@@ -2782,7 +2782,6 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	                      target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA +
 	                          pProxyCommitData->commitBatchInterval *
 	                              (1 - SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
-
 	pProxyCommitData->stats.commitBatchingWindowSize.addMeasurement(pProxyCommitData->commitBatchInterval);
 	pProxyCommitData->commitBatchesMemBytesCount -= self->currentBatchMemBytesCount;
 	ASSERT_ABORT(pProxyCommitData->commitBatchesMemBytesCount >= 0);
@@ -3750,34 +3749,30 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			}
 		};
 		for (auto& kv : data) {
-			if (!kv.key.startsWith(keyServersPrefix)) {
-				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
-				if (kv.key.startsWith(rangeLockPrefix)) {
-					// Make it as mutation pair issued by an identical KrmSetRange
-					// We can set the right end as allKeys.end with rangeLockPrefix since the kvs are in
-					// ascending order of keys
-					mutations.emplace_back(
-					    mutations.arena(), MutationRef::SetValue, allKeys.end.withPrefix(rangeLockPrefix), StringRef());
+			if (kv.key.startsWith(keyServersPrefix)) {
+				KeyRef k = kv.key.removePrefix(keyServersPrefix);
+				if (k == allKeys.end) {
+					continue;
 				}
+				decodeKeyServersValue(tag_uid, kv.value, src, dest);
+
+				info.tags.clear();
+
+				info.src_info.clear();
+				updateTagInfo(src, info.tags, info.src_info);
+
+				info.dest_info.clear();
+				updateTagInfo(dest, info.tags, info.dest_info);
+
+				uniquify(info.tags);
+				keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
+			} else if (kv.key.startsWith(rangeLockPrefix)) {
+				Key keyInsert = kv.key.removeSuffix(rangeLockPrefix);
+				pContext->pCommitData->rangeLock->initKeyPoint(keyInsert, kv.value);
+			} else {
+				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 				continue;
 			}
-
-			KeyRef k = kv.key.removePrefix(keyServersPrefix);
-			if (k == allKeys.end) {
-				continue;
-			}
-			decodeKeyServersValue(tag_uid, kv.value, src, dest);
-
-			info.tags.clear();
-
-			info.src_info.clear();
-			updateTagInfo(src, info.tags, info.src_info);
-
-			info.dest_info.clear();
-			updateTagInfo(dest, info.tags, info.dest_info);
-
-			uniquify(info.tags);
-			keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 		}
 
 		// insert keyTag data separately from metadata mutations so that we can do one bulk insert which

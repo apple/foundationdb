@@ -19,6 +19,9 @@
  */
 
 #pragma once
+#include "fdbclient/SystemData.h"
+#include "flow/Error.h"
+#include "flow/Trace.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -200,6 +203,15 @@ public:
 
 	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
 
+	void initKeyPoint(const Key& key, const Value& value) {
+		if (!value.empty()) {
+			coreMap.rawInsert(key, decodeRangeLockState(value));
+		} else {
+			coreMap.rawInsert(key, RangeLockState());
+		}
+		return;
+	}
+
 	void setPendingRequest(const Key& startKey, const RangeLockState& lockState) {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		ASSERT(!pendingRequest());
@@ -210,6 +222,7 @@ public:
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		ASSERT(pendingRequest());
 		ASSERT(endKey <= normalKeys.end);
+		ASSERT(currentRangeLockStartKey.get().first < endKey);
 		KeyRange lockRange = Standalone(KeyRangeRef(currentRangeLockStartKey.get().first, endKey));
 		RangeLockState lockState = currentRangeLockStartKey.get().second;
 		coreMap.insert(lockRange, lockState);

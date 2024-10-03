@@ -19,18 +19,64 @@
  */
 
 #include "fdbclient/RangeLock.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <string>
 
 struct RangeLocking : TestWorkload {
 	static constexpr auto NAME = "RangeLocking";
 	const bool enabled;
 	bool pass;
 
-	RangeLocking(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
+	struct KVOperation {
+		Optional<KeyRange> range;
+		Optional<KeyValue> keyValue;
+
+		KVOperation(KeyRange range) : range(range) {}
+		KVOperation(KeyValue keyValue) : keyValue(keyValue) {}
+
+		std::string toString() const {
+			std::string res = "KVOperation: ";
+			if (range.present()) {
+				res = res + "[ClearRange]: " + range.get().toString();
+			} else {
+				res = res + "[SetKeyValue]: key: " + keyValue.get().key.toString() +
+				      ", value: " + keyValue.get().value.toString();
+			}
+			return res;
+		}
+	};
+
+	struct LockRangeOperation {
+		KeyRange range;
+		bool lock;
+		LockRangeOperation(KeyRange range, bool lock) : range(range), lock(lock) {}
+
+		std::string toString() const {
+			std::string res = "LockRangeOperation: ";
+			if (lock) {
+				res = res + "[LockRange]: " + range.toString();
+			} else {
+				res = res + "[UnlockRange]: " + range.toString();
+			}
+			return res;
+		}
+	};
+
+	KeyRangeMap<bool> lockedRangeMap;
+	std::vector<LockRangeOperation> lockRangeOperations;
+	std::vector<KVOperation> kvOperations;
+	std::map<Key, Value> kvs;
+
+	RangeLocking(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {
+		lockedRangeMap.insert(allKeys, false);
+	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -105,11 +151,7 @@ struct RangeLocking : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> _start(RangeLocking* self, Database cx) {
-		if (self->clientId != 0) {
-			return Void();
-		}
-
+	ACTOR Future<Void> simpleTest(RangeLocking* self, Database cx) {
 		state Key keyUpdate = "11"_sr;
 		state KeyRange keyToClear = KeyRangeRef("1"_sr, "3"_sr);
 		state KeyRange rangeLock = KeyRangeRef("1"_sr, "2"_sr);
@@ -165,6 +207,143 @@ struct RangeLocking : TestWorkload {
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(value.present() && value.get() == "3"_sr);
 
+		return Void();
+	}
+
+	KeyValue getRandomKeyValue() const {
+		Key key = StringRef(std::to_string(deterministicRandom()->randomInt(0, 10)));
+		Value value = key;
+		return Standalone(KeyValueRef(key, value));
+	}
+
+	KeyRange getRandomRange() const {
+		int startPoint = deterministicRandom()->randomInt(0, 9);
+		Key beginKey = StringRef(std::to_string(startPoint));
+		Key endKey = StringRef(std::to_string(deterministicRandom()->randomInt(startPoint + 1, 10)));
+		return Standalone(KeyRangeRef(beginKey, endKey));
+	}
+
+	ACTOR Future<Void> updateDBWithRandomOperations(RangeLocking* self, Database cx) {
+		loop {
+			self->kvOperations.clear();
+			state Transaction tr(cx);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				int iterationCount = deterministicRandom()->randomInt(1, 10);
+				for (int i = 0; i < iterationCount; i++) {
+					if (deterministicRandom()->coinflip()) {
+						KeyValue kv = self->getRandomKeyValue();
+						tr.set(kv.key, kv.value);
+						self->kvOperations.push_back(KVOperation(kv));
+					} else {
+						KeyRange range = self->getRandomRange();
+						tr.clear(range);
+						self->kvOperations.push_back(KVOperation(range));
+					}
+				}
+				wait(tr.commit());
+				TraceEvent("RangeLockWorkLoadRandomKVS");
+				break;
+			} catch (Error& e) {
+				TraceEvent("RangeLockWorkLoadRandomKVSError").errorUnsuppressed(e);
+				wait(tr.onError(e));
+			}
+		}
+
+		return Void();
+	}
+
+	ACTOR Future<Void> updateLockMapWithRandomOperation(RangeLocking* self, Database cx) {
+		loop {
+			self->lockRangeOperations.clear();
+			try {
+				state int i = 0;
+				state int iterationCount = deterministicRandom()->randomInt(1, 10);
+				for (; i < iterationCount; i++) {
+					state KeyRange range = self->getRandomRange();
+					state bool lock = deterministicRandom()->coinflip();
+					if (lock) {
+						wait(lockCommitUserRange(cx, range));
+					} else {
+						wait(unlockCommitUserRange(cx, range));
+					}
+					self->lockRangeOperations.push_back(LockRangeOperation(range, lock));
+				}
+				TraceEvent("RangeLockWorkLoadRandomLockRange").detail("Ranges", describe(self->lockRangeOperations));
+				break;
+			} catch (Error& e) {
+				TraceEvent("RangeLockWorkLoadRandomLockRangeError")
+				    .errorUnsuppressed(e)
+				    .detail("Ranges", describe(self->lockRangeOperations));
+			}
+		}
+		return Void();
+	}
+
+	void updateInMemoryKVSStatus(RangeLocking* self) {
+		for (const auto& operation : self->kvOperations) {
+			if (operation.keyValue.present()) {
+				Key key = operation.keyValue.get().key;
+				Value value = operation.keyValue.get().value;
+				self->kvs[key] = value;
+			} else {
+				KeyRange clearRange = operation.range.get();
+				std::vector<Key> keysToClear;
+				for (const auto& [key, value] : self->kvs) {
+					if (clearRange.contains(key)) {
+						keysToClear.push_back(key);
+					}
+				}
+				for (const auto& key : keysToClear) {
+					self->kvs.erase(key);
+				}
+			}
+		}
+		return;
+	}
+
+	void updateInMemoryLockStatus(RangeLocking* self) {
+		for (const auto& operation : self->lockRangeOperations) {
+			self->lockedRangeMap.insert(operation.range, operation.lock);
+		}
+		return;
+	}
+
+	ACTOR Future<Void> checkCorrectness(RangeLocking* self, Database cx) { return Void(); }
+
+	ACTOR Future<Void> complexTest(RangeLocking* self, Database cx) {
+		state int iterationCount = 1000;
+		state int iteration = 0;
+		loop {
+			if (iteration > iterationCount) {
+				break;
+			}
+			if (deterministicRandom()->coinflip()) {
+				wait(self->updateLockMapWithRandomOperation(self, cx));
+				self->updateInMemoryLockStatus(self);
+			}
+			if (deterministicRandom()->coinflip()) {
+				try {
+					wait(self->updateDBWithRandomOperations(self, cx));
+					self->updateInMemoryKVSStatus(self);
+				} catch (Error& e) {
+					ASSERT(e.code() == error_code_transaction_rejected_range_locked);
+					self->kvOperations.clear();
+				}
+			}
+			wait(self->checkCorrectness(self, cx));
+			iteration++;
+		}
+		wait(unlockCommitUserRange(cx, normalKeys));
+		return Void();
+	}
+
+	ACTOR Future<Void> _start(RangeLocking* self, Database cx) {
+		if (self->clientId != 0) {
+			return Void();
+		}
+		// wait(self->simpleTest(self, cx));
+		wait(self->complexTest(self, cx));
 		return Void();
 	}
 };
