@@ -21,25 +21,20 @@
 
 
 import ctypes
-import sys
 import random
 import struct
 import unicodedata
-import math
 import uuid
 
 import fdb.tuple
-from fdb.tuple import pack, unpack, compare, SingleFloat
-
-from fdb import six
-from fdb.six import u
+from fdb.tuple import pack, unpack, compare, int2byte, SingleFloat
 
 
 def randomUnicode():
     while True:
         c = random.randint(0, 0xFFFF)
-        if unicodedata.category(six.unichr(c))[0] in "LMNPSZ":
-            return six.unichr(c)
+        if unicodedata.category(chr(c))[0] in "LMNPSZ":
+            return chr(c)
 
 
 def randomElement():
@@ -50,31 +45,26 @@ def randomElement():
             return b"".join([random.choice(chars) for c in range(random.randint(0, 5))])
         else:
             return b"".join(
-                [
-                    six.int2byte(random.randint(0, 255))
-                    for _ in range(random.randint(0, 10))
-                ]
+                [int2byte(random.randint(0, 255)) for _ in range(random.randint(0, 10))]
             )
     elif r == 1:
         if random.random() < 0.5:
             chars = [
-                u("\x00"),
-                u("\x01"),
-                u("a"),
-                u("7"),
-                u("\xfe"),
-                u("\ff"),
-                u("\u0000"),
-                u("\u0001"),
-                u("\uffff"),
-                u("\uff00"),
-                u("\U0001f4a9"),
+                "\x00",
+                "\x01",
+                "a",
+                "7",
+                "\xfe",
+                "\ff",
+                "\u0000",
+                "\u0001",
+                "\uffff",
+                "\uff00",
+                "\U0001f4a9",
             ]
-            return u("").join(
-                [random.choice(chars) for c in range(random.randint(0, 10))]
-            )
+            return "".join([random.choice(chars) for c in range(random.randint(0, 10))])
         else:
-            return u("").join([randomUnicode() for _ in range(random.randint(0, 10))])
+            return "".join([randomUnicode() for _ in range(random.randint(0, 10))])
     elif r == 2:
         return random.choice([-1, 1]) * min(
             2 ** random.randint(0, 2040) + random.randint(-10, 10), 2**2040 - 1
@@ -96,7 +86,7 @@ def randomElement():
     elif r == 6:
         is_double = random.random() < 0.5
         byte_str = b"".join(
-            [six.int2byte(random.randint(0, 255)) for _ in range(8 if is_double else 4)]
+            [int2byte(random.randint(0, 255)) for _ in range(8 if is_double else 4)]
         )
         if is_double:
             return struct.unpack(">d", byte_str)[0]

@@ -18,23 +18,18 @@
 # limitations under the License.
 #
 
-import traceback
-import sys
-
 import fdb
 import fdb.directory_impl
 
-from fdb import six
-
 ops_that_create_dirs = [
-    six.u("DIRECTORY_CREATE_SUBSPACE"),
-    six.u("DIRECTORY_CREATE_LAYER"),
-    six.u("DIRECTORY_CREATE_OR_OPEN"),
-    six.u("DIRECTORY_CREATE"),
-    six.u("DIRECTORY_OPEN"),
-    six.u("DIRECTORY_MOVE"),
-    six.u("DIRECTORY_MOVE_TO"),
-    six.u("DIRECTORY_OPEN_SUBSPACE"),
+    "DIRECTORY_CREATE_SUBSPACE",
+    "DIRECTORY_CREATE_LAYER",
+    "DIRECTORY_CREATE_OR_OPEN",
+    "DIRECTORY_CREATE",
+    "DIRECTORY_OPEN",
+    "DIRECTORY_MOVE",
+    "DIRECTORY_MOVE_TO",
+    "DIRECTORY_OPEN_SUBSPACE",
 ]
 
 log_all = False
@@ -83,12 +78,12 @@ class DirectoryExtension:
                 print("%d. %s" % (inst.index, inst.op))
 
             directory = self.dir_list[self.dir_index]
-            if inst.op == six.u("DIRECTORY_CREATE_SUBSPACE"):
+            if inst.op == "DIRECTORY_CREATE_SUBSPACE":
                 path = self.pop_tuples(inst.stack)
                 raw_prefix = inst.pop()
                 log_op("created subspace at %r: %r" % (path, raw_prefix))
                 self.append_dir(inst, fdb.Subspace(path, raw_prefix))
-            elif inst.op == six.u("DIRECTORY_CREATE_LAYER"):
+            elif inst.op == "DIRECTORY_CREATE_LAYER":
                 index1, index2, allow_manual_prefixes = inst.pop(3)
                 if self.dir_list[index1] is None or self.dir_list[index2] is None:
                     log_op("create directory layer: None")
@@ -112,7 +107,7 @@ class DirectoryExtension:
                             allow_manual_prefixes == 1,
                         ),
                     )
-            elif inst.op == six.u("DIRECTORY_CHANGE"):
+            elif inst.op == "DIRECTORY_CHANGE":
                 self.dir_index = inst.pop()
                 if not self.dir_list[self.dir_index]:
                     self.dir_index = self.error_index
@@ -126,9 +121,9 @@ class DirectoryExtension:
                         "changed directory to %d (%s @%r)"
                         % (self.dir_index, clazz, new_path)
                     )
-            elif inst.op == six.u("DIRECTORY_SET_ERROR_INDEX"):
+            elif inst.op == "DIRECTORY_SET_ERROR_INDEX":
                 self.error_index = inst.pop()
-            elif inst.op == six.u("DIRECTORY_CREATE_OR_OPEN"):
+            elif inst.op == "DIRECTORY_CREATE_OR_OPEN":
                 path = self.pop_tuples(inst.stack)
                 layer = inst.pop()
                 log_op(
@@ -136,7 +131,7 @@ class DirectoryExtension:
                 )
                 d = directory.create_or_open(inst.tr, path, layer or b"")
                 self.append_dir(inst, d)
-            elif inst.op == six.u("DIRECTORY_CREATE"):
+            elif inst.op == "DIRECTORY_CREATE":
                 path = self.pop_tuples(inst.stack)
                 layer, prefix = inst.pop(2)
                 log_op(
@@ -146,23 +141,23 @@ class DirectoryExtension:
                 self.append_dir(
                     inst, directory.create(inst.tr, path, layer or b"", prefix)
                 )
-            elif inst.op == six.u("DIRECTORY_OPEN"):
+            elif inst.op == "DIRECTORY_OPEN":
                 path = self.pop_tuples(inst.stack)
                 layer = inst.pop()
                 log_op("open %r: layer=%r" % (directory.get_path() + path, layer))
                 self.append_dir(inst, directory.open(inst.tr, path, layer or b""))
-            elif inst.op == six.u("DIRECTORY_MOVE"):
+            elif inst.op == "DIRECTORY_MOVE":
                 old_path, new_path = self.pop_tuples(inst.stack, 2)
                 log_op(
                     "move %r to %r"
                     % (directory.get_path() + old_path, directory.get_path() + new_path)
                 )
                 self.append_dir(inst, directory.move(inst.tr, old_path, new_path))
-            elif inst.op == six.u("DIRECTORY_MOVE_TO"):
+            elif inst.op == "DIRECTORY_MOVE_TO":
                 new_absolute_path = self.pop_tuples(inst.stack)
                 log_op("move %r to %r" % (directory.get_path(), new_absolute_path))
                 self.append_dir(inst, directory.move_to(inst.tr, new_absolute_path))
-            elif inst.op == six.u("DIRECTORY_REMOVE"):
+            elif inst.op == "DIRECTORY_REMOVE":
                 count = inst.pop()
                 if count == 0:
                     log_op("remove %r" % (directory.get_path(),))
@@ -171,7 +166,7 @@ class DirectoryExtension:
                     path = self.pop_tuples(inst.stack)
                     log_op("remove %r" % (directory.get_path() + path,))
                     directory.remove(inst.tr, path)
-            elif inst.op == six.u("DIRECTORY_REMOVE_IF_EXISTS"):
+            elif inst.op == "DIRECTORY_REMOVE_IF_EXISTS":
                 count = inst.pop()
                 if count == 0:
                     log_op("remove_if_exists %r" % (directory.get_path(),))
@@ -180,7 +175,7 @@ class DirectoryExtension:
                     path = self.pop_tuples(inst.stack)
                     log_op("remove_if_exists %r" % (directory.get_path() + path,))
                     directory.remove_if_exists(inst.tr, path)
-            elif inst.op == six.u("DIRECTORY_LIST"):
+            elif inst.op == "DIRECTORY_LIST":
                 count = inst.pop()
                 if count == 0:
                     result = directory.list(inst.tr)
@@ -191,7 +186,7 @@ class DirectoryExtension:
                     log_op("list %r" % (directory.get_path() + path,))
 
                 inst.push(fdb.tuple.pack(tuple(result)))
-            elif inst.op == six.u("DIRECTORY_EXISTS"):
+            elif inst.op == "DIRECTORY_EXISTS":
                 count = inst.pop()
                 if count == 0:
                     result = directory.exists(inst.tr)
@@ -205,10 +200,10 @@ class DirectoryExtension:
                     inst.push(1)
                 else:
                     inst.push(0)
-            elif inst.op == six.u("DIRECTORY_PACK_KEY"):
+            elif inst.op == "DIRECTORY_PACK_KEY":
                 key_tuple = self.pop_tuples(inst.stack)
                 inst.push(directory.pack(key_tuple))
-            elif inst.op == six.u("DIRECTORY_UNPACK_KEY"):
+            elif inst.op == "DIRECTORY_UNPACK_KEY":
                 key = inst.pop()
                 log_op(
                     "unpack %r in subspace with prefix %r" % (key, directory.rawPrefix)
@@ -216,26 +211,26 @@ class DirectoryExtension:
                 tup = directory.unpack(key)
                 for t in tup:
                     inst.push(t)
-            elif inst.op == six.u("DIRECTORY_RANGE"):
+            elif inst.op == "DIRECTORY_RANGE":
                 tup = self.pop_tuples(inst.stack)
                 rng = directory.range(tup)
                 inst.push(rng.start)
                 inst.push(rng.stop)
-            elif inst.op == six.u("DIRECTORY_CONTAINS"):
+            elif inst.op == "DIRECTORY_CONTAINS":
                 key = inst.pop()
                 result = directory.contains(key)
                 if result:
                     inst.push(1)
                 else:
                     inst.push(0)
-            elif inst.op == six.u("DIRECTORY_OPEN_SUBSPACE"):
+            elif inst.op == "DIRECTORY_OPEN_SUBSPACE":
                 path = self.pop_tuples(inst.stack)
                 log_op("open_subspace %r (at %r)" % (path, directory.key()))
                 self.append_dir(inst, directory.subspace(path))
-            elif inst.op == six.u("DIRECTORY_LOG_SUBSPACE"):
+            elif inst.op == "DIRECTORY_LOG_SUBSPACE":
                 prefix = inst.pop()
                 inst.tr[prefix + fdb.tuple.pack((self.dir_index,))] = directory.key()
-            elif inst.op == six.u("DIRECTORY_LOG_DIRECTORY"):
+            elif inst.op == "DIRECTORY_LOG_DIRECTORY":
                 prefix = inst.pop()
                 exists = directory.exists(inst.tr)
                 if exists:
@@ -243,15 +238,11 @@ class DirectoryExtension:
                 else:
                     children = ()
                 logSubspace = fdb.Subspace((self.dir_index,), prefix)
-                inst.tr[logSubspace[six.u("path")]] = fdb.tuple.pack(
-                    directory.get_path()
-                )
-                inst.tr[logSubspace[six.u("layer")]] = fdb.tuple.pack(
-                    (directory.get_layer(),)
-                )
-                inst.tr[logSubspace[six.u("exists")]] = fdb.tuple.pack((int(exists),))
-                inst.tr[logSubspace[six.u("children")]] = fdb.tuple.pack(children)
-            elif inst.op == six.u("DIRECTORY_STRIP_PREFIX"):
+                inst.tr[logSubspace["path"]] = fdb.tuple.pack(directory.get_path())
+                inst.tr[logSubspace["layer"]] = fdb.tuple.pack((directory.get_layer(),))
+                inst.tr[logSubspace["exists"]] = fdb.tuple.pack((int(exists),))
+                inst.tr[logSubspace["children"]] = fdb.tuple.pack(children)
+            elif inst.op == "DIRECTORY_STRIP_PREFIX":
                 s = inst.pop()
                 if not s.startswith(directory.key()):
                     raise Exception(
