@@ -3010,8 +3010,11 @@ ACTOR Future<Void> lockCommitUserRange(Database cx, KeyRange range) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(krmSetRange(
-			    &tr, rangeLockPrefix, range, rangeLockStateValue(RangeLockState(RangeLockType::RejectCommits))));
+			wait(krmSetRangeCoalescing(&tr,
+			                           rangeLockPrefix,
+			                           range,
+			                           normalKeys,
+			                           rangeLockStateValue(RangeLockState(RangeLockType::RejectCommits))));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {

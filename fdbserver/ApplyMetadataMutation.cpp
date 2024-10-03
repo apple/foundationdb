@@ -223,9 +223,9 @@ private:
 			    .detail("Encription", encryptMode.isEncryptionEnabled());
 			return;
 		}
-		// RangeLock is upated by SetKrmRange which updates a range with two successive mutations
+		ASSERT(!initialCommit);
+		// RangeLock is upated by KrmSetRange which updates a range with two successive mutations
 		if (rangeLock->pendingRequest()) {
-			ASSERT(m.param1.startsWith(rangeLockPrefix));
 			Key endKey = m.param1.removePrefix(rangeLockPrefix);
 			rangeLock->consumePendingRequest(endKey);
 		} else if (m.param1.startsWith(rangeLockPrefix)) {
@@ -234,9 +234,7 @@ private:
 			Key startKey = m.param1.removePrefix(rangeLockPrefix);
 			rangeLock->setPendingRequest(startKey, lockState);
 		}
-		if (m.param1.startsWith(rangeLockPrefix)) {
-			txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		}
+		txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		return;
 	}
 
@@ -948,13 +946,11 @@ private:
 	void checkClearRangeLockPrefix(KeyRangeRef range) {
 		if (rangeLock == nullptr) {
 			return;
-		}
-		if (!rangeLockKeys.intersects(range)) {
+		} else if (!rangeLockKeys.intersects(range)) {
 			return;
 		}
 		ASSERT(!initialCommit);
-		KeyRangeRef r = range & rangeLockKeys;
-		txnStateStore->clear(r);
+		txnStateStore->clear(range & rangeLockKeys);
 		return;
 	}
 
