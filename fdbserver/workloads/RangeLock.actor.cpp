@@ -37,6 +37,11 @@ struct RangeLocking : TestWorkload {
 	bool quitExit = false;
 	bool verboseLogging = false; // enable to log range lock and commit history
 
+	// This workload is not compatible with RandomRangeLock workload because they will race in locked range
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomRangeLock" });
+	}
+
 	struct KVOperation {
 		Optional<KeyRange> range;
 		Optional<KeyValue> keyValue;
