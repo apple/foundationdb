@@ -199,11 +199,12 @@ struct ExpectedIdempotencyIdCountForKey {
 
 struct RangeLock {
 public:
-	RangeLock() : anyLock(false) { coreMap.insert(allKeys, RangeLockState()); }
+	RangeLock() { coreMap.insert(allKeys, RangeLockState()); }
 
 	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
 
-	void initKeyPoint(const Key& key, const Value& value) {
+	void initKeyPoint(const Key key, const Value& value) {
+		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Init").detail("Key", key);
 		if (!value.empty()) {
 			coreMap.rawInsert(key, decodeRangeLockState(value));
 		} else {
@@ -212,28 +213,29 @@ public:
 		return;
 	}
 
-	void setPendingRequest(const Key& startKey, const RangeLockState& lockState) {
+	void setPendingRequest(const Key startKey, const RangeLockState lockState) {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		ASSERT(!pendingRequest());
 		currentRangeLockStartKey = std::make_pair(startKey, lockState);
 	}
 
-	void consumePendingRequest(const Key& endKey) {
+	void consumePendingRequest(const Key endKey) {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		ASSERT(pendingRequest());
 		ASSERT(endKey <= normalKeys.end);
 		ASSERT(currentRangeLockStartKey.get().first < endKey);
 		KeyRange lockRange = Standalone(KeyRangeRef(currentRangeLockStartKey.get().first, endKey));
 		RangeLockState lockState = currentRangeLockStartKey.get().second;
+		/* TraceEvent(SevDebug, "RangeLockRangeOps")
+		    .detail("Ops", "Update")
+		    .detail("Range", lockRange)
+		    .detail("Status", lockState.toString()); */
 		coreMap.insert(lockRange, lockState);
 		coreMap.coalesce(allKeys);
 		if (lockState.isValid()) {
-			anyLock = true;
 		} else {
-			anyLock = false;
 			for (auto range : coreMap.ranges()) {
 				if (range.value().isValid()) {
-					anyLock = true;
 					break;
 				}
 			}
@@ -241,23 +243,24 @@ public:
 		currentRangeLockStartKey.reset();
 	}
 
-	bool locked(const KeyRange& range) const {
+	bool locked(const KeyRange range) const {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
-		if (!anyLock) {
+		if (range.end >= normalKeys.end) {
 			return false;
 		}
+		bool res = false;
 		for (auto lockRange : coreMap.intersectingRanges(range)) {
 			if (lockRange.value().isValid()) {
-				return true;
+				res = true;
 			}
 		}
-		return false;
+		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Check").detail("Range", range).detail("Status", res);
+		return res;
 	}
 
 private:
 	Optional<std::pair<Key, RangeLockState>> currentRangeLockStartKey = Optional<std::pair<Key, RangeLockState>>();
 	KeyRangeMap<RangeLockState> coreMap;
-	bool anyLock = false;
 };
 
 struct ProxyCommitData {

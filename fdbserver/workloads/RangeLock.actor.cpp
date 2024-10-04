@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -33,6 +34,8 @@ struct RangeLocking : TestWorkload {
 	static constexpr auto NAME = "RangeLocking";
 	const bool enabled;
 	bool pass;
+	bool quitExit = false;
+	bool verboseLogging = false; // enable to log range lock and commit history
 
 	struct KVOperation {
 		Optional<KeyRange> range;
@@ -90,16 +93,10 @@ struct RangeLocking : TestWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.set(key, value);
 				wait(tr.commit());
-				TraceEvent("RangeLockWorkLoadSetKey").detail("Key", key).detail("Value", value);
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("RangeLockWorkLoadSetKeyError")
-				    .errorUnsuppressed(e)
-				    .detail("Key", key)
-				    .detail("Value", value);
 				wait(tr.onError(e));
 			}
 		}
@@ -109,10 +106,8 @@ struct RangeLocking : TestWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.clear(key);
 				wait(tr.commit());
-				TraceEvent("RangeLockWorkLoadClearKey").detail("Key", key);
 				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -124,10 +119,8 @@ struct RangeLocking : TestWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.clear(range);
 				wait(tr.commit());
-				TraceEvent("RangeLockWorkLoadClearRange").detail("Range", range);
 				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -139,11 +132,7 @@ struct RangeLocking : TestWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> value = wait(tr.get(key));
-				TraceEvent("RangeLockWorkLoadGetKey")
-				    .detail("Key", key)
-				    .detail("Value", value.present() ? value.get() : Value());
 				return value;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -224,64 +213,94 @@ struct RangeLocking : TestWorkload {
 	}
 
 	ACTOR Future<Void> updateDBWithRandomOperations(RangeLocking* self, Database cx) {
-		loop {
-			self->kvOperations.clear();
-			state Transaction tr(cx);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			try {
-				int iterationCount = deterministicRandom()->randomInt(1, 10);
-				for (int i = 0; i < iterationCount; i++) {
-					if (deterministicRandom()->coinflip()) {
-						KeyValue kv = self->getRandomKeyValue();
-						tr.set(kv.key, kv.value);
-						self->kvOperations.push_back(KVOperation(kv));
-					} else {
-						KeyRange range = self->getRandomRange();
-						tr.clear(range);
-						self->kvOperations.push_back(KVOperation(range));
+		self->kvOperations.clear();
+		state int iterationCount = deterministicRandom()->randomInt(1, 10);
+		state int i = 0;
+		for (; i < iterationCount; i++) {
+			state bool acceptedByDB = true;
+			if (deterministicRandom()->coinflip()) {
+				state KeyValue kv = self->getRandomKeyValue();
+				try {
+					wait(self->setKey(cx, kv.key, kv.value));
+				} catch (Error& e) {
+					if (e.code() != error_code_transaction_rejected_range_locked) {
+						throw e;
 					}
+					acceptedByDB = false;
 				}
-				wait(tr.commit());
-				TraceEvent("RangeLockWorkLoadRandomKVS");
-				break;
-			} catch (Error& e) {
-				TraceEvent("RangeLockWorkLoadRandomKVSError").errorUnsuppressed(e);
-				wait(tr.onError(e));
+				self->kvOperations.push_back(KVOperation(kv));
+				if (self->verboseLogging) {
+					TraceEvent("RangeLockWorkLoadHistory")
+					    .detail("Ops", "SetKey")
+					    .detail("Key", kv.key)
+					    .detail("Value", kv.value)
+					    .detail("Accepted", acceptedByDB);
+				}
+			} else {
+				state KeyRange range = self->getRandomRange();
+				try {
+					wait(self->clearRange(cx, range));
+				} catch (Error& e) {
+					if (e.code() != error_code_transaction_rejected_range_locked) {
+						throw e;
+					}
+					acceptedByDB = false;
+				}
+				self->kvOperations.push_back(KVOperation(range));
+				if (self->verboseLogging) {
+					TraceEvent("RangeLockWorkLoadHistory")
+					    .detail("Ops", "ClearRange")
+					    .detail("Range", range)
+					    .detail("Accepted", acceptedByDB);
+				}
 			}
 		}
-
 		return Void();
 	}
 
 	ACTOR Future<Void> updateLockMapWithRandomOperation(RangeLocking* self, Database cx) {
-		loop {
-			self->lockRangeOperations.clear();
-			try {
-				state int i = 0;
-				state int iterationCount = deterministicRandom()->randomInt(1, 10);
-				for (; i < iterationCount; i++) {
-					state KeyRange range = self->getRandomRange();
-					state bool lock = deterministicRandom()->coinflip();
-					if (lock) {
-						wait(lockCommitUserRange(cx, range));
-					} else {
-						wait(unlockCommitUserRange(cx, range));
-					}
-					self->lockRangeOperations.push_back(LockRangeOperation(range, lock));
+		self->lockRangeOperations.clear();
+		state int i = 0;
+		state int iterationCount = deterministicRandom()->randomInt(1, 10);
+		for (; i < iterationCount; i++) {
+			state KeyRange range = self->getRandomRange();
+			state bool lock = deterministicRandom()->coinflip();
+			if (lock) {
+				wait(lockCommitUserRange(cx, range));
+				if (self->verboseLogging) {
+					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Lock").detail("Range", range);
 				}
-				TraceEvent("RangeLockWorkLoadRandomLockRange").detail("Ranges", describe(self->lockRangeOperations));
-				break;
-			} catch (Error& e) {
-				TraceEvent("RangeLockWorkLoadRandomLockRangeError")
-				    .errorUnsuppressed(e)
-				    .detail("Ranges", describe(self->lockRangeOperations));
+			} else {
+				wait(unlockCommitUserRange(cx, range));
+				if (self->verboseLogging) {
+					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Unlock").detail("Range", range);
+				}
 			}
+			self->lockRangeOperations.push_back(LockRangeOperation(range, lock));
 		}
 		return Void();
 	}
 
+	bool operationRejectByLocking(RangeLocking* self, const KVOperation& kvOperation) {
+		KeyRange rangeToCheck;
+		if (kvOperation.range.present()) {
+			rangeToCheck = kvOperation.range.get();
+		} else {
+			rangeToCheck = singleKeyRange(kvOperation.keyValue.get().key);
+		}
+		for (auto lockRange : self->lockedRangeMap.intersectingRanges(rangeToCheck)) {
+			if (lockRange.value() == true) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void updateInMemoryKVSStatus(RangeLocking* self) {
 		for (const auto& operation : self->kvOperations) {
+			if (self->operationRejectByLocking(self, operation)) {
+				continue;
+			}
 			if (operation.keyValue.present()) {
 				Key key = operation.keyValue.get().key;
 				Value value = operation.keyValue.get().value;
@@ -309,19 +328,152 @@ struct RangeLocking : TestWorkload {
 		return;
 	}
 
-	ACTOR Future<Void> checkCorrectness(RangeLocking* self, Database cx) { return Void(); }
+	ACTOR Future<std::map<Key, Value>> getKVSFromDB(RangeLocking* self, Database cx) {
+		state std::map<Key, Value> kvsFromDB;
+		state Key beginKey = normalKeys.begin;
+		state Key endKey = normalKeys.end;
+		loop {
+			state Transaction tr(cx);
+			KeyRange rangeToRead = KeyRangeRef(beginKey, endKey);
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				RangeResult res = wait(tr.getRange(rangeToRead, GetRangeLimits()));
+				for (int i = 0; i < res.size(); i++) {
+					kvsFromDB[res[i].key] = res[i].value;
+				}
+				if (res.size() > 0) {
+					beginKey = keyAfter(res.end()[-1].key);
+				} else {
+					break;
+				}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return kvsFromDB;
+	}
+
+	ACTOR Future<std::vector<KeyRange>> getLockedRangesFromDB(Database cx) {
+		state std::vector<KeyRange> res;
+		wait(store(res, getCommitLockedUserRanges(cx, normalKeys)));
+		return coalesceRangeList(res);
+	}
+
+	std::vector<KeyRange> getLockedRangesFromMemory(RangeLocking* self) {
+		std::vector<KeyRange> res;
+		for (auto range : self->lockedRangeMap.ranges()) {
+			if (range.value() == true) {
+				res.push_back(range.range());
+			}
+		}
+		return coalesceRangeList(res);
+	}
+
+	ACTOR Future<Void> checkKVCorrectness(RangeLocking* self, Database cx) {
+		state std::map<Key, Value> currentKvsInDB;
+		wait(store(currentKvsInDB, self->getKVSFromDB(self, cx)));
+		for (const auto& [key, value] : currentKvsInDB) {
+			if (self->kvs.find(key) == self->kvs.end()) {
+				TraceEvent(SevError, "RangeLockWorkLoadHistory")
+				    .detail("Ops", "CheckDBUniqueKey")
+				    .detail("Key", key)
+				    .detail("Value", value);
+				self->quitExit = true;
+				return Void();
+			} else if (self->kvs[key] != value) {
+				TraceEvent(SevError, "RangeLockWorkLoadHistory")
+				    .detail("Ops", "CheckMismatchValue")
+				    .detail("Key", key)
+				    .detail("MemValue", self->kvs[key])
+				    .detail("DBValue", value);
+				self->quitExit = true;
+				return Void();
+			}
+		}
+		for (const auto& [key, value] : self->kvs) {
+			if (currentKvsInDB.find(key) == currentKvsInDB.end()) {
+				TraceEvent(SevError, "RangeLockWorkLoadHistory")
+				    .detail("Ops", "CheckMemoryUniqueKey")
+				    .detail("Key", key)
+				    .detail("Value", value);
+				self->quitExit = true;
+				return Void();
+			}
+		}
+		if (self->verboseLogging) {
+			TraceEvent e("RangeLockWorkLoadHistory");
+			e.setMaxEventLength(-1);
+			e.setMaxFieldLength(-1);
+			e.detail("Ops", "CheckAllKVCorrect");
+			int i = 0;
+			for (const auto& [key, value] : currentKvsInDB) {
+				e.detail("Key" + std::to_string(i), key);
+				e.detail("Value" + std::to_string(i), value);
+				i++;
+			}
+		}
+
+		return Void();
+	}
+
+	ACTOR Future<Void> checkLockCorrectness(RangeLocking* self, Database cx) {
+		state std::vector<KeyRange> currentLockRangesInDB;
+		wait(store(currentLockRangesInDB, self->getLockedRangesFromDB(cx)));
+		std::vector<KeyRange> currentLockRangesInMemory = self->getLockedRangesFromMemory(self);
+		for (int i = 0; i < currentLockRangesInDB.size(); i++) {
+			if (i >= currentLockRangesInMemory.size()) {
+				TraceEvent(SevError, "RangeLockWorkLoadHistory")
+				    .detail("Ops", "CheckDBUniqueLockedRange")
+				    .detail("Range", currentLockRangesInDB[i]);
+				self->quitExit = true;
+				return Void();
+			}
+			if (currentLockRangesInDB[i] != currentLockRangesInMemory[i]) {
+				TraceEvent(SevError, "RangeLockWorkLoadHistory")
+				    .detail("Ops", "CheckMismatchLockedRange")
+				    .detail("RangeMemory", currentLockRangesInMemory[i])
+				    .detail("RangeDB", currentLockRangesInDB[i]);
+				self->quitExit = true;
+				return Void();
+			}
+		}
+		for (int i = 0; i < currentLockRangesInMemory.size(); i++) {
+			if (i >= currentLockRangesInDB.size()) {
+				TraceEvent(SevError, "RangeLockWorkLoadHistory")
+				    .detail("Ops", "CheckMemoryUniqueLockedRange")
+				    .detail("Key", currentLockRangesInMemory[i]);
+				self->quitExit = true;
+				return Void();
+			}
+		}
+		if (self->verboseLogging) {
+			TraceEvent e("RangeLockWorkLoadHistory");
+			e.setMaxEventLength(-1);
+			e.setMaxFieldLength(-1);
+			e.detail("Ops", "CheckAllLockCorrect");
+			int i = 0;
+			for (const auto& range : currentLockRangesInDB) {
+				e.detail("Range" + std::to_string(i), range);
+				i++;
+			}
+		}
+
+		return Void();
+	}
 
 	ACTOR Future<Void> complexTest(RangeLocking* self, Database cx) {
 		state int iterationCount = 1000;
 		state int iteration = 0;
 		loop {
-			if (iteration > iterationCount) {
+			if (iteration > iterationCount || self->quitExit) {
 				break;
 			}
 			if (deterministicRandom()->coinflip()) {
 				wait(self->updateLockMapWithRandomOperation(self, cx));
 				self->updateInMemoryLockStatus(self);
 			}
+			wait(self->checkLockCorrectness(self, cx));
+
 			if (deterministicRandom()->coinflip()) {
 				try {
 					wait(self->updateDBWithRandomOperations(self, cx));
@@ -331,7 +483,7 @@ struct RangeLocking : TestWorkload {
 					self->kvOperations.clear();
 				}
 			}
-			wait(self->checkCorrectness(self, cx));
+			wait(self->checkKVCorrectness(self, cx));
 			iteration++;
 		}
 		wait(unlockCommitUserRange(cx, normalKeys));
