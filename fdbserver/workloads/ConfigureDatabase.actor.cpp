@@ -432,10 +432,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				int storeType = 0;
 				while (true) {
 					storeType = deterministicRandom()->randomInt(0, 6);
-					// TODO: replace
-					if (std::count(self->storageEngineExcludeTypes.begin(),
-					               self->storageEngineExcludeTypes.end(),
-					               storeType) == 0) {
+					if (std::find(self->storageEngineExcludeTypes.begin(),
+					              self->storageEngineExcludeTypes.end(),
+					              storeType) == self->storageEngineExcludeTypes.end()) {
 						break;
 					}
 				}

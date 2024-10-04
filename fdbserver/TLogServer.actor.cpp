@@ -2531,9 +2531,9 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 	state LifetimeToken lastMasterLifetime;
 	loop {
 		auto const& inf = self->dbInfo->get();
-		// TODO: Replace std::count with std::find for more efficiency
 		bool isDisplaced =
-		    !std::count(inf.priorCommittedLogServers.begin(), inf.priorCommittedLogServers.end(), tli.id());
+		    std::find(inf.priorCommittedLogServers.begin(), inf.priorCommittedLogServers.end(), tli.id()) ==
+		    inf.priorCommittedLogServers.end();
 		if (isPrimary) {
 			isDisplaced =
 			    isDisplaced && inf.recoveryCount >= recoveryCount && inf.recoveryState != RecoveryState::UNINITIALIZED;
@@ -2792,8 +2792,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			bool found = false;
 			if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 				for (auto& logs : self->dbInfo->get().logSystemConfig.tLogs) {
-					// TODO: replace
-					if (std::count(logs.tLogs.begin(), logs.tLogs.end(), logData->logId)) {
+					if (std::find(logs.tLogs.begin(), logs.tLogs.end(), logData->logId) != logs.tLogs.end()) {
 						found = true;
 						break;
 					}

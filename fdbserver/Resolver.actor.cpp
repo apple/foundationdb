@@ -793,10 +793,9 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 uint64_t recoveryCount,
                                 ResolverInterface myInterface) {
-	// TODO: Replace std::count with std::find for more efficiency
 	loop {
 		if (db->get().recoveryCount >= recoveryCount &&
-		    !std::count(db->get().resolvers.begin(), db->get().resolvers.end(), myInterface))
+		    std::find(db->get().resolvers.begin(), db->get().resolvers.end(), myInterface) == db->get().resolvers.end())
 			throw worker_removed();
 		wait(db->onChange());
 	}

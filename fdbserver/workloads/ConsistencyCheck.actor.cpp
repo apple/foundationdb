@@ -1072,7 +1072,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
-		// TODO: replace
 		int missingDc0 = configuration.regions.size() == 0
 		                     ? 0
 		                     : std::count(missingStorage.begin(), missingStorage.end(), configuration.regions[0].dcId);

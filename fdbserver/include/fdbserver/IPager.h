@@ -107,8 +107,8 @@ enum EncodingType : uint8_t {
 
 static constexpr std::array EncryptedEncodingTypes = { AESEncryption, AESEncryptionWithAuth, XOREncryption_TestOnly };
 inline bool isEncodingTypeEncrypted(EncodingType encoding) {
-	// TODO: replace
-	return std::count(EncryptedEncodingTypes.begin(), EncryptedEncodingTypes.end(), encoding) > 0;
+	return std::find(EncryptedEncodingTypes.begin(), EncryptedEncodingTypes.end(), encoding) !=
+	       EncryptedEncodingTypes.end();
 }
 
 inline bool isEncodingTypeAESEncrypted(EncodingType encoding) {

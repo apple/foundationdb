@@ -202,8 +202,8 @@ void ShardsAffectedByTeamFailure::check() const {
 	if (EXPENSIVE_VALIDATION || checkMode == CheckMode::ForceCheck) {
 		for (auto t = team_shards.begin(); t != team_shards.end(); ++t) {
 			auto i = shard_teams.rangeContaining(t->second.begin);
-			// TODO: Rreplace std::count with std::find for more efficiency
-			if (i->range() != t->second || !std::count(i->value().first.begin(), i->value().first.end(), t->first)) {
+			if (i->range() != t->second ||
+			    std::find(i->value().first.begin(), i->value().first.end(), t->first) == i->value().first.end()) {
 				ASSERT(false);
 			}
 		}

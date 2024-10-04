@@ -2267,7 +2267,6 @@ void PhysicalShardCollection::cleanUpPhysicalShardCollection() {
 	for (auto it = physicalShardInstances.begin(); it != physicalShardInstances.end();) {
 		uint64_t physicalShardID = it->first;
 		ASSERT(physicalShardInstances.contains(physicalShardID));
-		// TODO: Below condition will always be true? If yes, remove dead code (in else branch)
 		if (!physicalShardsInUse.contains(physicalShardID)) {
 			/*TraceEvent("PhysicalShardisEmpty")
 			    .detail("PhysicalShard", physicalShardID)

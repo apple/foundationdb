@@ -428,10 +428,9 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 		if (disabledWorkloads.contains(workload->description())) {
 			continue;
 		}
-		// TODO: replace
-		if (std::count(work.disabledFailureInjectionWorkloads.begin(),
-		               work.disabledFailureInjectionWorkloads.end(),
-		               workload->description()) > 0) {
+		if (std::find(work.disabledFailureInjectionWorkloads.begin(),
+		              work.disabledFailureInjectionWorkloads.end(),
+		              workload->description()) != work.disabledFailureInjectionWorkloads.end()) {
 			continue;
 		}
 		while (shouldInjectFailure(random, work, workload)) {
