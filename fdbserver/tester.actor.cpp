@@ -418,16 +418,17 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 	for (auto const& w : workloads) {
 		w->disableFailureInjectionWorkloads(disabledWorkloads);
 	}
-	if (disabledWorkloads.count("all") > 0) {
+	if (disabledWorkloads.contains("all")) {
 		return;
 	}
 	auto& factories = IFailureInjectorFactory::factories();
 	DeterministicRandom random(sharedRandomNumber);
 	for (auto& factory : factories) {
 		auto workload = factory->create(*this);
-		if (disabledWorkloads.count(workload->description()) > 0) {
+		if (disabledWorkloads.contains(workload->description())) {
 			continue;
 		}
+		// TODO: replace
 		if (std::count(work.disabledFailureInjectionWorkloads.begin(),
 		               work.disabledFailureInjectionWorkloads.end(),
 		               workload->description()) > 0) {
@@ -1646,7 +1647,7 @@ Optional<Key> getKeyFromString(const std::string& str) {
 		}
 		const char first = str.at(i + 2);
 		const char second = str.at(i + 3);
-		if (parseCharMap.count(first) == 0 || parseCharMap.count(second) == 0) {
+		if (!parseCharMap.contains(first) || !parseCharMap.contains(second)) {
 			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 			           "ConsistencyCheckUrgent_GetKeyFromStringError")
 			    .setMaxEventLength(-1)
@@ -3150,12 +3151,12 @@ ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
 	}
 
 	// Make sure that no duplicate details were provided
-	ASSERT(details.count("TestDescription") == 0);
-	ASSERT(details.count("ExpectedError") == 0);
-	ASSERT(details.count("ExpectedErrorCode") == 0);
-	ASSERT(details.count("ActualError") == 0);
-	ASSERT(details.count("ActualErrorCode") == 0);
-	ASSERT(details.count("Reason") == 0);
+	ASSERT(!details.contains("TestDescription"));
+	ASSERT(!details.contains("ExpectedError"));
+	ASSERT(!details.contains("ExpectedErrorCode"));
+	ASSERT(!details.contains("ActualError"));
+	ASSERT(!details.contains("ActualErrorCode"));
+	ASSERT(!details.contains("Reason"));
 
 	for (auto& p : details) {
 		evt.detail(p.first.c_str(), p.second);

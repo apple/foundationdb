@@ -270,7 +270,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
                                   std::vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
 	if (self->configuration.usableRegions > 1) {
 		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
-		if (!self->dcId_locality.count(recr.dcId)) {
+		if (!self->dcId_locality.contains(recr.dcId)) {
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
 			tr.set(tr.arena(), tagLocalityListKeyFor(recr.dcId), tagLocalityListValue(loc));
@@ -279,7 +279,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 			TraceEvent(SevWarn, "UnknownPrimaryDCID", self->dbgid).detail("PrimaryId", recr.dcId).detail("Loc", loc);
 		}
 
-		if (!self->dcId_locality.count(remoteDcId)) {
+		if (!self->dcId_locality.contains(remoteDcId)) {
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
 			tr.set(tr.arena(), tagLocalityListKeyFor(remoteDcId), tagLocalityListValue(loc));
@@ -357,7 +357,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		    .detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
 
 		InitializeStorageRequest isr;
-		isr.seedTag = dcId_tags.count(recruits.storageServers[idx].locality.dcId())
+		isr.seedTag = dcId_tags.contains(recruits.storageServers[idx].locality.dcId())
 		                  ? dcId_tags[recruits.storageServers[idx].locality.dcId()]
 		                  : Tag(nextLocality, 0);
 		isr.storeType = self->configuration.storageServerStoreType;
@@ -376,7 +376,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 			CODE_PROBE(true, "initial storage recuitment loop failed to get new server");
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
 		} else {
-			if (!dcId_tags.count(recruits.storageServers[idx].locality.dcId())) {
+			if (!dcId_tags.contains(recruits.storageServers[idx].locality.dcId())) {
 				dcId_tags[recruits.storageServers[idx].locality.dcId()] = Tag(nextLocality, 0);
 				nextLocality++;
 			}
@@ -758,7 +758,7 @@ ACTOR Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database
 			bool found = false;
 			for (auto& logSet : self->logSystem->getLogSystemConfig().tLogs) {
 				for (auto& log : logSet.tLogs) {
-					if (logIds.count(log.id())) {
+					if (logIds.contains(log.id())) {
 						found = true;
 						break;
 					}
@@ -1832,7 +1832,7 @@ ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData>
 }
 
 bool isNormalClusterRecoveryError(const Error& error) {
-	return normalClusterRecoveryErrors().count(error.code());
+	return normalClusterRecoveryErrors().contains(error.code());
 }
 
 std::string& getRecoveryEventName(ClusterRecoveryEventType type) {

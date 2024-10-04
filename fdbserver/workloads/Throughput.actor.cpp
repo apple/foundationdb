@@ -258,7 +258,7 @@ struct MeasurePeriodically : IMeasurer {
 		std::vector<PerfMetric> m;
 		msp.getMetrics(m);
 		for (auto i = m.begin(); i != m.end(); ++i)
-			if (includeMetrics.count(i->name())) {
+			if (includeMetrics.contains(i->name())) {
 				accumulatedMetrics.push_back(i->withPrefix(prefix));
 			}
 

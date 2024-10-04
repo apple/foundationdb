@@ -44,7 +44,7 @@ LatencyBandsMap::ExpirableBands::ExpirableBands(LatencyBands&& bands)
   : latencyBands(std::move(bands)), lastUpdated(now()) {}
 
 Optional<LatencyBands*> LatencyBandsMap::getLatencyBands(TransactionTag tag) {
-	if (map.size() == maxSize && !map.count(tag)) {
+	if (map.size() == maxSize && !map.contains(tag)) {
 		CODE_PROBE(true, "LatencyBandsMap reached maxSize");
 		return {};
 	}

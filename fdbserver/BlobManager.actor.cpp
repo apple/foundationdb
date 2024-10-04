@@ -1000,7 +1000,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			// actor map, cancelling this actor before it got here
 			bmData->workerAssignments.insert(assignment.keyRange, workerID.get());
 
-			if (bmData->workerStats.count(workerID.get())) {
+			if (bmData->workerStats.contains(workerID.get())) {
 				bmData->workerStats[workerID.get()].numGranulesAssigned += 1;
 			}
 
@@ -1040,7 +1040,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			req.type = assignment.assign.get().type;
 
 			// if that worker isn't alive anymore, add the range back into the stream
-			if (bmData->workersById.count(workerID.get()) == 0) {
+			if (!bmData->workersById.contains(workerID.get())) {
 				throw no_more_servers();
 			}
 			state Future<Void> assignFuture = bmData->workersById[workerID.get()].assignBlobRangeRequest.getReply(req);
@@ -1073,7 +1073,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			req.dispose = assignment.revoke.get().dispose;
 
 			// if that worker isn't alive anymore, this is a noop
-			if (bmData->workersById.count(workerID.get())) {
+			if (bmData->workersById.contains(workerID.get())) {
 				wait(bmData->workersById[workerID.get()].revokeBlobRangeRequest.getReply(req));
 			} else {
 				return Void();
@@ -1271,7 +1271,7 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 				bmData->assignsInProgress.insert(assignment.keyRange,
 				                                 doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
 			}
-			if (bmData->workerStats.count(workerId)) {
+			if (bmData->workerStats.contains(workerId)) {
 				bmData->workerStats[workerId].numGranulesAssigned += 1;
 			}
 		}
@@ -1291,7 +1291,7 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignment assignment, int64_t seqNo) {
 	if (assignment.worker.present()) {
 		// revoke this specific range from this specific worker. Either part of recovery or failing a worker
-		if (bmData->workerStats.count(assignment.worker.get())) {
+		if (bmData->workerStats.contains(assignment.worker.get())) {
 			bmData->workerStats[assignment.worker.get()].numGranulesAssigned -= 1;
 		}
 		// if this revoke matches the worker assignment state, mark the range as unassigned
@@ -1333,7 +1333,7 @@ static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignme
 			// It is fine for multiple disjoint sub-ranges to have the same sequence number since they were part
 			// of the same logical change
 
-			if (bmData->workerStats.count(it.value())) {
+			if (bmData->workerStats.contains(it.value())) {
 				bmData->workerStats[it.value()].numGranulesAssigned -= 1;
 			}
 
@@ -1407,7 +1407,7 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 				                 KeyRangeRef(splitPoints.keys[i], splitPoints.keys[endIdx]),
 				                 blobGranuleMappingValueFor(UID())));
 				for (j = 0; i + j < endIdx; j++) {
-					if (splitPoints.boundaries.count(splitPoints.keys[i + j])) {
+					if (splitPoints.boundaries.contains(splitPoints.keys[i + j])) {
 						tr->set(blobGranuleMergeBoundaryKeyFor(splitPoints.keys[i + j]),
 						        blobGranuleMergeBoundaryValueFor(splitPoints.boundaries[splitPoints.keys[i + j]]));
 					}
@@ -1419,7 +1419,7 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 				// Update BlobGranuleMergeBoundary in-memory state.
 				for (int k = i; k < i + j; k++) {
 					KeyRef beginKey = splitPoints.keys[k];
-					if (splitPoints.boundaries.count(beginKey)) {
+					if (splitPoints.boundaries.contains(beginKey)) {
 						bmData->mergeBoundaries[beginKey] = splitPoints.boundaries[beginKey];
 					}
 				}
@@ -1809,7 +1809,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	if (BM_DEBUG) {
 		fmt::print("Aligned split ({0}):\n", finalSplit.keys.size());
 		for (auto& it : finalSplit.keys) {
-			fmt::print("    {0}{1}\n", it.printable(), finalSplit.boundaries.count(it) ? " *" : "");
+			fmt::print("    {0}{1}\n", it.printable(), finalSplit.boundaries.contains(it) ? " *" : "");
 		}
 	}
 
@@ -1934,7 +1934,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 				                 blobGranuleMappingKeys.begin,
 				                 KeyRangeRef(finalSplit.keys[i], finalSplit.keys[i + 1]),
 				                 blobGranuleMappingValueFor(UID())));
-				if (finalSplit.boundaries.count(finalSplit.keys[i])) {
+				if (finalSplit.boundaries.contains(finalSplit.keys[i])) {
 					tr->set(blobGranuleMergeBoundaryKeyFor(finalSplit.keys[i]),
 					        blobGranuleMergeBoundaryValueFor(finalSplit.boundaries[finalSplit.keys[i]]));
 				}
@@ -2063,7 +2063,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			fmt::print("    {0}:{1}{2}\n",
 			           (i < newGranuleIDs.size() ? newGranuleIDs[i] : UID()).toString().substr(0, 6).c_str(),
 			           splitPoints.keys[i].printable(),
-			           splitPoints.boundaries.count(splitPoints.keys[i]) ? " *" : "");
+			           splitPoints.boundaries.contains(splitPoints.keys[i]) ? " *" : "");
 		}
 	}
 
@@ -2195,7 +2195,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				             MutationRef::SetVersionstampedValue);
 
 				// Update BlobGranuleMergeBoundary.
-				if (splitPoints.boundaries.count(splitRange.begin)) {
+				if (splitPoints.boundaries.contains(splitRange.begin)) {
 					tr->set(blobGranuleMergeBoundaryKeyFor(splitRange.begin),
 					        blobGranuleMergeBoundaryValueFor(splitPoints.boundaries[splitRange.begin]));
 				}
@@ -2605,7 +2605,7 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 	// Assert that none of the subsequent granules are hard boundaries.
 	if (g_network->isSimulated()) {
 		for (int i = 1; i < parentGranuleRanges.size() - 1; i++) {
-			ASSERT(!bmData->mergeHardBoundaries.count(parentGranuleRanges[i]));
+			ASSERT(!bmData->mergeHardBoundaries.contains(parentGranuleRanges[i]));
 		}
 	}
 
@@ -2843,7 +2843,7 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 			//   2. Hit the maximum in a merge evaluation window.
 			//   3. Hit a hard merge boundary meaning we should not merge across them.
 			if (!it->cvalue().mergeEligible() || currentCandidates.size() == maxRangeSize ||
-			    bmData->mergeHardBoundaries.count(it->range().begin)) {
+			    bmData->mergeHardBoundaries.contains(it->range().begin)) {
 				if (currentCandidates.size() >= 2) {
 					mergeChecks.push_back(attemptMerges(bmData, currentCandidates));
 				}
@@ -2859,8 +2859,8 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 				// Conditions:
 				//   1. Start a new soft merge range.
 				//   2. End a soft merge range.
-				if ((!mergeBoundaries.count(curRange.begin) && mergeBoundaries.count(curRange.end)) ||
-				    (mergeBoundaries.count(lastRange.begin) && !mergeBoundaries.count(lastRange.end))) {
+				if ((!mergeBoundaries.contains(curRange.begin) && mergeBoundaries.contains(curRange.end)) ||
+				    (mergeBoundaries.contains(lastRange.begin) && !mergeBoundaries.contains(lastRange.end))) {
 					if (currentCandidates.size() >= 2) {
 						mergeChecks.push_back(attemptMerges(bmData, currentCandidates));
 					}
@@ -2972,10 +2972,10 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 	}
 
 	Optional<UID> successor = bwId;
-	while (bmData->workerAffinities.count(successor.get())) {
+	while (bmData->workerAffinities.contains(successor.get())) {
 		successor = bmData->workerAffinities[successor.get()];
 	}
-	if (successor.get() == bwId || !bmData->workersById.count(successor.get())) {
+	if (successor.get() == bwId || !bmData->workersById.contains(successor.get())) {
 		successor = Optional<UID>();
 	}
 
@@ -3394,16 +3394,16 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 			// add all blob workers to this new blob manager's records and start monitoring it
 			bool foundAnyNew = false;
 			for (auto& worker : blobWorkers) {
-				if (!bmData->deadWorkers.count(worker.id())) {
+				if (!bmData->deadWorkers.contains(worker.id())) {
 					bool isFailedOrExcluded = bmData->exclusionTracker.isFailedOrExcluded(worker.stableAddress());
-					if (!bmData->workerAddresses.count(worker.stableAddress()) &&
+					if (!bmData->workerAddresses.contains(worker.stableAddress()) &&
 					    worker.locality.dcId() == bmData->dcId && !isFailedOrExcluded) {
 						bmData->workerAddresses.insert(worker.stableAddress());
 						bmData->workersById[worker.id()] = worker;
 						bmData->workerStats[worker.id()] = BlobWorkerInfo();
 						bmData->addActor.send(monitorBlobWorker(bmData, worker));
 						foundAnyNew = true;
-					} else if (!bmData->workersById.count(worker.id())) {
+					} else if (!bmData->workersById.contains(worker.id())) {
 						TraceEvent("KillingExtraneousBlobWorker", bmData->id)
 						    .detail("WorkerId", worker.id())
 						    .detail("Addr", worker.stableAddress())
@@ -3880,7 +3880,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				              assignment.seqnoAssigned,
 				              outOfDateAssignments);
 			}
-			if (bmData->workerStats.count(workerId)) {
+			if (bmData->workerStats.contains(workerId)) {
 				bmData->workerStats[workerId].numGranulesAssigned = reply.get().assignments.size();
 			}
 		} else {
@@ -4043,11 +4043,11 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 		// if worker id is already set to a known worker that replied with it in the mapping, range is already assigned
 		// there. If not, need to explicitly assign it to someone
-		if (workerId == UID() || epoch == 0 || !endingWorkers.count(workerId)) {
+		if (workerId == UID() || epoch == 0 || !endingWorkers.contains(workerId)) {
 			if (workerId == UID()) {
 				workerId = workerAffinity;
 			}
-			while (bmData->workerAffinities.count(workerId)) {
+			while (bmData->workerAffinities.contains(workerId)) {
 				workerId = bmData->workerAffinities[workerId];
 				CODE_PROBE(true, "Blob worker has affinity after reboot");
 			}
@@ -4058,7 +4058,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 			RangeAssignment raAssign;
 			raAssign.isAssign = true;
-			if (bmData->workersById.count(workerId)) {
+			if (bmData->workersById.contains(workerId)) {
 				raAssign.worker = workerId;
 			}
 			raAssign.keyRange = range.range();
@@ -4122,7 +4122,7 @@ ACTOR Future<Void> chaosRangeMover(Reference<BlobManagerData> bmData) {
 			while (tries > 0) {
 				tries--;
 				auto randomRange = bmData->workerAssignments.randomRange();
-				if (randomRange.value() != UID() && !alreadyMoved.count(randomRange.range().toString())) {
+				if (randomRange.value() != UID() && !alreadyMoved.contains(randomRange.range().toString())) {
 					if (BM_DEBUG) {
 						fmt::print("Range mover moving range [{0} - {1}): {2}\n",
 						           randomRange.begin().printable().c_str(),
@@ -4182,7 +4182,7 @@ ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self,
 
 	// Ask the candidateWorker to initialize a BW only if the worker does not have a pending request
 	if (numExistingBWOnAddr(self, workerAddr) == 0 &&
-	    self->recruitingLocalities.count(candidateWorker.worker.stableAddress()) == 0) {
+	    !self->recruitingLocalities.contains(candidateWorker.worker.stableAddress())) {
 		state UID interfaceId = deterministicRandom()->randomUniqueID();
 
 		state InitializeBlobWorkerRequest initReq;
@@ -4230,13 +4230,13 @@ ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self,
 		if (newBlobWorker.present()) {
 			BlobWorkerInterface bwi = newBlobWorker.get().interf;
 
-			if (!self->deadWorkers.count(bwi.id())) {
-				if (!self->workerAddresses.count(bwi.stableAddress()) && bwi.locality.dcId() == self->dcId) {
+			if (!self->deadWorkers.contains(bwi.id())) {
+				if (!self->workerAddresses.contains(bwi.stableAddress()) && bwi.locality.dcId() == self->dcId) {
 					self->workerAddresses.insert(bwi.stableAddress());
 					self->workersById[bwi.id()] = bwi;
 					self->workerStats[bwi.id()] = BlobWorkerInfo();
 					self->addActor.send(monitorBlobWorker(self, bwi));
-				} else if (!self->workersById.count(bwi.id())) {
+				} else if (!self->workersById.contains(bwi.id())) {
 					self->addActor.send(killBlobWorker(self, bwi, false));
 				}
 			}
@@ -5970,7 +5970,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	if (g_network->isSimulated()) {
 		UID clusterId = wait(fetchClusterId(self->db));
 		auto clusterEpoc = std::make_pair(clusterId, epoch);
-		bool managerEpochAlreadySeen = managerEpochsSeen.count(clusterEpoc);
+		bool managerEpochAlreadySeen = managerEpochsSeen.contains(clusterEpoc);
 		if (managerEpochAlreadySeen) {
 			TraceEvent(SevError, "DuplicateBlobManagersAtEpoch")
 			    .detail("ClusterId", clusterId)

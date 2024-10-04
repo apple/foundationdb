@@ -427,7 +427,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 
 					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && !req.bypassStorageQuota() &&
 					    req.tenantInfo.hasTenant() &&
-					    commitData->tenantsOverStorageQuota.count(req.tenantInfo.tenantId) > 0) {
+					    commitData->tenantsOverStorageQuota.contains(req.tenantInfo.tenantId)) {
 						req.reply.sendError(storage_quota_exceeded());
 						continue;
 					}
@@ -1056,7 +1056,7 @@ EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitDa
 			// Parse mutation key to determine mutation encryption domain
 			StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
 			int64_t tenantId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
-			if (commitData->tenantMap.count(tenantId)) {
+			if (commitData->tenantMap.contains(tenantId)) {
 				domainId = tenantId;
 			} else {
 				// Leverage 'default encryption domain'
@@ -1194,7 +1194,7 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 bool validTenantAccess(MutationRef m, std::map<int64_t, TenantName> const& tenantMap, Optional<int64_t>& tenantId) {
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		tenantId = TenantAPI::extractTenantIdFromMutation(m);
-		bool isLegalTenant = tenantMap.count(tenantId.get()) > 0;
+		bool isLegalTenant = tenantMap.contains(tenantId.get());
 		CODE_PROBE(!isLegalTenant, "Commit proxy access invalid tenant");
 		return isLegalTenant;
 	}
@@ -1572,7 +1572,7 @@ Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
 	if (!isValid) {
 		return tenant_not_found();
 	}
-	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.count(tr.tenantInfo.tenantId) > 0) {
+	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.contains(tr.tenantInfo.tenantId)) {
 		CODE_PROBE(true, "Attempt access to locked tenant without lock awareness");
 		return tenant_locked();
 	}
@@ -1626,7 +1626,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				// check if all tenant ids are valid if committed == true
 				committed = committed &&
 				            std::all_of(tenantIds.get().begin(), tenantIds.get().end(), [self](const int64_t& tid) {
-					            return self->pProxyCommitData->tenantMap.count(tid);
+					            return self->pProxyCommitData->tenantMap.contains(tid);
 				            });
 
 				if (self->debugID.present()) {
@@ -1805,7 +1805,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	if (pProxyCommitData->encryptMode == EncryptionAtRestMode::DOMAIN_AWARE && !rawAccessTenantIds.empty()) {
 		std::unordered_set<EncryptCipherDomainId> extraDomainIds;
 		for (auto tenantId : rawAccessTenantIds) {
-			if (self->cipherKeys.count(tenantId) == 0) {
+			if (!self->cipherKeys.contains(tenantId)) {
 				extraDomainIds.insert(tenantId);
 			}
 		}
@@ -1892,7 +1892,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 				CODE_PROBE(true, "Raw access mutation encryption", probe::decoration::rare);
 			}
 			ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
-			ASSERT(self->cipherKeys.count(domainId) > 0);
+			ASSERT(self->cipherKeys.contains(domainId));
 			encryptedMutation =
 			    mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG, encryptTime);
 		}
@@ -2827,7 +2827,7 @@ void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
                         ProxyCommitData* commitData,
                         std::unordered_set<UID>& included,
                         UID ssId) {
-	if (!included.count(ssId)) {
+	if (!included.contains(ssId)) {
 		auto mappingItr = commitData->tssMapping.find(ssId);
 		if (mappingItr != commitData->tssMapping.end()) {
 			reply.resultsTssMapping.push_back(*mappingItr);
@@ -3112,8 +3112,8 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 				throw blob_granule_transaction_too_old();
 			}
 
-			if (!req.justGranules && !commitData->blobWorkerInterfCache.count(workerId) &&
-			    !bwiLookedUp.count(workerId)) {
+			if (!req.justGranules && !commitData->blobWorkerInterfCache.contains(workerId) &&
+			    !bwiLookedUp.contains(workerId)) {
 				bwiLookedUp.insert(workerId);
 				bwiLookupFutures.push_back(tr.get(blobWorkerListKeyFor(workerId)));
 			}
@@ -3766,7 +3766,7 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	ASSERT(pContext->pCommitData != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
-	if (pContext->receivedSequences.count(request.sequence)) {
+	if (pContext->receivedSequences.contains(request.sequence)) {
 		if (pContext->receivedSequences.size() == pContext->maxSequence) {
 			wait(pContext->txnRecovery);
 		}

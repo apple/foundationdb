@@ -252,6 +252,7 @@ Future<Void> TCServerInfo::updateStoreType() {
 void TCServerInfo::removeTeamsContainingServer(UID removedServer) {
 	for (int t = 0; t < teams.size(); t++) {
 		auto const& serverIds = teams[t]->getServerIDs();
+		// TODO: replace std::count with std::find for more efficiency
 		if (std::count(serverIds.begin(), serverIds.end(), removedServer)) {
 			teams[t--] = teams.back();
 			teams.pop_back();

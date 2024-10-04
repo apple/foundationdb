@@ -218,6 +218,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	                               Proc idAccess) {
 		for (const auto& worker : workers) {
 			// kill all matching workers
+			// TODO: replace std::count
 			if (idAccess(worker).present() &&
 			    std::count(targets.begin(), targets.end(), idAccess(worker).get().toString())) {
 				TraceEvent("SendingRebootRequest").detail("TargetWorker", worker.interf.locality.toString());

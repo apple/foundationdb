@@ -171,6 +171,7 @@ public:
 	bool matches(std::vector<Standalone<StringRef>> const& sortedMachineIDs);
 	std::string getMachineIDsStr() const;
 	bool containsMachine(Standalone<StringRef> machineID) const {
+		// TODO: replace
 		return std::count(machineIDs.begin(), machineIDs.end(), machineID);
 	}
 

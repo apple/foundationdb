@@ -285,6 +285,7 @@ bool LogSystemConfig::isNextGenerationOf(LogSystemConfig const& r) const {
 	return false;
 }
 
+// TODO: for more efficiency, std::count can be replaced with std::find
 bool LogSystemConfig::hasTLog(UID tid) const {
 	for (const auto& log : tLogs) {
 		if (std::count(log.tLogs.begin(), log.tLogs.end(), tid) > 0) {
@@ -301,6 +302,7 @@ bool LogSystemConfig::hasTLog(UID tid) const {
 	return false;
 }
 
+// TODO: for more efficiency, std::count can be replaced with std::find
 bool LogSystemConfig::hasLogRouter(UID rid) const {
 	for (const auto& log : tLogs) {
 		if (std::count(log.logRouters.begin(), log.logRouters.end(), rid) > 0) {
@@ -317,6 +319,7 @@ bool LogSystemConfig::hasLogRouter(UID rid) const {
 	return false;
 }
 
+// TODO: for more efficiency, std::count can be replaced with std::find
 bool LogSystemConfig::hasBackupWorker(UID bid) const {
 	for (const auto& log : tLogs) {
 		if (std::count(log.backupWorkers.begin(), log.backupWorkers.end(), bid) > 0) {

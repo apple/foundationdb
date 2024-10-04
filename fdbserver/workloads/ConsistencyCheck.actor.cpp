@@ -1035,7 +1035,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		for (auto& ssi : servers) {
-			ASSERT(id_ssi.count(ssi.id()));
+			ASSERT(id_ssi.contains(ssi.id()));
 		}
 		return true;
 	}
@@ -1072,6 +1072,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
+		// TODO: replace
 		int missingDc0 = configuration.regions.size() == 0
 		                     ? 0
 		                     : std::count(missingStorage.begin(), missingStorage.end(), configuration.regions[0].dcId);
@@ -1180,7 +1181,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			            itr->interf.secondaryAddress().present() ? itr->interf.secondaryAddress().get().toString()
 			                                                     : "Unset");
 			for (const auto& id : stores.get()) {
-				if (statefulProcesses[itr->interf.address()].count(id)) {
+				if (statefulProcesses[itr->interf.address()].contains(id)) {
 					continue;
 				}
 				// For extra data store
@@ -1200,7 +1201,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ProcessPrimaryAddress", p->address)
 					    .detail("ProcessAddresses", p->addresses.toString())
 					    .detail("DataStoreID", id)
-					    .detail("Protected", g_simulator->protectedAddresses.count(itr->interf.address()))
+					    .detail("Protected", g_simulator->protectedAddresses.contains(itr->interf.address()))
 					    .detail("Reliable", p->isReliable())
 					    .detail("ReliableInfo", p->getReliableInfo())
 					    .detail("KillOrRebootProcess", p->address);
@@ -1323,7 +1324,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			    all[i]->startingClass != ProcessClass::TesterClass &&
 			    all[i]->startingClass != ProcessClass::SimHTTPServerClass &&
 			    all[i]->protocolVersion == g_network->protocolVersion()) {
-				if (!workerAddresses.count(all[i]->address)) {
+				if (!workerAddresses.contains(all[i]->address)) {
 					TraceEvent("ConsistencyCheck_WorkerMissingFromList").detail("Addr", all[i]->address);
 					return false;
 				}
@@ -1378,7 +1379,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				for (const auto& addr : oldCoordinators) {
 					auto findResult = addr_locality.find(addr);
 					if (findResult != addr_locality.end()) {
-						if (checkDuplicates.count(findResult->second.zoneId())) {
+						if (checkDuplicates.contains(findResult->second.zoneId())) {
 							TraceEvent("ConsistencyCheck_BadCoordinator")
 							    .detail("Addr", addr)
 							    .detail("NotFound", findResult == addr_locality.end());
@@ -1410,7 +1411,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		for (const auto& worker : allWorkers) {
 			allWorkerProcessMap[worker.interf.address()] = worker;
 			Optional<Key> dc = worker.interf.locality.dcId();
-			if (!dcToAllClassTypes.count(dc))
+			if (!dcToAllClassTypes.contains(dc))
 				dcToAllClassTypes.insert({});
 			dcToAllClassTypes[dc].push_back(worker.processClass.classType());
 		}
@@ -1420,17 +1421,17 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		for (const auto& worker : nonExcludedWorkers) {
 			nonExcludedWorkerProcessMap[worker.interf.address()] = worker;
 			Optional<Key> dc = worker.interf.locality.dcId();
-			if (!dcToNonExcludedClassTypes.count(dc))
+			if (!dcToNonExcludedClassTypes.contains(dc))
 				dcToNonExcludedClassTypes.insert({});
 			dcToNonExcludedClassTypes[dc].push_back(worker.processClass.classType());
 		}
 
-		if (!allWorkerProcessMap.count(db.clusterInterface.clientInterface.address())) {
+		if (!allWorkerProcessMap.contains(db.clusterInterface.clientInterface.address())) {
 			TraceEvent("ConsistencyCheck_CCNotInWorkerList")
 			    .detail("CCAddress", db.clusterInterface.clientInterface.address().toString());
 			return false;
 		}
-		if (!allWorkerProcessMap.count(db.master.address())) {
+		if (!allWorkerProcessMap.contains(db.master.address())) {
 			TraceEvent("ConsistencyCheck_MasterNotInWorkerList")
 			    .detail("MasterAddress", db.master.address().toString());
 			return false;
@@ -1478,13 +1479,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		// Check CC
 		ProcessClass::Fitness bestClusterControllerFitness =
 		    getBestAvailableFitness(dcToNonExcludedClassTypes[ccDcId], ProcessClass::ClusterController);
-		if (!nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address()) ||
+		if (!nonExcludedWorkerProcessMap.contains(db.clusterInterface.clientInterface.address()) ||
 		    nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].processClass.machineClassFitness(
 		        ProcessClass::ClusterController) != bestClusterControllerFitness) {
 			TraceEvent("ConsistencyCheck_ClusterControllerNotBest")
 			    .detail("BestClusterControllerFitness", bestClusterControllerFitness)
 			    .detail("ExistingClusterControllerFit",
-			            nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address())
+			            nonExcludedWorkerProcessMap.contains(db.clusterInterface.clientInterface.address())
 			                ? nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()]
 			                      .processClass.machineClassFitness(ProcessClass::ClusterController)
 			                : -1);
@@ -1501,14 +1502,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
-		if ((!nonExcludedWorkerProcessMap.count(db.master.address()) &&
+		if ((!nonExcludedWorkerProcessMap.contains(db.master.address()) &&
 		     bestMasterFitness != ProcessClass::ExcludeFit) ||
 		    nonExcludedWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::Master) !=
 		        bestMasterFitness) {
 			TraceEvent("ConsistencyCheck_MasterNotBest")
 			    .detail("BestMasterFitness", bestMasterFitness)
 			    .detail("ExistingMasterFit",
-			            nonExcludedWorkerProcessMap.count(db.master.address())
+			            nonExcludedWorkerProcessMap.contains(db.master.address())
 			                ? nonExcludedWorkerProcessMap[db.master.address()].processClass.machineClassFitness(
 			                      ProcessClass::Master)
 			                : -1);
@@ -1519,13 +1520,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		ProcessClass::Fitness bestCommitProxyFitness =
 		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::CommitProxy);
 		for (const auto& commitProxy : db.client.commitProxies) {
-			if (!nonExcludedWorkerProcessMap.count(commitProxy.address()) ||
+			if (!nonExcludedWorkerProcessMap.contains(commitProxy.address()) ||
 			    nonExcludedWorkerProcessMap[commitProxy.address()].processClass.machineClassFitness(
 			        ProcessClass::CommitProxy) != bestCommitProxyFitness) {
 				TraceEvent("ConsistencyCheck_CommitProxyNotBest")
 				    .detail("BestCommitProxyFitness", bestCommitProxyFitness)
 				    .detail("ExistingCommitProxyFitness",
-				            nonExcludedWorkerProcessMap.count(commitProxy.address())
+				            nonExcludedWorkerProcessMap.contains(commitProxy.address())
 				                ? nonExcludedWorkerProcessMap[commitProxy.address()].processClass.machineClassFitness(
 				                      ProcessClass::CommitProxy)
 				                : -1);
@@ -1537,13 +1538,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		ProcessClass::Fitness bestGrvProxyFitness =
 		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::GrvProxy);
 		for (const auto& grvProxy : db.client.grvProxies) {
-			if (!nonExcludedWorkerProcessMap.count(grvProxy.address()) ||
+			if (!nonExcludedWorkerProcessMap.contains(grvProxy.address()) ||
 			    nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(
 			        ProcessClass::GrvProxy) != bestGrvProxyFitness) {
 				TraceEvent("ConsistencyCheck_GrvProxyNotBest")
 				    .detail("BestGrvProxyFitness", bestGrvProxyFitness)
 				    .detail("ExistingGrvProxyFitness",
-				            nonExcludedWorkerProcessMap.count(grvProxy.address())
+				            nonExcludedWorkerProcessMap.contains(grvProxy.address())
 				                ? nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(
 				                      ProcessClass::GrvProxy)
 				                : -1);
@@ -1555,13 +1556,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		ProcessClass::Fitness bestResolverFitness =
 		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Resolver);
 		for (const auto& resolver : db.resolvers) {
-			if (!nonExcludedWorkerProcessMap.count(resolver.address()) ||
+			if (!nonExcludedWorkerProcessMap.contains(resolver.address()) ||
 			    nonExcludedWorkerProcessMap[resolver.address()].processClass.machineClassFitness(
 			        ProcessClass::Resolver) != bestResolverFitness) {
 				TraceEvent("ConsistencyCheck_ResolverNotBest")
 				    .detail("BestResolverFitness", bestResolverFitness)
 				    .detail("ExistingResolverFitness",
-				            nonExcludedWorkerProcessMap.count(resolver.address())
+				            nonExcludedWorkerProcessMap.contains(resolver.address())
 				                ? nonExcludedWorkerProcessMap[resolver.address()].processClass.machineClassFitness(
 				                      ProcessClass::Resolver)
 				                : -1);
@@ -1576,7 +1577,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			for (auto& tlogSet : db.logSystemConfig.tLogs) {
 				if (!tlogSet.isLocal && tlogSet.logRouters.size()) {
 					for (auto& logRouter : tlogSet.logRouters) {
-						if (!nonExcludedWorkerProcessMap.count(logRouter.interf().address())) {
+						if (!nonExcludedWorkerProcessMap.contains(logRouter.interf().address())) {
 							TraceEvent("ConsistencyCheck_LogRouterNotInNonExcludedWorkers")
 							    .detail("Id", logRouter.id());
 							return false;
@@ -1596,14 +1597,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		ProcessClass::Fitness fitnessLowerBound =
 		    allWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::DataDistributor);
 		if (db.distributor.present() &&
-		    (!nonExcludedWorkerProcessMap.count(db.distributor.get().address()) ||
+		    (!nonExcludedWorkerProcessMap.contains(db.distributor.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(
 		         ProcessClass::DataDistributor) > fitnessLowerBound)) {
 			TraceEvent("ConsistencyCheck_DistributorNotBest")
 			    .detail("DataDistributorFitnessLowerBound", fitnessLowerBound)
 			    .detail(
 			        "ExistingDistributorFitness",
-			        nonExcludedWorkerProcessMap.count(db.distributor.get().address())
+			        nonExcludedWorkerProcessMap.contains(db.distributor.get().address())
 			            ? nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(
 			                  ProcessClass::DataDistributor)
 			            : -1);
@@ -1612,14 +1613,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		// Check Ratekeeper
 		if (db.ratekeeper.present() &&
-		    (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) ||
+		    (!nonExcludedWorkerProcessMap.contains(db.ratekeeper.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(
 		         ProcessClass::Ratekeeper) > fitnessLowerBound)) {
 			TraceEvent("ConsistencyCheck_RatekeeperNotBest")
 			    .detail("BestRatekeeperFitness", fitnessLowerBound)
 			    .detail(
 			        "ExistingRatekeeperFitness",
-			        nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address())
+			        nonExcludedWorkerProcessMap.contains(db.ratekeeper.get().address())
 			            ? nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(
 			                  ProcessClass::Ratekeeper)
 			            : -1);
@@ -1628,14 +1629,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		// Check BlobManager
 		if (config.blobGranulesEnabled && db.blobManager.present() &&
-		    (!nonExcludedWorkerProcessMap.count(db.blobManager.get().address()) ||
+		    (!nonExcludedWorkerProcessMap.contains(db.blobManager.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
 		         ProcessClass::BlobManager) > fitnessLowerBound)) {
 			TraceEvent("ConsistencyCheck_BlobManagerNotBest")
 			    .detail("BestBlobManagerFitness", fitnessLowerBound)
 			    .detail(
 			        "ExistingBlobManagerFitness",
-			        nonExcludedWorkerProcessMap.count(db.blobManager.get().address())
+			        nonExcludedWorkerProcessMap.contains(db.blobManager.get().address())
 			            ? nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
 			                  ProcessClass::BlobManager)
 			            : -1);
@@ -1644,14 +1645,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		// Check BlobMigrator
 		if (config.blobGranulesEnabled && db.blobMigrator.present() &&
-		    (!nonExcludedWorkerProcessMap.count(db.blobMigrator.get().address()) ||
+		    (!nonExcludedWorkerProcessMap.contains(db.blobMigrator.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.blobMigrator.get().address()].processClass.machineClassFitness(
 		         ProcessClass::BlobMigrator) > fitnessLowerBound)) {
 			TraceEvent("ConsistencyCheck_BlobMigratorNotBest")
 			    .detail("BestBlobMigratorFitness", fitnessLowerBound)
 			    .detail(
 			        "ExistingBlobMigratorFitness",
-			        nonExcludedWorkerProcessMap.count(db.blobMigrator.get().address())
+			        nonExcludedWorkerProcessMap.contains(db.blobMigrator.get().address())
 			            ? nonExcludedWorkerProcessMap[db.blobMigrator.get().address()].processClass.machineClassFitness(
 			                  ProcessClass::BlobMigrator)
 			            : -1);
@@ -1660,13 +1661,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		// Check EncryptKeyProxy
 		if (config.encryptionAtRestMode.isEncryptionEnabled() && db.client.encryptKeyProxy.present() &&
-		    (!nonExcludedWorkerProcessMap.count(db.client.encryptKeyProxy.get().address()) ||
+		    (!nonExcludedWorkerProcessMap.contains(db.client.encryptKeyProxy.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.client.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {
 			TraceEvent("ConsistencyCheck_EncryptKeyProxyNotBest")
 			    .detail("BestEncryptKeyProxyFitness", fitnessLowerBound)
 			    .detail("ExistingEncryptKeyProxyFitness",
-			            nonExcludedWorkerProcessMap.count(db.client.encryptKeyProxy.get().address())
+			            nonExcludedWorkerProcessMap.contains(db.client.encryptKeyProxy.get().address())
 			                ? nonExcludedWorkerProcessMap[db.client.encryptKeyProxy.get().address()]
 			                      .processClass.machineClassFitness(ProcessClass::EncryptKeyProxy)
 			                : -1);
@@ -1675,13 +1676,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		// Check ConsistencyScan
 		if (db.consistencyScan.present() &&
-		    (!nonExcludedWorkerProcessMap.count(db.consistencyScan.get().address()) ||
+		    (!nonExcludedWorkerProcessMap.contains(db.consistencyScan.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.consistencyScan.get().address()].processClass.machineClassFitness(
 		         ProcessClass::ConsistencyScan) > fitnessLowerBound)) {
 			TraceEvent("ConsistencyCheck_ConsistencyScanNotBest")
 			    .detail("BestConsistencyScanFitness", fitnessLowerBound)
 			    .detail("ExistingConsistencyScanFitness",
-			            nonExcludedWorkerProcessMap.count(db.consistencyScan.get().address())
+			            nonExcludedWorkerProcessMap.contains(db.consistencyScan.get().address())
 			                ? nonExcludedWorkerProcessMap[db.consistencyScan.get().address()]
 			                      .processClass.machineClassFitness(ProcessClass::ConsistencyScan)
 			                : -1);

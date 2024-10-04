@@ -123,6 +123,7 @@ struct DiskDurabilityTest : TestWorkload {
 			state std::vector<int64_t> targetPages;
 			for (int i = deterministicRandom()->randomInt(1, 100); i > 0 && targetPages.size() < size / 4096; i--) {
 				auto p = deterministicRandom()->randomInt(0, size / 4096);
+				// TODO: replace
 				if (!std::count(targetPages.begin(), targetPages.end(), p))
 					targetPages.push_back(p);
 			}

@@ -117,8 +117,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		for (int i = 0; i < 20; ++i) {
 			int64_t newPrefix = deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
 			                                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1);
-			if (allowTenantIdPrefixReuse || !usedPrefixes.count(newPrefix)) {
-				CODE_PROBE(usedPrefixes.count(newPrefix), "Reusing tenant ID prefix", probe::decoration::rare);
+			if (allowTenantIdPrefixReuse || !usedPrefixes.contains(newPrefix)) {
+				CODE_PROBE(usedPrefixes.contains(newPrefix), "Reusing tenant ID prefix", probe::decoration::rare);
 				return newPrefix;
 			}
 		}
@@ -606,7 +606,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		state bool foundTenantCollision = false;
 		for (auto t : dataDb->tenants) {
-			if (self->createdTenants.count(t.first)) {
+			if (self->createdTenants.contains(t.first)) {
 				foundTenantCollision = true;
 				tenantsToRemove.insert(t.first);
 			}
@@ -614,7 +614,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		state bool foundGroupCollision = false;
 		for (auto t : dataDb->tenantGroups) {
-			if (self->tenantGroups.count(t.first)) {
+			if (self->tenantGroups.contains(t.first)) {
 				foundGroupCollision = true;
 				tenantsToRemove.insert(t.second->tenants.begin(), t.second->tenants.end());
 			}
@@ -1011,7 +1011,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		auto itr = self->createdTenants.find(tenant);
 		state bool exists = itr != self->createdTenants.end();
-		state bool tenantGroupExists = tenantGroup.present() && self->tenantGroups.count(tenantGroup.get());
+		state bool tenantGroupExists = tenantGroup.present() && self->tenantGroups.contains(tenantGroup.get());
 		state bool hasCapacity = tenantGroupExists || self->ungroupedTenants.size() + self->tenantGroups.size() <
 		                                                  self->totalTenantGroupCapacity;
 
@@ -1740,7 +1740,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		ASSERT_EQ(tenants.size(), clusterData->tenants.size());
 		for (auto [tenantName, tenantEntry] : tenants) {
-			ASSERT(clusterData->tenants.count(tenantName));
+			ASSERT(clusterData->tenants.contains(tenantName));
 			auto tenantData = clusterData->tenants.find(tenantName);
 			ASSERT(tenantData != clusterData->tenants.end());
 			ASSERT(tenantData->second->cluster == clusterName);

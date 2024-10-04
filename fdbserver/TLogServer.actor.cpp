@@ -555,7 +555,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	                                 bool poppedRecently,
 	                                 bool unpoppedRecovered) {
 		if (tag.locality != tagLocalityLogRouter && tag.locality != tagLocalityTxs && tag != txsTag && allTags.size() &&
-		    !allTags.count(tag) && popped <= recoveredAt) {
+		    !allTags.contains(tag) && popped <= recoveredAt) {
 			popped = recoveredAt + 1;
 		}
 		auto newTagData = makeReference<TagData>(tag, popped, 0, nothingPersistent, poppedRecently, unpoppedRecovered);
@@ -1345,7 +1345,7 @@ ACTOR Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData
 // This actor is just a loop that calls updatePersistentData and popDiskQueue whenever
 // (a) there's data to be spilled or (b) we should update metadata after some commits have been fully popped.
 ACTOR Future<Void> updateStorage(TLogData* self) {
-	while (self->spillOrder.size() && !self->id_data.count(self->spillOrder.front())) {
+	while (self->spillOrder.size() && !self->id_data.contains(self->spillOrder.front())) {
 		self->spillOrder.pop_front();
 	}
 
@@ -2531,6 +2531,7 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 	state LifetimeToken lastMasterLifetime;
 	loop {
 		auto const& inf = self->dbInfo->get();
+		// TODO: Replace std::count with std::find for more efficiency
 		bool isDisplaced =
 		    !std::count(inf.priorCommittedLogServers.begin(), inf.priorCommittedLogServers.end(), tli.id());
 		if (isPrimary) {
@@ -2791,6 +2792,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			bool found = false;
 			if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 				for (auto& logs : self->dbInfo->get().logSystemConfig.tLogs) {
+					// TODO: replace
 					if (std::count(logs.tLogs.begin(), logs.tLogs.end(), logData->logId)) {
 						found = true;
 						break;
@@ -2895,7 +2897,7 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 	                                                   // actors threw an error immediately
 	self->id_data.erase(logData->logId);
 
-	while (self->popOrder.size() && !self->id_data.count(self->popOrder.front())) {
+	while (self->popOrder.size() && !self->id_data.contains(self->popOrder.front())) {
 		self->popOrder.pop_front();
 	}
 

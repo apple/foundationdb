@@ -1153,6 +1153,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 uint64_t recoveryCount,
                                 GrvProxyInterface myInterface) {
 	loop {
+		// TODO: don't need std::count below, just std::find will be enough
 		if (db->get().recoveryCount >= recoveryCount &&
 		    !std::count(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), myInterface)) {
 			throw worker_removed();

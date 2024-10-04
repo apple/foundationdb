@@ -197,7 +197,7 @@ struct ConflictRangeWorkload : TestWorkload {
 					if (randomSets) {
 						for (int j = 0; j < 5; j++) {
 							int proposedKey = deterministicRandom()->randomInt(0, self->maxKeySpace);
-							if (!insertedSet.count(proposedKey)) {
+							if (!insertedSet.contains(proposedKey)) {
 								TraceEvent("ConflictRangeSet").detail("Key", proposedKey);
 								insertedSet.insert(proposedKey);
 								tr2.set(StringRef(format("%010d", proposedKey)),
@@ -208,7 +208,7 @@ struct ConflictRangeWorkload : TestWorkload {
 					} else {
 						for (int j = 0; j < 5; j++) {
 							int proposedKey = deterministicRandom()->randomInt(0, self->maxKeySpace);
-							if (insertedSet.count(proposedKey)) {
+							if (insertedSet.contains(proposedKey)) {
 								TraceEvent("ConflictRangeClear").detail("Key", proposedKey);
 								insertedSet.erase(proposedKey);
 								tr2.clear(StringRef(format("%010d", proposedKey)));
