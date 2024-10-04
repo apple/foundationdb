@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
@@ -53,18 +55,19 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	}
 
 	KeyRange getRandomRange() const {
-		char* startKeyBuffer = new char[1];
-		char* endKeyBuffer = new char[1];
-		int startPoint = deterministicRandom()->randomInt(0, 254);
-		int endPoint = deterministicRandom()->randomInt(startPoint + 1, 255);
-		startKeyBuffer[0] = static_cast<char>(startPoint);
-		endKeyBuffer[0] = static_cast<char>(endPoint);
-		Key beginKey = StringRef(std::string(startKeyBuffer));
-		Key endKey = StringRef(std::string(endKeyBuffer));
-		KeyRange res = Standalone(KeyRangeRef(beginKey, endKey));
-		delete[] startKeyBuffer;
-		delete[] endKeyBuffer;
-		return res;
+		int KeyALength = deterministicRandom()->randomInt(1, 10);
+		Standalone<StringRef> keyA = makeString(KeyALength);
+		deterministicRandom()->randomBytes(mutateString(keyA), KeyALength);
+		int KeyBLength = deterministicRandom()->randomInt(1, 10);
+		Standalone<StringRef> keyB = makeString(KeyBLength);
+		deterministicRandom()->randomBytes(mutateString(keyB), KeyBLength);
+		if (keyA < keyB) {
+			return Standalone(KeyRangeRef(keyA, keyB));
+		} else if (keyA > keyB) {
+			return Standalone(KeyRangeRef(keyB, keyA));
+		} else {
+			return singleKeyRange(keyA);
+		}
 	}
 
 	ACTOR Future<Void> _start(Database cx, RandomRangeLockWorkload* self) {
@@ -72,13 +75,31 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			wait(delay(self->testStartDelay));
 			state KeyRange range = self->getRandomRange();
 			TraceEvent(SevWarnAlways, "InjectRangeLockSubmit").detail("Range", range);
-			wait(lockCommitUserRange(cx, range));
-			TraceEvent(SevWarnAlways, "InjectRangeLocked")
-			    .detail("Range", range)
-			    .detail("LockTime", self->testDuration);
+			try {
+				wait(lockCommitUserRange(cx, range));
+				TraceEvent(SevWarnAlways, "InjectRangeLocked")
+				    .detail("Range", range)
+				    .detail("LockTime", self->testDuration);
+				ASSERT(range.end <= normalKeys.end);
+			} catch (Error& e) {
+				if (e.code() != error_code_range_lock_failed) {
+					throw e;
+				} else {
+					ASSERT(range.end > normalKeys.end);
+				}
+			}
 			wait(delay(self->testDuration));
-			wait(unlockCommitUserRange(cx, range));
-			TraceEvent(SevWarnAlways, "InjectRangeUnlocked").detail("Range", range);
+			try {
+				wait(unlockCommitUserRange(cx, range));
+				TraceEvent(SevWarnAlways, "InjectRangeUnlocked").detail("Range", range);
+				ASSERT(range.end <= normalKeys.end);
+			} catch (Error& e) {
+				if (e.code() != error_code_range_lock_failed) {
+					throw e;
+				} else {
+					ASSERT(range.end > normalKeys.end);
+				}
+			}
 		}
 		return Void();
 	}
