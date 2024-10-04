@@ -187,10 +187,24 @@ void ILogSystem::ServerPeekCursor::advanceTo(LogMessageVersion n) {
 	}
 }
 
+void padReplyToEnd(ILogSystem::ServerPeekCursor* self, const TLogPeekReply& res) {
+	if (!res.lockedEnd) {
+		return;
+	}
+	if (self->end.version == std::numeric_limits<Version>::max()) {
+		TraceEvent("GotLockedEndMax").detail("S", res.end);
+	} else {
+		self->results.end = self->end.version;
+	}
+}
+
 // This function is called after the cursor received one TLogPeekReply to update its members, which is the common logic
 // in getMore helper functions.
 void updateCursorWithReply(ILogSystem::ServerPeekCursor* self, const TLogPeekReply& res) {
 	self->results = res;
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		padReplyToEnd(self, res);
+	}
 	self->onlySpilled = res.onlySpilled;
 	if (res.popped.present())
 		self->poppedVersion = std::min(std::max(self->poppedVersion, res.popped.get()), self->end.version);

@@ -1288,8 +1288,13 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekSingle(UID dbgid
 Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID dbgid,
                                                                           Version begin,
                                                                           Tag tag,
-                                                                          bool useSatellite) {
+                                                                          bool useSatellite,
+                                                                          Optional<Version> end) {
 	bool found = false;
+	if (!end.present()) {
+		end = getPeekEnd();
+	}
+
 	for (const auto& log : tLogs) {
 		found = log->hasLogRouter(dbgid) || log->hasBackupWorker(dbgid);
 		if (found) {
@@ -1324,7 +1329,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 			// FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies
 			// across the WAN
 			return makeReference<ILogSystem::SetPeekCursor>(
-			    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, getPeekEnd(), true);
+			    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, end.get(), true);
 		} else {
 			int bestPrimarySet = -1;
 			int bestSatelliteSet = -1;
@@ -1350,7 +1355,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 			    .detail("Begin", begin)
 			    .detail("LogId", log->logServers[log->bestLocationFor(tag)]->get().id());
 			return makeReference<ILogSystem::ServerPeekCursor>(
-			    log->logServers[log->bestLocationFor(tag)], tag, begin, getPeekEnd(), false, true);
+			    log->logServers[log->bestLocationFor(tag)], tag, begin, end.get(), false, true);
 		}
 	}
 	bool firstOld = true;
@@ -1405,7 +1410,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 		firstOld = false;
 	}
 	return makeReference<ILogSystem::ServerPeekCursor>(
-	    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false);
+	    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, end.get(), false, false);
 }
 
 Version TagPartitionedLogSystem::getKnownCommittedVersion() {
@@ -2342,7 +2347,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	// trackRejoins listens for rejoin requests from the tLogs that we are recovering from, to learn their
 	// TLogInterfaces
 	state std::vector<LogLockInfo> lockResults;
-	state Reference<IdToInterf> lockResultsInterf = makeReference<IdToInterf>();
 	state std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>, Reference<IReplicationPolicy>>>
 	    allLogServers;
 	state std::vector<Reference<LogSet>> logServers;
@@ -2384,8 +2388,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		lockResults[i].isCurrent = true;
 		lockResults[i].logSet = logServers[i];
 		for (int t = 0; t < logServers[i]->logServers.size(); t++) {
-			lockResults[i].replies.push_back(
-			    TagPartitionedLogSystem::lockTLog(dbgid, logServers[i]->logServers[t], lockResultsInterf));
+			lockResults[i].replies.push_back(TagPartitionedLogSystem::lockTLog(dbgid, logServers[i]->logServers[t]));
 		}
 	}
 
@@ -2422,8 +2425,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			lockResult.epochEnd = old.epochEnd;
 			lockResult.logSet = old.tLogs[0];
 			for (int t = 0; t < old.tLogs[0]->logServers.size(); t++) {
-				lockResult.replies.push_back(
-				    TagPartitionedLogSystem::lockTLog(dbgid, old.tLogs[0]->logServers[t], lockResultsInterf));
+				lockResult.replies.push_back(TagPartitionedLogSystem::lockTLog(dbgid, old.tLogs[0]->logServers[t]));
 			}
 			allLockResults.push_back(lockResult);
 		}
@@ -2499,7 +2501,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 
 			logSystem->recoverAt = minEnd;
 			lastEnd = minEnd;
-			lockResultsInterf->recoverAt = logSystem->recoverAt;
 			logSystem->tLogs = logServers;
 			logSystem->logRouterTags = prevState.logRouterTags;
 			logSystem->txsTags = prevState.txsTags;
@@ -2518,34 +2519,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->stopped = true;
 			logSystem->pseudoLocalities = prevState.pseudoLocalities;
 			outLogSystem->set(logSystem);
-		}
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && lockResultsInterf->recoverAt.present()) {
-			// When a new log system is created, inform the surviving tLogs of the RV.
-			// @todo issues:
-			// - we are not adding entries of a LogSet to "logGroupResults" above if
-			// "getDurableVersion()" doesn't return a recovery version for that LogSet.
-			// Is it fine to ignore the log servers (if any) in that LogSet and if so,
-			// how would they learn about the recovery version?
-			// - we don't get here if a restart happens and the resulting recovery
-			// version doesn't exceed the previously computed recovery version. Don't
-			// we need to send the (previously computed) recovery version to those
-			// log servers that caused the restart?
-			for (LogLockInfo logLockInfo : lockResults) {
-
-				state std::vector<Future<TLogLockResult>> replies = logLockInfo.replies;
-				for (auto tLogResult : replies) {
-					if (tLogResult.isValid() && tLogResult.isReady()) {
-						TraceEvent("SendClusterRecoveryVersion").detail("DestInterf", tLogResult.get().id);
-						wait(transformErrors(
-						    throwErrorOr(lockResultsInterf->lockInterf[tLogResult.get().id]
-						                     .setClusterRecoveryVersion.getReplyUnlessFailedFor(
-						                         setClusterRecoveryVersionRequest(lockResultsInterf->recoverAt.get()),
-						                         SERVER_KNOBS->TLOG_TIMEOUT,
-						                         SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-						    cluster_recovery_failed()));
-					}
-				}
-			}
 		}
 
 		wait(waitForAny(changes));
@@ -2607,6 +2580,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					req.tLogLocalities = tLogLocalities;
 					req.tLogPolicy = tLogPolicy;
 					req.locality = locality;
+					req.recoverAt = self->getEnd();
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -2656,6 +2630,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					req.tLogLocalities = tLogLocalities;
 					req.tLogPolicy = tLogPolicy;
 					req.locality = locality;
+					req.recoverAt = old.recoverAt + 1;
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -3413,8 +3388,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::trackRejoins(
 
 ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
     UID myID,
-    Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog,
-    Optional<Reference<IdToInterf>> lockInterf) {
+    Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog) {
 	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id()).detail("InfPresent", tlog->get().present());
 	loop {
 		choose {
@@ -3422,17 +3396,7 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
 			         tlog->get().present() ? brokenPromiseToNever(tlog->get().interf().lock.getReply<TLogLockResult>())
 			                               : Never())) {
 				TraceEvent("TLogLocked", myID).detail("TLog", tlog->get().id()).detail("End", data.end);
-				state TLogLockResult returnedData = data;
-
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && lockInterf.present()) {
-					lockInterf.get()->lockInterf[data.id] = tlog->get().interf();
-					if (lockInterf.get()->recoverAt.present()) {
-						setClusterRecoveryVersionRequest req(lockInterf.get()->recoverAt.get());
-						TraceEvent("SendClusterRecoveryVersion").detail("DestInterf", tlog->get().id());
-						wait(tlog->get().interf().setClusterRecoveryVersion.getReply(req));
-					}
-				}
-				return returnedData;
+				return data;
 			}
 			when(wait(tlog->onChange())) {}
 		}

@@ -583,7 +583,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Promise<Void> recoveryComplete, committingQueue;
 	Version unrecoveredBefore, recoveredAt;
 	Version recoveryTxnVersion;
-	AsyncVar<Optional<Version>> clusterRecoveryVersion;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>>
@@ -1816,28 +1815,12 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	// if tLog locked for recovery, return an empty message at the cluster recovery version
 	// if requested version is greater than any received.
-	state Optional<Version> clusterRecoveryVersion = Optional<Version>();
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && logData->stopped()) {
-		DebugLogTraceEvent("TLogPeekMessagesWaitForCrv", self->dbgid)
-		    .detail("Tag", reqTag.toString())
-		    .detail("LogId", logData->logId)
-		    .detail("ReqReturnIfBlocked", reqReturnIfBlocked ? 1 : 0)
-		    .detail("ReqBegin", reqBegin)
-		    .detail("Version", logData->version.get())
-		    .detail("RecoveredAt", logData->recoveredAt);
-
-		if (!logData->clusterRecoveryVersion.get().present()) {
-			wait(timeoutError(logData->clusterRecoveryVersion.onChange(), 100.0));
-		}
-		// Obtain the first unreadable version number of the recovered log.
-		clusterRecoveryVersion = logData->clusterRecoveryVersion.get().get();
-		DebugLogTraceEvent("TLogPeekMessagesClusterRecoveryVersion", self->dbgid)
-		    .detail("LogId", logData->logId)
-		    .detail("LogEpoch", logData->epoch())
-		    .detail("CRV", clusterRecoveryVersion.get());
+	state bool clusterRecovery = false;
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && logData->version.get() < reqBegin && logData->stopped()) {
+		clusterRecovery = true;
 	}
 
-	if (!clusterRecoveryVersion.present() && reqReturnIfBlocked && logData->version.get() < reqBegin) {
+	if (!clusterRecovery && reqReturnIfBlocked && logData->version.get() < reqBegin) {
 		replyPromise.sendError(end_of_stream());
 		if (reqSequence.present()) {
 			auto& trackerData = logData->peekTracker[peekId];
@@ -1857,7 +1840,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	    .detail("Version", logData->version.get())
 	    .detail("RecoveredAt", logData->recoveredAt);
 	// Wait until we have something to return that the caller doesn't already have
-	if (!clusterRecoveryVersion.present() && logData->version.get() < reqBegin) {
+	if (!clusterRecovery && logData->version.get() < reqBegin) {
 		wait(logData->version.whenAtLeast(reqBegin));
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
 	}
@@ -2135,8 +2118,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.arena.dependsOn(messagesValue.arena());
 	reply.messages = messagesValue;
 	reply.end = endVersion;
-	if (clusterRecoveryVersion.present() && logData->stopped() && logData->version.get() < reqBegin) {
-		reply.end = clusterRecoveryVersion.get() + 1;
+	reply.lockedEnd = false;
+	if (clusterRecovery && logData->stopped() && logData->version.get() < reqBegin) {
+		// reply.end = clusterRecoveryVersion.get() + 1;
+		reply.lockedEnd = true;
 	}
 	reply.onlySpilled = onlySpilled;
 
@@ -2145,6 +2130,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
 	    .detail("EndVer", reply.end)
+	    .detail("LockEnd", reply.lockedEnd)
 	    .detail("MsgBytes", reply.messages.expectedSize());
 
 	if (reqSequence.present()) {
@@ -2830,17 +2816,6 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			} else {
 				logData->logSystem->set(Reference<ILogSystem>());
 			}
-			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && logData->stopped()) {
-				for (auto& oldTLogs : self->dbInfo->get().logSystemConfig.oldTLogs) {
-					// If this tLog's epoch is not in the list, it couldn't have received any commits.
-					// In that case find the recovery version in the next oldest epoch.
-					if (oldTLogs.epoch >= logData->epoch()) {
-						logData->clusterRecoveryVersion.set(oldTLogs.recoverAt);
-						// DebugLogTraceEvent("SetClusterRecoveryVersion",self->dbgid).detail("LogId",logData->logId);
-						break;
-					}
-				}
-			}
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
@@ -2899,12 +2874,6 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(TLogEnablePopRequest enablePopReq = waitNext(tli.enablePopRequest.getFuture())) {
 			logData->addActor.send(tLogEnablePopReq(enablePopReq, self, logData));
-		}
-		when(setClusterRecoveryVersionRequest req = waitNext(tli.setClusterRecoveryVersion.getFuture())) {
-			ASSERT(logData->stopped());
-			logData->clusterRecoveryVersion.set(req.recoveryVersion);
-			// DebugLogTraceEvent("SetClusterRecoveryVersion",self->dbgid).detail("LogId",logData->logId);
-			req.reply.send(Void());
 		}
 	}
 }
