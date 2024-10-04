@@ -509,6 +509,8 @@ public:
 	int simulationNormalRunTestsTimeoutSeconds = 5400;
 	int simulationBuggifyRunTestsTimeoutSeconds = 36000;
 
+	Optional<int> remoteDesiredTLogCount;
+
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
@@ -555,6 +557,7 @@ public:
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
 		    .add("desiredTLogCount", &desiredTLogCount)
+		    .add("remoteDesiredTLogCount", &remoteDesiredTLogCount)
 		    .add("commitProxyCount", &commitProxyCount)
 		    .add("grvProxyCount", &grvProxyCount)
 		    .add("resolverCount", &resolverCount)
@@ -1650,6 +1653,9 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 	if (testConfig.desiredTLogCount.present()) {
 		db.desiredTLogCount = testConfig.desiredTLogCount.get();
 	}
+	if (testConfig.remoteDesiredTLogCount.present()) {
+		db.remoteDesiredTLogCount = testConfig.remoteDesiredTLogCount.get();
+	}
 	if (testConfig.commitProxyCount.present()) {
 		db.commitProxyCount = testConfig.commitProxyCount.get();
 	}
@@ -2129,8 +2135,12 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 
 		if (deterministicRandom()->random01() < 0.25)
 			db.desiredLogRouterCount = deterministicRandom()->randomInt(1, 7);
-		if (deterministicRandom()->random01() < 0.25)
+
+		if (testConfig.remoteDesiredTLogCount.present()) {
+			db.remoteDesiredTLogCount = testConfig.remoteDesiredTLogCount.get();
+		} else if (deterministicRandom()->random01() < 0.25) {
 			db.remoteDesiredTLogCount = deterministicRandom()->randomInt(1, 7);
+		}
 
 		bool useNormalDCsAsSatellites =
 		    datacenters > 4 && testConfig.minimumRegions < 2 && deterministicRandom()->random01() < 0.3;
