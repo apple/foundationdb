@@ -3767,7 +3767,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				uniquify(info.tags);
 				keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 			} else if (kv.key.startsWith(rangeLockPrefix)) {
-				Key keyInsert = kv.key.removeSuffix(rangeLockPrefix);
+				Key keyInsert = kv.key.removePrefix(rangeLockPrefix);
 				pContext->pCommitData->rangeLock->initKeyPoint(keyInsert, kv.value);
 			} else {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);

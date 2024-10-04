@@ -2959,15 +2959,16 @@ ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID task
 	return Void();
 }
 
-ACTOR Future<std::vector<KeyRange>> _getUserRangeWithSpecificLockType(Transaction* tr,
-                                                                      KeyRange range,
-                                                                      RangeLockType lockType) {
+ACTOR Future<std::pair<std::vector<KeyRange>, Key>> _getUserRangeWithSpecificLockType(Transaction* tr,
+                                                                                      KeyRange range,
+                                                                                      RangeLockType lockType) {
 	if (range.end > normalKeys.end) {
 		throw range_lock_failed();
 	}
 	// FIXME: multiple reads
 	state std::vector<KeyRange> res;
 	RangeResult result = wait(krmGetRanges(tr, rangeLockPrefix, range));
+	state Key endKey = result[result.size() - 1].key;
 	for (int i = 0; i < result.size() - 1; i++) {
 		if (result[i].value.empty()) {
 			continue;
@@ -2978,7 +2979,7 @@ ACTOR Future<std::vector<KeyRange>> _getUserRangeWithSpecificLockType(Transactio
 		}
 		res.push_back(Standalone(KeyRangeRef(result[i].key, result[i + 1].key)));
 	}
-	return res;
+	return std::make_pair(res, endKey);
 }
 
 ACTOR Future<std::vector<KeyRange>> getCommitLockedUserRanges(Database cx, KeyRange range) {
@@ -2986,14 +2987,23 @@ ACTOR Future<std::vector<KeyRange>> getCommitLockedUserRanges(Database cx, KeyRa
 		throw range_lock_failed();
 	}
 	state std::vector<KeyRange> lockedRanges;
+	state Key beginKey = range.begin;
+	state Key endKey = range.end;
 	loop {
 		lockedRanges.clear();
 		state Transaction tr(cx);
+		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(store(lockedRanges, _getUserRangeWithSpecificLockType(&tr, range, RangeLockType::RejectCommits)));
-			break;
+			state std::pair<std::vector<KeyRange>, Key> res;
+			wait(store(res, _getUserRangeWithSpecificLockType(&tr, range, RangeLockType::RejectCommits)));
+			lockedRanges = res.first;
+			if (res.second == range.end) {
+				break;
+			} else {
+				beginKey = res.second;
+			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -3010,6 +3020,7 @@ ACTOR Future<Void> lockCommitUserRange(Database cx, KeyRange range) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.addWriteConflictRange(normalKeys);
 			wait(krmSetRangeCoalescing(&tr,
 			                           rangeLockPrefix,
 			                           range,
