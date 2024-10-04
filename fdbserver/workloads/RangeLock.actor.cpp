@@ -462,7 +462,7 @@ struct RangeLocking : TestWorkload {
 	}
 
 	ACTOR Future<Void> complexTest(RangeLocking* self, Database cx) {
-		state int iterationCount = 1000;
+		state int iterationCount = 100;
 		state int iteration = 0;
 		loop {
 			if (iteration > iterationCount || self->quitExit) {

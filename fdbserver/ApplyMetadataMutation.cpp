@@ -226,10 +226,11 @@ private:
 		ASSERT(!initialCommit);
 		// RangeLock is upated by KrmSetRange which updates a range with two successive mutations
 		if (rangeLock->pendingRequest()) {
+			// The second mutation
 			Key endKey = m.param1.removePrefix(rangeLockPrefix);
 			rangeLock->consumePendingRequest(endKey);
-		} else if (m.param1.startsWith(rangeLockPrefix)) {
-			ASSERT(!rangeLock->pendingRequest());
+		} else {
+			// The first mutation
 			RangeLockState lockState = m.param2.empty() ? RangeLockState() : decodeRangeLockState(m.param2);
 			Key startKey = m.param1.removePrefix(rangeLockPrefix);
 			rangeLock->setPendingRequest(startKey, lockState);
@@ -950,6 +951,7 @@ private:
 			return;
 		}
 		ASSERT(!initialCommit);
+		ASSERT_WE_THINK(rangeLockKeys.contains(range));
 		txnStateStore->clear(range & rangeLockKeys);
 		return;
 	}

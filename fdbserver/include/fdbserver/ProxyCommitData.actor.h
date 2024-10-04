@@ -203,7 +203,7 @@ public:
 
 	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
 
-	void initKeyPoint(const Key key, const Value& value) {
+	void initKeyPoint(const Key& key, const Value& value) {
 		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Init").detail("Key", key);
 		if (!value.empty()) {
 			coreMap.rawInsert(key, decodeRangeLockState(value));
@@ -213,13 +213,14 @@ public:
 		return;
 	}
 
-	void setPendingRequest(const Key startKey, const RangeLockState lockState) {
+	void setPendingRequest(const Key& startKey, const RangeLockState& lockState) {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		ASSERT(!pendingRequest());
 		currentRangeLockStartKey = std::make_pair(startKey, lockState);
+		return;
 	}
 
-	void consumePendingRequest(const Key endKey) {
+	void consumePendingRequest(const Key& endKey) {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		ASSERT(pendingRequest());
 		ASSERT(endKey <= normalKeys.end);
@@ -241,9 +242,10 @@ public:
 			}
 		}
 		currentRangeLockStartKey.reset();
+		return;
 	}
 
-	bool locked(const KeyRange range) const {
+	bool locked(const KeyRange& range) const {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		if (range.end >= normalKeys.end) {
 			return false;
