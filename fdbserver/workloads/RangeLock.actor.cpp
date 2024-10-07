@@ -28,7 +28,6 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <string>
 
 struct RangeLocking : TestWorkload {
 	static constexpr auto NAME = "RangeLocking";

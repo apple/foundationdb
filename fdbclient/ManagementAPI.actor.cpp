@@ -2989,7 +2989,6 @@ ACTOR Future<std::vector<KeyRange>> getCommitLockedUserRanges(Database cx, KeyRa
 	state Key beginKey = range.begin;
 	state Key endKey = range.end;
 	loop {
-		lockedRanges.clear();
 		state Transaction tr(cx);
 		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
@@ -2997,7 +2996,9 @@ ACTOR Future<std::vector<KeyRange>> getCommitLockedUserRanges(Database cx, KeyRa
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			state std::pair<std::vector<KeyRange>, Key> res;
 			wait(store(res, _getUserRangeWithSpecificLockType(&tr, range, RangeLockType::RejectCommits)));
-			lockedRanges = res.first;
+			for (const auto& range : res.first) {
+				lockedRanges.push_back(range);
+			}
 			if (res.second == range.end) {
 				break;
 			} else {
