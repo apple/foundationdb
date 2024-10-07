@@ -401,7 +401,6 @@ void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) const {
 			newState.oldTLogData.emplace_back(oldData);
 			TraceEvent("BWToCore")
 			    .detail("Epoch", newState.oldTLogData.back().epoch)
-			    .detail("RecoverAt", newState.oldTLogData.back().recoverAt)
 			    .detail("TotalTags", newState.oldTLogData.back().logRouterTags)
 			    .detail("BeginVersion", newState.oldTLogData.back().epochBegin)
 			    .detail("EndVersion", newState.oldTLogData.back().epochEnd);

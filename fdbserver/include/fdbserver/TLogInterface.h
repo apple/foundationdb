@@ -200,18 +200,16 @@ struct TLogPeekReply {
 	constexpr static FileIdentifier file_identifier = 11365689;
 	Arena arena;
 	StringRef messages;
-	mutable Version end;
+	Version end;
 	Optional<Version> popped;
 	Version maxKnownVersion;
 	Version minKnownCommittedVersion;
 	Optional<Version> begin;
 	bool onlySpilled = false;
-	bool lockedEnd = false;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin, onlySpilled, lockedEnd, arena);
+		serializer(ar, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin, onlySpilled, arena);
 	}
 };
 
@@ -223,13 +221,16 @@ struct TLogPeekRequest {
 	bool onlySpilled;
 	Optional<std::pair<UID, int>> sequence;
 	ReplyPromise<TLogPeekReply> reply;
+	Optional<Version> end;
 
 	TLogPeekRequest(Version begin,
 	                Tag tag,
 	                bool returnIfBlocked,
 	                bool onlySpilled,
-	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>())
-	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), onlySpilled(onlySpilled), sequence(sequence) {}
+	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>(),
+	                Optional<Version> end = Optional<Version>())
+	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), onlySpilled(onlySpilled), sequence(sequence),
+	    end(end) {}
 	TLogPeekRequest() {}
 
 	template <class Ar>
