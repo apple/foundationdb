@@ -723,7 +723,7 @@ bool MockGlobalState::serverIsDestForShard(const UID& serverId, KeyRangeRef shar
 }
 
 bool MockGlobalState::allShardsRemovedFromServer(const UID& serverId) {
-	return !allServers.contains(serverId) && shardMapping->getNumberOfShards(serverId);
+	return allServers.contains(serverId) && shardMapping->getNumberOfShards(serverId) == 0;
 }
 
 Future<std::pair<Optional<StorageMetrics>, int>> MockGlobalState::waitStorageMetrics(
