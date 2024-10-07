@@ -2993,9 +2993,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 
 				// Check if the cluster controller should trigger a recovery to exclude any degraded servers from
 				// the transaction system.
-				if (SERVER_KNOBS->CC_PAUSE_HEALTH_MONITOR) {
-					TraceEvent(SevWarnAlways, "HealthMonitorPaused");
-				} else if (self->shouldTriggerRecoveryDueToDegradedServers()) {
+				if (self->shouldTriggerRecoveryDueToDegradedServers()) {
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
 						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
 							self->recentHealthTriggeredRecoveryTime.push(now());
