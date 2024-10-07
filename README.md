@@ -32,12 +32,12 @@ The lastest stable releases are (were) versions that are recommended for product
 | 7.0      |           |   Experimental branch |
 | 6.3      |  [6.3.25](https://github.com/apple/foundationdb/releases/tag/6.3.25) |   Unsupported |
 
-- Supported branches are those we actively maintain and will publish new patch releases.
+- `Supported` branches are those we actively maintain and will publish new patch releases.
 - Bug fixes are branches we still accept bug fixes, but may not publish new patch releases.
-- Experimental branches are those for internal feature testing purpose, thus not recommended for production use.
-- Unsupported branches are those we no longer fix bugs.
+- `Experimental` branches are those used for internal feature testing. They are not recommended for production use.
+- `Unsupported` branches are those which will no longer receive any updates.
 
-If you are running on old production releases, we recommend always upgrading to the next major release's latest version, and then continue to the next major version, e.g., 6.2.X -> 6.3.25 -> 7.1.57 -> 7.3.43. These upgrade paths have been well tested in production (skipping a major release for an upgrade is only tested in simulation).
+If you are running on old production releases, we recommend always upgrading to the next major release's latest version, and then continue to the next major version, e.g., 6.2.X -> 6.3.25 -> 7.1.57 -> 7.3.43. These upgrade paths have been well tested in production (skipping a major release, not marked as `Experimental`, for an upgrade is only tested in simulation).
 
 ### Binary downloads
 
