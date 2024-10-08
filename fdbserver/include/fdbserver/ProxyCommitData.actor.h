@@ -250,14 +250,13 @@ public:
 		if (range.end >= normalKeys.end) {
 			return false;
 		}
-		bool res = false;
 		for (auto lockRange : coreMap.intersectingRanges(range)) {
 			if (lockRange.value().isValid()) {
-				res = true;
+				return true;
 			}
 		}
 		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Check").detail("Range", range).detail("Status", res);
-		return res;
+		return false;
 	}
 
 private:
