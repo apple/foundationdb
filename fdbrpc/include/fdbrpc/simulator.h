@@ -58,6 +58,13 @@ struct MachineInfo;
 
 constexpr double DISABLE_CONNECTION_FAILURE_FOREVER = 1e6;
 
+// Flip a random bit in the data for error injection ONLY in simulation.
+extern void flip_bit(StringRef data, const char* file, int line);
+
+extern Severity getBitFlipSeverityType();
+
+#define INJECT_BIT_FLIP(data) flip_bit(data, __FILE__, __LINE__)
+
 class ISimulator : public INetwork {
 
 public:
@@ -433,6 +440,15 @@ public:
 
 	ISimulator();
 	virtual ~ISimulator();
+
+	bool allowBitFlipInjection = false;
+	std::map<std::string, int> bitFlipInjections;
+	void enableBitFlipInjection() { allowBitFlipInjection = true; }
+	bool isBitFlipInjectionEnabled() { return allowBitFlipInjection && !speedUpSimulation; }
+	void disableBitFlipInjection() { allowBitFlipInjection = false; }
+	void addBitFlipInjectionStats(const char* file, int line);
+	bool isBitFlipInjected(const char* file, int line);
+	bool isBitFlipInjected() { return !bitFlipInjections.empty(); }
 
 protected:
 	Mutex mutex;
