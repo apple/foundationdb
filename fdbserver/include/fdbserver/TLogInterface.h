@@ -221,7 +221,7 @@ struct TLogPeekRequest {
 	bool onlySpilled;
 	Optional<std::pair<UID, int>> sequence;
 	ReplyPromise<TLogPeekReply> reply;
-	Optional<Version> end;
+	Optional<Version> end; // when set is exclusive, i.e. result of TagPartitionedLogSystem::getEnd()
 
 	TLogPeekRequest(Version begin,
 	                Tag tag,
@@ -235,7 +235,7 @@ struct TLogPeekRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, tag, returnIfBlocked, onlySpilled, sequence, reply);
+		serializer(ar, begin, tag, returnIfBlocked, onlySpilled, sequence, end, reply);
 	}
 };
 
