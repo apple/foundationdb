@@ -1814,11 +1814,16 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	state double blockStart = now();
 
-	// If requested for a version beyond what the tLog has, wait until we have something to return that the caller
-	// doesn't already have unless reqReturnIfBlocked is true. However, if the tLog is locked, this will deadlock, as
-	// the tLog will never recieve any new data. That can happen in version vector, as tLogs in recovery are peeked up
-	// to the RV, which can higher than logData->version, as tLogs advance at different rates. To avoid deadlocking,
-	// return with the end version received in the request, which is the RV if set to a valid version.
+	// We need to return data that the caller doesn't already have.
+	// If the requested version is beyond what the tLog currently has, we'll wait for new data.
+	// However, there's a catch:
+	//   - If the tLog is locked (e.g., during recovery), waiting for new data could cause a deadlock.
+	//     This happens because a locked tLog won't receive any new commits.
+	//   - This scenario can occur with version vector, where a tLog can be peeked at a version
+	//     higher than its current logData->version during recovery.
+	// To prevent deadlocks:
+	//   - If a valid 'end' version was provided in the request (the Recovery Version), return with that version.
+	//   - Otherwise, wait for new data as long as the tLog isn't locked.
 	state Optional<Version> replyWithRecoveryVersion = Optional<Version>();
 	if (logData->version.get() < reqBegin) {
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && logData->stopped() && reqEnd.present() &&
