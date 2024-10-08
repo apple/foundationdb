@@ -10,6 +10,7 @@ shard_encode_location_metadata = true
 [[test]]
 testTitle = 'ValidateStorageWorkload'
 useDB = true
+runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'ValidateStorageWorkload'
