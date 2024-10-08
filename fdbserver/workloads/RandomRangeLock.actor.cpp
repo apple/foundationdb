@@ -31,8 +31,10 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "RandomRangeLock";
 
 	bool enabled;
-	double testDuration = deterministicRandom()->random01() * 60.0;
-	double testStartDelay = deterministicRandom()->random01() * 300.0;
+	double maxLockDuration = 60.0;
+	double maxStartDelay = 300.0;
+	double testDuration = deterministicRandom()->random01() * maxLockDuration;
+	double testStartDelay = deterministicRandom()->random01() * maxStartDelay;
 
 	RandomRangeLockWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {
 		enabled = (clientId == 0) && g_network->isSimulated();
@@ -40,6 +42,8 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 
 	RandomRangeLockWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = (clientId == 0) && g_network->isSimulated();
+		maxLockDuration = getOption(options, "maxLockDuration"_sr, maxLockDuration);
+		maxStartDelay = getOption(options, "maxStartDelay"_sr, maxStartDelay);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -106,3 +110,4 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 };
 
 FailureInjectorFactory<RandomRangeLockWorkload> RangeLockFailureInjectionFactory;
+WorkloadFactory<RandomRangeLockWorkload> RandomRangeLockWorkloadFactory;

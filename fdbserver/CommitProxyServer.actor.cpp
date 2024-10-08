@@ -2007,7 +2007,8 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 // RangeLock takes effect only when the feature flag is on and database is unlocked and the mutation is not encrypted
 void rejectMutationsForRangeLock(CommitBatchContext* self) {
 	ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !self->locked &&
-	       !self->pProxyCommitData->encryptMode.isEncryptionEnabled());
+	       !self->pProxyCommitData->encryptMode.isEncryptionEnabled() &&
+	       self->pProxyCommitData->getTenantMode() == TenantMode::DISABLED);
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	ASSERT(pProxyCommitData->rangeLock != nullptr);
 	std::vector<CommitTransactionRequest>& trs = self->trs;
@@ -2019,6 +2020,10 @@ void rejectMutationsForRangeLock(CommitBatchContext* self) {
 		bool transactionRejected = false;
 		for (int j = 0; j < pMutations->size(); j++) {
 			MutationRef m = (*pMutations)[j];
+			ASSERT_WE_THINK(!m.isEncrypted());
+			if (m.isEncrypted()) {
+				continue;
+			}
 			KeyRange rangeToCheck;
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				rangeToCheck = singleKeyRange(m.param1);
@@ -2336,7 +2341,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// error_code_transaction_rejected_range_locked
 	// This feature is disabled when the database is locked
 	if (SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !self->locked &&
-	    !pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+	    !pProxyCommitData->encryptMode.isEncryptionEnabled() &&
+	    self->pProxyCommitData->getTenantMode() == TenantMode::DISABLED) {
 		rejectMutationsForRangeLock(self);
 	}
 

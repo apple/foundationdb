@@ -1,0 +1,22 @@
+[configuration]
+tenantModes = ['disabled'] # do not support tenant
+encryptModes = ['disabled'] # do not support encryption
+
+[[knobs]]
+enable_commit_user_range_lock = true
+proxy_use_resolver_private_mutations = false # do not support version vector
+
+[[test]]
+testTitle = 'RangeLockCycle'
+
+    [[test.workload]]
+    testName = "Cycle"
+    nodeCount = 30000
+    transactionsPerSecond = 1000.0
+    testDuration = 30.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'RandomRangeLock'
+    maxStartDelay = 1.0
+    maxLockDuration = 30.0
