@@ -1291,7 +1291,9 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
                                                                           Optional<Version> end) {
 	bool found = false;
 	if (!end.present()) {
-		end = getPeekEnd();
+		end = std::numeric_limits<Version>::max();
+	} else {
+		end = end.get() + 1; // The last version is exclusive to the cursor's desired range
 	}
 
 	for (const auto& log : tLogs) {
@@ -2579,7 +2581,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					req.tLogLocalities = tLogLocalities;
 					req.tLogPolicy = tLogPolicy;
 					req.locality = locality;
-					req.recoverAt = self->getEnd();
+					req.recoverAt = self->recoverAt.get();
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -2629,7 +2631,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					req.tLogLocalities = tLogLocalities;
 					req.tLogPolicy = tLogPolicy;
 					req.locality = locality;
-					req.recoverAt = old.recoverAt + 1;
+					req.recoverAt = old.recoverAt;
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
