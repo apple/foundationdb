@@ -89,8 +89,8 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 		// We must recruit the master in the same data center as the cluster controller.
 		// This should always be possible, because we can recruit the master on the same process as the cluster
 		// controller.
-		std::map<Optional<Standalone<StringRef>>, int> id_used;
-		id_used[cluster->clusterControllerProcessId]++;
+		ClusterControllerData::WorkerUsages id_used;
+		id_used[cluster->clusterControllerProcessId].addRole(ProcessClass::ClusterController);
 		masterWorker = cluster->getWorkerForRoleInDatacenter(
 		    cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
 		if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
