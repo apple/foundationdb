@@ -3107,6 +3107,37 @@ public:
 
 		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
 	};
+
+	// If worker can send process id, this implementation can be O(1)
+	// TODO:
+	//     assert -> assert_we_think
+	//     q: is network address global unique in the cluster? in other words, can
+	//        another process share the same networkaddress?
+	bool processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) {
+		Optional<Standalone<StringRef>> addr1DcID;
+		Optional<Standalone<StringRef>> addr2DcID;
+
+		for (const auto& [workerProcessId, workerInfo] : this->id_worker) {
+			(void)workerProcessId;
+			if (workerInfo.details.interf.addresses().contains(addr1) &&
+			    workerInfo.details.interf.locality.dcId().present()) {
+				ASSERT(!addr1DcID.present());
+				addr1DcID = workerInfo.details.interf.locality.dcId();
+			}
+			if (workerInfo.details.interf.addresses().contains(addr2) &&
+			    workerInfo.details.interf.locality.dcId().present()) {
+				ASSERT(!addr2DcID.present());
+				addr2DcID = workerInfo.details.interf.locality.dcId();
+			}
+		}
+
+		if (!addr1DcID.present() || !addr2DcID.present()) {
+			return true;
+		}
+
+		return addr1DcID.get() == addr2DcID.get();
+	}
+
 	// Returns a list of servers who are experiencing degraded links. These are candidates to perform exclusion. Note
 	// that only one endpoint of a bad link will be included in this list.
 	DegradationInfo getDegradationInfo() {
@@ -3120,6 +3151,9 @@ public:
 			for (const auto& [degradedPeer, times] : health.degradedPeers) {
 				if (currentTime - times.startTime < SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL) {
 					// This degraded link is not long enough to be considered as degraded.
+					continue;
+				}
+				if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY && !processesInSameDC(server, degradedPeer)) {
 					continue;
 				}
 				degradedLinkDst2Src[degradedPeer].insert(server);

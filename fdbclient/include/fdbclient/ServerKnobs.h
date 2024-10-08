@@ -760,8 +760,13 @@ public:
 	                                             // be determined as degraded worker.
 	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
 	                                             // determined as degraded satellite.
-	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether the remote log
-	                                             // router is degraded and may use trigger recovery to recover from it.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING; // When enabled, gray failure tries to detect whether the
+	                                                         // remote log router is degraded and may use trigger
+	                                                         // recovery to recover from it.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_DISCONNECT_MONITORING;
+	bool CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING;
+	bool CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING;
+	bool CC_ONLY_CONSIDER_INTRA_DC_LATENCY;
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 

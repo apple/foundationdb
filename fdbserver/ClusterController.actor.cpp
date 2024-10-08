@@ -99,7 +99,8 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 	const Reference<ClusterRecoveryData> recoveryData = db.recoveryData;
 	auto transactionWorkerInList = [&dbi, &recoveryData](const std::unordered_set<NetworkAddress>& serverList,
 	                                                     bool skipSatellite,
-	                                                     bool skipRemote) -> bool {
+	                                                     bool skipRemoteTLog,
+	                                                     bool skipRemoteLogRouter) -> bool {
 		for (const auto& server : serverList) {
 			if (dbi.master.addresses().contains(server)) {
 				return true;
@@ -115,15 +116,19 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 					continue;
 				}
 
-				if (skipRemote && !logSet.isLocal) {
-					continue;
-				}
-
 				if (!logSet.isLocal) {
-					// Only check log routers in the remote region.
-					for (const auto& logRouter : logSet.logRouters) {
-						if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
-							return true;
+					if (!skipRemoteTLog) {
+						for (const auto& tlog : logSet.tLogs) {
+							if (tlog.present() && tlog.interf().addresses().contains(server)) {
+								return true;
+							}
+						}
+					}
+					if (!skipRemoteLogRouter) {
+						for (const auto& logRouter : logSet.logRouters) {
+							if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
+								return true;
+							}
 						}
 					}
 				} else {
@@ -176,13 +181,22 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 		return false;
 	};
 
-	// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
+	// Check if transaction system contains degraded/disconnected servers. For satellite, we only
 	// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
 	// stable.
-	return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
-	       transactionWorkerInList(degradationInfo.disconnectedServers,
-	                               /*skipSatellite=*/false,
-	                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
+	return transactionWorkerInList(degradationInfo.degradedServers,
+	                               /*skipSatellite=*/true,
+	                               /*skipRemoteTLog=*/
+	                               !(SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY &&
+	                                 SERVER_KNOBS->CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING),
+	                               /*skipRemoteLogRouter*/
+	                               !(SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY &&
+	                                 SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING)) ||
+	       transactionWorkerInList(
+	           degradationInfo.disconnectedServers,
+	           /*skipSatellite=*/false,
+	           /*skipRemoteTLog=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING,
+	           /*skipRemoteLogRouter*/ !SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_DISCONNECT_MONITORING);
 }
 
 bool ClusterControllerData::remoteTransactionSystemContainsDegradedServers() {
@@ -3797,22 +3811,32 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	data.degradationInfo.disconnectedServers.clear();
 
 	// No recovery when remote tlog is degraded.
-	data.degradationInfo.degradedServers.insert(remoteTlog);
-	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradationInfo.degradedServers.clear();
-	data.degradationInfo.disconnectedServers.insert(remoteTlog);
-	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradationInfo.disconnectedServers.clear();
+	if (!(SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY &&
+	      SERVER_KNOBS->CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING)) {
+		data.degradationInfo.degradedServers.insert(remoteTlog);
+		ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+		data.degradationInfo.degradedServers.clear();
+	}
+	if (!SERVER_KNOBS->CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING) {
+		data.degradationInfo.disconnectedServers.insert(remoteTlog);
+		ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+		data.degradationInfo.disconnectedServers.clear();
+	}
 
 	// No recovery when remote log router is degraded.
-	data.degradationInfo.degradedServers.insert(logRouter);
-	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradationInfo.degradedServers.clear();
+	if (!(SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY &&
+	      SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING)) {
+		data.degradationInfo.degradedServers.insert(logRouter);
+		ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+		data.degradationInfo.degradedServers.clear();
+	}
 
 	// Trigger recovery when remote log router is disconnected.
-	data.degradationInfo.disconnectedServers.insert(logRouter);
-	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradationInfo.disconnectedServers.clear();
+	if (!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_DISCONNECT_MONITORING) {
+		data.degradationInfo.disconnectedServers.insert(logRouter);
+		ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+		data.degradationInfo.disconnectedServers.clear();
+	}
 
 	// No recovery when backup worker is degraded.
 	data.degradationInfo.degradedServers.insert(backup);
