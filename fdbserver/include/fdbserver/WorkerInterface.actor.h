@@ -668,10 +668,11 @@ struct InitializeLogRouterRequest {
 	Reference<IReplicationPolicy> tLogPolicy;
 	int8_t locality;
 	ReplyPromise<struct TLogInterface> reply;
+	Optional<Version> recoverAt = Optional<Version>();
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryCount, routerTag, startVersion, tLogLocalities, tLogPolicy, locality, reply);
+		serializer(ar, recoveryCount, routerTag, startVersion, tLogLocalities, tLogPolicy, locality, reply, recoverAt);
 	}
 };
 
