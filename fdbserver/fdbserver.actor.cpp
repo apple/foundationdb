@@ -2229,7 +2229,7 @@ int main(int argc, char* argv[]) {
 			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests", "fdbblob" };
 
 			for (const auto& dir : directories) {
-				if (dir.size() != 32 && allowedDirectories.count(dir) == 0 && dir.find("snap") == std::string::npos) {
+				if (dir.size() != 32 && !allowedDirectories.contains(dir) && dir.find("snap") == std::string::npos) {
 
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
 					    .detail("DataFolder", dataFolder)

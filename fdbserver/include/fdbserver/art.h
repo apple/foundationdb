@@ -315,7 +315,7 @@ public:
 
 	void erase(const art_iterator& it);
 
-	uint64_t count() { return size; }
+	uint64_t contains() { return size; }
 
 }; // art_tree
 

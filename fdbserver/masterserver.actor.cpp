@@ -611,7 +611,7 @@ ACTOR Future<Void> masterServerCxx(MasterInterface mi,
 		           "Master: terminated due to backup worker failure",
 		           probe::decoration::rare);
 
-		if (normalMasterErrors().count(err.code())) {
+		if (normalMasterErrors().contains(err.code())) {
 			TraceEvent("MasterTerminated", mi.id()).error(err);
 			return Void();
 		}

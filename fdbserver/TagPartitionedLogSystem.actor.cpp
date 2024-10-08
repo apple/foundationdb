@@ -219,14 +219,14 @@ Tag TagPartitionedLogSystem::getPseudoPopTag(Tag tag, ProcessClass::ClassType ty
 	switch (type) {
 	case ProcessClass::LogRouterClass:
 		if (tag.locality == tagLocalityLogRouter) {
-			ASSERT(pseudoLocalities.count(tagLocalityLogRouterMapped) > 0);
+			ASSERT(pseudoLocalities.contains(tagLocalityLogRouterMapped));
 			tag.locality = tagLocalityLogRouterMapped;
 		}
 		break;
 
 	case ProcessClass::BackupClass:
 		if (tag.locality == tagLocalityLogRouter) {
-			ASSERT(pseudoLocalities.count(tagLocalityBackup) > 0);
+			ASSERT(pseudoLocalities.contains(tagLocalityBackup));
 			tag.locality = tagLocalityBackup;
 		}
 		break;
@@ -238,7 +238,7 @@ Tag TagPartitionedLogSystem::getPseudoPopTag(Tag tag, ProcessClass::ClassType ty
 }
 
 bool TagPartitionedLogSystem::hasPseudoLocality(int8_t locality) const {
-	return pseudoLocalities.count(locality) > 0;
+	return pseudoLocalities.contains(locality);
 }
 
 Version TagPartitionedLogSystem::popPseudoLocalityTag(Tag tag, Version upTo) {
@@ -1856,7 +1856,7 @@ void TagPartitionedLogSystem::setBackupWorkers(const std::vector<InitializeBacku
 	LogEpoch logsetEpoch = this->epoch;
 	oldestBackupEpoch = this->epoch;
 	for (const auto& reply : replies) {
-		if (removedBackupWorkers.count(reply.interf.id()) > 0) {
+		if (removedBackupWorkers.contains(reply.interf.id())) {
 			removedBackupWorkers.erase(reply.interf.id());
 			continue;
 		}
@@ -2372,7 +2372,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				foundSpecial = true;
 				break;
 			}
-			if (!lockedLocalities.count(log->locality)) {
+			if (!lockedLocalities.contains(log->locality)) {
 				TraceEvent("EpochEndLockExtra").detail("Locality", log->locality);
 				CODE_PROBE(true, "locking old generations for version information");
 				lockedLocalities.insert(log->locality);

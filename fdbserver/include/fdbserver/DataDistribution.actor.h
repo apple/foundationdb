@@ -770,7 +770,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	void removeServer(const UID& serverId);
 	// update metadata and adjust priority_queue
 	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
-	bool contains(const UID& serverId) const { return pq_handles.count(serverId) > 0; }
+	bool contains(const UID& serverId) const { return pq_handles.contains(serverId); }
 	bool empty() const { return wiggle_pq.empty(); }
 
 	// It's guarantee that When a.metadata >= b.metadata, if !necessary(a) then !necessary(b)

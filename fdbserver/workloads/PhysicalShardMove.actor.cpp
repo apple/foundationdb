@@ -558,7 +558,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		ASSERT(interfs.size() > teamSize - includes.size());
 		while (includes.size() < teamSize) {
 			const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
-			if (excludes.count(interf.uniqueID) == 0 && includes.count(interf.uniqueID) == 0) {
+			if (!excludes.contains(interf.uniqueID) && !includes.contains(interf.uniqueID)) {
 				includes.insert(interf.uniqueID);
 			}
 		}

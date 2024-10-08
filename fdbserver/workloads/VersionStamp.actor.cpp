@@ -195,7 +195,7 @@ struct VersionStampWorkload : TestWorkload {
 				RangeResult result_ = wait(tr.getRange(
 				    KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
 				result = result_;
-				if (self->allowMetadataVersionKey && self->key_commit.count(metadataVersionKey)) {
+				if (self->allowMetadataVersionKey && self->key_commit.contains(metadataVersionKey)) {
 					Optional<Value> mVal = wait(tr.get(metadataVersionKey));
 					if (mVal.present()) {
 						result.push_back_deep(result.arena(), KeyValueRef(metadataVersionKey, mVal.get()));

@@ -82,12 +82,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Zoneid", it->locality.zoneId().get().toString())
 			    .detail("MachineId", it->locality.machineId().get().toString());
 
-			if (g_simulator->protectedAddresses.count(it->address) == 0)
+			if (!g_simulator->protectedAddresses.contains(it->address))
 				processAddrs.push_back(pAddr);
 			machineProcesses[machineIp].insert(pAddr);
 
 			// add only one entry for each machine
-			if (!machinesMap.count(it->locality.zoneId()))
+			if (!machinesMap.contains(it->locality.zoneId()))
 				machinesMap[it->locality.zoneId()] = machineIp;
 
 			machine_ids[machineIp] = it->locality.zoneId();
@@ -107,7 +107,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 			for (auto k1 : toKill1) {
 				AddressExclusion machineIp(k1.ip);
-				ASSERT(machineProcesses.count(machineIp));
+				ASSERT(machineProcesses.contains(machineIp));
 				// kill all processes on this machine even if it has a different ip address
 				std::copy(machineProcesses[machineIp].begin(),
 				          machineProcesses[machineIp].end(),
@@ -118,7 +118,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			processSet.clear();
 			for (auto k2 : toKill2) {
 				AddressExclusion machineIp(k2.ip);
-				ASSERT(machineProcesses.count(machineIp));
+				ASSERT(machineProcesses.contains(machineIp));
 				std::copy(machineProcesses[machineIp].begin(),
 				          machineProcesses[machineIp].end(),
 				          std::inserter(processSet, processSet.end()));
@@ -128,13 +128,13 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		for (AddressExclusion ex : toKill1) {
 			AddressExclusion machineIp(ex.ip);
-			ASSERT(machine_ids.count(machineIp));
+			ASSERT(machine_ids.contains(machineIp));
 			g_simulator->disableSwapToMachine(machine_ids[machineIp]);
 		}
 
 		for (AddressExclusion ex : toKill2) {
 			AddressExclusion machineIp(ex.ip);
-			ASSERT(machine_ids.count(machineIp));
+			ASSERT(machine_ids.contains(machineIp));
 			g_simulator->disableSwapToMachine(machine_ids[machineIp]);
 		}
 
@@ -191,7 +191,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Failed", processInfo->failed)
 				    .detail("Excluded", processInfo->excluded)
 				    .detail("Rebooting", processInfo->rebooting)
-				    .detail("Protected", g_simulator->protectedAddresses.count(processInfo->address));
+				    .detail("Protected", g_simulator->protectedAddresses.contains(processInfo->address));
 			} else {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "ProcessNotToKill")
@@ -200,7 +200,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    .detail("Failed", processInfo->failed)
 				    .detail("Excluded", processInfo->excluded)
 				    .detail("Rebooting", processInfo->rebooting)
-				    .detail("Protected", g_simulator->protectedAddresses.count(processInfo->address));
+				    .detail("Protected", g_simulator->protectedAddresses.contains(processInfo->address));
 			}
 		}
 		TraceEvent("RemoveAndKill", functionId)
@@ -459,14 +459,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("ClusterAvailable", g_simulator->isAvailable())
 			    .detail("RemoveViaClear", removeViaClear);
 			for (auto& killProcess : killProcArray) {
-				if (g_simulator->protectedAddresses.count(killProcess->address))
+				if (g_simulator->protectedAddresses.contains(killProcess->address))
 					TraceEvent("RemoveAndKill", functionId)
 					    .detail("Step", "NoKill Process")
 					    .detail("Process", describe(*killProcess))
 					    .detail("Failed", killProcess->failed)
 					    .detail("Rebooting", killProcess->rebooting)
 					    .detail("ClusterAvailable", g_simulator->isAvailable())
-					    .detail("Protected", g_simulator->protectedAddresses.count(killProcess->address));
+					    .detail("Protected", g_simulator->protectedAddresses.contains(killProcess->address));
 				else if (removeViaClear) {
 					g_simulator->rebootProcess(killProcess, ISimulator::KillType::RebootProcessAndDelete);
 					TraceEvent("RemoveAndKill", functionId)
@@ -475,12 +475,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 					    .detail("Failed", killProcess->failed)
 					    .detail("Rebooting", killProcess->rebooting)
 					    .detail("ClusterAvailable", g_simulator->isAvailable())
-					    .detail("Protected", g_simulator->protectedAddresses.count(killProcess->address));
+					    .detail("Protected", g_simulator->protectedAddresses.contains(killProcess->address));
 				}
 				/*
 				                else {
 				                    g_simulator->killProcess( killProcess, ISimulator::KillType::KillInstantly );
-				                    TraceEvent("RemoveAndKill", functionId).detail("Step", "Kill Process").detail("Process", describe(*killProcess)).detail("Failed", killProcess->failed).detail("Rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator->isAvailable()).detail("Protected", g_simulator->protectedAddresses.count(killProcess->address));
+				                    TraceEvent("RemoveAndKill", functionId).detail("Step", "Kill Process").detail("Process", describe(*killProcess)).detail("Failed", killProcess->failed).detail("Rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator->isAvailable()).detail("Protected", g_simulator->protectedAddresses.contains(killProcess->address));
 				                }
 				*/
 			}
@@ -798,7 +798,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	bool killContainsProcess(AddressExclusion kill, NetworkAddress process) {
 		return kill.excludes(process) || (machineProcesses.find(kill) != machineProcesses.end() &&
-		                                  machineProcesses[kill].count(AddressExclusion(process.ip, process.port)) > 0);
+		                                  machineProcesses[kill].contains(AddressExclusion(process.ip, process.port)));
 	}
 
 	// Finds the localities list that can be excluded from the safe killable addresses list.
@@ -836,8 +836,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				std::map<std::string, std::string> localityData = processInfo->locality.getAllData();
 				bool found = false;
 				for (const auto& l : localityData) {
-					if (toKillLocalities.count(LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" +
-					                           l.second)) {
+					if (toKillLocalities.contains(LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" +
+					                              l.second)) {
 						found = true;
 						break;
 					}

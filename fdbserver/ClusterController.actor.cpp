@@ -558,7 +558,7 @@ bool isHealthySingleton(ClusterControllerData* self,
                         const Optional<UID> recruitingID) {
 	// A singleton is stable if it exists in cluster, has not been killed off of proc and is not being recruited
 	bool isStableSingleton = singleton.isPresent() &&
-	                         self->id_worker.count(singleton.getInterface().locality.processId()) &&
+	                         self->id_worker.contains(singleton.getInterface().locality.processId()) &&
 	                         (!recruitingID.present() || (recruitingID.get() == singleton.getInterface().id()));
 
 	if (!isStableSingleton) {
@@ -1149,7 +1149,7 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 		// if not currently recruiting, then halt previous one in favour of requesting one
 		TraceEvent(("CCRegister" + roleName).c_str(), self->id).detail(roleAbbr + "ID", registeringID);
 		if (currSingleton.isPresent() && currSingleton.getInterface().id() != registeringID &&
-		    self->id_worker.count(currSingleton.getInterface().locality.processId())) {
+		    self->id_worker.contains(currSingleton.getInterface().locality.processId())) {
 			TraceEvent(("CCHaltPrevious" + roleName).c_str(), self->id)
 			    .detail(roleAbbr + "ID", currSingleton.getInterface().id())
 			    .detail("DcID", printable(self->clusterControllerDcId))
@@ -1713,7 +1713,7 @@ ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 				idMetadata[id] = decodeServerMetadataValue(sm.value);
 			}
 			for (auto& s : servers) {
-				if (idMetadata.count(s.id())) {
+				if (idMetadata.contains(s.id())) {
 					s.metadata = idMetadata[s.id()];
 				} else {
 					TraceEvent(SevWarn, "StorageServerMetadataMissing", self->id).detail("ServerID", s.id());
@@ -2236,7 +2236,7 @@ ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double wait
 				    .detail("Addr", worker.interf.address())
 				    .detail("DDID", ddInterf.get().id());
 				if (distributor.present() && distributor.get().id() != ddInterf.get().id() &&
-				    self->id_worker.count(distributor.get().locality.processId())) {
+				    self->id_worker.contains(distributor.get().locality.processId())) {
 
 					TraceEvent("CCHaltDataDistributorAfterRecruit", self->id)
 					    .detail("DDID", distributor.get().id())
@@ -2336,7 +2336,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime)
 				    .detail("Addr", worker.interf.address())
 				    .detail("RKID", interf.get().id());
 				if (ratekeeper.present() && ratekeeper.get().id() != interf.get().id() &&
-				    self->id_worker.count(ratekeeper.get().locality.processId())) {
+				    self->id_worker.contains(ratekeeper.get().locality.processId())) {
 					TraceEvent("CCHaltRatekeeperAfterRecruit", self->id)
 					    .detail("RKID", ratekeeper.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
@@ -2426,7 +2426,7 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 				    .detail("Addr", worker.interf.address())
 				    .detail("CKID", interf.get().id());
 				if (consistencyScan.present() && consistencyScan.get().id() != interf.get().id() &&
-				    self->id_worker.count(consistencyScan.get().locality.processId())) {
+				    self->id_worker.contains(consistencyScan.get().locality.processId())) {
 					TraceEvent("CCHaltConsistencyScanAfterRecruit", self->id)
 					    .detail("CKID", consistencyScan.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
@@ -2528,7 +2528,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, EncryptionA
 				    .detail("Id", interf.get().id())
 				    .detail("ProcessId", interf.get().locality.processId());
 				if (encryptKeyProxy.present() && encryptKeyProxy.get().id() != interf.get().id() &&
-				    self->id_worker.count(encryptKeyProxy.get().locality.processId())) {
+				    self->id_worker.contains(encryptKeyProxy.get().locality.processId())) {
 					TraceEvent("CCEKP_HaltAfterRecruit", self->id)
 					    .detail("Id", encryptKeyProxy.get().id())
 					    .detail("DcId", printable(self->clusterControllerDcId));
@@ -2700,7 +2700,7 @@ ACTOR Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTim
 				    .detail("Addr", worker.interf.address())
 				    .detail("MGID", interf.get().id());
 				if (blobMigrator.present() && blobMigrator.get().id() != interf.get().id() &&
-				    self->id_worker.count(blobMigrator.get().locality.processId())) {
+				    self->id_worker.contains(blobMigrator.get().locality.processId())) {
 					TraceEvent("CCHaltBlobMigratorAfterRecruit", self->id)
 					    .detail("MGID", blobMigrator.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
@@ -2805,7 +2805,7 @@ ACTOR Future<Void> startBlobManager(ClusterControllerData* self, double waitTime
 				    .detail("Addr", worker.interf.address())
 				    .detail("BMID", interf.get().id());
 				if (blobManager.present() && blobManager.get().id() != interf.get().id() &&
-				    self->id_worker.count(blobManager.get().locality.processId())) {
+				    self->id_worker.contains(blobManager.get().locality.processId())) {
 					TraceEvent("CCHaltBlobManagerAfterRecruit", self->id)
 					    .detail("BMID", blobManager.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));

@@ -630,7 +630,7 @@ ACTOR Future<Void> killBlobWorkers(Database cx) {
 				if (first) {
 					knownWorkers.insert(interf.id());
 				}
-				if (knownWorkers.count(interf.id())) {
+				if (knownWorkers.contains(interf.id())) {
 					haltIds.push_back(interf.id());
 					haltRequests.push_back(interf.haltBlobWorker.tryGetReply(HaltBlobWorkerRequest(1e6, UID())));
 				}

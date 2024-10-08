@@ -203,7 +203,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 			// If more than 2*SERVER_KNOBS->POLLING_FREQUENCY elapses while we are nominated by some coordinator but
 			// there is no leader, we might be breaking the leader election process for someone with better
 			// communications but lower ID, so change IDs.
-			if ((!leader.present() || !leader.get().second) && std::count(nominees.begin(), nominees.end(), myInfo)) {
+			if ((!leader.present() || !leader.get().second) &&
+			    std::find(nominees.begin(), nominees.end(), myInfo) != nominees.end()) {
 				if (!badCandidateTimeout.isValid())
 					badCandidateTimeout = delay(SERVER_KNOBS->POLLING_FREQUENCY * 2, TaskPriority::CoordinationReply);
 			} else

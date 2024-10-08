@@ -8072,7 +8072,7 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			if (g_network->isSimulated() && !g_simulator->restarted) {
 				// verify that the feed was actually destroyed and it's not an error in this inference logic.
 				// Restarting tests produce false positives because the validation state isn't kept across tests
-				ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.count(changeFeedInfo->id.toString()));
+				ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.contains(changeFeedInfo->id.toString()));
 			}
 
 			Key beginClearKey = changeFeedInfo->id.withPrefix(persistChangeFeedKeys.begin);
@@ -8089,7 +8089,7 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 
 			changeFeedInfo->destroy(cleanupVersion);
 
-			if (data->uidChangeFeed.count(changeFeedInfo->id)) {
+			if (data->uidChangeFeed.contains(changeFeedInfo->id)) {
 				// only register range for cleanup if it has not been already cleaned up
 				data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
 			}
@@ -8308,7 +8308,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		if (g_network->isSimulated() && !g_simulator->restarted) {
 			// verify that the feed was actually destroyed and it's not an error in this inference logic. Restarting
 			// tests produce false positives because the validation state isn't kept across tests
-			ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.count(feed.first.toString()));
+			ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.contains(feed.first.toString()));
 		}
 
 		Key beginClearKey = feed.first.withPrefix(persistChangeFeedKeys.begin);
@@ -12545,7 +12545,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			auto info = data->uidChangeFeed.find(feedFetchVersions[curFeed].first);
 			// Don't update if the feed is pending cleanup. Either it will get cleaned up and destroyed, or it will
 			// get fetched again, where the fetch version will get reset.
-			if (info != data->uidChangeFeed.end() && !data->changeFeedCleanupDurable.count(info->second->id)) {
+			if (info != data->uidChangeFeed.end() && !data->changeFeedCleanupDurable.contains(info->second->id)) {
 				if (feedFetchVersions[curFeed].second > info->second->durableFetchVersion.get()) {
 					info->second->durableFetchVersion.set(feedFetchVersions[curFeed].second);
 				}

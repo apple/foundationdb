@@ -195,7 +195,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			state std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 			if (!interfs.empty()) {
 				state StorageServerInterface interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
-				if (g_simulator->protectedAddresses.count(interf.address()) == 0) {
+				if (!g_simulator->protectedAddresses.contains(interf.address())) {
 					// We need to avoid selecting a storage server that is already dead at this point, otherwise
 					// the test will hang. This is achieved by sending a GetStorageMetrics RPC. This is a necessary
 					// check for this test because DD has been disabled and the proper mechanism that removes bad

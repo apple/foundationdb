@@ -351,9 +351,9 @@ public:
 			    .detail("Worker", it.second.details.interf.address())
 			    .detail("WorkerAvailable", workerAvailable(it.second, false))
 			    .detail("RecoverDiskFiles", it.second.details.recoveredDiskFiles)
-			    .detail("NotExcludedMachine", !excludedMachines.count(it.second.details.interf.locality.zoneId()))
+			    .detail("NotExcludedMachine", !excludedMachines.contains(it.second.details.interf.locality.zoneId()))
 			    .detail("IncludeDC",
-			            (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())))
+			            (includeDCs.size() == 0 || includeDCs.contains(it.second.details.interf.locality.dcId())))
 			    .detail("NotExcludedAddress", !addressExcluded(excludedAddresses, it.second.details.interf.address()))
 			    .detail("NotExcludedAddress2",
 			            (!it.second.details.interf.secondaryAddress().present() ||
@@ -363,8 +363,8 @@ public:
 			                ProcessClass::UnsetFit)
 			    .detail("MachineFitness", it.second.details.processClass.machineClassFitness(ProcessClass::Storage));
 			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-			    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
-			    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
+			    !excludedMachines.contains(it.second.details.interf.locality.zoneId()) &&
+			    (includeDCs.size() == 0 || includeDCs.contains(it.second.details.interf.locality.dcId())) &&
 			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
 			    (!it.second.details.interf.secondaryAddress().present() ||
 			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
@@ -379,8 +379,8 @@ public:
 			for (auto& it : id_worker) {
 				ProcessClass::Fitness fit = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
 				if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-				    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
-				    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
+				    !excludedMachines.contains(it.second.details.interf.locality.zoneId()) &&
+				    (includeDCs.size() == 0 || includeDCs.contains(it.second.details.interf.locality.dcId())) &&
 				    !addressExcluded(excludedAddresses, it.second.details.interf.address()) && fit < bestFit) {
 					bestFit = fit;
 					bestInfo = it.second.details;
@@ -502,7 +502,7 @@ public:
 			auto thisField = worker.interf.locality.get(field);
 			auto thisZone = worker.interf.locality.zoneId();
 
-			if (field_count.count(thisField)) {
+			if (field_count.contains(thisField)) {
 				zone_workers[thisZone].push_back(worker);
 				zone_count[thisZone].second = thisField;
 			}
@@ -528,7 +528,7 @@ public:
 				auto& zoneWorkers = zone_workers[lowestZone.second];
 
 				while (zoneWorkers.size() && !added) {
-					if (!resultSet.count(zoneWorkers.back())) {
+					if (!resultSet.contains(zoneWorkers.back())) {
 						resultSet.insert(zoneWorkers.back());
 						if (resultSet.size() == desired) {
 							return;
@@ -583,7 +583,7 @@ public:
 
 			bool added = false;
 			while (zoneWorkers.size() && !added) {
-				if (!resultSet.count(zoneWorkers.back())) {
+				if (!resultSet.contains(zoneWorkers.back())) {
 					resultSet.insert(zoneWorkers.back());
 					if (resultSet.size() == desired) {
 						return;
@@ -690,7 +690,7 @@ public:
 				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
-			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+			if (!dcIds.empty() && !dcIds.contains(worker_details.interf.locality.dcId())) {
 				logWorkerUnavailable(
 				    SevDebug, id, "complex", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
@@ -801,7 +801,7 @@ public:
 			}
 			if (workerIter->second.size() + resultSet.size() <= desired) {
 				for (auto& worker : workerIter->second) {
-					if (chosenFields.count(worker.interf.locality.get(field))) {
+					if (chosenFields.contains(worker.interf.locality.get(field))) {
 						resultSet.insert(worker);
 					}
 				}
@@ -940,7 +940,7 @@ public:
 				    SevDebug, id, "simple", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
-			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+			if (!dcIds.empty() && !dcIds.contains(worker_details.interf.locality.dcId())) {
 				logWorkerUnavailable(
 				    SevDebug, id, "simple", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
@@ -973,7 +973,7 @@ public:
 			auto used = std::get<1>(workerIter->first);
 			deterministicRandom()->randomShuffle(workerIter->second);
 			for (auto& worker : workerIter->second) {
-				if (!zones.count(worker.interf.locality.zoneId())) {
+				if (!zones.contains(worker.interf.locality.zoneId())) {
 					zones.insert(worker.interf.locality.zoneId());
 					resultSet.insert(worker);
 					if (resultSet.size() == required) {
@@ -1092,7 +1092,7 @@ public:
 				    SevDebug, id, "deprecated", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
-			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+			if (!dcIds.empty() && !dcIds.contains(worker_details.interf.locality.dcId())) {
 				logWorkerUnavailable(
 				    SevDebug, id, "deprecated", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
@@ -1312,7 +1312,7 @@ public:
 							std::map<Optional<Standalone<StringRef>>, int> field_count;
 							std::set<Optional<Standalone<StringRef>>> zones;
 							for (auto& worker : testWorkers) {
-								if (!zones.count(worker.interf.locality.zoneId())) {
+								if (!zones.contains(worker.interf.locality.zoneId())) {
 									field_count[worker.interf.locality.get(pa1->attributeKey())]++;
 									zones.insert(worker.interf.locality.zoneId());
 								}
@@ -2478,7 +2478,7 @@ public:
 					    .detail("ProcessID", it.interf().filteredLocality.processId());
 					return true;
 				}
-				if (!logRouterAddresses.count(tlogWorker->second.details.interf.address())) {
+				if (!logRouterAddresses.contains(tlogWorker->second.details.interf.address())) {
 					logRouterAddresses.insert(tlogWorker->second.details.interf.address());
 					log_routers.push_back(tlogWorker->second.details);
 				}
@@ -2498,7 +2498,7 @@ public:
 					    .detail("ProcessID", worker.interf().locality.processId());
 					return true;
 				}
-				if (backup_addresses.count(workerIt->second.details.interf.address()) == 0) {
+				if (!backup_addresses.contains(workerIt->second.details.interf.address())) {
 					backup_addresses.insert(workerIt->second.details.interf.address());
 					backup_workers.push_back(workerIt->second.details);
 				}
@@ -2664,7 +2664,7 @@ public:
 
 		int32_t oldSatelliteRegionFit = std::numeric_limits<int32_t>::max();
 		for (auto& it : satellite_tlogs) {
-			if (satellite_priority.count(it.interf.locality.dcId())) {
+			if (satellite_priority.contains(it.interf.locality.dcId())) {
 				oldSatelliteRegionFit = std::min(oldSatelliteRegionFit, satellite_priority[it.interf.locality.dcId()]);
 			} else {
 				oldSatelliteRegionFit = -1;
@@ -2673,7 +2673,7 @@ public:
 
 		int32_t newSatelliteRegionFit = std::numeric_limits<int32_t>::max();
 		for (auto& it : newSatelliteTLogs) {
-			if (satellite_priority.count(it.interf.locality.dcId())) {
+			if (satellite_priority.contains(it.interf.locality.dcId())) {
 				newSatelliteRegionFit = std::min(newSatelliteRegionFit, satellite_priority[it.interf.locality.dcId()]);
 			} else {
 				newSatelliteRegionFit = -1;

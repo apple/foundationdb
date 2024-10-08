@@ -464,7 +464,7 @@ class ConfigBroadcasterImpl {
 		state BroadcastClientDetails client(
 		    watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface));
 
-		if (impl->clients.count(broadcastInterface.id())) {
+		if (impl->clients.contains(broadcastInterface.id())) {
 			// Client already registered
 			return Void();
 		}

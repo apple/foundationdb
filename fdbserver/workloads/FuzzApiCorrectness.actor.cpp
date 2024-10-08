@@ -225,7 +225,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			return TenantGroupNameRef(format("tenantgroup_%d", groupNum));
 		}
 	}
-	bool canUseTenant(Optional<TenantName> tenant) { return !tenant.present() || createdTenants.count(tenant.get()); }
+	bool canUseTenant(Optional<TenantName> tenant) {
+		return !tenant.present() || createdTenants.contains(tenant.get());
+	}
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {

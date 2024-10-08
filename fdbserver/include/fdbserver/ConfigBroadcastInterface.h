@@ -43,7 +43,7 @@ public:
 		}
 	}
 
-	bool contains(KeyRef configClass) const { return classes.count(configClass); }
+	bool contains(KeyRef configClass) const { return classes.contains(configClass); }
 	std::set<Key> const& getClasses() const { return classes; }
 
 	template <class Ar>

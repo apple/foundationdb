@@ -892,14 +892,14 @@ ACTOR Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards
 		decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest);
 
 		for (int s = 0; s < src.size(); s++) {
-			if (!fetching.count(src[s])) {
+			if (!fetching.contains(src[s])) {
 				fetching.insert(src[s]);
 				serverListEntries.push_back(tr->get(serverListKeyFor(src[s])));
 			}
 		}
 
 		for (int s = 0; s < dest.size(); s++) {
-			if (!fetching.count(dest[s])) {
+			if (!fetching.contains(dest[s])) {
 				fetching.insert(dest[s]);
 				serverListEntries.push_back(tr->get(serverListKeyFor(dest[s])));
 			}
@@ -1350,7 +1350,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							completeSrc = src;
 						} else {
 							for (int i = 0; i < completeSrc.size(); i++) {
-								if (!srcSet.count(completeSrc[i])) {
+								if (!srcSet.contains(completeSrc[i])) {
 									swapAndPop(&completeSrc, i--);
 								}
 							}
@@ -1405,7 +1405,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							srcSet.insert(src2[s]);
 
 						for (int i = 0; i < completeSrc.size(); i++) {
-							if (!srcSet.count(completeSrc[i])) {
+							if (!srcSet.contains(completeSrc[i])) {
 								swapAndPop(&completeSrc, i--);
 							}
 						}
@@ -1452,7 +1452,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					state std::vector<UID> newDestinations;
 					std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 					for (auto& it : dest) {
-						if (!hasRemote || !completeSrcSet.count(it)) {
+						if (!hasRemote || !completeSrcSet.contains(it)) {
 							newDestinations.push_back(it);
 						}
 					}
@@ -1491,7 +1491,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						auto tssPair = tssMapping.find(storageServerInterfaces[s].id());
 
 						if (tssPair != tssMapping.end() && waitForTSSCounter > 0 &&
-						    !tssToIgnore.count(tssPair->second.id())) {
+						    !tssToIgnore.contains(tssPair->second.id())) {
 							tssReadyInterfs.push_back(tssPair->second);
 							tssReady.push_back(waitForShardReady(
 							    tssPair->second, keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
@@ -2171,7 +2171,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						completeSrc = src;
 					} else {
 						for (int i = 0; i < completeSrc.size(); i++) {
-							if (!srcSet.count(completeSrc[i])) {
+							if (!srcSet.contains(completeSrc[i])) {
 								swapAndPop(&completeSrc, i--);
 							}
 						}
@@ -2187,7 +2187,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				state std::vector<UID> newDestinations;
 				std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 				for (const UID& id : destServers) {
-					if (!hasRemote || !completeSrcSet.count(id)) {
+					if (!hasRemote || !completeSrcSet.contains(id)) {
 						newDestinations.push_back(id);
 					}
 				}
@@ -2692,7 +2692,7 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 					allLocalities.insert(dcId_locality[decodeTLogDatacentersKey(it.key)]);
 				}
 
-				if (locality >= 0 && !allLocalities.count(locality)) {
+				if (locality >= 0 && !allLocalities.contains(locality)) {
 					for (auto& it : fTagLocalities.get()) {
 						if (locality == decodeTagLocalityListValue(it.value)) {
 							tr->clear(it.key);
@@ -3316,7 +3316,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	std::map<UID, Tag> server_tag;
 	int8_t nextLocality = 0;
 	for (auto& s : servers) {
-		if (!dcId_locality.count(s.locality.dcId())) {
+		if (!dcId_locality.contains(s.locality.dcId())) {
 			tr.set(arena, tagLocalityListKeyFor(s.locality.dcId()), tagLocalityListValue(nextLocality));
 			dcId_locality[s.locality.dcId()] = Tag(nextLocality, 0);
 			nextLocality++;
@@ -3398,7 +3398,7 @@ Future<Void> unassignServerKeys(UID traceId, TrType tr, KeyRangeRef keys, std::s
 			continue;
 		}
 
-		if (ignoreServers.count(id)) {
+		if (ignoreServers.contains(id)) {
 			dprint("Ignore un-assignment from {} .\n", id.toString());
 			continue;
 		}

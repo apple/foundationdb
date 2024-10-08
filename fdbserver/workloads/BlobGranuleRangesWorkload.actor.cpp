@@ -831,7 +831,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			int op = OP_COUNT;
 			loop {
 				op = deterministicRandom()->randomInt(0, OP_COUNT);
-				if (!excludedTypes.count((UnitTestTypes)op)) {
+				if (!excludedTypes.contains((UnitTestTypes)op)) {
 					break;
 				}
 				loopTries--;

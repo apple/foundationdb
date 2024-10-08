@@ -93,9 +93,9 @@ public:
 	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
-			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			ASSERT(cipherKeys->contains(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID));
 			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+				ASSERT(cipherKeys->contains(ENCRYPT_HEADER_DOMAIN_ID));
 			}
 		}
 		// If commit proxy, epoch must be set
@@ -115,9 +115,9 @@ public:
 	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex), epoch(Optional<LogEpoch>()) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
-			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			ASSERT(cipherKeys->contains(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID));
 			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+				ASSERT(cipherKeys->contains(ENCRYPT_HEADER_DOMAIN_ID));
 			}
 		}
 	}
@@ -1184,7 +1184,7 @@ private:
 
 				bool foundKey = false;
 				for (auto& it : vecBackupKeys->intersectingRanges(normalKeys)) {
-					if (it.value().count(logDestination) > 0) {
+					if (it.value().contains(logDestination)) {
 						foundKey = true;
 						break;
 					}
@@ -1192,7 +1192,7 @@ private:
 				auto& systemBackupRanges = getSystemBackupRanges();
 				for (auto r = systemBackupRanges.begin(); !foundKey && r != systemBackupRanges.end(); ++r) {
 					for (auto& it : vecBackupKeys->intersectingRanges(*r)) {
-						if (it.value().count(logDestination) > 0) {
+						if (it.value().contains(logDestination)) {
 							foundKey = true;
 							break;
 						}

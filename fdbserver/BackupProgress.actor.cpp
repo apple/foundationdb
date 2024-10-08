@@ -92,7 +92,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 				auto prev = std::prev(current);
 				// Previous epoch is gone, consolidate the progress.
 				for (auto [tag, version] : prev->second) {
-					if (toCheck.count(tag) > 0) {
+					if (toCheck.contains(tag)) {
 						progressIt->second[tag] = std::max(version, progressIt->second[tag]);
 						toCheck.erase(tag);
 					}

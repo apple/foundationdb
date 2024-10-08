@@ -112,15 +112,15 @@ ACTOR Future<Void> httpKVRequestCallback(Reference<SimHTTPKVStore> kvStore,
 	// content-length and RequestID from http are already filled in
 	// ASSERT_EQ(req->data.headers.size(), 5);
 	ASSERT_EQ(req->data.headers.size(), 5);
-	ASSERT(req->data.headers.count("Key"));
-	ASSERT(req->data.headers.count("ClientID"));
-	ASSERT(req->data.headers.count("UID"));
-	ASSERT(req->data.headers.count("SeqNo"));
+	ASSERT(req->data.headers.contains("Key"));
+	ASSERT(req->data.headers.contains("ClientID"));
+	ASSERT(req->data.headers.contains("UID"));
+	ASSERT(req->data.headers.contains("SeqNo"));
 
 	int clientId = atoi(req->data.headers["ClientID"].c_str());
 	int seqNo = atoi(req->data.headers["SeqNo"].c_str());
 
-	ASSERT(req->data.headers.count("Content-Length"));
+	ASSERT(req->data.headers.contains("Content-Length"));
 	ASSERT_EQ(req->data.headers["Content-Length"], std::to_string(req->data.content.size()));
 	ASSERT_EQ(req->data.contentLen, req->data.content.size());
 
@@ -291,11 +291,11 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 				}
 
 				ASSERT_EQ(response->code, 200);
-				ASSERT(response->data.headers.count("ClientID"));
+				ASSERT(response->data.headers.contains("ClientID"));
 				ASSERT_EQ(response->data.headers["ClientID"], std::to_string(self->clientId));
-				ASSERT(response->data.headers.count("Key"));
+				ASSERT(response->data.headers.contains("Key"));
 				ASSERT_EQ(response->data.headers["Key"], key);
-				ASSERT(response->data.headers.count("UID"));
+				ASSERT(response->data.headers.contains("UID"));
 				ASSERT_EQ(response->data.headers["UID"], requestID.toString());
 
 				return response;
