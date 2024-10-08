@@ -155,13 +155,14 @@ struct TLogLockResult {
 	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
+	std::deque<std::tuple<Version, int>> unknownCommittedVersionTuples; // unused, kept for compatibility
 	std::deque<UnknownCommittedVersions> unknownCommittedVersions;
 	UID id; // captures TLogData::dbgid
 	UID logId; // captures LogData::logId
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, end, knownCommittedVersion, id, unknownCommittedVersions, logId);
+		serializer(ar, end, knownCommittedVersion, unknownCommittedVersionTuples, id, unknownCommittedVersions, logId);
 	}
 };
 
