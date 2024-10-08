@@ -150,7 +150,7 @@ public:
 		return result.getFuture();
 	}
 
-	static Future<Void> renameFile(std::string const& from, std::string const& to) {
+	static Future<Void> renameFile(std::filesystem::path const& from, std::filesystem::path const& to) {
 		::renameFile(from, to);
 		return Void();
 	}
