@@ -815,6 +815,11 @@ inline bool shouldBackup(MutationRef const& m) {
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 	std::set<Tag> transactionTags;
 	std::vector<Tag> cacheVector = { cacheTag };
+	// version vector is an experimental feature that does not support encryption at rest or backup.
+	// This is indicated by returning an empty set of tags from this function.
+	if (pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+		return std::set<Tag>();
+	}
 	for (int transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
 		int mutationNum = 0;
 		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
