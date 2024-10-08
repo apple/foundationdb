@@ -433,11 +433,12 @@ struct ProxyCommitData {
 	                   ? std::make_shared<AccumulativeChecksumBuilder>(
 	                         getCommitProxyAccumulativeChecksumIndex(commitProxyIndex))
 	                   : nullptr),
-	    rangeLock(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !encryptMode.isEncryptionEnabled()
-	                  ? std::make_shared<RangeLock>()
-	                  : nullptr),
 	    epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
+		rangeLock = SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !encryptMode.isEncryptionEnabled() &&
+		                    getTenantMode() == TenantMode::DISABLED
+		                ? std::make_shared<RangeLock>()
+		                : nullptr;
 	}
 };
 
