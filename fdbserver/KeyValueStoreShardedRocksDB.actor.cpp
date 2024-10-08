@@ -405,6 +405,7 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 			liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 			liveFileMetaData.level = fileMetaData.level;
 			rocksCF.sstFiles.push_back(liveFileMetaData);
+			checkpoint->bytes += fileMetaData.size;
 		}
 	}
 	checkpoint->setFormat(DataMoveRocksCF);

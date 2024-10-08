@@ -64,6 +64,8 @@ struct CheckpointMetaData {
 	Optional<UID> actionId; // Unique ID defined by the application.
 
 	std::string dir;
+	uint64_t bytes;
+	double creationTime;
 
 	CheckpointMetaData() = default;
 	CheckpointMetaData(const std::vector<KeyRange>& ranges,
@@ -125,7 +127,9 @@ struct CheckpointMetaData {
 		                  " [Checkpoint Dir:] " + dir + " [Server]: " + describe(src) +
 		                  " [ID]: " + checkpointID.toString() + " [State]: " + std::to_string(static_cast<int>(state)) +
 		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "") +
-		                  (bytesSampleFile.present() ? " [bytesSampleFile]: " + bytesSampleFile.get() : "");
+		                  (bytesSampleFile.present() ? " [bytesSampleFile]: " + bytesSampleFile.get() : "") +
+						  "Bytes: " + std::to_string(bytes) +
+						  "CreationTime: " + std::to_string(creationTime);
 		;
 		return res;
 	}
@@ -142,7 +146,9 @@ struct CheckpointMetaData {
 		           serializedCheckpoint,
 		           actionId,
 		           bytesSampleFile,
-		           dir);
+		           dir,
+				   bytes,
+				   creationTime);
 	}
 };
 
