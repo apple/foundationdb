@@ -25,7 +25,7 @@
 #include "flow/ProcessEvents.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"

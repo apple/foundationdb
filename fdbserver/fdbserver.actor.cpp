@@ -67,7 +67,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "fdbserver/Status.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
 #include "fdbserver/OnDemandStore.h"

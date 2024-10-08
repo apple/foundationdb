@@ -1,5 +1,5 @@
 /*
- * BenchCallback.actor.cpp
+ * BenchCallback.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,24 +24,22 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "flow/flow.h"
+#include "flow/Coroutines.h"
 #include "flow/ThreadHelper.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-ACTOR template <size_t Size>
+template <size_t Size>
 static Future<Void> increment(Future<Void> f, uint32_t* sum) {
 	// commented out to avoid counting the memory allocation in the benchmark
-	// state std::array<uint8_t, Size> arr;
-	wait(f);
+	// std::array<uint8_t, Size> arr;
+	co_await f;
 	// benchmark::DoNotOptimize(arr);
 	++(*sum);
-	return Void();
 }
 
-ACTOR template <size_t Size>
-static Future<Void> benchCallbackActor(benchmark::State* benchState) {
-	state size_t actorCount = benchState->range(0);
-	state uint32_t sum;
+template <size_t Size>
+static Future<Void> benchCallbackCoroutine(benchmark::State* benchState) {
+	size_t actorCount = benchState->range(0);
+	uint32_t sum;
 	while (benchState->KeepRunning()) {
 		sum = 0;
 		Promise<Void> trigger;
@@ -51,19 +49,18 @@ static Future<Void> benchCallbackActor(benchmark::State* benchState) {
 			futures.push_back(increment<Size>(trigger.getFuture(), &sum));
 		}
 		trigger.send(Void());
-		wait(waitForAll(futures));
+		co_await waitForAll(futures);
 		benchmark::DoNotOptimize(sum);
 	}
 	benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
 	benchState->SetBytesProcessed(actorCount * Size * static_cast<long>(benchState->iterations()));
-	return Void();
 }
 
 template <size_t Size>
-static void actor_callback(benchmark::State& benchState) {
-	onMainThread([&benchState]() { return benchCallbackActor<Size>(&benchState); }).blockUntilReady();
+static void coroutine_callback(benchmark::State& benchState) {
+	onMainThread([&benchState]() { return benchCallbackCoroutine<Size>(&benchState); }).blockUntilReady();
 }
 
-BENCHMARK_TEMPLATE(actor_callback, 1)->Range(1, 1 << 8)->ReportAggregatesOnly(true);
-// BENCHMARK_TEMPLATE(actor_callback, 32)->Range(1, 1 << 8)->ReportAggregatesOnly(true);
-// BENCHMARK_TEMPLATE(actor_callback, 1024)->Range(1, 1 << 8)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(coroutine_callback, 1)->Range(1, 1 << 8)->ReportAggregatesOnly(true);
+// BENCHMARK_TEMPLATE(coroutine_callback, 32)->Range(1, 1 << 8)->ReportAggregatesOnly(true);
+// BENCHMARK_TEMPLATE(coroutine_callback, 1024)->Range(1, 1 << 8)->ReportAggregatesOnly(true);

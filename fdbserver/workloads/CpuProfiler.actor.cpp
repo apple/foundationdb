@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/workloads/workloads.actor.h"
