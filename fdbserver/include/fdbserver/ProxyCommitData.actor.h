@@ -233,14 +233,6 @@ public:
 		    .detail("Status", lockState.toString()); */
 		coreMap.insert(lockRange, lockState);
 		coreMap.coalesce(allKeys);
-		if (lockState.isValid()) {
-		} else {
-			for (auto range : coreMap.ranges()) {
-				if (range.value().isValid()) {
-					break;
-				}
-			}
-		}
 		currentRangeLockStartKey.reset();
 		return;
 	}
