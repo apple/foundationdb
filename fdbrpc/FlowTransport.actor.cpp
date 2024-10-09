@@ -1587,7 +1587,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 }
 
 ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<IConnection> conn) {
-	state TransportData::ConnectionHistoryEntry entry();
+	state TransportData::ConnectionHistoryEntry entry;
 	entry.time = now();
 	entry.addr = conn->getPeerAddress();
 	try {
