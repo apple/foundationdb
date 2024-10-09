@@ -384,7 +384,7 @@ struct ConnectionLogWriter : IThreadPoolReceiver {
 		double getTimeEstimate() const { return 2; }
 	};
 
-	void init(){};
+	void init() {}
 
 	void openOrRoll() {
 		if (!file.is_open()) {
@@ -1595,8 +1595,8 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 		wait(conn->acceptHandshake());
 		state Promise<Reference<Peer>> onConnected;
 		state Future<Void> reader = connectionReader(self, conn, Reference<Peer>(), onConnected);
-		entry.failed = false;
 		if (FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
+			entry.failed = false;
 			self->connectionHistory.push_back(entry);
 		}
 		choose {
@@ -1618,12 +1618,12 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 			    .errorUnsuppressed(e)
 			    .suppressFor(1.0)
 			    .detail("FromAddress", conn->getPeerAddress());
+			if (FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
+				entry.failed = true;
+				self->connectionHistory.push_back(entry);
+			}
 		}
 		conn->close();
-		entry.failed = true;
-		if (FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
-			self->connectionHistory.push_back(entry);
-		}
 	}
 
 	return Void();
