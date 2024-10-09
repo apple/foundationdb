@@ -20,9 +20,15 @@
 
 #include "fdbrpc/FlowTransport.h"
 #include "flow/Arena.h"
+#include "flow/IThreadPool.h"
+#include "flow/Knobs.h"
+#include "flow/NetworkAddress.h"
+#include "flow/genericactors.actor.g.h"
 #include "flow/network.h"
 
 #include <cstdint>
+#include <fstream>
+#include <string>
 #include <unordered_map>
 #if VALGRIND
 #include <memcheck.h>
@@ -352,7 +358,97 @@ public:
 	Future<Void> publicKeyFileWatch;
 
 	std::unordered_map<Standalone<StringRef>, PublicKey> publicKeys;
+
+	struct ConnectionHistoryEntry {
+		int64_t time;
+		NetworkAddress addr;
+		bool failed;
+	};
+	std::deque<ConnectionHistoryEntry> connectionHistory;
+	Future<Void> connectionHistoryLoggerF;
 };
+
+struct ConnectionLogWriter : IThreadPoolReceiver {
+	const std::string base_dir = FLOW_KNOBS->CONNECTION_LOG_DIRECTORY;
+	std::string fileName = base_dir + "fdb-connection-log-" + std::to_string(now()) + ".csv";
+	std::fstream file;
+
+	virtual ~ConnectionLogWriter() { file.close(); }
+
+	struct AppendAction : TypedAction<ConnectionLogWriter, AppendAction> {
+		std::string localAddr;
+		std::deque<TransportData::ConnectionHistoryEntry> entries;
+		AppendAction(std::string localAddr, std::deque<TransportData::ConnectionHistoryEntry>&& entries)
+		  : localAddr(localAddr), entries(std::move(entries)) {}
+
+		double getTimeEstimate() const { return 2; }
+	};
+
+	void init(){};
+
+	void openOrRoll() {
+		if (!file.is_open()) {
+			TraceEvent("OpenConnectionLog").detail("FileName", fileName);
+			file = std::fstream(fileName, std::ios::in | std::ios::out | std::ios::app);
+		}
+
+		if (!file.is_open()) {
+			TraceEvent(SevError, "ErrorOpenConnectionLog").detail("FileName", fileName);
+			throw io_error();
+		}
+
+		if (file.tellg() > 100 * 1024 * 1024 /* 100 MB */) {
+			file.close();
+			fileName = base_dir + "fdb-connection-log-" + std::to_string(now()) + ".csv";
+			TraceEvent("RollConnectionLog").detail("FileName", fileName);
+			openOrRoll();
+		}
+	}
+
+	void action(AppendAction& a) {
+		openOrRoll();
+
+		std::string output;
+		for (const auto& entry : a.entries) {
+			output += std::to_string(entry.time) + ",";
+			output += a.localAddr + ",";
+			output += entry.failed ? "failed," : "success,";
+			output += entry.addr.toString() + "\n";
+		}
+		file << output;
+		file.flush();
+	}
+};
+
+ACTOR Future<Void> connectionHistoryLogger(TransportData* self) {
+	if (!FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
+		return Void();
+	}
+
+	state Future<Void> next = Void();
+
+	// One thread ensures async serialized execution on the log file.
+	state Reference<IThreadPool> pool;
+	if (g_network->isSimulated()) {
+		pool = Reference<IThreadPool>(new DummyThreadPool());
+	} else {
+		pool = createGenericThreadPool();
+	}
+	pool->addThread(new ConnectionLogWriter(), "fdb-connection-log-write");
+
+	loop {
+		wait(next);
+		next = delay(FLOW_KNOBS->LOG_CONNECTION_INTERVAL_SECS);
+		if (self->connectionHistory.size() == 0) {
+			continue;
+		}
+		std::string localAddr = FlowTransport::getGlobalLocalAddress().toString();
+		auto action = new ConnectionLogWriter::AppendAction(localAddr, std::move(self->connectionHistory));
+		ASSERT(action != nullptr);
+		pool->post(action);
+		ASSERT(self->connectionHistory.size() == 0);
+	}
+}
 
 ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 	state NetworkAddress lastAddress = NetworkAddress();
@@ -422,6 +518,8 @@ TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IP
     allowList(allowList == nullptr ? IPAllowList() : *allowList) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
+
+	connectionHistoryLoggerF = connectionHistoryLogger(this);
 }
 
 #define CONNECT_PACKET_V0 0x0FDB00A444020001LL
@@ -1490,10 +1588,17 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 }
 
 ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<IConnection> conn) {
+	state TransportData::ConnectionHistoryEntry entry();
+	entry.time = now();
+	entry.addr = conn->getPeerAddress();
 	try {
 		wait(conn->acceptHandshake());
 		state Promise<Reference<Peer>> onConnected;
 		state Future<Void> reader = connectionReader(self, conn, Reference<Peer>(), onConnected);
+		entry.failed = false;
+		if (FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
+			self->connectionHistory.push_back(entry);
+		}
 		choose {
 			when(wait(reader)) {
 				ASSERT(false);
@@ -1507,7 +1612,6 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 				throw timed_out();
 			}
 		}
-		return Void();
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
 			TraceEvent("IncomingConnectionError", conn->getDebugID())
@@ -1516,8 +1620,13 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 			    .detail("FromAddress", conn->getPeerAddress());
 		}
 		conn->close();
-		return Void();
+		entry.failed = true;
+		if (FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
+			self->connectionHistory.push_back(entry);
+		}
 	}
+
+	return Void();
 }
 
 ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr) {
