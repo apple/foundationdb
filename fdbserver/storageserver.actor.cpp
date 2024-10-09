@@ -1465,6 +1465,9 @@ public:
 		// Bytes fetched by fetchChangeFeed for data movements.
 		Counter feedBytesFetched;
 
+		// Local checkpoint files total size.
+		Counter checkpointBytes;
+
 		Counter sampledBytesCleared;
 		Counter atomicMutations, changeFeedMutations, changeFeedMutationsDurable;
 		Counter updateBatches, updateVersions;
@@ -1535,6 +1538,7 @@ public:
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
 		    bytesDurable("BytesDurable", cc), feedBytesFetched("FeedBytesFetched", cc),
+			checkpointBytes("CheckpointBytes", cc),
 		    sampledBytesCleared("SampledBytesCleared", cc), atomicMutations("AtomicMutations", cc),
 		    changeFeedMutations("ChangeFeedMutations", cc),
 		    changeFeedMutationsDurable("ChangeFeedMutationsDurable", cc), updateBatches("UpdateBatches", cc),
@@ -2842,6 +2846,8 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 		// TODO: Handle errors more gracefully.
 		throw;
 	}
+
+	self->counters.checkpointBytes += -checkpoint.bytes;
 
 	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
 	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
@@ -12064,6 +12070,7 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		checkpointResult.dir = checkpointDir;
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 
+		data->counters.checkpointBytes += checkpointResult.bytes;
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID)
 		    .detail("Checkpoint", checkpointResult.toString())
 		    .detail("BytesSampleFile", sampleByteSstFileCreated ? bytesSampleFile : "noFileCreated");
@@ -13080,6 +13087,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state int cLoc;
 	for (cLoc = 0; cLoc < checkpoints.size(); ++cLoc) {
 		CheckpointMetaData metaData = decodeCheckpointValue(checkpoints[cLoc].value);
+		data->counters.checkpointBytes += metaData.bytes;
 		data->checkpoints[metaData.checkpointID] = metaData;
 		if (metaData.getState() == CheckpointMetaData::Deleting) {
 			data->actors.add(deleteCheckpointQ(data, version, metaData));
