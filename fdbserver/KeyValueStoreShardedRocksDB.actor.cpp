@@ -1002,7 +1002,16 @@ int readRangeInDb(PhysicalShard* shard,
 	int accumulatedBytes = 0;
 	rocksdb::Status s;
 	std::shared_ptr<ReadIterator> readIter = nullptr;
-	if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS && iteratorPool != nullptr) {
+
+	bool reuseIterator = SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS && iteratorPool != nullptr;
+	if (g_network->isSimulated() &&
+	    deterministicRandom()->random01() > SERVER_KNOBS->ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM) {
+		// Reduce probability of reusing iterators in simulation.
+		reuseIterator = false;
+	}
+
+	if (reuseIterator) {
+
 		readIter = iteratorPool->getIterator(shard->id);
 		if (readIter == nullptr) {
 			readIter = std::make_shared<ReadIterator>(shard->cf, shard->db);
@@ -1051,12 +1060,8 @@ int readRangeInDb(PhysicalShard* shard,
 		// should never be returned to user.
 		return -1;
 	}
-	if (SERVER_KNOBS->SHARDED_ROCKSDB_REUSE_ITERATORS && iteratorPool != nullptr) {
-		if (!g_network->isSimulated() ||
-		    deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM) {
-			// Reduce the probability of reusing iterators in simulation.
-			iteratorPool->returnIterator(shard->id, readIter);
-		}
+	if (reuseIterator) {
+		iteratorPool->returnIterator(shard->id, readIter);
 	}
 	return accumulatedBytes;
 }
