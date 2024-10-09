@@ -23,7 +23,6 @@
 #include "flow/IThreadPool.h"
 #include "flow/Knobs.h"
 #include "flow/NetworkAddress.h"
-#include "flow/genericactors.actor.g.h"
 #include "flow/network.h"
 
 #include <cstdint>
