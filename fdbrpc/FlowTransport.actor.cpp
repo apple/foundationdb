@@ -389,17 +389,11 @@ struct ConnectionLogWriter : IThreadPoolReceiver {
 		double getTimeEstimate() const { return 2; }
 	};
 
-	std::string newFileName() const {
-		return baseDir + "fdb-connection-log-" + time_str() + ".csv";
-	}
+	std::string newFileName() const { return baseDir + "fdb-connection-log-" + time_str() + ".csv"; }
 
-	void init() {
-		fileName = newFileName();
-	}
+	void init() { fileName = newFileName(); }
 
-	std::string time_str() const {
-		return std::to_string(now());
-	}
+	std::string time_str() const { return std::to_string(now()); }
 
 	void openOrRoll() {
 		if (!file.is_open()) {
