@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/RangeLock.h"
 #include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
@@ -2966,10 +2967,12 @@ ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std
 	loop {
 		try {
 			state Transaction tr(cx);
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			RangeLockOwner owner(uniqueId, description);
+			Key key = rangeLockOwnerKeyFor(uniqueId);
 			tr.set(rangeLockOwnerKeyFor(uniqueId), rangeLockOwnerValue(owner));
+			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -2984,9 +2987,11 @@ ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId) {
 	loop {
 		try {
 			state Transaction tr(cx);
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.clear(rangeLockOwnerKeyFor(uniqueId));
+			wait(tr.commit());
+			// TODO: check if there exists a range having the uniqueId
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -2994,7 +2999,26 @@ ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId) {
 	}
 }
 
-ACTOR Future<std::vector<RangeLockOwner>> getRangeOwners(Database cx) {
+ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId) {
+	loop {
+		state Transaction tr(cx);
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			Key key = rangeLockOwnerKeyFor(uniqueId);
+			Optional<Value> res = wait(tr.get(key));
+			if (!res.present()) {
+				return Optional<RangeLockOwner>();
+			}
+			RangeLockOwner owner = decodeRangeLockOwner(res.get());
+			ASSERT(owner.isValid());
+			return owner;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 	state std::vector<RangeLockOwner> res;
 	state Key beginKey = rangeLockOwnerKeys.begin;
 	state Key endKey = rangeLockOwnerKeys.end;
@@ -3002,11 +3026,12 @@ ACTOR Future<std::vector<RangeLockOwner>> getRangeOwners(Database cx) {
 		state Transaction tr(cx);
 		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			RangeResult result = wait(tr.getRange(rangeToRead, CLIENT_KNOBS->TOO_MANY));
 			for (const auto& kv : result) {
 				RangeLockOwner owner = decodeRangeLockOwner(kv.value);
 				ASSERT(owner.isValid());
-				std::string uidFromKey = kv.key.removePrefix(rangeLockOwnerPrefix).toString();
+				std::string uidFromKey = rangeLockOwnerKey(kv.key);
 				ASSERT(owner.getUniqueId() == uidFromKey);
 				res.push_back(owner);
 			}
@@ -3021,6 +3046,7 @@ ACTOR Future<std::vector<RangeLockOwner>> getRangeOwners(Database cx) {
 	}
 }
 
+// Not transactional
 ACTOR Future<std::vector<KeyRange>> getCommitLockedUserRanges(Database cx, KeyRange range) {
 	if (range.end > normalKeys.end) {
 		throw range_lock_failed();
@@ -3033,15 +3059,16 @@ ACTOR Future<std::vector<KeyRange>> getCommitLockedUserRanges(Database cx, KeyRa
 		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			RangeResult result = wait(krmGetRanges(&tr, rangeLockPrefix, rangeToRead));
 			for (int i = 0; i < result.size() - 1; i++) {
 				if (result[i].value.empty()) {
 					continue;
 				}
-				RangeLockState rangeLockState = decodeRangeLockState(result[i].value);
-				ASSERT(rangeLockState.isValid());
-				lockedRanges.push_back(Standalone(KeyRangeRef(result[i].key, result[i + 1].key)));
+				RangeLockSetState rangeLockSetState = decodeRangeLockSetState(result[i].value);
+				ASSERT(rangeLockSetState.isValid());
+				if (rangeLockSetState.isLockedFor(RangeLockType::RejectCommits)) {
+					lockedRanges.push_back(Standalone(KeyRangeRef(result[i].key, result[i + 1].key)));
+				}
 			}
 			if (result[result.size() - 1].key == range.end) {
 				break;
@@ -3055,24 +3082,54 @@ ACTOR Future<std::vector<KeyRange>> getCommitLockedUserRanges(Database cx, KeyRa
 	return lockedRanges;
 }
 
-ACTOR Future<Void> lockCommitUserRange(Database cx, KeyRange range) {
+// Not transactional
+ACTOR Future<Void> lockCommitUserRange(Database cx, KeyRange range, std::string ownerUniqueID) {
 	if (range.end > normalKeys.end) {
 		throw range_lock_failed();
 	}
+	state Key beginKey = range.begin;
+	state Key endKey = range.end;
 	loop {
 		state Transaction tr(cx);
+		state KeyRange rangeToLock = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.addWriteConflictRange(normalKeys);
-			wait(krmSetRangeCoalescing(
-			    &tr,
-			    rangeLockPrefix,
-			    range,
-			    normalKeys,
-			    rangeLockStateValue(RangeLockState(RangeLockType::RejectCommits, RangeLockOwner("test", "test")))));
-			wait(tr.commit());
-			break;
+
+			// Step 1: Check owner
+			state Optional<Value> ownerValue = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
+			if (!ownerValue.present()) {
+				throw range_lock_failed();
+			}
+			state RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
+			ASSERT(owner.isValid());
+
+			// Step 2: Get all locks on the range and add the new lock
+			state RangeResult result = wait(krmGetRanges(&tr, rangeLockPrefix, rangeToLock));
+			state int i = 0;
+			for (; i < result.size() - 1; i++) {
+				KeyRange lockRange = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
+				RangeLockSetState rangeLockSetState;
+				if (!result[i].value.empty()) {
+					rangeLockSetState = decodeRangeLockSetState(result[i].value);
+				}
+				rangeLockSetState.insert(RangeLockState(RangeLockType::RejectCommits, owner.getUniqueId()));
+				ASSERT(rangeLockSetState.isValid());
+				wait(krmSetRangeCoalescing(
+				    &tr, rangeLockPrefix, lockRange, normalKeys, rangeLockSetStateValue(rangeLockSetState)));
+				wait(tr.commit());
+				beginKey = result[i + 1].key;
+				break;
+			}
+
+			// Step 3: Exit if all ranges have been locked
+			if (beginKey == range.end) {
+				break;
+			}
+
+			wait(delay(0.1));
+
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -3080,18 +3137,54 @@ ACTOR Future<Void> lockCommitUserRange(Database cx, KeyRange range) {
 	return Void();
 }
 
-ACTOR Future<Void> unlockCommitUserRange(Database cx, KeyRange range) {
+// Not transactional
+ACTOR Future<Void> unlockCommitUserRange(Database cx, KeyRange range, std::string ownerUniqueID) {
 	if (range.end > normalKeys.end) {
 		throw range_lock_failed();
 	}
+	state Key beginKey = range.begin;
+	state Key endKey = range.end;
 	loop {
 		state Transaction tr(cx);
+		state KeyRange rangeToLock = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(krmSetRangeCoalescing(&tr, rangeLockPrefix, range, normalKeys, StringRef()));
-			wait(tr.commit());
-			break;
+
+			// Step 1: Check owner
+			state Optional<Value> ownerValue = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
+			if (!ownerValue.present()) {
+				throw range_lock_failed();
+			}
+			state RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
+			ASSERT(owner.isValid());
+
+			// Step 2: Get all locks on the range and remove the lock
+			state RangeResult result = wait(krmGetRanges(&tr, rangeLockPrefix, rangeToLock));
+			state int i = 0;
+			for (; i < result.size() - 1; i++) {
+				KeyRange lockRange = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
+				if (result[i].value.empty()) {
+					beginKey = result[i + 1].key;
+					continue;
+				}
+				RangeLockSetState rangeLockSetState = decodeRangeLockSetState(result[i].value);
+				rangeLockSetState.remove(RangeLockState(RangeLockType::RejectCommits, owner.getUniqueId()));
+				ASSERT(rangeLockSetState.isValid());
+				wait(krmSetRangeCoalescing(
+				    &tr, rangeLockPrefix, lockRange, normalKeys, rangeLockSetStateValue(rangeLockSetState)));
+				wait(tr.commit());
+				beginKey = result[i + 1].key;
+				break;
+			}
+
+			// Step 3: Exit if all ranges have been unlocked
+			if (beginKey == range.end) {
+				break;
+			}
+
+			wait(delay(0.1));
+
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}

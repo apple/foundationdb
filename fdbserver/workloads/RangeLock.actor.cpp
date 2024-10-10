@@ -35,6 +35,7 @@ struct RangeLocking : TestWorkload {
 	bool pass;
 	bool quitExit = false;
 	bool verboseLogging = false; // enable to log range lock and commit history
+	std::string rangeLockOwnerName = "RangeLockingTest";
 
 	// This workload is not compatible with RandomRangeLock workload because they will race in locked range
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
@@ -85,7 +86,9 @@ struct RangeLocking : TestWorkload {
 		lockedRangeMap.insert(allKeys, false);
 	}
 
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> setup(Database const& cx) override {
+		return registerRangeLockOwner(cx, rangeLockOwnerName, rangeLockOwnerName);
+	}
 
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 
@@ -161,7 +164,7 @@ struct RangeLocking : TestWorkload {
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(!value.present());
 
-		wait(lockCommitUserRange(cx, rangeLock));
+		wait(lockCommitUserRange(cx, rangeLock, self->rangeLockOwnerName));
 		TraceEvent("RangeLockWorkLoadLockRange").detail("Range", rangeLock);
 
 		wait(store(lockedRanges, getCommitLockedUserRanges(cx, normalKeys)));
@@ -186,7 +189,7 @@ struct RangeLocking : TestWorkload {
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(!value.present());
 
-		wait(unlockCommitUserRange(cx, rangeLock));
+		wait(unlockCommitUserRange(cx, rangeLock, self->rangeLockOwnerName));
 		TraceEvent("RangeLockWorkLoadUnlockRange").detail("Range", rangeLock);
 
 		lockedRanges.clear();
@@ -270,12 +273,12 @@ struct RangeLocking : TestWorkload {
 			state KeyRange range = self->getRandomRange();
 			state bool lock = deterministicRandom()->coinflip();
 			if (lock) {
-				wait(lockCommitUserRange(cx, range));
+				wait(lockCommitUserRange(cx, range, self->rangeLockOwnerName));
 				if (self->verboseLogging) {
 					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Lock").detail("Range", range);
 				}
 			} else {
-				wait(unlockCommitUserRange(cx, range));
+				wait(unlockCommitUserRange(cx, range, self->rangeLockOwnerName));
 				if (self->verboseLogging) {
 					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Unlock").detail("Range", range);
 				}
@@ -468,6 +471,8 @@ struct RangeLocking : TestWorkload {
 	ACTOR Future<Void> complexTest(RangeLocking* self, Database cx) {
 		state int iterationCount = 100;
 		state int iteration = 0;
+		state std::string rangeLockOwnerName = "RangeLockingSimpleTest";
+		wait(registerRangeLockOwner(cx, rangeLockOwnerName, rangeLockOwnerName));
 		loop {
 			if (iteration > iterationCount || self->quitExit) {
 				break;
@@ -505,7 +510,8 @@ struct RangeLocking : TestWorkload {
 			    .detail("Phase", "CheckDBCorrectness");
 			iteration++;
 		}
-		wait(unlockCommitUserRange(cx, normalKeys));
+		wait(unlockCommitUserRange(cx, normalKeys, self->rangeLockOwnerName));
+		TraceEvent("RangeLockWorkloadProgress").detail("Phase", "End");
 		return Void();
 	}
 

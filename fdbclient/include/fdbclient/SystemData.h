@@ -530,12 +530,13 @@ BulkLoadState decodeBulkLoadState(const ValueRef& value);
 
 extern const KeyRangeRef rangeLockKeys;
 extern const KeyRef rangeLockPrefix;
-const Value rangeLockStateValue(const RangeLockState& rangeLockState);
-RangeLockState decodeRangeLockState(const ValueRef& value);
+const Value rangeLockSetStateValue(const RangeLockSetState& rangeLockSetState);
+RangeLockSetState decodeRangeLockSetState(const ValueRef& value);
 
 extern const KeyRangeRef rangeLockOwnerKeys;
 extern const KeyRef rangeLockOwnerPrefix;
 const Key rangeLockOwnerKeyFor(const std::string& ownerUniqueID);
+const std::string rangeLockOwnerKey(const KeyRef& key);
 const Value rangeLockOwnerValue(const RangeLockOwner& rangeLockOwner);
 RangeLockOwner decodeRangeLockOwner(const ValueRef& value);
 

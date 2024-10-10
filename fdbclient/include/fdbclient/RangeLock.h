@@ -79,12 +79,12 @@ struct RangeLockState {
 public:
 	RangeLockState() = default;
 
-	RangeLockState(RangeLockType type, const RangeLockOwner& owner)
-	  : lockType(type), owner(owner), creationTime(now()) {
+	RangeLockState(RangeLockType type, const std::string& ownerUniqueId)
+	  : lockType(type), ownerUniqueId(ownerUniqueId) {
 		ASSERT(isValid());
 	}
 
-	bool isValid() const { return lockType != RangeLockType::Invalid && owner.isValid(); }
+	bool isValid() const { return lockType != RangeLockType::Invalid && !ownerUniqueId.empty(); }
 
 	std::string rangeLockTypeString() const {
 		if (lockType == RangeLockType::Invalid) {
@@ -97,25 +97,25 @@ public:
 	}
 
 	std::string toString() const {
-		return "RangeLockState: [lockType]: " + rangeLockTypeString() + " [Owner]: " + owner.toString() +
-		       " [CreationTime]: " + std::to_string(creationTime);
+		return "RangeLockState: [lockType]: " + rangeLockTypeString() + " [Owner]: " + ownerUniqueId;
 	}
 
 	bool isLockedFor(RangeLockType inputLockType) const { return lockType == inputLockType; }
 
-	bool operator==(RangeLockState const& r) const { return lockType == r.lockType && owner == r.owner; }
+	bool operator==(RangeLockState const& r) const {
+		return lockType == r.lockType && ownerUniqueId == r.ownerUniqueId;
+	}
 
-	std::string getOwnerUniqueId() const { return owner.getUniqueId(); }
+	std::string getLockUniqueString() const { return ownerUniqueId + rangeLockTypeString(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, owner, lockType, creationTime);
+		serializer(ar, ownerUniqueId, lockType);
 	}
 
 private:
-	RangeLockOwner owner;
+	std::string ownerUniqueId;
 	RangeLockType lockType;
-	double creationTime; // Indicate when the data structure is created
 };
 
 // Persisted state on a range. A range can have multiple locks distinguishing by owner and lockType.
@@ -152,11 +152,17 @@ public:
 
 	void insert(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());
-		locks[inputLock.getOwnerUniqueId()] = inputLock;
+		locks[inputLock.getLockUniqueString()] = inputLock;
 		return;
 	}
 
-	bool isLockedFor(RangeLockType lockType) {
+	void remove(const RangeLockState& inputLock) {
+		ASSERT(inputLock.isValid());
+		locks.erase(inputLock.getLockUniqueString());
+		return;
+	}
+
+	bool isLockedFor(RangeLockType lockType) const {
 		for (const auto& [owner, lock] : locks) {
 			ASSERT(lock.isValid());
 			if (lock.isLockedFor(lockType)) {

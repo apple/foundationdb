@@ -200,24 +200,24 @@ struct ExpectedIdempotencyIdCountForKey {
 
 struct RangeLock {
 public:
-	RangeLock() { coreMap.insert(allKeys, RangeLockState()); }
+	RangeLock() { coreMap.insert(allKeys, RangeLockSetState()); }
 
 	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
 
 	void initKeyPoint(const Key& key, const Value& value) {
 		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Init").detail("Key", key);
 		if (!value.empty()) {
-			coreMap.rawInsert(key, decodeRangeLockState(value));
+			coreMap.rawInsert(key, decodeRangeLockSetState(value));
 		} else {
-			coreMap.rawInsert(key, RangeLockState());
+			coreMap.rawInsert(key, RangeLockSetState());
 		}
 		return;
 	}
 
-	void setPendingRequest(const Key& startKey, const RangeLockState& lockState) {
+	void setPendingRequest(const Key& startKey, const RangeLockSetState& lockSetState) {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		ASSERT(!pendingRequest());
-		currentRangeLockStartKey = std::make_pair(startKey, lockState);
+		currentRangeLockStartKey = std::make_pair(startKey, lockSetState);
 		return;
 	}
 
@@ -227,12 +227,12 @@ public:
 		ASSERT(endKey <= normalKeys.end);
 		ASSERT(currentRangeLockStartKey.get().first < endKey);
 		KeyRange lockRange = Standalone(KeyRangeRef(currentRangeLockStartKey.get().first, endKey));
-		RangeLockState lockState = currentRangeLockStartKey.get().second;
+		RangeLockSetState lockSetState = currentRangeLockStartKey.get().second;
 		/* TraceEvent(SevDebug, "RangeLockRangeOps")
 		    .detail("Ops", "Update")
 		    .detail("Range", lockRange)
-		    .detail("Status", lockState.toString()); */
-		coreMap.insert(lockRange, lockState);
+		    .detail("Status", lockSetState.toString()); */
+		coreMap.insert(lockRange, lockSetState);
 		coreMap.coalesce(allKeys);
 		currentRangeLockStartKey.reset();
 		return;
@@ -253,8 +253,9 @@ public:
 	}
 
 private:
-	Optional<std::pair<Key, RangeLockState>> currentRangeLockStartKey = Optional<std::pair<Key, RangeLockState>>();
-	KeyRangeMap<RangeLockState> coreMap;
+	Optional<std::pair<Key, RangeLockSetState>> currentRangeLockStartKey =
+	    Optional<std::pair<Key, RangeLockSetState>>();
+	KeyRangeMap<RangeLockSetState> coreMap;
 };
 
 struct ProxyCommitData {

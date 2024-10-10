@@ -231,9 +231,9 @@ private:
 			rangeLock->consumePendingRequest(endKey);
 		} else {
 			// The first mutation
-			RangeLockState lockState = m.param2.empty() ? RangeLockState() : decodeRangeLockState(m.param2);
+			RangeLockSetState lockSetState = m.param2.empty() ? RangeLockSetState() : decodeRangeLockSetState(m.param2);
 			Key startKey = m.param1.removePrefix(rangeLockPrefix);
-			rangeLock->setPendingRequest(startKey, lockState);
+			rangeLock->setPendingRequest(startKey, lockSetState);
 		}
 		txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		return;

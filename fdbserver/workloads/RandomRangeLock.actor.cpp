@@ -20,8 +20,10 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/RangeLock.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -35,6 +37,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	double maxStartDelay = 300.0;
 	double testDuration = deterministicRandom()->random01() * maxLockDuration;
 	double testStartDelay = deterministicRandom()->random01() * maxStartDelay;
+	std::string rangeLockOwnerName = "RandomRangeLockTest";
 
 	RandomRangeLockWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {
 		enabled = (clientId == 0) && g_network->isSimulated();
@@ -46,7 +49,9 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		maxStartDelay = getOption(options, "maxStartDelay"_sr, maxStartDelay);
 	}
 
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> setup(Database const& cx) override {
+		return registerRangeLockOwner(cx, rangeLockOwnerName, rangeLockOwnerName);
+	}
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -80,7 +85,10 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			state KeyRange range = self->getRandomRange();
 			TraceEvent(SevWarnAlways, "InjectRangeLockSubmit").detail("Range", range);
 			try {
-				wait(lockCommitUserRange(cx, range));
+				Optional<RangeLockOwner> owner = wait(getRangeLockOwner(cx, self->rangeLockOwnerName));
+				ASSERT(owner.present());
+				ASSERT(owner.get().getUniqueId() == self->rangeLockOwnerName);
+				wait(lockCommitUserRange(cx, range, self->rangeLockOwnerName));
 				TraceEvent(SevWarnAlways, "InjectRangeLocked")
 				    .detail("Range", range)
 				    .detail("LockTime", self->testDuration);
@@ -94,7 +102,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			}
 			wait(delay(self->testDuration));
 			try {
-				wait(unlockCommitUserRange(cx, range));
+				wait(unlockCommitUserRange(cx, range, self->rangeLockOwnerName));
 				TraceEvent(SevWarnAlways, "InjectRangeUnlocked").detail("Range", range);
 				ASSERT(range.end <= normalKeys.end);
 			} catch (Error& e) {

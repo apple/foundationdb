@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "fdbclient/RangeLock.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_MANAGEMENT_API_ACTOR_G_H)
 #define FDBCLIENT_MANAGEMENT_API_ACTOR_G_H
 #include "fdbclient/ManagementAPI.actor.g.h"
@@ -197,13 +198,15 @@ ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std
 ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId);
 
 // Get all registered rangeLock owner
-ACTOR Future<std::vector<RangeLockOwner>> getRangeOwners(Database cx);
+ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
+
+ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId);
 
 // Lock a user range (the input range must be within normalKeys)
-ACTOR Future<Void> lockCommitUserRange(Database cx, KeyRange range);
+ACTOR Future<Void> lockCommitUserRange(Database cx, KeyRange range, std::string ownerUniqueID);
 
 // Unlock a user range (the input range must be within normalKeys)
-ACTOR Future<Void> unlockCommitUserRange(Database cx, KeyRange range);
+ACTOR Future<Void> unlockCommitUserRange(Database cx, KeyRange range, std::string ownerUniqueID);
 
 // Get locked ranges within the input range (the input range must be within normalKeys)
 ACTOR Future<std::vector<KeyRange>> getCommitLockedUserRanges(Database cx, KeyRange range);
