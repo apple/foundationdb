@@ -1867,7 +1867,12 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		ASSERT(storageEngineAvailable.size() > 0);
 		std::vector<SimulationStorageEngine> storageEngineCandidates;
 		for (const auto& storageEngine : storageEngineAvailable) {
-			if (storageEngine == SimulationStorageEngine::SHARDED_ROCKSDB) {
+			if (storageEngine == SimulationStorageEngine::MEMORY) {
+				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_MEMORY_SELECTED_SIM; i++) {
+					storageEngineCandidates.push_back(storageEngine);
+					// Adjust the chance that Memory is selected
+				}
+			} else if (storageEngine == SimulationStorageEngine::SHARDED_ROCKSDB) {
 				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_SHARDED_ROCKSDB_ENGINE_SELECTED_SIM; i++) {
 					storageEngineCandidates.push_back(storageEngine);
 					// Adjust the chance that ShardedRocksDB is selected
