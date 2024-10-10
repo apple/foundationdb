@@ -199,6 +199,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
   add_fdb_test(TEST_FILES fast/RandomSelector.toml)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
+  add_fdb_test(TEST_FILES fast/RangeLocking.toml)
+  add_fdb_test(TEST_FILES fast/RangeLockCycle.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)
   add_fdb_test(TEST_FILES fast/RESTUnit.toml IGNORE)

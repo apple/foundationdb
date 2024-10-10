@@ -2,6 +2,9 @@
 testClass = "ChangeFeeds"
 allowDefaultTenant = false
 
+[[knobs]]
+enable_commit_user_range_lock = false # FIXME: re-enable after change feed is compatible with range lock
+
 [[test]]
 testTitle = 'ChangeFeedOperationsTest'
 
