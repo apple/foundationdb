@@ -533,6 +533,12 @@ extern const KeyRef rangeLockPrefix;
 const Value rangeLockStateValue(const RangeLockState& rangeLockState);
 RangeLockState decodeRangeLockState(const ValueRef& value);
 
+extern const KeyRangeRef rangeLockOwnerKeys;
+extern const KeyRef rangeLockOwnerPrefix;
+const Key rangeLockOwnerKeyFor(const std::string& ownerUniqueID);
+const Value rangeLockOwnerValue(const RangeLockOwner& rangeLockOwner);
+RangeLockOwner decodeRangeLockOwner(const ValueRef& value);
+
 // Keys to view and control tag throttling
 extern const KeyRangeRef tagThrottleKeys;
 extern const KeyRef tagThrottleKeysPrefix;

@@ -1225,6 +1225,27 @@ RangeLockState decodeRangeLockState(const ValueRef& value) {
 	return rangeLockState;
 }
 
+const KeyRangeRef rangeLockOwnerKeys = KeyRangeRef("\xff/rangeLockOwner/"_sr, "\xff/rangeLockOwner0"_sr);
+const KeyRef rangeLockOwnerPrefix = rangeLockOwnerKeys.begin;
+
+const Key rangeLockOwnerKeyFor(const std::string& ownerUniqueID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(rangeLockOwnerPrefix);
+	wr << ownerUniqueID;
+	return wr.toValue();
+}
+
+const Value rangeLockOwnerValue(const RangeLockOwner& rangeLockOwner) {
+	return ObjectWriter::toValue(rangeLockOwner, IncludeVersion());
+}
+
+RangeLockOwner decodeRangeLockOwner(const ValueRef& value) {
+	RangeLockOwner rangeLockOwner;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(rangeLockOwner);
+	return rangeLockOwner;
+}
+
 // Keys to view and control tag throttling
 const KeyRangeRef tagThrottleKeys = KeyRangeRef("\xff\x02/throttledTags/tag/"_sr, "\xff\x02/throttledTags/tag0"_sr);
 const KeyRef tagThrottleKeysPrefix = tagThrottleKeys.begin;

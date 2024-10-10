@@ -189,6 +189,16 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
                                             UID taskId,
                                             std::vector<BulkLoadPhase> phases);
 
+// Persist a rangeLock owner to database metadata
+// A range can only be locked by a registered owner
+ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description);
+
+// Remove an owner form the database metadata
+ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId);
+
+// Get all registered rangeLock owner
+ACTOR Future<std::vector<RangeLockOwner>> getRangeOwners(Database cx);
+
 // Lock a user range (the input range must be within normalKeys)
 ACTOR Future<Void> lockCommitUserRange(Database cx, KeyRange range);
 

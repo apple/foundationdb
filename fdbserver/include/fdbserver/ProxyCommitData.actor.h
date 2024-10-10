@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "fdbclient/RangeLock.h"
 #include "fdbclient/SystemData.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
@@ -237,13 +238,13 @@ public:
 		return;
 	}
 
-	bool locked(const KeyRange& range) const {
+	bool shouldReject(const KeyRange& range) const {
 		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
 		if (range.end >= normalKeys.end) {
 			return false;
 		}
 		for (auto lockRange : coreMap.intersectingRanges(range)) {
-			if (lockRange.value().isValid()) {
+			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::RejectCommits)) {
 				return true;
 			}
 		}
