@@ -300,6 +300,8 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 		prev_tags.clear();
 		if (logSystem->hasRemoteLogs()) {
 			prev_tags.push_back(logSystem->getRandomRouterTag());
+		} else if (changedToHA) {
+			prev_tags.emplace_back(-2, 0);
 		}
 		for (auto& tag : next_message_tags) {
 			prev_tags.push_back(tag);
