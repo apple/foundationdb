@@ -2996,8 +2996,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 
 				populateMetaData(&res, pMetadata);
-				res.creationTs = now();
-				res.expirationTs = res.creationTs + SERVER_KNOBS->ROCKSDB_DM_CHECKPOINT_TTL;
+				res.createTs = now();
+				res.expireTs = res.createTs + SERVER_KNOBS->ROCKSDB_DM_CHECKPOINT_TTL;
 				rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
 				delete pMetadata;
 				if (!metadata.files.empty() && SERVER_KNOBS->ROCKSDB_ENABLE_CHECKPOINT_VALIDATION) {

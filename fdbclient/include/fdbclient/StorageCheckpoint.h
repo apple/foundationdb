@@ -65,8 +65,8 @@ struct CheckpointMetaData {
 
 	std::string dir;
 	uint64_t bytes;
-	int64_t creationTs;
-	int64_t expirationTs;
+	int64_t createTs;
+	int64_t expireTs;
 
 	CheckpointMetaData() = default;
 	CheckpointMetaData(const std::vector<KeyRange>& ranges,
@@ -129,7 +129,7 @@ struct CheckpointMetaData {
 		                  " [ID]: " + checkpointID.toString() + " [State]: " + std::to_string(static_cast<int>(state)) +
 		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "") +
 		                  (bytesSampleFile.present() ? " [bytesSampleFile]: " + bytesSampleFile.get() : "") +
-		                  " [Bytes]: " + std::to_string(bytes) + " [CreationTimestamp]: " + std::to_string(creationTs);
+		                  " [Bytes]: " + std::to_string(bytes) + " [CreationTimestamp]: " + std::to_string(createTs);
 		;
 		return res;
 	}
@@ -148,7 +148,7 @@ struct CheckpointMetaData {
 		           bytesSampleFile,
 		           dir,
 		           bytes,
-		           creationTs);
+		           createTs);
 	}
 };
 
