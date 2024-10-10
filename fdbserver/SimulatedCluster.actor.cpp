@@ -1868,20 +1868,24 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		std::vector<SimulationStorageEngine> storageEngineCandidates;
 		for (const auto& storageEngine : storageEngineAvailable) {
 			if (storageEngine == SimulationStorageEngine::MEMORY) {
-				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_MEMORY_ENGINE_SELECTED_SIM; i++) {
-					storageEngineCandidates.push_back(storageEngine);
-					// Adjust the chance that Memory is selected
-				}
+				// Adjust the chance that Memory is selected
+				storageEngineCandidates.insert(
+				    storageEngineCandidates.end(), SERVER_KNOBS->PROBABILITY_FACTOR_MEMORY_SELECTED_SIM, storageEngine);
+			} else if (storageEngine == SimulationStorageEngine::SHARDED_ROCKSDB) {
+				// Adjust the chance that ShardedRocksDB is selected
+				storageEngineCandidates.insert(storageEngineCandidates.end(),
+				                               SERVER_KNOBS->PROBABILITY_FACTOR_SHARDED_ROCKSDB_ENGINE_SELECTED_SIM,
+				                               storageEngine);
 			} else if (storageEngine == SimulationStorageEngine::SSD) {
-				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM; i++) {
-					storageEngineCandidates.push_back(storageEngine);
-					// Adjust the chance that SQLite is selected
-				}
+				// Adjust the chance that SQLite is selected
+				storageEngineCandidates.insert(storageEngineCandidates.end(),
+				                               SERVER_KNOBS->PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM,
+				                               storageEngine);
 			} else if (storageEngine == SimulationStorageEngine::ROCKSDB) {
-				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM; i++) {
-					storageEngineCandidates.push_back(storageEngine);
-					// Adjust the chance that RocksDB is selected
-				}
+				// Adjust the chance that RocksDB is selected
+				storageEngineCandidates.insert(storageEngineCandidates.end(),
+				                               SERVER_KNOBS->PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM,
+				                               storageEngine);
 			} else {
 				storageEngineCandidates.push_back(storageEngine);
 			}
@@ -2902,11 +2906,11 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	if (std::string_view(testFile).find("Encrypt") != std::string_view::npos) {
+	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
+	if (std::string_view(testFile).find("BlobRestore") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
