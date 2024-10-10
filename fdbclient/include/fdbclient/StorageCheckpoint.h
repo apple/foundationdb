@@ -65,7 +65,8 @@ struct CheckpointMetaData {
 
 	std::string dir;
 	uint64_t bytes;
-	double creationTime;
+	int64_t creationTs;
+	int64_t expirationTs;
 
 	CheckpointMetaData() = default;
 	CheckpointMetaData(const std::vector<KeyRange>& ranges,
@@ -74,14 +75,14 @@ struct CheckpointMetaData {
 	                   UID const& checkpointID,
 	                   UID const& actionId)
 	  : version(invalidVersion), ranges(ranges), format(format), src(src), checkpointID(checkpointID), state(Pending),
-	    actionId(actionId) {}
+	    actionId(actionId), bytes(0) {}
 	CheckpointMetaData(const std::vector<KeyRange>& ranges,
 	                   Version version,
 	                   CheckpointFormat format,
 	                   UID const& checkpointID)
-	  : version(version), ranges(ranges), format(format), checkpointID(checkpointID), state(Pending) {}
+	  : version(version), ranges(ranges), format(format), checkpointID(checkpointID), state(Pending), bytes(0) {}
 	CheckpointMetaData(Version version, CheckpointFormat format, UID checkpointID)
-	  : version(version), format(format), checkpointID(checkpointID), state(Pending) {}
+	  : version(version), format(format), checkpointID(checkpointID), state(Pending), bytes(0) {}
 
 	CheckpointState getState() const { return static_cast<CheckpointState>(state); }
 
@@ -128,8 +129,7 @@ struct CheckpointMetaData {
 		                  " [ID]: " + checkpointID.toString() + " [State]: " + std::to_string(static_cast<int>(state)) +
 		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "") +
 		                  (bytesSampleFile.present() ? " [bytesSampleFile]: " + bytesSampleFile.get() : "") +
-						  "Bytes: " + std::to_string(bytes) +
-						  "CreationTime: " + std::to_string(creationTime);
+		                  " [Bytes]: " + std::to_string(bytes) + " [CreationTimestamp]: " + std::to_string(creationTs);
 		;
 		return res;
 	}
@@ -147,8 +147,8 @@ struct CheckpointMetaData {
 		           actionId,
 		           bytesSampleFile,
 		           dir,
-				   bytes,
-				   creationTime);
+		           bytes,
+		           creationTs);
 	}
 };
 
