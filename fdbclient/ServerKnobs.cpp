@@ -565,7 +565,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
  	init( ROCKSDB_CHECKPOINT_REPLAY_MARKER,                    false );
  	init( ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE,               true );
  	init( ROCKSDB_ENABLE_CHECKPOINT_VALIDATION,                false ); if ( randomize && BUGGIFY ) ROCKSDB_ENABLE_CHECKPOINT_VALIDATION = deterministicRandom()->coinflip();
- 	init( ROCKSDB_DM_CHECKPOINT_TTL,                		 60 * 60 ); // if ( randomize && BUGGIFY ) ROCKSDB_ENABLE_CHECKPOINT_VALIDATION = deterministicRandom()->coinflip();
+ 	init( ROCKSDB_DM_CHECKPOINT_TTL,                		 60 * 60 );  if ( randomize && BUGGIFY )  ROCKSDB_DM_CHECKPOINT_TTL = 300;
 	init( ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT,                 true );
 	init( ROCKSDB_COMPACTION_PRI,                                  3 ); // kMinOverlappingRatio, RocksDB default. 
 	init( ROCKSDB_WAL_RECOVERY_MODE,                               2 ); // kPointInTimeRecovery, RocksDB default.
