@@ -1867,10 +1867,10 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		ASSERT(storageEngineAvailable.size() > 0);
 		std::vector<SimulationStorageEngine> storageEngineCandidates;
 		for (const auto& storageEngine : storageEngineAvailable) {
-			if (storageEngine == SimulationStorageEngine::MEMORY) {
-				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_MEMORY_ENGINE_SELECTED_SIM; i++) {
+			if (storageEngine == SimulationStorageEngine::SHARDED_ROCKSDB) {
+				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_SHARDED_ROCKSDB_ENGINE_SELECTED_SIM; i++) {
 					storageEngineCandidates.push_back(storageEngine);
-					// Adjust the chance that Memory is selected
+					// Adjust the chance that ShardedRocksDB is selected
 				}
 			} else if (storageEngine == SimulationStorageEngine::SSD) {
 				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM; i++) {
@@ -2902,11 +2902,11 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	if (std::string_view(testFile).find("Encrypt") != std::string_view::npos) {
+	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
+	if (std::string_view(testFile).find("BlobRestore") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
