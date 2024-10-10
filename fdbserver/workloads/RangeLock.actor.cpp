@@ -476,8 +476,15 @@ struct RangeLocking : TestWorkload {
 				wait(self->updateLockMapWithRandomOperation(self, cx));
 				self->updateInMemoryLockStatus(self);
 			}
+			TraceEvent("RangeLockWorkloadProgress")
+			    .detail("Iteration", iteration)
+			    .detail("IterationCount", iterationCount)
+			    .detail("Phase", "UpdateLock");
 			wait(self->checkLockCorrectness(self, cx));
-
+			TraceEvent("RangeLockWorkloadProgress")
+			    .detail("Iteration", iteration)
+			    .detail("IterationCount", iterationCount)
+			    .detail("Phase", "CheckLockCorrectness");
 			if (deterministicRandom()->coinflip()) {
 				try {
 					wait(self->updateDBWithRandomOperations(self, cx));
@@ -487,7 +494,15 @@ struct RangeLocking : TestWorkload {
 					self->kvOperations.clear();
 				}
 			}
+			TraceEvent("RangeLockWorkloadProgress")
+			    .detail("Iteration", iteration)
+			    .detail("IterationCount", iterationCount)
+			    .detail("Phase", "UpdateDB");
 			wait(self->checkKVCorrectness(self, cx));
+			TraceEvent("RangeLockWorkloadProgress")
+			    .detail("Iteration", iteration)
+			    .detail("IterationCount", iterationCount)
+			    .detail("Phase", "CheckDBCorrectness");
 			iteration++;
 		}
 		wait(unlockCommitUserRange(cx, normalKeys));

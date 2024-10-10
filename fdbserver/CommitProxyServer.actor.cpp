@@ -2030,8 +2030,8 @@ void rejectMutationsForRangeLock(CommitBatchContext* self) {
 			} else if (m.type == MutationRef::ClearRange) {
 				rangeToCheck = KeyRangeRef(m.param1, m.param2);
 			}
-			bool isLocked = pProxyCommitData->rangeLock->locked(rangeToCheck);
-			if (isLocked) {
+			bool shouldReject = pProxyCommitData->rangeLock->shouldReject(rangeToCheck);
+			if (shouldReject) {
 				self->committed[i] = ConflictBatch::TransactionLockReject;
 				trs[i].reply.sendError(transaction_rejected_range_locked());
 				transactionRejected = true;
