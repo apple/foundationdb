@@ -2,6 +2,17 @@
 Release Notes
 #############
 
+7.3.53
+======
+* Same as 7.3.52 release with AVX enabled.
+
+7.3.52
+======
+* Improved Sharded Rocksdb to use a single iterator pool for all physical shards. `(PR #11694) <https://github.com/apple/foundationdb/pull/11694>`_
+* Changed the default values of various Sharded Rocksdb related knobs. `(PR #11706) <https://github.com/apple/foundationdb/pull/11706>`_
+* Removed CC_PAUSE_HEALTH_MONITOR knob. `(PR #11701) <https://github.com/apple/foundationdb/pull/11701>`_
+* Addressed protocol incompatibility issues between 7.3 patch releases. `(PR #11697) <https://github.com/apple/foundationdb/pull/11697>`_, `(PR #11705) <https://github.com/apple/foundationdb/pull/11705>`_
+
 7.3.51
 ======
 * Same as 7.3.50 release with AVX enabled.
