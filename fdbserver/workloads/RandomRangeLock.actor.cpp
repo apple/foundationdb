@@ -49,9 +49,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		maxStartDelay = getOption(options, "maxStartDelay"_sr, maxStartDelay);
 	}
 
-	Future<Void> setup(Database const& cx) override {
-		return registerRangeLockOwner(cx, rangeLockOwnerName, rangeLockOwnerName);
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -81,6 +79,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 
 	ACTOR Future<Void> _start(Database cx, RandomRangeLockWorkload* self) {
 		if (self->enabled) {
+			wait(registerRangeLockOwner(cx, self->rangeLockOwnerName, self->rangeLockOwnerName));
 			wait(delay(self->testStartDelay));
 			state KeyRange range = self->getRandomRange();
 			TraceEvent(SevWarnAlways, "InjectRangeLockSubmit").detail("Range", range);

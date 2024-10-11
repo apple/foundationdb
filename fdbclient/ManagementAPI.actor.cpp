@@ -2913,6 +2913,7 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
                                             UID taskId,
                                             std::vector<BulkLoadPhase> phases) {
 	state BulkLoadState bulkLoadState;
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	RangeResult result = wait(krmGetRanges(tr, bulkLoadPrefix, range));
 	if (result.size() > 2) {
 		throw bulkload_task_outdated();
@@ -2970,7 +2971,6 @@ ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			RangeLockOwner owner(uniqueId, description);
-			Key key = rangeLockOwnerKeyFor(uniqueId);
 			tr.set(rangeLockOwnerKeyFor(uniqueId), rangeLockOwnerValue(owner));
 			wait(tr.commit());
 			return Void();
@@ -3004,8 +3004,8 @@ ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::strin
 		state Transaction tr(cx);
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			Key key = rangeLockOwnerKeyFor(uniqueId);
-			Optional<Value> res = wait(tr.get(key));
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(uniqueId)));
 			if (!res.present()) {
 				return Optional<RangeLockOwner>();
 			}
@@ -3027,6 +3027,7 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult result = wait(tr.getRange(rangeToRead, CLIENT_KNOBS->TOO_MANY));
 			for (const auto& kv : result) {
 				RangeLockOwner owner = decodeRangeLockOwner(kv.value);
@@ -3059,6 +3060,7 @@ ACTOR Future<std::vector<KeyRange>> getCommitLockedUserRanges(Database cx, KeyRa
 		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult result = wait(krmGetRanges(&tr, rangeLockPrefix, rangeToRead));
 			for (int i = 0; i < result.size() - 1; i++) {
 				if (result[i].value.empty()) {
