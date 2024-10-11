@@ -2966,8 +2966,8 @@ ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std
 		throw range_lock_failed();
 	}
 	loop {
+		state Transaction tr(cx);
 		try {
-			state Transaction tr(cx);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			RangeLockOwner owner(uniqueId, description);
@@ -2985,8 +2985,8 @@ ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId) {
 		throw range_lock_failed();
 	}
 	loop {
+		state Transaction tr(cx);
 		try {
-			state Transaction tr(cx);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.clear(rangeLockOwnerKeyFor(uniqueId));
