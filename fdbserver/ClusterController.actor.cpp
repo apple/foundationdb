@@ -34,6 +34,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
+#include "fdbrpc/Locality.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -92,6 +93,17 @@ ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* sel
 			wait(tr.onError(e));
 		}
 	}
+}
+
+bool ClusterControllerData::processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) {
+	// TODO: this was done to fix a test, but probably the test needs updating instead
+	// if (!this->addr_locality.contains(addr1) || !this->addr_locality.contains(addr2)) {
+	// 	return true;
+	// }
+
+	return this->addr_locality.contains(addr1) && this->addr_locality.contains(addr2) &&
+	       this->addr_locality[addr1].dcId().present() && this->addr_locality[addr2].dcId().present() &&
+	       this->addr_locality[addr1].dcId().get() == this->addr_locality[addr2].dcId().get();
 }
 
 bool ClusterControllerData::transactionSystemContainsDegradedServers() {
@@ -928,6 +940,14 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 				    .detail("Address", worker.address());
 				cluster->removedDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
 				cluster->id_worker.erase(worker.locality.processId());
+				// Currently, only CC_ONLY_CONSIDER_INTRA_DC_LATENCY feature relies on addr_locality mapping. In the
+				// future, if needed, we can populate the mapping unconditionally.
+				if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY) {
+					cluster->addr_locality.erase(worker.address());
+					if (worker.secondaryAddress().present()) {
+						cluster->addr_locality.erase(worker.secondaryAddress().get());
+					}
+				}
 				cluster->updateWorkerList.set(worker.locality.processId(), Optional<ProcessData>());
 				return Void();
 			}
@@ -1289,6 +1309,23 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		                                                     req.degraded,
 		                                                     req.recoveredDiskFiles,
 		                                                     req.issues);
+		// Currently, only CC_ONLY_CONSIDER_INTRA_DC_LATENCY feature relies on addr_locality mapping. In the future, if
+		// needed, we can populate the mapping unconditionally.
+		if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY) {
+			const bool addrDcChanged = self->addr_locality.contains(w.address()) &&
+			                           self->addr_locality[w.address()].dcId() != w.locality.dcId();
+			if (addrDcChanged) {
+				TraceEvent(SevWarn, "AddrDcChanged")
+				    .detail("Addr", w.address())
+				    .detail("ExistingLocality", self->addr_locality[w.address()].toString())
+				    .detail("NewLocality", w.locality.toString());
+			}
+			ASSERT_WE_THINK(!addrDcChanged);
+			self->addr_locality[w.address()] = w.locality;
+			if (w.secondaryAddress().present()) {
+				self->addr_locality[w.secondaryAddress().get()] = w.locality;
+			}
+		}
 		if (!self->masterProcessId.present() &&
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
@@ -3377,6 +3414,15 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 
 namespace {
 
+void addProcessesToSameDC(ClusterControllerData& self, const std::vector<NetworkAddress>&& processes) {
+	LocalityData locality;
+	locality.set(LocalityData::keyDcId, StringRef("1"));
+	for (const auto& process : processes) {
+		const bool added = self.addr_locality.insert({ process, locality }).second;
+		ASSERT(added);
+	}
+}
+
 // Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth`
 // based on `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
@@ -3549,6 +3595,10 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 	NetworkAddress badPeer2(IPAddress(0x03030303), 1);
 	NetworkAddress badPeer3(IPAddress(0x04040404), 1);
 	NetworkAddress badPeer4(IPAddress(0x05050505), 1);
+
+	if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY) {
+		addProcessesToSameDC(data, { worker, badPeer1, badPeer2, badPeer3, badPeer4 });
+	}
 
 	// Test that a reported degraded link should stay for sometime before being considered as a degraded
 	// link by cluster controller.
