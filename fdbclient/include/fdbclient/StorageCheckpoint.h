@@ -148,7 +148,8 @@ struct CheckpointMetaData {
 		           bytesSampleFile,
 		           dir,
 		           bytes,
-		           createTs);
+		           createTs,
+		           expireTs);
 	}
 };
 

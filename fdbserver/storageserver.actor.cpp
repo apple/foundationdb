@@ -1465,9 +1465,6 @@ public:
 		// Bytes fetched by fetchChangeFeed for data movements.
 		Counter feedBytesFetched;
 
-		// Local checkpoint files total size.
-		Counter checkpointBytes;
-
 		Counter sampledBytesCleared;
 		Counter atomicMutations, changeFeedMutations, changeFeedMutationsDurable;
 		Counter updateBatches, updateVersions;
@@ -1538,8 +1535,8 @@ public:
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
 		    bytesDurable("BytesDurable", cc), feedBytesFetched("FeedBytesFetched", cc),
-		    checkpointBytes("CheckpointBytes", cc), sampledBytesCleared("SampledBytesCleared", cc),
-		    atomicMutations("AtomicMutations", cc), changeFeedMutations("ChangeFeedMutations", cc),
+		    sampledBytesCleared("SampledBytesCleared", cc), atomicMutations("AtomicMutations", cc),
+		    changeFeedMutations("ChangeFeedMutations", cc),
 		    changeFeedMutationsDurable("ChangeFeedMutationsDurable", cc), updateBatches("UpdateBatches", cc),
 		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
 		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
@@ -2845,8 +2842,6 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 		// TODO: Handle errors more gracefully.
 		throw;
 	}
-
-	self->counters.checkpointBytes += -checkpoint.bytes;
 
 	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
 	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
@@ -11918,6 +11913,37 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	}
 }
 
+ACTOR Future<Void> checkpointLogger(StorageServer* data) {
+	state double wakeTime = now();
+	loop {
+		try {
+			const double ts = now();
+			std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
+			for (; it != self->checkpoints.end(); ++it) {
+				const CheckpointMetaData& md = it->second;
+				if (md.expireTs > ts) {
+					TraceEvent(SevWarnAlways, "ExpiredCheckpointNotCleanedUp", data->thisServerID)
+					    .detail("Checkpoint", md.toString());
+				}
+				wakeTime = std::min(wakeTime, md.expireTs);
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_retry) {
+				wait(delay(0.5));
+				failureCount++;
+				continue;
+			} else {
+				TraceEvent(SevDebug, "StorageCreateCheckpointMetaDataSstFileDumpedFailure", data->thisServerID)
+				    .detail("PendingCheckpoint", metaData.toString())
+				    .detail("Error", e.name());
+				throw e;
+			}
+		}
+	}
+
+	return Void;
+}
+
 ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
                                                               CheckpointMetaData metaData,
                                                               std::string bytesSampleFile) {
@@ -12069,7 +12095,6 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		checkpointResult.dir = checkpointDir;
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 
-		data->counters.checkpointBytes += checkpointResult.bytes;
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID)
 		    .detail("Checkpoint", checkpointResult.toString())
 		    .detail("BytesSampleFile", sampleByteSstFileCreated ? bytesSampleFile : "noFileCreated");
@@ -13086,7 +13111,6 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state int cLoc;
 	for (cLoc = 0; cLoc < checkpoints.size(); ++cLoc) {
 		CheckpointMetaData metaData = decodeCheckpointValue(checkpoints[cLoc].value);
-		data->counters.checkpointBytes += metaData.bytes;
 		data->checkpoints[metaData.checkpointID] = metaData;
 		if (metaData.getState() == CheckpointMetaData::Deleting) {
 			data->actors.add(deleteCheckpointQ(data, version, metaData));
