@@ -11915,9 +11915,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 ACTOR Future<Void> checkpointLogger(StorageServer* data) {
 	loop {
-		const double ts = now();
-		std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
-		for (; it != self->checkpoints.end(); ++it) {
+		state double ts = now();
+		state std::unordered_map<UID, CheckpointMetaData>::iterator it = data->checkpoints.begin();
+		for (; it != data->checkpoints.end(); ++it) {
 			const CheckpointMetaData& md = it->second;
 			if (md.expireTs > ts) {
 				TraceEvent(SevWarnAlways, "ExpiredCheckpointNotCleanedUp", data->thisServerID)
@@ -11929,8 +11929,6 @@ ACTOR Future<Void> checkpointLogger(StorageServer* data) {
 		}
 		wait(delayUntil(ts + SERVER_KNOBS->ROCKSDB_DM_CHECKPOINT_TTL / 4));
 	}
-
-	return Void;
 }
 
 ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
