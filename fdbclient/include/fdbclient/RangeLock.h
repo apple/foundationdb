@@ -60,6 +60,11 @@ public:
 
 	std::string getUniqueId() const { return uniqueId; }
 
+	void setDescription(std::string inputDescription) {
+		description = inputDescription;
+		return;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, uniqueId, description, logId, creationTime);

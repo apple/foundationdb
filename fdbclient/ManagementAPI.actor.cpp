@@ -2961,6 +2961,7 @@ ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID task
 	return Void();
 }
 
+// Persist a new owner if input uniqueId is not existing; Update description if input uniqueId exists
 ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description) {
 	if (uniqueId.empty() || description.empty()) {
 		throw range_lock_failed();
@@ -2970,7 +2971,15 @@ ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			RangeLockOwner owner(uniqueId, description);
+			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(uniqueId)));
+			RangeLockOwner owner;
+			if (res.present()) {
+				owner = decodeRangeLockOwner(res.get());
+				ASSERT(owner.isValid());
+				owner.setDescription(description);
+			} else {
+				owner = RangeLockOwner(uniqueId, description);
+			}
 			tr.set(rangeLockOwnerKeyFor(uniqueId), rangeLockOwnerValue(owner));
 			wait(tr.commit());
 			return Void();
@@ -2989,9 +2998,14 @@ ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(uniqueId)));
+			if (!res.present()) {
+				return Void();
+			}
+			RangeLockOwner owner = decodeRangeLockOwner(res.get());
+			ASSERT(owner.isValid());
 			tr.clear(rangeLockOwnerKeyFor(uniqueId));
 			wait(tr.commit());
-			// TODO: check if there exists a range having the uniqueId
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));

@@ -23,6 +23,8 @@
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/ActorCollection.h"
+#include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
@@ -35,9 +37,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	bool enabled;
 	double maxLockDuration = 60.0;
 	double maxStartDelay = 300.0;
-	double testDuration = deterministicRandom()->random01() * maxLockDuration;
-	double testStartDelay = deterministicRandom()->random01() * maxStartDelay;
-	std::string rangeLockOwnerName = "RandomRangeLockTest";
+	int lockActorCount = 10;
 
 	RandomRangeLockWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {
 		enabled = (clientId == 0) && g_network->isSimulated();
@@ -61,13 +61,16 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		return alreadyAdded == 0 && work.useDatabase && random.random01() < 0.1;
 	}
 
-	KeyRange getRandomRange() const {
-		int KeyALength = deterministicRandom()->randomInt(1, 10);
-		Standalone<StringRef> keyA = makeString(KeyALength);
-		deterministicRandom()->randomBytes(mutateString(keyA), KeyALength);
-		int KeyBLength = deterministicRandom()->randomInt(1, 10);
-		Standalone<StringRef> keyB = makeString(KeyBLength);
-		deterministicRandom()->randomBytes(mutateString(keyB), KeyBLength);
+	Standalone<StringRef> getRandomStringRef() const {
+		int stringLength = deterministicRandom()->randomInt(1, 10);
+		Standalone<StringRef> stringBuffer = makeString(stringLength);
+		deterministicRandom()->randomBytes(mutateString(stringBuffer), stringLength);
+		return stringBuffer;
+	}
+
+	KeyRange getRandomRange(RandomRangeLockWorkload* self) const {
+		Standalone<StringRef> keyA = self->getRandomStringRef();
+		Standalone<StringRef> keyB = self->getRandomStringRef();
 		if (keyA < keyB) {
 			return Standalone(KeyRangeRef(keyA, keyB));
 		} else if (keyA > keyB) {
@@ -77,40 +80,71 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		}
 	}
 
+	ACTOR Future<Void> lockActor(Database cx, RandomRangeLockWorkload* self) {
+		state double testDuration = deterministicRandom()->random01() * self->maxLockDuration;
+		state double testStartDelay = deterministicRandom()->random01() * self->maxStartDelay;
+		state std::string rangeLockOwnerName =
+		    "Owner" + std::to_string(deterministicRandom()->randomInt(0, self->lockActorCount));
+		// Here we intentionally introduced duplicated owner name between different lockActor
+		std::string lockOwnerDescription = rangeLockOwnerName + ":" + self->getRandomStringRef().toString();
+		wait(registerRangeLockOwner(cx, rangeLockOwnerName, lockOwnerDescription));
+		wait(delay(testStartDelay));
+		state KeyRange range = self->getRandomRange(self);
+		TraceEvent(SevWarnAlways, "InjectRangeLockSubmit")
+		    .detail("RangeLockOwnerName", rangeLockOwnerName)
+		    .detail("Range", range)
+		    .detail("LockStartDelayTime", testStartDelay)
+		    .detail("LockTime", testDuration);
+		try {
+			Optional<RangeLockOwner> owner = wait(getRangeLockOwner(cx, rangeLockOwnerName));
+			ASSERT(owner.present());
+			ASSERT(owner.get().getUniqueId() == rangeLockOwnerName);
+			wait(lockCommitUserRange(cx, range, rangeLockOwnerName));
+			TraceEvent(SevWarnAlways, "InjectRangeLocked")
+			    .detail("RangeLockOwnerName", rangeLockOwnerName)
+			    .detail("Range", range)
+			    .detail("LockTime", testDuration);
+			ASSERT(range.end <= normalKeys.end);
+		} catch (Error& e) {
+			if (e.code() != error_code_range_lock_failed) {
+				throw e;
+			} else {
+				ASSERT(range.end > normalKeys.end);
+			}
+		}
+		wait(delay(testDuration));
+		try {
+			wait(unlockCommitUserRange(cx, range, rangeLockOwnerName));
+			TraceEvent(SevWarnAlways, "InjectRangeUnlocked")
+			    .detail("RangeLockOwnerName", rangeLockOwnerName)
+			    .detail("Range", range);
+			ASSERT(range.end <= normalKeys.end);
+		} catch (Error& e) {
+			if (e.code() != error_code_range_lock_failed) {
+				throw e;
+			} else {
+				ASSERT(range.end > normalKeys.end);
+			}
+		}
+		return Void();
+	}
+
 	ACTOR Future<Void> _start(Database cx, RandomRangeLockWorkload* self) {
 		if (self->enabled) {
-			wait(registerRangeLockOwner(cx, self->rangeLockOwnerName, self->rangeLockOwnerName));
-			wait(delay(self->testStartDelay));
-			state KeyRange range = self->getRandomRange();
-			TraceEvent(SevWarnAlways, "InjectRangeLockSubmit").detail("Range", range);
-			try {
-				Optional<RangeLockOwner> owner = wait(getRangeLockOwner(cx, self->rangeLockOwnerName));
-				ASSERT(owner.present());
-				ASSERT(owner.get().getUniqueId() == self->rangeLockOwnerName);
-				wait(lockCommitUserRange(cx, range, self->rangeLockOwnerName));
-				TraceEvent(SevWarnAlways, "InjectRangeLocked")
-				    .detail("Range", range)
-				    .detail("LockTime", self->testDuration);
-				ASSERT(range.end <= normalKeys.end);
-			} catch (Error& e) {
-				if (e.code() != error_code_range_lock_failed) {
-					throw e;
-				} else {
-					ASSERT(range.end > normalKeys.end);
-				}
+			// Run lockActorCount number of actor concurrently.
+			// Each actor conducts (1) locking a range for a while and (2) unlocking the range.
+			// Each actor randomly generate a uniqueId as the lock owner.
+			// It is possible that different actors have the same lock owner.
+			// The range to be locked is randomly generated.
+			// It is possible that different actors have overlapped range to lock.
+			// The rangeLock mechanism should approperiately handled those conflict.
+			// When all actors complete, it is expected that all locks are removed,
+			// and this injected workload should not block other workloads.
+			std::vector<Future<Void>> actors;
+			for (int i = 0; i < self->lockActorCount; i++) {
+				actors.push_back(self->lockActor(cx, self));
 			}
-			wait(delay(self->testDuration));
-			try {
-				wait(unlockCommitUserRange(cx, range, self->rangeLockOwnerName));
-				TraceEvent(SevWarnAlways, "InjectRangeUnlocked").detail("Range", range);
-				ASSERT(range.end <= normalKeys.end);
-			} catch (Error& e) {
-				if (e.code() != error_code_range_lock_failed) {
-					throw e;
-				} else {
-					ASSERT(range.end > normalKeys.end);
-				}
-			}
+			wait(waitForAll(actors));
 		}
 		return Void();
 	}
