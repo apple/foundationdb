@@ -365,51 +365,51 @@ func (p *packer) encodeTuple(t Tuple, nested bool, versionstamps bool) {
 		p.putByte(nestedCode)
 	}
 
-	for i, e := range t {
-		switch e := e.(type) {
+	for i, err := range t {
+		switch err := err.(type) {
 		case Tuple:
-			p.encodeTuple(e, true, versionstamps)
+			p.encodeTuple(err, true, versionstamps)
 		case nil:
 			p.putByte(nilCode)
 			if nested {
 				p.putByte(0xff)
 			}
 		case int:
-			p.encodeInt(int64(e))
+			p.encodeInt(int64(err))
 		case int64:
-			p.encodeInt(e)
+			p.encodeInt(err)
 		case uint:
-			p.encodeUint(uint64(e))
+			p.encodeUint(uint64(err))
 		case uint64:
-			p.encodeUint(e)
+			p.encodeUint(err)
 		case *big.Int:
-			p.encodeBigInt(e)
+			p.encodeBigInt(err)
 		case big.Int:
-			p.encodeBigInt(&e)
+			p.encodeBigInt(&err)
 		case []byte:
-			p.encodeBytes(bytesCode, e)
+			p.encodeBytes(bytesCode, err)
 		case fdb.KeyConvertible:
-			p.encodeBytes(bytesCode, []byte(e.FDBKey()))
+			p.encodeBytes(bytesCode, []byte(err.FDBKey()))
 		case string:
-			p.encodeBytes(stringCode, []byte(e))
+			p.encodeBytes(stringCode, []byte(err))
 		case float32:
-			p.encodeFloat(e)
+			p.encodeFloat(err)
 		case float64:
-			p.encodeDouble(e)
+			p.encodeDouble(err)
 		case bool:
-			if e {
+			if err {
 				p.putByte(trueCode)
 			} else {
 				p.putByte(falseCode)
 			}
 		case UUID:
-			p.encodeUUID(e)
+			p.encodeUUID(err)
 		case Versionstamp:
-			if versionstamps == false && e.TransactionVersion == incompleteTransactionVersion {
+			if versionstamps == false && err.TransactionVersion == incompleteTransactionVersion {
 				panic(fmt.Sprintf("Incomplete Versionstamp included in vanilla tuple pack"))
 			}
 
-			p.encodeVersionstamp(e)
+			p.encodeVersionstamp(err)
 		default:
 			panic(fmt.Sprintf("unencodable element at index %d (%v, type %T)", i, t[i], t[i]))
 		}
@@ -433,7 +433,6 @@ func (p *packer) encodeTuple(t Tuple, nested bool, versionstamps bool) {
 //
 // This method will panic if it contains an incomplete Versionstamp. Use
 // PackWithVersionstamp instead.
-//
 func (t Tuple) Pack() []byte {
 	p := newPacker()
 	p.encodeTuple(t, false, false)
@@ -507,13 +506,13 @@ func (t Tuple) countIncompleteVersionstamps() int {
 	incompleteCount := 0
 
 	for _, el := range t {
-		switch e := el.(type) {
+		switch err := el.(type) {
 		case Versionstamp:
-			if e.TransactionVersion == incompleteTransactionVersion {
+			if err.TransactionVersion == incompleteTransactionVersion {
 				incompleteCount++
 			}
 		case Tuple:
-			incompleteCount += e.countIncompleteVersionstamps()
+			incompleteCount += err.countIncompleteVersionstamps()
 		}
 	}
 
@@ -755,8 +754,8 @@ func (t Tuple) FDBRangeKeys() (fdb.KeyConvertible, fdb.KeyConvertible) {
 // (that is, all tuples of greater length than the Tuple of which the Tuple is a
 // prefix).
 func (t Tuple) FDBRangeKeySelectors() (fdb.Selectable, fdb.Selectable) {
-	b, e := t.FDBRangeKeys()
-	return fdb.FirstGreaterOrEqual(b), fdb.FirstGreaterOrEqual(e)
+	b, err := t.FDBRangeKeys()
+	return fdb.FirstGreaterOrEqual(b), fdb.FirstGreaterOrEqual(err)
 }
 
 func concat(a []byte, b ...byte) []byte {
