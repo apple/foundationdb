@@ -20,6 +20,7 @@
  */
 
 #include "fdbclient/FDBAWSCredentialsProvider.h"
+#include "fdbclient/FDBAWSCredentialsProviderChain.h"
 #include "fdbclient/Tracing.h"
 
 #ifdef WITH_AWS_BACKUP
@@ -35,7 +36,7 @@ Aws::Auth::AWSCredentials getAwsCredentials() {
 		Aws::InitAPI(options);
 		TraceEvent("AWSSDKInitSuccessful");
 	}
-	Aws::Auth::DefaultAWSCredentialsProviderChain credProvider;
+	FDBAWSCredentialsProviderChain credProvider;
 	Aws::Auth::AWSCredentials creds = credProvider.GetAWSCredentials();
 	return creds;
 }
