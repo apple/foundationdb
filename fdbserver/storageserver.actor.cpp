@@ -10583,7 +10583,11 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						    .detailf("CurrentShard", "%016llx", shard->desiredShardId)
 						    .detail("IsTSS", data->isTss())
 						    .detail("Version", cVer);
-						throw data_move_conflict();
+						if (data->isTss() && g_network->isSimulated()) {
+							throw please_reboot();
+						} else {
+							throw data_move_conflict();
+						}
 					} else {
 						TraceEvent(SevInfo, "CSKMoveInToSameShard", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
