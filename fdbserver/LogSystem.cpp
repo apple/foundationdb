@@ -157,7 +157,7 @@ void LogSet::checkSatelliteTagLocations() {
 	std::set<Optional<Key>> zones;
 	std::set<Optional<Key>> dcs;
 	for (auto& loc : tLogLocalities) {
-		if (zones.count(loc.zoneId())) {
+		if (zones.contains(loc.zoneId())) {
 			foundDuplicate = true;
 			break;
 		}
@@ -341,7 +341,7 @@ float LogPushData::getEmptyMessageRatio() const {
 
 bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 	if (!FLOW_KNOBS->WRITE_TRACING_ENABLED || logSystem->getTLogVersion() < TLogVersion::V6 ||
-	    writtenLocations.count(location) != 0) {
+	    writtenLocations.contains(location)) {
 		return false;
 	}
 

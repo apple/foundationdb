@@ -459,7 +459,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state std::map<TenantName, TenantMapEntry> tenantsToCreate;
 		for (int i = 0; i < numTenants; ++i) {
 			TenantName tenant = self->chooseTenantName(true);
-			while (tenantsToCreate.count(tenant)) {
+			while (tenantsToCreate.contains(tenant)) {
 				tenant = self->chooseTenantName(true);
 			}
 
@@ -467,9 +467,9 @@ struct TenantManagementWorkload : TestWorkload {
 			entry.tenantName = tenant;
 			entry.tenantGroup = self->chooseTenantGroup(true);
 
-			if (self->createdTenants.count(tenant)) {
+			if (self->createdTenants.contains(tenant)) {
 				alreadyExists = true;
-			} else if (!tenantsToCreate.count(tenant)) {
+			} else if (!tenantsToCreate.contains(tenant)) {
 				++newTenants;
 			}
 
@@ -579,7 +579,7 @@ struct TenantManagementWorkload : TestWorkload {
 				state typename std::map<TenantName, TenantMapEntry>::iterator tenantItr;
 				for (tenantItr = tenantsToCreate.begin(); tenantItr != tenantsToCreate.end(); ++tenantItr) {
 					// Ignore any tenants that already existed
-					if (self->createdTenants.count(tenantItr->first)) {
+					if (self->createdTenants.contains(tenantItr->first)) {
 						continue;
 					}
 
@@ -1452,7 +1452,7 @@ struct TenantManagementWorkload : TestWorkload {
 			TenantName oldTenant = self->chooseTenantName(false);
 			TenantName newTenant = self->chooseTenantName(false);
 			bool checkOverlap =
-			    oldTenant == newTenant || allTenantNames.count(oldTenant) || allTenantNames.count(newTenant);
+			    oldTenant == newTenant || allTenantNames.contains(oldTenant) || allTenantNames.contains(newTenant);
 			// These operation types do not handle rename collisions
 			// reject the rename here if it has overlap
 			if (checkOverlap && (operationType == OperationType::MANAGEMENT_TRANSACTION ||
@@ -1464,10 +1464,10 @@ struct TenantManagementWorkload : TestWorkload {
 			tenantRenames[oldTenant] = newTenant;
 			allTenantNames.insert(oldTenant);
 			allTenantNames.insert(newTenant);
-			if (!self->createdTenants.count(oldTenant)) {
+			if (!self->createdTenants.contains(oldTenant)) {
 				tenantNotFound = true;
 			}
-			if (self->createdTenants.count(newTenant)) {
+			if (self->createdTenants.contains(newTenant)) {
 				tenantExists = true;
 			}
 		}
@@ -1657,7 +1657,7 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 				}
 				if (tenantGroupChanging) {
-					ASSERT(configuration.count("tenant_group"_sr) > 0);
+					ASSERT(configuration.contains("tenant_group"_sr));
 					auto itr = self->createdTenants.find(tenant);
 					if (itr->second.tenantGroup.present()) {
 						auto tenantGroupItr = self->createdTenantGroups.find(itr->second.tenantGroup.get());

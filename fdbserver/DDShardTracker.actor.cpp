@@ -343,7 +343,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
 			DisabledTraceEvent(SevDebug, "TrackShardError", self()->distributorId).detail("Keys", keys);
 			// The above loop use Database cx, but those error should only be thrown in a code using transaction.
-			ASSERT(transactionRetryableErrors.count(e.code()) == 0);
+			ASSERT(!transactionRetryableErrors.contains(e.code()));
 			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
 		}
 		throw e;
@@ -368,7 +368,7 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
 			// Those error should only be thrown in a code using transaction.
-			ASSERT(transactionRetryableErrors.count(e.code()) == 0);
+			ASSERT(!transactionRetryableErrors.contains(e.code()));
 			self->output.sendError(e); // Propagate failure to dataDistributionTracker
 		}
 		throw e;
@@ -1837,7 +1837,7 @@ void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRang
 PhysicalShardAvailable PhysicalShardCollection::checkPhysicalShardAvailable(uint64_t physicalShardID,
                                                                             StorageMetrics const& moveInMetrics) {
 	ASSERT(physicalShardID != UID().first() && physicalShardID != anonymousShardId.first());
-	ASSERT(physicalShardInstances.count(physicalShardID) > 0);
+	ASSERT(physicalShardInstances.contains(physicalShardID));
 	if (physicalShardInstances[physicalShardID].metrics.bytes + moveInMetrics.bytes >
 	    SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES) {
 		return PhysicalShardAvailable::False;
@@ -1859,7 +1859,7 @@ void PhysicalShardCollection::updateTeamPhysicalShardIDsMap(uint64_t inputPhysic
 	ASSERT(inputTeams.size() <= 2);
 	ASSERT(inputPhysicalShardID != anonymousShardId.first() && inputPhysicalShardID != UID().first());
 	for (auto inputTeam : inputTeams) {
-		if (teamPhysicalShardIDs.count(inputTeam) == 0) {
+		if (!teamPhysicalShardIDs.contains(inputTeam)) {
 			std::set<uint64_t> physicalShardIDSet;
 			physicalShardIDSet.insert(inputPhysicalShardID);
 			teamPhysicalShardIDs.insert(std::make_pair(inputTeam, physicalShardIDSet));
@@ -1876,7 +1876,7 @@ void PhysicalShardCollection::insertPhysicalShardToCollection(uint64_t physicalS
                                                               uint64_t debugID,
                                                               PhysicalShardCreationTime whenCreated) {
 	ASSERT(physicalShardID != anonymousShardId.first() && physicalShardID != UID().first());
-	ASSERT(physicalShardInstances.count(physicalShardID) == 0);
+	ASSERT(!physicalShardInstances.contains(physicalShardID));
 	physicalShardInstances.insert(
 	    std::make_pair(physicalShardID, PhysicalShard(txnProcessor, physicalShardID, metrics, teams, whenCreated)));
 	return;
@@ -1953,7 +1953,7 @@ Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(
     uint64_t debugID) {
 	ASSERT(team.servers.size() > 0);
 	// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
-	if (teamPhysicalShardIDs.count(team) == 0) {
+	if (!teamPhysicalShardIDs.contains(team)) {
 		return Optional<uint64_t>();
 	}
 	ASSERT(teamPhysicalShardIDs[team].size() >= 1);
@@ -1964,7 +1964,7 @@ Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(
 		if (physicalShardID == anonymousShardId.first() || physicalShardID == UID().first()) {
 			ASSERT(false);
 		}
-		ASSERT(physicalShardInstances.count(physicalShardID));
+		ASSERT(physicalShardInstances.contains(physicalShardID));
 		/*TraceEvent("TryGetPhysicalShardIDCandidates")
 		    .detail("PhysicalShardID", physicalShardID)
 		    .detail("Bytes", physicalShardInstances[physicalShardID].metrics.bytes)
@@ -2005,14 +2005,14 @@ uint64_t PhysicalShardCollection::generateNewPhysicalShardID(uint64_t debugID) {
 }
 
 void PhysicalShardCollection::reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& moveOutMetrics) {
-	ASSERT(physicalShardInstances.count(physicalShardID) != 0);
+	ASSERT(physicalShardInstances.contains(physicalShardID));
 	ASSERT(physicalShardID != UID().first() && physicalShardID != anonymousShardId.first());
 	physicalShardInstances[physicalShardID].metrics = physicalShardInstances[physicalShardID].metrics - moveOutMetrics;
 	return;
 }
 
 void PhysicalShardCollection::increaseMetricsForMoveIn(uint64_t physicalShardID, StorageMetrics const& moveInMetrics) {
-	ASSERT(physicalShardInstances.count(physicalShardID) != 0);
+	ASSERT(physicalShardInstances.contains(physicalShardID));
 	ASSERT(physicalShardID != UID().first() && physicalShardID != anonymousShardId.first());
 	physicalShardInstances[physicalShardID].metrics = physicalShardInstances[physicalShardID].metrics + moveInMetrics;
 	return;
@@ -2109,7 +2109,7 @@ std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> PhysicalShardCollec
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
 	ASSERT(inputPhysicalShardID != anonymousShardId.first() && inputPhysicalShardID != UID().first());
-	if (physicalShardInstances.count(inputPhysicalShardID) == 0) {
+	if (!physicalShardInstances.contains(inputPhysicalShardID)) {
 		return { Optional<ShardsAffectedByTeamFailure::Team>(), true };
 	}
 	if (!checkPhysicalShardAvailable(inputPhysicalShardID, moveInMetrics)) {
@@ -2141,7 +2141,7 @@ void PhysicalShardCollection::initPhysicalShardCollection(KeyRange keys,
 	ASSERT(physicalShardID != UID().first());
 	if (physicalShardID != anonymousShardId.first()) {
 		updateTeamPhysicalShardIDsMap(physicalShardID, selectedTeams, debugID);
-		if (physicalShardInstances.count(physicalShardID) == 0) {
+		if (!physicalShardInstances.contains(physicalShardID)) {
 			insertPhysicalShardToCollection(
 			    physicalShardID, StorageMetrics(), selectedTeams, debugID, PhysicalShardCreationTime::DDInit);
 		} else {
@@ -2181,7 +2181,7 @@ void PhysicalShardCollection::updatePhysicalShardCollection(
 		// Update physicalShardInstances
 		// Add the metrics to in-physicalShard
 		// e.detail("PhysicalShardIDIn", physicalShardID);
-		if (physicalShardInstances.count(physicalShardID) == 0) {
+		if (!physicalShardInstances.contains(physicalShardID)) {
 			// e.detail("Op", "Insert");
 			insertPhysicalShardToCollection(
 			    physicalShardID, metrics, selectedTeams, debugID, PhysicalShardCreationTime::DDRelocator);
@@ -2266,8 +2266,8 @@ void PhysicalShardCollection::cleanUpPhysicalShardCollection() {
 	}
 	for (auto it = physicalShardInstances.begin(); it != physicalShardInstances.end();) {
 		uint64_t physicalShardID = it->first;
-		ASSERT(physicalShardInstances.count(physicalShardID) > 0);
-		if (physicalShardsInUse.count(physicalShardID) == 0) {
+		ASSERT(physicalShardInstances.contains(physicalShardID));
+		if (!physicalShardsInUse.contains(physicalShardID)) {
 			/*TraceEvent("PhysicalShardisEmpty")
 			    .detail("PhysicalShard", physicalShardID)
 			    .detail("RemainBytes", physicalShardInstances[physicalShardID].metrics.bytes);*/
@@ -2282,7 +2282,7 @@ void PhysicalShardCollection::cleanUpPhysicalShardCollection() {
 	for (auto [team, _] : teamPhysicalShardIDs) {
 		for (auto it = teamPhysicalShardIDs[team].begin(); it != teamPhysicalShardIDs[team].end();) {
 			uint64_t physicalShardID = *it;
-			if (physicalShardInstances.count(physicalShardID) == 0) {
+			if (!physicalShardInstances.contains(physicalShardID)) {
 				// physicalShardID has been removed from physicalShardInstances (see step 1)
 				// So, remove the physicalShard from teamPhysicalShardID[team]
 				it = teamPhysicalShardIDs[team].erase(it);
@@ -2322,7 +2322,7 @@ void PhysicalShardCollection::logPhysicalShardCollection() {
 		uint64_t maxPhysicalShardID = 0;
 		uint64_t minPhysicalShardID = 0;
 		for (auto physicalShardID : physicalShardIDs) {
-			ASSERT(physicalShardInstances.count(physicalShardID) > 0);
+			ASSERT(physicalShardInstances.contains(physicalShardID));
 			uint64_t id = physicalShardInstances[physicalShardID].id;
 			int64_t bytes = physicalShardInstances[physicalShardID].metrics.bytes;
 			if (bytes > maxPhysicalShardBytes) {
@@ -2352,14 +2352,14 @@ void PhysicalShardCollection::logPhysicalShardCollection() {
 		for (auto ssid : team.servers) {
 			for (auto it = teamPhysicalShardIDs[team].begin(); it != teamPhysicalShardIDs[team].end();) {
 				uint64_t physicalShardID = *it;
-				if (storageServerPhysicalShardStatus.count(ssid) != 0) {
-					if (storageServerPhysicalShardStatus[ssid].count(physicalShardID) == 0) {
-						ASSERT(physicalShardInstances.count(physicalShardID) > 0);
+				if (storageServerPhysicalShardStatus.contains(ssid)) {
+					if (!storageServerPhysicalShardStatus[ssid].contains(physicalShardID)) {
+						ASSERT(physicalShardInstances.contains(physicalShardID));
 						storageServerPhysicalShardStatus[ssid].insert(
 						    std::make_pair(physicalShardID, physicalShardInstances[physicalShardID].metrics.bytes));
 					}
 				} else {
-					ASSERT(physicalShardInstances.count(physicalShardID) > 0);
+					ASSERT(physicalShardInstances.contains(physicalShardID));
 					std::map<uint64_t, int64_t> tmp;
 					tmp.insert(std::make_pair(physicalShardID, physicalShardInstances[physicalShardID].metrics.bytes));
 					storageServerPhysicalShardStatus.insert(std::make_pair(ssid, tmp));

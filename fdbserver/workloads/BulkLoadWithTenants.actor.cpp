@@ -148,7 +148,7 @@ struct BulkSetupWorkload : TestWorkload {
 		for (i = 0; i < workload->tenants.size(); i++) {
 			state Reference<Tenant> tenant = workload->tenants[i];
 			std::vector<KeyValueRef> keysForCurTenant = wait(getKVPairsForTenant(workload, tenant, cx));
-			if (tenantIdsToDrop.count(tenant->id())) {
+			if (tenantIdsToDrop.contains(tenant->id())) {
 				// Don't check the tenants that the EKP would throw errors for
 				continue;
 			}

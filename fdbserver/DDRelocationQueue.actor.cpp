@@ -694,19 +694,19 @@ void DDQueue::validate() {
 		for (auto it = inFlightRanges.begin(); it != inFlightRanges.end(); ++it) {
 			for (int i = 0; i < it->value().src.size(); i++) {
 				// each server in the inFlight map is in the busymap
-				if (!busymap.count(it->value().src[i]))
+				if (!busymap.contains(it->value().src[i]))
 					TraceEvent(SevError, "DDQueueValidateError8")
 					    .detail("Problem", "each server in the inFlight map is in the busymap");
 
 				// relocate data that is inFlight is not also in the queue
-				if (queue[it->value().src[i]].count(it->value()))
+				if (queue[it->value().src[i]].contains(it->value()))
 					TraceEvent(SevError, "DDQueueValidateError9")
 					    .detail("Problem", "relocate data that is inFlight is not also in the queue");
 			}
 
 			for (int i = 0; i < it->value().completeDests.size(); i++) {
 				// each server in the inFlight map is in the dest busymap
-				if (!destBusymap.count(it->value().completeDests[i]))
+				if (!destBusymap.contains(it->value().completeDests[i]))
 					TraceEvent(SevError, "DDQueueValidateError10")
 					    .detail("Problem", "each server in the inFlight map is in the destBusymap");
 			}
@@ -853,7 +853,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		// ASSERT(queueMapItr->value() == queueMap.rangeContaining(affectedQueuedItems[r].begin)->value());
 		RelocateData& rrs = queueMapItr->value();
 
-		if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.count(rrs) > 0)) {
+		if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.contains(rrs))) {
 			if (rrs.keys != rd.keys) {
 				delayDelete.insert(rrs);
 			}
@@ -927,7 +927,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 }
 
 void DDQueue::completeSourceFetch(const RelocateData& results) {
-	ASSERT(fetchingSourcesQueue.count(results));
+	ASSERT(fetchingSourcesQueue.contains(results));
 
 	// logRelocation( results, "GotSourceServers" );
 
@@ -960,7 +960,7 @@ void DDQueue::launchQueuedWork(KeyRange keys, const DDEnabledState* ddEnabledSta
 	std::set<RelocateData, std::greater<RelocateData>> combined;
 	auto f = queueMap.intersectingRanges(keys);
 	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (it->value().src.size() && queue[it->value().src[0]].count(it->value()))
+		if (it->value().src.size() && queue[it->value().src[0]].contains(it->value()))
 			combined.insert(it->value());
 	}
 	launchQueuedWork(combined, ddEnabledState);
@@ -1064,7 +1064,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		bool overlappingInFlight = false;
 		auto intersectingInFlight = inFlight.intersectingRanges(rd.keys);
 		for (auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
-			if (fetchKeysComplete.count(it->value()) && inFlightActors.liveActorAt(it->range().begin) &&
+			if (fetchKeysComplete.contains(it->value()) && inFlightActors.liveActorAt(it->range().begin) &&
 			    !rd.keys.contains(it->range()) && it->value().priority >= rd.priority &&
 			    rd.healthPriority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
 
@@ -1235,7 +1235,7 @@ int DDQueue::getHighestPriorityRelocation() const {
 // return true if the servers are throttled as source for read rebalance
 bool DDQueue::timeThrottle(const std::vector<UID>& ids) const {
 	return std::any_of(ids.begin(), ids.end(), [this](const UID& id) {
-		if (this->lastAsSource.count(id)) {
+		if (this->lastAsSource.contains(id)) {
 			return (now() - this->lastAsSource.at(id)) * SERVER_KNOBS->READ_REBALANCE_SRC_PARALLELISM <
 			       SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 		}
@@ -1394,7 +1394,7 @@ static int nonOverlappedServerCount(const std::vector<UID>& srcIds, const std::v
 	std::unordered_set<UID> srcSet{ srcIds.begin(), srcIds.end() };
 	int count = 0;
 	for (int i = 0; i < destIds.size(); i++) {
-		if (srcSet.count(destIds[i]) == 0) {
+		if (!srcSet.contains(destIds[i])) {
 			count++;
 		}
 	}
@@ -2231,7 +2231,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& ids) {
 	double cpu = 0;
 	for (auto& id : ids) {
-		if (metrics.storageStats.count(id)) {
+		if (metrics.storageStats.contains(id)) {
 			cpu = std::max(cpu, metrics.storageStats.at(id).cpuUsage);
 		} else {
 			// assume the server is too busy to report its stats

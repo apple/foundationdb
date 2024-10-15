@@ -194,11 +194,10 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		TraceEvent("ResendChaos")
 		    .detail("ChosenWorkersSize", self->chosenWorkers.size())
 		    .detail("FoundWorkers", workersMap.size())
-		    .detail(
-		        "ResendToNumber",
-		        std::count_if(self->chosenWorkers.begin(),
-		                      self->chosenWorkers.end(),
-		                      [&map = std::as_const(workersMap)](auto const& addr) { return map.count(addr) > 0; }));
+		    .detail("ResendToNumber",
+		            std::count_if(self->chosenWorkers.begin(),
+		                          self->chosenWorkers.end(),
+		                          [&map = std::as_const(workersMap)](auto const& addr) { return map.contains(addr); }));
 		for (auto& workerAddress : self->chosenWorkers) {
 			auto itr = workersMap.find(workerAddress);
 			if (itr != workersMap.end()) {
