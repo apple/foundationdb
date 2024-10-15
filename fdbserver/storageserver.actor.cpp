@@ -11914,31 +11914,20 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 }
 
 ACTOR Future<Void> checkpointLogger(StorageServer* data) {
-	state double wakeTime = now();
 	loop {
-		try {
-			const double ts = now();
-			std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
-			for (; it != self->checkpoints.end(); ++it) {
-				const CheckpointMetaData& md = it->second;
-				if (md.expireTs > ts) {
-					TraceEvent(SevWarnAlways, "ExpiredCheckpointNotCleanedUp", data->thisServerID)
-					    .detail("Checkpoint", md.toString());
-				}
-				wakeTime = std::min(wakeTime, md.expireTs);
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_retry) {
-				wait(delay(0.5));
-				failureCount++;
-				continue;
+		const double ts = now();
+		std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
+		for (; it != self->checkpoints.end(); ++it) {
+			const CheckpointMetaData& md = it->second;
+			if (md.expireTs > ts) {
+				TraceEvent(SevWarnAlways, "ExpiredCheckpointNotCleanedUp", data->thisServerID)
+				    .detail("Checkpoint", md.toString());
 			} else {
-				TraceEvent(SevDebug, "StorageCreateCheckpointMetaDataSstFileDumpedFailure", data->thisServerID)
-				    .detail("PendingCheckpoint", metaData.toString())
-				    .detail("Error", e.name());
-				throw e;
+				TraceEvent(SevInfo, "ServerCheckpoint", data->thisServerID).detail("Checkpoint", md.toString());
 			}
+			wait(yield());
 		}
+		wait(delayUntil(ts + SERVER_KNOBS->ROCKSDB_DM_CHECKPOINT_TTL / 4));
 	}
 
 	return Void;
