@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <chrono>
+#include <filesystem>
 #ifdef __unixish__
 #include <fcntl.h>
 #endif
@@ -40,6 +42,7 @@
 #include "fdbclient/ClientVersion.h"
 #include "fdbclient/LocalClientAPI.h"
 #include "fdbclient/VersionVector.h"
+#include "fdbclient/buildid.h"
 
 #include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
@@ -57,6 +60,13 @@
 #ifdef FDBCLIENT_NATIVEAPI_ACTOR_H
 #error "MVC should not depend on the Native API"
 #endif
+
+#define TIMER_START(i) auto start##i = std::chrono::steady_clock::now()
+
+#define TIMER_END(i, desc)                                                                                             \
+	auto end##i = std::chrono::steady_clock::now();                                                                    \
+	std::cout << (externalClient ? "    " : "") << #desc << " took "                                                   \
+	          << std::chrono::duration_cast<std::chrono::microseconds>(end##i - start##i).count() << " us.\n"
 
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if (e) {
@@ -1232,16 +1242,22 @@ void DLApi::init() {
 	loadClientFunction(&api->clusterCreateDatabase, lib, fdbCPath, "fdb_cluster_create_database", headerVersion < 610);
 	loadClientFunction(&api->clusterDestroy, lib, fdbCPath, "fdb_cluster_destroy", headerVersion < 610);
 	loadClientFunction(&api->futureGetCluster, lib, fdbCPath, "fdb_future_get_cluster", headerVersion < 610);
+	loadClientFunction(&api->retrieveBuildID, lib, fdbCPath, "fdb_retrieve_build_id", headerVersion >= 720);
 }
 
 void DLApi::selectApiVersion(int apiVersion) {
 	// External clients must support at least this version
 	// Versions newer than what we understand are rejected in the C bindings
 	headerVersion = std::max(apiVersion, 400);
-
+	// auto externalClient = false;
+	// TIMER_START(1);
 	init();
+	// TIMER_END(1, DLApi::selectApiVersion::init());
+
+	// TIMER_START(2);
 	throwIfError(api->selectApiVersion(apiVersion, headerVersion));
 	throwIfError(api->setNetworkOption(static_cast<FDBNetworkOption>(FDBNetworkOptions::EXTERNAL_CLIENT), nullptr, 0));
+	// TIMER_END(2, DLApi::selectApiVersion::throwIfError);
 }
 
 const char* DLApi::getClientVersion() {
@@ -1293,6 +1309,10 @@ void DLApi::stopNetwork() {
 	if (networkSetup) {
 		throwIfError(api->stopNetwork());
 	}
+}
+
+const uint8_t* DLApi::retrieveBuildID() {
+	return api->retrieveBuildID();
 }
 
 Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
@@ -2717,6 +2737,16 @@ void MultiVersionApi::runOnExternalClientsAllThreads(std::function<void(Referenc
 	}
 }
 
+void MultiVersionApi::runOnExternalClientsThreadRange(std::function<void(Reference<ClientInfo>)> func,
+                                                      int startIdx,
+                                                      int endIdx,
+                                                      bool runOnFailedClients,
+                                                      bool failOnError) {
+	for (int i = startIdx; i < std::min(endIdx, threadCount); i++) {
+		runOnExternalClients(i, func, runOnFailedClients, failOnError);
+	}
+}
+
 // runOnFailedClients should be used cautiously. Some failed clients may not have successfully loaded all symbols.
 void MultiVersionApi::runOnExternalClients(int threadIdx,
                                            std::function<void(Reference<ClientInfo>)> func,
@@ -2866,26 +2896,26 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 		}
 	}
 }
+
 #if defined(__unixish__)
-std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
+std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path,
+                                                                                        std::string buildId) {
+
 	ASSERT_GE(threadCount, 1);
-	// Copy library for each thread configured per version
+	// Copy library for each thread configured per version if the copies do not already exist
 	std::vector<std::pair<std::string, bool>> paths;
 
-	if (threadCount == 1) {
-		paths.push_back({ path, false });
-	} else {
-		// It's tempting to use the so once without copying. However, we don't know
-		// if the thing we're about to copy is the shared object executing this code
-		// or not, so this optimization is unsafe.
-		// paths.push_back({path, false});
-		for (int ii = 0; ii < threadCount; ++ii) {
-			std::string filename = basename(path);
+	std::string filename = basename(path);
 
-			constexpr int MAX_TMP_NAME_LENGTH = PATH_MAX + 12;
-			char tempName[MAX_TMP_NAME_LENGTH];
-			snprintf(tempName, MAX_TMP_NAME_LENGTH, "%s/%s-XXXXXX", tmpDir.c_str(), filename.c_str());
-			int tempFd = mkstemp(tempName);
+	for (int ii = 1; ii < threadCount; ++ii) {
+
+		constexpr int MAX_TMP_NAME_LENGTH = PATH_MAX + 12;
+		char cpName[MAX_TMP_NAME_LENGTH];
+		snprintf(cpName, MAX_TMP_NAME_LENGTH, "%s/%s-%d-%s", tmpDir.c_str(), filename.c_str(), ii, buildId.c_str());
+
+		if (!(std::filesystem::exists(cpName))) {
+
+			int cpFd = open(cpName, O_RDWR | O_CREAT, 0755);
 			int fd;
 
 			if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
@@ -2896,7 +2926,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 			TraceEvent("CopyingExternalClient")
 			    .detail("FileName", filename)
 			    .detail("LibraryPath", path)
-			    .detail("TempPath", tempName);
+			    .detail("CopyPath", cpName);
 
 			constexpr size_t buf_sz = 4096;
 			char buf[buf_sz];
@@ -2914,7 +2944,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 				}
 				ssize_t written = 0;
 				while (written != readCount) {
-					ssize_t writeCount = write(tempFd, buf + written, readCount - written);
+					ssize_t writeCount = write(cpFd, buf + written, readCount - written);
 					if (writeCount == -1) {
 						TraceEvent(SevError, "ExternalClientCopyFailedWriteError")
 						    .GetLastError()
@@ -2926,10 +2956,9 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 			}
 
 			close(fd);
-			close(tempFd);
-
-			paths.push_back({ tempName, true }); // use + delete temporary copies of the library.
+			close(cpFd);
 		}
+		paths.push_back({ cpName, false }); // use + no not delete copies of the library.
 	}
 
 	return paths;
@@ -3081,7 +3110,33 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	}
 }
 
+std::string getBuildIdString(const uint8_t* build_id) {
+	// https://gist.github.com/miguelmota/4fc9b46cf21111af5fa613555c14de92
+	const int BUILD_ID_LENGTH = 20;
+	std::ostringstream ss_build_id;
+	ss_build_id << std::hex << std::setfill('0');
+	for (ElfW(Word) i = 0; i < BUILD_ID_LENGTH; i++) {
+		ss_build_id << std::hex << std::setw(2) << static_cast<int>(build_id[i]);
+	};
+	return ss_build_id.str();
+}
+
 void MultiVersionApi::setupNetwork() {
+
+	TIMER_START(1);
+
+	// function to initialize external clients
+	auto extInitFunc = [this](Reference<ClientInfo> client) {
+		// TIMER_START(1);
+		TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
+		client->api->selectApiVersion(apiVersion.version());
+		if (client->useFutureVersion) {
+			client->api->useFutureProtocolVersion();
+		}
+		client->loadVersion();
+		// TIMER_END(1, extInitFunc);
+	};
+
 	try {
 		if (!externalClient) {
 			loadEnvironmentVariableNetworkOptions();
@@ -3108,8 +3163,8 @@ void MultiVersionApi::setupNetwork() {
 			}
 
 			if (externalClientDescriptions.empty() && !disableBypass) {
-				bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes possible to
-				                             // add clients after setupNetwork is called
+				bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes
+				                             // possible to add clients after setupNetwork is called
 			}
 
 			if (!bypassMultiClientApi) {
@@ -3120,49 +3175,62 @@ void MultiVersionApi::setupNetwork() {
 				localClient->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID,
 				                                   std::to_string(transportId));
 			}
+			TIMER_START(2);
 			localClient->api->setupNetwork();
+			TIMER_END(2, Setting up local network);
 
 			if (!apiVersion.hasFailOnExternalClientErrors()) {
 				ignoreExternalClientFailures = true;
 			}
 
+			assert(externalClients.empty());
+
+			// TIMER_START(3);
 			for (auto i : externalClientDescriptions) {
 				std::string path = i.second.libPath;
 				std::string filename = basename(path);
 				bool useFutureVersion = i.second.useFutureVersion;
 
-				// Copy external lib for each thread
 				if (externalClients.count(filename) == 0) {
 					externalClients[filename] = {};
-					auto libCopies = copyExternalLibraryPerThread(path);
-					for (int idx = 0; idx < libCopies.size(); ++idx) {
-						bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
-						externalClients[filename].push_back(Reference<ClientInfo>(
-						    new ClientInfo(new DLApi(libCopies[idx].first, unlinkOnLoad /*unlink on load*/),
-						                   path,
-						                   useFutureVersion,
-						                   idx)));
-					}
+					externalClients[filename].push_back((Reference<ClientInfo>(
+					    new ClientInfo(new DLApi(path, false /*unlink on load*/), path, useFutureVersion, 0))));
 				}
 			}
-		}
+			// TIMER_END(3, Retrieving first external clients);
 
+			TIMER_START(4);
+			// initialize the first external thread for each library
+			runOnExternalClients(0, extInitFunc, false, !ignoreExternalClientFailures);
+			TIMER_END(4, Init first external clients(mostly loading library functions));
+
+			TIMER_START(5);
+			// generate copies of the first external thread for each library
+			for (auto i : externalClients) {
+				std::string path = i.second[0]->libPath;
+				std::string filename = basename(path);
+				bool useFutureVersion = i.second[0]->useFutureVersion;
+
+				auto libCopies = copyExternalLibraryPerThread(
+				    path, getBuildIdString(dynamic_cast<DLApi*>(externalClients[filename][0]->api)->retrieveBuildID()));
+
+				for (int idx = 0; idx < libCopies.size(); ++idx) {
+					externalClients[filename].push_back(Reference<ClientInfo>(new ClientInfo(
+					    new DLApi(libCopies[idx].first, false /*unlink on load*/), path, useFutureVersion, idx)));
+				}
+			}
+			TIMER_END(5, External client copy loop);
+		}
+		// TIMER_START(11);
 		localClient->loadVersion();
+		// TIMER_END(11, localClient->loadVersion());
 
 		if (bypassMultiClientApi) {
 			networkSetup = true;
 		} else {
-			runOnExternalClientsAllThreads(
-			    [this](Reference<ClientInfo> client) {
-				    TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
-				    client->api->selectApiVersion(apiVersion.version());
-				    if (client->useFutureVersion) {
-					    client->api->useFutureProtocolVersion();
-				    }
-				    client->loadVersion();
-			    },
-			    false,
-			    !ignoreExternalClientFailures);
+			TIMER_START(6);
+			runOnExternalClientsThreadRange(extInitFunc, 1, threadCount, false, !ignoreExternalClientFailures);
+			TIMER_END(6, Init remaining external clients(mostly loading library functions));
 
 			std::string baseTraceFileId;
 			if (apiVersion.hasTraceFileIdentifier()) {
@@ -3171,6 +3239,7 @@ void MultiVersionApi::setupNetwork() {
 			}
 
 			MutexHolder holder(lock);
+			TIMER_START(7);
 			runOnExternalClientsAllThreads(
 			    [this, transportId, baseTraceFileId](Reference<ClientInfo> client) {
 				    for (auto option : options) {
@@ -3188,6 +3257,7 @@ void MultiVersionApi::setupNetwork() {
 			    },
 			    false,
 			    !ignoreExternalClientFailures);
+			TIMER_END(7, Setup External Networks);
 
 			if (localClientDisabled && !hasNonFailedExternalClients()) {
 				TraceEvent(SevWarn, "CannotSetupNetwork")
@@ -3205,6 +3275,7 @@ void MultiVersionApi::setupNetwork() {
 		flushTraceFileVoid();
 		throw e;
 	}
+	TIMER_END(1, MultiVersionApi::setupNetwork);
 }
 
 THREAD_FUNC_RETURN runNetworkThread(void* param) {
