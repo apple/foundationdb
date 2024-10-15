@@ -60,7 +60,7 @@ public:
 
 	std::string getUniqueId() const { return uniqueId; }
 
-	void setDescription(std::string inputDescription) {
+	void setDescription(const std::string& inputDescription) {
 		description = inputDescription;
 		return;
 	}
