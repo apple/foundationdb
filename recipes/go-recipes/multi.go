@@ -71,8 +71,8 @@ func (multi MultiMap) MultiSubtract(trtr fdb.Transactor, index, value interface{
 	})
 }
 
-func (multi MultiMap) MultiGet(tr fdb.ReadTransactor, index int) (ret []interface{}, e error) {
-	_, e = tr.ReadTransact(func(tr fdb.ReadTransaction) (interface{}, error) {
+func (multi MultiMap) MultiGet(tr fdb.ReadTransactor, index int) (ret []interface{}, err error) {
+	_, err = tr.ReadTransact(func(tr fdb.ReadTransaction) (interface{}, error) {
 		pr, err := fdb.PrefixRange(multi.MapSS.Pack(tuple.Tuple{index}))
 		if err != nil {
 			return nil, err
@@ -94,7 +94,7 @@ func (multi MultiMap) MultiGet(tr fdb.ReadTransactor, index int) (ret []interfac
 }
 
 func (multi MultiMap) MultiGetCounts(trtr fdb.Transactor, index interface{}) (map[interface{}]int, error) {
-	i, e := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	i, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		kr, err := fdb.PrefixRange(multi.MapSS.Pack(tuple.Tuple{}))
 		if err != nil {
 			return nil, err
@@ -118,7 +118,7 @@ func (multi MultiMap) MultiGetCounts(trtr fdb.Transactor, index interface{}) (ma
 		}
 		return counts, nil
 	})
-	return i.(map[interface{}]int), e
+	return i.(map[interface{}]int), err
 }
 
 func (multi MultiMap) MultiIsElement(trtr fdb.Transactor, index, value interface{}) bool {

@@ -116,10 +116,10 @@ func (t Transaction) GetDatabase() Database {
 //
 // See the Transactor interface for an example of using Transact with
 // Transaction and Database objects.
-func (t Transaction) Transact(f func(Transaction) (interface{}, error)) (r interface{}, e error) {
-	defer panicToError(&e)
+func (t Transaction) Transact(f func(Transaction) (interface{}, error)) (r interface{}, err error) {
+	defer panicToError(&err)
 
-	r, e = f(t)
+	r, err = f(t)
 	return
 }
 
@@ -136,10 +136,10 @@ func (t Transaction) Transact(f func(Transaction) (interface{}, error)) (r inter
 //
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
-func (t Transaction) ReadTransact(f func(ReadTransaction) (interface{}, error)) (r interface{}, e error) {
-	defer panicToError(&e)
+func (t Transaction) ReadTransact(f func(ReadTransaction) (interface{}, error)) (r interface{}, err error) {
+	defer panicToError(&err)
 
-	r, e = f(t)
+	r, err = f(t)
 	return
 }
 
@@ -189,9 +189,9 @@ func (t Transaction) Snapshot() Snapshot {
 //
 // Typical code will not use OnError directly. (Database).Transact uses
 // OnError internally to implement a correct retry loop.
-func (t Transaction) OnError(e Error) FutureNil {
+func (t Transaction) OnError(err Error) FutureNil {
 	return &futureNil{
-		future: newFuture(t.transaction, C.fdb_transaction_on_error(t.ptr, C.fdb_error_t(e.Code))),
+		future: newFuture(t.transaction, C.fdb_transaction_on_error(t.ptr, C.fdb_error_t(err.Code))),
 	}
 }
 
