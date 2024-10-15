@@ -3836,7 +3836,7 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 			}
 		}
 	} catch (Error& err) {
-		if (!normalDataDistributorErrors().contains(err.code())) {
+		if (!(normalDataDistributorErrors().contains(err.code()))) {
 			TraceEvent("DataDistributorError", di.id()).errorUnsuppressed(err);
 			throw err;
 		}
