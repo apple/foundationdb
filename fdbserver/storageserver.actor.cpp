@@ -10584,6 +10584,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						    .detail("IsTSS", data->isTss())
 						    .detail("Version", cVer);
 						if (data->isTss() && g_network->isSimulated()) {
+							// Tss data move conflicts are expected in simulation, and can be safely ignored
+							// by restarting the server.
 							throw please_reboot();
 						} else {
 							throw data_move_conflict();
