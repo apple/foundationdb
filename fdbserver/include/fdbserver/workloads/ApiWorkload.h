@@ -270,7 +270,11 @@ struct ApiWorkload : TestWorkload {
 	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1)
 	  : TestWorkload(wcx), maxClients(maxClients), success(true), transactionFactory(nullptr) {
 		clientPrefixInt = getOption(options, "clientId"_sr, clientId);
-		clientPrefix = format("%010d", clientPrefixInt);
+		// StorageCache if enabled, simulate partial keycache caching
+		clientPrefix = clientId < 2 ? fmt::format("apiworkload/cached/{0:>10}", clientPrefixInt)
+		                            : fmt::format("apiworkload/uncached/{0:>10}", clientPrefixInt);
+
+		printf("%s\n", clientPrefix.c_str());
 
 		numKeys = getOption(options, "numKeys"_sr, 5000);
 		onlyLowerCase = getOption(options, "onlyLowerCase"_sr, false);
