@@ -8,19 +8,19 @@ statelessProcessClassesPerDC = 2
 
 [[knobs]]
 enable_worker_health_monitor = true
-cc_enable_worker_health_monitor = true
 worker_health_monitor_interval = 10
+cc_enable_worker_health_monitor = true
+cc_health_trigger_recovery = true
+cc_enable_remote_tlog_degradation_monitoring = true
 cc_worker_health_checking_interval = 45
 cc_min_degradation_interval = 30
-cc_health_trigger_recovery = true
-peer_latency_degradation_threshold = 1
-cc_tracking_health_recovery_interval = 60
-cc_max_health_recovery_count = 1
-peer_latency_check_min_population = 2
 cc_degraded_peer_degree_to_exclude = 10
-cc_enable_remote_tlog_degradation_monitoring = true
+cc_max_health_recovery_count = 1
 cc_only_consider_intra_dc_latency = true
+cc_tracking_health_recovery_interval = 60
+peer_latency_degradation_threshold = 1
 peer_latency_degradation_percentile = 1
+peer_latency_check_min_population = 2
 
 [[test]]
 testTitle = "ClogRemoteTLog"

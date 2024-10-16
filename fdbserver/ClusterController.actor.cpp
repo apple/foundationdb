@@ -95,15 +95,10 @@ ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* sel
 	}
 }
 
-bool ClusterControllerData::processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) {
-	// TODO: this was done to fix a test, but probably the test needs updating instead
-	// if (!this->addr_locality.contains(addr1) || !this->addr_locality.contains(addr2)) {
-	// 	return true;
-	// }
-
+bool ClusterControllerData::processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) const {
 	return this->addr_locality.contains(addr1) && this->addr_locality.contains(addr2) &&
-	       this->addr_locality[addr1].dcId().present() && this->addr_locality[addr2].dcId().present() &&
-	       this->addr_locality[addr1].dcId().get() == this->addr_locality[addr2].dcId().get();
+	       this->addr_locality.at(addr1).dcId().present() && this->addr_locality.at(addr2).dcId().present() &&
+	       this->addr_locality.at(addr1).dcId().get() == this->addr_locality.at(addr2).dcId().get();
 }
 
 bool ClusterControllerData::transactionSystemContainsDegradedServers() {
@@ -196,6 +191,8 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 	// Check if transaction system contains degraded/disconnected servers. For satellite, we only
 	// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
 	// stable.
+	// TODO: Consider adding satellite latency degradation check and rely on
+	//       SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY for accurate health signal
 	return transactionWorkerInList(degradationInfo.degradedServers,
 	                               /*skipSatellite=*/true,
 	                               /*skipRemoteTLog=*/
@@ -204,11 +201,10 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 	                               /*skipRemoteLogRouter*/
 	                               !(SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY &&
 	                                 SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING)) ||
-	       transactionWorkerInList(
-	           degradationInfo.disconnectedServers,
-	           /*skipSatellite=*/false,
-	           /*skipRemoteTLog=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING,
-	           /*skipRemoteLogRouter*/ !SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_DISCONNECT_MONITORING);
+	       transactionWorkerInList(degradationInfo.disconnectedServers,
+	                               /*skipSatellite=*/false,
+	                               /*skipRemoteTLog=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING,
+	                               /*skipRemoteLogRouter*/ !SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
 }
 
 bool ClusterControllerData::remoteTransactionSystemContainsDegradedServers() {
@@ -3882,7 +3878,7 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	}
 
 	// Trigger recovery when remote log router is disconnected.
-	if (!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_DISCONNECT_MONITORING) {
+	if (SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING) {
 		data.degradationInfo.disconnectedServers.insert(logRouter);
 		ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
 		data.degradationInfo.disconnectedServers.clear();

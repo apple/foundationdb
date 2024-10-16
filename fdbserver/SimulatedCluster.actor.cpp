@@ -511,7 +511,7 @@ public:
 
 	// Number of tlogs in the remote region
 	Optional<int> remoteDesiredTLogCount;
-	// Number of process classes explictly set as Stateless in all regions
+	// Number of process classes explictly set as Stateless in all DCs
 	Optional<int> statelessProcessClassesPerDC;
 
 	ConfigDBType getConfigDBType() const { return configDBType; }

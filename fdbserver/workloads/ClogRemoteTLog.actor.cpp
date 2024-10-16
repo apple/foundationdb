@@ -30,7 +30,7 @@ struct ClogRemoteTLog : TestWorkload {
 	bool doStatePathCheck{ true };
 
 	enum TestState { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH };
-	// Currently, the only valid state path is: TEST_INIT, SS_LAG_NORMAL -> SS_LAG_HIGH -> SS_LAG_NORMAL
+	// Currently, the only valid state path is: TEST_INIT -> SS_LAG_NORMAL -> SS_LAG_HIGH -> SS_LAG_NORMAL
 	const std::vector<std::vector<TestState>> expectedStatePaths{
 		{ TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, SS_LAG_NORMAL }
 	};
@@ -42,9 +42,9 @@ struct ClogRemoteTLog : TestWorkload {
 		    (clientId == 0); // only run this workload for a single client, and that too the first client (by its id)
 		testDuration = getOption(options, "testDuration"_sr, 120);
 		lagMeasurementFrequency = getOption(options, "lagMeasurementFrequency"_sr, 5);
-		clogInitDelay = getOption(options, "clogInitDelay"_sr, 15);
-		clogDuration = getOption(options, "clogDuration"_sr, 60);
-		lagThreshold = getOption(options, "lagThreshold"_sr, 5);
+		clogInitDelay = getOption(options, "clogInitDelay"_sr, 10);
+		clogDuration = getOption(options, "clogDuration"_sr, 110);
+		lagThreshold = getOption(options, "lagThreshold"_sr, 20);
 	}
 
 	Future<Void> setup(const Database& db) override { return Void(); }
@@ -176,9 +176,10 @@ struct ClogRemoteTLog : TestWorkload {
 				}
 				return ret;
 			} catch (Error& e) {
-				TraceEvent("GetRemoteSSIPsError").error(e);
+				if (e.code() != error_code_actor_cancelled) {
+					TraceEvent("GetRemoteSSIPsError").error(e);
+				}
 				wait(tr.onError(e));
-				tr = Transaction(db);
 			}
 		}
 	}
@@ -220,6 +221,9 @@ struct ClogRemoteTLog : TestWorkload {
 			}
 		}
 
+		// If we can find such a machine that is just running a remote tlog, then we will do extra checking at the end
+		// (in check() method). If we can't find such a machine, we pick a random machhine and still run the test to
+		// ensure no crashes or correctness issues are observed.
 		state IPAddress remoteTLogIP;
 		if (remoteTLogIP_temp.present()) {
 			remoteTLogIP = remoteTLogIP_temp.get();

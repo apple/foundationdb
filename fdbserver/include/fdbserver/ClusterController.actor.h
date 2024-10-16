@@ -21,7 +21,6 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
 #include "fdbrpc/Locality.h"
-#include "flow/Arena.h"
 #include "flow/NetworkAddress.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H)
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H
@@ -3111,8 +3110,8 @@ public:
 		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
 	};
 
-	// Returns true iff addr1 and addr2 are located in the same DC
-	bool processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2);
+	// Returns true if and only if addr1 and addr2 are located in the same DC
+	bool processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) const;
 
 	// Returns a list of servers who are experiencing degraded links. These are candidates to perform exclusion. Note
 	// that only one endpoint of a bad link will be included in this list.

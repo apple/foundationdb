@@ -760,13 +760,23 @@ public:
 	                                             // be determined as degraded worker.
 	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
 	                                             // determined as degraded satellite.
-	bool CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING; // When enabled, gray failure tries to detect whether the
-	                                                         // remote log router is degraded and may use trigger
-	                                                         // recovery to recover from it.
-	bool CC_ENABLE_REMOTE_LOG_ROUTER_DISCONNECT_MONITORING;
-	bool CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING;
-	bool CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING;
-	bool CC_ONLY_CONSIDER_INTRA_DC_LATENCY;
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING; // When enabled, gray failure tries to detect whether
+	                                                         // remote log routers are experiencing degradation
+	                                                         // (latency) with their peers. Gray failure may trigger
+	                                                         // recovery based on this.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether
+	                                             // remote log routers are disconnected from their peers. Gray failure
+	                                             // may trigger recovery based on this.
+	bool CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING; // When enabled, gray failure tries to detect whether remote
+	                                                   // tlogs are experiencing degradation (latency) with their peers.
+	                                                   // Gray failure may trigger recovery based on this.
+	bool CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING; // When enabled, gray failure tries to detect whether remote
+	                                                  // tlogs are disconnected from their peers. Gray failure may
+	                                                  // trigger recovery based on this.
+	bool CC_ONLY_CONSIDER_INTRA_DC_LATENCY; // When enabled, gray failure only considers intra-DC signal for latency
+	                                        // degradations. For remote processes, this knob is strongly advised to be
+	                                        // turned on, because inter-DC latency signal is not reliable and it's
+	                                        // challenging to pick a good latency threshold.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 
