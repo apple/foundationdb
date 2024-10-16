@@ -61,7 +61,7 @@ struct ClogRemoteTLog : TestWorkload {
 			return true;
 		}
 		// First, emit trace event for potential debugging if test fails
-		auto stateToStr = [](const TestState testState) {
+		auto stateToStr = [](const TestState testState) -> std::string {
 			switch (testState) {
 			case (TEST_INIT): {
 				return "TEST_INIT";
@@ -74,6 +74,7 @@ struct ClogRemoteTLog : TestWorkload {
 			}
 			default: {
 				ASSERT(false);
+				return "";
 			}
 			};
 		};
