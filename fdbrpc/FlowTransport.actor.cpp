@@ -396,6 +396,10 @@ struct ConnectionLogWriter : IThreadPoolReceiver {
 	std::string time_str() const { return std::to_string(now()); }
 
 	void openOrRoll() {
+		if (fileName.empty()) {
+			fileName = newFileName();
+		}
+
 		if (!file.is_open()) {
 			TraceEvent("OpenConnectionLog").detail("FileName", fileName);
 			file = std::fstream(fileName, std::ios::in | std::ios::out | std::ios::app);
@@ -454,6 +458,7 @@ ACTOR Future<Void> connectionHistoryLogger(TransportData* self) {
 		auto action = new ConnectionLogWriter::AppendAction(localAddr, std::move(self->connectionHistory));
 		ASSERT(action != nullptr);
 		self->connectionLogWriterThread->post(action);
+		wait(delay(1));
 		ASSERT(self->connectionHistory.size() == 0);
 	}
 }
