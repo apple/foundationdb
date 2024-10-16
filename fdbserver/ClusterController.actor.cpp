@@ -3412,7 +3412,7 @@ namespace {
 
 void addProcessesToSameDC(ClusterControllerData& self, const std::vector<NetworkAddress>&& processes) {
 	LocalityData locality;
-	locality.set(LocalityData::keyDcId, StringRef("1"));
+	locality.set(LocalityData::keyDcId, Standalone<StringRef>(std::string{ "1" }));
 	for (const auto& process : processes) {
 		const bool added = self.addr_locality.insert({ process, locality }).second;
 		ASSERT(added);
