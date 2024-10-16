@@ -305,6 +305,9 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					req.begin = begin;
 					req.end = firstGreaterOrEqual(range.end);
 					req.limit = 1e4;
+					if (g_network->isSimulated() && SERVER_KNOBS->SIM_CONSISTENCY_CHECK_BACKWARD_READ) {
+						req.limit = -1e4;
+					}
 					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 					req.version = version;
 					req.tags = TagSet();
