@@ -74,6 +74,22 @@ unsigned EligibilityCounter::getCount(int combinedType) const {
 
 } // namespace data_distribution
 
+size_t getNChooseKLowerBound(size_t n, size_t k) {
+	if (k > n)
+		return 0;
+	if (k * 2 > n)
+		k = n - k;
+	if (k == 0)
+		return 1;
+
+	size_t result = n;
+	for (size_t i = 2; i <= k; ++i) {
+		result = result * (n - i + 1);
+		result = result / i;
+	}
+	return result;
+}
+
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 		state double start = now();
@@ -847,6 +863,10 @@ public:
 		}
 
 		self->evaluateTeamQuality();
+
+		if (SERVER_KNOBS->DD_BUILD_TEAMS_FAILED_TIMESPAN_AS_ERROR > 0) {
+			self->traceBuildTeamFailedForLongTime();
+		}
 
 		// Building teams can cause servers to become undesired, which can make teams unhealthy.
 		// Let all of these changes get worked out before responding to the get team request
@@ -3457,7 +3477,8 @@ public:
 
 			TraceEvent("DDPrintSnapshotTeamsInfo", self->getDistributorId())
 			    .detail("SnapshotSpeed", now() - snapshotStart)
-			    .detail("Primary", self->isPrimary());
+			    .detail("Primary", self->isPrimary())
+			    .detail("ServerMachineLayoutIsGood", self->isServerMachineLayoutGood());
 
 			// Print to TraceEvents
 			TraceEvent("DDConfig", self->getDistributorId())
@@ -4474,6 +4495,168 @@ void DDTeamCollection::evaluateTeamQuality() const {
 	    .detail("MachineMaxTeams", maxMachineTeams);
 }
 
+bool DDTeamCollection::isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMachine,
+                                           uint64_t& maxMachineTeamCount) const {
+	// The decision is made based on the tracked healthy SSes
+	// Collect data points from server_info and filter out unhealthy machines
+	std::vector<size_t> tmp = getHealthyMachineCountPerZoneOrDataHall();
+	size_t minMachineCountPerZone = tmp[0];
+	size_t maxMachineCountPerZone = tmp[1];
+	size_t zoneCount = tmp[2];
+	size_t totalHealthyMachineCount = tmp[3];
+	if (zoneCount == 0) {
+		// Layout is bad if the number of zone is 0
+		TraceEvent(SevWarnAlways, "BuildTeamZeroZoneFromServerList", distributorId)
+		    .suppressFor(60.0)
+		    .detail("Primary", primary);
+		return false;
+	}
+	if (maxMachineCountPerZone - minMachineCountPerZone > 1) {
+		// The unbalance count makes the condition harder to meet given the same amount of machines.
+		// So, we make an alert here
+		TraceEvent(SevWarn, "BuildTeamUnbalanceMachinePerZoneFromServerList", distributorId)
+		    .suppressFor(60.0)
+		    .detail("MaxMachineCountPerZone", maxMachineCountPerZone)
+		    .detail("MinMachineCountPerZone", minMachineCountPerZone)
+		    .detail("ZoneCount", zoneCount)
+		    .detail("Primary", primary);
+	}
+	// Make decision:
+	// (1) Layout is bad if the number of machine/zone is not efficient to satisfy the targetMachineTeamNumPerMachine
+	// when building machineTeams. If this is the case, it is possible that buildTeam consistently fails.
+	maxMachineTeamCountGivenAMachine = getNChooseKLowerBound(zoneCount - 1, configuration.storageTeamSize - 1) *
+	                                   pow(minMachineCountPerZone, configuration.storageTeamSize - 1);
+	int targetMachineTeamNumPerMachine =
+	    SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS
+	        ? (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2
+	        : SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER;
+	bool sufficientToCreateEnoughMachineTeams = targetMachineTeamNumPerMachine <= maxMachineTeamCountGivenAMachine;
+
+	// (2) Layout is bad if the number of all healthy machines is not efficient to satisfy the desiredTotalMachineTeams
+	int desiredTotalMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
+	maxMachineTeamCount = getNChooseKLowerBound(zoneCount, configuration.storageTeamSize) *
+	                      pow(minMachineCountPerZone, configuration.storageTeamSize);
+	sufficientToCreateEnoughMachineTeams &= (desiredTotalMachineTeams <= maxMachineTeamCount);
+
+	TraceEvent(SevInfo, "BuildTeamsDecideMachineGoodLayout", distributorId)
+	    .suppressFor(60.0)
+	    .setMaxEventLength(-1)
+	    .setMaxFieldLength(-1)
+	    .detail("Primary", primary)
+	    .detail("HealthyMachineCount", totalHealthyMachineCount)
+	    .detail("MachineInfoSize", machine_info.size())
+	    .detail("ConfigTeamSize", configuration.storageTeamSize)
+	    .detail("TargetMachineTeamNumPerMachine", targetMachineTeamNumPerMachine)
+	    .detail("MaxMachineTeamsGivenAMachine", maxMachineTeamCountGivenAMachine)
+	    .detail("MaxMachineTeamCount", maxMachineTeamCount)
+	    .detail("MinMachineCountPerZone", minMachineCountPerZone)
+	    .detail("MaxMachineCountPerZone", maxMachineCountPerZone)
+	    .detail("ZoneCount", zoneCount)
+	    .detail("TotalHealthyMachineCount", totalHealthyMachineCount)
+	    .detail("DesiredTotalMachineTeams", desiredTotalMachineTeams)
+	    .detail("SufficientToCreateEnoughMachineTeams", sufficientToCreateEnoughMachineTeams);
+	return sufficientToCreateEnoughMachineTeams;
+}
+
+bool DDTeamCollection::isServerLayoutGood(const uint64_t maxMachineTeamCountGivenAMachine,
+                                          const uint64_t maxMachineTeamCount) const {
+	// The decision is made based on the tracked healthy SSes
+	// Collect data points from server_info and filter out unhealthy SSes
+	std::vector<size_t> tmp = getHealthyStorageServerCountPerMachine();
+	size_t minServerCountPerMachine = tmp[0];
+	size_t maxServerCountPerMachine = tmp[1];
+	size_t machineCount = tmp[2];
+	size_t totalHealthyServerCount = tmp[3];
+	if (machineCount == 0) {
+		// Layout is bad if the number of machine is 0
+		TraceEvent(SevWarnAlways, "BuildTeamZeroMachineFromServerList", distributorId)
+		    .suppressFor(60.0)
+		    .detail("Primary", primary);
+		return false;
+	}
+	if (maxServerCountPerMachine - minServerCountPerMachine > 1) {
+		// The unbalance count makes the condition harder to meet given the same amount of SSes.
+		// So, we make an alert here
+		TraceEvent(SevWarn, "BuildTeamUnbalanceSSPerMachineFromServerList", distributorId)
+		    .suppressFor(60.0)
+		    .detail("MaxServerCountPerMachine", maxServerCountPerMachine)
+		    .detail("MinServerCountPerMachine", minServerCountPerMachine)
+		    .detail("Primary", primary);
+	}
+
+	// Make decision:
+	// (1) Layout is bad if there exists a machine having too few SSes or the machine count and minServerCountPerMachine
+	// cannot satisfy the targetTeamNumPerServer when building serverTeams.
+	// If this is the case, it is possible that buildTeam consistently fails but not always fails.
+	// However, we conservatively mark the layout bad
+	int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
+	bool sufficientToCreateEnoughServerTeams =
+	    (maxMachineTeamCountGivenAMachine * pow(minServerCountPerMachine, configuration.storageTeamSize - 1) >=
+	     targetTeamNumPerServer);
+
+	// (2) Layout is bad if the number of all healthy servers is not efficient to satisfy the desiredTotalServerTeams
+	int desiredTotalServerTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyServerCount;
+	sufficientToCreateEnoughServerTeams &= (desiredTotalServerTeams <= maxMachineTeamCount);
+
+	TraceEvent(SevInfo, "BuildTeamsDecideServerGoodLayout", distributorId)
+	    .suppressFor(60.0)
+	    .setMaxEventLength(-1)
+	    .setMaxFieldLength(-1)
+	    .detail("Primary", primary)
+	    .detail("MachineCount", machineCount)
+	    .detail("MachineInfoSize", machine_info.size())
+	    .detail("MinServerCountPerMachine", minServerCountPerMachine)
+	    .detail("MaxServerCountPerMachine", maxServerCountPerMachine)
+	    .detail("ConfigTeamSize", configuration.storageTeamSize)
+	    .detail("TargetTeamNumPerServer", targetTeamNumPerServer)
+	    .detail("MaxMachineTeamsGivenAMachine", maxMachineTeamCountGivenAMachine)
+	    .detail("MaxMachineTeamCount", maxMachineTeamCount)
+	    .detail("DesiredTotalServerTeams", desiredTotalServerTeams)
+	    .detail("TotalHealthyServerCount", totalHealthyServerCount)
+	    .detail("SufficientToCreateEnoughServerTeams", sufficientToCreateEnoughServerTeams);
+	return sufficientToCreateEnoughServerTeams;
+}
+
+// Decide if the current layout of servers and machines is good enough to meet the target when building serverTeams and
+// machineTeams. Sometimes, buildTeams is consistently failed because the layout is bad For example, when each machine
+// team is smaller than targetTeamNumPerServer, then buildTeam always fails. This can be caused by: (1) each machine has
+// too few SSes; (2) machine count is too small Complexity: scan the server_info list
+bool DDTeamCollection::isServerMachineLayoutGood() const {
+	uint64_t maxMachineTeamCountGivenAMachine = 0;
+	uint64_t maxMachineTeamCount = 0;
+	bool sufficientToCreateEnoughMachineTeams =
+	    isMachineLayoutGood(maxMachineTeamCountGivenAMachine, maxMachineTeamCount);
+	// maxMachineTeamCountGivenAMachine and maxMachineTeamCount updated by isMachineLayoutGood
+	bool sufficientToCreateEnoughServerTeams =
+	    isServerLayoutGood(maxMachineTeamCountGivenAMachine, maxMachineTeamCount);
+	return sufficientToCreateEnoughServerTeams && sufficientToCreateEnoughMachineTeams;
+}
+
+// Trace error if buildTeams keep failing for sufficient long time when the layout is good.
+// For the layout, see comments of isServerMachineLayoutGood()
+void DDTeamCollection::traceBuildTeamFailedForLongTime() {
+	if (!isServerMachineLayoutGood()) {
+		buildTeamsFailedStartTime.reset();
+		TraceEvent(SevWarn, "BuildTeamsFailedTimerResetDueToBadLayout", distributorId).detail("Primary", primary);
+	} else if (!lastBuildTeamsFailed) {
+		buildTeamsFailedStartTime.reset();
+		TraceEvent(SevInfo, "BuildTeamsFailedTimerResetDueToSucceed", distributorId).detail("Primary", primary);
+	} else if (!buildTeamsFailedStartTime.present()) {
+		buildTeamsFailedStartTime = now();
+		TraceEvent(SevWarn, "BuildTeamsFailedTimerStart", distributorId);
+	} else if (now() - buildTeamsFailedStartTime.get() > SERVER_KNOBS->DD_BUILD_TEAMS_FAILED_TIMESPAN_AS_ERROR) {
+		TraceEvent(SevError, "BuildTeamsFailedForLongTime", distributorId)
+		    .detail("Primary", primary)
+		    .detail("KeepFailedForSecond", now() - buildTeamsFailedStartTime.get());
+		buildTeamsFailedStartTime.reset();
+	} else {
+		TraceEvent(SevInfo, "BuildTeamsKeepFailed", distributorId)
+		    .suppressFor(60.0)
+		    .detail("KeepFailedForSecond", now() - buildTeamsFailedStartTime.get());
+	}
+	return;
+}
+
 int DDTeamCollection::overlappingMembers(const std::vector<UID>& team) const {
 	if (team.empty()) {
 		return 0;
@@ -5017,6 +5200,10 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			// NOTE: selectReplicas() should always return success when storageTeamSize = 1
 			ASSERT_WE_THINK(configuration.storageTeamSize > 1 || (configuration.storageTeamSize == 1 && success));
 			if (!success) {
+				TraceEvent(SevDebug, "AddBestMachineTeamFailedSelectReplicas", distributorId)
+				    .detail("Primary", primary)
+				    .detail("Name", configuration.storagePolicy->name())
+				    .detail("Policy", configuration.storagePolicy->info());
 				continue; // Try up to maxAttempts, since next time we may choose a different forcedAttributes
 			}
 			ASSERT_GT(forcedAttributes.size(), 0);
@@ -5046,6 +5233,15 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			int overlap = overlappingMachineMembers(machineIDs);
 			if (overlap == machineIDs.size()) {
 				maxAttempts += 1;
+				TraceEvent(SevInfo, "AddBestMachineTeamAlreadyExist", distributorId)
+				    // .suppressFor(1.0)
+				    .detail("Index", i)
+				    .detail("AddedMachineTeams", addedMachineTeams)
+				    .detail("MachineTeamsToBuild", machineTeamsToBuild)
+				    .detail("NotEnoughMachineTeamsForAMachine", notEnoughMachineTeamsForAMachine())
+				    .detail("Primary", primary)
+				    .detail("Name", configuration.storagePolicy->name())
+				    .detail("Policy", configuration.storagePolicy->info());
 				continue;
 			}
 			score += SERVER_KNOBS->DD_OVERLAP_PENALTY * overlap;
@@ -5078,7 +5274,11 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			TraceEvent(SevWarn, "BuildTeamsLastBuildTeamsFailed", distributorId)
 			    .detail("Primary", primary)
 			    .detail("Reason", "Unable to make desired machineTeams")
-			    .detail("Hint", "Check TraceAllInfo event");
+			    .detail("Hint", "Check TraceAllInfo event")
+			    .detail("BestTeam", bestTeam.size())
+			    .detail("ConfigTeamSize", configuration.storageTeamSize)
+			    .detail("Name", configuration.storagePolicy->name())
+			    .detail("Policy", configuration.storagePolicy->info());
 			lastBuildTeamsFailed = true;
 			break;
 		}
@@ -5349,6 +5549,84 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 	return false;
 }
 
+std::vector<size_t> DDTeamCollection::getHealthyStorageServerCountPerMachine() const {
+	std::unordered_map<std::string, int> serverCountOnMachines;
+	size_t serverCount = 0;
+	for (auto& [serverID, server] : server_info) {
+		if (server_status.get(serverID).isUnhealthy()) {
+			continue;
+		}
+		std::string machineID = server->machine->machineID.toString();
+		if (serverCountOnMachines.find(machineID) == serverCountOnMachines.end()) {
+			serverCountOnMachines[machineID] = 0;
+		}
+		serverCountOnMachines[machineID] = serverCountOnMachines[machineID] + 1;
+		serverCount++;
+	}
+	size_t maxCount = 0;
+	size_t minCount = std::numeric_limits<size_t>::max();
+	for (const auto& [id, count] : serverCountOnMachines) {
+		if (count > maxCount) {
+			maxCount = count;
+		}
+		if (count < minCount) {
+			minCount = count;
+		}
+	}
+	return { minCount, maxCount, serverCountOnMachines.size(), serverCount };
+}
+
+std::vector<size_t> DDTeamCollection::getHealthyMachineCountPerZoneOrDataHall() const {
+	std::unordered_map<std::string, std::unordered_set<std::string>> machinesPerZone;
+	std::unordered_set<std::string> machines;
+	for (auto& [serverID, server] : server_info) {
+		if (!isMachineHealthy(server->machine)) {
+			continue;
+		}
+		std::string zoneId;
+		if (configuration.storagePolicy->info().find("data_hall") != std::string::npos) {
+			ASSERT(server->getLastKnownInterface().locality.dataHallId().present());
+			zoneId = server->getLastKnownInterface().locality.dataHallId().get().toString();
+		} else if (server->getLastKnownInterface().locality.zoneId().present()) {
+			zoneId = server->getLastKnownInterface().locality.zoneId().get().toString();
+		} else {
+			zoneId = server->machine->machineID.toString();
+		}
+		std::string machineID = server->machine->machineID.toString();
+		machinesPerZone[zoneId].insert(machineID);
+		machines.insert(machineID);
+	}
+	size_t maxCount = 0;
+	size_t minCount = std::numeric_limits<int>::max();
+	for (const auto& [id, machines] : machinesPerZone) {
+		size_t machineCount = machines.size();
+		if (machineCount > maxCount) {
+			maxCount = machineCount;
+		}
+		if (machineCount < minCount) {
+			minCount = machineCount;
+		}
+	}
+	return { minCount, maxCount, machinesPerZone.size(), machines.size() };
+}
+
+std::vector<std::string> DDTeamCollection::getServersOnMachineTeamDescription(
+    const std::vector<Reference<TCMachineInfo>>& machines) const {
+	std::vector<std::string> res;
+	for (auto& machine : machines) {
+		int healthySSCount = 0;
+		for (auto it : machine->serversOnMachine) {
+			if (!server_status.get(it->getId()).isUnhealthy()) {
+				healthySSCount++;
+			}
+		}
+		res.push_back("[Machine]:" + machine->machineID.toString() +
+		              ",[all]:" + std::to_string(machine->serversOnMachine.size()) +
+		              ",[Healthy]:" + std::to_string(healthySSCount));
+	}
+	return res;
+}
+
 int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams) {
 	ASSERT_GE(teamsToBuild, 0);
 	ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
@@ -5402,12 +5680,13 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			te.detail("MachineTeamsAdded", addedMachineTeams);
 		}
 	}
-
 	while (addedTeams < teamsToBuild || notEnoughTeamsForAServer()) {
 		std::vector<UID> bestServerTeam;
 		int bestScore = std::numeric_limits<int>::max();
 		int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
 		bool earlyQuitBuild = false;
+		int duplicatedAttemptCount = 0;
+		int machineTeamNotFoundCount = 0;
 		for (int i = 0; i < maxAttempts && i < 100; ++i) {
 			// Step 1: Choose 1 least used server and then choose 1 least used machine team from the server
 			Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
@@ -5424,9 +5703,10 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 
 			if (!chosenMachineTeam.isValid()) {
 				// We may face the situation that temporarily we have no healthy machine.
-				TraceEvent(SevWarn, "MachineTeamNotFound")
+				TraceEvent(SevWarn, "MachineTeamNotFound", distributorId)
 				    .detail("Primary", primary)
 				    .detail("MachineTeams", machineTeams.size());
+				machineTeamNotFoundCount++;
 				continue; // try randomly to find another least used server
 			}
 
@@ -5460,6 +5740,17 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			int overlap = overlappingMembers(serverTeam);
 			if (overlap == serverTeam.size()) {
 				maxAttempts += 1;
+				duplicatedAttemptCount++;
+				TraceEvent(SevInfo, "BuildServerTeamsCandidateAlreadyExist", distributorId)
+				    .suppressFor(1.0)
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Primary", primary)
+				    .detail("MachineCount", chosenMachineTeam->getMachines().size())
+				    .detail("ServersOnMachineTeam",
+				            describe(getServersOnMachineTeamDescription(chosenMachineTeam->getMachines())))
+				    .detail("ServerTeam", describe(serverTeam))
+				    .detail("StorageTeamSize", configuration.storageTeamSize);
 				continue;
 			}
 
@@ -5470,7 +5761,8 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			for (auto& server : serverTeam) {
 				score += server_info[server]->getTeams().size();
 			}
-			TraceEvent(SevDebug, "BuildServerTeams")
+			TraceEvent(SevDebug, "BuildServerTeams", distributorId)
+			    .detail("Primary", primary)
 			    .detail("Score", score)
 			    .detail("BestScore", bestScore)
 			    .detail("TeamSize", serverTeam.size())
@@ -5488,10 +5780,15 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			// Not find any team and will unlikely find a team
 			lastBuildTeamsFailed = true;
 			TraceEvent(SevWarn, "BuildTeamsLastBuildTeamsFailed", distributorId)
-			    .detail("Reason", "Unable to find any valid serverTeam")
+			    .detail("Reason", "Unable to find more valid serverTeam")
 			    .detail("Primary", primary)
 			    .detail("BestServerTeam", describe(bestServerTeam))
-			    .detail("ConfigStorageTeamSize", configuration.storageTeamSize);
+			    .detail("ConfigStorageTeamSize", configuration.storageTeamSize)
+			    .detail("AddedTeams", addedTeams)
+			    .detail("TeamsToBuild", teamsToBuild)
+			    .detail("NotEnoughTeamsForAServer", notEnoughTeamsForAServer())
+			    .detail("DuplicatedAttemptCount", duplicatedAttemptCount)
+			    .detail("MachineTeamNotFoundCount", machineTeamNotFoundCount);
 			break;
 		}
 
