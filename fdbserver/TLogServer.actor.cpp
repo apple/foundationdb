@@ -334,7 +334,6 @@ struct TLogData : NonCopyable {
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
 	int activePeekStreams = 0;
-	Optional<Version> clusterRecoveryVersion;
 	WorkerCache<TLogInterface> tlogCache;
 	FlowLock peekMemoryLimiter;
 
@@ -1750,7 +1749,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
                               Tag reqTag,
                               bool reqReturnIfBlocked = false,
                               bool reqOnlySpilled = false,
-                              Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>()) {
+                              Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>(),
+                              Optional<Version> reqEnd = Optional<Version>()) {
 	state BinaryWriter messages(Unversioned());
 	state BinaryWriter messages2(Unversioned());
 	state int sequence = -1;
@@ -1814,26 +1814,28 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	state double blockStart = now();
 
-	// if tLog locked for recovery, return an empty message at the cluster recovery version
-	// if requested version is greater than any received.
-	state Optional<Version> clusterRecoveryVersion = Optional<Version>();
-	ASSERT(!clusterRecoveryVersion.present() || reqBegin <= clusterRecoveryVersion.get());
-	if (logData->stopped() && logData->version.get() < reqBegin && self->clusterRecoveryVersion.present()) {
-		clusterRecoveryVersion = self->clusterRecoveryVersion.get();
-		TraceEvent("TLogPeekMessagesClusterRecoveryVersion").detail("Version", clusterRecoveryVersion.get());
-	}
-
-	if (!clusterRecoveryVersion.present() && reqReturnIfBlocked && logData->version.get() < reqBegin) {
-		replyPromise.sendError(end_of_stream());
-		if (reqSequence.present()) {
-			auto& trackerData = logData->peekTracker[peekId];
-			auto& sequenceData = trackerData.sequence_version[sequence + 1];
-			trackerData.lastUpdate = now();
-			if (!sequenceData.isSet()) {
-				sequenceData.send(std::make_pair(reqBegin, reqOnlySpilled));
+	// If requested for a version beyond what the tLog has, wait until we have something to return that the caller
+	// doesn't already have unless reqReturnIfBlocked is true. However, if the tLog is locked, this will deadlock, as
+	// the tLog will never recieve any new data. That can happen in version vector, as tLogs in recovery are peeked up
+	// to the RV, which can higher than logData->version, as tLogs advance at different rates. To avoid deadlocking,
+	// return with the end version received in the request, which is the RV if set to a valid version.
+	state Optional<Version> replyWithRecoveryVersion = Optional<Version>();
+	if (logData->version.get() < reqBegin) {
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && logData->stopped() && reqEnd.present() &&
+		    reqEnd.get() != std::numeric_limits<Version>::max()) {
+			replyWithRecoveryVersion = reqEnd;
+		} else if (reqReturnIfBlocked) {
+			replyPromise.sendError(end_of_stream());
+			if (reqSequence.present()) {
+				auto& trackerData = logData->peekTracker[peekId];
+				auto& sequenceData = trackerData.sequence_version[sequence + 1];
+				trackerData.lastUpdate = now();
+				if (!sequenceData.isSet()) {
+					sequenceData.send(std::make_pair(reqBegin, reqOnlySpilled));
+				}
 			}
+			return Void();
 		}
-		return Void();
 	}
 
 	DebugLogTraceEvent("TLogPeekMessages0", self->dbgid)
@@ -1841,9 +1843,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
 	    .detail("Version", logData->version.get())
-	    .detail("RecoveredAt", logData->recoveredAt);
+	    .detail("RecoveredAt", logData->recoveredAt)
+	    .detail("ClusterRecovery", replyWithRecoveryVersion.present() ? replyWithRecoveryVersion.get() : -1);
 	// Wait until we have something to return that the caller doesn't already have
-	if (!clusterRecoveryVersion.present() && logData->version.get() < reqBegin) {
+	if (!replyWithRecoveryVersion.present() && logData->version.get() < reqBegin) {
 		wait(logData->version.whenAtLeast(reqBegin));
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
 	}
@@ -2120,7 +2123,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	auto messagesValue = messages.toValue();
 	reply.arena.dependsOn(messagesValue.arena());
 	reply.messages = messagesValue;
-	reply.end = clusterRecoveryVersion.present() ? clusterRecoveryVersion.get() : endVersion;
+	reply.end = endVersion;
+	if (replyWithRecoveryVersion.present()) {
+		reply.end = replyWithRecoveryVersion.get();
+	}
 	reply.onlySpilled = onlySpilled;
 
 	DebugLogTraceEvent("TLogPeekMessages4", self->dbgid)
@@ -2821,8 +2827,15 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
-			logData->addActor.send(tLogPeekMessages(
-			    req.reply, self, logData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
+			logData->addActor.send(tLogPeekMessages(req.reply,
+			                                        self,
+			                                        logData,
+			                                        req.begin,
+			                                        req.tag,
+			                                        req.returnIfBlocked,
+			                                        req.onlySpilled,
+			                                        req.sequence,
+			                                        req.end));
 		}
 		when(TLogPopRequest req = waitNext(tli.popMessages.getFuture())) {
 			logData->addActor.send(tLogPop(self, req, logData));
@@ -2872,11 +2885,6 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(TLogEnablePopRequest enablePopReq = waitNext(tli.enablePopRequest.getFuture())) {
 			logData->addActor.send(tLogEnablePopReq(enablePopReq, self, logData));
-		}
-		when(setClusterRecoveryVersionRequest req = waitNext(tli.setClusterRecoveryVersion.getFuture())) {
-			ASSERT(logData->stopped());
-			self->clusterRecoveryVersion = req.recoveryVersion;
-			req.reply.send(Void());
 		}
 	}
 }
