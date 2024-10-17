@@ -56,4 +56,8 @@ var (
 	errAPIVersionUnset        = Error{2200}
 	errAPIVersionAlreadySet   = Error{2201}
 	errAPIVersionNotSupported = Error{2203}
+
+	errTenantNotFound    = Error{2131}
+	errTenantExists      = Error{2132}
+	errTenantNameInvalid = Error{2134}
 )

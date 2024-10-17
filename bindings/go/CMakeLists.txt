@@ -19,6 +19,7 @@ set(SRCS
   src/fdb/tuple/tuple_test.go
   src/fdb/database.go
   src/fdb/directory/directorySubspace.go
+  src/fdb/tenant.go
   src/fdb/fdb_test.go
   src/fdb/snapshot.go
 
