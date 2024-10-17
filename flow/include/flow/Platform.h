@@ -31,6 +31,7 @@
 #define FLOW_THREAD_SAFE 0
 
 #include <stdlib.h>
+#include <filesystem>
 #if defined(__cplusplus)
 #include <ctime>
 #else
@@ -320,49 +321,51 @@ void threadSleep(double seconds);
 void threadYield(); // Attempt to yield to other processes or threads
 
 // Returns true iff the file exists
-bool fileExists(std::string const& filename);
+bool fileExists(std::filesystem::path const& filename);
 
 // Returns true iff the directory exists
-bool directoryExists(std::string const& path);
+bool directoryExists(std::filesystem::path const& path);
 
 // Returns size of file in bytes
-int64_t fileSize(std::string const& filename);
+int64_t fileSize(std::filesystem::path const& filename);
 
 // Returns last modified time of the file.
-time_t fileModifiedTime(const std::string& filename);
+time_t fileModifiedTime(std::filesystem::path const& filename); // Maybe this should be const for extra protection?
 
 // Returns true if file is deleted, false if it was not found, throws platform_error() otherwise
 // Consider using IAsyncFileSystem::filesystem()->deleteFile() instead, especially if you need durability!
-bool deleteFile(std::string const& filename);
+bool deleteFile(std::filesystem::path const& path);
 
 // Renames the given file.  Does not fsync the directory.
-void renameFile(std::string const& fromPath, std::string const& toPath);
+void renameFile(std::filesystem::path const& fromPath, std::filesystem::path const& toPath);
 
 // Atomically replaces the contents of the specified file.
-void atomicReplace(std::string const& path, std::string const& content, bool textmode = true);
+void atomicReplace(std::filesystem::path const& path,
+                   std::string const& content,
+                   bool textmode = true); // Maybe the content should also be filesystem? Not sure if there's an
+                                          // alternative but there might be some security issues if we leave it as
+                                          // std::string. (Could be a victim of injection attacks)
 
 // Read a file into memory
 // This requires the file to be seekable
-std::string readFileBytes(std::string const& filename, size_t maxSize);
+std::string readFileBytes(std::filesystem::path const& filename, size_t maxSize);
 
 // Read a file into memory supplied by the caller
 // If 'len' is greater than file size, then read the filesize bytes.
-size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len);
+size_t readFileBytes(std::filesystem::path const& filename, uint8_t* buff, size_t len);
 
 // Write data buffer into file
-void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count);
+void writeFileBytes(std::filesystem::path const& filename, const uint8_t* data, size_t count);
 
 // Write text into file
-void writeFile(std::string const& filename, std::string const& content);
-
-std::string joinPath(std::string const& directory, std::string const& filename);
+void writeFile(std::filesystem::path const& filename, std::string const& content);
 
 // cleanPath() does a 'logical' resolution of the given path string to a canonical form *without*
 // following symbolic links or verifying the existence of any path components.  It removes redundant
 // "." references and duplicate separators, and resolves any ".." references that can be resolved
 // using the preceding path components.
 // Relative paths remain relative and are NOT rebased on the current working directory.
-std::string cleanPath(std::string const& path);
+std::filesystem::path cleanPath(std::filesystem::path const& path);
 
 // Removes the last component from a path string (if possible) and returns the result with one trailing separator.
 // If there is only one path component, the result will be "" for relative paths and "/" for absolute paths.
@@ -376,7 +379,7 @@ std::string cleanPath(std::string const& path);
 //   /a/.
 //   /a/./
 //   /a//..//
-std::string popPath(const std::string& path);
+std::filesystem::path popPath(std::filesystem::path const& path);
 
 // abspath() resolves the given path to a canonical form.
 // If path is relative, the result will be based on the current working directory.
@@ -387,32 +390,34 @@ std::string popPath(const std::string& path);
 // User directory references such as '~' or '~user' are effectively treated as symbolic links which
 // are impossible to resolve, so resolveLinks=true results in failure and resolveLinks=false results
 // in the reference being left in-tact prior to resolving '..' references.
-std::string abspath(std::string const& path, bool resolveLinks = true, bool mustExist = false);
+std::filesystem::path abspath(std::filesystem::path const& path, bool resolveLinks = true, bool mustExist = false);
 
 // parentDirectory() returns the parent directory of the given file or directory in a canonical form,
 // with a single trailing path separator.
 // It uses absPath() with the same bool options to initially obtain a canonical form, and upon success
 // removes the final path component, if present.
-std::string parentDirectory(std::string const& path, bool resolveLinks = true, bool mustExist = false);
+// std::filesystem::path parentDirectory(std::filesystem::path const& path, bool resolveLinks = true, bool mustExist =
+// false); // This doesn't need to exist. Will commit this out to track references.
 
 // Returns the portion of the path following the last path separator (e.g. the filename or directory name)
-std::string basename(std::string const& filename);
+// std::string basename(std::string const& filename); // This doesn't need to exist. Will commit this out to track
+// references.
 
 // Returns the home directory of the current user
-std::string getUserHomeDirectory();
+std::string getUserHomeDirectory(); // Not sure if this needs to change.
 
 namespace platform {
 
 // Returns true if directory was created, false if it existed, throws platform_error() otherwise
-bool createDirectory(std::string const& directory);
+bool createDirectory(std::filesystem::path const& directory);
 
 // e.g. extension==".fdb", returns filenames relative to directory
-std::vector<std::string> listFiles(std::string const& directory, std::string const& extension = "");
+std::vector<std::filesystem::path> listFiles(std::filesystem::path const& directory, std::string const& extension = "");
 
 // returns directory names relative to directory
-std::vector<std::string> listDirectories(std::string const& directory);
+std::vector<std::filesystem::path> listDirectories(std::filesystem::path const& directory);
 
-void findFilesRecursively(std::string const& path, std::vector<std::string>& out);
+void findFilesRecursively(std::filesystem::path const& path, std::vector<std::filesystem::path>& out);
 
 // Tag the given file as "temporary", i.e. not really needing commits to disk
 void makeTemporary(const char* filename);
@@ -427,13 +432,13 @@ int getRandomSeed();
 bool getEnvironmentVar(const char* name, std::string& value);
 int setEnvironmentVar(const char* name, const char* value, int overwrite);
 
-std::string getWorkingDirectory();
+std::filesystem::path getWorkingDirectory();
 
 // Returns the absolute platform-dependant path for server-based files
-std::string getDefaultConfigPath();
+std::filesystem::path getDefaultConfigPath();
 
 // Returns the absolute platform-dependant path for the default fdb.cluster file
-std::string getDefaultClusterFilePath();
+std::filesystem::path getDefaultClusterFilePath();
 
 struct ImageInfo {
 	void* offset = nullptr;
@@ -463,10 +468,10 @@ public:
 	size_t read(uint8_t* buff, size_t len);
 	void write(const uint8_t* buff, size_t len);
 	bool destroyFile();
-	std::string getFileName() const { return filename; }
+	std::filesystem::path getFileName() const { return filename; }
 
 private:
-	std::string filename;
+	std::filesystem::path filename;
 	constexpr static std::string_view defaultPrefix = "fdbtmp";
 
 	void createTmpFile(const std::string_view dir, const std::string_view prefix);
@@ -753,10 +758,10 @@ void* loadLibrary(const char* lib_path);
 void closeLibrary(void* handle);
 void* loadFunction(void* lib, const char* func_name);
 
-std::string exePath();
+std::filesystem::path exePath();
 
 // get the absolute path
-std::string getExecPath();
+std::filesystem::path getExecPath();
 
 #ifdef _WIN32
 inline static int ctzll(uint64_t value) {

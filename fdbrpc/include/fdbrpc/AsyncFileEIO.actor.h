@@ -115,7 +115,7 @@ public:
 
 		return Reference<IAsyncFile>(new AsyncFileEIO(r->result, flags, filename));
 	}
-	static Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
+	static Future<Void> deleteFile(std::filesystem::path const& filename, bool mustBeDurable) {
 		::deleteFile(filename);
 		if (mustBeDurable) {
 			CODE_PROBE(true, "deleteFile and fsync parent dir", probe::decoration::rare);
@@ -124,10 +124,10 @@ public:
 			return Void();
 	}
 
-	ACTOR static Future<Void> renameFile(std::string from, std::string to) {
+	ACTOR static Future<Void> renameFile(std::filesystem::path from, std::filesystem::path to) {
 		state TaskPriority taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
-		state eio_req* r = eio_rename(from.c_str(), to.c_str(), 0, eio_callback, &p);
+		state eio_req* r = eio_rename(from.string(), to.string(), 0, eio_callback, &p);
 		try {
 			wait(p.getFuture());
 		} catch (...) {
@@ -198,7 +198,7 @@ public:
 	}
 	std::string getFilename() const override { return filename; }
 
-	ACTOR static Future<Void> async_fsync_parent(std::string filename) {
+	ACTOR static Future<Void> async_fsync_parent(std::filesystem::path const& filename) {
 		std::string folder = parentDirectory(filename);
 		TraceEvent("FSyncParentDir").detail("Folder", folder).detail("File", filename);
 		state int folderFD = ::open(folder.c_str(), O_DIRECTORY | O_CLOEXEC, 0);
