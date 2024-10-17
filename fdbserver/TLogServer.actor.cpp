@@ -2123,6 +2123,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.end = clusterRecoveryVersion.present() ? clusterRecoveryVersion.get() : endVersion;
 	reply.onlySpilled = onlySpilled;
 
+	if (g_network->isSimulated() && g_simulator->isBitFlipInjectionEnabled() && BUGGIFY_WITH_PROB(0.001)) {
+		INJECT_BIT_FLIP(reply.messages);
+	}
+
 	DebugLogTraceEvent("TLogPeekMessages4", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Tag", reqTag.toString())
