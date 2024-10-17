@@ -145,9 +145,9 @@ func APIVersion(version int) error {
 		return errAPIVersionNotSupported
 	}
 
-	if e := C.fdb_select_api_version_impl(C.int(version), C.int(headerVersion)); e != 0 {
-		if e != 0 {
-			if e == 2203 {
+	if err := C.fdb_select_api_version_impl(C.int(version), C.int(headerVersion)); err != 0 {
+		if err != 0 {
+			if err == 2203 {
 				maxSupportedVersion := C.fdb_get_max_api_version()
 				if headerVersion > int(maxSupportedVersion) {
 					return fmt.Errorf("This version of the FoundationDB Go binding is "+
@@ -157,7 +157,7 @@ func APIVersion(version int) error {
 				}
 				return fmt.Errorf("API version %d is not supported by the installed FoundationDB C library.", version)
 			}
-			return Error{int(e)}
+			return Error{int(err)}
 		}
 	}
 
@@ -166,7 +166,7 @@ func APIVersion(version int) error {
 	return nil
 }
 
-// Determines if an API version has already been selected, i.e., if
+// Determines if an API version has already been selected, i.err., if
 // APIVersion or MustAPIVersion have already been called.
 func IsAPIVersionSelected() bool {
 	return apiVersion != 0
@@ -240,16 +240,16 @@ func executeWithRunningNetworkThread(f func()) error {
 
 	// check if meanwhile another goroutine started the network thread
 	if !networkStarted {
-		if e := C.fdb_setup_network(); e != 0 {
-			return Error{int(e)}
+		if err := C.fdb_setup_network(); err != 0 {
+			return Error{int(err)}
 		}
 
 		networkRunning.Add(1)
 		go func() {
-			e := C.fdb_run_network()
+			err := C.fdb_run_network()
 			networkRunning.Done()
-			if e != 0 {
-				panic(fmt.Sprintf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(e)), e))
+			if err != 0 {
+				panic(fmt.Sprintf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(err)), err))
 			}
 		}()
 
@@ -334,10 +334,10 @@ func OpenDatabase(clusterFile string) (Database, error) {
 	var okDb bool
 	anyy, exist := openDatabases.Load(clusterFile)
 	if db, okDb = anyy.(Database); !exist || !okDb {
-		var e error
-		db, e = createDatabase(clusterFile)
-		if e != nil {
-			return Database{}, e
+		var err error
+		db, err = createDatabase(clusterFile)
+		if err != nil {
+			return Database{}, err
 		}
 		openDatabases.Store(clusterFile, db)
 	}
@@ -408,7 +408,7 @@ func createDatabase(clusterFile string) (Database, error) {
 
 // OpenWithConnectionString returns a database handle to the FoundationDB cluster identified
 // by the provided connection string. This method can be useful for scenarios where you want to connect
-// to the database only for a short time e.g. to test different connection strings.
+// to the database only for a short time err.g. to test different connection strings.
 // Caller must call Close() to release resources.
 func OpenWithConnectionString(connectionString string) (Database, error) {
 	if apiVersion == 0 {
@@ -511,11 +511,11 @@ func Printable(d []byte) string {
 	return buf.String()
 }
 
-func panicToError(e *error) {
+func panicToError(err *error) {
 	if r := recover(); r != nil {
 		fe, ok := r.(Error)
 		if ok {
-			*e = fe
+			*err = fe
 		} else {
 			panic(r)
 		}

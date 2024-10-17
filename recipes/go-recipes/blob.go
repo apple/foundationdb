@@ -97,9 +97,9 @@ func main() {
 
 	write_blob(db, blobspace, test)
 
-	ret, e := read_blob(db, blobspace)
+	ret, err := read_blob(db, blobspace)
 
-	if e == nil {
+	if err == nil {
 		fmt.Println(string(ret))
 	}
 }

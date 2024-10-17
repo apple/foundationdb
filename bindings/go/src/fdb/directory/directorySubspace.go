@@ -90,7 +90,7 @@ func (d directorySubspace) Exists(rt fdb.ReadTransactor, path []string) (bool, e
 	return d.dl.Exists(rt, d.dl.partitionSubpath(d.path, path))
 }
 
-func (d directorySubspace) List(rt fdb.ReadTransactor, path []string) (subdirs []string, e error) {
+func (d directorySubspace) List(rt fdb.ReadTransactor, path []string) (subdirs []string, err error) {
 	return d.dl.List(rt, d.dl.partitionSubpath(d.path, path))
 }
 
