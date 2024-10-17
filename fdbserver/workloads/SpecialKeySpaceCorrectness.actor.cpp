@@ -29,7 +29,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/TenantManagement.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h"
