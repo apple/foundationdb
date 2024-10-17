@@ -1015,6 +1015,7 @@ ACTOR Future<Void> applyMutations(Database cx,
 			}
 		}
 	} catch (Error& e) {
+		ASSERT_WE_THINK(e.code() != error_code_transaction_rejected_range_locked);
 		Severity sev =
 		    (e.code() == error_code_restore_missing_data || e.code() == error_code_transaction_throttled_hot_shard)
 		        ? SevWarnAlways

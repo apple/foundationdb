@@ -38,6 +38,11 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	Database extraDB;
 
+	// This workload is not compatible with RandomRangeLock workload because they will race in locked range
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomRangeLock" });
+	}
+
 	BackupToDBUpgradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupAfter = getOption(options, "backupAfter"_sr, deterministicRandom()->random01() * 10.0);
 		backupPrefix = getOption(options, "backupPrefix"_sr, StringRef());

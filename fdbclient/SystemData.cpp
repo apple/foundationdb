@@ -1210,6 +1210,49 @@ BulkLoadState decodeBulkLoadState(const ValueRef& value) {
 	return bulkLoadState;
 }
 
+// Range Lock
+const KeyRangeRef rangeLockKeys = KeyRangeRef("\xff/rangeLock/"_sr, "\xff/rangeLock0"_sr);
+const KeyRef rangeLockPrefix = rangeLockKeys.begin;
+
+const Value rangeLockSetStateValue(const RangeLockSetState& rangeLockSetState) {
+	return ObjectWriter::toValue(rangeLockSetState, IncludeVersion());
+}
+
+RangeLockSetState decodeRangeLockSetState(const ValueRef& value) {
+	RangeLockSetState rangeLockSetState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(rangeLockSetState);
+	return rangeLockSetState;
+}
+
+const KeyRangeRef rangeLockOwnerKeys = KeyRangeRef("\xff/rangeLockOwner/"_sr, "\xff/rangeLockOwner0"_sr);
+const KeyRef rangeLockOwnerPrefix = rangeLockOwnerKeys.begin;
+
+const Key rangeLockOwnerKeyFor(const std::string& ownerUniqueID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(rangeLockOwnerPrefix);
+	wr.serializeBytes(StringRef(ownerUniqueID));
+	return wr.toValue();
+}
+
+const std::string rangeLockOwnerKey(const KeyRef& key) {
+	std::string ownerUniqueID;
+	BinaryReader rd(key.removePrefix(rangeLockOwnerPrefix), Unversioned());
+	rd >> ownerUniqueID;
+	return ownerUniqueID;
+}
+
+const Value rangeLockOwnerValue(const RangeLockOwner& rangeLockOwner) {
+	return ObjectWriter::toValue(rangeLockOwner, IncludeVersion());
+}
+
+RangeLockOwner decodeRangeLockOwner(const ValueRef& value) {
+	RangeLockOwner rangeLockOwner;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(rangeLockOwner);
+	return rangeLockOwner;
+}
+
 // Keys to view and control tag throttling
 const KeyRangeRef tagThrottleKeys = KeyRangeRef("\xff\x02/throttledTags/tag/"_sr, "\xff\x02/throttledTags/tag0"_sr);
 const KeyRef tagThrottleKeysPrefix = tagThrottleKeys.begin;

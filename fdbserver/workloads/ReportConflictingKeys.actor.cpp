@@ -38,6 +38,11 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 	PerfIntCounter invalidReports, commits, conflicts, xacts;
 
+	// This workload is not compatible with RandomRangeLock workload because they will race in conflicting ranges
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomRangeLock" });
+	}
+
 	ReportConflictingKeysWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), invalidReports("InvalidReports"), commits("commits"), conflicts("Conflicts"),
 	    xacts("Transactions") {

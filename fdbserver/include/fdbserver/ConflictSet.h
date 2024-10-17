@@ -44,6 +44,7 @@ struct ConflictBatch {
 		TransactionTooOld,
 		TransactionTenantFailure,
 		TransactionCommitted,
+		TransactionLockReject,
 	};
 
 	void addTransaction(const CommitTransactionRef& transaction, Version newOldestVersion);
