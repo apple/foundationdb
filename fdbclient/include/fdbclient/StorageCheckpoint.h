@@ -129,7 +129,8 @@ struct CheckpointMetaData {
 		                  " [ID]: " + checkpointID.toString() + " [State]: " + std::to_string(static_cast<int>(state)) +
 		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "") +
 		                  (bytesSampleFile.present() ? " [bytesSampleFile]: " + bytesSampleFile.get() : "") +
-		                  " [Bytes]: " + std::to_string(bytes) + " [CreationTimestamp]: " + std::to_string(createTs);
+		                  " [Bytes]: " + std::to_string(bytes) + " [CreateTimestamp]: " + std::to_string(createTs) +
+		                  " [ExpireTimestamp]: " + std::to_string(expireTs);
 		;
 		return res;
 	}
