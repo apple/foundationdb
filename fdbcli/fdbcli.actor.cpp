@@ -101,6 +101,7 @@ enum {
 	OPT_DEBUG_TLS,
 	OPT_API_VERSION,
 	OPT_MEMORY,
+	OPT_ADMIN,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -125,6 +126,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
+									  { OPT_ADMIN, "--admin", SO_NONE },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
@@ -991,6 +993,7 @@ struct CLIOptions {
 	int exit_timeout = 0;
 	Optional<std::string> exec;
 	bool initialStatusCheck = true;
+	bool adminControl = false;
 	bool cliHints = true;
 	bool debugTLS = false;
 	std::string tlsCertPath;
@@ -1144,6 +1147,9 @@ struct CLIOptions {
 		case OPT_BUILD_FLAGS:
 			printBuildInformation();
 			return FDB_EXIT_SUCCESS;
+		case OPT_ADMIN:
+			adminControl = true;
+			break;
 		}
 		return -1;
 	}
@@ -1850,12 +1856,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						if (tokencmp(tokens[1], "on")) {
-							writeMode = true;
-						} else if (tokencmp(tokens[1], "off")) {
-							writeMode = false;
+						if (opt.adminControl){
+							if (tokencmp(tokens[1], "on")) {
+								writeMode = true;
+							} else if (tokencmp(tokens[1], "off")) {
+								writeMode = false;
+							} else {
+								printUsage(tokens[0]);
+								is_error = true;
+							}
 						} else {
-							printUsage(tokens[0]);
+							fprintf(stderr, "ERROR: You do not have the required permissions to access the write mode.\n");
 							is_error = true;
 						}
 					}
