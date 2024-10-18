@@ -20,8 +20,6 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#include "fdbrpc/Locality.h"
-#include "flow/NetworkAddress.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H)
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H
 #include "fdbserver/ClusterController.actor.g.h"
@@ -39,6 +37,8 @@
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbrpc/Locality.h"
+#include "flow/NetworkAddress.h"
 #include "flow/SystemMonitor.h"
 
 #include "metacluster/MetaclusterMetrics.h"

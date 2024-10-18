@@ -262,21 +262,18 @@ struct ClogRemoteTLog : TestWorkload {
 		state Future<Void> clog = self->clogRemoteTLog(self, db);
 		state TestState testState = TestState::TEST_INIT;
 		self->actualStatePath.push_back(testState);
-		loop choose {
-			when(wait(delay(self->lagMeasurementFrequency))) {
-				Optional<double> ssLag = wait(measureMaxSSLag(self, db));
-				if (!ssLag.present()) {
-					continue;
-				}
-				TestState localState =
-				    ssLag.get() < self->lagThreshold ? TestState::SS_LAG_NORMAL : TestState::SS_LAG_HIGH;
-				// Anytime a state transition happens, append to the state path
-				if (localState != testState) {
-					self->actualStatePath.push_back(localState);
-					testState = localState;
-				}
+		loop {
+			wait(delay(self->lagMeasurementFrequency));
+			Optional<double> ssLag = wait(measureMaxSSLag(self, db));
+			if (!ssLag.present()) {
+				continue;
 			}
-			when(wait(clog)) {}
+			TestState localState = ssLag.get() < self->lagThreshold ? TestState::SS_LAG_NORMAL : TestState::SS_LAG_HIGH;
+			// Anytime a state transition happens, append to the state path
+			if (localState != testState) {
+				self->actualStatePath.push_back(localState);
+				testState = localState;
+			}
 		}
 	}
 };
