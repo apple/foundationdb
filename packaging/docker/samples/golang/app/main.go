@@ -1,6 +1,6 @@
 // main.go
 //
-// # This source file is part of the FoundationDB open source project
+// This source file is part of the FoundationDB open source project
 //
 // Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
 //
