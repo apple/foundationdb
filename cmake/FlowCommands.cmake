@@ -237,12 +237,12 @@ function(add_flow_target)
         if(WIN32)
           add_custom_command(OUTPUT "${out_file}"
             COMMAND $<TARGET_FILE:actorcompiler> "${in_file}" "${out_file}" ${actor_compiler_flags}
-            DEPENDS "${in_file}" ${actor_exe}
+            DEPENDS "${in_file}" actorcompiler
             COMMENT "Compile actor: ${src}")
         else()
           add_custom_command(OUTPUT "${out_file}"
             COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${in_file}" "${out_file}" ${actor_compiler_flags} > /dev/null
-            DEPENDS "${in_file}" ${actor_exe}
+            DEPENDS "${in_file}" actorcompiler
             COMMENT "Compile actor: ${src}")
         endif()
       endif()
