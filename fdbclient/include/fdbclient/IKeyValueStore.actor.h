@@ -60,6 +60,7 @@ public:
 	virtual KeyValueStoreType getType() const = 0;
 	// Returns true if the KV store supports shards, i.e., implements addRange(), removeRange(), and
 	// persistRangeMapping().
+	virtual bool getReplaceContent() const { return false; };
 	virtual bool shardAware() const { return false; }
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
