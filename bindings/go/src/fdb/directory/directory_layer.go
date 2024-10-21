@@ -1,5 +1,5 @@
 /*
- * directoryLayer.go
+ * directory_layer.go
  *
  * This source file is part of the FoundationDB open source project
  *

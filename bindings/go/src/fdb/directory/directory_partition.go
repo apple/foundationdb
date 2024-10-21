@@ -1,5 +1,5 @@
 /*
- * directoryPartition.go
+ * directory_partition.go
  *
  * This source file is part of the FoundationDB open source project
  *

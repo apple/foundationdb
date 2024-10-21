@@ -1,5 +1,5 @@
 /*
- * directorySubspace.go
+ * directory_subspace.go
  *
  * This source file is part of the FoundationDB open source project
  *

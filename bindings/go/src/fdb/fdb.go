@@ -166,7 +166,7 @@ func APIVersion(version int) error {
 	return nil
 }
 
-// Determines if an API version has already been selected, i.err., if
+// Determines if an API version has already been selected, i.e., if
 // APIVersion or MustAPIVersion have already been called.
 func IsAPIVersionSelected() bool {
 	return apiVersion != 0
