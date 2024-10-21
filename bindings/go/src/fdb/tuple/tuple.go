@@ -365,51 +365,51 @@ func (p *packer) encodeTuple(t Tuple, nested bool, versionstamps bool) {
 		p.putByte(nestedCode)
 	}
 
-	for i, err := range t {
-		switch err := err.(type) {
+	for i, e := range t {
+		switch e := e.(type) {
 		case Tuple:
-			p.encodeTuple(err, true, versionstamps)
+			p.encodeTuple(e, true, versionstamps)
 		case nil:
 			p.putByte(nilCode)
 			if nested {
 				p.putByte(0xff)
 			}
 		case int:
-			p.encodeInt(int64(err))
+			p.encodeInt(int64(e))
 		case int64:
-			p.encodeInt(err)
+			p.encodeInt(e)
 		case uint:
-			p.encodeUint(uint64(err))
+			p.encodeUint(uint64(e))
 		case uint64:
-			p.encodeUint(err)
+			p.encodeUint(e)
 		case *big.Int:
-			p.encodeBigInt(err)
+			p.encodeBigInt(e)
 		case big.Int:
-			p.encodeBigInt(&err)
+			p.encodeBigInt(&e)
 		case []byte:
-			p.encodeBytes(bytesCode, err)
+			p.encodeBytes(bytesCode, e)
 		case fdb.KeyConvertible:
-			p.encodeBytes(bytesCode, []byte(err.FDBKey()))
+			p.encodeBytes(bytesCode, []byte(e.FDBKey()))
 		case string:
-			p.encodeBytes(stringCode, []byte(err))
+			p.encodeBytes(stringCode, []byte(e))
 		case float32:
-			p.encodeFloat(err)
+			p.encodeFloat(e)
 		case float64:
-			p.encodeDouble(err)
+			p.encodeDouble(e)
 		case bool:
-			if err {
+			if e {
 				p.putByte(trueCode)
 			} else {
 				p.putByte(falseCode)
 			}
 		case UUID:
-			p.encodeUUID(err)
+			p.encodeUUID(e)
 		case Versionstamp:
-			if versionstamps == false && err.TransactionVersion == incompleteTransactionVersion {
+			if versionstamps == false && e.TransactionVersion == incompleteTransactionVersion {
 				panic(fmt.Sprintf("Incomplete Versionstamp included in vanilla tuple pack"))
 			}
 
-			p.encodeVersionstamp(err)
+			p.encodeVersionstamp(e)
 		default:
 			panic(fmt.Sprintf("unencodable element at index %d (%v, type %T)", i, t[i], t[i]))
 		}

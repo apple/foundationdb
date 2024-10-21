@@ -145,9 +145,9 @@ func APIVersion(version int) error {
 		return errAPIVersionNotSupported
 	}
 
-	if err := C.fdb_select_api_version_impl(C.int(version), C.int(headerVersion)); err != 0 {
-		if err != 0 {
-			if err == 2203 {
+	if e := C.fdb_select_api_version_impl(C.int(version), C.int(headerVersion)); e != 0 {
+		if e != 0 {
+			if e == 2203 {
 				maxSupportedVersion := C.fdb_get_max_api_version()
 				if headerVersion > int(maxSupportedVersion) {
 					return fmt.Errorf("This version of the FoundationDB Go binding is "+
@@ -157,7 +157,7 @@ func APIVersion(version int) error {
 				}
 				return fmt.Errorf("API version %d is not supported by the installed FoundationDB C library.", version)
 			}
-			return Error{int(err)}
+			return Error{int(e)}
 		}
 	}
 
@@ -240,16 +240,16 @@ func executeWithRunningNetworkThread(f func()) error {
 
 	// check if meanwhile another goroutine started the network thread
 	if !networkStarted {
-		if err := C.fdb_setup_network(); err != 0 {
-			return Error{int(err)}
+		if e := C.fdb_setup_network(); e != 0 {
+			return Error{int(e)}
 		}
 
 		networkRunning.Add(1)
 		go func() {
-			err := C.fdb_run_network()
+			e := C.fdb_run_network()
 			networkRunning.Done()
-			if err != 0 {
-				panic(fmt.Sprintf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(err)), err))
+			if e != 0 {
+				panic(fmt.Sprintf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(e)), e))
 			}
 		}()
 
