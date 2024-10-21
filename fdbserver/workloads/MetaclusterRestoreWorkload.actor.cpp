@@ -139,7 +139,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					do {
 						tenantGroup = TenantGroupNameRef(
 						    format("tenantgroup%08d", deterministicRandom()->randomInt(0, maxTenantGroups)));
-					} while (tenantGroups.count(tenantGroup.get()) > 0);
+					} while (tenantGroups.contains(tenantGroup.get()));
 				}
 			}
 		}
@@ -368,7 +368,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		for (auto const& t : tenantCollisions) {
 			// If the data cluster tenant is expected, then remove the management tenant
 			// Note that the management tenant may also have been expected
-			if (self->createdTenants.count(t.second.first)) {
+			if (self->createdTenants.contains(t.second.first)) {
 				CODE_PROBE(true, "Remove management tenant in restore collision");
 				removeTrackedTenant(t.second.second);
 				deleteFutures.push_back(metacluster::deleteTenant(self->managementDb, t.second.second));
@@ -527,7 +527,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			}
 		}
 		for (auto const& g : dataClusterGroups.results) {
-			if (managementGroups.count(g.first)) {
+			if (managementGroups.contains(g.first)) {
 				groupCollisions.insert(g.first);
 			}
 		}
@@ -765,12 +765,12 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		state TenantName tenantName;
 		for (int i = 0; i < 10; ++i) {
 			tenantName = self->chooseTenantName();
-			if (self->tenantNameIndex.count(tenantName) == 0) {
+			if (!self->tenantNameIndex.contains(tenantName)) {
 				break;
 			}
 		}
 
-		if (self->tenantNameIndex.count(tenantName)) {
+		if (self->tenantNameIndex.contains(tenantName)) {
 			return Void();
 		}
 
@@ -815,12 +815,12 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		state TenantName tenantName;
 		for (int i = 0; i < 10; ++i) {
 			tenantName = self->chooseTenantName();
-			if (self->tenantNameIndex.count(tenantName) != 0) {
+			if (self->tenantNameIndex.contains(tenantName)) {
 				break;
 			}
 		}
 
-		if (self->tenantNameIndex.count(tenantName) == 0) {
+		if (!self->tenantNameIndex.contains(tenantName)) {
 			return Void();
 		}
 
@@ -856,12 +856,12 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		state TenantName tenantName;
 		for (int i = 0; i < 10; ++i) {
 			tenantName = self->chooseTenantName();
-			if (self->tenantNameIndex.count(tenantName) != 0) {
+			if (self->tenantNameIndex.contains(tenantName)) {
 				break;
 			}
 		}
 
-		if (self->tenantNameIndex.count(tenantName) == 0) {
+		if (!self->tenantNameIndex.contains(tenantName)) {
 			return Void();
 		}
 
@@ -920,18 +920,18 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		state TenantName newTenantName;
 		for (int i = 0; i < 10; ++i) {
 			oldTenantName = self->chooseTenantName();
-			if (self->tenantNameIndex.count(oldTenantName) != 0) {
+			if (self->tenantNameIndex.contains(oldTenantName)) {
 				break;
 			}
 		}
 		for (int i = 0; i < 10; ++i) {
 			newTenantName = self->chooseTenantName();
-			if (self->tenantNameIndex.count(newTenantName) == 0) {
+			if (!self->tenantNameIndex.contains(newTenantName)) {
 				break;
 			}
 		}
 
-		if (self->tenantNameIndex.count(oldTenantName) == 0 || self->tenantNameIndex.count(newTenantName) != 0) {
+		if (!self->tenantNameIndex.contains(oldTenantName) || self->tenantNameIndex.contains(newTenantName)) {
 			return Void();
 		}
 
@@ -1094,7 +1094,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		if (!clusterData.restored) {
 			ASSERT_EQ(tenants.results.size(), clusterData.tenants.size());
 			for (auto [tenantId, tenantEntry] : tenants.results) {
-				ASSERT(clusterData.tenants.count(tenantId));
+				ASSERT(clusterData.tenants.contains(tenantId));
 				auto tenantData = self->createdTenants[tenantId];
 				ASSERT(tenantData.cluster == clusterName);
 				ASSERT(tenantData.tenantGroup == tenantEntry.tenantGroup);
@@ -1128,9 +1128,9 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			// Check for deleted tenants that reappeared
 			int unexpectedTenants = 0;
 			for (auto const& [tenantId, tenantEntry] : tenantMap) {
-				if (!clusterData.tenants.count(tenantId)) {
+				if (!clusterData.tenants.contains(tenantId)) {
 					ASSERT(self->recoverManagementCluster);
-					ASSERT(self->deletedTenants.count(tenantId));
+					ASSERT(self->deletedTenants.contains(tenantId));
 					++unexpectedTenants;
 				}
 			}
@@ -1204,8 +1204,8 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		// If we recovered both the management and some data clusters, we might undelete a tenant
 		// Check that any unexpected tenants were deleted and that we had a potentially lossy recovery
 		for (auto const& [tenantId, tenantEntry] : tenantMap) {
-			if (!self->createdTenants.count(tenantId)) {
-				ASSERT(self->deletedTenants.count(tenantId));
+			if (!self->createdTenants.contains(tenantId)) {
+				ASSERT(self->deletedTenants.contains(tenantId));
 				ASSERT(self->recoverManagementCluster);
 				ASSERT(self->recoverDataClusters);
 			}

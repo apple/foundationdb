@@ -53,7 +53,6 @@ struct LatencyStats {
 	}
 
 	void reset() { *this = LatencyStats(); }
-	double count() { return n; }
 	double mean() { return x / n; }
 	double stddev() { return sqrt(x2 / n - (x / n) * (x / n)); }
 };

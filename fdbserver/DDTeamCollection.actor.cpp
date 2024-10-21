@@ -91,7 +91,7 @@ class DDTeamCollectionImpl {
 					const ProcessData& workerData = workers[i];
 					AddressExclusion addr(workerData.address.ip, workerData.address.port);
 					existingAddrs.insert(addr);
-					if (self->invalidLocalityAddr.count(addr) &&
+					if (self->invalidLocalityAddr.contains(addr) &&
 					    self->isValidLocality(self->configuration.storagePolicy, workerData.locality)) {
 						// The locality info on the addr has been corrected
 						self->invalidLocalityAddr.erase(addr);
@@ -104,7 +104,7 @@ class DDTeamCollectionImpl {
 
 				// In case system operator permanently excludes workers on the address with invalid locality
 				for (auto addr = self->invalidLocalityAddr.begin(); addr != self->invalidLocalityAddr.end();) {
-					if (!existingAddrs.count(*addr)) {
+					if (!existingAddrs.contains(*addr)) {
 						// The address no longer has a worker
 						addr = self->invalidLocalityAddr.erase(addr);
 						hasCorrectedLocality = true;
@@ -452,7 +452,7 @@ public:
 
 			bool foundSrc = false;
 			for (const auto& id : req.src) {
-				if (self->server_info.count(id)) {
+				if (self->server_info.contains(id)) {
 					foundSrc = true;
 					break;
 				}
@@ -1224,7 +1224,7 @@ public:
 									}
 									ASSERT_EQ(tc->primary, t.primary);
 									// tc->traceAllInfo();
-									if (tc->server_info.count(t.servers[0])) {
+									if (tc->server_info.contains(t.servers[0])) {
 										auto& info = tc->server_info[t.servers[0]];
 
 										bool found = false;
@@ -2173,14 +2173,14 @@ public:
 			// Do not retrigger and double-overwrite failed or wiggling servers
 			auto old = self->excludedServers.getKeys();
 			for (const auto& o : old) {
-				if (!exclusionTracker.excluded.count(o) && !exclusionTracker.failed.count(o) &&
+				if (!exclusionTracker.excluded.contains(o) && !exclusionTracker.failed.contains(o) &&
 				    !(self->excludedServers.count(o) &&
 				      self->excludedServers.get(o) == DDTeamCollection::Status::WIGGLING)) {
 					self->excludedServers.set(o, DDTeamCollection::Status::NONE);
 				}
 			}
 			for (const auto& n : exclusionTracker.excluded) {
-				if (!exclusionTracker.failed.count(n)) {
+				if (!exclusionTracker.failed.contains(n)) {
 					self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
 				}
 			}
@@ -2783,7 +2783,7 @@ public:
 
 			if (newServer.present()) {
 				UID id = newServer.get().interf.id();
-				if (!self->server_and_tss_info.count(id)) {
+				if (!self->server_and_tss_info.contains(id)) {
 					if (!recruitTss || tssState->tssRecruitSuccess()) {
 						self->addServer(newServer.get().interf,
 						                candidateWorker.processClass,
@@ -3043,7 +3043,7 @@ public:
 								UID tssId = itr->second->getId();
 								StorageServerInterface tssi = itr->second->getLastKnownInterface();
 
-								if (self->shouldHandleServer(tssi) && self->server_and_tss_info.count(tssId)) {
+								if (self->shouldHandleServer(tssi) && self->server_and_tss_info.contains(tssId)) {
 									Promise<Void> killPromise = itr->second->killTss;
 									if (killPromise.canBeSet()) {
 										CODE_PROBE(tssToRecruit < 0, "Killing TSS due to too many TSS");
@@ -3171,7 +3171,7 @@ public:
 						ProcessClass const& processClass = servers[i].second;
 						if (!self->shouldHandleServer(ssi)) {
 							continue;
-						} else if (self->server_and_tss_info.count(serverId)) {
+						} else if (self->server_and_tss_info.contains(serverId)) {
 							auto& serverInfo = self->server_and_tss_info[serverId];
 							if (ssi.getValue.getEndpoint() !=
 							        serverInfo->getLastKnownInterface().getValue.getEndpoint() ||
@@ -3185,7 +3185,7 @@ public:
 								        serverInfo->interfaceChanged.getFuture());
 								currentInterfaceChanged.send(std::make_pair(ssi, processClass));
 							}
-						} else if (!self->recruitingIds.count(ssi.id())) {
+						} else if (!self->recruitingIds.contains(ssi.id())) {
 							self->addServer(ssi,
 							                processClass,
 							                self->serverTrackerErrorOut,
@@ -3263,7 +3263,7 @@ public:
 
 			// if perpetual_storage_wiggle_locality has value and not 0(disabled).
 			if (!localityKeyValues.empty()) {
-				if (self->server_info.count(res.begin()->first)) {
+				if (self->server_info.contains(res.begin()->first)) {
 					auto server = self->server_info.at(res.begin()->first);
 					for (const auto& [localityKey, localityValue] : localityKeyValues) {
 						// Update the wigglingId only if it matches the locality.
@@ -3975,14 +3975,14 @@ Optional<Reference<IDataDistributionTeam>> DDTeamCollection::findTeamFromServers
 	const std::set<UID> completeSources(servers.begin(), servers.end());
 
 	for (const auto& server : servers) {
-		if (!server_info.count(server)) {
+		if (!server_info.contains(server)) {
 			continue;
 		}
 		auto const& teamList = server_info[server]->getTeams();
 		for (const auto& team : teamList) {
 			bool found = true;
 			for (const UID& s : team->getServerIDs()) {
-				if (!completeSources.count(s)) {
+				if (!completeSources.contains(s)) {
 					found = false;
 					break;
 				}
@@ -5688,7 +5688,7 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 	if (newServer.isTss()) {
 		tss_info_by_pair[newServer.tssPairID.get()] = r;
 
-		if (server_info.count(newServer.tssPairID.get())) {
+		if (server_info.contains(newServer.tssPairID.get())) {
 			r->onTSSPairRemoved = server_info[newServer.tssPairID.get()]->onRemoved;
 		}
 	} else {
@@ -5701,7 +5701,7 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 
 	if (!newServer.isTss()) {
 		// link and wake up tss' tracker so it knows when this server gets removed
-		if (tss_info_by_pair.count(newServer.id())) {
+		if (tss_info_by_pair.contains(newServer.id())) {
 			tss_info_by_pair[newServer.id()]->onTSSPairRemoved = r->onRemoved;
 			if (tss_info_by_pair[newServer.id()]->wakeUpTracker.canBeSet()) {
 				auto p = tss_info_by_pair[newServer.id()]->wakeUpTracker;
@@ -5987,7 +5987,7 @@ void DDTeamCollection::removeServer(UID removedServer) {
 
 Future<Void> DDTeamCollection::excludeStorageServersForWiggle(const UID& id) {
 	Future<Void> moveFuture = Void();
-	if (this->server_info.count(id) != 0) {
+	if (this->server_info.contains(id)) {
 		auto& info = server_info.at(id);
 		AddressExclusion addr(info->getLastKnownInterface().address().ip, info->getLastKnownInterface().address().port);
 

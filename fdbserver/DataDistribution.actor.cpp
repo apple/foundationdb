@@ -207,7 +207,7 @@ Future<Void> StorageWiggler::onCheck() const {
 void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
 	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "
 	//           << teamCollection->isPrimary() << std::endl;
-	ASSERT(!pq_handles.count(serverId));
+	ASSERT(!pq_handles.contains(serverId));
 	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
 }
 
@@ -1730,7 +1730,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 						    .detail("SS", server.id());
 						++storageFailures;
 					} else {
-						if (result.count(server.address())) {
+						if (result.contains(server.address())) {
 							ASSERT(itr->second.id() == result[server.address()].first.id());
 							if (result[server.address()].second.find("storage") == std::string::npos)
 								result[server.address()].second.append(",storage");
@@ -1755,7 +1755,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 					TraceEvent(SevWarn, "MissingTlogWorkerInterface").detail("TlogAddress", tlog.address());
 					throw snap_tlog_failed();
 				}
-				if (result.count(tlog.address())) {
+				if (result.contains(tlog.address())) {
 					ASSERT(workersMap[tlog.address()].id() == result[tlog.address()].first.id());
 					result[tlog.address()].second.append(",tlog");
 				} else {
@@ -1779,7 +1779,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
 				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
 				    (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
-					if (result.count(primary)) {
+					if (result.contains(primary)) {
 						ASSERT(workersMap[primary].id() == result[primary].first.id());
 						result[primary].second.append(",coord");
 					} else {
@@ -1791,7 +1791,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				for (const auto& worker : workers) {
 					const auto& processAddress = worker.interf.address();
 					// skip processes that are already included
-					if (result.count(processAddress))
+					if (result.contains(processAddress))
 						continue;
 					const auto& processClassType = worker.processClass.classType();
 					// coordinators are always configured to be recruited
@@ -3784,7 +3784,7 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 			}
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				auto& snapUID = snapReq.snapUID;
-				if (ddSnapReqResultMap.count(snapUID)) {
+				if (ddSnapReqResultMap.contains(snapUID)) {
 					CODE_PROBE(true,
 					           "Data distributor received a duplicate finished snapshot request",
 					           probe::decoration::rare);
@@ -3793,7 +3793,7 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 					TraceEvent("RetryFinishedDistributorSnapRequest")
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
-				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
+				} else if (ddSnapReqMap.contains(snapReq.snapUID)) {
 					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
@@ -3836,7 +3836,7 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 			}
 		}
 	} catch (Error& err) {
-		if (normalDataDistributorErrors().count(err.code()) == 0) {
+		if (!(normalDataDistributorErrors().contains(err.code()))) {
 			TraceEvent("DataDistributorError", di.id()).errorUnsuppressed(err);
 			throw err;
 		}

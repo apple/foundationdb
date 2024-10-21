@@ -115,7 +115,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		while (t.size() < teamSize && storageServers.size()) {
 			auto s = storageServers.back();
 			storageServers.pop_back();
-			if (!machines.count(s.locality.zoneId())) {
+			if (!machines.contains(s.locality.zoneId())) {
 				machines.insert(s.locality.zoneId());
 				t.insert(s);
 			}

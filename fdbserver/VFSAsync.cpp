@@ -685,7 +685,7 @@ static int asyncFullPathname(sqlite3_vfs* pVfs, /* VFS */
 ** and false otherwise.
 */
 bool vfsAsyncIsOpen(std::string filename) {
-	return SharedMemoryInfo::table.count(abspath(filename)) > 0;
+	return SharedMemoryInfo::table.contains(abspath(filename));
 }
 
 /*

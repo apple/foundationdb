@@ -494,7 +494,7 @@ private:
 		uint32_t opType = (uint32_t)op;
 		// Make sure the first bit of the optype is empty
 		ASSERT(opType >> ENCRYPTION_ENABLED_BIT == 0);
-		if (!enableEncryption || metaOps.count(op) > 0) {
+		if (!enableEncryption || metaOps.contains(op)) {
 			OpHeader h = { opType, v1.size(), v2.size() };
 			log->push(StringRef((const uint8_t*)&h, sizeof(h)));
 			log->push(v1);
@@ -545,7 +545,7 @@ private:
 		ASSERT(!isOpEncrypted(&h));
 		// Metadata op types to be excluded from encryption.
 		static std::unordered_set<OpType> metaOps = { OpSnapshotEnd, OpSnapshotAbort, OpCommit, OpRollback };
-		if (metaOps.count((OpType)h.op) == 0) {
+		if (!metaOps.contains((OpType)h.op)) {
 			// It is not supported to open an encrypted store as unencrypted, or vice-versa.
 			ASSERT_EQ(encryptedOp, self->enableEncryption);
 		}

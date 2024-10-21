@@ -139,7 +139,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 				    .detail("BadActorThrottleRetries", badActorThrottleRetries)
 				    .detail("GoodActorThrottleRetries", goodActorThrottleRetries);
 			}
-			if (!throttledTags.empty() && throttledTags.count(badTag.toString()) == 0) {
+			if (!throttledTags.empty() && !throttledTags.contains(badTag.toString())) {
 				TraceEvent(SevWarnAlways, "IncorrectThrottle")
 				    .detail("ThrottledTagNumber", throttledTags.size())
 				    .detail("ThrottledTags", setToString(throttledTags));

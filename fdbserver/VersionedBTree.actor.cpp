@@ -3344,7 +3344,7 @@ public:
 
 		if (copyNewToOriginal) {
 			if (g_network->isSimulated()) {
-				ASSERT(self->remapDestinationsSimOnly.count(p.originalPageID) == 0);
+				ASSERT(!self->remapDestinationsSimOnly.contains(p.originalPageID));
 				self->remapDestinationsSimOnly.insert(p.originalPageID);
 			}
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
@@ -9175,7 +9175,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 		if (deterministicRandom()->coinflip()) {
 			rec.value = StringRef(arena, v);
 		}
-		if (uniqueItems.count(rec) == 0) {
+		if (!uniqueItems.contains(rec)) {
 			uniqueItems.insert(rec);
 		}
 	}
@@ -9352,7 +9352,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 		if (deterministicRandom()->coinflip()) {
 			rec.value = StringRef(arena, v);
 		}
-		if (uniqueItems.count(rec) == 0) {
+		if (!uniqueItems.contains(rec)) {
 			uniqueItems.insert(rec);
 		}
 	}
@@ -9533,7 +9533,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 		nextP.v++;
 		auto prevP = p;
 		prevP.v--;
-		if (uniqueItems.count(p) == 0 && uniqueItems.count(nextP) == 0 && uniqueItems.count(prevP) == 0) {
+		if (!uniqueItems.contains(p) && !uniqueItems.contains(nextP) && !uniqueItems.contains(prevP)) {
 			uniqueItems.insert(p);
 		}
 	}
@@ -9676,8 +9676,8 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 		// Insert record if it, its predecessor, and its successor are not present.
 		// Test data is intentionally sparse to test finding each record with a directional
 		// seek from each adjacent possible but not present record.
-		if (uniqueItems.count(p) == 0 && uniqueItems.count(IntIntPair(p.k, p.v - 1)) == 0 &&
-		    uniqueItems.count(IntIntPair(p.k, p.v + 1)) == 0) {
+		if (!uniqueItems.contains(p) && !uniqueItems.contains(IntIntPair(p.k, p.v - 1)) &&
+		    !uniqueItems.contains(IntIntPair(p.k, p.v + 1))) {
 			if (!cur2.insert(p)) {
 				shouldBeFull = true;
 				break;

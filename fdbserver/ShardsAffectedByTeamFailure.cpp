@@ -202,14 +202,15 @@ void ShardsAffectedByTeamFailure::check() const {
 	if (EXPENSIVE_VALIDATION || checkMode == CheckMode::ForceCheck) {
 		for (auto t = team_shards.begin(); t != team_shards.end(); ++t) {
 			auto i = shard_teams.rangeContaining(t->second.begin);
-			if (i->range() != t->second || !std::count(i->value().first.begin(), i->value().first.end(), t->first)) {
+			if (i->range() != t->second ||
+			    std::find(i->value().first.begin(), i->value().first.end(), t->first) == i->value().first.end()) {
 				ASSERT(false);
 			}
 		}
 		auto rs = shard_teams.ranges();
 		for (auto i = rs.begin(); i != rs.end(); ++i) {
 			for (auto t = i->value().first.begin(); t != i->value().first.end(); ++t) {
-				if (!team_shards.count(std::make_pair(*t, i->range()))) {
+				if (!team_shards.contains(std::make_pair(*t, i->range()))) {
 					std::string teamDesc, shards;
 					for (int k = 0; k < t->servers.size(); k++)
 						teamDesc += format("%llx ", t->servers[k].first());

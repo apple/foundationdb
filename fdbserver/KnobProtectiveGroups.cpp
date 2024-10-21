@@ -28,7 +28,7 @@
 #include "fdbserver/Knobs.h"
 
 void KnobKeyValuePairs::set(const std::string& name, const ParsedKnobValue value) {
-	ASSERT(knobs.count(name) == 0);
+	ASSERT(!knobs.contains(name));
 
 	knobs[name] = value;
 }

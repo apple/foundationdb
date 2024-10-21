@@ -666,7 +666,7 @@ ACTOR Future<Void> processTransactionStateRequestPart(Reference<Resolver> self,
 	ASSERT(pContext->pResolverData.getPtr() != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
-	if (pContext->receivedSequences.count(request.sequence)) {
+	if (pContext->receivedSequences.contains(request.sequence)) {
 		// This part is already received. Still we will re-broadcast it to other CommitProxies & Resolvers
 		pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
 		wait(yield());
@@ -795,7 +795,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 ResolverInterface myInterface) {
 	loop {
 		if (db->get().recoveryCount >= recoveryCount &&
-		    !std::count(db->get().resolvers.begin(), db->get().resolvers.end(), myInterface))
+		    std::find(db->get().resolvers.begin(), db->get().resolvers.end(), myInterface) == db->get().resolvers.end())
 			throw worker_removed();
 		wait(db->onChange());
 	}

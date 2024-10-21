@@ -57,7 +57,7 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 		}
 	}
 	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present() && cc.id_worker.count(pid)) {
+		if (interface.present() && cc.id_worker.contains(pid)) {
 			cc.id_worker[pid].haltRatekeeper =
 			    brokenPromiseToNever(interface.get().haltRatekeeper.getReply(HaltRatekeeperRequest(cc.id)));
 		}
@@ -82,7 +82,7 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 		}
 	}
 	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present() && cc.id_worker.count(pid)) {
+		if (interface.present() && cc.id_worker.contains(pid)) {
 			cc.id_worker[pid].haltDistributor =
 			    brokenPromiseToNever(interface.get().haltDataDistributor.getReply(HaltDataDistributorRequest(cc.id)));
 		}
@@ -132,7 +132,7 @@ struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
 		}
 	}
 	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present() && cc.id_worker.count(pid)) {
+		if (interface.present() && cc.id_worker.contains(pid)) {
 			cc.id_worker[pid].haltBlobManager =
 			    brokenPromiseToNever(interface.get().haltBlobManager.getReply(HaltBlobManagerRequest(cc.id)));
 		}
@@ -190,7 +190,7 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 		}
 	}
 	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present() && cc.id_worker.count(pid)) {
+		if (interface.present() && cc.id_worker.contains(pid)) {
 			cc.id_worker[pid].haltEncryptKeyProxy =
 			    brokenPromiseToNever(interface.get().haltEncryptKeyProxy.getReply(HaltEncryptKeyProxyRequest(cc.id)));
 		}
