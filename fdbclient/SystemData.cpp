@@ -1214,28 +1214,28 @@ BulkLoadState decodeBulkLoadState(const ValueRef& value) {
 const KeyRangeRef rangeLockKeys = KeyRangeRef("\xff/rangeLock/"_sr, "\xff/rangeLock0"_sr);
 const KeyRef rangeLockPrefix = rangeLockKeys.begin;
 
-const Value rangeLockSetStateValue(const RangeLockSetState& rangeLockSetState) {
-	return ObjectWriter::toValue(rangeLockSetState, IncludeVersion());
+const Value rangeLockStateSetValue(const RangeLockStateSet& rangeLockStateSet) {
+	return ObjectWriter::toValue(rangeLockStateSet, IncludeVersion());
 }
 
-RangeLockSetState decodeRangeLockSetState(const ValueRef& value) {
-	RangeLockSetState rangeLockSetState;
+RangeLockStateSet decodeRangeLockStateSet(const ValueRef& value) {
+	RangeLockStateSet rangeLockStateSet;
 	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(rangeLockSetState);
-	return rangeLockSetState;
+	reader.deserialize(rangeLockStateSet);
+	return rangeLockStateSet;
 }
 
 const KeyRangeRef rangeLockOwnerKeys = KeyRangeRef("\xff/rangeLockOwner/"_sr, "\xff/rangeLockOwner0"_sr);
 const KeyRef rangeLockOwnerPrefix = rangeLockOwnerKeys.begin;
 
-const Key rangeLockOwnerKeyFor(const std::string& ownerUniqueID) {
+const Key rangeLockOwnerKeyFor(const RangeLockOwnerName& ownerUniqueID) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(rangeLockOwnerPrefix);
 	wr.serializeBytes(StringRef(ownerUniqueID));
 	return wr.toValue();
 }
 
-const std::string rangeLockOwnerKey(const KeyRef& key) {
+const RangeLockOwnerName decodeRangeLockOwnerKey(const KeyRef& key) {
 	std::string ownerUniqueID;
 	BinaryReader rd(key.removePrefix(rangeLockOwnerPrefix), Unversioned());
 	rd >> ownerUniqueID;

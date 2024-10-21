@@ -19,7 +19,6 @@
  */
 
 #pragma once
-#include "fdbclient/RangeLock.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_MANAGEMENT_API_ACTOR_G_H)
 #define FDBCLIENT_MANAGEMENT_API_ACTOR_G_H
 #include "fdbclient/ManagementAPI.actor.g.h"
@@ -37,6 +36,7 @@ standard API and some knowledge of the contents of the system key space.
 #include <map>
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/RangeLock.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/MonitorLeader.h"
@@ -203,13 +203,13 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
 ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId);
 
 // Lock a user range (the input range must be within normalKeys)
-ACTOR Future<Void> lockCommitUserRange(Database cx, KeyRange range, std::string ownerUniqueID);
+ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);
 
 // Unlock a user range (the input range must be within normalKeys)
-ACTOR Future<Void> unlockCommitUserRange(Database cx, KeyRange range, std::string ownerUniqueID);
+ACTOR Future<Void> releaseReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);
 
 // Get locked ranges within the input range (the input range must be within normalKeys)
-ACTOR Future<std::vector<KeyRange>> getCommitLockedUserRanges(Database cx, KeyRange range);
+ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange range);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);

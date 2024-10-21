@@ -99,7 +99,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			Optional<RangeLockOwner> owner = wait(getRangeLockOwner(cx, rangeLockOwnerName));
 			ASSERT(owner.present());
 			ASSERT(owner.get().getUniqueId() == rangeLockOwnerName);
-			wait(lockCommitUserRange(cx, range, rangeLockOwnerName));
+			wait(takeReadLockOnRange(cx, range, rangeLockOwnerName));
 			TraceEvent(SevWarnAlways, "InjectRangeLocked")
 			    .detail("RangeLockOwnerName", rangeLockOwnerName)
 			    .detail("Range", range)
@@ -114,7 +114,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		}
 		wait(delay(testDuration));
 		try {
-			wait(unlockCommitUserRange(cx, range, rangeLockOwnerName));
+			wait(releaseReadLockOnRange(cx, range, rangeLockOwnerName));
 			TraceEvent(SevWarnAlways, "InjectRangeUnlocked")
 			    .detail("RangeLockOwnerName", rangeLockOwnerName)
 			    .detail("Range", range);

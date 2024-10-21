@@ -3,7 +3,7 @@ tenantModes = ['disabled'] # do not support tenant
 encryptModes = ['disabled'] # do not support encryption
 
 [[knobs]]
-enable_commit_user_range_lock = true
+enable_read_lock_on_range = true
 proxy_use_resolver_private_mutations = false # do not support version vector
 
 [[test]]

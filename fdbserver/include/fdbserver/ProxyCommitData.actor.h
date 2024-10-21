@@ -19,10 +19,6 @@
  */
 
 #pragma once
-#include "fdbclient/RangeLock.h"
-#include "fdbclient/SystemData.h"
-#include "flow/Error.h"
-#include "flow/Trace.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -31,6 +27,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
+#include "fdbclient/RangeLock.h"
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
@@ -200,34 +197,34 @@ struct ExpectedIdempotencyIdCountForKey {
 
 struct RangeLock {
 public:
-	RangeLock() { coreMap.insert(allKeys, RangeLockSetState()); }
+	RangeLock() { coreMap.insert(allKeys, RangeLockStateSet()); }
 
 	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
 
 	void initKeyPoint(const Key& key, const Value& value) {
 		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Init").detail("Key", key);
 		if (!value.empty()) {
-			coreMap.rawInsert(key, decodeRangeLockSetState(value));
+			coreMap.rawInsert(key, decodeRangeLockStateSet(value));
 		} else {
-			coreMap.rawInsert(key, RangeLockSetState());
+			coreMap.rawInsert(key, RangeLockStateSet());
 		}
 		return;
 	}
 
-	void setPendingRequest(const Key& startKey, const RangeLockSetState& lockSetState) {
-		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
+	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) {
+		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
 		ASSERT(!pendingRequest());
 		currentRangeLockStartKey = std::make_pair(startKey, lockSetState);
 		return;
 	}
 
 	void consumePendingRequest(const Key& endKey) {
-		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
+		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
 		ASSERT(pendingRequest());
 		ASSERT(endKey <= normalKeys.end);
 		ASSERT(currentRangeLockStartKey.get().first < endKey);
 		KeyRange lockRange = Standalone(KeyRangeRef(currentRangeLockStartKey.get().first, endKey));
-		RangeLockSetState lockSetState = currentRangeLockStartKey.get().second;
+		RangeLockStateSet lockSetState = currentRangeLockStartKey.get().second;
 		/* TraceEvent(SevDebug, "RangeLockRangeOps")
 		    .detail("Ops", "Update")
 		    .detail("Range", lockRange)
@@ -238,13 +235,13 @@ public:
 		return;
 	}
 
-	bool shouldReject(const KeyRange& range) const {
-		ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK);
+	bool isLocked(const KeyRange& range) const {
+		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
 		if (range.end >= normalKeys.end) {
 			return false;
 		}
 		for (auto lockRange : coreMap.intersectingRanges(range)) {
-			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::RejectCommits)) {
+			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ReadLockOnRange)) {
 				return true;
 			}
 		}
@@ -253,9 +250,8 @@ public:
 	}
 
 private:
-	Optional<std::pair<Key, RangeLockSetState>> currentRangeLockStartKey =
-	    Optional<std::pair<Key, RangeLockSetState>>();
-	KeyRangeMap<RangeLockSetState> coreMap;
+	Optional<std::pair<Key, RangeLockStateSet>> currentRangeLockStartKey;
+	KeyRangeMap<RangeLockStateSet> coreMap;
 };
 
 struct ProxyCommitData {
@@ -428,7 +424,7 @@ struct ProxyCommitData {
 	                   : nullptr),
 	    epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
-		rangeLock = SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !encryptMode.isEncryptionEnabled() &&
+		rangeLock = SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !encryptMode.isEncryptionEnabled() &&
 		                    getTenantMode() == TenantMode::DISABLED
 		                ? std::make_shared<RangeLock>()
 		                : nullptr;

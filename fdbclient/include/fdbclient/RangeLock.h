@@ -28,12 +28,14 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
+using RangeLockOwnerName = std::string;
+
 enum class RangeLockType : uint8_t {
 	Invalid = 0,
-	RejectCommits = 1, // reject all commits to the locked range
+	ReadLockOnRange = 1, // reject all commits to the locked range
 };
 
-// Owner who owns the lock
+// The app/user that owns the lock.
 // A lock can be only removed by the owner
 struct RangeLockOwner {
 	constexpr static FileIdentifier file_identifier = 1384408;
@@ -58,12 +60,14 @@ public:
 
 	bool operator==(RangeLockOwner const& r) const { return uniqueId == r.uniqueId; }
 
-	std::string getUniqueId() const { return uniqueId; }
+	RangeLockOwnerName getUniqueId() const { return uniqueId; }
 
 	void setDescription(const std::string& inputDescription) {
 		description = inputDescription;
 		return;
 	}
+
+	std::string getDescription() const { return description; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -71,8 +75,8 @@ public:
 	}
 
 private:
-	std::string uniqueId; // Unique globally
-	std::string description; // More details
+	RangeLockOwnerName uniqueId; // The owner's unique ID and the owner is free to use as many times as needed.
+	std::string description; // More details about the owner
 	UID logId; // For logging purpose
 	double creationTime; // Indicate when the data structure is created
 };
@@ -84,25 +88,25 @@ struct RangeLockState {
 public:
 	RangeLockState() = default;
 
-	RangeLockState(RangeLockType type, const std::string& ownerUniqueId)
+	RangeLockState(RangeLockType type, const RangeLockOwnerName& ownerUniqueId)
 	  : lockType(type), ownerUniqueId(ownerUniqueId) {
 		ASSERT(isValid());
 	}
 
 	bool isValid() const { return lockType != RangeLockType::Invalid && !ownerUniqueId.empty(); }
 
-	std::string rangeLockTypeString() const {
-		if (lockType == RangeLockType::Invalid) {
+	static std::string rangeLockTypeString(const RangeLockType& type) {
+		if (type == RangeLockType::Invalid) {
 			return "invalid";
-		} else if (lockType == RangeLockType::RejectCommits) {
-			return "rejectCommit";
+		} else if (type == RangeLockType::ReadLockOnRange) {
+			return "ReadLockOnRange";
 		} else {
 			UNREACHABLE();
 		}
 	}
 
 	std::string toString() const {
-		return "RangeLockState: [lockType]: " + rangeLockTypeString() + " [Owner]: " + ownerUniqueId;
+		return "RangeLockState: [lockType]: " + rangeLockTypeString(lockType) + " [Owner]: " + ownerUniqueId;
 	}
 
 	bool isLockedFor(RangeLockType inputLockType) const { return lockType == inputLockType; }
@@ -111,7 +115,7 @@ public:
 		return lockType == r.lockType && ownerUniqueId == r.ownerUniqueId;
 	}
 
-	std::string getLockUniqueString() const { return ownerUniqueId + rangeLockTypeString(); }
+	std::string getLockUniqueString() const { return ownerUniqueId + rangeLockTypeString(lockType); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -119,18 +123,18 @@ public:
 	}
 
 private:
-	std::string ownerUniqueId;
+	RangeLockOwnerName ownerUniqueId; // The app/user that owns the lock.
 	RangeLockType lockType;
 };
 
 // Persisted state on a range. A range can have multiple locks distinguishing by owner and lockType.
 // For each combination of owner and lockType, there is an unique lock for the combination
-// RangeLockSetState tracks all those unique locks
-struct RangeLockSetState {
+// RangeLockStateSet tracks all those unique locks
+struct RangeLockStateSet {
 	constexpr static FileIdentifier file_identifier = 1384410;
 
 public:
-	RangeLockSetState() = default;
+	RangeLockStateSet() = default;
 
 	bool empty() const { return locks.empty(); }
 
@@ -151,9 +155,9 @@ public:
 		return true;
 	}
 
-	std::string toString() const { return "RangeLockSetState: " + describe(getAllLockStats()); }
+	std::string toString() const { return "RangeLockStateSet: " + describe(getAllLockStats()); }
 
-	bool operator==(RangeLockSetState const& r) const { return getAllLockStats() == r.getAllLockStats(); }
+	bool operator==(RangeLockStateSet const& r) const { return getAllLockStats() == r.getAllLockStats(); }
 
 	void insert(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());
@@ -183,7 +187,7 @@ public:
 	}
 
 private:
-	std::map<std::string, RangeLockState> locks;
+	std::map<RangeLockOwnerName, RangeLockState> locks;
 };
 
 #endif

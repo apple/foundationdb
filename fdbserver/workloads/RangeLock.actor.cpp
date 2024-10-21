@@ -33,7 +33,7 @@ struct RangeLocking : TestWorkload {
 	static constexpr auto NAME = "RangeLocking";
 	const bool enabled;
 	bool pass;
-	bool quitExit = false;
+	bool shouldExit = false;
 	bool verboseLogging = false; // enable to log range lock and commit history
 	std::string rangeLockOwnerName = "RangeLockingTest";
 
@@ -97,8 +97,8 @@ struct RangeLocking : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> setKey(Database cx, Key key, Value value) {
+		state Transaction tr(cx);
 		loop {
-			state Transaction tr(cx);
 			try {
 				tr.set(key, value);
 				wait(tr.commit());
@@ -110,8 +110,8 @@ struct RangeLocking : TestWorkload {
 	}
 
 	ACTOR Future<Void> clearKey(Database cx, Key key) {
+		state Transaction tr(cx);
 		loop {
-			state Transaction tr(cx);
 			try {
 				tr.clear(key);
 				wait(tr.commit());
@@ -123,8 +123,8 @@ struct RangeLocking : TestWorkload {
 	}
 
 	ACTOR Future<Void> clearRange(Database cx, KeyRange range) {
+		state Transaction tr(cx);
 		loop {
-			state Transaction tr(cx);
 			try {
 				tr.clear(range);
 				wait(tr.commit());
@@ -136,8 +136,8 @@ struct RangeLocking : TestWorkload {
 	}
 
 	ACTOR Future<Optional<Value>> getKey(Database cx, Key key) {
+		state Transaction tr(cx);
 		loop {
-			state Transaction tr(cx);
 			try {
 				Optional<Value> value = wait(tr.get(key));
 				return value;
@@ -164,10 +164,10 @@ struct RangeLocking : TestWorkload {
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(!value.present());
 
-		wait(lockCommitUserRange(cx, rangeLock, self->rangeLockOwnerName));
+		wait(takeReadLockOnRange(cx, rangeLock, self->rangeLockOwnerName));
 		TraceEvent("RangeLockWorkLoadLockRange").detail("Range", rangeLock);
 
-		wait(store(lockedRanges, getCommitLockedUserRanges(cx, normalKeys)));
+		wait(store(lockedRanges, getReadLockOnRange(cx, normalKeys)));
 		TraceEvent("RangeLockWorkLoadGetLockedRange")
 		    .detail("Range", rangeLock)
 		    .detail("LockState", describe(lockedRanges));
@@ -189,11 +189,11 @@ struct RangeLocking : TestWorkload {
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(!value.present());
 
-		wait(unlockCommitUserRange(cx, rangeLock, self->rangeLockOwnerName));
+		wait(releaseReadLockOnRange(cx, rangeLock, self->rangeLockOwnerName));
 		TraceEvent("RangeLockWorkLoadUnlockRange").detail("Range", rangeLock);
 
 		lockedRanges.clear();
-		wait(store(lockedRanges, getCommitLockedUserRanges(cx, normalKeys)));
+		wait(store(lockedRanges, getReadLockOnRange(cx, normalKeys)));
 		TraceEvent("RangeLockWorkLoadGetLockedRange")
 		    .detail("Range", rangeLock)
 		    .detail("LockState", describe(lockedRanges));
@@ -273,12 +273,12 @@ struct RangeLocking : TestWorkload {
 			state KeyRange range = self->getRandomRange();
 			state bool lock = deterministicRandom()->coinflip();
 			if (lock) {
-				wait(lockCommitUserRange(cx, range, self->rangeLockOwnerName));
+				wait(takeReadLockOnRange(cx, range, self->rangeLockOwnerName));
 				if (self->verboseLogging) {
 					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Lock").detail("Range", range);
 				}
 			} else {
-				wait(unlockCommitUserRange(cx, range, self->rangeLockOwnerName));
+				wait(releaseReadLockOnRange(cx, range, self->rangeLockOwnerName));
 				if (self->verboseLogging) {
 					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Unlock").detail("Range", range);
 				}
@@ -362,7 +362,7 @@ struct RangeLocking : TestWorkload {
 
 	ACTOR Future<std::vector<KeyRange>> getLockedRangesFromDB(Database cx) {
 		state std::vector<KeyRange> res;
-		wait(store(res, getCommitLockedUserRanges(cx, normalKeys)));
+		wait(store(res, getReadLockOnRange(cx, normalKeys)));
 		return coalesceRangeList(res);
 	}
 
@@ -385,7 +385,7 @@ struct RangeLocking : TestWorkload {
 				    .detail("Ops", "CheckDBUniqueKey")
 				    .detail("Key", key)
 				    .detail("Value", value);
-				self->quitExit = true;
+				self->shouldExit = true;
 				return Void();
 			} else if (self->kvs[key] != value) {
 				TraceEvent(SevError, "RangeLockWorkLoadHistory")
@@ -393,7 +393,7 @@ struct RangeLocking : TestWorkload {
 				    .detail("Key", key)
 				    .detail("MemValue", self->kvs[key])
 				    .detail("DBValue", value);
-				self->quitExit = true;
+				self->shouldExit = true;
 				return Void();
 			}
 		}
@@ -403,7 +403,7 @@ struct RangeLocking : TestWorkload {
 				    .detail("Ops", "CheckMemoryUniqueKey")
 				    .detail("Key", key)
 				    .detail("Value", value);
-				self->quitExit = true;
+				self->shouldExit = true;
 				return Void();
 			}
 		}
@@ -432,7 +432,7 @@ struct RangeLocking : TestWorkload {
 				TraceEvent(SevError, "RangeLockWorkLoadHistory")
 				    .detail("Ops", "CheckDBUniqueLockedRange")
 				    .detail("Range", currentLockRangesInDB[i]);
-				self->quitExit = true;
+				self->shouldExit = true;
 				return Void();
 			}
 			if (currentLockRangesInDB[i] != currentLockRangesInMemory[i]) {
@@ -440,7 +440,7 @@ struct RangeLocking : TestWorkload {
 				    .detail("Ops", "CheckMismatchLockedRange")
 				    .detail("RangeMemory", currentLockRangesInMemory[i])
 				    .detail("RangeDB", currentLockRangesInDB[i]);
-				self->quitExit = true;
+				self->shouldExit = true;
 				return Void();
 			}
 		}
@@ -449,7 +449,7 @@ struct RangeLocking : TestWorkload {
 				TraceEvent(SevError, "RangeLockWorkLoadHistory")
 				    .detail("Ops", "CheckMemoryUniqueLockedRange")
 				    .detail("Key", currentLockRangesInMemory[i]);
-				self->quitExit = true;
+				self->shouldExit = true;
 				return Void();
 			}
 		}
@@ -474,7 +474,7 @@ struct RangeLocking : TestWorkload {
 		state std::string rangeLockOwnerName = "RangeLockingSimpleTest";
 		wait(registerRangeLockOwner(cx, rangeLockOwnerName, rangeLockOwnerName));
 		loop {
-			if (iteration > iterationCount || self->quitExit) {
+			if (iteration > iterationCount || self->shouldExit) {
 				break;
 			}
 			if (deterministicRandom()->coinflip()) {
@@ -510,7 +510,7 @@ struct RangeLocking : TestWorkload {
 			    .detail("Phase", "CheckDBCorrectness");
 			iteration++;
 		}
-		wait(unlockCommitUserRange(cx, normalKeys, self->rangeLockOwnerName));
+		wait(releaseReadLockOnRange(cx, normalKeys, self->rangeLockOwnerName));
 		TraceEvent("RangeLockWorkloadProgress").detail("Phase", "End");
 		return Void();
 	}

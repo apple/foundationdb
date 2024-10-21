@@ -2005,8 +2005,8 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 }
 
 // RangeLock takes effect only when the feature flag is on and database is unlocked and the mutation is not encrypted
-void rejectMutationsForRangeLock(CommitBatchContext* self) {
-	ASSERT(SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !self->locked &&
+void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
+	ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !self->locked &&
 	       !self->pProxyCommitData->encryptMode.isEncryptionEnabled() &&
 	       self->pProxyCommitData->getTenantMode() == TenantMode::DISABLED);
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
@@ -2030,7 +2030,7 @@ void rejectMutationsForRangeLock(CommitBatchContext* self) {
 			} else if (m.type == MutationRef::ClearRange) {
 				rangeToCheck = KeyRangeRef(m.param1, m.param2);
 			}
-			bool shouldReject = pProxyCommitData->rangeLock->shouldReject(rangeToCheck);
+			bool shouldReject = pProxyCommitData->rangeLock->isLocked(rangeToCheck);
 			if (shouldReject) {
 				self->committed[i] = ConflictBatch::TransactionLockReject;
 				trs[i].reply.sendError(transaction_rejected_range_locked());
@@ -2340,10 +2340,10 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// If a transaction has any mutation accessing to the locked range, reject the transaction with
 	// error_code_transaction_rejected_range_locked
 	// This feature is disabled when the database is locked
-	if (SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK && !self->locked &&
+	if (SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !self->locked &&
 	    !pProxyCommitData->encryptMode.isEncryptionEnabled() &&
 	    self->pProxyCommitData->getTenantMode() == TenantMode::DISABLED) {
-		rejectMutationsForRangeLock(self);
+		rejectMutationsForReadLockOnRange(self);
 	}
 
 	// Second pass

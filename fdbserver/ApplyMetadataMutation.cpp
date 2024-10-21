@@ -219,7 +219,7 @@ private:
 		} else if (rangeLock == nullptr) {
 			TraceEvent(SevWarnAlways, "MutationHasRangeLockPrefixButFeatureIsOff")
 			    .detail("Mutation", m.toString())
-			    .detail("FeatureFlag", SERVER_KNOBS->ENABLE_COMMIT_USER_RANGE_LOCK)
+			    .detail("FeatureFlag", SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE)
 			    .detail("Encription", encryptMode.isEncryptionEnabled());
 			return;
 		}
@@ -231,7 +231,7 @@ private:
 			rangeLock->consumePendingRequest(endKey);
 		} else {
 			// The first mutation
-			RangeLockSetState lockSetState = m.param2.empty() ? RangeLockSetState() : decodeRangeLockSetState(m.param2);
+			RangeLockStateSet lockSetState = m.param2.empty() ? RangeLockStateSet() : decodeRangeLockStateSet(m.param2);
 			Key startKey = m.param1.removePrefix(rangeLockPrefix);
 			rangeLock->setPendingRequest(startKey, lockSetState);
 		}
