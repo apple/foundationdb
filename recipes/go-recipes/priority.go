@@ -142,7 +142,7 @@ func main() {
 	p.Push(db, "b", 5)
 	p.Push(db, "c", 2)
 	p.Push(db, "d", 4)
-	p.Push(db, "err", 3)
+	p.Push(db, "e", 3)
 
 	fmt.Println(p.Peek(db, false))
 	fmt.Println(p.Peek(db, false))

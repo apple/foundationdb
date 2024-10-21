@@ -45,8 +45,8 @@ func _pack(t interface{}) []byte {
 }
 
 func _unpack(t []byte) tuple.Tuple {
-	i, err := tuple.Unpack(t)
-	if err != nil {
+	i, e := tuple.Unpack(t)
+	if e != nil {
 		return nil
 	}
 	return i
