@@ -53,7 +53,6 @@ struct TLogInterface {
 	RequestStream<struct TLogEnablePopRequest> enablePopRequest;
 	RequestStream<struct TLogSnapRequest> snapRequest;
 	RequestStream<struct TrackTLogRecoveryRequest> trackRecovery;
-	RequestStream<struct setClusterRecoveryVersionRequest> setClusterRecoveryVersion;
 
 	TLogInterface() {}
 	explicit TLogInterface(const LocalityData& locality)
@@ -88,7 +87,6 @@ struct TLogInterface {
 		streams.push_back(snapRequest.getReceiver());
 		streams.push_back(peekStreamMessages.getReceiver(TaskPriority::TLogPeek));
 		streams.push_back(trackRecovery.getReceiver());
-		streams.push_back(setClusterRecoveryVersion.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 
@@ -119,8 +117,6 @@ struct TLogInterface {
 			    RequestStream<struct TLogPeekStreamRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(11));
 			trackRecovery =
 			    RequestStream<struct TrackTLogRecoveryRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(12));
-			setClusterRecoveryVersion = RequestStream<struct setClusterRecoveryVersionRequest>(
-			    peekMessages.getEndpoint().getAdjustedEndpoint(13));
 		}
 	}
 };
@@ -225,18 +221,21 @@ struct TLogPeekRequest {
 	bool onlySpilled;
 	Optional<std::pair<UID, int>> sequence;
 	ReplyPromise<TLogPeekReply> reply;
+	Optional<Version> end; // when set is exclusive to the desired range
 
 	TLogPeekRequest(Version begin,
 	                Tag tag,
 	                bool returnIfBlocked,
 	                bool onlySpilled,
-	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>())
-	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), onlySpilled(onlySpilled), sequence(sequence) {}
+	                Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>(),
+	                Optional<Version> end = Optional<Version>())
+	  : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), onlySpilled(onlySpilled), sequence(sequence),
+	    end(end) {}
 	TLogPeekRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, tag, returnIfBlocked, onlySpilled, sequence, reply);
+		serializer(ar, begin, tag, returnIfBlocked, onlySpilled, sequence, reply, end);
 	}
 };
 
@@ -467,21 +466,6 @@ struct TrackTLogRecoveryRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, oldestGenRecoverAtVersion, reply);
-	}
-};
-
-struct setClusterRecoveryVersionRequest {
-	constexpr static FileIdentifier file_identifier = 6876464;
-
-	Version recoveryVersion;
-	ReplyPromise<Void> reply;
-
-	setClusterRecoveryVersionRequest() = default;
-	setClusterRecoveryVersionRequest(Version recoveryVersion) : recoveryVersion(recoveryVersion) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, recoveryVersion, reply);
 	}
 };
 
