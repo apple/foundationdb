@@ -157,9 +157,26 @@ public:
 
 	std::string toString() const { return "RangeLockStateSet: " + describe(getAllLockStats()); }
 
-	bool operator==(RangeLockStateSet const& r) const { return getAllLockStats() == r.getAllLockStats(); }
+	const std::map<RangeLockOwnerName, RangeLockState>& getLocks() const { return locks; }
 
-	void insert(const RangeLockState& inputLock) {
+	bool operator==(RangeLockStateSet const& r) const {
+		auto rLocks = r.getLocks();
+		if (locks.size() != rLocks.size()) {
+			return false;
+		}
+		std::map<RangeLockOwnerName, RangeLockState>::const_iterator iterator = locks.begin();
+		std::map<RangeLockOwnerName, RangeLockState>::const_iterator rIterator = rLocks.begin();
+		while (iterator != locks.end() && rIterator != rLocks.end()) {
+			if (iterator->first != rIterator->first || iterator->second != rIterator->second) {
+				return false;
+			}
+			++iterator;
+			++rIterator;
+		}
+		return true;
+	}
+
+	void upsert(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());
 		locks[inputLock.getLockUniqueString()] = inputLock;
 		return;

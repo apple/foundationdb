@@ -3135,7 +3135,7 @@ ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string 
 				if (!result[i].value.empty()) {
 					rangeLockStateSet = decodeRangeLockStateSet(result[i].value);
 				}
-				rangeLockStateSet.insert(RangeLockState(RangeLockType::ReadLockOnRange, owner.getUniqueId()));
+				rangeLockStateSet.upsert(RangeLockState(RangeLockType::ReadLockOnRange, owner.getUniqueId()));
 				ASSERT(rangeLockStateSet.isValid());
 				wait(krmSetRangeCoalescing(
 				    &tr, rangeLockPrefix, lockRange, normalKeys, rangeLockStateSetValue(rangeLockStateSet)));

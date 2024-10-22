@@ -43,19 +43,18 @@ struct RangeLocking : TestWorkload {
 	}
 
 	struct KVOperation {
-		Optional<KeyRange> range;
-		Optional<KeyValue> keyValue;
+		std::variant<KeyRange, KeyValue> params;
 
-		KVOperation(KeyRange range) : range(range) {}
-		KVOperation(KeyValue keyValue) : keyValue(keyValue) {}
+		KVOperation(KeyRange range) : params(range) {}
+		KVOperation(KeyValue keyValue) : params(keyValue) {}
 
 		std::string toString() const {
 			std::string res = "KVOperation: ";
-			if (range.present()) {
-				res = res + "[ClearRange]: " + range.get().toString();
+			if (std::holds_alternative<KeyRange>(params)) {
+				res = res + "[ClearRange]: " + std::get<KeyRange>(params).toString();
 			} else {
-				res = res + "[SetKeyValue]: key: " + keyValue.get().key.toString() +
-				      ", value: " + keyValue.get().value.toString();
+				res = res + "[SetKeyValue]: key: " + std::get<KeyValue>(params).key.toString() +
+				      ", value: " + std::get<KeyValue>(params).value.toString();
 			}
 			return res;
 		}
@@ -290,10 +289,10 @@ struct RangeLocking : TestWorkload {
 
 	bool operationRejectByLocking(RangeLocking* self, const KVOperation& kvOperation) {
 		KeyRange rangeToCheck;
-		if (kvOperation.range.present()) {
-			rangeToCheck = kvOperation.range.get();
+		if (std::holds_alternative<KeyRange>(kvOperation.params)) {
+			rangeToCheck = std::get<KeyRange>(kvOperation.params);
 		} else {
-			rangeToCheck = singleKeyRange(kvOperation.keyValue.get().key);
+			rangeToCheck = singleKeyRange(std::get<KeyValue>(kvOperation.params).key);
 		}
 		for (auto lockRange : self->lockedRangeMap.intersectingRanges(rangeToCheck)) {
 			if (lockRange.value() == true) {
@@ -308,12 +307,12 @@ struct RangeLocking : TestWorkload {
 			if (self->operationRejectByLocking(self, operation)) {
 				continue;
 			}
-			if (operation.keyValue.present()) {
-				Key key = operation.keyValue.get().key;
-				Value value = operation.keyValue.get().value;
+			if (std::holds_alternative<KeyValue>(operation.params)) {
+				Key key = std::get<KeyValue>(operation.params).key;
+				Value value = std::get<KeyValue>(operation.params).value;
 				self->kvs[key] = value;
 			} else {
-				KeyRange clearRange = operation.range.get();
+				KeyRange clearRange = std::get<KeyRange>(operation.params);
 				std::vector<Key> keysToClear;
 				for (const auto& [key, value] : self->kvs) {
 					if (clearRange.contains(key)) {
@@ -444,14 +443,12 @@ struct RangeLocking : TestWorkload {
 				return Void();
 			}
 		}
-		for (int i = 0; i < currentLockRangesInMemory.size(); i++) {
-			if (i >= currentLockRangesInDB.size()) {
-				TraceEvent(SevError, "RangeLockWorkLoadHistory")
-				    .detail("Ops", "CheckMemoryUniqueLockedRange")
-				    .detail("Key", currentLockRangesInMemory[i]);
-				self->shouldExit = true;
-				return Void();
-			}
+		for (int i = currentLockRangesInDB.size(); i < currentLockRangesInMemory.size(); i++) {
+			TraceEvent(SevError, "RangeLockWorkLoadHistory")
+			    .detail("Ops", "CheckMemoryUniqueLockedRange")
+			    .detail("Key", currentLockRangesInMemory[i]);
+			self->shouldExit = true;
+			return Void();
 		}
 		if (self->verboseLogging) {
 			TraceEvent e("RangeLockWorkLoadHistory");
