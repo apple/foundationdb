@@ -815,6 +815,11 @@ inline bool shouldBackup(MutationRef const& m) {
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 	std::set<Tag> transactionTags;
 	std::vector<Tag> cacheVector = { cacheTag };
+	if (pProxyCommitData->txnStateStore->getReplaceContent()) {
+		// return empty set if txnStateStore will snapshot.
+		// empty sets are sent to all logs.
+		return transactionTags;
+	}
 	for (int transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
 		int mutationNum = 0;
 		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
