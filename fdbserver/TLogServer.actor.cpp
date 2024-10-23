@@ -53,17 +53,19 @@ struct TLogQueueEntryRef {
 	UID id;
 	Version version;
 	Version knownCommittedVersion;
+	Version prevVersion;
+	std::vector<uint16_t> tLogLocIds;
 	StringRef messages;
-	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
+	TLogQueueEntryRef() : version(0), knownCommittedVersion(0), prevVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
 	  : id(from.id), version(from.version), knownCommittedVersion(from.knownCommittedVersion),
-	    messages(a, from.messages) {}
+	    messages(a, from.messages), prevVersion(from.prevVersion), tLogLocIds(from.tLogLocIds) {}
 
 	// To change this serialization, ProtocolVersion::TLogQueueEntryRef must be updated, and downgrades need to be
 	// considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, messages, knownCommittedVersion, id);
+		serializer(ar, version, messages, knownCommittedVersion, prevVersion, tLogLocIds, id);
 	}
 	size_t expectedSize() const { return messages.expectedSize(); }
 };
@@ -73,8 +75,11 @@ struct AlternativeTLogQueueEntryRef {
 	Version version;
 	Version knownCommittedVersion;
 	std::vector<TagsAndMessage>* alternativeMessages;
+	Version prevVersion;
+	std::vector<uint16_t> tLogLocIds;
 
-	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(nullptr) {}
+	AlternativeTLogQueueEntryRef()
+	  : version(0), knownCommittedVersion(0), alternativeMessages(nullptr), prevVersion(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -84,7 +89,7 @@ struct AlternativeTLogQueueEntryRef {
 		for (auto& msg : *alternativeMessages) {
 			ar.serializeBytes(msg.message);
 		}
-		serializer(ar, knownCommittedVersion, id);
+		serializer(ar, knownCommittedVersion, prevVersion, tLogLocIds, id);
 	}
 
 	uint32_t expectedSize() const {
@@ -2430,6 +2435,8 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		qe.knownCommittedVersion = logData->knownCommittedVersion;
 		qe.messages = req.messages;
 		qe.id = logData->logId;
+		qe.prevVersion = req.seqPrevVersion;
+		qe.tLogLocIds = req.tLogLocIds;
 		self->persistentQueue->push(qe, logData);
 
 		self->diskQueueCommitBytes += qe.expectedSize();
@@ -3430,6 +3437,16 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 						logData->knownCommittedVersion =
 						    std::max(logData->knownCommittedVersion, qe.knownCommittedVersion);
+
+						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+							logData->unknownCommittedVersions.emplace_front(qe.version, qe.prevVersion, qe.tLogLocIds);
+
+							while (!logData->unknownCommittedVersions.empty() &&
+							       logData->unknownCommittedVersions.back().version <= logData->knownCommittedVersion) {
+								logData->unknownCommittedVersions.pop_back();
+							}
+						}
+
 						if (qe.version > logData->version.get()) {
 							commitMessages(self, logData, qe.version, qe.arena(), qe.messages);
 							logData->version.set(qe.version);
