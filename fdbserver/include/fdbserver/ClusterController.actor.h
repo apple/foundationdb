@@ -37,6 +37,8 @@
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbrpc/Locality.h"
+#include "flow/NetworkAddress.h"
 #include "flow/SystemMonitor.h"
 
 #include "metacluster/MetaclusterMetrics.h"
@@ -3107,6 +3109,10 @@ public:
 
 		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
 	};
+
+	// Returns true if and only if addr1 and addr2 are located in the same DC
+	bool processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) const;
+
 	// Returns a list of servers who are experiencing degraded links. These are candidates to perform exclusion. Note
 	// that only one endpoint of a bad link will be included in this list.
 	DegradationInfo getDegradationInfo() {
@@ -3120,6 +3126,9 @@ public:
 			for (const auto& [degradedPeer, times] : health.degradedPeers) {
 				if (currentTime - times.startTime < SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL) {
 					// This degraded link is not long enough to be considered as degraded.
+					continue;
+				}
+				if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY && !processesInSameDC(server, degradedPeer)) {
 					continue;
 				}
 				degradedLinkDst2Src[degradedPeer].insert(server);
@@ -3262,7 +3271,6 @@ public:
 
 		return transactionSystemContainsDegradedServers();
 	}
-
 	// Returns true when the cluster controller should trigger a failover due to degraded servers used in the
 	// transaction system in the primary data center, and no degradation in the remote data center.
 	bool shouldTriggerFailoverDueToDegradedServers() {
@@ -3319,6 +3327,7 @@ public:
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>
 	    id_class; // contains the mapping from process id to process class from the database
+	std::unordered_map<NetworkAddress, LocalityData> addr_locality; // mapping of process address to its locality
 	RangeResult lastProcessClasses;
 	bool gotProcessClasses;
 	bool gotFullyRecoveredConfig;
