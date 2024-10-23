@@ -108,6 +108,8 @@ ERROR( duplicate_snapshot_request, 1083, "A duplicate snapshot request has been 
 ERROR( dd_config_changed, 1084, "DataDistribution configuration changed." )
 ERROR( consistency_check_urgent_task_failed, 1085, "Consistency check urgent task is failed")
 ERROR( data_move_conflict, 1086, "Data move conflict in SS")
+ERROR( consistency_check_urgent_duplicate_request, 1087, "Consistency check urgent got a duplicate request")
+ERROR( consistency_check_urgent_conflicting_request, 1088, "Consistency check urgent can process 1 workload at a time")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
