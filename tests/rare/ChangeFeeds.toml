@@ -2,6 +2,9 @@
 testClass = "ChangeFeeds"
 allowDefaultTenant = false
 
+[[knobs]]
+enable_read_lock_on_range = false # FIXME: re-enable after change feed is compatible with range lock
+
 [[test]]
 testTitle = 'ChangeFeed'
 
