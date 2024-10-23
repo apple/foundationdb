@@ -967,6 +967,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 					    .detail("ConsistencyCheckerId", work.sharedRandomNumber)
 					    .detail("ClientId", work.clientId)
 					    .detail("ClientCount", work.clientCount);
+					work.reply.sendError(consistency_check_urgent_duplicate_request());
 				} else if (consistencyCheckerUrgentTester.second.isValid() &&
 				           !consistencyCheckerUrgentTester.second.isReady()) {
 					TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_TesterWorkloadConflict", interf.id())
@@ -974,13 +975,15 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 					    .detail("ArrivingConsistencyCheckerId", work.sharedRandomNumber)
 					    .detail("ClientId", work.clientId)
 					    .detail("ClientCount", work.clientCount);
+					work.reply.sendError(consistency_check_urgent_conflicting_request());
+				} else {
+					consistencyCheckerUrgentTester = std::make_pair(
+					    work.sharedRandomNumber, testerServerConsistencyCheckerUrgentWorkload(work, ccr, dbInfo));
+					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterWorkloadInitialized", interf.id())
+					    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first)
+					    .detail("ClientId", work.clientId)
+					    .detail("ClientCount", work.clientCount);
 				}
-				consistencyCheckerUrgentTester = std::make_pair(
-				    work.sharedRandomNumber, testerServerConsistencyCheckerUrgentWorkload(work, ccr, dbInfo));
-				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterWorkloadInitialized", interf.id())
-				    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first)
-				    .detail("ClientId", work.clientId)
-				    .detail("ClientCount", work.clientCount);
 			} else {
 				addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality));
 			}
