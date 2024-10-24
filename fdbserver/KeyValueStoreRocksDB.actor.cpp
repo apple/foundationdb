@@ -1869,8 +1869,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		// substantially more confidence in the correctness.
 		// TODO: Adapt the simulation framework to not advance time quickly when background reads/writes are occurring.
 		if (g_network->isSimulated()) {
-			writeThread = CoroThreadPool::createThreadPool();
-			readThreads = CoroThreadPool::createThreadPool();
+			writeThread = CoroThreadPool::createThreadPool(true);
+			readThreads = CoroThreadPool::createThreadPool(true);
 		} else {
 			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
 			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);

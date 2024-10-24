@@ -32,7 +32,7 @@ public:
 	static void init();
 	static void waitFor(Future<Void> what);
 
-	static Reference<IThreadPool> createThreadPool();
+	static Reference<IThreadPool> createThreadPool(bool immediate = false);
 
 protected:
 	CoroThreadPool() {}

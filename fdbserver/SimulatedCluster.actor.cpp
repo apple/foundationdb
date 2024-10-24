@@ -1809,7 +1809,7 @@ void rocksdbStorageEngineConfig(SimulationConfig* simCfg) {
 	// background threads.
 	TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
 	    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
-	noUnseed = true;
+	noUnseed = false;
 }
 
 void shardedRocksDBStorageEngineConfig(SimulationConfig* simCfg) {
@@ -1820,7 +1820,7 @@ void shardedRocksDBStorageEngineConfig(SimulationConfig* simCfg) {
 	// background threads.
 	TraceEvent(SevWarnAlways, "ShardedRocksDBNonDeterminism")
 	    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
-	noUnseed = true;
+	noUnseed = false;
 }
 
 const std::unordered_map<SimulationStorageEngine, StorageEngineConfigFunc> STORAGE_ENGINE_CONFIG_MAPPER = {
