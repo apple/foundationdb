@@ -775,7 +775,9 @@ public:
 	                                                  // tlogs are disconnected from their peers. Gray failure may
 	                                                  // trigger recovery based on this.
 	bool CC_ONLY_CONSIDER_INTRA_DC_LATENCY; // When enabled, gray failure only considers intra-DC signal for latency
-	                                        // degradations. For remote processes, this knob is strongly advised to be
+	                                        // degradations. For remote process knobs
+	                                        // (CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING and
+	                                        // CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING), this knob must be
 	                                        // turned on, because inter-DC latency signal is not reliable and it's
 	                                        // challenging to pick a good latency threshold.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
