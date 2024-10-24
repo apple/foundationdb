@@ -11919,6 +11919,24 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	}
 }
 
+ACTOR Future<Void> checkpointLogger(StorageServer* data) {
+	loop {
+		state double ts = now();
+		state std::unordered_map<UID, CheckpointMetaData>::iterator it = data->checkpoints.begin();
+		for (; it != data->checkpoints.end(); ++it) {
+			const CheckpointMetaData& md = it->second;
+			if (md.expireTs > ts) {
+				TraceEvent(SevWarnAlways, "ExpiredCheckpointNotCleanedUp", data->thisServerID)
+				    .detail("Checkpoint", md.toString());
+			} else {
+				TraceEvent(SevInfo, "ServerCheckpoint", data->thisServerID).detail("Checkpoint", md.toString());
+			}
+			wait(yield());
+		}
+		wait(delayUntil(ts + SERVER_KNOBS->ROCKSDB_DM_CHECKPOINT_TTL / 4));
+	}
+}
+
 ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
                                                               CheckpointMetaData metaData,
                                                               std::string bytesSampleFile) {

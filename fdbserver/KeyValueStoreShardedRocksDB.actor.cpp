@@ -405,6 +405,7 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 			liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 			liveFileMetaData.level = fileMetaData.level;
 			rocksCF.sstFiles.push_back(liveFileMetaData);
+			checkpoint->bytes += fileMetaData.size;
 		}
 	}
 	checkpoint->setFormat(DataMoveRocksCF);
@@ -2974,6 +2975,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 
 				populateMetaData(&res, pMetadata);
+				res.createTs = now();
+				res.expireTs = res.createTs + SERVER_KNOBS->ROCKSDB_DM_CHECKPOINT_TTL;
 				rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
 				delete pMetadata;
 				if (!metadata.files.empty() && SERVER_KNOBS->ROCKSDB_ENABLE_CHECKPOINT_VALIDATION) {
