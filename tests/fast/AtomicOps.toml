@@ -1,4 +1,11 @@
 [[test]]
+testTitle = 'Cached'
+
+    [[test.workload]]
+    testName = 'Cache'
+    keyPrefix = 'log'
+
+[[test]]
 testTitle = 'Clogged'
 
     [[test.workload]]

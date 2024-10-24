@@ -14,3 +14,12 @@ testTitle = 'Cycle'
     testDuration = 10.0
     expectedRate = 0.01
     keyPrefix = 'foo/'
+
+[[test]]
+testTitle = 'Cycle'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+    expectedRate = 0.01
