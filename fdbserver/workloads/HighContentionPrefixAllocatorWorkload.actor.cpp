@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/HighContentionPrefixAllocator.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
