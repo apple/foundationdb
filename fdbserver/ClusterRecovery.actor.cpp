@@ -1417,7 +1417,9 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 		updateConfigForForcedRecovery(self, initialConfChanges);
 	}
 
-	debug_checkMaxRestoredVersion(UID(), self->lastEpochEnd, "DBRecovery");
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		debug_checkMaxRestoredVersion(UID(), self->lastEpochEnd, "DBRecovery");
+	}
 
 	// Ordinarily we pass through this loop once and recover.  We go around the loop if recovery stalls for more than a
 	// second, a provisional master is initialized, and an "emergency transaction" is submitted that might change the
