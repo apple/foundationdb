@@ -23,9 +23,11 @@
 package fdb_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
@@ -388,4 +390,37 @@ func ExampleOpenWithConnectionString() {
 	// Do work here
 
 	// Output:
+}
+
+func TestGetClientStatus(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	db := fdb.MustOpenDefault()
+
+	retry := -1
+	emptyReturns := 0
+	for retry < 20 {
+		retry++
+		st, e := db.GetClientStatus()
+		if errors.Is(e, fdb.ErrClientNotReady) {
+			// allow the initial call to return empty while client-side or server-side are initializing
+			// (the exact nature of this issue is not clear)
+			if retry == emptyReturns {
+				t.Logf("client not yet ready, retrying")
+				emptyReturns++
+				time.Sleep(time.Millisecond * 5)
+				continue
+			}
+		}
+		if e != nil {
+			t.Errorf("GetClientStatus failed %v", e)
+		}
+		if len(st) == 0 {
+			t.Errorf("returned status is empty (retry = %v emptyReturns = %v)", retry, emptyReturns)
+		}
+
+		t.Logf("client status returned (retry = %v):\n%s", retry, string(st))
+		break
+	}
+
+	t.Errorf("client not ready after %v retries", retry)
 }
