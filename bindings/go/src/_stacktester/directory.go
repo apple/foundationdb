@@ -115,7 +115,7 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		}
 	}()
 
-	var e error
+	var err error
 
 	switch {
 	case op == "CREATE_SUBSPACE":
@@ -142,9 +142,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		if l != nil {
 			layer = l.([]byte)
 		}
-		d, e := de.cwd().CreateOrOpen(t, tupleToPath(tuples[0]), layer)
-		if e != nil {
-			panic(e)
+		d, err := de.cwd().CreateOrOpen(t, tupleToPath(tuples[0]), layer)
+		if err != nil {
+			panic(err)
 		}
 		de.store(d)
 	case op == "CREATE":
@@ -157,13 +157,13 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		p := sm.waitAndPop().item
 		var d directory.Directory
 		if p == nil {
-			d, e = de.cwd().Create(t, tupleToPath(tuples[0]), layer)
+			d, err = de.cwd().Create(t, tupleToPath(tuples[0]), layer)
 		} else {
 			// p.([]byte) itself may be nil, but CreatePrefix handles that appropriately
-			d, e = de.cwd().CreatePrefix(t, tupleToPath(tuples[0]), layer, p.([]byte))
+			d, err = de.cwd().CreatePrefix(t, tupleToPath(tuples[0]), layer, p.([]byte))
 		}
-		if e != nil {
-			panic(e)
+		if err != nil {
+			panic(err)
 		}
 		de.store(d)
 	case op == "OPEN":
@@ -173,9 +173,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		if l != nil {
 			layer = l.([]byte)
 		}
-		d, e := de.cwd().Open(rt, tupleToPath(tuples[0]), layer)
-		if e != nil {
-			panic(e)
+		d, err := de.cwd().Open(rt, tupleToPath(tuples[0]), layer)
+		if err != nil {
+			panic(err)
 		}
 		de.store(d)
 	case op == "CHANGE":
@@ -188,16 +188,16 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		de.errorIndex = sm.waitAndPop().item.(int64)
 	case op == "MOVE":
 		tuples := sm.popTuples(2)
-		d, e := de.cwd().Move(t, tupleToPath(tuples[0]), tupleToPath(tuples[1]))
-		if e != nil {
-			panic(e)
+		d, err := de.cwd().Move(t, tupleToPath(tuples[0]), tupleToPath(tuples[1]))
+		if err != nil {
+			panic(err)
 		}
 		de.store(d)
 	case op == "MOVE_TO":
 		tuples := sm.popTuples(1)
-		d, e := de.cwd().MoveTo(t, tupleToPath(tuples[0]))
-		if e != nil {
-			panic(e)
+		d, err := de.cwd().MoveTo(t, tupleToPath(tuples[0]))
+		if err != nil {
+			panic(err)
 		}
 		de.store(d)
 	case strings.HasPrefix(op, "REMOVE"):
@@ -208,10 +208,10 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		// doesn't end up committing the version key. (Other languages have
 		// separate remove() and remove_if_exists() so don't have this tricky
 		// issue).
-		_, e := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
-			ok, e := de.cwd().Remove(tr, path)
-			if e != nil {
-				panic(e)
+		_, err := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+			ok, err := de.cwd().Remove(tr, path)
+			if err != nil {
+				panic(err)
 			}
 			switch op[6:] {
 			case "":
@@ -222,13 +222,13 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 			}
 			return nil, nil
 		})
-		if e != nil {
-			panic(e)
+		if err != nil {
+			panic(err)
 		}
 	case op == "LIST":
-		subs, e := de.cwd().List(rt, sm.maybePath())
-		if e != nil {
-			panic(e)
+		subs, err := de.cwd().List(rt, sm.maybePath())
+		if err != nil {
+			panic(err)
 		}
 		t := make(tuple.Tuple, len(subs))
 		for i, s := range subs {
@@ -236,9 +236,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		}
 		sm.store(idx, t.Pack())
 	case op == "EXISTS":
-		b, e := de.cwd().Exists(rt, sm.maybePath())
-		if e != nil {
-			panic(e)
+		b, err := de.cwd().Exists(rt, sm.maybePath())
+		if err != nil {
+			panic(err)
 		}
 		if b {
 			sm.store(idx, int64(1))
@@ -249,9 +249,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		tuples := sm.popTuples(1)
 		sm.store(idx, de.css().Pack(tuples[0]))
 	case op == "UNPACK_KEY":
-		t, e := de.css().Unpack(fdb.Key(sm.waitAndPop().item.([]byte)))
-		if e != nil {
-			panic(e)
+		t, err := de.css().Unpack(fdb.Key(sm.waitAndPop().item.([]byte)))
+		if err != nil {
+			panic(err)
 		}
 		for _, el := range t {
 			sm.store(idx, el)
@@ -288,9 +288,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		v2 := tuple.Tuple{de.cwd().GetLayer()}.Pack()
 		k3 := ss.Pack(tuple.Tuple{"exists"})
 		var v3 []byte
-		exists, e := de.cwd().Exists(rt, nil)
-		if e != nil {
-			panic(e)
+		exists, err := de.cwd().Exists(rt, nil)
+		if err != nil {
+			panic(err)
 		}
 		if exists {
 			v3 = tuple.Tuple{1}.Pack()
@@ -300,9 +300,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		k4 := ss.Pack(tuple.Tuple{"children"})
 		var subs []string
 		if exists {
-			subs, e = de.cwd().List(rt, nil)
-			if e != nil {
-				panic(e)
+			subs, err = de.cwd().List(rt, nil)
+			if err != nil {
+				panic(err)
 			}
 		}
 		v4 := tuplePackStrings(subs)
