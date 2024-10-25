@@ -2414,8 +2414,6 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 			       self->unknownCommittedVersions.back().version <= req.knownCommittedVersion) {
 				self->unknownCommittedVersions.pop_back();
 			}
-		} else {
-			ASSERT(req.prevVersion == req.seqPrevVersion); // @todo remove this assert later
 		}
 
 		if (req.debugID.present())
