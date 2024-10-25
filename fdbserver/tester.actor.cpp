@@ -26,6 +26,7 @@
 #include <iterator>
 #include <map>
 #include <streambuf>
+#include <numeric>
 
 #include <fmt/ranges.h>
 #include <toml.hpp>
@@ -1765,7 +1766,13 @@ std::unordered_map<int, std::vector<KeyRange>> makeTaskAssignment(Database cx,
                                                                   std::vector<KeyRange> shardsToCheck,
                                                                   int testersCount,
                                                                   int round) {
+	ASSERT(testersCount >= 1);
 	std::unordered_map<int, std::vector<KeyRange>> assignment;
+
+	std::vector<size_t> shuffledIndices(testersCount);
+	std::iota(shuffledIndices.begin(), shuffledIndices.end(), 0); // creates [0, 1, ..., testersCount - 1]
+	deterministicRandom()->randomShuffle(shuffledIndices);
+
 	int batchSize = CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_BATCH_SHARD_COUNT;
 	int startingPoint = 0;
 	if (shardsToCheck.size() > batchSize * testersCount) {
@@ -1780,7 +1787,17 @@ std::unordered_map<int, std::vector<KeyRange>> makeTaskAssignment(Database cx,
 		if (testerIdx > testersCount - 1) {
 			break; // Have filled up all testers
 		}
-		assignment[testerIdx].push_back(shardsToCheck[i]);
+		// When assigning a shards/batch to a tester idx, there are certain edge cases which can result in urgent
+		// consistency checker being infinetely stuck in a loop. Examples:
+		//      1. if there is 1 remaining shard, and tester 0 consistently fails, we will still always pick tester 0
+		//      2. if there are 10 remaining shards, and batch size is 10, and tester 0 consistently fails, we will
+		//      still always pick tester 0
+		//      3. if there are 20 remaining shards, and batch size is 20, and testers {0, 1} consistently fail, we will
+		//      keep picking testers {0, 1}
+		// To avoid repeatedly picking the same testers even though they could be failing, shuffledIndices provides an
+		// indirection to a random tester idx. That way, each invocation of makeTaskAssignment won't
+		// result in the same task assignment for the class of edge cases mentioned above.
+		assignment[shuffledIndices[testerIdx]].push_back(shardsToCheck[i]);
 	}
 	std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
 	for (assignIt = assignment.begin(); assignIt != assignment.end(); assignIt++) {
