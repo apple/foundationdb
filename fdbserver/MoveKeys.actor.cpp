@@ -2330,6 +2330,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							TraceEvent(SevInfo, "DDBulkLoadTaskCompletePersist", relocationIntervalId)
 							    .detail("BulkLoadState", newBulkLoadState.toString());
 							dataMove.bulkLoadState = newBulkLoadState;
+							wait(turnOnUserWriteTrafficForBulkLoad(&tr, newBulkLoadState.getRange()));
 						}
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 						tr.clear(dataMoveKeyFor(dataMoveId));

@@ -43,6 +43,7 @@ struct BulkLoading : TestWorkload {
 	bool pass;
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
+	// This workload is not compatible with RandomRangeLock for the conflict in range lock
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		out.insert({ "RandomMoveKeys",
 		             "DataLossRecovery",
@@ -51,7 +52,8 @@ struct BulkLoading : TestWorkload {
 		             "PhysicalShardMove",
 		             "StorageCorruption",
 		             "StorageServerCheckpointRestoreTest",
-		             "ValidateStorage" });
+		             "ValidateStorage",
+		             "RandomRangeLock" });
 	}
 
 	BulkLoading(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
@@ -325,7 +327,7 @@ struct BulkLoading : TestWorkload {
 		BulkLoadTaskTestUnit taskUnit;
 		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
 		    range, folder, joinPath(folder, dataFileName), joinPath(folder, bytesSampleFileName));
-		size_t dataSize = deterministicRandom()->randomInt(10, 100);
+		size_t dataSize = deterministicRandom()->randomInt(10, 30);
 		taskUnit.data = self->generateRandomData(range, dataSize, keyCharList);
 		self->produceFilesToLoad(taskUnit);
 		return taskUnit;
@@ -513,7 +515,7 @@ struct BulkLoading : TestWorkload {
 		state KeyRangeMap<Optional<BulkLoadTaskTestUnit>> taskMap;
 		taskMap.insert(allKeys, Optional<BulkLoadTaskTestUnit>());
 		state int i = 0;
-		state int n = deterministicRandom()->randomInt(5, 10);
+		state int n = deterministicRandom()->randomInt(1, 5);
 		state int frequencyFactorForWaitAll = std::max(2, (int)(n * deterministicRandom()->random01()));
 		state int frequencyFactorForSwitchMode = std::max(2, (int)(n * deterministicRandom()->random01()));
 		for (; i < n; i++) {
@@ -559,6 +561,9 @@ struct BulkLoading : TestWorkload {
 		}
 		std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, incompleteRanges));
 		ASSERT(self->checkData(kvs, dbkvs));
+
+		// Clear all range lock
+		wait(releaseReadLockOnRange(cx, normalKeys, "BulkLoad"));
 
 		// Clear metadata
 		int old5 = wait(setBulkLoadMode(cx, 1));

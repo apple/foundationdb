@@ -24,6 +24,7 @@
 
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/RangeLock.h"
+#include "flow/Error.h"
 #include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
@@ -3103,6 +3104,80 @@ ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange ran
 	return lockedRanges;
 }
 
+// Transactional
+ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range) {
+	ASSERT(range.end <= normalKeys.end);
+	tr->addWriteConflictRange(normalKeys);
+	// Validate
+	state Key beginKey = range.begin;
+	state Key endKey = range.end;
+	state KeyRange rangeToRead;
+	while (beginKey < endKey) {
+		rangeToRead = KeyRangeRef(beginKey, endKey);
+		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
+		for (int i = 0; i < res.size() - 1; i++) {
+			if (res[i].value.empty()) {
+				continue;
+			}
+			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
+			ASSERT(rangeLockStateSet.isValid());
+			for (const auto& [lockId, lock] : rangeLockStateSet.getLocks()) {
+				if (lock == RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad)) {
+					continue;
+				}
+				// TODO(Zhe): should cancel this task
+				TraceEvent(SevError, "DDBulkLoadSeeUnexpectedRangeLock")
+				    .detail("Lock", lock.toString())
+				    .detail("Range", rangeToRead);
+				throw not_implemented();
+			}
+		}
+		beginKey = res[res.size() - 1].key;
+	}
+	// Lock range exclusively by overwiting the range
+	RangeLockStateSet rangeLockStateSet;
+	rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad));
+	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(rangeLockStateSet)));
+	TraceEvent(SevInfo, "DDBulkLoadTurnOffWriteTraffic").detail("Range", range);
+	return Void();
+}
+
+// Transactional
+ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range) {
+	ASSERT(range.end <= normalKeys.end);
+	// Validate
+	state Key beginKey = range.begin;
+	state Key endKey = range.end;
+	state KeyRange rangeToRead;
+	while (beginKey < endKey) {
+		rangeToRead = KeyRangeRef(beginKey, endKey);
+		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
+		for (int i = 0; i < res.size() - 1; i++) {
+			if (res[i].value.empty()) {
+				continue;
+			}
+			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
+			ASSERT(rangeLockStateSet.isValid());
+			for (const auto& [lockId, lock] : rangeLockStateSet.getLocks()) {
+				if (lock != RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad)) {
+					TraceEvent(SevError, "DDBulkLoadSeeUnexpectedRangeLock")
+					    .detail("Lock", lock.toString())
+					    .detail("Range", rangeToRead);
+					ASSERT_WE_THINK(false);
+					// TODO(Zhe): make lock exclusive to other applications
+					// This is unexpected because others should see the exclusive lock of bulk load
+					// and give up locking the range
+				}
+			}
+		}
+		beginKey = res[res.size() - 1].key;
+	}
+	// Unlock exclusively by overwiting the range
+	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, StringRef()));
+	TraceEvent(SevInfo, "DDBulkLoadTurnOnWriteTraffic").detail("Range", range);
+	return Void();
+}
+
 // Not transactional
 ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID) {
 	if (range.end > normalKeys.end) {
@@ -3135,7 +3210,7 @@ ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string 
 				if (!result[i].value.empty()) {
 					rangeLockStateSet = decodeRangeLockStateSet(result[i].value);
 				}
-				rangeLockStateSet.upsert(RangeLockState(RangeLockType::ReadLockOnRange, owner.getUniqueId()));
+				rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ReadLockOnRange, owner.getUniqueId()));
 				ASSERT(rangeLockStateSet.isValid());
 				wait(krmSetRangeCoalescing(
 				    &tr, rangeLockPrefix, lockRange, normalKeys, rangeLockStateSetValue(rangeLockStateSet)));
