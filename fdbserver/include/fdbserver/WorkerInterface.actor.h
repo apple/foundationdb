@@ -38,7 +38,7 @@
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/TesterInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"
