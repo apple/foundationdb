@@ -242,10 +242,17 @@ public:
 		}
 		for (auto lockRange : coreMap.intersectingRanges(range)) {
 			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ReadLockOnRange)) {
+				/*TraceEvent(SevDebug, "RangeLockRangeOps")
+				    .detail("Ops", "Check")
+				    .detail("Range", range)
+				    .detail("Status", "Reject");*/
 				return true;
 			}
 		}
-		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Check").detail("Range", range).detail("Status", res);
+		/*TraceEvent(SevDebug, "RangeLockRangeOps")
+		    .detail("Ops", "Check")
+		    .detail("Range", range)
+		    .detail("Status", "Accept");*/
 		return false;
 	}
 
