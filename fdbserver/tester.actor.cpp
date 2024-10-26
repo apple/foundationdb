@@ -1792,7 +1792,7 @@ std::unordered_map<int, std::vector<KeyRange>> makeTaskAssignment(Database cx,
 		//      1. if there is 1 remaining shard, and tester 0 consistently fails, we will still always pick tester 0
 		//      2. if there are 10 remaining shards, and batch size is 10, and tester 0 consistently fails, we will
 		//      still always pick tester 0
-		//      3. if there are 20 remaining shards, and batch size is 20, and testers {0, 1} consistently fail, we will
+		//      3. if there are 20 remaining shards, and batch size is 10, and testers {0, 1} consistently fail, we will
 		//      keep picking testers {0, 1}
 		// To avoid repeatedly picking the same testers even though they could be failing, shuffledIndices provides an
 		// indirection to a random tester idx. That way, each invocation of makeTaskAssignment won't
