@@ -566,7 +566,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MAX_OPEN_FILES,                                 -1 ); // RocksDB default.
 	init( ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS,            false ); 
 	init( ROCKSDB_CF_RANGE_DELETION_LIMIT,                         0 );
-	init( ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,                    0 );
+	init( ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,                10000 );
 	init( ROCKSDB_WAIT_ON_CF_FLUSH,                            false );
 	init( ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
 	init( ROCKSDB_CF_METRICS_DELAY,                            900.0 );
