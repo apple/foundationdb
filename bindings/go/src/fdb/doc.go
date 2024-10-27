@@ -36,34 +36,34 @@ https://apple.github.io/foundationdb/index.html.
 
 A basic interaction with the FoundationDB API is demonstrated below:
 
-	package main
+package main
 
-	import (
-	    "github.com/apple/foundationdb/bindings/go/src/fdb"
-	    "log"
-	    "fmt"
-	)
+import (
+    "github.com/apple/foundationdb/bindings/go/src/fdb"
+    "log"
+    "fmt"
+)
 
-	func main() {
-	    // Different API versions may expose different runtime behaviors.
-	    fdb.MustAPIVersion(740)
+func main() {
+    // Different API versions may expose different runtime behaviors.
+    fdb.MustAPIVersion(740)
 
-	    // Open the default database from the system cluster
-	    db := fdb.MustOpenDefault()
+    // Open the default database from the system cluster
+    db := fdb.MustOpenDefault()
 
-	    // Database reads and writes happen inside transactions
-	    ret, err := db.Transact(func(tr fdb.Transaction) (interface{}, error) {
-	        tr.Set(fdb.Key("hello"), []byte("world"))
-	        return tr.Get(fdb.Key("foo")).MustGet(), nil
-	        // db.Transact automatically commits (and if necessary,
-	        // retries) the transaction
-	    })
-	    if err != nil {
-	        log.Fatalf("Unable to perform FDB transaction (%v)", err)
-	    }
+    // Database reads and writes happen inside transactions
+    ret, err := db.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	tr.Set(fdb.Key("hello"), []byte("world"))
+	return tr.Get(fdb.Key("foo")).MustGet(), nil
+	// db.Transact automatically commits (and if necessary,
+	// retries) the transaction
+    })
+    if err != nil {
+	log.Fatalf("Unable to perform FDB transaction (%v)", err)
+    }
 
-	    fmt.Printf("hello is now world, foo was: %s\n", string(ret.([]byte)))
-	}
+    fmt.Printf("hello is now world, foo was: %s\n", string(ret.([]byte)))
+}
 
 # Futures
 
