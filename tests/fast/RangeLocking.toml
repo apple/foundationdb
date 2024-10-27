@@ -1,0 +1,15 @@
+[configuration]
+tenantModes = ['disabled'] # do not support tenant
+encryptModes = ['disabled'] # do not support encryption
+
+[[knobs]]
+enable_read_lock_on_range = true
+transaction_lock_rejection_retriable = false
+proxy_use_resolver_private_mutations = false # do not support version vector
+
+[[test]]
+testTitle = 'RangeLocking'
+useDB = true
+
+    [[test.workload]]
+    testName = 'RangeLocking'

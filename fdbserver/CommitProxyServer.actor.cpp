@@ -815,6 +815,11 @@ inline bool shouldBackup(MutationRef const& m) {
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 	std::set<Tag> transactionTags;
 	std::vector<Tag> cacheVector = { cacheTag };
+	if (pProxyCommitData->txnStateStore->getReplaceContent()) {
+		// return empty set if txnStateStore will snapshot.
+		// empty sets are sent to all logs.
+		return transactionTags;
+	}
 	for (int transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
 		int mutationNum = 0;
 		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
@@ -2004,6 +2009,46 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 	}
 }
 
+// RangeLock takes effect only when the feature flag is on and database is unlocked and the mutation is not encrypted
+void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
+	ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !self->locked &&
+	       !self->pProxyCommitData->encryptMode.isEncryptionEnabled() &&
+	       self->pProxyCommitData->getTenantMode() == TenantMode::DISABLED);
+	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	ASSERT(pProxyCommitData->rangeLock != nullptr);
+	std::vector<CommitTransactionRequest>& trs = self->trs;
+	for (int i = self->transactionNum; i < trs.size(); i++) {
+		if (self->committed[i] != ConflictBatch::TransactionCommitted) {
+			continue;
+		}
+		VectorRef<MutationRef>* pMutations = &trs[i].transaction.mutations;
+		bool transactionRejected = false;
+		for (int j = 0; j < pMutations->size(); j++) {
+			MutationRef m = (*pMutations)[j];
+			ASSERT_WE_THINK(!m.isEncrypted());
+			if (m.isEncrypted()) {
+				continue;
+			}
+			KeyRange rangeToCheck;
+			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+				rangeToCheck = singleKeyRange(m.param1);
+			} else if (m.type == MutationRef::ClearRange) {
+				rangeToCheck = KeyRangeRef(m.param1, m.param2);
+			}
+			bool shouldReject = pProxyCommitData->rangeLock->isLocked(rangeToCheck);
+			if (shouldReject) {
+				self->committed[i] = ConflictBatch::TransactionLockReject;
+				trs[i].reply.sendError(transaction_rejected_range_locked());
+				transactionRejected = true;
+			}
+			if (transactionRejected) {
+				break;
+			}
+		}
+	}
+	return;
+}
+
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
 /// tags
 ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
@@ -2294,6 +2339,16 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadataToCommittedTxn");
+	}
+
+	// After applyed metadata change, this commit proxy has the latest view of locked ranges.
+	// If a transaction has any mutation accessing to the locked range, reject the transaction with
+	// error_code_transaction_rejected_range_locked
+	// This feature is disabled when the database is locked
+	if (SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !self->locked &&
+	    !pProxyCommitData->encryptMode.isEncryptionEnabled() &&
+	    self->pProxyCommitData->getTenantMode() == TenantMode::DISABLED) {
+		rejectMutationsForReadLockOnRange(self);
 	}
 
 	// Second pass
@@ -2643,7 +2698,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
 		} else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
-		} else if (self->committed[t] == ConflictBatch::TransactionTenantFailure) {
+		} else if (self->committed[t] == ConflictBatch::TransactionTenantFailure ||
+		           self->committed[t] == ConflictBatch::TransactionLockReject) {
 			// We already sent the error
 			ASSERT(tr.reply.isSet());
 		} else {
@@ -2737,7 +2793,6 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	                      target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA +
 	                          pProxyCommitData->commitBatchInterval *
 	                              (1 - SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
-
 	pProxyCommitData->stats.commitBatchingWindowSize.addMeasurement(pProxyCommitData->commitBatchInterval);
 	pProxyCommitData->commitBatchesMemBytesCount -= self->currentBatchMemBytesCount;
 	ASSERT_ABORT(pProxyCommitData->commitBatchesMemBytesCount >= 0);
@@ -3705,27 +3760,30 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			}
 		};
 		for (auto& kv : data) {
-			if (!kv.key.startsWith(keyServersPrefix)) {
+			if (kv.key.startsWith(keyServersPrefix)) {
+				KeyRef k = kv.key.removePrefix(keyServersPrefix);
+				if (k == allKeys.end) {
+					continue;
+				}
+				decodeKeyServersValue(tag_uid, kv.value, src, dest);
+
+				info.tags.clear();
+
+				info.src_info.clear();
+				updateTagInfo(src, info.tags, info.src_info);
+
+				info.dest_info.clear();
+				updateTagInfo(dest, info.tags, info.dest_info);
+
+				uniquify(info.tags);
+				keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
+			} else if (kv.key.startsWith(rangeLockPrefix)) {
+				Key keyInsert = kv.key.removePrefix(rangeLockPrefix);
+				pContext->pCommitData->rangeLock->initKeyPoint(keyInsert, kv.value);
+			} else {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 				continue;
 			}
-
-			KeyRef k = kv.key.removePrefix(keyServersPrefix);
-			if (k == allKeys.end) {
-				continue;
-			}
-			decodeKeyServersValue(tag_uid, kv.value, src, dest);
-
-			info.tags.clear();
-
-			info.src_info.clear();
-			updateTagInfo(src, info.tags, info.src_info);
-
-			info.dest_info.clear();
-			updateTagInfo(dest, info.tags, info.dest_info);
-
-			uniquify(info.tags);
-			keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 		}
 
 		// insert keyTag data separately from metadata mutations so that we can do one bulk insert which

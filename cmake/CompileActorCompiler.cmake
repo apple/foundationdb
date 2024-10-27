@@ -19,7 +19,7 @@ else()
   set(ACTOR_COMPILER_REFERENCES
     "-r:System,System.Core,System.Xml.Linq,System.Data.DataSetExtensions,Microsoft.CSharp,System.Data,System.Xml")
 
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/actorcompiler.exe
+  add_custom_command(OUTPUT actorcompiler.exe
     COMMAND ${MCS_EXECUTABLE} ARGS ${ACTOR_COMPILER_REFERENCES} ${ACTORCOMPILER_SRCS} "-target:exe" "-out:actorcompiler.exe"
     DEPENDS ${ACTORCOMPILER_SRCS}
     COMMENT "Compile actor compiler" VERBATIM)

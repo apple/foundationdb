@@ -38,6 +38,11 @@ struct ConflictRangeWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	PerfIntCounter withConflicts, withoutConflicts, retries;
 
+	// This workload is not compatible with RandomRangeLock workload because RangeLock transaction triggers conflicts
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomRangeLock" });
+	}
+
 	ConflictRangeWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), withConflicts("WithConflicts"), withoutConflicts("withoutConflicts"), retries("Retries") {
 		minOperationsPerTransaction = getOption(options, "minOperationsPerTransaction"_sr, 2);

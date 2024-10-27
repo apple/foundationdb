@@ -52,6 +52,7 @@ public:
 	                    bool exactRecovery,
 	                    bool enableEncryption);
 
+	bool getReplaceContent() const override { return replaceContent; }
 	// IClosable
 	Future<Void> getError() const override { return log->getError(); }
 	Future<Void> onClosed() const override { return log->onClosed(); }

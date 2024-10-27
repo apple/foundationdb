@@ -664,6 +664,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL,                   0.5 );
 	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,           5.0 );
 	init( COMMIT_TRIGGER_DELAY,                                  0.01 ); if (randomize && BUGGIFY) COMMIT_TRIGGER_DELAY = deterministicRandom()->random01() * 4;
+	init( ENABLE_READ_LOCK_ON_RANGE,                            false ); if (isSimulated) ENABLE_READ_LOCK_ON_RANGE = deterministicRandom()->coinflip();
 
 	// these settings disable batch bytes scaling.  Try COMMIT_TRANSACTION_BATCH_BYTES_MAX=1e6, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE=50000, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER=0.5?
 	init( COMMIT_TRANSACTION_BATCH_BYTES_MIN,                  100000 );
@@ -789,7 +790,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_ENABLE_ENTIRE_SATELLITE_MONITORING,               false );
 	init( CC_SATELLITE_DEGRADATION_MIN_COMPLAINER,                 3 );
 	init( CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER,                 3 );
-	init( CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING,               true );
+	init( CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING,   false); 
+	init( CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING,                true); 
+	init( CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING,         false); if (isSimulated && deterministicRandom()->coinflip()) CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING = true;
+	init( CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING,          false); if (isSimulated && deterministicRandom()->coinflip()) CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING = true;
+	init( CC_ONLY_CONSIDER_INTRA_DC_LATENCY,                    false); if (isSimulated && deterministicRandom()->coinflip()) CC_ONLY_CONSIDER_INTRA_DC_LATENCY = true;
 	init( CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL,              0.5 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
@@ -860,6 +865,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     250e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
 	init( STORAGE_INCLUDE_FEED_STORAGE_QUEUE,                   true ); if ( randomize && BUGGIFY ) STORAGE_INCLUDE_FEED_STORAGE_QUEUE = false;
 	init( STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL,                     0.0); if ( isSimulated ) STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL = 5.0;
+	init( CONSISTENCY_CHECK_BACKWARD_READ,                    false ); if (isSimulated) CONSISTENCY_CHECK_BACKWARD_READ = deterministicRandom()->coinflip();
 	init (STORAGE_FETCH_KEYS_DELAY,	                             0.0 ); if ( randomize && BUGGIFY ) { STORAGE_FETCH_KEYS_DELAY = deterministicRandom()->random01() * 5.0; }
 	init (STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET,                false ); if (isSimulated) STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET = deterministicRandom()->coinflip();
 	init (STORAGE_FETCH_KEYS_RATE_LIMIT,             			   0 ); if (isSimulated && BUGGIFY) STORAGE_FETCH_KEYS_RATE_LIMIT = 100 * 1024 * deterministicRandom()->randomInt(1, 10);  // In MB/s

@@ -52,6 +52,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	bool defaultBackup;
 	Optional<std::string> encryptionKeyFileName;
 
+	// This workload is not compatible with RandomRangeLock workload because they will race in locked range
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomRangeLock" });
+	}
+
 	BackupAndRestoreCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);

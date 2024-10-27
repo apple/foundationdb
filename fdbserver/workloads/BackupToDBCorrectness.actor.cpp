@@ -49,6 +49,11 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	bool defaultBackup;
 	UID destUid;
 
+	// This workload is not compatible with RandomRangeLock workload because they will race in locked range
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomRangeLock" });
+	}
+
 	BackupToDBCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);

@@ -26,7 +26,7 @@
 #include "flow/flow.h"
 #include "fdbclient/StorageCheckpoint.h"
 
-enum class MoveInPhase {
+enum class MoveInPhase : std::int8_t {
 	Pending = 0,
 	Fetching = 1,
 	Ingesting = 2,
@@ -45,13 +45,13 @@ struct MoveInShardMetaData {
 	UID id;
 	UID dataMoveId;
 	std::vector<KeyRange> ranges; // The key ranges to be fetched.
-	Version createVersion;
-	Version highWatermark; // The highest version that has been applied to the MoveInShard.
-	int8_t phase; // MoveInPhase.
+	Version createVersion = invalidVersion;
+	Version highWatermark = invalidVersion; // The highest version that has been applied to the MoveInShard.
+	int8_t phase = static_cast<int8_t>(MoveInPhase::Error); // MoveInPhase.
 	std::vector<CheckpointMetaData> checkpoints; // All related checkpoints, they should cover `ranges`.
 	Optional<std::string> error;
-	double startTime;
-	bool conductBulkLoad;
+	double startTime = 0.0;
+	bool conductBulkLoad = false;
 
 	MoveInShardMetaData() = default;
 	MoveInShardMetaData(const UID& id,

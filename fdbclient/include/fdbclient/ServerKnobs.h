@@ -629,6 +629,7 @@ public:
 	double COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL;
 	double COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR;
 	double COMMIT_TRIGGER_DELAY;
+	bool ENABLE_READ_LOCK_ON_RANGE;
 
 	double RESOLVER_COALESCE_TIME;
 	int BUGGIFIED_ROW_LIMIT;
@@ -760,8 +761,25 @@ public:
 	                                             // be determined as degraded worker.
 	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
 	                                             // determined as degraded satellite.
-	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether the remote log
-	                                             // router is degraded and may use trigger recovery to recover from it.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING; // When enabled, gray failure tries to detect whether
+	                                                         // remote log routers are experiencing degradation
+	                                                         // (latency) with their peers. Gray failure may trigger
+	                                                         // recovery based on this.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether
+	                                             // remote log routers are disconnected from their peers. Gray failure
+	                                             // may trigger recovery based on this.
+	bool CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING; // When enabled, gray failure tries to detect whether remote
+	                                                   // tlogs are experiencing degradation (latency) with their peers.
+	                                                   // Gray failure may trigger recovery based on this.
+	bool CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING; // When enabled, gray failure tries to detect whether remote
+	                                                  // tlogs are disconnected from their peers. Gray failure may
+	                                                  // trigger recovery based on this.
+	bool CC_ONLY_CONSIDER_INTRA_DC_LATENCY; // When enabled, gray failure only considers intra-DC signal for latency
+	                                        // degradations. For remote process knobs
+	                                        // (CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING and
+	                                        // CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING), this knob must be
+	                                        // turned on, because inter-DC latency signal is not reliable and it's
+	                                        // challenging to pick a good latency threshold.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 
@@ -1068,6 +1086,7 @@ public:
 	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
 	int SPLIT_METRICS_MAX_ROWS;
 	double STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL;
+	bool CONSISTENCY_CHECK_BACKWARD_READ;
 	int PHYSICAL_SHARD_MOVE_LOG_SEVERITY;
 	int FETCH_SHARD_BUFFER_BYTE_LIMIT;
 	int FETCH_SHARD_UPDATES_BYTE_LIMIT;
