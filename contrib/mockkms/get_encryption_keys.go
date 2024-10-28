@@ -27,59 +27,59 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
-	"log"
-	"math/rand"
-	"net/http"
+    "encoding/json"
+    "fmt"
+    "io/ioutil"
+    "log"
+    "math/rand"
+    "net/http"
 )
 
 type CipherDetailRes struct {
-	BaseCipherId    uint64 `json:"base_cipher_id"`
-	EncryptDomainId int64  `json:"encrypt_domain_id"`
-	BaseCipher      string `json:"base_cipher"`
+    BaseCipherId    uint64 `json:"base_cipher_id"`
+    EncryptDomainId int64  `json:"encrypt_domain_id"`
+    BaseCipher      string `json:"base_cipher"`
 }
 
 type ValidationToken struct {
-	TokenName  string `json:"token_name"`
-	TokenValue string `json:"token_value"`
+    TokenName  string `json:"token_name"`
+    TokenValue string `json:"token_value"`
 }
 
 type CipherDetailReq struct {
-	BaseCipherId    uint64 `json:"base_cipher_id"`
-	EncryptDomainId int64  `json:"encrypt_domain_id"`
+    BaseCipherId    uint64 `json:"base_cipher_id"`
+    EncryptDomainId int64  `json:"encrypt_domain_id"`
 }
 
 type GetEncryptKeysResponse struct {
-	CipherDetails []CipherDetailRes `json:"cipher_key_details"`
-	KmsUrls       []string          `json:"kms_urls"`
+    CipherDetails []CipherDetailRes `json:"cipher_key_details"`
+    KmsUrls       []string          `json:"kms_urls"`
 }
 
 type GetEncryptKeysRequest struct {
-	QueryMode        string            `json:"query_mode"`
-	CipherDetails    []CipherDetailReq `json:"cipher_key_details"`
-	ValidationTokens []ValidationToken `json:"validation_tokens"`
-	RefreshKmsUrls   bool              `json:"refresh_kms_urls"`
+    QueryMode        string            `json:"query_mode"`
+    CipherDetails    []CipherDetailReq `json:"cipher_key_details"`
+    ValidationTokens []ValidationToken `json:"validation_tokens"`
+    RefreshKmsUrls   bool              `json:"refresh_kms_urls"`
 }
 
 type cipherMapInstanceSingleton map[uint64][]byte
 
 const (
-	READ_HTTP_REQUEST_BODY = iota
-	UNMARSHAL_REQUEST_BODY_JSON
-	UNSUPPORTED_QUERY_MODE
-	PARSE_HTTP_REQUEST
-	MARSHAL_RESPONSE
+    READ_HTTP_REQUEST_BODY = iota
+    UNMARSHAL_REQUEST_BODY_JSON
+    UNSUPPORTED_QUERY_MODE
+    PARSE_HTTP_REQUEST
+    MARSHAL_RESPONSE
 )
 
 const (
-	maxCipherKeys = uint64(1024 * 1024) // Max cipher keys
-	maxCipherSize = 16                  // Max cipher buffer size
+    maxCipherKeys = uint64(1024 * 1024) // Max cipher keys
+    maxCipherSize = 16                  // Max cipher buffer size
 )
 
 var (
-	cipherMapInstance cipherMapInstanceSingleton // Singleton mapping of { baseCipherId -> baseCipher }
+    cipherMapInstance cipherMapInstanceSingleton // Singleton mapping of { baseCipherId -> baseCipher }
 )
 
 // const mapping of { Location -> errorString }
