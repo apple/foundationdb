@@ -6,6 +6,7 @@
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
@@ -27,15 +28,25 @@ struct ClogRemoteTLog : TestWorkload {
 	double clogInitDelay{ 0 };
 	double clogDuration{ 0 };
 	double lagThreshold{ 0 };
-	bool doStatePathCheck{ true };
 
-	enum TestState { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH };
+	enum TestState { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, CLOGGED_REMOTE_TLOG_EXCLUDED };
 	// Currently, the only valid state path is: TEST_INIT -> SS_LAG_NORMAL -> SS_LAG_HIGH -> SS_LAG_NORMAL
-	const std::vector<std::vector<TestState>> expectedStatePaths{
-		{ TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, SS_LAG_NORMAL }
+	struct StatePathT {
+		std::vector<TestState> path;
+		bool prefixMatch{ false };
+	};
+	const std::vector<StatePathT> expectedStatePaths{
+		{ .path = { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, SS_LAG_NORMAL }, .prefixMatch = true },
+		// For some topology and process placements, it's possible that the lag does not recover. However, we still
+		// allow the test to pass as long as the bad/clogged remote tlog was excluded by gray failure.
+		{ .path = { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, CLOGGED_REMOTE_TLOG_EXCLUDED }, .prefixMatch = true }
 	};
 	std::vector<TestState>
 	    actualStatePath; // to be populated when the test runs, and finally checked at the end in check()
+
+	Optional<NetworkAddress>
+	    cloggedRemoteTLog; // set after clogging is done, we use this state to ensure that it's
+	                       // eventually not present in dbInfo (which implies it was excluded by gray failure)
 
 	ClogRemoteTLog(const WorkloadContext& wctx) : TestWorkload(wctx) {
 		enabled =
@@ -72,6 +83,9 @@ struct ClogRemoteTLog : TestWorkload {
 			case (SS_LAG_HIGH): {
 				return "SS_LAG_HIGH";
 			}
+			case (CLOGGED_REMOTE_TLOG_EXCLUDED): {
+				return "CLOGGED_REMOTE_TLOG_EXCLUDED";
+			}
 			default: {
 				ASSERT(false);
 				return "";
@@ -86,27 +100,29 @@ struct ClogRemoteTLog : TestWorkload {
 			}
 			return ret;
 		};
-		TraceEvent("ClogRemoteTLogCheck")
-		    .detail("ActualStatePath", print(actualStatePath))
-		    .detail("DoStatePathCheck", doStatePathCheck ? "True" : "False");
+		TraceEvent("ClogRemoteTLogCheck").detail("ActualStatePath", print(actualStatePath));
 
 		// Then, do the actual check
-		if (!doStatePathCheck) {
-			return true;
-		}
-		auto match = [](const std::vector<TestState>& path1, const std::vector<TestState>& path2) -> bool {
-			if (path1.size() != path2.size()) {
+		auto match =
+		    [](const std::vector<TestState>& actualPath,
+		       const std::vector<TestState>& expectedPath,
+		       const bool
+		           allowPrefix /* when true, relaxes match as long as a prefix of actualPath matches expectedPath */)
+		    -> bool {
+			if (!allowPrefix && actualPath.size() != expectedPath.size()) {
+				return false;
+			} else if (allowPrefix && actualPath.size() < expectedPath.size()) {
 				return false;
 			}
-			for (size_t i = 0; i < path1.size(); ++i) {
-				if (path1[i] != path2[i]) {
+			for (size_t i = 0; i < std::min(actualPath.size(), expectedPath.size()); ++i) {
+				if (actualPath[i] != expectedPath[i]) {
 					return false;
 				}
 			}
 			return true;
 		};
 		for (const auto& expectedPath : expectedStatePaths) {
-			if (match(actualStatePath, expectedPath)) {
+			if (match(actualStatePath, expectedPath.path, expectedPath.prefixMatch)) {
 				return true;
 			}
 		}
@@ -185,14 +201,14 @@ struct ClogRemoteTLog : TestWorkload {
 		}
 	}
 
-	static std::vector<IPAddress> getRemoteTLogIPs(ClogRemoteTLog* self) {
-		std::vector<IPAddress> remoteTLogIPs;
+	static std::vector<NetworkAddress> getRemoteTLogs(ClogRemoteTLog* self) {
+		std::vector<NetworkAddress> remoteTLogIPs;
 		for (const auto& tLogSet : self->dbInfo->get().logSystemConfig.tLogs) {
 			if (tLogSet.isLocal) {
 				continue;
 			}
 			for (const auto& tLog : tLogSet.tLogs) {
-				remoteTLogIPs.push_back(tLog.interf().address().ip);
+				remoteTLogIPs.push_back(tLog.interf().address());
 			}
 		}
 		return remoteTLogIPs;
@@ -207,55 +223,77 @@ struct ClogRemoteTLog : TestWorkload {
 		}
 
 		// Then, get all remote TLog IPs
-		state std::vector<IPAddress> remoteTLogIPs = getRemoteTLogIPs(self);
-		ASSERT(!remoteTLogIPs.empty());
+		state std::vector<NetworkAddress> remoteTLogs = getRemoteTLogs(self);
+		ASSERT(!remoteTLogs.empty());
 
 		// Then, get all remote SS IPs
 		std::vector<IPAddress> remoteSSIPs = wait(getRemoteSSIPs(db));
 		ASSERT(!remoteSSIPs.empty());
 
 		// Then, attempt to find a remote tlog that is not on the same machine as a remote SS
-		Optional<IPAddress> remoteTLogIP_temp;
-		for (const auto& ip : remoteTLogIPs) {
-			if (std::find(remoteSSIPs.begin(), remoteSSIPs.end(), ip) == remoteSSIPs.end()) {
-				remoteTLogIP_temp = ip;
+		Optional<NetworkAddress> remoteTLogIP_temp;
+		for (const auto& addr : remoteTLogs) {
+			if (std::find(remoteSSIPs.begin(), remoteSSIPs.end(), addr.ip) == remoteSSIPs.end()) {
+				remoteTLogIP_temp = addr;
 			}
 		}
 
 		// If we can find such a machine that is just running a remote tlog, then we will do extra checking at the end
 		// (in check() method). If we can't find such a machine, we pick a random machhine and still run the test to
 		// ensure no crashes or correctness issues are observed.
-		state IPAddress remoteTLogIP;
 		if (remoteTLogIP_temp.present()) {
-			remoteTLogIP = remoteTLogIP_temp.get();
+			self->cloggedRemoteTLog = remoteTLogIP_temp.get();
 		} else {
-			remoteTLogIP = remoteTLogIPs[deterministicRandom()->randomInt(0, remoteTLogIPs.size())];
-			self->doStatePathCheck = false;
+			self->cloggedRemoteTLog = remoteTLogs[deterministicRandom()->randomInt(0, remoteTLogs.size())];
 		}
+
+		ASSERT(self->cloggedRemoteTLog.present());
 
 		// Then, find all processes that the remote tlog will have degraded connection with
 		IPAddress cc = self->dbInfo->get().clusterInterface.address().ip;
 		state std::vector<IPAddress> processes;
-		for (const auto& process : g_simulator->getAllProcesses()) {
-			const auto& ip = process->address.ip;
-			if (process->startingClass != ProcessClass::TesterClass && ip != cc) {
-				processes.push_back(ip);
+		if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN) {
+			for (const auto& remoteSSIP : remoteSSIPs) {
+				if (remoteSSIP != cc) {
+					processes.push_back(remoteSSIP);
+				}
+			}
+		} else {
+			for (const auto& process : g_simulator->getAllProcesses()) {
+				const auto& ip = process->address.ip;
+				if (process->startingClass != ProcessClass::TesterClass && ip != cc) {
+					processes.push_back(ip);
+				}
 			}
 		}
 		ASSERT(!processes.empty());
 
 		// Finally, start the clogging between the remote tlog and the processes calculated above
 		for (const auto& ip : processes) {
-			if (remoteTLogIP == ip) {
+			if (self->cloggedRemoteTLog.get().ip == ip) {
 				continue;
 			}
-			TraceEvent("ClogRemoteTLog").detail("SrcIP", remoteTLogIP).detail("DstIP", ip);
-			g_simulator->clogPair(remoteTLogIP, ip, self->testDuration);
-			g_simulator->clogPair(ip, remoteTLogIP, self->testDuration);
+			TraceEvent("ClogRemoteTLog").detail("SrcIP", self->cloggedRemoteTLog).detail("DstIP", ip);
+			g_simulator->clogPair(self->cloggedRemoteTLog.get().ip, ip, self->testDuration);
+			g_simulator->clogPair(ip, self->cloggedRemoteTLog.get().ip, self->testDuration);
 		}
 
 		wait(Never());
 		return Void();
+	}
+
+	static bool remoteTLogExcluded(const NetworkAddress& addr, const ServerDBInfo& dbInfo) {
+		for (const auto& tLogSet : dbInfo.logSystemConfig.tLogs) {
+			if (tLogSet.isLocal) {
+				continue;
+			}
+			for (const auto& tLog : tLogSet.tLogs) {
+				if (tLog.present() && tLog.interf().addresses().contains(addr)) {
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	ACTOR Future<Void> workload(ClogRemoteTLog* self, Database db) {
@@ -268,9 +306,20 @@ struct ClogRemoteTLog : TestWorkload {
 			if (!ssLag.present()) {
 				continue;
 			}
+			// See if ss lag state changed
 			TestState localState = ssLag.get() < self->lagThreshold ? TestState::SS_LAG_NORMAL : TestState::SS_LAG_HIGH;
-			// Anytime a state transition happens, append to the state path
-			if (localState != testState) {
+			bool stateTransition = localState != testState;
+			// If ss lag state did not change, see if clogged remote tlog got excluded
+			if (!stateTransition) {
+				const bool dbReady = self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED;
+				if (dbReady && self->cloggedRemoteTLog.present() &&
+				    remoteTLogExcluded(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
+					localState = TestState::CLOGGED_REMOTE_TLOG_EXCLUDED;
+					stateTransition = localState != testState;
+				}
+			}
+			// If there was a state transition, append new state to state path
+			if (stateTransition) {
 				self->actualStatePath.push_back(localState);
 				testState = localState;
 			}

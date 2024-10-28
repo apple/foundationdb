@@ -21,6 +21,7 @@ cc_tracking_health_recovery_interval = 60
 peer_latency_degradation_threshold = 1
 peer_latency_degradation_percentile = 1
 peer_latency_check_min_population = 2
+cc_max_exclusion_due_to_health = 5
 
 [[test]]
 testTitle = "ClogRemoteTLog"
