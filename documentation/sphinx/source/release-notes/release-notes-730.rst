@@ -8,7 +8,7 @@ Release Notes
 
 7.3.54
 ======
-* Addressed consistency checker related issues. `(PR #11736) <https://github.com/apple/foundationdb/pull/11736>`_
+* Addressed urgent consistency checker related issues. `(PR #11736) <https://github.com/apple/foundationdb/pull/11736>`_
 * Addressed a downgrade related incompatibility issue between 7.3 patch releases. `(PR #11732) <https://github.com/apple/foundationdb/pull/11732>`_
 * Added knob LOG_CONNECTION_ATTEMPTS_ENABLED to log all incoming connections. `(PR #11713) <https://github.com/apple/foundationdb/pull/11713>`_
 
