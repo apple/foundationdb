@@ -1049,6 +1049,7 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 		state Transaction tr(cx);
 		state BulkLoadState newBulkLoadState;
 		try {
+			// TODO(BulkLoad): make sure the range has been locked
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
@@ -1066,7 +1067,6 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 			newBulkLoadState.restartCount = newBulkLoadState.restartCount + 1;
 			newBulkLoadState.triggerTime = now();
 			wait(krmSetRange(&tr, bulkLoadPrefix, newBulkLoadState.getRange(), bulkLoadStateValue(newBulkLoadState)));
-			wait(turnOffUserWriteTrafficForBulkLoad(&tr, newBulkLoadState.getRange()));
 			wait(tr.commit());
 			Version commitVersion = tr.getCommittedVersion();
 			TraceEvent(SevInfo, "DDBulkLoadTaskTriggeredPersist", self->ddId)

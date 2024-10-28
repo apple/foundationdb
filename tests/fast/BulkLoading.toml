@@ -21,6 +21,9 @@ dd_physical_shard_move_probability = 1.0
 enable_read_lock_on_range = true
 proxy_use_resolver_private_mutations = false # do not support version vector
 
+# Set high enough sample rate to test bytes sampling
+min_byte_sampling_probability = 0.5
+
 [[test]]
 testTitle = 'BulkLoadingWorkload'
 useDB = true

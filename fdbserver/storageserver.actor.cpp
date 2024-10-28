@@ -9201,7 +9201,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 		rcp.fetchedFiles.emplace_back(abspath(filePath), coalesceRanges[0], 0);
 	}
 	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
-	localRecord.version = 0;
+	localRecord.version = moveInShard->meta->createVersion;
 	localRecord.bytesSampleFile = fileSetToLoad.bytesSampleFile;
 	localRecord.setFormat(CheckpointFormat::RocksDBKeyValues);
 	localRecord.setState(CheckpointMetaData::Complete);

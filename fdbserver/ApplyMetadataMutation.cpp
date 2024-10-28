@@ -951,7 +951,6 @@ private:
 			return;
 		}
 		ASSERT(!initialCommit);
-		ASSERT_WE_THINK(rangeLockKeys.contains(range));
 		txnStateStore->clear(range & rangeLockKeys);
 		return;
 	}
