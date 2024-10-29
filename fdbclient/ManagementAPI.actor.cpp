@@ -24,7 +24,6 @@
 
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/RangeLock.h"
-#include "flow/Error.h"
 #include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
@@ -2950,7 +2949,7 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
 	return bulkLoadState;
 }
 
-// Update bulkload task to acknowledge state
+// Update bulkload task to acknowledge state and unlock the range
 ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId) {
 	state Transaction tr(cx);
 	loop {

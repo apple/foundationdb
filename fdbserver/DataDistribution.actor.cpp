@@ -51,7 +51,6 @@
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
-#include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/genericactors.actor.h"

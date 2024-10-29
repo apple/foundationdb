@@ -21,13 +21,10 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/SystemData.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/Error.h"
-#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const std::string simulationBulkLoadFolder = "bulkLoad";
