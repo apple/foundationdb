@@ -2964,6 +2964,7 @@ ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID task
 			ASSERT(range == bulkLoadState.getRange() && taskId == bulkLoadState.getTaskId());
 			ASSERT(normalKeys.contains(range));
 			wait(krmSetRange(&tr, bulkLoadPrefix, bulkLoadState.getRange(), bulkLoadStateValue(bulkLoadState)));
+			wait(turnOnUserWriteTrafficForBulkLoad(&tr, bulkLoadState.getRange()));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {

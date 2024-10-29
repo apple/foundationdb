@@ -21,10 +21,13 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/Error.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const std::string simulationBulkLoadFolder = "bulkLoad";
@@ -39,7 +42,8 @@ struct BulkLoading : TestWorkload {
 	static constexpr auto NAME = "BulkLoadingWorkload";
 	const bool enabled;
 	bool pass;
-	bool debugging = true;
+	bool debugging = false;
+	bool backgroundTrafficEnabled = deterministicRandom()->coinflip();
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -218,8 +222,8 @@ struct BulkLoading : TestWorkload {
 		return true;
 	}
 
-	bool keyIsIgnored(Key key, const std::vector<KeyRange>& ignoreRanges) {
-		for (const auto& range : ignoreRanges) {
+	bool keyContainedInRanges(Key key, const std::vector<KeyRange>& ranges) {
+		for (const auto& range : ranges) {
 			if (range.contains(key)) {
 				return true;
 			}
@@ -229,7 +233,8 @@ struct BulkLoading : TestWorkload {
 
 	ACTOR Future<std::vector<KeyValue>> getKvsFromDB(BulkLoading* self,
 	                                                 Database cx,
-	                                                 std::vector<KeyRange> ignoreRanges) {
+	                                                 std::vector<KeyRange> outdatedRanges,
+	                                                 std::vector<KeyRange> loadedRanges) {
 		state std::vector<KeyValue> res;
 		state Transaction tr(cx);
 		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBStart");
@@ -238,9 +243,13 @@ struct BulkLoading : TestWorkload {
 				RangeResult result = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!result.more);
 				for (int i = 0; i < result.size(); i++) {
-					if (!self->keyIsIgnored(result[i].key, ignoreRanges)) {
-						res.push_back(Standalone(KeyValueRef(result[i].key, result[i].value)));
+					if (self->keyContainedInRanges(result[i].key, outdatedRanges)) {
+						continue; // The kv in the range of outdated task is undefined
 					}
+					if (self->backgroundTrafficEnabled && !self->keyContainedInRanges(result[i].key, loadedRanges)) {
+						continue; // When background traffic is enabled, ignore any data outside the loaded range
+					}
+					res.push_back(Standalone(KeyValueRef(result[i].key, result[i].value)));
 				}
 				break;
 			} catch (Error& e) {
@@ -425,9 +434,11 @@ struct BulkLoading : TestWorkload {
 		state int oldBulkLoadMode = 0;
 		state std::vector<BulkLoadState> bulkLoadStates;
 		state std::vector<std::vector<KeyValue>> bulkLoadDataList;
+		state std::vector<KeyRange> completeRanges;
 		loop { // New tasks overwrite old tasks on the same range
 			bulkLoadStates.clear();
 			bulkLoadDataList.clear();
+			completeRanges.clear();
 			for (int i = 0; i < 3; i++) {
 				std::string indexStr = std::to_string(i);
 				std::string indexStrNext = std::to_string(i + 1);
@@ -439,6 +450,7 @@ struct BulkLoading : TestWorkload {
 				    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
 				bulkLoadStates.push_back(taskUnit.bulkLoadTask);
 				bulkLoadDataList.push_back(taskUnit.data);
+				completeRanges.push_back(taskUnit.bulkLoadTask.getRange());
 			}
 			// Issue above 3 tasks in the same transaction
 			wait(self->submitBulkLoadTasks(self, cx, bulkLoadStates));
@@ -456,7 +468,7 @@ struct BulkLoading : TestWorkload {
 		// Check data
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 0)));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 0);
-		state std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, std::vector<KeyRange>()));
+		state std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, std::vector<KeyRange>(), completeRanges));
 		state std::vector<KeyValue> kvs;
 		for (int j = 0; j < bulkLoadDataList.size(); j++) {
 			kvs.insert(kvs.end(), bulkLoadDataList[j].begin(), bulkLoadDataList[j].end());
@@ -476,6 +488,31 @@ struct BulkLoading : TestWorkload {
 		}
 		TraceEvent("BulkLoadingWorkLoadSimpleTestComplete");
 		return Void();
+	}
+
+	ACTOR Future<Void> setKeys(Database cx, std::vector<KeyValue> kvs) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				for (const auto& kv : kvs) {
+					tr.set(kv.key, kv.value);
+				}
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR Future<Void> backgroundWriteTraffic(BulkLoading* self, Database cx) {
+		loop {
+			int keyCount = deterministicRandom()->randomInt(1, 20);
+			std::vector<KeyValue> kvs = self->generateOrderedKVS(self, normalKeys, keyCount);
+			wait(self->setKeys(cx, kvs));
+			double delayTime = deterministicRandom()->random01() * 5.0;
+			wait(delay(delayTime));
+		}
 	}
 
 	ACTOR Future<Void> complexTest(BulkLoading* self, Database cx) {
@@ -522,6 +559,7 @@ struct BulkLoading : TestWorkload {
 		state std::vector<KeyValue> kvs;
 		state std::vector<BulkLoadState> bulkLoadStates;
 		state std::vector<KeyRange> incompleteRanges;
+		state std::vector<KeyRange> completeRanges;
 		for (auto& range : taskMap.ranges()) {
 			if (!range.value().present()) {
 				continue;
@@ -534,11 +572,12 @@ struct BulkLoading : TestWorkload {
 				}
 				continue; // outdated
 			}
+			completeRanges.push_back(range.range());
 			std::vector<KeyValue> kvsToCheck = range.value().get().data;
 			kvs.insert(std::end(kvs), std::begin(kvsToCheck), std::end(kvsToCheck));
 			bulkLoadStates.push_back(range.value().get().bulkLoadTask);
 		}
-		std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, incompleteRanges));
+		std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, incompleteRanges, completeRanges));
 		ASSERT(self->checkSame(self, kvs, dbkvs));
 
 		// Clear all range lock
@@ -584,6 +623,16 @@ struct BulkLoading : TestWorkload {
 			disableConnectionFailures("BulkLoading");
 		}
 
+		// Run background traffic
+		if (self->backgroundTrafficEnabled) {
+			state std::vector<Future<Void>> trafficActors;
+			int actorCount = deterministicRandom()->randomInt(1, 10);
+			for (int i = 0; i < actorCount; i++) {
+				trafficActors.push_back(self->backgroundWriteTraffic(self, cx));
+			}
+		}
+
+		// Run test
 		if (deterministicRandom()->coinflip()) {
 			// Inject data to three non-overlapping ranges
 			wait(self->simpleTest(self, cx));
