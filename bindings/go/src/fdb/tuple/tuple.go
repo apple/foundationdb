@@ -506,13 +506,13 @@ func (t Tuple) countIncompleteVersionstamps() int {
 	incompleteCount := 0
 
 	for _, el := range t {
-		switch err := el.(type) {
+		switch e := el.(type) {
 		case Versionstamp:
-			if err.TransactionVersion == incompleteTransactionVersion {
+			if e.TransactionVersion == incompleteTransactionVersion {
 				incompleteCount++
 			}
 		case Tuple:
-			incompleteCount += err.countIncompleteVersionstamps()
+			incompleteCount += e.countIncompleteVersionstamps()
 		}
 	}
 
@@ -754,8 +754,8 @@ func (t Tuple) FDBRangeKeys() (fdb.KeyConvertible, fdb.KeyConvertible) {
 // (that is, all tuples of greater length than the Tuple of which the Tuple is a
 // prefix).
 func (t Tuple) FDBRangeKeySelectors() (fdb.Selectable, fdb.Selectable) {
-	b, err := t.FDBRangeKeys()
-	return fdb.FirstGreaterOrEqual(b), fdb.FirstGreaterOrEqual(err)
+	b, e := t.FDBRangeKeys()
+	return fdb.FirstGreaterOrEqual(b), fdb.FirstGreaterOrEqual(e)
 }
 
 func concat(a []byte, b ...byte) []byte {
