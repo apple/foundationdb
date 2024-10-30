@@ -86,25 +86,25 @@ func (q *Queue) Enqueue(trtr fdb.Transactor, item interface{}) (interface{}, err
 }
 
 func (q *Queue) LastIndex(trtr fdb.Transactor) (interface{}, error) {
-	i, err := trtr.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+	i, e := trtr.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
 		r, err := rtr.Snapshot().GetRange(q.QueueSS, fdb.RangeOptions{1, 0, true}).GetSliceWithError()
 		if len(r) == 0 {
 			return q.QueueSS.Pack(tuple.Tuple{0}), nil
 		}
 		return r[0].Key, err
 	})
-	return i, err
+	return i, e
 }
 
 func (q *Queue) FirstItem(trtr fdb.Transactor) (interface{}, error) {
-	i, err := trtr.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+	i, e := trtr.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
 		r, err := rtr.GetRange(q.QueueSS, fdb.RangeOptions{1, 0, false}).GetSliceWithError()
 		if len(r) == 0 {
 			return nil, EmptyQueueError{}
 		}
 		return r[0], err
 	})
-	return i, err
+	return i, e
 }
 
 func main() {
