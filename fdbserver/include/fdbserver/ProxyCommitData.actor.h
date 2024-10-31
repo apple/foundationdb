@@ -212,14 +212,18 @@ public:
 	}
 
 	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) {
-		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
+		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
+		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+		       !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
 		ASSERT(!pendingRequest());
 		currentRangeLockStartKey = std::make_pair(startKey, lockSetState);
 		return;
 	}
 
 	void consumePendingRequest(const Key& endKey) {
-		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
+		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
+		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+		       !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
 		ASSERT(pendingRequest());
 		ASSERT(endKey <= normalKeys.end);
 		ASSERT(currentRangeLockStartKey.get().first < endKey);
@@ -236,7 +240,9 @@ public:
 	}
 
 	bool isLocked(const KeyRange& range) const {
-		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
+		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
+		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+		       !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
 		if (range.end >= normalKeys.end) {
 			return false;
 		}
@@ -431,7 +437,8 @@ struct ProxyCommitData {
 	                   : nullptr),
 	    epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
-		rangeLock = SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !encryptMode.isEncryptionEnabled() &&
+		rangeLock = SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
+		                    !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && !encryptMode.isEncryptionEnabled() &&
 		                    getTenantMode() == TenantMode::DISABLED
 		                ? std::make_shared<RangeLock>()
 		                : nullptr;
