@@ -176,9 +176,9 @@ public:
 		return true;
 	}
 
-	void upsert(const RangeLockState& inputLock) {
+	void insertIfNotExist(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());
-		locks[inputLock.getLockUniqueString()] = inputLock;
+		locks.insert({ inputLock.getLockUniqueString(), inputLock });
 		return;
 	}
 

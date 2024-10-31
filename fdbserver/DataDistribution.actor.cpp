@@ -1048,6 +1048,7 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 		state Transaction tr(cx);
 		state BulkLoadState newBulkLoadState;
 		try {
+			// TODO(BulkLoad): make sure the range has been locked
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
@@ -1074,6 +1075,11 @@ ACTOR Future<std::pair<BulkLoadState, Version>> triggerBulkLoadTask(Reference<Da
 			return std::make_pair(newBulkLoadState, commitVersion);
 
 		} catch (Error& e) {
+			if (e.code() != error_code_actor_cancelled) {
+				TraceEvent(SevInfo, "DDBulkLoadTaskTriggeredPersistError", self->ddId)
+				    .errorUnsuppressed(e)
+				    .detail("BulkLoadState", newBulkLoadState.toString());
+			}
 			wait(tr.onError(e));
 		}
 	}
@@ -1099,6 +1105,9 @@ ACTOR Future<Void> waitUntilBulkLoadTaskCanStart(Reference<DataDistributor> self
 	return Void();
 }
 
+// A bulk load task is guaranteed to be either complete or overwritten by another task
+// When a bulk load task is trigged, the range traffic is turned off atomically
+// If the task completes, the task re-enables the traffic atomically
 ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId, bool restart) {
 	state Promise<Void> completeAck;
 	state BulkLoadState triggeredBulkLoadTask;
@@ -1162,10 +1171,10 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 }
 
 ACTOR Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
+	state Database cx = self->txnProcessor->context();
+	state Transaction tr(cx);
+	state BulkLoadState bulkLoadTask;
 	loop {
-		state Database cx = self->txnProcessor->context();
-		state Transaction tr(cx);
-		state BulkLoadState bulkLoadTask;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1303,6 +1312,8 @@ ACTOR Future<Void> resumeBulkLoadTasks(Reference<DataDistributor> self) {
 
 ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
 	wait(readyToStart);
+	state Database cx = self->txnProcessor->context();
+	wait(registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad));
 	wait(resumeBulkLoadTasks(self));
 	TraceEvent(SevInfo, "DDBulkLoadCoreResumed", self->ddId);
 

@@ -2881,10 +2881,10 @@ ACTOR Future<std::vector<BulkLoadState>> getValidBulkLoadTasksWithinRange(
 	return res;
 }
 
-// Submit bulkload task and overwrite any existing task
+// Submit bulkload task and overwrite any existing task and lock range
 ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask) {
+	state Transaction tr(cx);
 	loop {
-		state Transaction tr(cx);
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2892,9 +2892,19 @@ ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask) {
 				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
+				    .detail("Reason", "WrongPhase")
 				    .detail("Task", bulkLoadTask.toString());
 				throw bulkload_task_failed();
 			}
+			if (!normalKeys.contains(bulkLoadTask.getRange())) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "RangeOutOfScope")
+				    .detail("Task", bulkLoadTask.toString());
+				throw bulkload_task_failed();
+			}
+			wait(turnOffUserWriteTrafficForBulkLoad(&tr, bulkLoadTask.getRange()));
 			bulkLoadTask.submitTime = now();
 			wait(krmSetRange(&tr, bulkLoadPrefix, bulkLoadTask.getRange(), bulkLoadStateValue(bulkLoadTask)));
 			wait(tr.commit());
@@ -2939,10 +2949,10 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
 	return bulkLoadState;
 }
 
-// Update bulkload task to acknowledge state
+// Update bulkload task to acknowledge state and unlock the range
 ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId) {
+	state Transaction tr(cx);
 	loop {
-		state Transaction tr(cx);
 		state BulkLoadState bulkLoadState;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2951,7 +2961,9 @@ ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID task
 			           getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged })));
 			bulkLoadState.phase = BulkLoadPhase::Acknowledged;
 			ASSERT(range == bulkLoadState.getRange() && taskId == bulkLoadState.getTaskId());
+			ASSERT(normalKeys.contains(range));
 			wait(krmSetRange(&tr, bulkLoadPrefix, bulkLoadState.getRange(), bulkLoadStateValue(bulkLoadState)));
+			wait(turnOnUserWriteTrafficForBulkLoad(&tr, bulkLoadState.getRange()));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -3103,6 +3115,85 @@ ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange ran
 	return lockedRanges;
 }
 
+// Transactional
+ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range) {
+	if (range.end > normalKeys.end) {
+		throw bulkload_task_failed();
+	}
+	tr->addWriteConflictRange(normalKeys);
+	// Validate
+	state Key beginKey = range.begin;
+	state Key endKey = range.end;
+	state KeyRange rangeToRead;
+	while (beginKey < endKey) {
+		rangeToRead = KeyRangeRef(beginKey, endKey);
+		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
+		for (int i = 0; i < res.size() - 1; i++) {
+			if (res[i].value.empty()) {
+				continue;
+			}
+			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
+			ASSERT(rangeLockStateSet.isValid());
+			for (const auto& [lockId, lock] : rangeLockStateSet.getLocks()) {
+				if (lock == RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad)) {
+					continue;
+				}
+				// TODO(BulkLoad): should cancel this task
+				TraceEvent(SevError, "DDBulkLoadSeeUnexpectedRangeLock")
+				    .detail("Lock", lock.toString())
+				    .detail("Range", rangeToRead);
+				throw not_implemented();
+			}
+		}
+		beginKey = res[res.size() - 1].key;
+	}
+	// Lock range exclusively by overwiting the range
+	RangeLockStateSet rangeLockStateSet;
+	rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad));
+	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(rangeLockStateSet)));
+	TraceEvent(SevInfo, "DDBulkLoadTurnOffWriteTraffic").detail("Range", range);
+	return Void();
+}
+
+// Transactional
+ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range) {
+	if (range.end > normalKeys.end) {
+		throw bulkload_task_failed();
+	}
+	// Validate
+	state Key beginKey = range.begin;
+	state Key endKey = range.end;
+	state KeyRange rangeToRead;
+	while (beginKey < endKey) {
+		rangeToRead = KeyRangeRef(beginKey, endKey);
+		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
+		for (int i = 0; i < res.size() - 1; i++) {
+			if (res[i].value.empty()) {
+				continue;
+			}
+			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
+			ASSERT(rangeLockStateSet.isValid());
+			for (const auto& [lockId, lock] : rangeLockStateSet.getLocks()) {
+				if (lock != RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad)) {
+					TraceEvent(SevError, "DDBulkLoadSeeUnexpectedRangeLock")
+					    .detail("Lock", lock.toString())
+					    .detail("Range", rangeToRead);
+					ASSERT_WE_THINK(false);
+					// TODO(BulkLoad): make lock exclusive to other applications
+					// This is unexpected because others should see the exclusive lock of bulk load
+					// and give up locking the range
+				}
+			}
+		}
+		beginKey = res[res.size() - 1].key;
+	}
+	// Unlock exclusively by overwiting the range
+	// TODO(BulkLoad): use exclusive write lock for bulk load in the future
+	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, StringRef()));
+	TraceEvent(SevInfo, "DDBulkLoadTurnOnWriteTraffic").detail("Range", range);
+	return Void();
+}
+
 // Not transactional
 ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID) {
 	if (range.end > normalKeys.end) {
@@ -3135,14 +3226,14 @@ ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string 
 				if (!result[i].value.empty()) {
 					rangeLockStateSet = decodeRangeLockStateSet(result[i].value);
 				}
-				rangeLockStateSet.upsert(RangeLockState(RangeLockType::ReadLockOnRange, owner.getUniqueId()));
+				rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ReadLockOnRange, owner.getUniqueId()));
 				ASSERT(rangeLockStateSet.isValid());
 				wait(krmSetRangeCoalescing(
 				    &tr, rangeLockPrefix, lockRange, normalKeys, rangeLockStateSetValue(rangeLockStateSet)));
 				wait(tr.commit());
 				tr.reset();
 				beginKey = result[i + 1].key;
-				break; // TODO(Zhe): remove
+				break;
 			}
 
 			// Step 3: Exit if all ranges have been locked
@@ -3198,7 +3289,7 @@ ACTOR Future<Void> releaseReadLockOnRange(Database cx, KeyRange range, std::stri
 				wait(tr.commit());
 				tr.reset();
 				beginKey = result[i + 1].key;
-				break; // TODO(Zhe): remove
+				break;
 			}
 
 			// Step 3: Exit if all ranges have been unlocked

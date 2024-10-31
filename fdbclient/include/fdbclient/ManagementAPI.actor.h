@@ -202,6 +202,12 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
 
 ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId);
 
+// Turn off user traffic for bulk load based on range lock
+ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range);
+
+// Turn on user traffic for bulk load based on range lock
+ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range);
+
 // Lock a user range (the input range must be within normalKeys)
 ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);
 
