@@ -3117,7 +3117,9 @@ ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange ran
 
 // Transactional
 ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range) {
-	ASSERT(range.end <= normalKeys.end);
+	if (range.end > normalKeys.end) {
+		throw bulkload_task_failed();
+	}
 	tr->addWriteConflictRange(normalKeys);
 	// Validate
 	state Key beginKey = range.begin;
@@ -3155,7 +3157,9 @@ ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange 
 
 // Transactional
 ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range) {
-	ASSERT(range.end <= normalKeys.end);
+	if (range.end > normalKeys.end) {
+		throw bulkload_task_failed();
+	}
 	// Validate
 	state Key beginKey = range.begin;
 	state Key endKey = range.end;
@@ -3184,6 +3188,7 @@ ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange r
 		beginKey = res[res.size() - 1].key;
 	}
 	// Unlock exclusively by overwiting the range
+	// TODO(BulkLoad): use exclusive write lock for bulk load in the future
 	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, StringRef()));
 	TraceEvent(SevInfo, "DDBulkLoadTurnOnWriteTraffic").detail("Range", range);
 	return Void();
