@@ -57,7 +57,8 @@ Future<StatusReply> clusterGetStatus(
     Version const& dcStorageServerVersionDifference,
     ConfigBroadcaster const* const& conifgBroadcaster,
     Optional<UnversionedMetaclusterRegistrationEntry> const& metaclusterRegistration,
-    metacluster::MetaclusterMetrics const& metaclusterMetrics);
+    metacluster::MetaclusterMetrics const& metaclusterMetrics,
+    std::unordered_set<NetworkAddress> const& excludedDegradedServers);
 
 StatusReply clusterGetFaultToleranceStatus(const std::string& statusString);
 

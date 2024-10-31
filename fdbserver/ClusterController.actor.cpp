@@ -1574,7 +1574,8 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                  self->dcStorageServerVersionDifference,
 			                                                                  configBroadcaster,
 			                                                                  self->db.metaclusterRegistration,
-			                                                                  self->db.metaclusterMetrics)));
+			                                                                  self->db.metaclusterMetrics,
+			                                                                  self->excludedDegradedServers)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
