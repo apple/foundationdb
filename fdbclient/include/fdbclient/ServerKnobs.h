@@ -780,6 +780,7 @@ public:
 	                                        // CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING), this knob must be
 	                                        // turned on, because inter-DC latency signal is not reliable and it's
 	                                        // challenging to pick a good latency threshold.
+	bool CC_INVALIDATE_EXCLUDED_PROCESSES; // gray failure, todo
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 

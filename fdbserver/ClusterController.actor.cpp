@@ -3047,6 +3047,13 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 							self->excludedDegradedServers = self->degradationInfo.degradedServers;
 							self->excludedDegradedServers.insert(self->degradationInfo.disconnectedServers.begin(),
 							                                     self->degradationInfo.disconnectedServers.end());
+							// If we are excluding processes and triggering recovery, also invalidate the complaints
+							// from the such processes in the past because that signal was not reliable.
+							if (SERVER_KNOBS->CC_INVALIDATE_EXCLUDED_PROCESSES) {
+								for (const auto& addr : self->excludedDegradedServers) {
+									self->workerHealth.erase(addr);
+								}
+							}
 							TraceEvent(SevWarnAlways, "DegradedServerDetectedAndTriggerRecovery")
 							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
 							self->db.forceMasterFailure.trigger();
