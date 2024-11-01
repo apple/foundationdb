@@ -1141,11 +1141,14 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	return processMap;
 }
 
-static JsonBuilderObject grayFailureStatus(const std::unordered_set<NetworkAddress>& excludedDegradedServers) {
+static JsonBuilderObject grayFailureStatus(const std::unordered_map<NetworkAddress, double>& excludedDegradedServers) {
 	JsonBuilderObject status;
 	JsonBuilderArray excludedProcesses;
-	for (const auto& excludedServer : excludedDegradedServers) {
-		excludedProcesses.push_back(excludedServer.toString());
+	for (const auto& [excludedServer, time] : excludedDegradedServers) {
+		JsonBuilderObject process;
+		process["address"] = excludedServer.toString();
+		process["time"] = time;
+		excludedProcesses.push_back(process);
 	}
 	status["excluded_processes"] = excludedProcesses;
 	return status;
@@ -3057,7 +3060,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
     ConfigBroadcaster const* configBroadcaster,
     Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration,
     metacluster::MetaclusterMetrics metaclusterMetrics,
-    std::unordered_set<NetworkAddress> excludedDegradedServers) {
+    std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
 
 	state double tStart = timer();
 
