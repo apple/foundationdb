@@ -195,78 +195,7 @@ struct ExpectedIdempotencyIdCountForKey {
 	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
 };
 
-struct RangeLock {
-public:
-	RangeLock() { coreMap.insert(allKeys, RangeLockStateSet()); }
-
-	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
-
-	void initKeyPoint(const Key& key, const Value& value) {
-		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Init").detail("Key", key);
-		if (!value.empty()) {
-			coreMap.rawInsert(key, decodeRangeLockStateSet(value));
-		} else {
-			coreMap.rawInsert(key, RangeLockStateSet());
-		}
-		return;
-	}
-
-	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) {
-		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
-		       !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
-		ASSERT(!pendingRequest());
-		currentRangeLockStartKey = std::make_pair(startKey, lockSetState);
-		return;
-	}
-
-	void consumePendingRequest(const Key& endKey) {
-		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
-		       !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
-		ASSERT(pendingRequest());
-		ASSERT(endKey <= normalKeys.end);
-		ASSERT(currentRangeLockStartKey.get().first < endKey);
-		KeyRange lockRange = Standalone(KeyRangeRef(currentRangeLockStartKey.get().first, endKey));
-		RangeLockStateSet lockSetState = currentRangeLockStartKey.get().second;
-		/* TraceEvent(SevDebug, "RangeLockRangeOps")
-		    .detail("Ops", "Update")
-		    .detail("Range", lockRange)
-		    .detail("Status", lockSetState.toString()); */
-		coreMap.insert(lockRange, lockSetState);
-		coreMap.coalesce(allKeys);
-		currentRangeLockStartKey.reset();
-		return;
-	}
-
-	bool isLocked(const KeyRange& range) const {
-		ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
-		       !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
-		if (range.end >= normalKeys.end) {
-			return false;
-		}
-		for (auto lockRange : coreMap.intersectingRanges(range)) {
-			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ReadLockOnRange)) {
-				/*TraceEvent(SevDebug, "RangeLockRangeOps")
-				    .detail("Ops", "Check")
-				    .detail("Range", range)
-				    .detail("Status", "Reject");*/
-				return true;
-			}
-		}
-		/*TraceEvent(SevDebug, "RangeLockRangeOps")
-		    .detail("Ops", "Check")
-		    .detail("Range", range)
-		    .detail("Status", "Accept");*/
-		return false;
-	}
-
-private:
-	Optional<std::pair<Key, RangeLockStateSet>> currentRangeLockStartKey;
-	KeyRangeMap<RangeLockStateSet> coreMap;
-};
-
+struct RangeLock;
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
@@ -407,6 +336,18 @@ struct ProxyCommitData {
 		}
 	}
 
+	// RangeLock feature currently does not support version vector
+	// So, if the version vector is enabled, the RangeLock is automatically disabled
+	// RangeLock feature currently rely on processing private mutations in commit proxy
+	// So, if PROXY_USE_RESOLVER_PRIVATE_MUTATIONS is on, the RangeLock is automatically disabled
+	// RangeLock feature currently is not compatible with encryption and tenant
+	bool rangeLockEnabled() {
+		return SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
+		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+		       !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && !encryptMode.isEncryptionEnabled() &&
+		       getTenantMode() == TenantMode::DISABLED;
+	}
+
 	ProxyCommitData(UID dbgid,
 	                MasterInterface master,
 	                PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion,
@@ -437,12 +378,76 @@ struct ProxyCommitData {
 	                   : nullptr),
 	    epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
-		rangeLock = SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-		                    !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && !encryptMode.isEncryptionEnabled() &&
-		                    getTenantMode() == TenantMode::DISABLED
-		                ? std::make_shared<RangeLock>()
-		                : nullptr;
 	}
+};
+struct RangeLock {
+public:
+	RangeLock(ProxyCommitData* const pProxyCommitData) : pProxyCommitData(pProxyCommitData) {
+		coreMap.insert(allKeys, RangeLockStateSet());
+	}
+
+	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
+
+	void initKeyPoint(const Key& key, const Value& value) {
+		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
+		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Init").detail("Key", key);
+		if (!value.empty()) {
+			coreMap.rawInsert(key, decodeRangeLockStateSet(value));
+		} else {
+			coreMap.rawInsert(key, RangeLockStateSet());
+		}
+		return;
+	}
+
+	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) {
+		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
+		ASSERT(!pendingRequest());
+		currentRangeLockStartKey = std::make_pair(startKey, lockSetState);
+		return;
+	}
+
+	void consumePendingRequest(const Key& endKey) {
+		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
+		ASSERT(pendingRequest());
+		ASSERT(endKey <= normalKeys.end);
+		ASSERT(currentRangeLockStartKey.get().first < endKey);
+		KeyRange lockRange = Standalone(KeyRangeRef(currentRangeLockStartKey.get().first, endKey));
+		RangeLockStateSet lockSetState = currentRangeLockStartKey.get().second;
+		/* TraceEvent(SevDebug, "RangeLockRangeOps")
+		    .detail("Ops", "Update")
+		    .detail("Range", lockRange)
+		    .detail("Status", lockSetState.toString()); */
+		coreMap.insert(lockRange, lockSetState);
+		coreMap.coalesce(allKeys);
+		currentRangeLockStartKey.reset();
+		return;
+	}
+
+	bool isLocked(const KeyRange& range) const {
+		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
+		if (range.end >= normalKeys.end) {
+			return false;
+		}
+		for (auto lockRange : coreMap.intersectingRanges(range)) {
+			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ReadLockOnRange)) {
+				/*TraceEvent(SevDebug, "RangeLockRangeOps")
+				    .detail("Ops", "Check")
+				    .detail("Range", range)
+				    .detail("Status", "Reject");*/
+				return true;
+			}
+		}
+		/*TraceEvent(SevDebug, "RangeLockRangeOps")
+		    .detail("Ops", "Check")
+		    .detail("Range", range)
+		    .detail("Status", "Accept");*/
+		return false;
+	}
+
+private:
+	Optional<std::pair<Key, RangeLockStateSet>> currentRangeLockStartKey;
+	KeyRangeMap<RangeLockStateSet> coreMap;
+	ProxyCommitData* const pProxyCommitData;
 };
 
 #include "flow/unactorcompiler.h"
