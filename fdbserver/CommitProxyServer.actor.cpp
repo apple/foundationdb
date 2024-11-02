@@ -427,7 +427,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 
 					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && !req.bypassStorageQuota() &&
 					    req.tenantInfo.hasTenant() &&
-					    commitData->tenantsOverStorageQuota.count(req.tenantInfo.tenantId) > 0) {
+					    commitData->tenantsOverStorageQuota.contains(req.tenantInfo.tenantId)) {
 						req.reply.sendError(storage_quota_exceeded());
 						continue;
 					}
@@ -738,9 +738,15 @@ struct CommitBatchContext {
 
 	void checkHotShards();
 
+	bool rangeLockEnabled();
+
 private:
 	void evaluateBatchSize();
 };
+
+bool CommitBatchContext::rangeLockEnabled() {
+	return pProxyCommitData->rangeLockEnabled();
+}
 
 void CommitBatchContext::checkHotShards() {
 	// removed expired hot shards
@@ -795,14 +801,41 @@ void CommitBatchContext::checkHotShards() {
 	return;
 }
 
+// Check whether the mutation intersects any legal backup ranges
+// If so, it will be clamped to the intersecting range(s) later
+inline bool shouldBackup(MutationRef const& m) {
+	if (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey) {
+		return true;
+	} else if (m.type != MutationRef::Type::ClearRange) {
+		return systemBackupMutationMask().rangeContaining(m.param1).value();
+	} else {
+		for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m.param1, m.param2))) {
+			if (r->value()) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 	std::set<Tag> transactionTags;
 	std::vector<Tag> cacheVector = { cacheTag };
+	if (pProxyCommitData->txnStateStore->getReplaceContent()) {
+		// return empty set if txnStateStore will snapshot.
+		// empty sets are sent to all logs.
+		return transactionTags;
+	}
 	for (int transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
 		int mutationNum = 0;
 		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
 		for (; mutationNum < pMutations->size(); mutationNum++) {
 			auto& m = (*pMutations)[mutationNum];
+			// disable version vector's effect if any mutation in the batch is backed up.
+			// TODO: make backup work with version vector.
+			if (pProxyCommitData->vecBackupKeys.size() > 1 && shouldBackup(m)) {
+				return std::set<Tag>();
+			}
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
 				transactionTags.insert(tags.begin(), tags.end());
@@ -834,6 +867,11 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 				UNREACHABLE();
 			}
 		}
+	}
+
+	if (toCommit.getLogRouterTags()) {
+		toCommit.storeRandomRouterTag();
+		transactionTags.insert(toCommit.savedRandomRouterTag.get());
 	}
 
 	return transactionTags;
@@ -1029,7 +1067,7 @@ EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitDa
 			// Parse mutation key to determine mutation encryption domain
 			StringRef prefix = m.param1.substr(0, TenantAPI::PREFIX_SIZE);
 			int64_t tenantId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
-			if (commitData->tenantMap.count(tenantId)) {
+			if (commitData->tenantMap.contains(tenantId)) {
 				domainId = tenantId;
 			} else {
 				// Leverage 'default encryption domain'
@@ -1167,7 +1205,7 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 bool validTenantAccess(MutationRef m, std::map<int64_t, TenantName> const& tenantMap, Optional<int64_t>& tenantId) {
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		tenantId = TenantAPI::extractTenantIdFromMutation(m);
-		bool isLegalTenant = tenantMap.count(tenantId.get()) > 0;
+		bool isLegalTenant = tenantMap.contains(tenantId.get());
 		CODE_PROBE(!isLegalTenant, "Commit proxy access invalid tenant");
 		return isLegalTenant;
 	}
@@ -1545,7 +1583,7 @@ Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
 	if (!isValid) {
 		return tenant_not_found();
 	}
-	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.count(tr.tenantInfo.tenantId) > 0) {
+	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.contains(tr.tenantInfo.tenantId)) {
 		CODE_PROBE(true, "Attempt access to locked tenant without lock awareness");
 		return tenant_locked();
 	}
@@ -1599,7 +1637,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				// check if all tenant ids are valid if committed == true
 				committed = committed &&
 				            std::all_of(tenantIds.get().begin(), tenantIds.get().end(), [self](const int64_t& tid) {
-					            return self->pProxyCommitData->tenantMap.count(tid);
+					            return self->pProxyCommitData->tenantMap.contains(tid);
 				            });
 
 				if (self->debugID.present()) {
@@ -1778,7 +1816,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	if (pProxyCommitData->encryptMode == EncryptionAtRestMode::DOMAIN_AWARE && !rawAccessTenantIds.empty()) {
 		std::unordered_set<EncryptCipherDomainId> extraDomainIds;
 		for (auto tenantId : rawAccessTenantIds) {
-			if (self->cipherKeys.count(tenantId) == 0) {
+			if (!self->cipherKeys.contains(tenantId)) {
 				extraDomainIds.insert(tenantId);
 			}
 		}
@@ -1865,7 +1903,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 				CODE_PROBE(true, "Raw access mutation encryption", probe::decoration::rare);
 			}
 			ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
-			ASSERT(self->cipherKeys.count(domainId) > 0);
+			ASSERT(self->cipherKeys.contains(domainId));
 			encryptedMutation =
 			    mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG, encryptTime);
 		}
@@ -1877,23 +1915,6 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 		self->toCommit.writeTypedMessage(*mutation);
 		return std::variant<MutationRef, VectorRef<MutationRef>>{ *mutation };
 	}
-}
-
-// Check whether the mutation intersects any legal backup ranges
-// If so, it will be clamped to the intersecting range(s) later
-inline bool shouldBackup(MutationRef const& m) {
-	if (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey) {
-		return true;
-	} else if (m.type != MutationRef::Type::ClearRange) {
-		return systemBackupMutationMask().rangeContaining(m.param1).value();
-	} else {
-		for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m.param1, m.param2))) {
-			if (r->value()) {
-				return true;
-			}
-		}
-	}
-	return false;
 }
 
 double pushToBackupMutations(CommitBatchContext* self,
@@ -1992,6 +2013,45 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 		self->toCommit.addTag(tag);
 		self->toCommit.writeTypedMessage(acsMutation);
 	}
+}
+// RangeLock takes effect only when the feature flag is on and database is unlocked and the mutation is not encrypted
+void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
+	ASSERT(self->rangeLockEnabled());
+	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	ASSERT(pProxyCommitData->rangeLock != nullptr);
+	std::vector<CommitTransactionRequest>& trs = self->trs;
+	for (int i = self->transactionNum; i < trs.size(); i++) {
+		if (self->committed[i] != ConflictBatch::TransactionCommitted) {
+			continue;
+		} else if (trs[i].isLockAware()) {
+			continue; // rangeLock is transparent to lock-aware transactions
+		}
+		VectorRef<MutationRef>* pMutations = &trs[i].transaction.mutations;
+		bool transactionRejected = false;
+		for (int j = 0; j < pMutations->size(); j++) {
+			MutationRef m = (*pMutations)[j];
+			ASSERT_WE_THINK(!m.isEncrypted());
+			if (m.isEncrypted()) {
+				continue;
+			}
+			KeyRange rangeToCheck;
+			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+				rangeToCheck = singleKeyRange(m.param1);
+			} else if (m.type == MutationRef::ClearRange) {
+				rangeToCheck = KeyRangeRef(m.param1, m.param2);
+			}
+			bool shouldReject = pProxyCommitData->rangeLock->isLocked(rangeToCheck);
+			if (shouldReject) {
+				self->committed[i] = ConflictBatch::TransactionLockReject;
+				trs[i].reply.sendError(transaction_rejected_range_locked());
+				transactionRejected = true;
+			}
+			if (transactionRejected) {
+				break;
+			}
+		}
+	}
+	return;
 }
 
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
@@ -2284,6 +2344,13 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadataToCommittedTxn");
+	}
+
+	// After applyed metadata change, this commit proxy has the latest view of locked ranges.
+	// If a transaction has any mutation accessing to the locked range, reject the transaction with
+	// error_code_transaction_rejected_range_locked
+	if (self->rangeLockEnabled()) {
+		rejectMutationsForReadLockOnRange(self);
 	}
 
 	// Second pass
@@ -2633,7 +2700,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
 		} else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
-		} else if (self->committed[t] == ConflictBatch::TransactionTenantFailure) {
+		} else if (self->committed[t] == ConflictBatch::TransactionTenantFailure ||
+		           self->committed[t] == ConflictBatch::TransactionLockReject) {
 			// We already sent the error
 			ASSERT(tr.reply.isSet());
 		} else {
@@ -2727,7 +2795,6 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	                      target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA +
 	                          pProxyCommitData->commitBatchInterval *
 	                              (1 - SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
-
 	pProxyCommitData->stats.commitBatchingWindowSize.addMeasurement(pProxyCommitData->commitBatchInterval);
 	pProxyCommitData->commitBatchesMemBytesCount -= self->currentBatchMemBytesCount;
 	ASSERT_ABORT(pProxyCommitData->commitBatchesMemBytesCount >= 0);
@@ -2817,7 +2884,7 @@ void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
                         ProxyCommitData* commitData,
                         std::unordered_set<UID>& included,
                         UID ssId) {
-	if (!included.count(ssId)) {
+	if (!included.contains(ssId)) {
 		auto mappingItr = commitData->tssMapping.find(ssId);
 		if (mappingItr != commitData->tssMapping.end()) {
 			reply.resultsTssMapping.push_back(*mappingItr);
@@ -3102,8 +3169,8 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 				throw blob_granule_transaction_too_old();
 			}
 
-			if (!req.justGranules && !commitData->blobWorkerInterfCache.count(workerId) &&
-			    !bwiLookedUp.count(workerId)) {
+			if (!req.justGranules && !commitData->blobWorkerInterfCache.contains(workerId) &&
+			    !bwiLookedUp.contains(workerId)) {
 				bwiLookedUp.insert(workerId);
 				bwiLookupFutures.push_back(tr.get(blobWorkerListKeyFor(workerId)));
 			}
@@ -3199,7 +3266,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 			rep.newLocality = false;
 			if (localityKey.present()) {
 				int8_t locality = decodeTagLocalityListValue(localityKey.get());
-				if (rep.tag.locality != tagLocalityUpgraded && locality != rep.tag.locality) {
+				if (locality != rep.tag.locality) {
 					TraceEvent(SevWarnAlways, "SSRejoinedWithChangedLocality")
 					    .detail("Tag", rep.tag.toString())
 					    .detail("DcId", req.dcId)
@@ -3233,18 +3300,11 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 					}
 					rep.newTag = Tag(locality, tagId);
 				}
-			} else if (rep.tag.locality != tagLocalityUpgraded) {
+			} else {
+				ASSERT_WE_THINK(rep.tag.locality != tagLocalityUpgraded);
 				TraceEvent(SevWarnAlways, "SSRejoinedWithUnknownLocality")
 				    .detail("Tag", rep.tag.toString())
 				    .detail("DcId", req.dcId);
-			} else {
-				rep.newLocality = true;
-				int8_t maxTagLocality = -1;
-				auto localityKeys = commitData->txnStateStore->readRange(tagLocalityListKeys).get();
-				for (auto& kv : localityKeys) {
-					maxTagLocality = std::max(maxTagLocality, decodeTagLocalityListValue(kv.value));
-				}
-				rep.newTag = Tag(maxTagLocality + 1, 0);
 			}
 			rep.encryptMode = commitData->encryptMode;
 			req.reply.send(rep);
@@ -3702,27 +3762,33 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			}
 		};
 		for (auto& kv : data) {
-			if (!kv.key.startsWith(keyServersPrefix)) {
+			if (kv.key.startsWith(keyServersPrefix)) {
+				KeyRef k = kv.key.removePrefix(keyServersPrefix);
+				if (k == allKeys.end) {
+					continue;
+				}
+				decodeKeyServersValue(tag_uid, kv.value, src, dest);
+
+				info.tags.clear();
+
+				info.src_info.clear();
+				updateTagInfo(src, info.tags, info.src_info);
+
+				info.dest_info.clear();
+				updateTagInfo(dest, info.tags, info.dest_info);
+
+				uniquify(info.tags);
+				keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
+			} else if (kv.key.startsWith(rangeLockPrefix)) {
+				if (pContext->pCommitData->rangeLockEnabled()) {
+					ASSERT(pContext->pCommitData->rangeLock != nullptr);
+					Key keyInsert = kv.key.removePrefix(rangeLockPrefix);
+					pContext->pCommitData->rangeLock->initKeyPoint(keyInsert, kv.value);
+				}
+			} else {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 				continue;
 			}
-
-			KeyRef k = kv.key.removePrefix(keyServersPrefix);
-			if (k == allKeys.end) {
-				continue;
-			}
-			decodeKeyServersValue(tag_uid, kv.value, src, dest);
-
-			info.tags.clear();
-
-			info.src_info.clear();
-			updateTagInfo(src, info.tags, info.src_info);
-
-			info.dest_info.clear();
-			updateTagInfo(dest, info.tags, info.dest_info);
-
-			uniquify(info.tags);
-			keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 		}
 
 		// insert keyTag data separately from metadata mutations so that we can do one bulk insert which
@@ -3763,7 +3829,7 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	ASSERT(pContext->pCommitData != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
-	if (pContext->receivedSequences.count(request.sequence)) {
+	if (pContext->receivedSequences.contains(request.sequence)) {
 		if (pContext->receivedSequences.size() == pContext->maxSequence) {
 			wait(pContext->txnRecovery);
 		}
@@ -3948,6 +4014,12 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		                         SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
 	}
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
+
+	// Initialize RangeLock
+	if (commitData.rangeLockEnabled()) {
+		commitData.rangeLock = std::make_shared<RangeLock>(&commitData);
+		TraceEvent(SevInfo, "CommitProxyRangeLockEnabled", commitData.dbgid);
+	}
 
 	addActor.send(monitorRemoteCommitted(&commitData));
 	addActor.send(tenantIdServer(proxy, addActor, &commitData));

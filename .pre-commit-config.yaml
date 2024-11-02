@@ -5,7 +5,6 @@ repos:
     - id: black
       exclude: |
           (?x)^(
-              bindings/python/fdb/six.py|
               contrib/Implib.so/implib-gen.py|
               documentation/sphinx/extensions/rubydomain.py
           )$

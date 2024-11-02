@@ -572,6 +572,8 @@ public:
 	bool SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t SHARDED_ROCKSDB_BLOCK_CACHE_SIZE;
+	double SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
+	bool SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 	int64_t SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	int64_t SHARDED_ROCKSDB_RATE_LIMITER_MODE;
 	int SHARDED_ROCKSDB_BACKGROUND_PARALLELISM;
@@ -627,6 +629,7 @@ public:
 	double COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL;
 	double COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR;
 	double COMMIT_TRIGGER_DELAY;
+	bool ENABLE_READ_LOCK_ON_RANGE;
 
 	double RESOLVER_COALESCE_TIME;
 	int BUGGIFIED_ROW_LIMIT;
@@ -726,7 +729,6 @@ public:
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
 	double CLIENT_REGISTER_INTERVAL;
-	bool CC_PAUSE_HEALTH_MONITOR;
 	bool CC_ENABLE_WORKER_HEALTH_MONITOR;
 	double CC_WORKER_HEALTH_CHECKING_INTERVAL; // The interval of refreshing the degraded server list.
 	double CC_DEGRADED_LINK_EXPIRATION_INTERVAL; // The time period from the last degradation report after which a
@@ -759,8 +761,25 @@ public:
 	                                             // be determined as degraded worker.
 	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
 	                                             // determined as degraded satellite.
-	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether the remote log
-	                                             // router is degraded and may use trigger recovery to recover from it.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING; // When enabled, gray failure tries to detect whether
+	                                                         // remote log routers are experiencing degradation
+	                                                         // (latency) with their peers. Gray failure may trigger
+	                                                         // recovery based on this.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether
+	                                             // remote log routers are disconnected from their peers. Gray failure
+	                                             // may trigger recovery based on this.
+	bool CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING; // When enabled, gray failure tries to detect whether remote
+	                                                   // tlogs are experiencing degradation (latency) with their peers.
+	                                                   // Gray failure may trigger recovery based on this.
+	bool CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING; // When enabled, gray failure tries to detect whether remote
+	                                                  // tlogs are disconnected from their peers. Gray failure may
+	                                                  // trigger recovery based on this.
+	bool CC_ONLY_CONSIDER_INTRA_DC_LATENCY; // When enabled, gray failure only considers intra-DC signal for latency
+	                                        // degradations. For remote process knobs
+	                                        // (CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING and
+	                                        // CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING), this knob must be
+	                                        // turned on, because inter-DC latency signal is not reliable and it's
+	                                        // challenging to pick a good latency threshold.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 
@@ -1067,6 +1086,7 @@ public:
 	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
 	int SPLIT_METRICS_MAX_ROWS;
 	double STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL;
+	bool CONSISTENCY_CHECK_BACKWARD_READ;
 	int PHYSICAL_SHARD_MOVE_LOG_SEVERITY;
 	int FETCH_SHARD_BUFFER_BYTE_LIMIT;
 	int FETCH_SHARD_UPDATES_BYTE_LIMIT;
@@ -1117,9 +1137,12 @@ public:
 
 	// Test harness
 	double WORKER_POLL_DELAY;
-	int PROBABILITY_FACTOR_MEMORY_ENGINE_SELECTED_SIM;
+
+	// Adjust storage engine probability in simulation tests
+	int PROBABILITY_FACTOR_SHARDED_ROCKSDB_ENGINE_SELECTED_SIM;
 	int PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM;
 	int PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM;
+	int PROBABILITY_FACTOR_MEMORY_SELECTED_SIM;
 
 	// Coordination
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;

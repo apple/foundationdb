@@ -465,8 +465,10 @@ struct TLogOptions {
 	}
 
 	DiskQueueVersion getDiskQueueVersion() const {
-		if (version < TLogVersion::V3)
+		if (version < TLogVersion::V3) {
+			ASSERT(false); // no longer supported
 			return DiskQueueVersion::V0;
+		}
 		if (version < TLogVersion::V7)
 			return DiskQueueVersion::V1;
 		return DiskQueueVersion::V2;
@@ -476,15 +478,10 @@ struct TLogOptions {
 TLogFn tLogFnForOptions(TLogOptions options) {
 	switch (options.version) {
 	case TLogVersion::V2:
-		if (options.spillType == TLogSpillType::REFERENCE)
-			ASSERT(false);
-		return oldTLog_6_0::tLog;
 	case TLogVersion::V3:
 	case TLogVersion::V4:
-		if (options.spillType == TLogSpillType::VALUE)
-			return oldTLog_6_0::tLog;
-		else
-			return oldTLog_6_2::tLog;
+		ASSERT(false); // V2 to V4 are no longer supported
+
 	case TLogVersion::V5:
 	case TLogVersion::V6:
 	case TLogVersion::V7:
@@ -1408,7 +1405,7 @@ std::set<std::thread::id> profiledThreads;
 
 // Returns whether or not a given thread should be profiled
 int filter_in_thread(void* arg) {
-	return profiledThreads.count(std::this_thread::get_id()) > 0 ? 1 : 0;
+	return profiledThreads.contains(std::this_thread::get_id()) ? 1 : 0;
 }
 #endif
 
@@ -3332,7 +3329,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
 				std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
-				if (snapReqResultMap.count(snapReqKey)) {
+				if (snapReqResultMap.contains(snapReqKey)) {
 					CODE_PROBE(true, "Worker received a duplicate finished snapshot request", probe::decoration::rare);
 					auto result = snapReqResultMap[snapReqKey];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
@@ -3340,7 +3337,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    .detail("SnapUID", snapReq.snapUID.toString())
 					    .detail("Role", snapReq.role)
 					    .detail("Result", result.isError() ? result.getError().code() : success().code());
-				} else if (snapReqMap.count(snapReqKey)) {
+				} else if (snapReqMap.contains(snapReqKey)) {
 					CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request", probe::decoration::rare);
 					TraceEvent("RetryOngoingWorkerSnapRequest")
 					    .detail("SnapUID", snapReq.snapUID.toString())

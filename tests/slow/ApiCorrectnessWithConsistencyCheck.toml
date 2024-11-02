@@ -1,6 +1,3 @@
-[configuration]
-storageEngineExcludeTypes = [5]
-
 [[knobs]]
 enable_replica_consistency_check_on_reads = true
 

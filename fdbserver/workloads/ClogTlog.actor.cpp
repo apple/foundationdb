@@ -129,16 +129,13 @@ struct ClogTlogWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> excludeFailedLog(ClogTlogWorkload* self, Database cx) {
-		state Future<Void> timeout = delay(30);
-
 		loop choose {
 			when(wait(self->dbInfo->onChange())) {
 				if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 					return Void();
 				}
-				timeout = delay(30);
 			}
-			when(wait(timeout)) {
+			when(wait(delay(30))) {
 				// recovery state hasn't changed in 30s, exclude the failed tlog
 				CODE_PROBE(true, "Exclude failed tlog");
 				TraceEvent("ExcludeFailedLog")

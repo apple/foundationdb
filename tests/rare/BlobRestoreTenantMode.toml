@@ -1,0 +1,55 @@
+[configuration]
+extraDatabaseMode = 'Single'
+blobGranulesEnabled = true 
+allowDefaultTenant = false
+tenantModes = ['optional', 'required']
+injectTargetedSSRestart = true
+injectSSDelay = true
+disableTss = true
+
+[[knobs]]
+bg_metadata_source = "tenant"
+bg_key_tuple_truncate_offset = 1
+enable_rest_kms_communication = true
+bg_consistency_check_enabled = 0
+bw_throttling_enabled = false
+
+[[test]] 
+testTitle = 'BackupMutationLogs'
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+waitForQuiescence = false
+
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    blobManifestUrl = 'file://simfdb/fdbblob/manifest'
+    submitOnly = true
+    waitForBackup = true
+
+[[test]]
+testTitle = 'BlobGranuleCorrectness'
+runConsistencyCheck = false
+waitForQuiescence = false
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'BlobGranuleCorrectnessWorkload'
+    testDuration = 60
+
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    waitForBackup = true
+    stopBackup = true
+
+[[test]]
+testTitle = 'BlobRestore'
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+clearAfterTest = false
+waitForQuiescence = false
+
+    [[test.workload]]
+    testName = 'BlobRestoreWorkload'
+    performRestore = true

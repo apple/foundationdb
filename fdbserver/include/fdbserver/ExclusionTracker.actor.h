@@ -49,7 +49,7 @@ struct ExclusionTracker {
 
 	bool isFailedOrExcluded(NetworkAddress addr) {
 		AddressExclusion addrExclusion(addr.ip, addr.port);
-		return excluded.count(addrExclusion) || failed.count(addrExclusion);
+		return excluded.contains(addrExclusion) || failed.contains(addrExclusion);
 	}
 
 	ACTOR static Future<Void> tracker(ExclusionTracker* self) {

@@ -284,7 +284,6 @@
                   <File Id='FDBPY$(var.PyVer)TUPLE' Name='tuple.py' DiskId='1' Source='$(var.PyPath)tuple.py' KeyPath='no'/>
                   <File Id='FDBPY$(var.PyVer)DIR' Name='directory_impl.py' DiskId='1' Source='$(var.PyPath)directory_impl.py' KeyPath='no'/>
                   <File Id='FDBPY$(var.PyVer)SUBS' Name='subspace_impl.py' DiskId='1' Source='$(var.PyPath)subspace_impl.py' KeyPath='no'/>
-                  <File Id='FDBPY$(var.PyVer)SIX' Name='six.py' DiskId='1' Source='$(var.PyPath)six.py' KeyPath='no'/>
                   <RemoveFile Id="Purge$(var.PyVer)PYC" Name="*.pyc" On="uninstall" />
                   <RemoveFile Id="Purge$(var.PyVer)PYO" Name="*.pyo" On="uninstall" />
                   <RemoveFile Id="Purge$(var.PyVer)Cache" Directory="PyTarget$(var.PyVer)CacheDir" Name="*.*" On="uninstall" />

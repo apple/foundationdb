@@ -1,0 +1,41 @@
+[configuration]
+testClass = "ChangeFeeds"
+allowDefaultTenant = false
+
+[[knobs]]
+enable_read_lock_on_range = false # FIXME: re-enable after change feed is compatible with range lock
+
+[[test]]
+testTitle = 'ChangeFeedOperationsTest'
+
+    [[test.workload]]
+    testName = 'ChangeFeedOperations'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 30.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+

@@ -92,6 +92,7 @@ struct LogRouterData {
 	double maxGetMoreTime = 0; // The max wait time LR spent in a pull-data-request to satellite tLog.
 	int64_t generation = -1;
 	Reference<Histogram> peekLatencyDist;
+	Optional<Version> recoverAt = Optional<Version>();
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
@@ -137,6 +138,8 @@ struct LogRouterData {
 		logSet.tLogPolicy = req.tLogPolicy;
 		logSet.locality = req.locality;
 		logSet.updateLocalitySet(req.tLogLocalities);
+
+		recoverAt = req.recoverAt;
 
 		for (int i = 0; i < req.tLogLocalities.size(); i++) {
 			Tag tag(tagLocalityRemoteLog, i);
@@ -338,7 +341,7 @@ Future<Void> LogRouterData::waitForVersion(Version ver) {
 Future<Void> LogRouterData::waitForVersionAndLog(Version ver) {
 	Future<Void> f = waitForVersion(ver);
 	double emitInterval = 60.0;
-	loop {
+	while (true) {
 		bool shouldExit = false;
 		co_await Choose()
 		    .When(f, [&](const Void&) { shouldExit = true; })
@@ -364,7 +367,7 @@ Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Refe
 	bool useSatellite = SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED;
 	uint32_t noPrimaryPeekLocation = 0;
 
-	loop {
+	while (true) {
 		Future<Void> getMoreF = Never();
 		if (result) {
 			getMoreF = result->getMore(TaskPriority::TLogCommit);
@@ -387,7 +390,8 @@ Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Refe
 		    .When(logSystemChanged,
 		          [&](const Void&) {
 			          if (logSystem->get()) {
-				          result = logSystem->get()->peekLogRouter(dbgid, beginVersion, routerTag, useSatellite);
+				          result =
+				              logSystem->get()->peekLogRouter(dbgid, beginVersion, routerTag, useSatellite, recoverAt);
 				          primaryPeekLocation = result->getPrimaryPeekLocation();
 				          TraceEvent("LogRouterPeekLocation", dbgid)
 				              .detail("LogID", result->getPrimaryPeekLocation())
@@ -403,7 +407,7 @@ Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Refe
 			          CODE_PROBE(true, "Detect log router slow peeks");
 			          TraceEvent(SevWarnAlways, "LogRouterSlowPeek", dbgid).detail("NextTrySatellite", !useSatellite);
 			          useSatellite = !useSatellite;
-			          result = logSystem->get()->peekLogRouter(dbgid, beginVersion, routerTag, useSatellite);
+			          result = logSystem->get()->peekLogRouter(dbgid, beginVersion, routerTag, useSatellite, recoverAt);
 			          primaryPeekLocation = result->getPrimaryPeekLocation();
 			          TraceEvent("LogRouterPeekLocation", dbgid)
 			              .detail("LogID", result->getPrimaryPeekLocation())
@@ -428,7 +432,7 @@ Future<Void> LogRouterData::pullAsyncData() {
 	Version lastVer = 0;
 	std::vector<int> tags; // an optimization to avoid reallocating vector memory in every loop
 
-	loop {
+	while (true) {
 		r = co_await getPeekCursorData(r, tagAt);
 
 		minKnownCommittedVersion = std::max(minKnownCommittedVersion, r->getMinKnownCommittedVersion());
@@ -599,7 +603,7 @@ Future<Void> LogRouterData::logRouterPeekMessages(PromiseType replyPromise,
 	Version endVersion;
 	// Run the peek logic in a loop to account for the case where there is no data to return to the caller, and we may
 	// want to wait a little bit instead of just sending back an empty message. This feature is controlled by a knob.
-	loop {
+	while (true) {
 
 		poppedVer = getTagPopVersion(reqTag);
 
@@ -702,7 +706,7 @@ Future<Void> LogRouterData::logRouterPeekStream(TLogPeekStreamRequest req) {
 	Version begin = req.begin;
 	bool onlySpilled = false;
 	req.reply.setByteLimit(std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, req.limitBytes));
-	loop {
+	while (true) {
 		TLogPeekStreamReply reply;
 		Promise<TLogPeekReply> promise;
 		Future<TLogPeekReply> future(promise.getFuture());
@@ -739,7 +743,7 @@ Future<Void> LogRouterData::logRouterPeekStream(TLogPeekStreamRequest req) {
 }
 
 Future<Void> LogRouterData::cleanupPeekTrackers() {
-	loop {
+	while (true) {
 		double minTimeUntilExpiration = SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME;
 		auto it = peekTracker.begin();
 		while (it != peekTracker.end()) {
@@ -807,7 +811,7 @@ Future<Void> logRouterCore(TLogInterface interf,
 	addActor.send(logRouterData.cleanupPeekTrackers());
 	addActor.send(traceRole(Role::LOG_ROUTER, interf.id()));
 
-	loop {
+	while (true) {
 		co_await Choose()
 		    .When(dbInfoChange,
 		          [&](const Void&) {
@@ -841,7 +845,7 @@ Future<Void> logRouterCore(TLogInterface interf,
 Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                           uint64_t recoveryCount,
                           TLogInterface myInterface) {
-	loop {
+	while (true) {
 		bool isDisplaced =
 		    ((db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) ||
 		     (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED));
@@ -863,7 +867,7 @@ Future<Void> logRouter(TLogInterface interf,
 		    .detail("Localities", req.tLogLocalities.size())
 		    .detail("Locality", req.locality);
 		Future<Void> core = logRouterCore(interf, req, db);
-		loop {
+		while (true) {
 			bool shouldExit = false;
 			co_await Choose()
 			    .When(core, [&](const Void&) { shouldExit = true; })

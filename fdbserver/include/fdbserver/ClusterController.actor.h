@@ -37,6 +37,8 @@
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbrpc/Locality.h"
+#include "flow/NetworkAddress.h"
 #include "flow/SystemMonitor.h"
 
 #include "metacluster/MetaclusterMetrics.h"
@@ -351,9 +353,9 @@ public:
 			    .detail("Worker", it.second.details.interf.address())
 			    .detail("WorkerAvailable", workerAvailable(it.second, false))
 			    .detail("RecoverDiskFiles", it.second.details.recoveredDiskFiles)
-			    .detail("NotExcludedMachine", !excludedMachines.count(it.second.details.interf.locality.zoneId()))
+			    .detail("NotExcludedMachine", !excludedMachines.contains(it.second.details.interf.locality.zoneId()))
 			    .detail("IncludeDC",
-			            (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())))
+			            (includeDCs.size() == 0 || includeDCs.contains(it.second.details.interf.locality.dcId())))
 			    .detail("NotExcludedAddress", !addressExcluded(excludedAddresses, it.second.details.interf.address()))
 			    .detail("NotExcludedAddress2",
 			            (!it.second.details.interf.secondaryAddress().present() ||
@@ -363,8 +365,8 @@ public:
 			                ProcessClass::UnsetFit)
 			    .detail("MachineFitness", it.second.details.processClass.machineClassFitness(ProcessClass::Storage));
 			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-			    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
-			    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
+			    !excludedMachines.contains(it.second.details.interf.locality.zoneId()) &&
+			    (includeDCs.size() == 0 || includeDCs.contains(it.second.details.interf.locality.dcId())) &&
 			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
 			    (!it.second.details.interf.secondaryAddress().present() ||
 			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
@@ -379,8 +381,8 @@ public:
 			for (auto& it : id_worker) {
 				ProcessClass::Fitness fit = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
 				if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-				    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
-				    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
+				    !excludedMachines.contains(it.second.details.interf.locality.zoneId()) &&
+				    (includeDCs.size() == 0 || includeDCs.contains(it.second.details.interf.locality.dcId())) &&
 				    !addressExcluded(excludedAddresses, it.second.details.interf.address()) && fit < bestFit) {
 					bestFit = fit;
 					bestInfo = it.second.details;
@@ -502,7 +504,7 @@ public:
 			auto thisField = worker.interf.locality.get(field);
 			auto thisZone = worker.interf.locality.zoneId();
 
-			if (field_count.count(thisField)) {
+			if (field_count.contains(thisField)) {
 				zone_workers[thisZone].push_back(worker);
 				zone_count[thisZone].second = thisField;
 			}
@@ -528,7 +530,7 @@ public:
 				auto& zoneWorkers = zone_workers[lowestZone.second];
 
 				while (zoneWorkers.size() && !added) {
-					if (!resultSet.count(zoneWorkers.back())) {
+					if (!resultSet.contains(zoneWorkers.back())) {
 						resultSet.insert(zoneWorkers.back());
 						if (resultSet.size() == desired) {
 							return;
@@ -583,7 +585,7 @@ public:
 
 			bool added = false;
 			while (zoneWorkers.size() && !added) {
-				if (!resultSet.count(zoneWorkers.back())) {
+				if (!resultSet.contains(zoneWorkers.back())) {
 					resultSet.insert(zoneWorkers.back());
 					if (resultSet.size() == desired) {
 						return;
@@ -690,7 +692,7 @@ public:
 				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
-			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+			if (!dcIds.empty() && !dcIds.contains(worker_details.interf.locality.dcId())) {
 				logWorkerUnavailable(
 				    SevDebug, id, "complex", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
@@ -801,7 +803,7 @@ public:
 			}
 			if (workerIter->second.size() + resultSet.size() <= desired) {
 				for (auto& worker : workerIter->second) {
-					if (chosenFields.count(worker.interf.locality.get(field))) {
+					if (chosenFields.contains(worker.interf.locality.get(field))) {
 						resultSet.insert(worker);
 					}
 				}
@@ -940,7 +942,7 @@ public:
 				    SevDebug, id, "simple", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
-			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+			if (!dcIds.empty() && !dcIds.contains(worker_details.interf.locality.dcId())) {
 				logWorkerUnavailable(
 				    SevDebug, id, "simple", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
@@ -973,7 +975,7 @@ public:
 			auto used = std::get<1>(workerIter->first);
 			deterministicRandom()->randomShuffle(workerIter->second);
 			for (auto& worker : workerIter->second) {
-				if (!zones.count(worker.interf.locality.zoneId())) {
+				if (!zones.contains(worker.interf.locality.zoneId())) {
 					zones.insert(worker.interf.locality.zoneId());
 					resultSet.insert(worker);
 					if (resultSet.size() == required) {
@@ -1092,7 +1094,7 @@ public:
 				    SevDebug, id, "deprecated", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
-			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
+			if (!dcIds.empty() && !dcIds.contains(worker_details.interf.locality.dcId())) {
 				logWorkerUnavailable(
 				    SevDebug, id, "deprecated", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
@@ -1312,7 +1314,7 @@ public:
 							std::map<Optional<Standalone<StringRef>>, int> field_count;
 							std::set<Optional<Standalone<StringRef>>> zones;
 							for (auto& worker : testWorkers) {
-								if (!zones.count(worker.interf.locality.zoneId())) {
+								if (!zones.contains(worker.interf.locality.zoneId())) {
 									field_count[worker.interf.locality.get(pa1->attributeKey())]++;
 									zones.insert(worker.interf.locality.zoneId());
 								}
@@ -2478,7 +2480,7 @@ public:
 					    .detail("ProcessID", it.interf().filteredLocality.processId());
 					return true;
 				}
-				if (!logRouterAddresses.count(tlogWorker->second.details.interf.address())) {
+				if (!logRouterAddresses.contains(tlogWorker->second.details.interf.address())) {
 					logRouterAddresses.insert(tlogWorker->second.details.interf.address());
 					log_routers.push_back(tlogWorker->second.details);
 				}
@@ -2498,7 +2500,7 @@ public:
 					    .detail("ProcessID", worker.interf().locality.processId());
 					return true;
 				}
-				if (backup_addresses.count(workerIt->second.details.interf.address()) == 0) {
+				if (!backup_addresses.contains(workerIt->second.details.interf.address())) {
 					backup_addresses.insert(workerIt->second.details.interf.address());
 					backup_workers.push_back(workerIt->second.details);
 				}
@@ -2664,7 +2666,7 @@ public:
 
 		int32_t oldSatelliteRegionFit = std::numeric_limits<int32_t>::max();
 		for (auto& it : satellite_tlogs) {
-			if (satellite_priority.count(it.interf.locality.dcId())) {
+			if (satellite_priority.contains(it.interf.locality.dcId())) {
 				oldSatelliteRegionFit = std::min(oldSatelliteRegionFit, satellite_priority[it.interf.locality.dcId()]);
 			} else {
 				oldSatelliteRegionFit = -1;
@@ -2673,7 +2675,7 @@ public:
 
 		int32_t newSatelliteRegionFit = std::numeric_limits<int32_t>::max();
 		for (auto& it : newSatelliteTLogs) {
-			if (satellite_priority.count(it.interf.locality.dcId())) {
+			if (satellite_priority.contains(it.interf.locality.dcId())) {
 				newSatelliteRegionFit = std::min(newSatelliteRegionFit, satellite_priority[it.interf.locality.dcId()]);
 			} else {
 				newSatelliteRegionFit = -1;
@@ -3107,6 +3109,10 @@ public:
 
 		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
 	};
+
+	// Returns true if and only if addr1 and addr2 are located in the same DC
+	bool processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) const;
+
 	// Returns a list of servers who are experiencing degraded links. These are candidates to perform exclusion. Note
 	// that only one endpoint of a bad link will be included in this list.
 	DegradationInfo getDegradationInfo() {
@@ -3120,6 +3126,9 @@ public:
 			for (const auto& [degradedPeer, times] : health.degradedPeers) {
 				if (currentTime - times.startTime < SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL) {
 					// This degraded link is not long enough to be considered as degraded.
+					continue;
+				}
+				if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY && !processesInSameDC(server, degradedPeer)) {
 					continue;
 				}
 				degradedLinkDst2Src[degradedPeer].insert(server);
@@ -3262,7 +3271,6 @@ public:
 
 		return transactionSystemContainsDegradedServers();
 	}
-
 	// Returns true when the cluster controller should trigger a failover due to degraded servers used in the
 	// transaction system in the primary data center, and no degradation in the remote data center.
 	bool shouldTriggerFailoverDueToDegradedServers() {
@@ -3319,6 +3327,7 @@ public:
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>
 	    id_class; // contains the mapping from process id to process class from the database
+	std::unordered_map<NetworkAddress, LocalityData> addr_locality; // mapping of process address to its locality
 	RangeResult lastProcessClasses;
 	bool gotProcessClasses;
 	bool gotFullyRecoveredConfig;

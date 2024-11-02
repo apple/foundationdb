@@ -160,6 +160,7 @@ public:
 	void addThread(IThreadPoolReceiver* userData, const char* name = nullptr) override {
 		ASSERT(!thread);
 		thread = userData;
+		userData->init();
 	}
 	void post(PThreadAction action) override {
 		try {

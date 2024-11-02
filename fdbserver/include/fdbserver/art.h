@@ -314,9 +314,6 @@ public:
 	art_iterator insert_if_absent(KeyRef& key, void* value, int* replaced);
 
 	void erase(const art_iterator& it);
-
-	uint64_t count() { return size; }
-
 }; // art_tree
 
 struct art_iterator {

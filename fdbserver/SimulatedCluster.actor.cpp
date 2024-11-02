@@ -509,6 +509,11 @@ public:
 	int simulationNormalRunTestsTimeoutSeconds = 5400;
 	int simulationBuggifyRunTestsTimeoutSeconds = 36000;
 
+	// Number of tlogs in the remote region
+	Optional<int> remoteDesiredTLogCount;
+	// Number of process classes explictly set as Stateless in all DCs
+	Optional<int> statelessProcessClassesPerDC;
+
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
@@ -555,6 +560,7 @@ public:
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
 		    .add("desiredTLogCount", &desiredTLogCount)
+		    .add("remoteDesiredTLogCount", &remoteDesiredTLogCount)
 		    .add("commitProxyCount", &commitProxyCount)
 		    .add("grvProxyCount", &grvProxyCount)
 		    .add("resolverCount", &resolverCount)
@@ -581,7 +587,8 @@ public:
 		    .add("defaultTenant", &defaultTenant)
 		    .add("longRunningTest", &longRunningTest)
 		    .add("simulationNormalRunTestsTimeoutSeconds", &simulationNormalRunTestsTimeoutSeconds)
-		    .add("simulationBuggifyRunTestsTimeoutSeconds", &simulationBuggifyRunTestsTimeoutSeconds);
+		    .add("simulationBuggifyRunTestsTimeoutSeconds", &simulationBuggifyRunTestsTimeoutSeconds)
+		    .add("statelessProcessClassesPerDC", &statelessProcessClassesPerDC);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -1650,6 +1657,9 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 	if (testConfig.desiredTLogCount.present()) {
 		db.desiredTLogCount = testConfig.desiredTLogCount.get();
 	}
+	if (testConfig.remoteDesiredTLogCount.present()) {
+		db.remoteDesiredTLogCount = testConfig.remoteDesiredTLogCount.get();
+	}
 	if (testConfig.commitProxyCount.present()) {
 		db.commitProxyCount = testConfig.commitProxyCount.get();
 	}
@@ -1789,7 +1799,7 @@ void radixTreeStorageEngineConfig(SimulationConfig* simCfg) {
 void redwoodStorageEngineConfig(SimulationConfig* simCfg) {
 	CODE_PROBE(true, "Simulated cluster using redwood storage engine");
 	// The experimental suffix is still supported so test it randomly
-	simCfg->set_config(BUGGIFY ? "ssd-redwood-1" : "ssd-redwood-1-experimental");
+	simCfg->set_config("ssd-redwood-1");
 }
 
 void rocksdbStorageEngineConfig(SimulationConfig* simCfg) {
@@ -1868,20 +1878,24 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		std::vector<SimulationStorageEngine> storageEngineCandidates;
 		for (const auto& storageEngine : storageEngineAvailable) {
 			if (storageEngine == SimulationStorageEngine::MEMORY) {
-				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_MEMORY_ENGINE_SELECTED_SIM; i++) {
-					storageEngineCandidates.push_back(storageEngine);
-					// Adjust the chance that Memory is selected
-				}
+				// Adjust the chance that Memory is selected
+				storageEngineCandidates.insert(
+				    storageEngineCandidates.end(), SERVER_KNOBS->PROBABILITY_FACTOR_MEMORY_SELECTED_SIM, storageEngine);
+			} else if (storageEngine == SimulationStorageEngine::SHARDED_ROCKSDB) {
+				// Adjust the chance that ShardedRocksDB is selected
+				storageEngineCandidates.insert(storageEngineCandidates.end(),
+				                               SERVER_KNOBS->PROBABILITY_FACTOR_SHARDED_ROCKSDB_ENGINE_SELECTED_SIM,
+				                               storageEngine);
 			} else if (storageEngine == SimulationStorageEngine::SSD) {
-				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM; i++) {
-					storageEngineCandidates.push_back(storageEngine);
-					// Adjust the chance that SQLite is selected
-				}
+				// Adjust the chance that SQLite is selected
+				storageEngineCandidates.insert(storageEngineCandidates.end(),
+				                               SERVER_KNOBS->PROBABILITY_FACTOR_SQLITE_ENGINE_SELECTED_SIM,
+				                               storageEngine);
 			} else if (storageEngine == SimulationStorageEngine::ROCKSDB) {
-				for (int i = 0; i < SERVER_KNOBS->PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM; i++) {
-					storageEngineCandidates.push_back(storageEngine);
-					// Adjust the chance that RocksDB is selected
-				}
+				// Adjust the chance that RocksDB is selected
+				storageEngineCandidates.insert(storageEngineCandidates.end(),
+				                               SERVER_KNOBS->PROBABILITY_FACTOR_ROCKSDB_ENGINE_SELECTED_SIM,
+				                               storageEngine);
 			} else {
 				storageEngineCandidates.push_back(storageEngine);
 			}
@@ -1933,11 +1947,18 @@ void SimulationConfig::setReplicationType(const TestConfig& testConfig) {
 			// FIXME: log replicas must be more than storage replicas because otherwise better master exists will not
 			// recognize it needs to change dcs
 			int replication_factor = deterministicRandom()->randomInt(storage_servers, generateFearless ? 4 : 5);
-			int anti_quorum = deterministicRandom()->randomInt(
-			    0,
-			    (replication_factor / 2) +
-			        1); // The anti quorum cannot be more than half of the replication factor, or the
-			            // log system will continue to accept commits when a recovery is impossible
+			// Version vector is an experimental feature that does not support logWriteAntiQuorum
+			// feature. Disable logWriteAntiQuorum (when version vector is enabled) in simulation
+			// tests for now.
+			// @todo extend version vector to support logWriteAntiQuorum feature.
+			int anti_quorum =
+			    SERVER_KNOBS->ENABLE_VERSION_VECTOR
+			        ? 0
+			        : (deterministicRandom()->randomInt(
+			              0,
+			              (replication_factor / 2) +
+			                  1)); // The anti quorum cannot be more than half of the replication factor, or the
+			                       // log system will continue to accept commits when a recovery is impossible
 			// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 			set_config(format("storage_replicas:=%d log_replicas:=%d log_anti_quorum:=%d "
 			                  "replica_datacenters:=1 min_replica_datacenters:=1",
@@ -2118,8 +2139,12 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 
 		if (deterministicRandom()->random01() < 0.25)
 			db.desiredLogRouterCount = deterministicRandom()->randomInt(1, 7);
-		if (deterministicRandom()->random01() < 0.25)
+
+		if (testConfig.remoteDesiredTLogCount.present()) {
+			db.remoteDesiredTLogCount = testConfig.remoteDesiredTLogCount.get();
+		} else if (deterministicRandom()->random01() < 0.25) {
 			db.remoteDesiredTLogCount = deterministicRandom()->randomInt(1, 7);
+		}
 
 		bool useNormalDCsAsSatellites =
 		    datacenters > 4 && testConfig.minimumRegions < 2 && deterministicRandom()->random01() < 0.3;
@@ -2621,13 +2646,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		               (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
 		int possible_ss = 0;
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount % dataCenters);
-		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n",
-		       dc,
-		       machines,
-		       machineCount,
-		       dcCoordinators,
-		       coordinatorCount);
-		ASSERT_LE(dcCoordinators, machines);
 
 		// FIXME: we hardcode some machines to specifically test storage cache and blob workers
 		// TODO: caching disabled for this merge
@@ -2646,9 +2664,26 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 		int totalMachines =
 		    machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines + extraStorageMachineCount;
+
+		printf("Datacenter %d: %d/%d machines, %d/%d coordinators, %d other machines\n",
+		       dc,
+		       machines,
+		       machineCount,
+		       dcCoordinators,
+		       coordinatorCount,
+		       totalMachines - machines);
+		ASSERT_LE(dcCoordinators, machines);
+
 		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
+
+		Optional<int> desiredStatelessClasses;
+		int actualStatelessClasses = 0;
+		if (testConfig.statelessProcessClassesPerDC.present()) {
+			desiredStatelessClasses = testConfig.statelessProcessClassesPerDC.get();
+		}
+
 		for (int machine = 0; machine < totalMachines; machine++) {
 			Standalone<StringRef> machineId(deterministicRandom()->randomUniqueID().toString());
 			if (machine == 0 || machineCount - dataCenters <= 4 || assignedMachines != 4 ||
@@ -2674,6 +2709,11 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
 					possible_ss++;
 				}
+			}
+
+			if (desiredStatelessClasses.present() && actualStatelessClasses < desiredStatelessClasses.get()) {
+				processClass = ProcessClass(ProcessClass::StatelessClass, ProcessClass::CommandLineSource);
+				actualStatelessClasses++;
 			}
 
 			// FIXME: hack to add machines specifically to test storage cache and blob workers and http server
@@ -2768,6 +2808,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			}
 
 			assignedMachines++;
+		}
+
+		if (desiredStatelessClasses.present()) {
+			// If this assertion fails, that measn that there were not enough machines in the DC (primary or remote)
+			// to match desired stateless classes
+			ASSERT(actualStatelessClasses == desiredStatelessClasses.get());
 		}
 
 		if (possible_ss - simconfig.db.desiredTSSCount / simconfig.db.usableRegions <= simconfig.db.storageTeamSize) {
@@ -2895,11 +2941,11 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	if (std::string_view(testFile).find("Encrypt") != std::string_view::npos) {
+	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
+	if (std::string_view(testFile).find("BlobRestore") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 

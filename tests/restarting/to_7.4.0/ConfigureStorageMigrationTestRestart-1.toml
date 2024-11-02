@@ -1,6 +1,6 @@
 [configuration]
 extraMachineCountDC = 2
-maxTLogVersion=6
+maxTLogVersion=7
 disableHostname=true
 tenantModes=['disabled']
 

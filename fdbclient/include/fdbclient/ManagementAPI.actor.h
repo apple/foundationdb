@@ -36,6 +36,7 @@ standard API and some knowledge of the contents of the system key space.
 #include <map>
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/RangeLock.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/MonitorLeader.h"
@@ -188,6 +189,33 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
                                             KeyRange range,
                                             UID taskId,
                                             std::vector<BulkLoadPhase> phases);
+
+// Persist a rangeLock owner to database metadata
+// A range can only be locked by a registered owner
+ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description);
+
+// Remove an owner form the database metadata
+ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId);
+
+// Get all registered rangeLock owner
+ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
+
+ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId);
+
+// Turn off user traffic for bulk load based on range lock
+ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range);
+
+// Turn on user traffic for bulk load based on range lock
+ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range);
+
+// Lock a user range (the input range must be within normalKeys)
+ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);
+
+// Unlock a user range (the input range must be within normalKeys)
+ACTOR Future<Void> releaseReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);
+
+// Get locked ranges within the input range (the input range must be within normalKeys)
+ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange range);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);

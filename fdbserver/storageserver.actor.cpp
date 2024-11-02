@@ -6384,8 +6384,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
-		data->checkTenantEntry(
-		    req.version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
+		data->checkTenantEntry(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 		if (req.tenantInfo.hasTenant()) {
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
@@ -8072,7 +8071,7 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			if (g_network->isSimulated() && !g_simulator->restarted) {
 				// verify that the feed was actually destroyed and it's not an error in this inference logic.
 				// Restarting tests produce false positives because the validation state isn't kept across tests
-				ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.count(changeFeedInfo->id.toString()));
+				ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.contains(changeFeedInfo->id.toString()));
 			}
 
 			Key beginClearKey = changeFeedInfo->id.withPrefix(persistChangeFeedKeys.begin);
@@ -8089,7 +8088,7 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 
 			changeFeedInfo->destroy(cleanupVersion);
 
-			if (data->uidChangeFeed.count(changeFeedInfo->id)) {
+			if (data->uidChangeFeed.contains(changeFeedInfo->id)) {
 				// only register range for cleanup if it has not been already cleaned up
 				data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
 			}
@@ -8308,7 +8307,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		if (g_network->isSimulated() && !g_simulator->restarted) {
 			// verify that the feed was actually destroyed and it's not an error in this inference logic. Restarting
 			// tests produce false positives because the validation state isn't kept across tests
-			ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.count(feed.first.toString()));
+			ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.contains(feed.first.toString()));
 		}
 
 		Key beginClearKey = feed.first.withPrefix(persistChangeFeedKeys.begin);
@@ -8622,7 +8621,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			}
 			ASSERT(fetchVersion >= shard->fetchVersion); // at this point, shard->fetchVersion is the last fetchVersion
 			shard->fetchVersion = fetchVersion;
-			TraceEvent(SevDebug, "FetchKeysUnblocked", data->thisServerID)
+			TraceEvent(SevVerbose, "FetchKeysUnblocked", data->thisServerID)
 			    .detail("FKID", interval.pairID)
 			    .detail("Version", fetchVersion);
 
@@ -8747,12 +8746,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .suppressFor(1.0)
 					    .detail("FKID", interval.pairID);
 
-					// FIXME: remove when we no longer support upgrades from 5.X
-					if (debug_getRangeRetries >= 100) {
-						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::False;
-						TraceEvent(SevWarnAlways, "FKDisableLB").detail("FKID", fetchKeysID);
-					}
-
 					debug_getRangeRetries++;
 					if (debug_nextRetryToLog == debug_getRangeRetries) {
 						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
@@ -8804,12 +8797,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				}
 				break;
 			}
-		}
-
-		// FIXME: remove when we no longer support upgrades from 5.X
-		if (!data->cx->enableLocalityLoadBalance) {
-			data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::True;
-			TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
 		}
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
@@ -9213,7 +9200,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 		rcp.fetchedFiles.emplace_back(abspath(filePath), coalesceRanges[0], 0);
 	}
 	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
-	localRecord.version = 0;
+	localRecord.version = moveInShard->meta->createVersion;
 	localRecord.bytesSampleFile = fileSetToLoad.bytesSampleFile;
 	localRecord.setFormat(CheckpointFormat::RocksDBKeyValues);
 	localRecord.setState(CheckpointMetaData::Complete);
@@ -10520,7 +10507,9 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("Version", cVer);
 			newEmptyRanges.push_back(range);
 			updatedShards.emplace_back(range, cVer, desiredId, desiredId, StorageServerShard::ReadWrite);
-			data->pendingAddRanges[cVer].emplace_back(desiredId, range);
+			if (data->physicalShards.find(desiredId) == data->physicalShards.end()) {
+				data->pendingAddRanges[cVer].emplace_back(desiredId, range);
+			}
 		} else if (!nowAssigned) {
 			if (dataAvailable) {
 				ASSERT(data->newestAvailableVersion[range.begin] ==
@@ -10593,7 +10582,13 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						    .detailf("CurrentShard", "%016llx", shard->desiredShardId)
 						    .detail("IsTSS", data->isTss())
 						    .detail("Version", cVer);
-						throw data_move_conflict();
+						if (data->isTss() && g_network->isSimulated()) {
+							// Tss data move conflicts are expected in simulation, and can be safely ignored
+							// by restarting the server.
+							throw please_reboot();
+						} else {
+							throw data_move_conflict();
+						}
 					} else {
 						TraceEvent(SevInfo, "CSKMoveInToSameShard", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
@@ -12555,7 +12550,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			auto info = data->uidChangeFeed.find(feedFetchVersions[curFeed].first);
 			// Don't update if the feed is pending cleanup. Either it will get cleaned up and destroyed, or it will
 			// get fetched again, where the fetch version will get reset.
-			if (info != data->uidChangeFeed.end() && !data->changeFeedCleanupDurable.count(info->second->id)) {
+			if (info != data->uidChangeFeed.end() && !data->changeFeedCleanupDurable.contains(info->second->id)) {
 				if (feedFetchVersions[curFeed].second > info->second->durableFetchVersion.get()) {
 					info->second->durableFetchVersion.set(feedFetchVersions[curFeed].second);
 				}

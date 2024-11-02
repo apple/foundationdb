@@ -668,10 +668,11 @@ struct InitializeLogRouterRequest {
 	Reference<IReplicationPolicy> tLogPolicy;
 	int8_t locality;
 	ReplyPromise<struct TLogInterface> reply;
+	Optional<Version> recoverAt = Optional<Version>();
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryCount, routerTag, startVersion, tLogLocalities, tLogPolicy, locality, reply);
+		serializer(ar, recoveryCount, routerTag, startVersion, tLogLocalities, tLogPolicy, locality, reply, recoverAt);
 	}
 };
 
@@ -1299,47 +1300,6 @@ bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<A
 bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 void updateCpuProfiler(ProfilerRequest req);
-
-namespace oldTLog_4_6 {
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo> const> db,
-                        LocalityData locality,
-                        UID tlogId,
-                        UID workerID);
-}
-namespace oldTLog_6_0 {
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo> const> db,
-                        LocalityData locality,
-                        PromiseStream<InitializeTLogRequest> tlogRequests,
-                        UID tlogId,
-                        UID workerID,
-                        bool restoreFromDisk,
-                        Promise<Void> oldLog,
-                        Promise<Void> recovered,
-                        std::string folder,
-                        Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog,
-                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
-}
-namespace oldTLog_6_2 {
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo> const> db,
-                        LocalityData locality,
-                        PromiseStream<InitializeTLogRequest> tlogRequests,
-                        UID tlogId,
-                        UID workerID,
-                        bool restoreFromDisk,
-                        Promise<Void> oldLog,
-                        Promise<Void> recovered,
-                        std::string folder,
-                        Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog,
-                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
-}
 
 typedef decltype(&tLog) TLogFn;
 

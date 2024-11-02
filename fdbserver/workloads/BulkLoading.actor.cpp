@@ -27,9 +27,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const std::string simulationBulkLoadFolderForSimpleTest = "bulkLoadSimple";
-const std::string simulationBulkLoadFolderForLargeDataProduce = "bulkLoadLargeData";
-const std::string simulationBulkLoadFolderForComplexTest = "bulkLoadComplex";
+const std::string simulationBulkLoadFolder = "bulkLoad";
 
 struct BulkLoadTaskTestUnit {
 	BulkLoadState bulkLoadTask;
@@ -41,8 +39,11 @@ struct BulkLoading : TestWorkload {
 	static constexpr auto NAME = "BulkLoadingWorkload";
 	const bool enabled;
 	bool pass;
+	bool debugging = false;
+	bool backgroundTrafficEnabled = deterministicRandom()->coinflip();
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
+	// This workload is not compatible with RandomRangeLock for the conflict in range lock
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		out.insert({ "RandomMoveKeys",
 		             "DataLossRecovery",
@@ -51,7 +52,8 @@ struct BulkLoading : TestWorkload {
 		             "PhysicalShardMove",
 		             "StorageCorruption",
 		             "StorageServerCheckpointRestoreTest",
-		             "ValidateStorage" });
+		             "ValidateStorage",
+		             "RandomRangeLock" });
 	}
 
 	BulkLoading(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
@@ -115,79 +117,6 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	Key getRandomKey(const std::vector<Key>& keyCharList, size_t keySizeMin, size_t keySizeMax) {
-		Key key = ""_sr;
-		int keyLength = deterministicRandom()->randomInt(keySizeMin, keySizeMax);
-		for (int j = 0; j < keyLength; j++) {
-			Key appendedItem = deterministicRandom()->randomChoice(keyCharList);
-			key = key.withSuffix(appendedItem);
-		}
-		return key;
-	}
-
-	std::vector<KeyValue> generateRandomData(KeyRange range, size_t count, const std::vector<Key>& keyCharList) {
-		std::set<Key> keys;
-		while (keys.size() < count) {
-			Key key = getRandomKey(keyCharList, 1, 1000);
-			if (!range.contains(key)) {
-				continue;
-			}
-			keys.insert(key);
-		}
-		std::vector<KeyValue> res;
-		for (const auto& key : keys) {
-			UID randomId = deterministicRandom()->randomUniqueID();
-			Value val = Standalone(StringRef(randomId.toString()));
-			res.push_back(Standalone(KeyValueRef(key, val)));
-		}
-		ASSERT(res.size() == count);
-		return res;
-	}
-
-	void produceFilesToLoad(BulkLoadTaskTestUnit task) {
-		std::string folder = task.bulkLoadTask.getFolder();
-		platform::eraseDirectoryRecursive(folder);
-		ASSERT(platform::createDirectory(folder));
-		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFile().get();
-		std::string dataFile = *(task.bulkLoadTask.getDataFiles().begin());
-
-		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
-		sstWriter->open(abspath(dataFile));
-		std::vector<KeyValue> bytesSample;
-		for (const auto& kv : task.data) {
-			ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
-			if (sampleInfo.inSample) {
-				Key sampleKey = kv.key;
-				Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
-				bytesSample.push_back(Standalone(KeyValueRef(sampleKey, sampleValue)));
-			}
-			sstWriter->write(kv.key, kv.value);
-		}
-		TraceEvent("BulkLoadingDataProduced")
-		    .detail("LoadKeyCount", task.data.size())
-		    .detail("BytesSampleSize", bytesSample.size())
-		    .detail("Folder", folder)
-		    .detail("DataFile", dataFile)
-		    .detail("BytesSampleFile", bytesSampleFile);
-		ASSERT(sstWriter->finish());
-
-		if (bytesSample.size() > 0) {
-			sstWriter->open(abspath(bytesSampleFile));
-			for (const auto& kv : bytesSample) {
-				sstWriter->write(kv.key, kv.value);
-			}
-			TraceEvent("BulkLoadingByteSampleProduced")
-			    .detail("LoadKeyCount", task.data.size())
-			    .detail("BytesSampleSize", bytesSample.size())
-			    .detail("Folder", folder)
-			    .detail("DataFile", dataFile)
-			    .detail("BytesSampleFile", bytesSampleFile);
-			ASSERT(sstWriter->finish());
-		}
-		TraceEvent("BulkLoadingProduceDataToLoad").detail("Folder", folder).detail("LoadKeyCount", task.data.size());
-		return;
-	}
-
 	ACTOR Future<bool> checkDDEnabled(Database cx) {
 		loop {
 			state Transaction tr(cx);
@@ -207,18 +136,14 @@ struct BulkLoading : TestWorkload {
 		}
 	}
 
-	ACTOR Future<bool> allComplete(Database cx) {
+	ACTOR Future<bool> checkAllTaskComplete(Database cx) {
 		state Transaction tr(cx);
 		state Key beginKey = allKeys.begin;
 		state Key endKey = allKeys.end;
 		while (beginKey < endKey) {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				RangeResult res = wait(krmGetRanges(&tr,
-				                                    bulkLoadPrefix,
-				                                    Standalone(KeyRangeRef(beginKey, endKey)),
-				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+				RangeResult res = wait(krmGetRanges(&tr, bulkLoadPrefix, Standalone(KeyRangeRef(beginKey, endKey))));
 				for (int i = 0; i < res.size() - 1; i++) {
 					if (!res[i].value.empty()) {
 						BulkLoadState bulkLoadState = decodeBulkLoadState(res[i].value);
@@ -243,9 +168,9 @@ struct BulkLoading : TestWorkload {
 		return true;
 	}
 
-	ACTOR Future<Void> waitUntilAllComplete(BulkLoading* self, Database cx) {
+	ACTOR Future<Void> waitUntilAllTaskComplete(BulkLoading* self, Database cx) {
 		loop {
-			bool complete = wait(self->allComplete(cx));
+			bool complete = wait(self->checkAllTaskComplete(cx));
 			if (complete) {
 				break;
 			}
@@ -254,110 +179,16 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	bool checkData(std::vector<KeyValue> kvs, std::vector<KeyValue> kvsdb) {
-		if (kvs.size() != kvsdb.size()) {
-			TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
-			    .detail("Reason", "KeyValue count wrong")
-			    .detail("KVS", kvs.size())
-			    .detail("DB", kvsdb.size());
-			return false;
-		}
-		std::sort(kvs.begin(), kvs.end(), [](KeyValue a, KeyValue b) { return a.key < b.key; });
-		std::sort(kvsdb.begin(), kvsdb.end(), [](KeyValue a, KeyValue b) { return a.key < b.key; });
-		for (int i = 0; i < kvs.size(); i++) {
-			if (kvs[i].key != kvsdb[i].key) {
-				TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
-				    .detail("Reason", "Key mismatch")
-				    .detail("KVS", kvs[i])
-				    .detail("DB", kvsdb[i]);
-				return false;
-			} else if (kvs[i].value != kvsdb[i].value) {
-				TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
-				    .detail("Reason", "Value mismatch")
-				    .detail("KVS", kvs[i])
-				    .detail("DB", kvsdb[i]);
-				return false;
-			}
-		}
-		return true;
-	}
-
-	bool keyIsIgnored(Key key, const std::vector<KeyRange>& ignoreRanges) {
-		for (const auto& range : ignoreRanges) {
-			if (range.contains(key)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	ACTOR Future<std::vector<KeyValue>> getKvsFromDB(BulkLoading* self,
-	                                                 Database cx,
-	                                                 std::vector<KeyRange> ignoreRanges) {
-		state std::vector<KeyValue> res;
-		state Transaction tr(cx);
-		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBStart");
-		loop {
-			try {
-				RangeResult result = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!result.more);
-				for (int i = 0; i < result.size(); i++) {
-					if (!self->keyIsIgnored(result[i].key, ignoreRanges)) {
-						res.push_back(Standalone(KeyValueRef(result[i].key, result[i].value)));
-					}
-				}
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBDone");
-		return res;
-	}
-
-	BulkLoadTaskTestUnit produceBulkLoadTaskUnit(BulkLoading* self,
-	                                             const std::vector<Key>& keyCharList,
-	                                             KeyRange range,
-	                                             std::string folderName) {
-		std::string dataFileName = generateRandomBulkLoadDataFileName();
-		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
-		std::string folder = joinPath(simulationBulkLoadFolderForSimpleTest, folderName);
-		BulkLoadTaskTestUnit taskUnit;
-		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
-		    range, folder, joinPath(folder, dataFileName), joinPath(folder, bytesSampleFileName));
-		size_t dataSize = deterministicRandom()->randomInt(10, 100);
-		taskUnit.data = self->generateRandomData(range, dataSize, keyCharList);
-		self->produceFilesToLoad(taskUnit);
-		return taskUnit;
-	}
-
-	std::vector<KeyValue> generateSortedKVS(StringRef prefix, size_t count) {
-		std::vector<KeyValue> res;
-		for (int i = 0; i < count; i++) {
-			UID keyId = deterministicRandom()->randomUniqueID();
-			Value key = Standalone(StringRef(keyId.toString())).withPrefix(prefix);
-			UID valueId = deterministicRandom()->randomUniqueID();
-			Value val = Standalone(StringRef(valueId.toString()));
-			res.push_back(Standalone(KeyValueRef(key, val)));
-		}
-		std::sort(res.begin(), res.end(), [](KeyValue a, KeyValue b) { return a.key < b.key; });
-		return res;
-	}
-
 	ACTOR Future<bool> checkBulkLoadMetadataCleared(BulkLoading* self, Database cx) {
 		state Key beginKey = allKeys.begin;
 		state Key endKey = allKeys.end;
 		state KeyRange rangeToRead;
+		state Transaction tr(cx);
 		while (beginKey < endKey) {
-			state Transaction tr(cx);
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-				RangeResult res = wait(krmGetRanges(&tr,
-				                                    bulkLoadPrefix,
-				                                    allKeys,
-				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+				RangeResult res = wait(krmGetRanges(&tr, bulkLoadPrefix, allKeys));
 				beginKey = res.back().key;
 				int emptyCount = 0;
 				int nonEmptyCount = 0;
@@ -388,64 +219,262 @@ struct BulkLoading : TestWorkload {
 		return true;
 	}
 
+	bool keyContainedInRanges(Key key, const std::vector<KeyRange>& ranges) {
+		for (const auto& range : ranges) {
+			if (range.contains(key)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	ACTOR Future<std::vector<KeyValue>> getKvsFromDB(BulkLoading* self,
+	                                                 Database cx,
+	                                                 std::vector<KeyRange> outdatedRanges,
+	                                                 std::vector<KeyRange> loadedRanges) {
+		state std::vector<KeyValue> res;
+		state Transaction tr(cx);
+		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBStart");
+		loop {
+			try {
+				RangeResult result = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!result.more);
+				for (int i = 0; i < result.size(); i++) {
+					if (self->keyContainedInRanges(result[i].key, outdatedRanges)) {
+						continue; // The kv in the range of outdated task is undefined
+					}
+					if (self->backgroundTrafficEnabled && !self->keyContainedInRanges(result[i].key, loadedRanges)) {
+						continue; // When background traffic is enabled, ignore any data outside the loaded range
+					}
+					res.push_back(Standalone(KeyValueRef(result[i].key, result[i].value)));
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBDone");
+		return res;
+	}
+
+	Standalone<StringRef> getRandomStringRef() const {
+		int stringLength = deterministicRandom()->randomInt(1, 10);
+		Standalone<StringRef> stringBuffer = makeString(stringLength);
+		deterministicRandom()->randomBytes(mutateString(stringBuffer), stringLength);
+		return stringBuffer;
+	}
+
+	KeyRange getRandomRange(BulkLoading* self, KeyRange scope) const {
+		loop {
+			Standalone<StringRef> keyA = self->getRandomStringRef();
+			Standalone<StringRef> keyB = self->getRandomStringRef();
+			if (!scope.contains(keyA) || !scope.contains(keyB)) {
+				continue;
+			} else if (keyA < keyB) {
+				return Standalone(KeyRangeRef(keyA, keyB));
+			} else if (keyA > keyB) {
+				return Standalone(KeyRangeRef(keyB, keyA));
+			} else {
+				continue;
+			}
+		}
+	}
+
+	std::vector<KeyValue> generateOrderedKVS(BulkLoading* self, KeyRange range, size_t count) {
+		std::set<Key> keys; // ordered
+		while (keys.size() < count) {
+			Standalone<StringRef> str = self->getRandomStringRef();
+			Key key = range.begin.withSuffix(str);
+			if (keys.contains(key)) {
+				continue;
+			}
+			if (!range.contains(key)) {
+				continue;
+			}
+			keys.insert(key);
+		}
+		std::vector<KeyValue> res;
+		for (const auto& key : keys) {
+			Value val = self->getRandomStringRef();
+			res.push_back(Standalone(KeyValueRef(key, val)));
+		}
+		return res; // ordered
+	}
+
+	void generateSSTFiles(BulkLoading* self, BulkLoadTaskTestUnit task) {
+		std::string folder = task.bulkLoadTask.getFolder();
+		platform::eraseDirectoryRecursive(folder);
+		ASSERT(platform::createDirectory(folder));
+		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFile().get();
+		std::string dataFile = *(task.bulkLoadTask.getDataFiles().begin());
+
+		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+		sstWriter->open(abspath(dataFile));
+		std::vector<KeyValue> bytesSample;
+		for (const auto& kv : task.data) {
+			ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
+			if (sampleInfo.inSample) {
+				Key sampleKey = kv.key;
+				Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
+				bytesSample.push_back(Standalone(KeyValueRef(sampleKey, sampleValue)));
+			}
+			sstWriter->write(kv.key, kv.value);
+		}
+		TraceEvent("BulkLoadingDataProduced")
+		    .detail("Task", task.bulkLoadTask.toString())
+		    .detail("LoadKeyCount", task.data.size())
+		    .detail("BytesSampleSize", bytesSample.size())
+		    .detail("Folder", folder)
+		    .detail("DataFile", dataFile)
+		    .detail("BytesSampleFile", bytesSampleFile);
+
+		if (self->debugging) {
+			TraceEvent e("DebugBulkLoadDataProducedKVS");
+			e.setMaxEventLength(-1);
+			e.setMaxFieldLength(-1);
+			e.detail("Task", task.bulkLoadTask.toString());
+			e.detail("LoadKeyCount", task.data.size());
+			int counter = 0;
+			for (const auto& kv : task.data) {
+				e.detail("Key" + std::to_string(counter), kv.key);
+				e.detail("Val" + std::to_string(counter), kv.value);
+				counter++;
+			}
+		}
+
+		ASSERT(sstWriter->finish());
+
+		if (bytesSample.size() > 0) {
+			sstWriter->open(abspath(bytesSampleFile));
+			for (const auto& kv : bytesSample) {
+				sstWriter->write(kv.key, kv.value);
+			}
+			TraceEvent("BulkLoadingByteSampleProduced")
+			    .detail("Task", task.bulkLoadTask.toString())
+			    .detail("LoadKeyCount", task.data.size())
+			    .detail("BytesSampleSize", bytesSample.size())
+			    .detail("Folder", folder)
+			    .detail("DataFile", dataFile)
+			    .detail("BytesSampleFile", bytesSampleFile);
+			ASSERT(sstWriter->finish());
+		}
+		TraceEvent("BulkLoadingProduceDataToLoad").detail("Folder", folder).detail("LoadKeyCount", task.data.size());
+		return;
+	}
+
+	BulkLoadTaskTestUnit generateBulkLoadTaskUnit(BulkLoading* self,
+	                                              std::string folderPath,
+	                                              int dataSize,
+	                                              Optional<KeyRange> range = Optional<KeyRange>()) {
+		std::string dataFilePath = joinPath(folderPath, generateRandomBulkLoadDataFileName());
+		std::string bytesSampleFilePath = joinPath(folderPath, generateRandomBulkLoadBytesSampleFileName());
+		KeyRange rangeToLoad = range.present() ? range.get() : self->getRandomRange(self, normalKeys);
+		BulkLoadTaskTestUnit taskUnit;
+		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(rangeToLoad, folderPath, dataFilePath, bytesSampleFilePath);
+		taskUnit.data = self->generateOrderedKVS(self, rangeToLoad, dataSize);
+		self->generateSSTFiles(self, taskUnit);
+		return taskUnit;
+	}
+
+	bool checkSame(BulkLoading* self, std::vector<KeyValue> kvs, std::vector<KeyValue> kvsdb) {
+		if (kvs.size() != kvsdb.size()) {
+			TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
+			    .detail("Reason", "KeyValue count wrong")
+			    .detail("KVS", kvs.size())
+			    .detail("DB", kvsdb.size());
+			if (self->debugging) {
+				TraceEvent e("DebugBulkLoadKVS");
+				e.setMaxEventLength(-1);
+				e.setMaxFieldLength(-1);
+				int counter = 0;
+				for (const auto& kv : kvs) {
+					e.detail("Key" + std::to_string(counter), kv.key);
+					e.detail("Val" + std::to_string(counter), kv.value);
+					counter++;
+				}
+				TraceEvent e1("DebugBulkLoadDB");
+				e1.setMaxEventLength(-1);
+				e1.setMaxFieldLength(-1);
+				counter = 0;
+				for (const auto& kv : kvsdb) {
+					e1.detail("Key" + std::to_string(counter), kv.key);
+					e1.detail("Val" + std::to_string(counter), kv.value);
+					counter++;
+				}
+			}
+			return false;
+		}
+		std::sort(kvs.begin(), kvs.end(), [](KeyValue a, KeyValue b) { return a.key < b.key; });
+		std::sort(kvsdb.begin(), kvsdb.end(), [](KeyValue a, KeyValue b) { return a.key < b.key; });
+		for (int i = 0; i < kvs.size(); i++) {
+			if (kvs[i].key != kvsdb[i].key) {
+				TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
+				    .detail("Reason", "Key mismatch")
+				    .detail("KVS", kvs[i])
+				    .detail("DB", kvsdb[i]);
+				return false;
+			} else if (kvs[i].value != kvsdb[i].value) {
+				TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
+				    .detail("Reason", "Value mismatch")
+				    .detail("KVS", kvs[i])
+				    .detail("DB", kvsdb[i]);
+				return false;
+			}
+		}
+		return true;
+	}
+
 	// Issue three non-overlapping tasks and check data consistency and correctness
-	// Repeat twice
 	ACTOR Future<Void> simpleTest(BulkLoading* self, Database cx) {
 		TraceEvent("BulkLoadingWorkLoadSimpleTestBegin");
-		state std::vector<Key> keyCharList = { "0"_sr, "1"_sr, "2"_sr, "3"_sr, "4"_sr, "5"_sr };
-		// First round of issuing tasks
+		state int counter = 0;
+		state int oldBulkLoadMode = 0;
 		state std::vector<BulkLoadState> bulkLoadStates;
 		state std::vector<std::vector<KeyValue>> bulkLoadDataList;
-		for (int i = 0; i < 3; i++) {
-			std::string strIdx = std::to_string(i);
-			std::string strIdxPlusOne = std::to_string(i + 1);
-			std::string folderName = strIdx;
-			Key beginKey = Standalone(StringRef(strIdx));
-			Key endKey = Standalone(StringRef(strIdxPlusOne));
-			KeyRange range = Standalone(KeyRangeRef(beginKey, endKey));
-			BulkLoadTaskTestUnit taskUnit = self->produceBulkLoadTaskUnit(self, keyCharList, range, folderName);
-			bulkLoadStates.push_back(taskUnit.bulkLoadTask);
-			bulkLoadDataList.push_back(taskUnit.data);
+		state std::vector<KeyRange> completeRanges;
+		loop { // New tasks overwrite old tasks on the same range
+			bulkLoadStates.clear();
+			bulkLoadDataList.clear();
+			completeRanges.clear();
+			for (int i = 0; i < 3; i++) {
+				std::string indexStr = std::to_string(i);
+				std::string indexStrNext = std::to_string(i + 1);
+				Key beginKey = StringRef(indexStr);
+				Key endKey = StringRef(indexStrNext);
+				std::string folderPath = joinPath(simulationBulkLoadFolder, indexStr);
+				int dataSize = deterministicRandom()->randomInt(5, 20);
+				BulkLoadTaskTestUnit taskUnit =
+				    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
+				bulkLoadStates.push_back(taskUnit.bulkLoadTask);
+				bulkLoadDataList.push_back(taskUnit.data);
+				completeRanges.push_back(taskUnit.bulkLoadTask.getRange());
+			}
+			// Issue above 3 tasks in the same transaction
+			wait(self->submitBulkLoadTasks(self, cx, bulkLoadStates));
+			TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
+			wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
+			TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
+			wait(self->waitUntilAllTaskComplete(self, cx));
+			TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
+			counter++;
+			if (counter > 1) {
+				break;
+			}
 		}
-		wait(self->submitBulkLoadTasks(self, cx, bulkLoadStates));
-		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
-		int old1 = wait(setBulkLoadMode(cx, 1));
-		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", old1).detail("NewMode", 1);
-		wait(self->waitUntilAllComplete(self, cx));
-		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
-
-		// Second round of issuing tasks
-		bulkLoadStates.clear();
-		bulkLoadDataList.clear();
-		for (int i = 0; i < 3; i++) {
-			std::string strIdx = std::to_string(i);
-			std::string strIdxPlusOne = std::to_string(i + 1);
-			std::string folderName = strIdx;
-			Key beginKey = Standalone(StringRef(strIdx));
-			Key endKey = Standalone(StringRef(strIdxPlusOne));
-			KeyRange range = Standalone(KeyRangeRef(beginKey, endKey));
-			BulkLoadTaskTestUnit taskUnit = self->produceBulkLoadTaskUnit(self, keyCharList, range, folderName);
-			bulkLoadStates.push_back(taskUnit.bulkLoadTask);
-			bulkLoadDataList.push_back(taskUnit.data);
-		}
-		wait(self->submitBulkLoadTasks(self, cx, bulkLoadStates));
-		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
-		wait(self->waitUntilAllComplete(self, cx));
-		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
 
 		// Check data
-		int old2 = wait(setBulkLoadMode(cx, 0));
-		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", old2).detail("NewMode", 0);
-		state std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, std::vector<KeyRange>()));
+		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 0)));
+		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 0);
+		state std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, std::vector<KeyRange>(), completeRanges));
 		state std::vector<KeyValue> kvs;
 		for (int j = 0; j < bulkLoadDataList.size(); j++) {
 			kvs.insert(kvs.end(), bulkLoadDataList[j].begin(), bulkLoadDataList[j].end());
 		}
-		ASSERT(self->checkData(kvs, dbkvs));
+		ASSERT(self->checkSame(self, kvs, dbkvs));
 
 		// Check bulk load metadata
-		int old3 = wait(setBulkLoadMode(cx, 1));
-		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", old3).detail("NewMode", 1);
+		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
+		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		wait(self->acknowledgeBulkLoadTasks(self, cx, bulkLoadStates));
 		loop {
 			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
@@ -458,92 +487,76 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	std::string getStringWithFixedLength(int number, int length) {
-		std::string numStr = std::to_string(number);
-		int zeroCount = length - numStr.size();
-		std::string res;
-		for (int i = 0; i < zeroCount; i++) {
-			res = res + "0";
+	ACTOR Future<Void> setKeys(Database cx, std::vector<KeyValue> kvs) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				for (const auto& kv : kvs) {
+					tr.set(kv.key, kv.value);
+				}
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
-		res = res + numStr;
-		return res;
 	}
 
-	BulkLoadTaskTestUnit produceRandomBulkLoadTaskUnit(BulkLoading* self, std::string rootPath, int index) {
-		std::string dataFileName = generateRandomBulkLoadDataFileName();
-		std::string bytesSampleFileName = generateRandomBulkLoadBytesSampleFileName();
-		std::string randomKey1 = deterministicRandom()->randomUniqueID().toString();
-		std::string randomKey2 = deterministicRandom()->randomUniqueID().toString();
-		while (randomKey2 == randomKey1) {
-			randomKey2 = deterministicRandom()->randomUniqueID().toString();
+	ACTOR Future<Void> backgroundWriteTraffic(BulkLoading* self, Database cx) {
+		loop {
+			int keyCount = deterministicRandom()->randomInt(1, 20);
+			std::vector<KeyValue> kvs = self->generateOrderedKVS(self, normalKeys, keyCount);
+			wait(self->setKeys(cx, kvs));
+			double delayTime = deterministicRandom()->random01() * 5.0;
+			wait(delay(delayTime));
 		}
-		StringRef randomKeyRef1 = StringRef(randomKey1);
-		StringRef randomKeyRef2 = StringRef(randomKey2);
-
-		StringRef firstKey = randomKeyRef1 < randomKeyRef2 ? randomKeyRef1 : randomKeyRef2;
-		StringRef lastKey = randomKeyRef1 < randomKeyRef2 ? randomKeyRef2 : randomKeyRef1;
-		KeyRange range = Standalone(KeyRangeRef(firstKey, lastKey.withSuffix("\xff"_sr)));
-		std::string folderName = getStringWithFixedLength(index, 6);
-		std::string folder = joinPath(rootPath, folderName);
-
-		BulkLoadTaskTestUnit taskUnit;
-		taskUnit.data.push_back(Standalone(KeyValueRef(firstKey, firstKey)));
-		std::set<std::string> middleKeys;
-		int keyCount = deterministicRandom()->randomInt(1, 20);
-		for (int i = 0; i < keyCount; i++) {
-			middleKeys.insert(deterministicRandom()->randomUniqueID().toString());
-		}
-		for (const auto& middleKey : middleKeys) {
-			Key key = firstKey.withSuffix(middleKey);
-			taskUnit.data.push_back(Standalone(KeyValueRef(key, key)));
-		}
-		taskUnit.data.push_back(Standalone(KeyValueRef(lastKey, lastKey)));
-
-		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
-		    range, folder, joinPath(folder, dataFileName), joinPath(folder, bytesSampleFileName));
-		self->produceFilesToLoad(taskUnit);
-		return taskUnit;
 	}
 
 	ACTOR Future<Void> complexTest(BulkLoading* self, Database cx) {
-		int old1 = wait(setBulkLoadMode(cx, 1));
-		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old1).detail("NewMode", 1);
-
-		// Issue tasks
 		state KeyRangeMap<Optional<BulkLoadTaskTestUnit>> taskMap;
 		taskMap.insert(allKeys, Optional<BulkLoadTaskTestUnit>());
 		state int i = 0;
-		state int n = deterministicRandom()->randomInt(5, 10);
-		state int frequencyFactorForWaitAll = std::max(2, (int)(n * deterministicRandom()->random01()));
-		state int frequencyFactorForSwitchMode = std::max(2, (int)(n * deterministicRandom()->random01()));
-		for (; i < n; i++) {
-			state BulkLoadTaskTestUnit taskUnit =
-			    self->produceRandomBulkLoadTaskUnit(self, simulationBulkLoadFolderForComplexTest, i);
+		state int oldBulkLoadMode = 0;
+		state BulkLoadTaskTestUnit taskUnit;
+
+		// Run tasks
+		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
+		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
+		for (; i < 3; i++) {
+			std::string folderPath = joinPath(simulationBulkLoadFolder, std::to_string(i));
+			int dataSize = deterministicRandom()->randomInt(2, 5);
+			taskUnit = self->generateBulkLoadTaskUnit(self, folderPath, dataSize);
+			ASSERT(normalKeys.contains(taskUnit.bulkLoadTask.getRange()));
 			taskMap.insert(taskUnit.bulkLoadTask.getRange(), taskUnit);
-			if (deterministicRandom()->coinflip()) {
-				wait(delay(deterministicRandom()->random01() * 10));
-			}
 			wait(self->submitBulkLoadTasks(self, cx, { taskUnit.bulkLoadTask }));
-			if (i % frequencyFactorForWaitAll == 0 && deterministicRandom()->coinflip()) {
-				wait(self->waitUntilAllComplete(self, cx));
+			if (deterministicRandom()->coinflip()) {
+				wait(self->waitUntilAllTaskComplete(self, cx));
 			}
-			if (i % frequencyFactorForSwitchMode == 0 && deterministicRandom()->coinflip()) {
-				int old2 = wait(setBulkLoadMode(cx, 0));
-				TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old2).detail("NewMode", 0);
+			if (deterministicRandom()->coinflip()) {
+				wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 0)));
+				TraceEvent("BulkLoadingWorkLoadComplexTestSetMode")
+				    .detail("OldMode", oldBulkLoadMode)
+				    .detail("NewMode", 0);
 				wait(delay(deterministicRandom()->random01() * 5));
-				int old3 = wait(setBulkLoadMode(cx, 1));
-				TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old3).detail("NewMode", 1);
+				wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
+				TraceEvent("BulkLoadingWorkLoadComplexTestSetMode")
+				    .detail("OldMode", oldBulkLoadMode)
+				    .detail("NewMode", 1);
+			}
+			if (deterministicRandom()->coinflip()) {
+				wait(delay(deterministicRandom()->random01() * 5));
 			}
 		}
 		// Wait until all tasks have completed
-		wait(self->waitUntilAllComplete(self, cx));
-		int old4 = wait(setBulkLoadMode(cx, 0)); // trigger DD restart
-		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old4).detail("NewMode", 0);
+		wait(self->waitUntilAllTaskComplete(self, cx));
+		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 0))); // trigger DD restart
+		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 0);
 
 		// Check correctness
 		state std::vector<KeyValue> kvs;
 		state std::vector<BulkLoadState> bulkLoadStates;
 		state std::vector<KeyRange> incompleteRanges;
+		state std::vector<KeyRange> completeRanges;
 		for (auto& range : taskMap.ranges()) {
 			if (!range.value().present()) {
 				continue;
@@ -551,18 +564,25 @@ struct BulkLoading : TestWorkload {
 			if (range.value().get().bulkLoadTask.getRange() != range.range()) {
 				ASSERT(range.value().get().bulkLoadTask.getRange().contains(range.range()));
 				incompleteRanges.push_back(range.range());
+				if (self->debugging) {
+					TraceEvent("DebugBulkLoadOutdateTask").detail("Task", range.value().get().bulkLoadTask.toString());
+				}
 				continue; // outdated
 			}
+			completeRanges.push_back(range.range());
 			std::vector<KeyValue> kvsToCheck = range.value().get().data;
 			kvs.insert(std::end(kvs), std::begin(kvsToCheck), std::end(kvsToCheck));
 			bulkLoadStates.push_back(range.value().get().bulkLoadTask);
 		}
-		std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, incompleteRanges));
-		ASSERT(self->checkData(kvs, dbkvs));
+		std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, incompleteRanges, completeRanges));
+		ASSERT(self->checkSame(self, kvs, dbkvs));
+
+		// Clear all range lock
+		wait(releaseReadLockOnRange(cx, normalKeys, "BulkLoad"));
 
 		// Clear metadata
-		int old5 = wait(setBulkLoadMode(cx, 1));
-		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", old5).detail("NewMode", 1);
+		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
+		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		wait(self->acknowledgeBulkLoadTasks(self, cx, bulkLoadStates));
 		loop {
 			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
@@ -575,78 +595,16 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	void produceLargeDataToLoad(BulkLoadTaskTestUnit task, int count) {
-		std::string folder = task.bulkLoadTask.getFolder();
-		platform::eraseDirectoryRecursive(folder);
-		ASSERT(platform::createDirectory(folder));
-		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFile().get();
-		std::string dataFile = *(task.bulkLoadTask.getDataFiles().begin());
-
-		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
-		sstWriter->open(abspath(dataFile));
-		std::vector<KeyValue> bytesSample;
-		int insertedKeyCount = 0;
-		for (int i = 0; i < 10; i++) {
-			std::string idxStr = std::to_string(i);
-			Key prefix = Standalone(StringRef(idxStr)).withPrefix(task.bulkLoadTask.getRange().begin);
-			std::vector<KeyValue> kvs = generateSortedKVS(prefix, std::max(count / 10, 1));
-			for (const auto& kv : kvs) {
-				ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
-				if (sampleInfo.inSample) {
-					Key sampleKey = kv.key;
-					Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
-					bytesSample.push_back(Standalone(KeyValueRef(sampleKey, sampleValue)));
-				}
-				sstWriter->write(kv.key, kv.value);
-				insertedKeyCount++;
-			}
-		}
-		TraceEvent("BulkLoadingDataProduced")
-		    .detail("LoadKeyCount", insertedKeyCount)
-		    .detail("BytesSampleSize", bytesSample.size())
-		    .detail("Folder", folder)
-		    .detail("DataFile", dataFile)
-		    .detail("BytesSampleFile", bytesSampleFile);
-		ASSERT(sstWriter->finish());
-
-		if (bytesSample.size() > 0) {
-			sstWriter->open(abspath(bytesSampleFile));
-			for (const auto& kv : bytesSample) {
-				sstWriter->write(kv.key, kv.value);
-			}
-			TraceEvent("BulkLoadingByteSampleProduced")
-			    .detail("LoadKeyCount", task.data.size())
-			    .detail("BytesSampleSize", bytesSample.size())
-			    .detail("Folder", folder)
-			    .detail("DataFile", dataFile)
-			    .detail("BytesSampleFile", bytesSampleFile);
-			ASSERT(sstWriter->finish());
-		}
-	}
-
-	void produceDataSet(BulkLoading* self, KeyRange range, std::string folderName) {
-		std::string dataFileName =
-		    range.begin.toString() + "_" + range.end.toString() + "_" + generateRandomBulkLoadDataFileName();
-		std::string bytesSampleFileName =
-		    range.begin.toString() + "_" + range.end.toString() + "_" + generateRandomBulkLoadBytesSampleFileName();
-		std::string folder = joinPath(simulationBulkLoadFolderForLargeDataProduce, folderName);
-		BulkLoadTaskTestUnit taskUnit;
-		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
-		    range, folder, joinPath(folder, dataFileName), joinPath(folder, bytesSampleFileName));
-		self->produceLargeDataToLoad(taskUnit, 5000000);
-		return;
-	}
-
+	// For offline test
 	void produceLargeData(BulkLoading* self, Database cx) {
-		std::string folderName1 = "1";
-		KeyRange range1 = Standalone(KeyRangeRef("1"_sr, "2"_sr));
-		self->produceDataSet(self, range1, folderName1);
-		std::string folderName2 = "2";
-		KeyRange range2 = Standalone(KeyRangeRef("2"_sr, "3"_sr));
-		self->produceDataSet(self, range2, folderName2);
-		std::string folderName3 = "3";
-		KeyRange range3 = Standalone(KeyRangeRef("3"_sr, "4"_sr));
-		self->produceDataSet(self, range3, folderName3);
+		for (int i = 0; i < 3; i++) {
+			std::string folderName = std::to_string(i);
+			Key beginKey = StringRef(std::to_string(i));
+			Key endKey = StringRef(std::to_string(i + 1));
+			KeyRange range = KeyRangeRef(beginKey, endKey);
+			std::string folderPath = joinPath(simulationBulkLoadFolder, folderName);
+			self->generateBulkLoadTaskUnit(self, folderPath, 5000000, range);
+		}
 		return;
 	}
 
@@ -662,6 +620,16 @@ struct BulkLoading : TestWorkload {
 			disableConnectionFailures("BulkLoading");
 		}
 
+		// Run background traffic
+		if (self->backgroundTrafficEnabled) {
+			state std::vector<Future<Void>> trafficActors;
+			int actorCount = deterministicRandom()->randomInt(1, 10);
+			for (int i = 0; i < actorCount; i++) {
+				trafficActors.push_back(self->backgroundWriteTraffic(self, cx));
+			}
+		}
+
+		// Run test
 		if (deterministicRandom()->coinflip()) {
 			// Inject data to three non-overlapping ranges
 			wait(self->simpleTest(self, cx));

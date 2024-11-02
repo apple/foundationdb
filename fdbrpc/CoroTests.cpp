@@ -28,6 +28,9 @@
 #include <ranges>
 #include <iterator>
 
+#include <fmt/base.h>
+#include <fmt/format.h>
+
 void forceLinkCoroTests() {}
 
 using namespace std::literals::string_literals;

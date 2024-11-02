@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <fmt/core.h>
+
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/FDBTypes.h"
@@ -100,9 +102,9 @@ ACTOR Future<bool> getKeyServers(
 // The command is used to get all storage server addresses for a given key.
 ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens) {
 	if (tokens.size() != 2 && tokens.size() != 3) {
-		printf("getlocation <KEY> [<KEY2>]\n"
-		       "fetch the storage server address for a given key or range.\n"
-		       "Displays the addresses of storage servers, or `not found' if location is not found.");
+		fmt::println("getlocation <KEY> [<KEY2>]\n"
+		             "fetch the storage server address for a given key or range.\n"
+		             "Displays the addresses of storage servers, or `not found' if location is not found.");
 		return false;
 	}
 
@@ -111,15 +113,15 @@ ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> t
 	state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise;
 	bool found = wait(getKeyServers(cx, keyServersPromise, kr));
 	if (!found) {
-		printf("%s locations not found\n", printable(kr).c_str());
+		fmt::println("{} locations not found", printable(kr));
 		return false;
 	}
 	std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 	    keyServersPromise.getFuture().get();
 	for (const auto& [range, servers] : keyServers) {
-		printf("Key range: %s\n", printable(range).c_str());
+		fmt::println("Key range: {}", printable(range));
 		for (const auto& server : servers) {
-			printf("  %s\n", server.address().toString().c_str());
+			fmt::println("  {}", server.address().toString());
 		}
 	}
 	return true;
@@ -130,9 +132,9 @@ CommandFactory getLocationCommandFactory("getlocation");
 // The command is used to get values from all storage servers that have the given key.
 ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version) {
 	if (tokens.size() != 2) {
-		printf("getall <KEY>\n"
-		       "fetch values from all storage servers that have the given key.\n"
-		       "Displays the value and the addresses of storage servers, or `not found' if key is not found.");
+		fmt::println("getall <KEY>\n"
+		             "fetch values from all storage servers that have the given key.\n"
+		             "Displays the value and the addresses of storage servers, or `not found' if key is not found.");
 		return false;
 	}
 
@@ -140,8 +142,8 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 	    cx, {}, tokens[1], SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, version));
 
 	if (loc.locations) {
-		printf("version is %ld\n", version);
-		printf("`%s' is at:\n", printable(tokens[1]).c_str());
+		fmt::println("version is {}", version);
+		fmt::println("`{}' is at:", printable(tokens[1]));
 		state Reference<LocationInfo::Locations> locations = loc.locations->locations();
 		state std::vector<Future<GetValueReply>> replies;
 		for (int i = 0; locations && i < locations->size(); i++) {
@@ -152,14 +154,14 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 		for (int i = 0; i < replies.size(); i++) {
 			std::string ssi = locations->getInterface(i).address().toString();
 			if (replies[i].isError()) {
-				fprintf(stderr, "ERROR: %s %s\n", ssi.c_str(), replies[i].getError().what());
+				fmt::println(stderr, "ERROR: {} {}", ssi, replies[i].getError().what());
 			} else {
 				Optional<Value> v = replies[i].get().value;
-				printf(" %s %s\n", ssi.c_str(), v.present() ? printable(v.get()).c_str() : "(not found)");
+				fmt::println(" {} {}", ssi, v.present() ? printable(v.get()) : "(not found)");
 			}
 		}
 	} else {
-		printf("`%s': location not found\n", printable(tokens[1]).c_str());
+		fmt::println("`{}': location not found", printable(tokens[1]));
 	}
 	return true;
 }
@@ -204,9 +206,9 @@ bool checkResults(Version version,
 			firstValidServer = j;
 			// Print full list of comparing servers and the reference server
 			// Used to check server info which does not produce an inconsistency log
-			printf("CheckResult: servers: %s, reference server: %s\n",
-			       printAllStorageServerMachineInfo(servers).c_str(),
-			       printStorageServerMachineInfo(servers[firstValidServer]).c_str());
+			fmt::println("CheckResult: servers: {}, reference server: {}",
+			             printAllStorageServerMachineInfo(servers),
+			             printStorageServerMachineInfo(servers[firstValidServer]));
 			continue; // always select the first server as reference
 		}
 		// compare reference and current
@@ -228,61 +230,62 @@ bool checkResults(Version version,
 			if (currentI >= current.data.size()) {
 				// ServerA(1), ServerB(0): 1 indicates that ServerA has the key while 0 indicates that ServerB does not
 				// have the key
-				printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key "
-				       "%s\n",
-				       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
-				       printStorageServerMachineInfo(servers[j]).c_str(),
-				       currentI,
-				       referenceI,
-				       version,
-				       toHex(reference.data[referenceI].key).c_str());
+				fmt::println(
+				    "Inconsistency: UniqueKey, {}(1), {}(0), CurrentIndex {}, ReferenceIndex {}, Version {}, Key {}",
+				    printStorageServerMachineInfo(servers[firstValidServer]),
+				    printStorageServerMachineInfo(servers[j]),
+				    currentI,
+				    referenceI,
+				    version,
+				    toHex(reference.data[referenceI].key));
 				referenceI++;
 			} else if (referenceI >= reference.data.size()) {
-				printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, Key "
-				       "%s\n",
-				       printStorageServerMachineInfo(servers[j]).c_str(),
-				       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
-				       currentI,
-				       referenceI,
-				       version,
-				       toHex(current.data[currentI].key).c_str());
+				fmt::println(
+				    "Inconsistency: UniqueKey, {}(1), {}(0), CurrentIndex {}, ReferenceIndex {}, Version {}, Key {}",
+				    printStorageServerMachineInfo(servers[j]),
+				    printStorageServerMachineInfo(servers[firstValidServer]),
+				    currentI,
+				    referenceI,
+				    version,
+				    toHex(current.data[currentI].key));
 				currentI++;
 			} else {
 				KeyValueRef currentKV = current.data[currentI];
 				KeyValueRef referenceKV = reference.data[referenceI];
 				if (currentKV.key == referenceKV.key) {
 					if (currentKV.value != referenceKV.value) {
-						printf("Inconsistency: MismatchValue, %s(1), %s(1), CurrentIndex %lu, ReferenceIndex %lu, "
-						       "Version %ld, "
-						       "Key %s\n",
-						       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
-						       printStorageServerMachineInfo(servers[j]).c_str(),
-						       currentI,
-						       referenceI,
-						       version,
-						       toHex(currentKV.key).c_str());
+						fmt::println("Inconsistency: MismatchValue, {}(1), {}(1), CurrentIndex {}, ReferenceIndex {}, "
+						             "Version {}, Key {}",
+						             printStorageServerMachineInfo(servers[firstValidServer]),
+						             printStorageServerMachineInfo(servers[j]),
+						             currentI,
+						             referenceI,
+						             version,
+						             toHex(currentKV.key));
 					}
 					currentI++;
 					referenceI++;
 				} else if (currentKV.key < referenceKV.key) {
-					printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
-					       "Key %s\n",
-					       printStorageServerMachineInfo(servers[j]).c_str(),
-					       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
-					       currentI,
-					       referenceI,
-					       version,
-					       toHex(currentKV.key).c_str());
+					fmt::println(
+					    "Inconsistency: UniqueKey, {}(1), {}(0), CurrentIndex {}, ReferenceIndex {}, Version {}, "
+					    "Key {}",
+					    printStorageServerMachineInfo(servers[j]),
+					    printStorageServerMachineInfo(servers[firstValidServer]),
+					    currentI,
+					    referenceI,
+					    version,
+					    toHex(currentKV.key));
 					currentI++;
 				} else {
-					printf("Inconsistency: UniqueKey, %s(1), %s(0), CurrentIndex %lu, ReferenceIndex %lu, Version %ld, "
-					       "Key %s\n",
-					       printStorageServerMachineInfo(servers[firstValidServer]).c_str(),
-					       printStorageServerMachineInfo(servers[j]).c_str(),
-					       currentI,
-					       referenceI,
-					       version,
-					       toHex(referenceKV.key).c_str());
+					fmt::println(
+					    "Inconsistency: UniqueKey, {}(1), {}(0), CurrentIndex {}, ReferenceIndex {}, Version {}, "
+					    "Key {}",
+					    printStorageServerMachineInfo(servers[firstValidServer]),
+					    printStorageServerMachineInfo(servers[j]),
+					    currentI,
+					    referenceI,
+					    version,
+					    toHex(referenceKV.key));
 					referenceI++;
 				}
 			}
@@ -299,12 +302,12 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 	state bool consistent = true;
 	loop {
 		try {
-			printf("Start checking for range: %s\n", printable(inputRange).c_str());
+			fmt::println("Start checking for range: {}", printable(inputRange));
 			// Get SS interface for each shard of the inputRange
 			state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
 			bool foundKeyServers = wait(getKeyServers(cx, keyServerPromise, inputRange));
 			if (!foundKeyServers) {
-				printf("key server locations for %s not found, retrying in 1s...\n", printable(inputRange).c_str());
+				fmt::println("key server locations for {} not found, retrying in 1s...", printable(inputRange));
 				wait(delay(1.0));
 				continue;
 			}
@@ -321,9 +324,9 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 				}
 				const auto& servers = keyServers[i].second;
 				state Key beginKeyToCheck = rangeToCheck.begin;
-				printf("Key range to check: %s\n", printable(rangeToCheck).c_str());
+				fmt::println("Key range to check: {}", printable(rangeToCheck));
 				for (const auto& server : servers) {
-					printf("\t%s\n", server.address().toString().c_str());
+					fmt::println("\t{}", server.address().toString());
 				}
 				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
 				state bool hasMore = true;
@@ -332,8 +335,7 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 				while (hasMore) {
 					wait(store(version, getVersion(cx)));
 					replies.clear();
-					printf(
-					    "Round %d: %s - %s\n", round, toHex(beginKeyToCheck).c_str(), toHex(rangeToCheck.end).c_str());
+					fmt::println("Round {}: {} - {}", round, toHex(beginKeyToCheck), toHex(rangeToCheck.end));
 					for (const auto& s : keyServers[i].second) { // for each storage server
 						GetKeyValuesRequest req;
 						req.begin = firstGreaterOrEqual(beginKeyToCheck);
@@ -353,10 +355,10 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 					for (int j = 0; j < replies.size(); j++) {
 						auto reply = replies[j].get();
 						if (reply.isError()) {
-							printf("checkResults error: %s\n", reply.getError().what());
+							fmt::println("checkResults error: {}", reply.getError().what());
 							throw reply.getError();
 						} else if (reply.get().error.present()) {
-							printf("checkResults error: %s\n", reply.get().error.get().what());
+							fmt::println("checkResults error: {}", reply.get().error.get().what());
 							throw reply.get().error.get();
 						}
 						GetKeyValuesReply current = reply.get();
@@ -371,10 +373,10 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 						}
 						hasMore = hasMore || current.more;
 					}
-					printf("Compare scope has been decided\n\tBeginKey: %s\n\tEndKey: %s\n\tHasMore: %d\n",
-					       toHex(beginKeyToCheck).c_str(),
-					       toHex(claimEndKey).c_str(),
-					       hasMore);
+					fmt::println("Compare scope has been decided\n\tBeginKey: {}\n\tEndKey: {}\n\tHasMore: {}",
+					             toHex(beginKeyToCheck),
+					             toHex(claimEndKey),
+					             hasMore);
 					if (claimEndKey.empty()) {
 						// It is possible that there is clear operation between the prev round and the current round
 						// which result in empty claimEndKey --- nothing to compare
@@ -392,7 +394,7 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 						// and the child checkall will complete and the global progress will move forward. Once the
 						// child checkall is done, we move to the range: maxEndKey ~ rangeToCheck.end
 						state KeyRange spawnedRangeToCheck = Standalone(KeyRangeRef(beginKeyToCheck, maxEndKey));
-						printf("Spawn new checkall for range %s\n", printable(spawnedRangeToCheck).c_str());
+						fmt::println("Spawn new checkall for range {}", printable(spawnedRangeToCheck));
 						bool allSame = wait(doCheckAll(cx, spawnedRangeToCheck, checkAll));
 						beginKeyToCheck = spawnedRangeToCheck.end;
 						consistent = consistent && allSame; // !allSame of any subrange results in !consistent
@@ -409,10 +411,9 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 						// Using claimEndKey of the current round as the nextBeginKey for the next round
 						// Note that claimEndKey is not compared in the current round
 						// This key will be compared in the next round
-						printf(
-						    "Result: compared %s - %s\n", toHex(beginKeyToCheck).c_str(), toHex(claimEndKey).c_str());
+						fmt::println("Result: compared {} - {}", toHex(beginKeyToCheck), toHex(claimEndKey));
 						beginKeyToCheck = claimEndKey;
-						printf("allSame %d, hasMore %d, checkAll %d\n", allSame, hasMore, checkAll);
+						fmt::println("allSame {}, hasMore {}, checkAll {}", allSame, hasMore, checkAll);
 						consistent = consistent && allSame; // !allSame of any subrange results in !consistent
 					}
 					if (!consistent && !checkAll) {
@@ -424,9 +425,9 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 			break;
 
 		} catch (Error& e) {
-			printf("Error: %s", e.what());
+			fmt::print("Error: {}", e.what());
 			wait(onErrorTr.onError(e));
-			printf(", retrying in 1s...\n");
+			fmt::println(", retrying in 1s...");
 		}
 		wait(delay(1.0));
 	}
@@ -443,22 +444,22 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 		inputRange = KeyRangeRef(tokens[1], tokens[2]);
 		checkAll = true;
 	} else {
-		printf(
+		fmt::println(
 		    "checkall [<KEY> <KEY2>] (all)\n"
 		    "Check inconsistency of the input range by comparing all replicas and print any corruptions.\n"
 		    "The default behavior is to stop on the first subrange where corruption is found\n"
 		    "`all` is optional. When `all` is appended, the checker does not stop until all subranges have checked.\n"
 		    "Note this is intended to check a small range of keys, not the entire database (consider consistencycheck "
-		    "for that purpose).\n");
+		    "for that purpose).");
 		return false;
 	}
 	if (inputRange.empty()) {
-		printf("Input empty range: %s.\nImmediately exit.\n", printable(inputRange).c_str());
+		fmt::println("Input empty range: {}.\nImmediately exit.", printable(inputRange));
 		return false;
 	}
 	// At this point, we have a non-empty inputRange to check
 	bool res = wait(doCheckAll(cx, inputRange, checkAll));
-	printf("Checking complete. AllSame: %d\n", res);
+	fmt::println("Checking complete. AllSame: {}", res);
 	return true;
 }
 

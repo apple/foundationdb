@@ -292,6 +292,10 @@ public:
 	// Maximum duration that a transaction can be tag throttled by proxy before being rejected
 	double PROXY_MAX_TAG_THROTTLE_DURATION;
 
+	// Enable to automatically retry transactions in the presence of transaction_lock_rejection error
+	// Set to false only for the rangeLocking simulation test
+	bool TRANSACTION_LOCK_REJECTION_RETRIABLE;
+
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;

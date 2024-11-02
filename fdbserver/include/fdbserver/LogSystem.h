@@ -453,16 +453,10 @@ struct ILogSystem {
 		int targetQueueSize;
 		UID randomID;
 
-		// FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support
-		// that upgrade.
-		bool collectTags;
-		void combineMessages();
-
 		BufferedCursor(std::vector<Reference<IPeekCursor>> cursors,
 		               Version begin,
 		               Version end,
 		               bool withTags,
-		               bool collectTags,
 		               bool canDiscardPopped);
 		BufferedCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
 		               Tag tag,
@@ -561,7 +555,11 @@ struct ILogSystem {
 	// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is
 	// correspondingly less expensive)
 
-	virtual Reference<IPeekCursor> peekLogRouter(UID dbgid, Version begin, Tag tag, bool useSatellite) = 0;
+	virtual Reference<IPeekCursor> peekLogRouter(UID dbgid,
+	                                             Version begin,
+	                                             Tag tag,
+	                                             bool useSatellite,
+	                                             Optional<Version> end = Optional<Version>()) = 0;
 	// Same contract as peek(), but can only peek from the logs elected in the same generation.
 	// If the preferred log server is down, a different log from the same generation will merge results locally before
 	// sending them to the log router.
@@ -815,6 +813,10 @@ struct LogPushData : NonCopyable {
 	// getAllMessages() and is used before writing any other mutations.
 	void setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations);
 
+	Optional<Tag> savedRandomRouterTag;
+	void storeRandomRouterTag() { savedRandomRouterTag = logSystem->getRandomRouterTag(); }
+	int getLogRouterTags() { return logSystem->getLogRouterTags(); }
+
 private:
 	Reference<ILogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
@@ -836,13 +838,17 @@ private:
 	// true on a successful write, and false if the location has already been
 	// written.
 	bool writeTransactionInfo(int location, uint32_t subseq);
+
+	Tag chooseRouterTag() {
+		return savedRandomRouterTag.present() ? savedRandomRouterTag.get() : logSystem->getRandomRouterTag();
+	}
 };
 
 template <class T>
 void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool allLocations) {
 	prev_tags.clear();
 	if (logSystem->hasRemoteLogs()) {
-		prev_tags.push_back(logSystem->getRandomRouterTag());
+		prev_tags.push_back(chooseRouterTag());
 	}
 	for (auto& tag : next_message_tags) {
 		prev_tags.push_back(tag);

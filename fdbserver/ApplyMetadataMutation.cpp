@@ -90,12 +90,12 @@ public:
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
 	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_),
 	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
-	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch) {
+	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch), rangeLock(proxyCommitData_.rangeLock) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
-			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			ASSERT(cipherKeys->contains(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID));
 			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+				ASSERT(cipherKeys->contains(ENCRYPT_HEADER_DOMAIN_ID));
 			}
 		}
 		// If commit proxy, epoch must be set
@@ -115,9 +115,9 @@ public:
 	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex), epoch(Optional<LogEpoch>()) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
-			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			ASSERT(cipherKeys->contains(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID));
 			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+				ASSERT(cipherKeys->contains(ENCRYPT_HEADER_DOMAIN_ID));
 			}
 		}
 	}
@@ -195,6 +195,8 @@ private:
 	// commit
 	std::vector<std::pair<UID, UID>> tssMappingToAdd;
 
+	std::shared_ptr<RangeLock> rangeLock = nullptr;
+
 private:
 	bool dummyConfChange = false;
 
@@ -209,6 +211,32 @@ private:
 			CODE_PROBE(forResolver, "encrypting resolver mutations", probe::decoration::rare);
 			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, BlobCipherMetrics::TLOG));
 		}
+	}
+
+	void checkSetRangeLockPrefix(const MutationRef& m) {
+		if (!m.param1.startsWith(rangeLockPrefix)) {
+			return;
+		} else if (rangeLock == nullptr) {
+			TraceEvent(SevWarnAlways, "MutationHasRangeLockPrefixButFeatureIsOff")
+			    .detail("Mutation", m.toString())
+			    .detail("FeatureFlag", SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE)
+			    .detail("Encription", encryptMode.isEncryptionEnabled());
+			return;
+		}
+		ASSERT(!initialCommit);
+		// RangeLock is upated by KrmSetRange which updates a range with two successive mutations
+		if (rangeLock->pendingRequest()) {
+			// The second mutation
+			Key endKey = m.param1.removePrefix(rangeLockPrefix);
+			rangeLock->consumePendingRequest(endKey);
+		} else {
+			// The first mutation
+			RangeLockStateSet lockSetState = m.param2.empty() ? RangeLockStateSet() : decodeRangeLockStateSet(m.param2);
+			Key startKey = m.param1.removePrefix(rangeLockPrefix);
+			rangeLock->setPendingRequest(startKey, lockSetState);
+		}
+		txnStateStore->set(KeyValueRef(m.param1, m.param2));
+		return;
 	}
 
 	void checkSetKeyServersPrefix(MutationRef m) {
@@ -916,6 +944,17 @@ private:
 		}
 	}
 
+	void checkClearRangeLockPrefix(KeyRangeRef range) {
+		if (rangeLock == nullptr) {
+			return;
+		} else if (!rangeLockKeys.intersects(range)) {
+			return;
+		}
+		ASSERT(!initialCommit);
+		txnStateStore->clear(range & rangeLockKeys);
+		return;
+	}
+
 	void checkClearKeyServerKeys(KeyRangeRef range) {
 		if (!keyServersKeys.intersects(range)) {
 			return;
@@ -1184,7 +1223,7 @@ private:
 
 				bool foundKey = false;
 				for (auto& it : vecBackupKeys->intersectingRanges(normalKeys)) {
-					if (it.value().count(logDestination) > 0) {
+					if (it.value().contains(logDestination)) {
 						foundKey = true;
 						break;
 					}
@@ -1192,7 +1231,7 @@ private:
 				auto& systemBackupRanges = getSystemBackupRanges();
 				for (auto r = systemBackupRanges.begin(); !foundKey && r != systemBackupRanges.end(); ++r) {
 					for (auto& it : vecBackupKeys->intersectingRanges(*r)) {
-						if (it.value().count(logDestination) > 0) {
+						if (it.value().contains(logDestination)) {
 							foundKey = true;
 							break;
 						}
@@ -1516,6 +1555,7 @@ public:
 			}
 
 			if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
+				checkSetRangeLockPrefix(m);
 				checkSetKeyServersPrefix(m);
 				checkSetServerKeysPrefix(m);
 				checkSetCheckpointKeys(m);
@@ -1541,6 +1581,7 @@ public:
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
 				KeyRangeRef range(m.param1, m.param2);
 
+				checkClearRangeLockPrefix(range);
 				checkClearKeyServerKeys(range);
 				checkClearConfigKeys(m, range);
 				checkClearServerListKeys(range);

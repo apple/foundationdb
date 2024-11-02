@@ -1,7 +1,6 @@
 [configuration]
 # tenants are not supported with parallel restore
 allowDefaultTenant = false
-storageEngineExcludeTypes = [5]
 
 [[test]]
 testTitle = 'BackupAndParallelRestoreWithAtomicOp'

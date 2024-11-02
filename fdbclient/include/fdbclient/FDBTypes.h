@@ -56,7 +56,7 @@ enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
 	tagLocalityLogRouter = -2,
 	tagLocalityRemoteLog = -3, // tag created by log router for remote (aka. not in Primary DC) tLogs
-	tagLocalityUpgraded = -4, // tlogs with old log format
+	tagLocalityUpgraded = -4, // tlogs with old log format (no longer applicable)
 	tagLocalitySatellite = -5,
 	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,
@@ -155,10 +155,8 @@ struct hash<Tag> {
 } // namespace std
 
 static const Tag invalidTag{ tagLocalitySpecial, 0 };
-static const Tag txsTag{ tagLocalitySpecial, 1 };
+static const Tag txsTag{ tagLocalitySpecial, 1 }; // obsolete now
 static const Tag cacheTag{ tagLocalitySpecial, 2 };
-
-enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
 	StringRef message;
@@ -1033,10 +1031,10 @@ struct TLogVersion {
 		V5 = 5, // 6.3
 		V6 = 6, // 7.0
 		V7 = 7, // 7.2
-		MIN_SUPPORTED = V2,
+		MIN_SUPPORTED = V5,
 		MAX_SUPPORTED = V7,
 		MIN_RECRUITABLE = V6,
-		DEFAULT = V6,
+		DEFAULT = V7,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -1744,7 +1742,7 @@ struct ReadOptions {
 	            ReadType type = ReadType::NORMAL,
 	            CacheResult cache = CacheResult::True,
 	            Optional<Version> version = Optional<Version>())
-	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version) {}
 
 	ReadOptions(ReadType type, CacheResult cache = CacheResult::True) : ReadOptions({}, type, cache) {}
 

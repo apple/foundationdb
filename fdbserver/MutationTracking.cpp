@@ -90,8 +90,8 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 		}
 		TagsAndMessage msg;
 		msg.loadFromArena(&rdr, nullptr);
-		bool logAdapterMessage = std::any_of(
-		    msg.tags.begin(), msg.tags.end(), [](const Tag& t) { return t == txsTag || t.locality == tagLocalityTxs; });
+		bool logAdapterMessage =
+		    std::any_of(msg.tags.begin(), msg.tags.end(), [](const Tag& t) { return t.locality == tagLocalityTxs; });
 		StringRef mutationData = msg.getMessageWithoutTags();
 		uint8_t mutationType = *mutationData.begin();
 		if (logAdapterMessage) {

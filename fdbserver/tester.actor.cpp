@@ -18,18 +18,17 @@
  * limitations under the License.
  */
 
-#include <boost/algorithm/string/predicate.hpp>
-#include <boost/filesystem.hpp>
-#include <boost/filesystem/directory.hpp>
-#include <boost/filesystem/path.hpp>
-#include <boost/range/iterator_range_core.hpp>
 #include <cinttypes>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <istream>
 #include <iterator>
 #include <map>
 #include <streambuf>
+#include <numeric>
+
+#include <fmt/ranges.h>
 #include <toml.hpp>
 
 #include "flow/ActorCollection.h"
@@ -420,19 +419,19 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 	for (auto const& w : workloads) {
 		w->disableFailureInjectionWorkloads(disabledWorkloads);
 	}
-	if (disabledWorkloads.count("all") > 0) {
+	if (disabledWorkloads.contains("all")) {
 		return;
 	}
 	auto& factories = IFailureInjectorFactory::factories();
 	DeterministicRandom random(sharedRandomNumber);
 	for (auto& factory : factories) {
 		auto workload = factory->create(*this);
-		if (disabledWorkloads.count(workload->description()) > 0) {
+		if (disabledWorkloads.contains(workload->description())) {
 			continue;
 		}
-		if (std::count(work.disabledFailureInjectionWorkloads.begin(),
-		               work.disabledFailureInjectionWorkloads.end(),
-		               workload->description()) > 0) {
+		if (std::find(work.disabledFailureInjectionWorkloads.begin(),
+		              work.disabledFailureInjectionWorkloads.end(),
+		              workload->description()) != work.disabledFailureInjectionWorkloads.end()) {
 			continue;
 		}
 		while (shouldInjectFailure(random, work, workload)) {
@@ -969,6 +968,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 					    .detail("ConsistencyCheckerId", work.sharedRandomNumber)
 					    .detail("ClientId", work.clientId)
 					    .detail("ClientCount", work.clientCount);
+					work.reply.sendError(consistency_check_urgent_duplicate_request());
 				} else if (consistencyCheckerUrgentTester.second.isValid() &&
 				           !consistencyCheckerUrgentTester.second.isReady()) {
 					TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_TesterWorkloadConflict", interf.id())
@@ -976,13 +976,15 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 					    .detail("ArrivingConsistencyCheckerId", work.sharedRandomNumber)
 					    .detail("ClientId", work.clientId)
 					    .detail("ClientCount", work.clientCount);
+					work.reply.sendError(consistency_check_urgent_conflicting_request());
+				} else {
+					consistencyCheckerUrgentTester = std::make_pair(
+					    work.sharedRandomNumber, testerServerConsistencyCheckerUrgentWorkload(work, ccr, dbInfo));
+					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterWorkloadInitialized", interf.id())
+					    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first)
+					    .detail("ClientId", work.clientId)
+					    .detail("ClientCount", work.clientCount);
 				}
-				consistencyCheckerUrgentTester = std::make_pair(
-				    work.sharedRandomNumber, testerServerConsistencyCheckerUrgentWorkload(work, ccr, dbInfo));
-				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterWorkloadInitialized", interf.id())
-				    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first)
-				    .detail("ClientId", work.clientId)
-				    .detail("ClientCount", work.clientCount);
 			} else {
 				addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality));
 			}
@@ -1648,7 +1650,7 @@ Optional<Key> getKeyFromString(const std::string& str) {
 		}
 		const char first = str.at(i + 2);
 		const char second = str.at(i + 3);
-		if (parseCharMap.count(first) == 0 || parseCharMap.count(second) == 0) {
+		if (!parseCharMap.contains(first) || !parseCharMap.contains(second)) {
 			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 			           "ConsistencyCheckUrgent_GetKeyFromStringError")
 			    .setMaxEventLength(-1)
@@ -1764,7 +1766,13 @@ std::unordered_map<int, std::vector<KeyRange>> makeTaskAssignment(Database cx,
                                                                   std::vector<KeyRange> shardsToCheck,
                                                                   int testersCount,
                                                                   int round) {
+	ASSERT(testersCount >= 1);
 	std::unordered_map<int, std::vector<KeyRange>> assignment;
+
+	std::vector<size_t> shuffledIndices(testersCount);
+	std::iota(shuffledIndices.begin(), shuffledIndices.end(), 0); // creates [0, 1, ..., testersCount - 1]
+	deterministicRandom()->randomShuffle(shuffledIndices);
+
 	int batchSize = CLIENT_KNOBS->CONSISTENCY_CHECK_URGENT_BATCH_SHARD_COUNT;
 	int startingPoint = 0;
 	if (shardsToCheck.size() > batchSize * testersCount) {
@@ -1779,7 +1787,17 @@ std::unordered_map<int, std::vector<KeyRange>> makeTaskAssignment(Database cx,
 		if (testerIdx > testersCount - 1) {
 			break; // Have filled up all testers
 		}
-		assignment[testerIdx].push_back(shardsToCheck[i]);
+		// When assigning a shards/batch to a tester idx, there are certain edge cases which can result in urgent
+		// consistency checker being infinetely stuck in a loop. Examples:
+		//      1. if there is 1 remaining shard, and tester 0 consistently fails, we will still always pick tester 0
+		//      2. if there are 10 remaining shards, and batch size is 10, and tester 0 consistently fails, we will
+		//      still always pick tester 0
+		//      3. if there are 20 remaining shards, and batch size is 10, and testers {0, 1} consistently fail, we will
+		//      keep picking testers {0, 1}
+		// To avoid repeatedly picking the same testers even though they could be failing, shuffledIndices provides an
+		// indirection to a random tester idx. That way, each invocation of makeTaskAssignment won't
+		// result in the same task assignment for the class of edge cases mentioned above.
+		assignment[shuffledIndices[testerIdx]].push_back(shardsToCheck[i]);
 	}
 	std::unordered_map<int, std::vector<KeyRange>>::iterator assignIt;
 	for (assignIt = assignment.begin(); assignIt != assignment.end(); assignIt++) {
@@ -1867,7 +1885,7 @@ ACTOR Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<C
 			} else { // In simulation
 				ts = testers.get();
 			}
-			TraceEvent(SevInfo, "ConsistencyCheckUrgent_GoTTesters")
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_GotTesters")
 			    .detail("ConsistencyCheckerId", consistencyCheckerId)
 			    .detail("Round", round)
 			    .detail("RetryTimes", retryTimes)
@@ -2556,7 +2574,7 @@ void encryptionAtRestPlaintextMarkerCheck() {
 		return;
 	}
 
-	namespace fs = boost::filesystem;
+	namespace fs = std::filesystem;
 
 	printf("EncryptionAtRestPlaintextMarkerCheckStart\n");
 	TraceEvent("EncryptionAtRestPlaintextMarkerCheckStart");
@@ -2566,8 +2584,8 @@ void encryptionAtRestPlaintextMarkerCheck() {
 	bool success = true;
 	// Enumerate all files in the "simfdb/" folder and look for "marker" string
 	for (fs::recursive_directory_iterator itr(p); itr != end; ++itr) {
-		if (boost::filesystem::is_regular_file(itr->path())) {
-			std::ifstream f(itr->path().string().c_str());
+		if (fs::is_regular_file(itr->path())) {
+			std::ifstream f(itr->path());
 			if (f) {
 				std::string buf;
 				int count = 0;
@@ -3046,9 +3064,9 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 			return Void();
 		}
 		enableClientInfoLogging(); // Enable Client Info logging by default for tester
-		if (boost::algorithm::ends_with(fileName, ".txt")) {
+		if (fileName.ends_with(".txt")) {
 			testSet.testSpecs = readTests(ifs);
-		} else if (boost::algorithm::ends_with(fileName, ".toml")) {
+		} else if (fileName.ends_with(".toml")) {
 			// TOML is weird about opening the file as binary on windows, so we
 			// just let TOML re-open the file instead of using ifs.
 			testSet = readTOMLTests(fileName);
@@ -3152,12 +3170,12 @@ ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
 	}
 
 	// Make sure that no duplicate details were provided
-	ASSERT(details.count("TestDescription") == 0);
-	ASSERT(details.count("ExpectedError") == 0);
-	ASSERT(details.count("ExpectedErrorCode") == 0);
-	ASSERT(details.count("ActualError") == 0);
-	ASSERT(details.count("ActualErrorCode") == 0);
-	ASSERT(details.count("Reason") == 0);
+	ASSERT(!details.contains("TestDescription"));
+	ASSERT(!details.contains("ExpectedError"));
+	ASSERT(!details.contains("ExpectedErrorCode"));
+	ASSERT(!details.contains("ActualError"));
+	ASSERT(!details.contains("ActualErrorCode"));
+	ASSERT(!details.contains("Reason"));
 
 	for (auto& p : details) {
 		evt.detail(p.first.c_str(), p.second);

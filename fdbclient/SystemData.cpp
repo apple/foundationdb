@@ -82,31 +82,17 @@ const Value keyServersValue(RangeResult result, const std::vector<UID>& src, con
 	std::vector<Tag> srcTag;
 	std::vector<Tag> destTag;
 
-	bool foundOldLocality = false;
 	for (const KeyValueRef& kv : result) {
 		UID uid = decodeServerTagKey(kv.key);
 		if (std::find(src.begin(), src.end(), uid) != src.end()) {
 			srcTag.push_back(decodeServerTagValue(kv.value));
-			if (srcTag.back().locality == tagLocalityUpgraded) {
-				foundOldLocality = true;
-				break;
-			}
 		}
 		if (std::find(dest.begin(), dest.end(), uid) != dest.end()) {
 			destTag.push_back(decodeServerTagValue(kv.value));
-			if (destTag.back().locality == tagLocalityUpgraded) {
-				foundOldLocality = true;
-				break;
-			}
 		}
 	}
 
-	if (foundOldLocality || src.size() != srcTag.size() || dest.size() != destTag.size()) {
-		ASSERT_WE_THINK(foundOldLocality);
-		BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue()));
-		wr << src << dest;
-		return wr.toValue();
-	}
+	ASSERT_WE_THINK(src.size() == srcTag.size() && dest.size() == destTag.size());
 
 	return keyServersValue(srcTag, destTag);
 }
@@ -831,21 +817,8 @@ Version decodeServerTagHistoryKey(KeyRef const& key) {
 Tag decodeServerTagValue(ValueRef const& value) {
 	Tag s;
 	BinaryReader reader(value, IncludeVersion());
-	if (!reader.protocolVersion().hasTagLocality()) {
-		int16_t id;
-		reader >> id;
-		if (id == invalidTagOld) {
-			s = invalidTag;
-		} else if (id == txsTagOld) {
-			s = txsTag;
-		} else {
-			ASSERT(id >= 0);
-			s.id = id;
-			s.locality = tagLocalityUpgraded;
-		}
-	} else {
-		reader >> s;
-	}
+	ASSERT_WE_THINK(reader.protocolVersion().hasTagLocality());
+	reader >> s;
 	return s;
 }
 
@@ -970,10 +943,7 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	StorageServerInterface s;
 	BinaryReader reader(value, IncludeVersion());
 
-	if (!reader.protocolVersion().hasStorageInterfaceReadiness()) {
-		reader >> s;
-		return s;
-	}
+	ASSERT_WE_THINK(reader.protocolVersion().hasStorageInterfaceReadiness());
 
 	return decodeServerListValueFB(value);
 }
@@ -1238,6 +1208,51 @@ BulkLoadState decodeBulkLoadState(const ValueRef& value) {
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(bulkLoadState);
 	return bulkLoadState;
+}
+
+// Range Lock
+const std::string rangeLockNameForBulkLoad = "BulkLoad";
+
+const KeyRangeRef rangeLockKeys = KeyRangeRef("\xff/rangeLock/"_sr, "\xff/rangeLock0"_sr);
+const KeyRef rangeLockPrefix = rangeLockKeys.begin;
+
+const Value rangeLockStateSetValue(const RangeLockStateSet& rangeLockStateSet) {
+	return ObjectWriter::toValue(rangeLockStateSet, IncludeVersion());
+}
+
+RangeLockStateSet decodeRangeLockStateSet(const ValueRef& value) {
+	RangeLockStateSet rangeLockStateSet;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(rangeLockStateSet);
+	return rangeLockStateSet;
+}
+
+const KeyRangeRef rangeLockOwnerKeys = KeyRangeRef("\xff/rangeLockOwner/"_sr, "\xff/rangeLockOwner0"_sr);
+const KeyRef rangeLockOwnerPrefix = rangeLockOwnerKeys.begin;
+
+const Key rangeLockOwnerKeyFor(const RangeLockOwnerName& ownerUniqueID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(rangeLockOwnerPrefix);
+	wr.serializeBytes(StringRef(ownerUniqueID));
+	return wr.toValue();
+}
+
+const RangeLockOwnerName decodeRangeLockOwnerKey(const KeyRef& key) {
+	std::string ownerUniqueID;
+	BinaryReader rd(key.removePrefix(rangeLockOwnerPrefix), Unversioned());
+	rd >> ownerUniqueID;
+	return ownerUniqueID;
+}
+
+const Value rangeLockOwnerValue(const RangeLockOwner& rangeLockOwner) {
+	return ObjectWriter::toValue(rangeLockOwner, IncludeVersion());
+}
+
+RangeLockOwner decodeRangeLockOwner(const ValueRef& value) {
+	RangeLockOwner rangeLockOwner;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(rangeLockOwner);
+	return rangeLockOwner;
 }
 
 // Keys to view and control tag throttling

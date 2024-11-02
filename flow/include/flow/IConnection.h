@@ -28,11 +28,15 @@
 
 #include "flow/Knobs.h"
 #include "flow/NetworkAddress.h"
+#include "flow/network.h"
 
 class Void;
 
 template <typename T>
 class Future;
+
+// forward declare SendBuffer, defined in serialize.h
+class SendBuffer;
 
 class IConnection {
 public:
@@ -86,9 +90,6 @@ public:
 
 	virtual boost::asio::ip::tcp::socket& getSocket() = 0;
 };
-
-// forward declare SendBuffer, declared in serialize.h
-class SendBuffer;
 
 class IListener {
 public:

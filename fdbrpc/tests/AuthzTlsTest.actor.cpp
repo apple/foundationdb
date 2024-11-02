@@ -33,7 +33,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-// NOTE clang15 still does not support std::format
 #include <fmt/core.h>
 
 #include "fdbrpc/fdbrpc.h"
@@ -56,8 +55,7 @@ Role role = Role::MAIN;
 
 template <>
 struct fmt::formatter<Role> : fmt::formatter<std::string> {
-	template <typename FormatContext>
-	auto format(Role role, FormatContext& ctx) {
+	auto format(Role role, fmt::format_context& ctx) const {
 		return fmt::format_to(ctx.out(), "{:^10}", ROLE_STRING[static_cast<int>(role)]);
 	}
 };
@@ -80,8 +78,7 @@ enum ChainLength : int { NO_TLS = -1 };
 
 template <>
 struct fmt::formatter<ChainLength> : fmt::formatter<std::string> {
-	template <class FormatContext>
-	auto format(ChainLength value, FormatContext& ctx) {
+	auto format(ChainLength value, fmt::format_context& ctx) const {
 		if (value == NO_TLS)
 			return fmt::format_to(ctx.out(), "NO_TLS");
 		else
@@ -91,8 +88,7 @@ struct fmt::formatter<ChainLength> : fmt::formatter<std::string> {
 
 template <>
 struct fmt::formatter<std::vector<std::pair<ChainLength, ChainLength>>> : fmt::formatter<std::string> {
-	template <class FormatContext>
-	auto format(const std::vector<std::pair<ChainLength, ChainLength>>& entries, FormatContext& ctx) {
+	auto format(const std::vector<std::pair<ChainLength, ChainLength>>& entries, fmt::format_context& ctx) const {
 		fmt::format_to(ctx.out(), "[");
 		bool first = true;
 		for (const auto& entry : entries) {
@@ -156,8 +152,7 @@ constexpr std::array<std::string_view, static_cast<size_t>(Result::LAST)> RESULT
 	                                                                                     "TIMEOUT" };
 template <>
 struct fmt::formatter<Result> : fmt::formatter<std::string> {
-	template <class FormatContext>
-	auto format(const Result& r, FormatContext& ctx) {
+	auto format(const Result& r, fmt::format_context& ctx) const {
 		return fmt::format_to(ctx.out(), "{}", RESULT_STRING[static_cast<int>(r)]);
 	}
 };

@@ -2,9 +2,6 @@
 # Priority 1.0 is the default in TestHarness2
 testPriority = '20'
 
-[configuration]
-storageEngineExcludeTypes = [5]
-
 [[test]]
 testTitle='ThrottlingTest'
     [[test.workload]]

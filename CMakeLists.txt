@@ -124,7 +124,6 @@ set(FDB_CURRENT_VERSION ${PROJECT_VERSION})
 set(FDB_FUTURE_VERSION "7.5.0")
 set(FDB_PREV_RELEASE_VERSION "7.3.41")
 set(FDB_PREV2_RELEASE_VERSION "7.1.33")
-set(FDB_PREV3_RELEASE_VERSION "7.0.0")
 
 ################################################################################
 # Flow
@@ -190,6 +189,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 
 include(CompileBoost)
+include(GetFmt)
 include(GetMsgpack)
 add_subdirectory(contrib)
 add_subdirectory(flow)
@@ -217,7 +217,9 @@ if(WITH_PYTHON AND WITH_C_BINDING)
 endif()
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
-  add_dependencies(html CopyJavadoc)
+  if(BUILD_JAVA_BINDING)
+    add_dependencies(html CopyJavadoc)
+  endif()
 endif()
 
 if(WIN32)

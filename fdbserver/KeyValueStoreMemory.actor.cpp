@@ -52,6 +52,7 @@ public:
 	                    bool exactRecovery,
 	                    bool enableEncryption);
 
+	bool getReplaceContent() const override { return replaceContent; }
 	// IClosable
 	Future<Void> getError() const override { return log->getError(); }
 	Future<Void> onClosed() const override { return log->onClosed(); }
@@ -494,7 +495,7 @@ private:
 		uint32_t opType = (uint32_t)op;
 		// Make sure the first bit of the optype is empty
 		ASSERT(opType >> ENCRYPTION_ENABLED_BIT == 0);
-		if (!enableEncryption || metaOps.count(op) > 0) {
+		if (!enableEncryption || metaOps.contains(op)) {
 			OpHeader h = { opType, v1.size(), v2.size() };
 			log->push(StringRef((const uint8_t*)&h, sizeof(h)));
 			log->push(v1);
@@ -545,7 +546,7 @@ private:
 		ASSERT(!isOpEncrypted(&h));
 		// Metadata op types to be excluded from encryption.
 		static std::unordered_set<OpType> metaOps = { OpSnapshotEnd, OpSnapshotAbort, OpCommit, OpRollback };
-		if (metaOps.count((OpType)h.op) == 0) {
+		if (!metaOps.contains((OpType)h.op)) {
 			// It is not supported to open an encrypted store as unencrypted, or vice-versa.
 			ASSERT_EQ(encryptedOp, self->enableEncryption);
 		}
@@ -1080,8 +1081,8 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 	    .detail("MemoryLimit", memoryLimit)
 	    .detail("StoreType", storeType);
 
-	// SOMEDAY: update to use DiskQueueVersion::V2 with xxhash3 checksum for FDB >= 7.2
-	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V1);
+	// Use DiskQueueVersion::V2 with xxhash3 checksum
+	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V2);
 	if (storeType == KeyValueStoreType::MEMORY_RADIXTREE) {
 		return new KeyValueStoreMemory<radix_tree>(
 		    log, Reference<AsyncVar<ServerDBInfo> const>(), logID, memoryLimit, storeType, false, false, false, false);
