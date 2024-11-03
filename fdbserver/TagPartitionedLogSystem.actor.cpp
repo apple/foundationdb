@@ -927,7 +927,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peek(UID dbgid,
 	if (tag.locality == tagLocalityRemoteLog) {
 		return peekRemote(dbgid, begin, end, tag, parallelGetMore);
 	} else {
-		return peekAll(dbgid, begin, getPeekEnd(), tag, parallelGetMore);
+		return peekAll(dbgid, begin, end.present() ? end.get() + 1 : getPeekEnd(), tag, parallelGetMore);
 	}
 }
 
