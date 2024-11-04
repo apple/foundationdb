@@ -86,7 +86,7 @@ size_t getNChooseKLowerBound(size_t n, size_t k) {
 	for (size_t i = 2; i <= k; ++i) {
 		result *= ((n - i + 1) * 1.0 / i);
 	}
-	return static_cast<size_t>(ceil(result));
+	return static_cast<size_t>(floor(result));
 }
 
 class DDTeamCollectionImpl {
@@ -4619,7 +4619,7 @@ bool DDTeamCollection::isServerLayoutGood(const uint64_t maxMachineTeamCountGive
 // Decide if the current layout of servers and machines is good enough to meet the target when building serverTeams and
 // machineTeams. Sometimes, buildTeams is consistently failed because the layout is bad For example, when each machine
 // team is smaller than targetTeamNumPerServer, then buildTeam always fails. This can be caused by: (1) each machine has
-// too few SSes; (2) machine count is too small Complexity: scan the server_info list
+// too few SSes; (2) machine count is too small; Complexity: scan the server_info list
 bool DDTeamCollection::isServerMachineLayoutGood() const {
 	uint64_t maxMachineTeamCountGivenAMachine = 0;
 	uint64_t maxMachineTeamCount = 0;
