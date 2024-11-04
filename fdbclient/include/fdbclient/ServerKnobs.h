@@ -763,6 +763,8 @@ public:
 	                                             // determined as degraded satellite.
 	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether the remote log
 	                                             // router is degraded and may use trigger recovery to recover from it.
+	bool CC_INVALIDATE_EXCLUDED_PROCESSES; // When enabled, invalidate the complaints by processes that were excluded
+	                                       // in gray failure triggered recoveries.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 
