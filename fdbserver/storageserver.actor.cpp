@@ -219,33 +219,18 @@ static const std::string bulkLoadFolder = "bulkLoadFiles";
 static const KeyRangeRef persistAccumulativeChecksumKeys =
     KeyRangeRef(PERSIST_PREFIX "AccumulativeChecksum/"_sr, PERSIST_PREFIX "AccumulativeChecksum0"_sr);
 
-inline Key encodePersistAccumulativeChecksumKey(uint16_t acsIndex, LogEpoch epoch) {
+inline Key encodePersistAccumulativeChecksumKey(uint16_t acsIndex) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistAccumulativeChecksumKeys.begin);
 	wr << bigEndian16(acsIndex);
-	wr.serializeBytes("/"_sr);
-	wr << bigEndian64(epoch);
 	return wr.toValue();
 }
 
-inline KeyRange encodePersistAccumulativeChecksumRange(uint16_t acsIndex) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(persistAccumulativeChecksumKeys.begin);
-	wr << bigEndian16(acsIndex);
-	Key keyPrefix = wr.toValue();
-	Key beginKey = keyPrefix.withSuffix("/"_sr);
-	Key endKey = keyPrefix.withSuffix("0"_sr);
-	return Standalone(KeyRangeRef(beginKey, endKey));
-}
-
-inline std::pair<LogEpoch, uint16_t> decodePersistAccumulativeChecksumKey(const Key& key) {
+inline uint16_t decodePersistAccumulativeChecksumKey(const Key& key) {
 	uint16_t acsIndex;
-	LogEpoch epoch;
 	BinaryReader rd(key.removePrefix(persistAccumulativeChecksumKeys.begin), Unversioned());
 	rd >> acsIndex;
-	rd.readBytes(1); // skip "/"
-	rd >> epoch;
-	return std::make_pair(bigEndian64(epoch), bigEndian16(acsIndex));
+	return bigEndian16(acsIndex);
 }
 
 // MoveInUpdates caches new updates of a move-in shard, before that shard is ready to accept writes.
@@ -11225,15 +11210,10 @@ private:
 				    acsMutationState, data->thisServerID, data->tag, data->version.get());
 				if (stateToPersist.present()) {
 					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-					// Clear existing ACS and write the new ACS for the acsIndex
-					KeyRange rangeToClear = encodePersistAccumulativeChecksumRange(stateToPersist.get().acsIndex);
-					data->addMutationToMutationLog(
-					    mLV, MutationRef(MutationRef::ClearRange, rangeToClear.begin, rangeToClear.end));
 					data->addMutationToMutationLog(
 					    mLV,
 					    MutationRef(MutationRef::SetValue,
-					                encodePersistAccumulativeChecksumKey(stateToPersist.get().acsIndex,
-					                                                     stateToPersist.get().epoch),
+					                encodePersistAccumulativeChecksumKey(stateToPersist.get().acsIndex),
 					                accumulativeChecksumValue(stateToPersist.get())));
 				}
 			}
@@ -13133,9 +13113,9 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		RangeResult accumulativeChecksums = fAccumulativeChecksum.get();
 		data->bytesRestored += accumulativeChecksums.logicalSize();
 		for (int acsLoc = 0; acsLoc < accumulativeChecksums.size(); acsLoc++) {
-			std::pair<LogEpoch, uint16_t> res = decodePersistAccumulativeChecksumKey(accumulativeChecksums[acsLoc].key);
+			uint16_t acsIndex = decodePersistAccumulativeChecksumKey(accumulativeChecksums[acsLoc].key);
 			AccumulativeChecksumState acsState = decodeAccumulativeChecksum(accumulativeChecksums[acsLoc].value);
-			ASSERT(res.first == acsState.epoch && res.second == acsState.acsIndex);
+			ASSERT(acsIndex == acsState.acsIndex);
 			data->acsValidator->restore(acsState, data->thisServerID, data->tag, data->version.get());
 		}
 	}
