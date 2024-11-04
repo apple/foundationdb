@@ -82,12 +82,11 @@ size_t getNChooseKLowerBound(size_t n, size_t k) {
 	if (k == 0)
 		return 1;
 
-	size_t result = n;
+	double result = n;
 	for (size_t i = 2; i <= k; ++i) {
-		result = result * (n - i + 1);
-		result = result / i;
+		result *= ((n - i + 1) * 1.0 / i);
 	}
-	return result;
+	return static_cast<size_t>(ceil(result));
 }
 
 class DDTeamCollectionImpl {
@@ -4499,11 +4498,11 @@ bool DDTeamCollection::isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMa
                                            uint64_t& maxMachineTeamCount) const {
 	// The decision is made based on the tracked healthy SSes
 	// Collect data points from server_info and filter out unhealthy machines
-	std::vector<size_t> tmp = getHealthyMachineCountPerZoneOrDataHall();
-	size_t minMachineCountPerZone = tmp[0];
-	size_t maxMachineCountPerZone = tmp[1];
-	size_t zoneCount = tmp[2];
-	size_t totalHealthyMachineCount = tmp[3];
+	TCMachineZoneMapCounting res = getMachineZoneMapCounting();
+	size_t minMachineCountPerZone = res.minMachineCountPerZone;
+	size_t maxMachineCountPerZone = res.maxMachineCountPerZone;
+	size_t zoneCount = res.zoneCount;
+	size_t totalHealthyMachineCount = res.totalHealthyMachineCount;
 	if (zoneCount == 0) {
 		// Layout is bad if the number of zone is 0
 		TraceEvent(SevWarnAlways, "BuildTeamZeroZoneFromServerList", distributorId)
@@ -4562,11 +4561,11 @@ bool DDTeamCollection::isServerLayoutGood(const uint64_t maxMachineTeamCountGive
                                           const uint64_t maxMachineTeamCount) const {
 	// The decision is made based on the tracked healthy SSes
 	// Collect data points from server_info and filter out unhealthy SSes
-	std::vector<size_t> tmp = getHealthyStorageServerCountPerMachine();
-	size_t minServerCountPerMachine = tmp[0];
-	size_t maxServerCountPerMachine = tmp[1];
-	size_t machineCount = tmp[2];
-	size_t totalHealthyServerCount = tmp[3];
+	TCStorageServerMachineMapCounting res = getStorageServerMachineMapCounting();
+	size_t minServerCountPerMachine = res.minServerCountPerMachine;
+	size_t maxServerCountPerMachine = res.maxServerCountPerMachine;
+	size_t machineCount = res.machineCount;
+	size_t totalHealthyServerCount = res.totalHealthyServerCount;
 	if (machineCount == 0) {
 		// Layout is bad if the number of machine is 0
 		TraceEvent(SevWarnAlways, "BuildTeamZeroMachineFromServerList", distributorId)
@@ -5549,8 +5548,8 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 	return false;
 }
 
-std::vector<size_t> DDTeamCollection::getHealthyStorageServerCountPerMachine() const {
-	std::unordered_map<std::string, int> serverCountOnMachines;
+TCStorageServerMachineMapCounting DDTeamCollection::getStorageServerMachineMapCounting() const {
+	std::unordered_map<std::string, size_t> serverCountOnMachines;
 	size_t serverCount = 0;
 	for (auto& [serverID, server] : server_info) {
 		if (server_status.get(serverID).isUnhealthy()) {
@@ -5566,17 +5565,13 @@ std::vector<size_t> DDTeamCollection::getHealthyStorageServerCountPerMachine() c
 	size_t maxCount = 0;
 	size_t minCount = std::numeric_limits<size_t>::max();
 	for (const auto& [id, count] : serverCountOnMachines) {
-		if (count > maxCount) {
-			maxCount = count;
-		}
-		if (count < minCount) {
-			minCount = count;
-		}
+		maxCount = std::max(count, maxCount);
+		minCount = std::min(count, minCount);
 	}
-	return { minCount, maxCount, serverCountOnMachines.size(), serverCount };
+	return TCStorageServerMachineMapCounting(minCount, maxCount, serverCountOnMachines.size(), serverCount);
 }
 
-std::vector<size_t> DDTeamCollection::getHealthyMachineCountPerZoneOrDataHall() const {
+TCMachineZoneMapCounting DDTeamCollection::getMachineZoneMapCounting() const {
 	std::unordered_map<std::string, std::unordered_set<std::string>> machinesPerZone;
 	std::unordered_set<std::string> machines;
 	for (auto& [serverID, server] : server_info) {
@@ -5600,14 +5595,10 @@ std::vector<size_t> DDTeamCollection::getHealthyMachineCountPerZoneOrDataHall() 
 	size_t minCount = std::numeric_limits<int>::max();
 	for (const auto& [id, machines] : machinesPerZone) {
 		size_t machineCount = machines.size();
-		if (machineCount > maxCount) {
-			maxCount = machineCount;
-		}
-		if (machineCount < minCount) {
-			minCount = machineCount;
-		}
+		maxCount = std::max(machineCount, maxCount);
+		minCount = std::min(machineCount, maxCount);
 	}
-	return { minCount, maxCount, machinesPerZone.size(), machines.size() };
+	return TCMachineZoneMapCounting(minCount, maxCount, machinesPerZone.size(), machines.size());
 }
 
 std::vector<std::string> DDTeamCollection::getServersOnMachineTeamDescription(

@@ -202,6 +202,32 @@ struct DDTeamCollectionInitParams {
 	PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 };
 
+struct TCStorageServerMachineMapCounting {
+	size_t minServerCountPerMachine = 0;
+	size_t maxServerCountPerMachine = 0;
+	size_t machineCount = 0;
+	size_t totalHealthyServerCount = 0;
+	TCStorageServerMachineMapCounting(size_t minServerCountPerMachine,
+	                                  size_t maxServerCountPerMachine,
+	                                  size_t machineCount,
+	                                  size_t totalHealthyServerCount)
+	  : minServerCountPerMachine(minServerCountPerMachine), maxServerCountPerMachine(maxServerCountPerMachine),
+	    machineCount(machineCount), totalHealthyServerCount(totalHealthyServerCount) {}
+};
+
+struct TCMachineZoneMapCounting {
+	size_t minMachineCountPerZone = 0;
+	size_t maxMachineCountPerZone = 0;
+	size_t zoneCount = 0;
+	size_t totalHealthyMachineCount = 0;
+	TCMachineZoneMapCounting(size_t minMachineCountPerZone,
+	                         size_t maxMachineCountPerZone,
+	                         size_t zoneCount,
+	                         size_t totalHealthyMachineCount)
+	  : minMachineCountPerZone(minMachineCountPerZone), maxMachineCountPerZone(maxMachineCountPerZone),
+	    zoneCount(zoneCount), totalHealthyMachineCount(totalHealthyMachineCount) {}
+};
+
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 	friend class DDTeamCollectionUnitTest;
@@ -431,9 +457,9 @@ protected:
 	std::vector<std::string> getServersOnMachineTeamDescription(
 	    const std::vector<Reference<TCMachineInfo>>& machines) const;
 
-	std::vector<size_t> getHealthyStorageServerCountPerMachine() const;
+	TCStorageServerMachineMapCounting getStorageServerMachineMapCounting() const;
 
-	std::vector<size_t> getHealthyMachineCountPerZoneOrDataHall() const;
+	TCMachineZoneMapCounting getMachineZoneMapCounting() const;
 
 	bool isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMachine, uint64_t& maxMachineTeamCount) const;
 
