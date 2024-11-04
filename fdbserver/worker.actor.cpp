@@ -1159,14 +1159,18 @@ bool isDegradedPeer(const UpdateWorkerHealthRequest& lastReq, const NetworkAddre
 	return false;
 }
 
+struct PrimaryAndRemoteAddresses {
+	std::vector<NetworkAddress> primary;
+	std::vector<NetworkAddress> remote;
+};
+
 // Check if the current worker is a transaction worker, and is experiencing degraded or disconnected peers.
-UpdateWorkerHealthRequest doPeerHealthCheck(
-    const WorkerInterface& interf,
-    const LocalityData& locality,
-    Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-    const UpdateWorkerHealthRequest& lastReq,
-    Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck,
-    Optional<std::pair<std::vector<NetworkAddress>, std::vector<NetworkAddress>>> storageServers) {
+UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
+                                            const LocalityData& locality,
+                                            Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                            const UpdateWorkerHealthRequest& lastReq,
+                                            Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck,
+                                            Optional<PrimaryAndRemoteAddresses> storageServers) {
 	const auto& allPeers = FlowTransport::transport().getAllPeers();
 
 	// Check remote log router connectivity only when remote TLogs are recruited and in use.
@@ -1178,14 +1182,13 @@ UpdateWorkerHealthRequest doPeerHealthCheck(
 	WorkerLocation workerLocation = None;
 	if (addressesInDbAndPrimaryDc(interf.addresses(),
 	                              dbInfo,
-	                              storageServers.present() ? storageServers.get().first /* primary storage servers */
+	                              storageServers.present() ? storageServers.get().primary
 	                                                       : Optional<std::vector<NetworkAddress>>{})) {
 		workerLocation = Primary;
 	} else if (addressesInDbAndRemoteDc(interf.addresses(),
 	                                    dbInfo,
-	                                    storageServers.present()
-	                                        ? storageServers.get().second /* remote storage servers */
-	                                        : Optional<std::vector<NetworkAddress>>{})) {
+	                                    storageServers.present() ? storageServers.get().remote
+	                                                             : Optional<std::vector<NetworkAddress>>{})) {
 		workerLocation = Remote;
 	} else if (addressesInDbAndPrimarySatelliteDc(interf.addresses(), dbInfo)) {
 		workerLocation = Satellite;
@@ -1395,14 +1398,12 @@ static Optional<Standalone<StringRef>> getPrimaryDCId(const ServerDBInfo& dbInfo
 
 // Makes a "best effort" to return the network addresses of primary and remote storage servers.
 // Both primary and secondary (if present) addresses are returned.
-// This actor makes a network call, and if that call fails, an empty optional is returned.
-// as well a TraceEvent would be logged.
-// Intentionally, this actor does not implement a retry policy, but the client can choose to retry
-// by waiting on this actor again.
-ACTOR Future<
-    Optional<std::pair<std::vector<NetworkAddress> /* primary SS */, std::vector<NetworkAddress> /* remote SS */>>>
-getStorageServers(Database db, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	state Optional<std::pair<std::vector<NetworkAddress>, std::vector<NetworkAddress>>> ret;
+// This actor makes a network call, and if that call fails, an empty optional is returned in addition to a
+// TraceEvent being logged. Intentionally, this actor does not implement a retry policy, but the client can
+// choose to retry by waiting on this actor again.
+ACTOR Future<Optional<PrimaryAndRemoteAddresses>> getStorageServers(Database db,
+                                                                    Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state Optional<PrimaryAndRemoteAddresses> ret;
 	state Transaction tr(db);
 	try {
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -1410,7 +1411,7 @@ getStorageServers(Database db, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 		    wait(NativeAPI::getServerListAndProcessClasses(&tr));
-		std::pair<std::vector<NetworkAddress>, std::vector<NetworkAddress>> storageServers;
+		PrimaryAndRemoteAddresses storageServers;
 		for (auto& [ssi, _] : results) {
 			const auto primaryDCId = getPrimaryDCId(dbInfo->get());
 			const bool primarySS = ssi.locality.dcId().present() && primaryDCId.present() &&
@@ -1418,14 +1419,14 @@ getStorageServers(Database db, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 			const bool remoteSS = ssi.locality.dcId().present() && primaryDCId.present() &&
 			                      ssi.locality.dcId().get() != primaryDCId.get();
 			if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN && primarySS) {
-				storageServers.first.push_back(ssi.address());
+				storageServers.primary.push_back(ssi.address());
 				if (ssi.secondaryAddress().present()) {
-					storageServers.first.push_back(ssi.secondaryAddress().get());
+					storageServers.primary.push_back(ssi.secondaryAddress().get());
 				}
 			} else if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN && remoteSS) {
-				storageServers.second.push_back(ssi.address());
+				storageServers.remote.push_back(ssi.address());
 				if (ssi.secondaryAddress().present()) {
-					storageServers.first.push_back(ssi.secondaryAddress().get());
+					storageServers.remote.push_back(ssi.secondaryAddress().get());
 				}
 			}
 		}
@@ -1448,7 +1449,6 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 	state Optional<Database> db;
 	if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN ||
 	    SERVER_KNOBS->GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN) {
-		// what if this error? or does this never error and is postponed to later txn calls?
 		db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 	loop {
@@ -1457,12 +1457,9 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 		     enablePrimaryTxnSystemHealthCheck->get()) &&
 		    ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
-			state Optional<std::pair<std::vector<NetworkAddress>, std::vector<NetworkAddress>>> storageServers;
-			if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN ||
-			    SERVER_KNOBS->GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN) {
-				ASSERT(db.present());
-				Optional<std::pair<std::vector<NetworkAddress>, std::vector<NetworkAddress>>> storageServers_ =
-				    wait(getStorageServers(db.get(), dbInfo));
+			state Optional<PrimaryAndRemoteAddresses> storageServers;
+			if (db.present()) {
+				Optional<PrimaryAndRemoteAddresses> storageServers_ = wait(getStorageServers(db.get(), dbInfo));
 				storageServers = storageServers_;
 			}
 			req = doPeerHealthCheck(interf, locality, dbInfo, req, enablePrimaryTxnSystemHealthCheck, storageServers);

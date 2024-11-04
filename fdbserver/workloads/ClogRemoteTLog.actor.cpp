@@ -30,12 +30,11 @@ struct ClogRemoteTLog : TestWorkload {
 	double lagThreshold{ 0 };
 
 	enum TestState { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, CLOGGED_REMOTE_TLOG_EXCLUDED };
-	// Currently, the only valid state path is: TEST_INIT -> SS_LAG_NORMAL -> SS_LAG_HIGH -> SS_LAG_NORMAL
-	struct StatePathT {
+	struct StatePath {
 		std::vector<TestState> path;
 		bool prefixMatch{ false };
 	};
-	const std::vector<StatePathT> expectedStatePaths{
+	const std::vector<StatePath> expectedStatePaths{
 		{ .path = { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, SS_LAG_NORMAL }, .prefixMatch = true },
 		// For some topology and process placements, it's possible that the lag does not recover. However, we still
 		// allow the test to pass as long as the bad/clogged remote tlog was excluded by gray failure.
@@ -273,7 +272,7 @@ struct ClogRemoteTLog : TestWorkload {
 			if (self->cloggedRemoteTLog.get().ip == ip) {
 				continue;
 			}
-			TraceEvent("ClogRemoteTLog").detail("SrcIP", self->cloggedRemoteTLog).detail("DstIP", ip);
+			TraceEvent("ClogRemoteTLog").detail("SrcIP", self->cloggedRemoteTLog->ip).detail("DstIP", ip);
 			g_simulator->clogPair(self->cloggedRemoteTLog.get().ip, ip, self->testDuration);
 			g_simulator->clogPair(ip, self->cloggedRemoteTLog.get().ip, self->testDuration);
 		}
@@ -282,7 +281,8 @@ struct ClogRemoteTLog : TestWorkload {
 		return Void();
 	}
 
-	static bool remoteTLogExcluded(const NetworkAddress& addr, const ServerDBInfo& dbInfo) {
+	// Returns true if and only if the provided remote tlog `addr` is not in dbInfo
+	static bool remoteTLogNotInDbInfo(const NetworkAddress& addr, const ServerDBInfo& dbInfo) {
 		for (const auto& tLogSet : dbInfo.logSystemConfig.tLogs) {
 			if (tLogSet.isLocal) {
 				continue;
@@ -313,7 +313,7 @@ struct ClogRemoteTLog : TestWorkload {
 			if (!stateTransition) {
 				const bool dbReady = self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED;
 				if (dbReady && self->cloggedRemoteTLog.present() &&
-				    remoteTLogExcluded(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
+				    remoteTLogNotInDbInfo(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
 					localState = TestState::CLOGGED_REMOTE_TLOG_EXCLUDED;
 					stateTransition = localState != testState;
 				}
