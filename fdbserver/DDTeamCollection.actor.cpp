@@ -5232,8 +5232,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			int overlap = overlappingMachineMembers(machineIDs);
 			if (overlap == machineIDs.size()) {
 				maxAttempts += 1;
-				TraceEvent(SevInfo, "AddBestMachineTeamAlreadyExist", distributorId)
-				    // .suppressFor(1.0)
+				TraceEvent(SevDebug, "AddBestMachineTeamAlreadyExist", distributorId)
 				    .detail("Index", i)
 				    .detail("AddedMachineTeams", addedMachineTeams)
 				    .detail("MachineTeamsToBuild", machineTeamsToBuild)
@@ -5732,8 +5731,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			if (overlap == serverTeam.size()) {
 				maxAttempts += 1;
 				duplicatedAttemptCount++;
-				TraceEvent(SevInfo, "BuildServerTeamsCandidateAlreadyExist", distributorId)
-				    .suppressFor(1.0)
+				TraceEvent(SevDebug, "BuildServerTeamsCandidateAlreadyExist", distributorId)
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("Primary", primary)
