@@ -77,10 +77,10 @@ unsigned EligibilityCounter::getCount(int combinedType) const {
 size_t getNChooseKLowerBound(size_t n, size_t k) {
 	if (k > n)
 		return 0;
-	if (k * 2 > n)
-		k = n - k;
 	if (k == 0)
 		return 1;
+	if (k * 2 > n)
+		k = n - k;
 
 	double result = n;
 	for (size_t i = 2; i <= k; ++i) {
