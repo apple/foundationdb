@@ -260,7 +260,7 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
 		throw please_reboot();
 	}
 	auto res = acsTable.insert({ acsIndex, acsState });
-	ASSERT(res.second); // Each acsIndex has persisted ACS value for at most one epoch -> The insert must be complete
+	ASSERT(res.second); // Each acsIndex has persisted one ACS value
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AcsValidatorRestore", ssid)
 		    .detail("AcsIndex", acsIndex)
