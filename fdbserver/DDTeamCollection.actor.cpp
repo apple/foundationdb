@@ -74,25 +74,6 @@ unsigned EligibilityCounter::getCount(int combinedType) const {
 
 } // namespace data_distribution
 
-size_t getNChooseKLowerBound(int n, int k) {
-	ASSERT(n >= 0 && k >= 0);
-	if (k > n) {
-		return 0;
-	}
-	if (k == 0 || k == n) {
-		return 1;
-	}
-	// Take advantage of symmetry C(n, k) = C(n, n - k)
-	if (k > n - k) {
-		k = n - k;
-	}
-	double result = 1;
-	for (int i = 1; i <= k; ++i) {
-		result *= ((n - k + i) * 1.0 / i); // avoid overflow
-	}
-	return static_cast<size_t>(floor(result));
-}
-
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 		state double start = now();
@@ -4527,7 +4508,7 @@ bool DDTeamCollection::isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMa
 	// Make decision:
 	// (1) Layout is bad if the number of machine/zone is not efficient to satisfy the targetMachineTeamNumPerMachine
 	// when building machineTeams. If this is the case, it is possible that buildTeam consistently fails.
-	maxMachineTeamCountGivenAMachine = getNChooseKLowerBound(zoneCount - 1, configuration.storageTeamSize - 1) *
+	maxMachineTeamCountGivenAMachine = nChooseK(zoneCount - 1, configuration.storageTeamSize - 1) *
 	                                   pow(minMachineCountPerZone, configuration.storageTeamSize - 1);
 	int targetMachineTeamNumPerMachine =
 	    SERVER_KNOBS->TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS
@@ -4537,8 +4518,8 @@ bool DDTeamCollection::isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMa
 
 	// (2) Layout is bad if the number of all healthy machines is not efficient to satisfy the desiredTotalMachineTeams
 	int desiredTotalMachineTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * totalHealthyMachineCount;
-	maxMachineTeamCount = getNChooseKLowerBound(zoneCount, configuration.storageTeamSize) *
-	                      pow(minMachineCountPerZone, configuration.storageTeamSize);
+	maxMachineTeamCount =
+	    nChooseK(zoneCount, configuration.storageTeamSize) * pow(minMachineCountPerZone, configuration.storageTeamSize);
 	sufficientToCreateEnoughMachineTeams &= (desiredTotalMachineTeams <= maxMachineTeamCount);
 
 	TraceEvent(SevInfo, "BuildTeamsDecideMachineGoodLayout", distributorId)
