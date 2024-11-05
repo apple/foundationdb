@@ -43,8 +43,8 @@ typedef enum FDBSeverity {
 } FDBSeverity;
 
 typedef struct CVector {
-    int n;
-    void* elements;
+	int n;
+	void* elements;
 } CVector;
 
 typedef struct CStringPair {
@@ -60,13 +60,13 @@ typedef struct CMetric {
 } CMetric;
 
 typedef struct BridgeToClient {
-    FDBWorkload* workload;
-    void (*setup)(FDBWorkload*, FDBDatabase*, FDBPromise*);
-    void (*start)(FDBWorkload*, FDBDatabase*, FDBPromise*);
-    void (*check)(FDBWorkload*, FDBDatabase*, FDBPromise*);
-    CVector (*getMetrics)(FDBWorkload*);
-    double (*getCheckTimeout)(FDBWorkload*);
-    void (*free)(FDBWorkload*);
+	FDBWorkload* workload;
+	void (*setup)(FDBWorkload*, FDBDatabase*, FDBPromise*);
+	void (*start)(FDBWorkload*, FDBDatabase*, FDBPromise*);
+	void (*check)(FDBWorkload*, FDBDatabase*, FDBPromise*);
+	CVector (*getMetrics)(FDBWorkload*);
+	double (*getCheckTimeout)(FDBWorkload*);
+	void (*free)(FDBWorkload*);
 } BridgeToClient;
 
 typedef struct BridgeToServer {
