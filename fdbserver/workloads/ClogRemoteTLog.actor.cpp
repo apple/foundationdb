@@ -326,6 +326,7 @@ struct ClogRemoteTLog : TestWorkload {
 		state Future<Void> clog = self->clogRemoteTLog(self, db);
 		state TestState testState = TestState::TEST_INIT;
 		self->actualStatePath.push_back(testState);
+		state bool statusCheckPassed = false;
 		loop {
 			wait(delay(self->lagMeasurementFrequency));
 			Optional<double> ssLag = wait(measureMaxSSLag(self, db));
@@ -342,8 +343,11 @@ struct ClogRemoteTLog : TestWorkload {
 				if (dbReady && self->cloggedRemoteTLog.present() &&
 				    remoteTLogNotInDbInfo(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
 					localState = TestState::CLOGGED_REMOTE_TLOG_EXCLUDED;
-					bool checkPassed = wait(grayFailureStatusCheck(db, self->cloggedRemoteTLog.get()));
-					ASSERT(checkPassed);
+					if (!statusCheckPassed) {
+						bool statusCheckPassed_ = wait(grayFailureStatusCheck(db, self->cloggedRemoteTLog.get()));
+						statusCheckPassed = statusCheckPassed_;
+						ASSERT(statusCheckPassed);
+					}
 					stateTransition = localState != testState;
 				}
 			}
