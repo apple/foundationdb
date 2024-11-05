@@ -75,7 +75,10 @@ unsigned EligibilityCounter::getCount(int combinedType) const {
 } // namespace data_distribution
 
 size_t getNChooseKLowerBound(int n, int k) {
-	ASSERT(k >= 0 && k <= n);
+	ASSERT(n >= 0 && k >= 0);
+	if (k > n) {
+		return 0;
+	}
 	if (k == 0 || k == n) {
 		return 1;
 	}
