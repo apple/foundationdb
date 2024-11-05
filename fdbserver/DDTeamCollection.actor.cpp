@@ -89,6 +89,7 @@ size_t getNChooseKLowerBound(int n, int k) {
 	}
 	return static_cast<size_t>(floor(result));
 }
+
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 		state double start = now();
