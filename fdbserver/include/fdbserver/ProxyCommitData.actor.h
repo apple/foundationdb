@@ -343,8 +343,7 @@ struct ProxyCommitData {
 	// RangeLock feature currently is not compatible with encryption and tenant
 	bool rangeLockEnabled() {
 		return SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
-		       !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && !encryptMode.isEncryptionEnabled() &&
+		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && !encryptMode.isEncryptionEnabled() &&
 		       getTenantMode() == TenantMode::DISABLED;
 	}
 
