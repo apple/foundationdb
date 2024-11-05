@@ -74,21 +74,21 @@ unsigned EligibilityCounter::getCount(int combinedType) const {
 
 } // namespace data_distribution
 
-size_t getNChooseKLowerBound(size_t n, size_t k) {
-	if (k > n)
-		return 0;
-	if (k == 0)
+size_t getNChooseKLowerBound(int n, int k) {
+	ASSERT(k >= 0 && k <= n);
+	if (k == 0 || k == n) {
 		return 1;
-	if (k * 2 > n)
+	}
+	// Take advantage of symmetry C(n, k) = C(n, n - k)
+	if (k > n - k) {
 		k = n - k;
-
-	double result = n;
-	for (size_t i = 2; i <= k; ++i) {
-		result *= ((n - i + 1) * 1.0 / i);
+	}
+	double result = 1;
+	for (int i = 1; i <= k; ++i) {
+		result *= ((n - k + i) * 1.0 / i); // avoid overflow
 	}
 	return static_cast<size_t>(floor(result));
 }
-
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 		state double start = now();
