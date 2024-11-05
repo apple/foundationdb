@@ -5,7 +5,6 @@ encryptModes = ['disabled'] # do not support encryption
 [[knobs]]
 enable_read_lock_on_range = true
 transaction_lock_rejection_retriable = false
-proxy_use_resolver_private_mutations = false # do not support version vector
 enable_version_vector = false
 enable_version_vector_tlog_unicast = false
 
