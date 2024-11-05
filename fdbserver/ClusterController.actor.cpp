@@ -3008,7 +3008,7 @@ static void invalidateExcludedProcessComplaints(ClusterControllerData* self) {
 	if (!SERVER_KNOBS->CC_INVALIDATE_EXCLUDED_PROCESSES) {
 		return;
 	}
-	for (const auto& addr : self->excludedDegradedServers) {
+	for (const auto& [addr, _] : self->excludedDegradedServers) {
 		self->workerHealth.erase(addr);
 	}
 }
@@ -4107,7 +4107,9 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 
 	// Compute degraded processes
 	data.degradationInfo = data.getDegradationInfo();
-	data.excludedDegradedServers = data.degradationInfo.degradedServers;
+	for (const auto& addr : data.degradationInfo.degradedServers) {
+		data.excludedDegradedServers[addr] = now();
+	}
 
 	// Ensure badPeer is successfully added to excluded list
 	// At this point, recovery would also be triggered in a production setting
@@ -4125,7 +4127,9 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 
 	// Compute degraded processes again
 	data.degradationInfo = data.getDegradationInfo();
-	data.excludedDegradedServers = data.degradationInfo.degradedServers;
+	for (const auto& addr : data.degradationInfo.degradedServers) {
+		data.excludedDegradedServers[addr] = now();
+	}
 
 	if (SERVER_KNOBS->CC_INVALIDATE_EXCLUDED_PROCESSES) {
 		// With CC_INVALIDATE_EXCLUDE_PROCESSES, we should got 0 degraded processes

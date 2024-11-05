@@ -175,6 +175,32 @@ struct ClogRemoteTLog : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<bool> grayFailureStatusCheck(Database db, NetworkAddress cloggedRemoteTLog) {
+		StatusObject status = wait(StatusClient::statusFetcher(db));
+		StatusObjectReader reader(status);
+		StatusObjectReader cluster;
+		if (!reader.get("cluster", cluster)) {
+			TraceEvent("NoCluster");
+			return false;
+		}
+		StatusObjectReader grayFailure;
+		if (!cluster.get("gray_failure", grayFailure)) {
+			TraceEvent("NoGrayFailure");
+			return false;
+		}
+		ASSERT(grayFailure.has("excluded_processes"));
+		StatusArray excludedProcesses = grayFailure["excluded_processes"].get_array();
+		for (StatusObjectReader process : excludedProcesses) {
+			ASSERT(process.has("address"));
+			ASSERT(process.has("time"));
+			if (process["address"].get_str() == cloggedRemoteTLog.toString()) {
+				ASSERT(process["time"].get_real() < now());
+				return true;
+			}
+		}
+		return false;
+	}
+
 	ACTOR static Future<std::vector<IPAddress>> getRemoteSSIPs(Database db) {
 		state std::vector<IPAddress> ret;
 		state Transaction tr(db);
@@ -307,14 +333,17 @@ struct ClogRemoteTLog : TestWorkload {
 				continue;
 			}
 			// See if ss lag state changed
-			TestState localState = ssLag.get() < self->lagThreshold ? TestState::SS_LAG_NORMAL : TestState::SS_LAG_HIGH;
-			bool stateTransition = localState != testState;
+			state TestState localState =
+			    ssLag.get() < self->lagThreshold ? TestState::SS_LAG_NORMAL : TestState::SS_LAG_HIGH;
+			state bool stateTransition = localState != testState;
 			// If ss lag state did not change, see if clogged remote tlog got excluded
 			if (!stateTransition) {
 				const bool dbReady = self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED;
 				if (dbReady && self->cloggedRemoteTLog.present() &&
 				    remoteTLogNotInDbInfo(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
 					localState = TestState::CLOGGED_REMOTE_TLOG_EXCLUDED;
+					bool checkPassed = wait(grayFailureStatusCheck(db, self->cloggedRemoteTLog.get()));
+					ASSERT(checkPassed);
 					stateTransition = localState != testState;
 				}
 			}
