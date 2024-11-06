@@ -1127,6 +1127,12 @@ public:
 	                                                 // cluster controller.
 	bool GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING; // When enabled, health monitor will try to detect any gray
 	                                                   // failure during tlog recovery during the recovery process.
+	bool GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN; // When enabled, storage servers in the primary DC are allowed to
+	                                                // complain about their peers in the transaction subsystem e.g.
+	                                                // buddy tlogs.
+	bool GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN; // When enabled, storage servers in the remote DC are allowed to
+	                                               // complain about their peers in the transaction subsystem e.g. buddy
+	                                               // tlogs.
 	bool STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT; // When enabled, storage server's worker will crash on io_timeout error;
 	                                          // this allows fdbmonitor to restart the worker and recreate the same SS.
 	                                          // When SS can be temporarily throttled by infrastructure, e.g, k8s,
