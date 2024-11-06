@@ -344,8 +344,7 @@ struct ClogRemoteTLog : TestWorkload {
 				    remoteTLogNotInDbInfo(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
 					localState = TestState::CLOGGED_REMOTE_TLOG_EXCLUDED;
 					if (!statusCheckPassed) {
-						bool statusCheckPassed_ = wait(grayFailureStatusCheck(db, self->cloggedRemoteTLog.get()));
-						statusCheckPassed = statusCheckPassed_;
+						wait(store(statusCheckPassed, grayFailureStatusCheck(db, self->cloggedRemoteTLog.get())));
 						ASSERT(statusCheckPassed);
 					}
 					stateTransition = localState != testState;

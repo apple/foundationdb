@@ -20,7 +20,6 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#include "flow/IPAddress.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H)
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H
 #include "fdbserver/ClusterController.actor.g.h"
@@ -3403,7 +3402,9 @@ public:
 	};
 	std::unordered_map<NetworkAddress, WorkerHealth> workerHealth;
 	DegradationInfo degradationInfo;
-	std::unordered_map<NetworkAddress, double /* latest time at which address was excluded */> excludedDegradedServers;
+	std::unordered_map<NetworkAddress /* degraded servers to be excluded when assigning workers to roles */,
+	                   double /* latest time at which address was excluded */>
+	    excludedDegradedServers;
 	std::queue<double> recentHealthTriggeredRecoveryTime;
 
 	// Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
