@@ -1412,8 +1412,8 @@ ACTOR Future<Optional<PrimaryAndRemoteAddresses>> getStorageServers(Database db,
 		std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 		    wait(NativeAPI::getServerListAndProcessClasses(&tr));
 		PrimaryAndRemoteAddresses storageServers;
+		const auto primaryDCId = getPrimaryDCId(dbInfo->get());
 		for (auto& [ssi, _] : results) {
-			const auto primaryDCId = getPrimaryDCId(dbInfo->get());
 			const bool primarySS = ssi.locality.dcId().present() && primaryDCId.present() &&
 			                       ssi.locality.dcId().get() == primaryDCId.get();
 			const bool remoteSS = ssi.locality.dcId().present() && primaryDCId.present() &&
@@ -1459,8 +1459,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			state Optional<PrimaryAndRemoteAddresses> storageServers;
 			if (db.present()) {
-				Optional<PrimaryAndRemoteAddresses> storageServers_ = wait(getStorageServers(db.get(), dbInfo));
-				storageServers = storageServers_;
+				wait(store(storageServers, getStorageServers(db.get(), dbInfo)));
 			}
 			req = doPeerHealthCheck(interf, locality, dbInfo, req, enablePrimaryTxnSystemHealthCheck, storageServers);
 

@@ -792,10 +792,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER,                 3 );
 	init( CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING,   false); 
 	init( CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING,                true); 
-	init( CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING,         false); if (isSimulated && deterministicRandom()->coinflip()) CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING = true;
-	init( CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING,          false); if (isSimulated && deterministicRandom()->coinflip()) CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING = true;
-	init( CC_ONLY_CONSIDER_INTRA_DC_LATENCY,                    false); if (isSimulated && deterministicRandom()->coinflip()) CC_ONLY_CONSIDER_INTRA_DC_LATENCY = true;
-	init( CC_INVALIDATE_EXCLUDED_PROCESSES,                     false); if (isSimulated && deterministicRandom()->coinflip()) CC_INVALIDATE_EXCLUDED_PROCESSES = true;
+	init( CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING,         false); if (isSimulated) CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING = deterministicRandom()->coinflip();
+	init( CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING,          false); if (isSimulated) CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING = deterministicRandom()->coinflip();
+	init( CC_ONLY_CONSIDER_INTRA_DC_LATENCY,                    false); if (isSimulated) CC_ONLY_CONSIDER_INTRA_DC_LATENCY = deterministicRandom()->coinflip();
+	init( CC_INVALIDATE_EXCLUDED_PROCESSES,                     false); if (isSimulated) CC_INVALIDATE_EXCLUDED_PROCESSES = deterministicRandom()->coinflip();
 	init( CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL,              0.5 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
@@ -1102,8 +1102,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               5 );
 	init( WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER,           true );
 	init( GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING,         true );	
-	init( GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN,           false ); if (isSimulated && deterministicRandom()->coinflip()) GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN = true;
-	init( GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN,            false ); if (isSimulated && deterministicRandom()->coinflip()) GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN = true;
+	init( GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN,           false ); if (isSimulated) GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN = deterministicRandom()->coinflip();
+	init( GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN,            false ); if (isSimulated) GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN = deterministicRandom()->coinflip();
 	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
 	init( STORAGE_DISK_CLEANUP_MAX_RETRIES,                       10 );
 	init( STORAGE_DISK_CLEANUP_RETRY_INTERVAL,  isSimulated ? 2 : 30 );
