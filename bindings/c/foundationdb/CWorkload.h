@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,6 +59,25 @@ typedef struct CMetric {
 	bool averaged;
 } CMetric;
 
+/**
+ * BridgeToClient - A structure the client has to pass to the fdbserver so it
+ * can interact with the workload it defines.
+ *
+ * This structure includes:
+ * - An opaque pointer to the client-defined workload.
+ * - A set of function pointers that operate on the workload, with the workload
+ *   itself as the first parameter (emulating C++ method calls).
+ *
+ * All methods, except `free`, directly map to corresponding C++ methods in
+ * `CppWorkload.h`, documented here: https://apple.github.io/foundationdb/client-testing.html.
+ *
+ * Notes:
+ * - `FDBWorkload::init` is not defined in this struct, initialization should be
+ *   done during workload creation.
+ * - The `FDBWorkload` pointer passed in each method corresponds to the pointer
+ *   the client sets in `BridgeToClient::workload`, allowing it to be safely cast
+ *   back to its original type.
+ */
 typedef struct BridgeToClient {
 	FDBWorkload* workload;
 	void (*setup)(FDBWorkload*, FDBDatabase*, FDBPromise*);
@@ -69,6 +88,21 @@ typedef struct BridgeToClient {
 	void (*free)(FDBWorkload*);
 } BridgeToClient;
 
+/**
+ * BridgeToServer - A structure the client will receive at initialisation
+ * to interact with the FDBContext and FDBPromise.
+ *
+ * Each C workload must define the following entry point:
+ * extern BridgeToClient workloadInstantiate(char* name, FDBWorkloadContext* ctx, BridgeToServer bridge);
+ * This allows the fdbserver to pass to the workload's name, context and bridge.
+ * A workload instance must be created, initialized and returned as a pointer
+ * in the BridgeToClient structure. The context and bridge should be stored, as
+ * they cannot be accessed otherwise
+ *
+ * The ContextImpl and PromiseImpl sub-structures store the function pointers
+ * corresponding to the C++ methods of FDBContext and FDBPromise respectively,
+ * defined in CppWorkload.h
+ */
 typedef struct BridgeToServer {
 	struct ContextImpl {
 		void (*trace)(FDBWorkloadContext* context, FDBSeverity severity, const char* name, CVector vec);

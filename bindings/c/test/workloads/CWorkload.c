@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -88,11 +88,6 @@ static void workload_free(FDBWorkload* raw_workload) {
 }
 
 extern BridgeToClient workloadInstantiate(char* name, FDBWorkloadContext* context, BridgeToServer bridgeToServer) {
-	// int status = fdb_select_api_version(FDB_API_VERSION);
-	// if (status != 0) {
-	//     fdb_get_error(status);
-	// }
-
 	char* configValue = bridgeToServer.context.getOption(context, "my_c_option", "null");
 	int clientId = bridgeToServer.context.clientId(context);
 	int clientCount = bridgeToServer.context.clientCount(context);
