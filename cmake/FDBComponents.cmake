@@ -231,10 +231,7 @@ endif()
 
 ################################################################################
 
-# find_package(Protobuf CONFIG REQUIRED)
-
 # TODO (Vishesh): Replace with target_include_directories.
-# include_directories(${PROTOBUF_INCLUDE_DIR})
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/generated/")
 
 set(gRPC_DIR /usr/local/lib/cmake/grpc)

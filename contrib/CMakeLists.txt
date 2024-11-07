@@ -1,7 +1,6 @@
 add_library(rapidjson INTERFACE)
 target_include_directories(rapidjson INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/rapidjson)
 
-add_subdirectory(fmt-8.1.1)
 add_subdirectory(crc32)
 add_subdirectory(stacktrace)
 add_subdirectory(folly_memcpy)
