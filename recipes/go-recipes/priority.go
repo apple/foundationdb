@@ -80,6 +80,9 @@ func (prty Priority) _NextCount(trtr fdb.Transactor, priority int) int {
 			return 0, nil
 		}
 		k, err := prty.PrioritySS.Unpack(ks[0].Key)
+		if err != nil {
+			return nil, err
+		}
 		return k[0].(int) + 1, nil
 	})
 	if err != nil {
