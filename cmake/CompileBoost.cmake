@@ -77,7 +77,7 @@ function(compile_boost)
   if(USE_ASAN)
     set(BOOST_SRC_URL https://boostorg.jfrog.io/artifactory/main/release/1.86.0/source/boost_1_86_0.tar.bz2)
     set(BOOST_SRC_SHA SHA256=1bed88e40401b2cb7a1f76d4bab499e352fa4d0c5f31c0dbae64e24d34d7513b)
-    set(COMPILE_BOOST_BUILD_ARGS context-impl=ucontext)
+    set(B2_ADDTTIONAL_BUILD_ARGS context-impl=ucontext)
   endif()
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
@@ -88,7 +88,7 @@ function(compile_boost)
                        --with-libraries=${BOOTSTRAP_LIBRARIES}
                        --with-toolset=${BOOST_TOOLSET}
     BUILD_COMMAND      ${B2_COMMAND}
-                       link=static
+                       link=static ${B2_ADDTTIONAL_BUILD_ARGS}
                        ${COMPILE_BOOST_BUILD_ARGS}
                        --prefix=${BOOST_INSTALL_DIR}
                        ${USER_CONFIG_FLAG} install
