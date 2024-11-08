@@ -1520,6 +1520,7 @@ private:
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
+				setThreadLocalDeterministicRandomSeed(randomSeed);
 				break;
 			}
 			case OPT_MACHINEID: {
@@ -1988,8 +1989,6 @@ int main(int argc, char* argv[]) {
 
 		if (opts.zoneId.present())
 			printf("ZoneId set to %s, dcId to %s\n", printable(opts.zoneId).c_str(), printable(opts.dcId).c_str());
-
-		setThreadLocalDeterministicRandomSeed(opts.randomSeed);
 
 		if (opts.buggifyEnabled) {
 			enableGeneralBuggify();
