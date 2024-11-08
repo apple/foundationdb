@@ -2031,6 +2031,11 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 			// FIXME: we cannot use one satellite replication with more than one satellite per region because
 			// canKillProcesses does not respect usable_dcs
 			int satellite_replication_type = deterministicRandom()->randomInt(0, 3);
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && satellite_replication_type == 1) {
+				// two_satellite_fast sets antiQuorum to 2, because only one out of two satellites need reply before
+				// commit. disabling for version vector in simulation until quorum feature works with it.
+				satellite_replication_type = 2;
+			}
 			switch (satellite_replication_type) {
 			case 0: {
 				CODE_PROBE(true, "Simulated cluster using no satellite redundancy mode (>4 datacenters)");
