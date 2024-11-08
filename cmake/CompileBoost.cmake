@@ -71,10 +71,18 @@ function(compile_boost)
   # Build boost
   include(ExternalProject)
 
+  set(BOOST_SRC_URL https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2)
+  set(BOOST_SRC_SHA SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc)
+
+  if(USE_ASAN)
+    set(BOOST_SRC_URL https://boostorg.jfrog.io/artifactory/main/release/1.86.0/source/boost_1_86_0.tar.bz2)
+    set(BOOST_SRC_SHA SHA256=1bed88e40401b2cb7a1f76d4bab499e352fa4d0c5f31c0dbae64e24d34d7513b)
+    set(COMPILE_BOOST_BUILD_ARGS context-impl=ucontext)
+  endif()
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
-    URL                "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
-    URL_HASH           SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
+    URL                ${BOOST_SRC_URL}
+    URL_HASH           ${BOOST_SRC_SHA}
     CONFIGURE_COMMAND  ${BOOTSTRAP_COMMAND}
                        ${BOOTSTRAP_ARGS}
                        --with-libraries=${BOOTSTRAP_LIBRARIES}
@@ -132,6 +140,10 @@ if(USE_SANITIZER)
   message(STATUS "A sanitizer is enabled, need to build boost from source")
   if (USE_VALGRIND)
     compile_boost(TARGET boost_target BUILD_ARGS valgrind=on
+      CXXFLAGS ${BOOST_CXX_OPTIONS} LDFLAGS ${BOOST_LINK_OPTIONS})
+  elseif(USE_ASAN)
+    list(APPEND BOOST_CXX_OPTIONS -DBOOST_COROUTINES_NO_DEPRECATION_WARNING)
+    compile_boost(TARGET boost_target BUILD_ARGS
       CXXFLAGS ${BOOST_CXX_OPTIONS} LDFLAGS ${BOOST_LINK_OPTIONS})
   else()
     compile_boost(TARGET boost_target BUILD_ARGS context-impl=ucontext
