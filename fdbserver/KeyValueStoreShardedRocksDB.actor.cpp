@@ -778,6 +778,7 @@ public:
 			}
 		}
 		TraceEvent("RefreshIterators")
+		    .suppressFor(5.0)
 		    .detail("NumReplacedIterators", numReplacedIters)
 		    .detail("NumReusedIterators", numReusedIters)
 		    .detail("NumNewIterators", numNewIterators)
