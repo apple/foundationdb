@@ -988,6 +988,9 @@ void DDQueue::launchQueuedWork(RelocateData launchData, const DDEnabledState* dd
 }
 
 DataMoveType newDataMoveType(bool doBulkLoading) {
+	if (doBulkLoading && SERVER_KNOBS->BULKLOAD_ONLY_USE_PHYSICAL_SHARD_MOVE) {
+		return DataMoveType::PHYSICAL_BULKLOAD;
+	}
 	DataMoveType type = DataMoveType::LOGICAL;
 	if (deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY) {
 		type = DataMoveType::PHYSICAL;

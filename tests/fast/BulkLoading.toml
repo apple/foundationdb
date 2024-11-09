@@ -15,7 +15,6 @@ encryptModes = ['disabled'] # Do not support encryption
 # The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check
 # so for this BulkLoading test, the shard RocksDB storage engine is always turned on.
 shard_encode_location_metadata = true
-dd_physical_shard_move_probability = 1.0
 
 # BulkLoad relies on RangeLock
 enable_read_lock_on_range = true
