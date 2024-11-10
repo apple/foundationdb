@@ -510,6 +510,7 @@ private:
 	}
 
 	void checkSetApplyMutationsEndRange(MutationRef m) {
+		// only proceed when see mutation with applyMutationsEndRange
 		if (!m.param1.startsWith(applyMutationsEndRange.begin)) {
 			return;
 		}
