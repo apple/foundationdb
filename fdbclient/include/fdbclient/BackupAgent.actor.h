@@ -522,8 +522,8 @@ using RangeResultWithVersion = std::pair<RangeResult, Version>;
 
 struct RCGroup {
 	RangeResult items;
-	Version version;
-	uint64_t groupKey;
+	Version version; // this is read version for this group
+	uint64_t groupKey; // this is the original version for this group
 
 	RCGroup() : version(-1), groupKey(ULLONG_MAX){};
 
@@ -676,6 +676,7 @@ public:
 	                    Reference<Task> task,
 	                    SetValidation setValidation = SetValidation::True) {
 		// Set the uid task parameter
+		// task's uid is set to my uid
 		TaskParams.uid().set(task, uid);
 
 		if (!setValidation) {
