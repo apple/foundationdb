@@ -4,14 +4,16 @@ mod bindings;
 mod mock;
 
 use bindings::{
-    str_from_c, BridgeToClient, BridgeToServer, BridgeToServer_PromiseImpl, CVector, FDBDatabase,
-    FDBPromise, FDBWorkload, FDBWorkloadContext, Metric, Promise, Severity, WorkloadContext,
+    str_from_c, FDBMetrics, FDBPromise, FDBWorkload, FDBWorkloadContext, OpaqueWorkload,
 };
+pub use bindings::{FDBDatabase, Metric, Metrics, Promise, Severity, WorkloadContext};
 
-/// RustWorkload trait provides a one to one equivalent to the C++ abstract class `FDBWorkload`
+// Should be replaced by a Rust wrapper over the FDBDatabase bindings, like the one provided by
+// foundationdb-rs
+pub type MockDatabase = NonNull<FDBDatabase>;
+
+/// Equivalent to the C++ abstract class `FDBWorkload`
 pub trait RustWorkload {
-    fn new(name: String, context: WorkloadContext) -> Self;
-
     /// This method is called by the tester during the setup phase.
     /// It should be used to populate the database.
     ///
@@ -40,86 +42,76 @@ pub trait RustWorkload {
 
     /// If a workload collects metrics (like latencies or throughput numbers), these should be reported back here.
     /// The multitester (or test orchestrator) will collect all metrics from all test clients and it will aggregate them.
-    fn get_metrics(&self) -> Vec<Metric>;
+    ///
+    /// # Arguments
+    ///
+    /// * `out` - A metric sink
+    fn get_metrics(&self, out: Metrics);
 
     /// Set the check timeout for this workload.
     fn get_check_timeout(&self) -> f64;
 }
 
-// Should be replaced by a Rust wrapper over the FDBDatabase bindings, like the one provided by
-// foundationdb-rs
-type MockDatabase = NonNull<FDBDatabase>;
-
-struct Bridge<W: RustWorkload> {
-    workload: W,
-    promise: BridgeToServer_PromiseImpl,
+/// Equivalent to the C++ abstract class `FDBWorkloadFactory`
+pub trait RustWorkloadFactory {
+    /// If the test file contains a key-value pair workloadName the value will be passed to this method (empty string otherwise).
+    /// This way, a library author can implement many workloads in one library and use the test file to chose which one to run
+    /// (or run multiple workloads either concurrently or serially).
+    fn create(name: String, context: WorkloadContext) -> FDBWorkload;
 }
 
 unsafe extern "C" fn workload_setup<W: RustWorkload + 'static>(
-    raw_bridge: *mut FDBWorkload,
+    raw_workload: *mut OpaqueWorkload,
     raw_database: *mut FDBDatabase,
-    raw_promise: *mut FDBPromise,
+    raw_promise: FDBPromise,
 ) {
-    let bridge = &mut *(raw_bridge as *mut Bridge<W>);
+    let workload = &mut *(raw_workload as *mut W);
     let database = NonNull::new_unchecked(raw_database);
-    let done = Promise::new(raw_promise, bridge.promise);
-    bridge.workload.setup(database, done)
+    let done = Promise::new(raw_promise);
+    workload.setup(database, done)
 }
 unsafe extern "C" fn workload_start<W: RustWorkload + 'static>(
-    raw_bridge: *mut FDBWorkload,
+    raw_workload: *mut OpaqueWorkload,
     raw_database: *mut FDBDatabase,
-    raw_promise: *mut FDBPromise,
+    raw_promise: FDBPromise,
 ) {
-    let bridge = &mut *(raw_bridge as *mut Bridge<W>);
+    let workload = &mut *(raw_workload as *mut W);
     let database = NonNull::new_unchecked(raw_database);
-    let done = Promise::new(raw_promise, bridge.promise);
-    bridge.workload.start(database, done)
+    let done = Promise::new(raw_promise);
+    workload.start(database, done)
 }
 unsafe extern "C" fn workload_check<W: RustWorkload + 'static>(
-    raw_bridge: *mut FDBWorkload,
+    raw_workload: *mut OpaqueWorkload,
     raw_database: *mut FDBDatabase,
-    raw_promise: *mut FDBPromise,
+    raw_promise: FDBPromise,
 ) {
-    let bridge: &mut Bridge<W> = &mut *(raw_bridge as *mut Bridge<W>);
+    let workload = &mut *(raw_workload as *mut W);
     let database = NonNull::new_unchecked(raw_database);
-    let done = Promise::new(raw_promise, bridge.promise);
-    bridge.workload.check(database, done)
+    let done = Promise::new(raw_promise);
+    workload.check(database, done)
 }
 unsafe extern "C" fn workload_get_metrics<W: RustWorkload>(
-    raw_bridge: *mut FDBWorkload,
-) -> CVector {
-    let bridge = &*(raw_bridge as *mut Bridge<W>);
-    let mut metrics = bridge.workload.get_metrics();
-    // TODO: Metric to CMetric
-    // FIXME: dangling pointers
-    CVector {
-        elements: metrics.as_mut_ptr() as *mut _,
-        n: metrics.len() as i32,
-    }
+    raw_workload: *mut OpaqueWorkload,
+    raw_metrics: FDBMetrics,
+) {
+    let workload = &*(raw_workload as *mut W);
+    let out = Metrics::new(raw_metrics);
+    workload.get_metrics(out)
 }
 unsafe extern "C" fn workload_get_check_timeout<W: RustWorkload>(
-    raw_bridge: *mut FDBWorkload,
+    raw_workload: *mut OpaqueWorkload,
 ) -> f64 {
-    let bridge = &*(raw_bridge as *mut Bridge<W>);
-    bridge.workload.get_check_timeout()
+    let workload = &*(raw_workload as *mut W);
+    workload.get_check_timeout()
 }
-unsafe extern "C" fn workload_drop<W: RustWorkload>(raw_bridge: *mut FDBWorkload) {
-    unsafe { drop(Box::from_raw(raw_bridge as *mut Bridge<W>)) };
+unsafe extern "C" fn workload_drop<W: RustWorkload>(raw_workload: *mut OpaqueWorkload) {
+    unsafe { drop(Box::from_raw(raw_workload as *mut W)) };
 }
 
-extern "C" fn workload_instantiate<W: RustWorkload + 'static>(
-    raw_name: *const c_char,
-    raw_context: *mut FDBWorkloadContext,
-    bridge_to_server: BridgeToServer,
-) -> BridgeToClient {
-    let name = str_from_c(raw_name);
-    let context = WorkloadContext::new(raw_context, bridge_to_server.context);
-    let workload = Box::into_raw(Box::new(Bridge {
-        workload: W::new(name, context),
-        promise: bridge_to_server.promise,
-    }));
-    BridgeToClient {
-        workload: workload as *mut _,
+pub fn wrap<W: RustWorkload + 'static>(workload: W) -> FDBWorkload {
+    let workload = Box::into_raw(Box::new(workload));
+    FDBWorkload {
+        inner: workload as *mut _,
         setup: Some(workload_setup::<W>),
         start: Some(workload_start::<W>),
         check: Some(workload_check::<W>),
@@ -129,17 +121,17 @@ extern "C" fn workload_instantiate<W: RustWorkload + 'static>(
     }
 }
 
-// FIXME: workloadFactory
 #[macro_export]
-macro_rules! register_workload {
+macro_rules! register_factory {
     ($name:ident) => {
         #[no_mangle]
-        extern "C" fn workloadInstantiate(
+        extern "C" fn workloadCFactory(
             raw_name: *const $crate::c_char,
-            raw_context: *mut $crate::FDBWorkloadContext,
-            bridge_to_server: $crate::BridgeToServer,
-        ) -> $crate::BridgeToClient {
-            $crate::workload_instantiate::<$name>(raw_name, raw_context, bridge_to_server)
+            raw_context: $crate::FDBWorkloadContext,
+        ) -> $crate::FDBWorkload {
+            let name = $crate::str_from_c(raw_name);
+            let context = $crate::WorkloadContext::new(raw_context);
+            $name::create(name, context)
         }
     };
 }

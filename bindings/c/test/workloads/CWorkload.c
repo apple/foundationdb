@@ -20,90 +20,93 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-// #define FDB_USE_LATEST_API_VERSION
-// #include "foundationdb/fdb_c.h"
+#include <string.h>
 #include "foundationdb/CWorkload.h"
 
 typedef struct CWorkload {
 	char* name;
-	int cliendId;
-	BridgeToServer cpp;
-	FDBWorkloadContext* context;
+	int cliend_id;
+	FDBWorkloadContext context;
 } CWorkload;
 
-#define GET_CWORKLOAD(NAME, W) CWorkload* NAME = (CWorkload*)W
+#define BIND(W) CWorkload* this = (CWorkload*)W
+#define WITH(C, M, ...) (C).M((C).inner, ##__VA_ARGS__)
 
-static void workload_setup(FDBWorkload* raw_workload, FDBDatabase* db, FDBPromise* done) {
-	GET_CWORKLOAD(workload, raw_workload);
-	printf("workload_setup(%s_%d)\n", workload->name, workload->cliendId);
-	CStringPair pairs[2] = {
+static void workload_setup(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
+	BIND(raw_workload);
+	printf("workload_setup(%s_%d)\n", this->name, this->cliend_id);
+	FDBStringPair details[2] = {
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "setup" },
 	};
-	CVector details = { .n = 2, .elements = pairs };
-	workload->cpp.context.trace(workload->context, FDBSeverity_Debug, "Test", details);
-	workload->cpp.promise.send(done, true);
-	workload->cpp.promise.free(done);
+	WITH(this->context, trace, FDBSeverity_Debug, "Test", details, 2);
+	WITH(done, send, true);
+	WITH(done, free);
 }
-static void workload_start(FDBWorkload* raw_workload, FDBDatabase* db, FDBPromise* done) {
-	GET_CWORKLOAD(workload, raw_workload);
-	printf("workload_start(%s_%d)\n", workload->name, workload->cliendId);
-	CStringPair pairs[2] = {
+static void workload_start(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
+	BIND(raw_workload);
+	printf("workload_start(%s_%d)\n", this->name, this->cliend_id);
+	FDBStringPair details[2] = {
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "start" },
 	};
-	CVector details = { .n = 2, .elements = pairs };
-	workload->cpp.context.trace(workload->context, FDBSeverity_Debug, "Test", details);
-	workload->cpp.promise.send(done, true);
-	workload->cpp.promise.free(done);
+	WITH(this->context, trace, FDBSeverity_Debug, "Test", details, 2);
+	WITH(done, send, true);
+	WITH(done, free);
 }
-static void workload_check(FDBWorkload* raw_workload, FDBDatabase* db, FDBPromise* done) {
-	GET_CWORKLOAD(workload, raw_workload);
-	printf("workload_check(%s_%d)\n", workload->name, workload->cliendId);
-	CStringPair pairs[2] = {
+static void workload_check(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
+	BIND(raw_workload);
+	printf("workload_check(%s_%d)\n", this->name, this->cliend_id);
+	FDBStringPair details[2] = {
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "check" },
 	};
-	CVector details = { .n = 2, .elements = pairs };
-	workload->cpp.context.trace(workload->context, FDBSeverity_Debug, "Test", details);
-	workload->cpp.promise.send(done, true);
-	workload->cpp.promise.free(done);
+	WITH(this->context, trace, FDBSeverity_Debug, "Test", details, 2);
+	WITH(done, send, true);
+	WITH(done, free);
 }
-static CVector workload_getMetrics(FDBWorkload* raw_workload) {
-	GET_CWORKLOAD(workload, raw_workload);
-	printf("workload_getMetrics(%s_%d)\n", workload->name, workload->cliendId);
-	CVector metrics = { 0 };
-	return metrics;
+static void workload_getMetrics(OpaqueWorkload* raw_workload, FDBMetrics out) {
+	BIND(raw_workload);
+	printf("workload_getMetrics(%s_%d)\n", this->name, this->cliend_id);
+	WITH(out, reserve, 8);
+	WITH(out, push, (FDBMetric){ .key = "test", .val = 42., .avg = false });
 }
-static double workload_getCheckTimeout(FDBWorkload* raw_workload) {
-	GET_CWORKLOAD(workload, raw_workload);
-	printf("workload_getCheckTimeout(%s_%d)\n", workload->name, workload->cliendId);
+static double workload_getCheckTimeout(OpaqueWorkload* raw_workload) {
+	BIND(raw_workload);
+	printf("workload_getCheckTimeout(%s_%d)\n", this->name, this->cliend_id);
 	return 3000.;
 };
-static void workload_free(FDBWorkload* raw_workload) {
-	GET_CWORKLOAD(workload, raw_workload);
-	printf("workload_free(%s_%d)\n", workload->name, workload->cliendId);
-	free(workload->name);
-	free(workload);
+static void workload_free(OpaqueWorkload* raw_workload) {
+	BIND(raw_workload);
+	printf("workload_free(%s_%d)\n", this->name, this->cliend_id);
+	free(this->name);
+	free(this);
 }
 
-extern BridgeToClient workloadInstantiate(char* name, FDBWorkloadContext* context, BridgeToServer bridgeToServer) {
-	char* configValue = bridgeToServer.context.getOption(context, "my_c_option", "null");
-	int clientId = bridgeToServer.context.clientId(context);
-	int clientCount = bridgeToServer.context.clientCount(context);
+extern FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext context) {
+	int len = strlen(borrow_name) + 1;
+	char* name = (char*)malloc(len);
+	memcpy(name, borrow_name, len);
 
-	printf("workloadInstantiate(%s, %p)[%d/%d]\n", name, context, client_id, clientCount);
-	printf("my_c_option: %s\n", configValue);
-	free(configValue);
+	int client_id = WITH(context, clientId);
+	int client_count = WITH(context, clientCount);
+	printf("workloadCFactory(%s)[%d/%d]\n", name, client_id, client_count);
+
+	FDBString my_c_option;
+	my_c_option = WITH(context, getOption, "my_c_option", "null");
+	printf("my_c_option: \"%s\"\n", my_c_option.inner);
+	WITH(my_c_option, free);
+	my_c_option = WITH(context, getOption, "my_c_option", "null");
+	printf("my_c_option: \"%s\"\n", my_c_option.inner);
+	WITH(my_c_option, free);
 
 	CWorkload* workload = (CWorkload*)malloc(sizeof(CWorkload));
 	workload->name = name;
-	workload->cliendId = clientId;
-	workload->cpp = bridgeToServer;
+	workload->cliend_id = client_id;
 	workload->context = context;
 
-	BridgeToClient bridgeToClient = {
-		.workload = (FDBWorkload*)workload,
+	return (FDBWorkload){
+		.inner = (OpaqueWorkload*)workload,
 		.setup = workload_setup,
 		.start = workload_start,
 		.check = workload_check,
@@ -111,5 +114,4 @@ extern BridgeToClient workloadInstantiate(char* name, FDBWorkloadContext* contex
 		.getCheckTimeout = workload_getCheckTimeout,
 		.free = workload_free,
 	};
-	return bridgeToClient;
 }
