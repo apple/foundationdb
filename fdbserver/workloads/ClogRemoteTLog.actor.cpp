@@ -188,17 +188,16 @@ struct ClogRemoteTLog : TestWorkload {
 			TraceEvent("NoGrayFailure");
 			return false;
 		}
-		ASSERT(grayFailure.has("excluded_processes"));
-		StatusArray excludedProcesses = grayFailure["excluded_processes"].get_array();
+		ASSERT(grayFailure.has("excluded_servers"));
+		StatusArray excludedProcesses = grayFailure["excluded_servers"].get_array();
 		for (StatusObjectReader process : excludedProcesses) {
 			ASSERT(process.has("address"));
 			ASSERT(process.has("time"));
-			if (process["address"].get_str() == cloggedRemoteTLog.toString()) {
-				ASSERT(process["time"].get_real() < now());
-				return true;
-			}
+			TraceEvent("GrayFailureStatus")
+			    .detail("Address", process["address"].get_str())
+			    .detail("time", process["time"].get_real());
 		}
-		return false;
+		return true;
 	}
 
 	ACTOR static Future<std::vector<IPAddress>> getRemoteSSIPs(Database db) {

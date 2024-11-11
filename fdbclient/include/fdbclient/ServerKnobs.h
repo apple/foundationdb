@@ -794,7 +794,7 @@ public:
 	                                        // challenging to pick a good latency threshold.
 	bool CC_INVALIDATE_EXCLUDED_PROCESSES; // When enabled, invalidate the complaints by processes that were excluded
 	                                       // in gray failure triggered recoveries.
-	bool CC_GRAY_FAILURE_STATUS_JSON; // When enabled, returns gray failure information in machine readable status json
+	bool CC_GRAY_FAILURE_STATUS_JSON; // When enabled, returns gray failure information in machine readable status json.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 

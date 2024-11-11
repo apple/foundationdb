@@ -528,7 +528,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
       },
       "generation":2,
       "gray_failure" : {
-         "excluded_processes" : [
+         "excluded_servers" : [
          ]
       },
       "latency_probe":{

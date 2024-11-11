@@ -1143,14 +1143,14 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 static JsonBuilderObject grayFailureStatus(const std::unordered_map<NetworkAddress, double>& excludedDegradedServers) {
 	JsonBuilderObject status;
-	JsonBuilderArray excludedProcesses;
+	JsonBuilderArray excludedServers;
 	for (const auto& [excludedServer, time] : excludedDegradedServers) {
-		JsonBuilderObject process;
-		process["address"] = excludedServer.toString();
-		process["time"] = time;
-		excludedProcesses.push_back(process);
+		JsonBuilderObject server;
+		server["address"] = excludedServer.toString();
+		server["time"] = time;
+		excludedServers.push_back(server);
 	}
-	status["excluded_processes"] = excludedProcesses;
+	status["excluded_servers"] = excludedServers;
 	return status;
 }
 
