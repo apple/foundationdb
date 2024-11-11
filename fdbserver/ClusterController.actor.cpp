@@ -606,7 +606,11 @@ bool isHealthySingleton(ClusterControllerData* self,
 		    .detail(roleAbbr + "ID", singleton.getInterface().id())
 		    .detail("Excluded", currWorker.priorityInfo.isExcluded)
 		    .detail("Fitness", currFitness)
-		    .detail("BestFitness", bestFitness);
+		    .detail("BestFitness", bestFitness)
+		    .detail("MasterProcessId", self->masterProcessId)
+		    .detail("CurrentWorkerProcessId", currWorker.details.interf.locality.processId())
+		    .detail("NewWorkerProcessId", newWorker.interf.locality.processId())
+		    .detail("IsUsedNotMaster", self->isUsedNotMaster(currWorker.details.interf.locality.processId()));
 		singleton.recruit(*self); // SIDE EFFECT: initiating recruitment
 		return false; // not healthy since needed to be rerecruited
 	} else {
