@@ -40,6 +40,9 @@
 #include "flow/flow.h"
 
 #include <openssl/x509.h>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
+
 typedef int NID;
 
 enum class MatchType {
@@ -80,8 +83,6 @@ struct Criteria {
 		return false;
 	}
 };
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 enum class TLSEndpointType { UNSET = 0, CLIENT, SERVER };
 
