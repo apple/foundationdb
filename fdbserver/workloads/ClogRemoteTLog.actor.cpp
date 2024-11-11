@@ -195,7 +195,7 @@ struct ClogRemoteTLog : TestWorkload {
 			ASSERT(process.has("time"));
 			TraceEvent("GrayFailureStatus")
 			    .detail("Address", process["address"].get_str())
-			    .detail("Time", process["time"].get_real());
+			    .detail("Ts", process["time"].get_real());
 		}
 		return true;
 	}
