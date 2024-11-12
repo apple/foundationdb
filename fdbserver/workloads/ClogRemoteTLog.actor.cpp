@@ -175,6 +175,31 @@ struct ClogRemoteTLog : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<bool> grayFailureStatusCheck(Database db, NetworkAddress cloggedRemoteTLog) {
+		StatusObject status = wait(StatusClient::statusFetcher(db));
+		StatusObjectReader reader(status);
+		StatusObjectReader cluster;
+		if (!reader.get("cluster", cluster)) {
+			TraceEvent("NoCluster");
+			return false;
+		}
+		StatusObjectReader grayFailure;
+		if (!cluster.get("gray_failure", grayFailure)) {
+			TraceEvent("NoGrayFailure");
+			return false;
+		}
+		ASSERT(grayFailure.has("excluded_servers"));
+		StatusArray excludedProcesses = grayFailure["excluded_servers"].get_array();
+		for (StatusObjectReader process : excludedProcesses) {
+			ASSERT(process.has("address"));
+			ASSERT(process.has("time"));
+			TraceEvent("GrayFailureStatus")
+			    .detail("Address", process["address"].get_str())
+			    .detail("Ts", process["time"].get_real());
+		}
+		return true;
+	}
+
 	ACTOR static Future<std::vector<IPAddress>> getRemoteSSIPs(Database db) {
 		state std::vector<IPAddress> ret;
 		state Transaction tr(db);
@@ -300,6 +325,7 @@ struct ClogRemoteTLog : TestWorkload {
 		state Future<Void> clog = self->clogRemoteTLog(self, db);
 		state TestState testState = TestState::TEST_INIT;
 		self->actualStatePath.push_back(testState);
+		state bool statusCheckPassed = false;
 		loop {
 			wait(delay(self->lagMeasurementFrequency));
 			Optional<double> ssLag = wait(measureMaxSSLag(self, db));
@@ -307,14 +333,19 @@ struct ClogRemoteTLog : TestWorkload {
 				continue;
 			}
 			// See if ss lag state changed
-			TestState localState = ssLag.get() < self->lagThreshold ? TestState::SS_LAG_NORMAL : TestState::SS_LAG_HIGH;
-			bool stateTransition = localState != testState;
+			state TestState localState =
+			    ssLag.get() < self->lagThreshold ? TestState::SS_LAG_NORMAL : TestState::SS_LAG_HIGH;
+			state bool stateTransition = localState != testState;
 			// If ss lag state did not change, see if clogged remote tlog got excluded
 			if (!stateTransition) {
 				const bool dbReady = self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED;
 				if (dbReady && self->cloggedRemoteTLog.present() &&
 				    remoteTLogNotInDbInfo(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
 					localState = TestState::CLOGGED_REMOTE_TLOG_EXCLUDED;
+					if (!statusCheckPassed) {
+						wait(store(statusCheckPassed, grayFailureStatusCheck(db, self->cloggedRemoteTLog.get())));
+						ASSERT(statusCheckPassed);
+					}
 					stateTransition = localState != testState;
 				}
 			}
