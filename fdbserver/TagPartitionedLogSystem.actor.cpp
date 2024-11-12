@@ -3209,7 +3209,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		}
 
 		wait(waitForAll(satelliteInitializationReplies) || oldRouterRecruitment);
-		TraceEvent("PrimarySatelliteTLogInitializationComplete").log();
+		TraceEvent("PrimarySatelliteTLogInitializationComplete", logSystem->getDebugID()).log();
 
 		for (int i = 0; i < satelliteInitializationReplies.size(); i++) {
 			logSystem->tLogs[1]->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
