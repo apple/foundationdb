@@ -529,6 +529,10 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
       "generation":2,
       "gray_failure" : {
          "excluded_servers" : [
+            {
+               "address": "127.0.0.1:4500",
+               "time": 1731294251
+            }
          ]
       },
       "latency_probe":{
