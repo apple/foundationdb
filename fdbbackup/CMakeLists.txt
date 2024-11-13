@@ -59,3 +59,8 @@ if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbbackup PRIVATE gperftools)
 endif()
+
+if (NOT WIN32 AND NOT OPEN_FOR_IDE)
+  enable_testing()
+  add_test(NAME s3cp_test COMMAND ${CMAKE_SOURCE_DIR}/fdbbackup/tests/s3cp_test.sh ${CMAKE_BINARY_DIR})
+endif()

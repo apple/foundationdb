@@ -120,12 +120,13 @@ ACTOR Future<Void> copy_up_directory(std::string dirpath, std::string s3url) {
 	S3BlobStoreEndpoint::ParametersT parameters;
 	state Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
 	state std::string bucket = parameters["bucket"];
-	state std::vector<std::string> files = platform::listFiles(dirpath);
+	state std::vector<std::string> files;
+	platform::findFilesRecursively(dirpath, files);
 	TraceEvent("UploadDirStart").detail("filecount", files.size()).
 		detail("bucket", bucket).detail("resource", resource);
 	for (const auto& file : files) {
-		std::string filepath = dirpath + "/" + file;
-		std::string s3path = resource + "/" + file;
+		std::string filepath = file;
+		std::string s3path = resource + "/" + file.substr(dirpath.size() + 1);
 		wait(copy_up_file(endpoint, bucket, s3path, filepath));
 	}
 	TraceEvent("UploadDirEnd").detail("bucket", bucket).
@@ -140,7 +141,7 @@ ACTOR Future<Void> copy_down_file(Reference<S3BlobStoreEndpoint> endpoint,
 		std::string filepath) {
 	std::string content = wait(endpoint->readEntireFile(bucket, resource));
 	auto parent = std::filesystem::path(filepath).parent_path();
-	if (!std::filesystem::exists(parent)) {
+	if (parent != "" && !std::filesystem::exists(parent)) {
 		std::filesystem::create_directories(parent);
 	}
 	writeFile(filepath, content);
@@ -171,7 +172,7 @@ ACTOR Future<Void> copy_down_directory(std::string s3url, std::string dirpath) {
 	TraceEvent("DownloadDirStart").detail("filecount", objects.size()).
 		detail("bucket", bucket).detail("resource", resource);
 	for (const auto& object : objects) {
-		std::string filepath = dirpath + "/" + object.name;
+		std::string filepath = dirpath + "/" + object.name.substr(resource.size());
 		std::string s3path = object.name;
 		wait(copy_down_file(endpoint, bucket, s3path, filepath));
 	}
