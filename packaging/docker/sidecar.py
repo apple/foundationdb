@@ -493,6 +493,7 @@ class SidecarHandler(BaseHTTPRequestHandler):
                     )
                 except FileNotFoundError:
                     self.send_error(404, f"{file_path} not found")
+                return
             if self.path.startswith("/is_present/"):
                 file_path = os.path.relpath(self.path, "/is_present")
                 if self.is_present(file_path):
@@ -504,7 +505,7 @@ class SidecarHandler(BaseHTTPRequestHandler):
             elif self.path == "/substitutions":
                 self.send_text(self.get_substitutions())
             else:
-                self.send_error(404, "Path not found")
+                self.send_error(404, f"Path {self.path} not found")
         except RequestException as e:
             self.send_error(400, e.message)
         except (ConnectionResetError, BrokenPipeError) as ex:
