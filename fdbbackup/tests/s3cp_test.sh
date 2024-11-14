@@ -1,10 +1,9 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #
 # Start a weed server and then run tests of the s3cp
 # command line tool against it (which uses S3Cp.actor.cpp).
 # For use by ctest. seaweed server takes about 25
-# seconds to come up (joys of raft I'd presume).
-# Tests take a few seconds after that.
+# seconds to come up. Tests run for a few seconds after that.
 #
 # Used https://www.shellcheck.net/
 # and https://bertvv.github.io/cheat-sheets/Bash.html
@@ -49,10 +48,9 @@ log() {
 }
 
 # Download seaweed.
-# $1 scratch_dir for test
+# $1 A scratch_dir for test
 # Returns the full path to the weed binary.
-# Caller should test the return value to ensure
-# we succefully managed the download (check $?).
+# Caller should test for error code on return.
 download_weed() {
   local dir="${1}"
   local tgz
@@ -70,6 +68,7 @@ download_weed() {
   # If not already present, download it.
   local fullpath_tgz="${dir}/${tgz}"
   if [ ! -f "${fullpath_tgz}" ]; then
+    # Change directory because awkward telling curl where to put download.
     ( cd "${dir}"
       curl -sL "https://github.com/seaweedfs/seaweedfs/releases/download/3.79/${tgz}" \
         -o "${tgz}")
@@ -82,24 +81,21 @@ download_weed() {
 }
 
 # Create directory for weed to use.
-# $1 Base scratch directory
+# $1 A scratch directory for test.
 # Returns the created weed directory. Caller should
-# verify it was created -- check $? and existence.
+# check error code and return.
 create_weed_dir() {
   local dir="${1}"
-  local weed_dir
-  weed_dir=$(mktemp -d -p "${dir}")
+  local weed_dir=$(mktemp -d -p "${dir}")
   # Exit if the temp directory wasn't created successfully.
   if [ ! -d "${weed_dir}" ]; then
-    echo "ERROR: Failed to create weed directory" >&2
-    # Return from this function.. weed_dir will be null.
+    echo "ERROR: Failed create of weed directory ${weed_dir}" >&2
     exit 1
   fi
   echo "${weed_dir}"
 }
 
 # Start up the weed server. It can take 30 seconds to come.
-# If we don't come up, we exit the script.
 # $1 the weed directory.
 # Returns an array of the pid and the s3 port.
 # Caller should test return value.
@@ -161,8 +157,9 @@ start_weed() {
     echo "ERROR: Failed to curl fid" >&2
     exit 1
   fi
-  local -a returns=("${weed_pid}" "${s3_port}" "${master_port}")
-  echo "${returns[@]}"
+  # Return two values.
+  echo "${weed_pid}"
+  echo "${s3_port}"
 }
 
 # Test file upload and download
@@ -219,6 +216,19 @@ test_dir_upload_and_download() {
   fi
 }
 
+# Log pass or fail.
+# $1 Test errcode
+# $2 Test name
+log_test_result() {
+  local test_errcode=$1
+  local test_name=$2
+  if [ $test_errcode -eq 0 ]; then
+    log "PASSED ${test_name}"
+  else
+    log "FAILED ${test_name}"
+  fi
+}
+
 # Process command-line options.
 if [ $# -lt 1 ] || [ $# -gt 2 ]; then
     echo "ERROR: ${0} requires the fdb build directory -- CMAKE_BUILD_DIR -- as its"
@@ -245,7 +255,7 @@ fi
 # Download seaweed.
 readonly weed_binary_path="$(download_weed "${scratch_dir}")"
 if [ $? -ne 0 ] || [ ! -f "${weed_binary_path}" ]; then
-  echo "ERROR: failed download of the weed binary." >&2
+  echo "ERROR: failed download of weed binary." >&2
   exit 1
 fi
 WEED_DIR="$(create_weed_dir "${scratch_dir}")"
@@ -261,11 +271,11 @@ if [ $? -ne 0 ]; then
 fi
 WEED_PID="${returns[0]}"
 readonly s3_port="${returns[1]}"
-readonly master_port="${returns[2]}"
-log "Seaweed server is up; pid=${WEED_PID}, s3.port=${s3_port}, master.port=${master_port}"
+log "Seaweed server is up; pid=${WEED_PID}, s3.port=${s3_port}"
 
 # Seaweed is up. Run some tests. 
 test_file_upload_and_download "${s3_port}" "${WEED_DIR}" "${build_dir}/bin/s3cp"
-log "test_file_upload_and_download PASSED"
+log_test_result $? "test_file_upload_and_download"
+
 test_dir_upload_and_download "${s3_port}" "${WEED_DIR}" "${build_dir}/bin/s3cp"
-log "test_dir_upload_and_download PASSED"
+log_test_result $? "test_dir_upload_and_download"
