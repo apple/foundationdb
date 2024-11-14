@@ -60,16 +60,16 @@ struct RestoreFromBlobWorkload : TestWorkload {
 		wait(delay(self->restoreAfter));
 		if (config.tenantMode == TenantMode::REQUIRED) {
 			// restore system keys followed by user keys
-			wait(success(backupAgent.restore(
+			wait(success(backupAgent.restoreWithBeginVersion(
 			    cx, {}, self->backupTag, self->backupURL, {}, getSystemBackupRanges(), self->waitForComplete)));
 			Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 			restoreRanges.push_back_deep(restoreRanges.arena(), normalKeys);
-			wait(success(backupAgent.restore(
+			wait(success(backupAgent.restoreWithBeginVersion(
 			    cx, {}, self->backupTag, self->backupURL, {}, restoreRanges, self->waitForComplete)));
 		} else {
 			Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 			addDefaultBackupRanges(restoreRanges);
-			wait(success(backupAgent.restore(
+			wait(success(backupAgent.restoreWithBeginVersion(
 			    cx, {}, self->backupTag, self->backupURL, {}, restoreRanges, self->waitForComplete)));
 		}
 		return Void();
