@@ -3318,7 +3318,7 @@ public:
 
 	bool isExcludedDegradedServer(const NetworkAddressList& a) const {
 		for (const auto& server : excludedDegradedServers) {
-			if (a.contains(server))
+			if (a.contains(server.first))
 				return true;
 		}
 		return false;
@@ -3402,8 +3402,9 @@ public:
 	};
 	std::unordered_map<NetworkAddress, WorkerHealth> workerHealth;
 	DegradationInfo degradationInfo;
-	std::unordered_set<NetworkAddress>
-	    excludedDegradedServers; // The degraded servers to be excluded when assigning workers to roles.
+	std::unordered_map<NetworkAddress /* degraded servers to be excluded when assigning workers to roles */,
+	                   double /* latest time at which address was excluded */>
+	    excludedDegradedServers;
 	std::queue<double> recentHealthTriggeredRecoveryTime;
 
 	// Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.

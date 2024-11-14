@@ -1578,7 +1578,8 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                  self->dcStorageServerVersionDifference,
 			                                                                  configBroadcaster,
 			                                                                  self->db.metaclusterRegistration,
-			                                                                  self->db.metaclusterMetrics)));
+			                                                                  self->db.metaclusterMetrics,
+			                                                                  self->excludedDegradedServers)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
@@ -3011,7 +3012,7 @@ static void invalidateExcludedProcessComplaints(ClusterControllerData* self) {
 	if (!SERVER_KNOBS->CC_INVALIDATE_EXCLUDED_PROCESSES) {
 		return;
 	}
-	for (const auto& addr : self->excludedDegradedServers) {
+	for (const auto& [addr, _] : self->excludedDegradedServers) {
 		self->workerHealth.erase(addr);
 	}
 }
@@ -3029,8 +3030,9 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 			// recovered.
 			bool hasRecoveredServer = false;
 			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
-				if (self->degradationInfo.degradedServers.find(*it) == self->degradationInfo.degradedServers.end() &&
-				    self->degradationInfo.disconnectedServers.find(*it) ==
+				if (self->degradationInfo.degradedServers.find(it->first) ==
+				        self->degradationInfo.degradedServers.end() &&
+				    self->degradationInfo.disconnectedServers.find(it->first) ==
 				        self->degradationInfo.disconnectedServers.end()) {
 					self->excludedDegradedServers.erase(it++);
 					hasRecoveredServer = true;
@@ -3060,9 +3062,13 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
 						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
 							self->recentHealthTriggeredRecoveryTime.push(now());
-							self->excludedDegradedServers = self->degradationInfo.degradedServers;
-							self->excludedDegradedServers.insert(self->degradationInfo.disconnectedServers.begin(),
-							                                     self->degradationInfo.disconnectedServers.end());
+							self->excludedDegradedServers.clear();
+							for (const auto& degradedServer : self->degradationInfo.degradedServers) {
+								self->excludedDegradedServers[degradedServer] = now();
+							}
+							for (const auto& disconnectedServer : self->degradationInfo.disconnectedServers) {
+								self->excludedDegradedServers[disconnectedServer] = now();
+							}
 							invalidateExcludedProcessComplaints(self);
 							TraceEvent(SevWarnAlways, "DegradedServerDetectedAndTriggerRecovery")
 							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
@@ -4105,7 +4111,9 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 
 	// Compute degraded processes
 	data.degradationInfo = data.getDegradationInfo();
-	data.excludedDegradedServers = data.degradationInfo.degradedServers;
+	for (const auto& addr : data.degradationInfo.degradedServers) {
+		data.excludedDegradedServers[addr] = now();
+	}
 
 	// Ensure badPeer is successfully added to excluded list
 	// At this point, recovery would also be triggered in a production setting
@@ -4123,7 +4131,9 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 
 	// Compute degraded processes again
 	data.degradationInfo = data.getDegradationInfo();
-	data.excludedDegradedServers = data.degradationInfo.degradedServers;
+	for (const auto& addr : data.degradationInfo.degradedServers) {
+		data.excludedDegradedServers[addr] = now();
+	}
 
 	if (SERVER_KNOBS->CC_INVALIDATE_EXCLUDED_PROCESSES) {
 		// With CC_INVALIDATE_EXCLUDE_PROCESSES, we should got 0 degraded processes

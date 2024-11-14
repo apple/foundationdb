@@ -540,6 +540,10 @@
          "lock_uid":"00000000000000000000000000000000" // Only present when database is locked
       },
       "generation":2,
+      "gray_failure" : { // Displays subset of gray failure in-memory state. Currently, shows excluded server network address (ip + port) as well as time when the server was last excluded. Based on these exclusions, recovery is triggered.
+         "excluded_servers" : [
+         ]
+      },    
       "latency_probe":{ // all measurements are based on running sample transactions
          "read_seconds":7, // time to perform a single read
          "immediate_priority_transaction_start_seconds":0.0, // time to start a sample transaction at system immediate priority
