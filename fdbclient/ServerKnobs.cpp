@@ -613,6 +613,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE,       false); if (isSimulated) SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE = deterministicRandom()->coinflip();
 	init (SHARDED_ROCKSDB_READ_ASYNC_IO,                       false ); if (isSimulated) SHARDED_ROCKSDB_READ_ASYNC_IO = deterministicRandom()->coinflip();
 	init( SHARDED_ROCKSDB_PREFIX_LEN,                              0 ); if( randomize && BUGGIFY )  SHARDED_ROCKSDB_PREFIX_LEN = deterministicRandom()->randomInt(1, 20);
+	init( SHARDED_ROCKSDB_BLOOM_FILTER_BITS,                       3 ); if( randomize && BUGGIFY )  SHARDED_ROCKSDB_BLOOM_FILTER_BITS = deterministicRandom()->randomInt(3, 10);
+	init (SHARDED_ROCKSDB_MEMTABLE_BLOOM_FILTER_RATIO,           0.1 );
 
 
 	// Leader election
