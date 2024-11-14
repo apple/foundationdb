@@ -204,7 +204,8 @@ public:
 	                        UnlockDB = UnlockDB::True,
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {},
+	                        TransformPartitionedLog transformPartitionedLog = TransformPartitionedLog::True);
 
 	// this method will construct range and version vectors and then call restore()
 	Future<Version> restoreKeyRange(Database cx,
@@ -242,7 +243,8 @@ public:
 	    OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	    InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	    Version beginVersion = ::invalidVersion,
-	    Optional<std::string> const& encryptionKeyFileName = {});
+	    Optional<std::string> const& encryptionKeyFileName = {},
+	    TransformPartitionedLog transformPartitionedLog = TransformPartitionedLog::False);
 
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,

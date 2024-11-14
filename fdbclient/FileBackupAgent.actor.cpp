@@ -172,6 +172,7 @@ public:
 	KeyBackedProperty<bool> onlyApplyMutationLogs() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> unlockDBAfterRestore() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> transformPartitionedLog() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Changed to restoreRangeSet. It can be removed.
@@ -5111,7 +5112,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef RestoreDispatchPartitionedTaskFunc::name = "restore_dispatch"_sr;
+StringRef RestoreDispatchPartitionedTaskFunc::name = "restore_dispatch_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreDispatchPartitionedTaskFunc);
 struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
@@ -5807,7 +5808,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	                                  Reference<FutureBucket> futureBucket,
 	                                  Reference<Task> task) {
 		state RestoreConfig restore(task);
-
+		state bool transformPartitionedLog;
+		state Version restoreVersion;
 		state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 		if (firstVersion == invalidVersion) {
 			wait(restore.logError(
@@ -5825,8 +5827,16 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		restore.setApplyEndVersion(tr, firstVersion);
 
 		// Apply range data and log data in order
-		wait(success(RestoreDispatchTaskFunc::addTask(
-		    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
+		wait(store(transformPartitionedLog, restore.transformPartitionedLog().getD(tr, Snapshot::False, false)));
+		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+
+		if (transformPartitionedLog) {
+			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(
+				tr, taskBucket, task, 0, restoreVersion)));
+		} else {
+			wait(success(RestoreDispatchTaskFunc::addTask(
+			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
+		}
 
 		wait(taskBucket->finish(tr, task));
 		return Void();
@@ -6239,7 +6249,8 @@ public:
 	                                        OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                        InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                        Version beginVersion,
-	                                        UID uid) {
+	                                        UID uid,
+	                                        TransformPartitionedLog transformPartitionedLog) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -6312,6 +6323,7 @@ public:
 		restore.inconsistentSnapshotOnly().set(tr, inconsistentSnapshotOnly);
 		restore.beginVersion().set(tr, beginVersion);
 		restore.unlockDBAfterRestore().set(tr, unlockDB);
+		restore.transformPartitionedLog().set(tr, transformPartitionedLog);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
@@ -6895,25 +6907,27 @@ public:
 	//                             When set to true, gives an inconsistent snapshot, thus not recommended
 	//   beginVersions: restore's begin version for each range
 	//   randomUid: the UID for lock the database
-	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
-	                                     Database cx,
-	                                     Optional<Database> cxOrig,
-	                                     Key tagName,
-	                                     Key url,
-	                                     Optional<std::string> proxy,
-	                                     Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                     Standalone<VectorRef<Version>> beginVersions,
-	                                     WaitForComplete waitForComplete,
-	                                     Version targetVersion,
-	                                     Verbose verbose,
-	                                     Key addPrefix,
-	                                     Key removePrefix,
-	                                     LockDB lockDB,
-	                                     UnlockDB unlockDB,
-	                                     OnlyApplyMutationLogs onlyApplyMutationLogs,
-	                                     InconsistentSnapshotOnly inconsistentSnapshotOnly,
-	                                     Optional<std::string> encryptionKeyFileName,
-	                                     UID randomUid) {
+	ACTOR static Future<Version> restore(
+	    FileBackupAgent* backupAgent,
+	    Database cx,
+	    Optional<Database> cxOrig,
+	    Key tagName,
+	    Key url,
+	    Optional<std::string> proxy,
+	    Standalone<VectorRef<KeyRangeRef>> ranges,
+	    Standalone<VectorRef<Version>> beginVersions,
+	    WaitForComplete waitForComplete,
+	    Version targetVersion,
+	    Verbose verbose,
+	    Key addPrefix,
+	    Key removePrefix,
+	    LockDB lockDB,
+	    UnlockDB unlockDB,
+	    OnlyApplyMutationLogs onlyApplyMutationLogs,
+	    InconsistentSnapshotOnly inconsistentSnapshotOnly,
+	    Optional<std::string> encryptionKeyFileName,
+	    UID randomUid,
+	    TransformPartitionedLog transformPartitionedLog = TransformPartitionedLog::False) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
 		if (ranges.empty()) {
 			throw restore_error();
@@ -6979,7 +6993,8 @@ public:
 				                   onlyApplyMutationLogs,
 				                   inconsistentSnapshotOnly,
 				                   beginVersion,
-				                   randomUid));
+				                   randomUid,
+				                   transformPartitionedLog));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -7341,7 +7356,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          UnlockDB unlockDB,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         TransformPartitionedLog transformPartitionedLog) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -7360,7 +7376,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    onlyApplyMutationLogs,
 	                                    inconsistentSnapshotOnly,
 	                                    encryptionKeyFileName,
-	                                    deterministicRandom()->randomUniqueID());
+	                                    deterministicRandom()->randomUniqueID(),
+	                                    transformPartitionedLog);
 }
 
 Future<Version> FileBackupAgent::restoreConstructVersion(Database cx,
@@ -7379,7 +7396,8 @@ Future<Version> FileBackupAgent::restoreConstructVersion(Database cx,
                                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                                          Version beginVersion,
-                                                         Optional<std::string> const& encryptionKeyFileName) {
+                                                         Optional<std::string> const& encryptionKeyFileName,
+                                                         TransformPartitionedLog transformPartitionedLog) {
 	Standalone<VectorRef<Version>> beginVersions;
 	for (auto i = 0; i < ranges.size(); ++i) {
 		beginVersions.push_back(beginVersions.arena(), beginVersion);
@@ -7400,7 +7418,8 @@ Future<Version> FileBackupAgent::restoreConstructVersion(Database cx,
 	               unlockDB,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
-	               encryptionKeyFileName);
+	               encryptionKeyFileName,
+	               transformPartitionedLog);
 }
 
 Future<Version> FileBackupAgent::restoreKeyRange(Database cx,
