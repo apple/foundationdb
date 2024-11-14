@@ -1,0 +1,11 @@
+[configuration]
+config = 'triple'
+processesPerMachine = 2
+machineCount = 15
+
+[[test]]
+testTitle = 'BulkDumpingWorkload'
+useDB = true
+
+    [[test.workload]]
+    testName = 'BulkDumpingWorkload'

@@ -1210,6 +1210,21 @@ BulkLoadState decodeBulkLoadState(const ValueRef& value) {
 	return bulkLoadState;
 }
 
+// Bulk dumping keys
+const KeyRangeRef bulkDumpKeys = KeyRangeRef("\xff/bulkDump/"_sr, "\xff/bulkDump0"_sr);
+const KeyRef bulkDumpPrefix = bulkDumpKeys.begin;
+
+const Value bulkDumpStateValue(const BulkDumpState& bulkDumpState) {
+	return ObjectWriter::toValue(bulkDumpState, IncludeVersion());
+}
+
+BulkDumpState decodeBulkDumpState(const ValueRef& value) {
+	BulkDumpState bulkDumpState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(bulkDumpState);
+	return bulkDumpState;
+}
+
 // Range Lock
 const std::string rangeLockNameForBulkLoad = "BulkLoad";
 

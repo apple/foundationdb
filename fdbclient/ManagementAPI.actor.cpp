@@ -2973,6 +2973,93 @@ ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID task
 	return Void();
 }
 
+// Submit bulkdump task and overwrite any existing task
+ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpTask) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (bulkDumpTask.phase != BulkDumpPhase::Submitted) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkDumpTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "WrongPhase")
+				    .detail("Task", bulkDumpTask.toString());
+				throw bulkdump_task_failed();
+			}
+			if (!normalKeys.contains(bulkDumpTask.getRange())) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "RangeOutOfScope")
+				    .detail("Task", bulkDumpTask.toString());
+				throw bulkdump_task_failed();
+			}
+			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpTask.getRange(), bulkDumpStateValue(bulkDumpTask)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<std::vector<BulkDumpState>> getValidBulkDumpTasksWithinRange(Database cx,
+                                                                          KeyRange rangeToRead,
+                                                                          size_t limit,
+                                                                          Optional<BulkDumpPhase> phase) {
+	state Transaction tr(cx);
+	state Key readBegin = rangeToRead.begin;
+	state Key readEnd = rangeToRead.end;
+	state RangeResult rangeResult;
+	state std::vector<BulkDumpState> res;
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkDumpPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+		for (int i = 0; i < rangeResult.size() - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+			KeyRange range = Standalone(KeyRangeRef(rangeResult[i].key, rangeResult[i + 1].key));
+			if (range != bulkDumpState.getRange()) {
+				ASSERT(bulkDumpState.getRange().contains(range));
+				continue;
+			}
+			if (!phase.present() || phase.get() == bulkDumpState.phase) {
+				res.push_back(bulkDumpState);
+			}
+			if (res.size() >= limit) {
+				return res;
+			}
+		}
+		readBegin = rangeResult.back().key;
+	}
+
+	return res;
+}
+
 // Persist a new owner if input uniqueId is not existing; Update description if input uniqueId exists
 ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description) {
 	if (uniqueId.empty() || description.empty()) {

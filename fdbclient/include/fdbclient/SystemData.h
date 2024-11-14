@@ -26,6 +26,7 @@
 
 #include "fdbclient/AccumulativeChecksum.h"
 #include "fdbclient/BulkLoading.h"
+#include "fdbclient/BulkDumping.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this dependency
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RangeLock.h"
@@ -527,6 +528,11 @@ extern const KeyRangeRef bulkLoadKeys;
 extern const KeyRef bulkLoadPrefix;
 const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState);
 BulkLoadState decodeBulkLoadState(const ValueRef& value);
+
+extern const KeyRangeRef bulkDumpKeys;
+extern const KeyRef bulkDumpPrefix;
+const Value bulkDumpStateValue(const BulkDumpState& bulkDumpState);
+BulkDumpState decodeBulkDumpState(const ValueRef& value);
 
 extern const std::string rangeLockNameForBulkLoad;
 extern const KeyRangeRef rangeLockKeys;

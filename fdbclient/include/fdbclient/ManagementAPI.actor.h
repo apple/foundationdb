@@ -190,6 +190,16 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
                                             UID taskId,
                                             std::vector<BulkLoadPhase> phases);
 
+// Submit a bulk load task
+ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpState);
+
+// Get valid bulk load dump state within the input range
+ACTOR Future<std::vector<BulkDumpState>> getValidBulkDumpTasksWithinRange(
+    Database cx,
+    KeyRange rangeToRead,
+    size_t limit = 10,
+    Optional<BulkDumpPhase> phase = Optional<BulkDumpPhase>());
+
 // Persist a rangeLock owner to database metadata
 // A range can only be locked by a registered owner
 ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description);
