@@ -497,6 +497,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	// to 1 will enable all disabled parts
 	int mode;
 	int bulkLoadMode = 0;
+	int bulkDumpMode = 0;
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;
@@ -555,6 +556,10 @@ struct DDBulkLoadTask {
 
 inline bool bulkLoadIsEnabled(int bulkLoadModeValue) {
 	return SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && bulkLoadModeValue == 1;
+}
+
+inline bool bulkDumpIsEnabled(int bulkDumpModeValue) {
+	return bulkDumpModeValue == 1;
 }
 
 class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {

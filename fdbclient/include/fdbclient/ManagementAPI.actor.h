@@ -190,6 +190,9 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
                                             UID taskId,
                                             std::vector<BulkLoadPhase> phases);
 
+// Set bulk dump mode
+ACTOR Future<int> setBulkDumpMode(Database cx, int mode);
+
 // Submit a bulk load task
 ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpState);
 

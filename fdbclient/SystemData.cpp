@@ -1211,6 +1211,7 @@ BulkLoadState decodeBulkLoadState(const ValueRef& value) {
 }
 
 // Bulk dumping keys
+const KeyRef bulkDumpModeKey = "\xff/bulkDumpMode"_sr;
 const KeyRangeRef bulkDumpKeys = KeyRangeRef("\xff/bulkDump/"_sr, "\xff/bulkDump0"_sr);
 const KeyRef bulkDumpPrefix = bulkDumpKeys.begin;
 

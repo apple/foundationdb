@@ -422,6 +422,7 @@ public:
 
 	ActorCollection bulkLoadActors;
 	bool bulkLoadEnabled = false;
+	bool bulkDumpEnabled = false;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
@@ -432,7 +433,7 @@ public:
 	    teamCollection(nullptr), bulkLoadTaskCollection(nullptr), auditStorageHaLaunchingLock(1),
 	    auditStorageReplicaLaunchingLock(1), auditStorageLocationMetadataLaunchingLock(1),
 	    auditStorageSsShardLaunchingLock(1), auditStorageInitStarted(false), bulkLoadActors(false),
-	    bulkLoadEnabled(false) {}
+	    bulkLoadEnabled(false), bulkDumpEnabled(false) {}
 
 	// bootstrap steps
 
@@ -1575,6 +1576,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				} else {
 					actors.push_back(bulkLoadingCore(self, self->initialized.getFuture()));
 				}
+			}
+
+			if (bulkDumpIsEnabled(self->initData->bulkDumpMode)) {
+				TraceEvent(SevInfo, "DDBulkDumpModeEnabled", self->ddId)
+				    .detail("UsableRegions", self->configuration.usableRegions);
+				self->bulkDumpEnabled = true;
 			}
 
 			wait(waitForAll(actors));
