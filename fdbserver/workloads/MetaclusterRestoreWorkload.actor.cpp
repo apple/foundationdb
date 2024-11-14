@@ -254,7 +254,8 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		                    }));
 
 		TraceEvent("MetaclusterRestoreWorkloadRestoreCluster").detail("ClusterName", clusterName);
-		wait(success(backupAgent.restore(dataDb, dataDb, clusterName, StringRef(backupUrl), {}, backupRanges)));
+		wait(success(
+		    backupAgent.restoreWithBeginVersion(dataDb, dataDb, clusterName, StringRef(backupUrl), {}, backupRanges)));
 
 		state std::vector<std::string> messages;
 		if (addToMetacluster) {
