@@ -7363,23 +7363,23 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    deterministicRandom()->randomUniqueID());
 }
 
-Future<Version> FileBackupAgent::restore(Database cx,
-                                         Optional<Database> cxOrig,
-                                         Key tagName,
-                                         Key url,
-                                         Optional<std::string> proxy,
-                                         Standalone<VectorRef<KeyRangeRef>> ranges,
-                                         WaitForComplete waitForComplete,
-                                         Version targetVersion,
-                                         Verbose verbose,
-                                         Key addPrefix,
-                                         Key removePrefix,
-                                         LockDB lockDB,
-                                         UnlockDB unlockDB,
-                                         OnlyApplyMutationLogs onlyApplyMutationLogs,
-                                         InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                                         Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+Future<Version> FileBackupAgent::restoreConstructVersion(Database cx,
+                                                         Optional<Database> cxOrig,
+                                                         Key tagName,
+                                                         Key url,
+                                                         Optional<std::string> proxy,
+                                                         Standalone<VectorRef<KeyRangeRef>> ranges,
+                                                         WaitForComplete waitForComplete,
+                                                         Version targetVersion,
+                                                         Verbose verbose,
+                                                         Key addPrefix,
+                                                         Key removePrefix,
+                                                         LockDB lockDB,
+                                                         UnlockDB unlockDB,
+                                                         OnlyApplyMutationLogs onlyApplyMutationLogs,
+                                                         InconsistentSnapshotOnly inconsistentSnapshotOnly,
+                                                         Version beginVersion,
+                                                         Optional<std::string> const& encryptionKeyFileName) {
 	Standalone<VectorRef<Version>> beginVersions;
 	for (auto i = 0; i < ranges.size(); ++i) {
 		beginVersions.push_back(beginVersions.arena(), beginVersion);
@@ -7403,22 +7403,22 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               encryptionKeyFileName);
 }
 
-Future<Version> FileBackupAgent::restore(Database cx,
-                                         Optional<Database> cxOrig,
-                                         Key tagName,
-                                         Key url,
-                                         Optional<std::string> proxy,
-                                         WaitForComplete waitForComplete,
-                                         Version targetVersion,
-                                         Verbose verbose,
-                                         KeyRange range,
-                                         Key addPrefix,
-                                         Key removePrefix,
-                                         LockDB lockDB,
-                                         OnlyApplyMutationLogs onlyApplyMutationLogs,
-                                         InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                                         Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+Future<Version> FileBackupAgent::restoreKeyRange(Database cx,
+                                                 Optional<Database> cxOrig,
+                                                 Key tagName,
+                                                 Key url,
+                                                 Optional<std::string> proxy,
+                                                 WaitForComplete waitForComplete,
+                                                 Version targetVersion,
+                                                 Verbose verbose,
+                                                 KeyRange range,
+                                                 Key addPrefix,
+                                                 Key removePrefix,
+                                                 LockDB lockDB,
+                                                 OnlyApplyMutationLogs onlyApplyMutationLogs,
+                                                 InconsistentSnapshotOnly inconsistentSnapshotOnly,
+                                                 Version beginVersion,
+                                                 Optional<std::string> const& encryptionKeyFileName) {
 	Standalone<VectorRef<KeyRangeRef>> rangeRef;
 	if (range.begin.empty() && range.end.empty()) {
 		addDefaultBackupRanges(rangeRef);

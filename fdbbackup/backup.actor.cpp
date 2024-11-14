@@ -2397,23 +2397,23 @@ ACTOR Future<Void> runRestore(Database db,
 		}
 
 		if (performRestore) {
-			Version restoredVersion = wait(backupAgent.restore(db,
-			                                                   origDb,
-			                                                   KeyRef(tagName),
-			                                                   KeyRef(container),
-			                                                   proxy,
-			                                                   ranges,
-			                                                   waitForDone,
-			                                                   targetVersion,
-			                                                   verbose,
-			                                                   KeyRef(addPrefix),
-			                                                   KeyRef(removePrefix),
-			                                                   LockDB::True,
-			                                                   UnlockDB::True,
-			                                                   onlyApplyMutationLogs,
-			                                                   inconsistentSnapshotOnly,
-			                                                   beginVersion,
-			                                                   encryptionKeyFile));
+			Version restoredVersion = wait(backupAgent.restoreConstructVersion(db,
+			                                                                   origDb,
+			                                                                   KeyRef(tagName),
+			                                                                   KeyRef(container),
+			                                                                   proxy,
+			                                                                   ranges,
+			                                                                   waitForDone,
+			                                                                   targetVersion,
+			                                                                   verbose,
+			                                                                   KeyRef(addPrefix),
+			                                                                   KeyRef(removePrefix),
+			                                                                   LockDB::True,
+			                                                                   UnlockDB::True,
+			                                                                   onlyApplyMutationLogs,
+			                                                                   inconsistentSnapshotOnly,
+			                                                                   beginVersion,
+			                                                                   encryptionKeyFile));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
