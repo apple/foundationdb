@@ -484,23 +484,24 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		}));
 		state Standalone<StringRef> restoreTag(self->backupTag.toString() + "_system");
 		printf("BackupCorrectness, backupAgent.restore is called for tag:%s\n", restoreTag.toString().c_str());
-		wait(success(backupAgent->restore(cx,
-		                                  cx,
-		                                  restoreTag,
-		                                  KeyRef(lastBackupContainer->getURL()),
-		                                  lastBackupContainer->getProxy(),
-		                                  systemRestoreRanges,
-		                                  WaitForComplete::True,
-		                                  targetVersion,
-		                                  Verbose::True,
-		                                  Key(),
-		                                  Key(),
-		                                  self->locked,
-		                                  UnlockDB::True,
-		                                  OnlyApplyMutationLogs::False,
-		                                  InconsistentSnapshotOnly::False,
-		                                  ::invalidVersion,
-		                                  self->encryptionKeyFileName)));
+		wait(success(backupAgent->restoreConstructVersion(cx,
+		                                                  cx,
+		                                                  restoreTag,
+		                                                  KeyRef(lastBackupContainer->getURL()),
+		                                                  lastBackupContainer->getProxy(),
+		                                                  systemRestoreRanges,
+		                                                  WaitForComplete::True,
+		                                                  targetVersion,
+		                                                  Verbose::True,
+		                                                  Key(),
+		                                                  Key(),
+		                                                  self->locked,
+		                                                  UnlockDB::True,
+		                                                  OnlyApplyMutationLogs::False,
+		                                                  InconsistentSnapshotOnly::False,
+		                                                  ::invalidVersion,
+		                                                  self->encryptionKeyFileName,
+		                                                  TransformPartitionedLog::True)));
 		printf("BackupCorrectness, backupAgent.restore finished for tag:%s\n", restoreTag.toString().c_str());
 		return Void();
 	}
@@ -648,59 +649,31 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 					wait(clearAndRestoreSystemKeys(
 					    cx, self, &backupAgent, targetVersion, lastBackupContainer, systemRestoreRanges));
 				}
-				if (deterministicRandom()->random01() < 0.5) {
-					for (restoreIndex = 0; restoreIndex < self->restoreRanges.size(); restoreIndex++) {
-						auto range = self->restoreRanges[restoreIndex];
-						Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" +
-						                                 std::to_string(restoreIndex));
-						restoreTags.push_back(restoreTag);
-						printf("BackupCorrectness, restore for each range: backupAgent.restore is called for "
-						       "restoreIndex:%d tag:%s ranges:%s\n",
-						       restoreIndex,
-						       range.toString().c_str(),
-						       restoreTag.toString().c_str());
-						restores.push_back(backupAgent.restore(cx,
-						                                       cx,
-						                                       restoreTag,
-						                                       KeyRef(lastBackupContainer->getURL()),
-						                                       lastBackupContainer->getProxy(),
-						                                       WaitForComplete::True,
-						                                       targetVersion,
-						                                       Verbose::True,
-						                                       range,
-						                                       Key(),
-						                                       Key(),
-						                                       self->locked,
-						                                       OnlyApplyMutationLogs::False,
-						                                       InconsistentSnapshotOnly::False,
-						                                       ::invalidVersion,
-						                                       self->encryptionKeyFileName));
-					}
-				} else {
-					multipleRangesInOneTag = true;
-					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
-					restoreTags.push_back(restoreTag);
-					printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
-					       restoreIndex,
-					       restoreTag.toString().c_str());
-					restores.push_back(backupAgent.restore(cx,
-					                                       cx,
-					                                       restoreTag,
-					                                       KeyRef(lastBackupContainer->getURL()),
-					                                       lastBackupContainer->getProxy(),
-					                                       self->restoreRanges,
-					                                       WaitForComplete::True,
-					                                       targetVersion,
-					                                       Verbose::True,
-					                                       Key(),
-					                                       Key(),
-					                                       self->locked,
-					                                       UnlockDB::True,
-					                                       OnlyApplyMutationLogs::False,
-					                                       InconsistentSnapshotOnly::False,
-					                                       ::invalidVersion,
-					                                       self->encryptionKeyFileName));
-				}
+
+				multipleRangesInOneTag = true;
+				Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
+				restoreTags.push_back(restoreTag);
+				printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
+				       restoreIndex,
+				       restoreTag.toString().c_str());
+				restores.push_back(backupAgent.restoreConstructVersion(cx,
+				                                                       cx,
+				                                                       restoreTag,
+				                                                       KeyRef(lastBackupContainer->getURL()),
+				                                                       lastBackupContainer->getProxy(),
+				                                                       self->restoreRanges,
+				                                                       WaitForComplete::True,
+				                                                       targetVersion,
+				                                                       Verbose::True,
+				                                                       Key(),
+				                                                       Key(),
+				                                                       self->locked,
+				                                                       UnlockDB::True,
+				                                                       OnlyApplyMutationLogs::False,
+				                                                       InconsistentSnapshotOnly::False,
+				                                                       ::invalidVersion,
+				                                                       self->encryptionKeyFileName,
+				                                                       TransformPartitionedLog::True));
 
 				wait(waitForAll(restores));
 
