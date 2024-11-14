@@ -22,7 +22,7 @@
 
 #include "flow/UnitTest.h"
 #include "fdbrpc/FlowGrpc.h"
-#include "FlowGrpcTests.h"
+#include "fdbrpc/FlowGrpcTests.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

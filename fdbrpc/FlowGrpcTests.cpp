@@ -21,8 +21,8 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/FileTransfer.h"
+#include "fdbrpc/FlowGrpcTests.h"
 #include "flow/flow.h"
-#include "FlowGrpcTests.h"
 
 // So that tests are not optimized out. :/
 void forceLinkGrpcTests2() {}
