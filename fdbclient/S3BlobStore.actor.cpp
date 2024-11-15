@@ -849,28 +849,31 @@ std::string awsCanonicalURI(const std::string& resource, std::vector<std::string
 // ref: https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html
 std::string parseErrorCodeFromS3(std::string xmlResponse) {
 	// Copy XML string to a modifiable buffer
-	std::vector<char> xmlBuffer(xmlResponse.begin(), xmlResponse.end());
-	xmlBuffer.push_back('\0'); // Ensure null-terminated string
-
-	// Parse the XML
-	xml_document<> doc;
-	doc.parse<0>(&xmlBuffer[0]);
-
-	// Find the root node
-	xml_node<>* root = doc.first_node("Error");
-	if (!root) {
-		TraceEvent(SevWarn, "ParseS3XMLResponseNoError").detail("Response", xmlResponse).log();
-		return "";
+	try {
+		std::vector<char> xmlBuffer(xmlResponse.begin(), xmlResponse.end());
+		xmlBuffer.push_back('\0'); // Ensure null-terminated string
+		// Parse the XML
+		xml_document<> doc;
+		doc.parse<0>(&xmlBuffer[0]);
+		// Find the root node
+		xml_node<>* root = doc.first_node("Error");
+		if (!root) {
+			TraceEvent(SevWarn, "ParseS3XMLResponseNoError").detail("Response", xmlResponse).log();
+			return "";
+		}
+		// Find the <Code> node
+		xml_node<>* codeNode = root->first_node("Code");
+		if (!codeNode) {
+			TraceEvent(SevWarn, "ParseS3XMLResponseNoErrorCode").detail("Response", xmlResponse).log();
+			return "";
+		}
+		return std::string(codeNode->value());
+	} catch (Error e) {
+		TraceEvent("BackupParseS3ErrorCodeFailure").errorUnsuppressed(e);
+		throw backup_parse_s3_response_failure();
+	} catch (...) {
+		throw backup_parse_s3_response_failure();
 	}
-
-	// Find the <Code> node
-	xml_node<>* codeNode = root->first_node("Code");
-	if (!codeNode) {
-		TraceEvent(SevWarn, "ParseS3XMLResponseNoErrorCode").detail("Response", xmlResponse).log();
-		return "";
-	}
-
-	return std::string(codeNode->value());
 }
 
 bool isS3TokenError(const std::string& s3Error) {
@@ -906,23 +909,18 @@ std::string getCanonicalURI(Reference<S3BlobStoreEndpoint> bstore, Reference<HTT
 	return canonicalURI;
 }
 
-Reference<HTTP::OutgoingRequest> getDryrunRequest(Reference<S3BlobStoreEndpoint> bstore, std::string bucket) {
+void populateDryrunRequest(Reference<HTTP::OutgoingRequest> dryrunRequest,
+                           Reference<S3BlobStoreEndpoint> bstore,
+                           std::string bucket) {
 	// dryrun with a check bucket exist request, to avoid sending duplicate data
-	UnsentPacketQueue contentCopy;
 	HTTP::Headers headers;
-	Reference<HTTP::OutgoingRequest> dryrunRequest = makeReference<HTTP::OutgoingRequest>();
 	dryrunRequest->verb = "GET";
-
-	dryrunRequest->data.content = &contentCopy;
 	dryrunRequest->data.contentLen = 0;
-
 	dryrunRequest->data.headers = headers;
 	dryrunRequest->data.headers["Host"] = bstore->host;
 	dryrunRequest->data.headers["Accept"] = "application/xml";
 
 	dryrunRequest->resource = constructResourcePath(bstore, bucket, "");
-
-	return dryrunRequest;
 }
 
 bool isWriteRequest(std::string verb) {
@@ -953,7 +951,9 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
                                                                int contentLen,
                                                                std::set<unsigned int> successCodes) {
 	state UnsentPacketQueue contentCopy;
+	state UnsentPacketQueue dryrunContentCopy; // NonCopyable state var so must be declared at top of actor
 	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	state Reference<HTTP::OutgoingRequest> dryrunRequest = makeReference<HTTP::OutgoingRequest>();
 	req->verb = verb;
 	req->data.content = &contentCopy;
 	req->data.contentLen = contentLen;
@@ -1034,7 +1034,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			reqStartTimer = g_network->timer();
 
 			try {
-				if (s3TokenError && isWriteRequest(req->verb)) {
+				if (s3TokenError && isWriteRequest(req->verb) && CLIENT_KNOBS->BACKUP_ALLOW_DRYRUN) {
 					// if it is a write request with s3TokenError, retry with a HEAD dryrun request
 					// to avoid sending duplicate data indefinitly to save network bandwidth
 					// because it might due to expired or invalid S3 token from the disk
@@ -1047,19 +1047,23 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 						    .log();
 						throw bucket_not_in_url();
 					}
+					dryrunRequest->data.content = &dryrunContentCopy;
+					dryrunRequest->data.content->discardAll(); // this should always be empty
+					populateDryrunRequest(dryrunRequest, bstore, bucket);
+					setHeaders(bstore, dryrunRequest);
+					dryrunRequest->resource = getCanonicalURI(bstore, dryrunRequest);
 					TraceEvent("RetryS3RequestDueToTokenIssue")
 					    .detail("S3TokenError", s3TokenError)
-					    .detail("Resource", resource)
+					    .detail("OriginalResource", resource)
+					    .detail("DryrunResource", dryrunRequest->resource)
 					    .detail("Bucket", bucket)
 					    .detail("V4", CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER)
 					    .log();
-					state Reference<HTTP::OutgoingRequest> dryrunRequest = getDryrunRequest(bstore, bucket);
-					setHeaders(bstore, dryrunRequest);
-					dryrunRequest->resource = getCanonicalURI(bstore, dryrunRequest);
 					wait(bstore->requestRate->getAllowance(1));
 					Future<Reference<HTTP::IncomingResponse>> dryrunResponse = HTTP::doRequest(
 					    rconn.conn, dryrunRequest, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
-					store(dryrunR, timeoutError(dryrunResponse, requestTimeout));
+					Reference<HTTP::IncomingResponse> _dryrunR = wait(timeoutError(dryrunResponse, requestTimeout));
+					dryrunR = _dryrunR;
 					std::string s3Error = parseErrorCodeFromS3(dryrunR->data.content);
 					if (dryrunR->code == badRequestCode && isS3TokenError(s3Error)) {
 						// authentication fails and s3 token error persists, retry in the hope token is corrected
