@@ -26,7 +26,7 @@ while [ -h "${source}" ]; do # resolve $source until the file is no longer a sym
 done
 cwd=$( cd -P "$( dirname "${source}" )" >/dev/null 2>&1 && pwd )
 # Now source in the seaweedfs fixture so we can use its methods in the below.
-source seaweedfs_fixture.sh
+source "${cwd}/seaweedfs_fixture.sh"
 
 # Globals that get set below and are used when we cleanup.
 WEED_DIR=
@@ -111,7 +111,7 @@ test_dir_upload_and_download() {
 log_test_result() {
   local test_errcode=$1
   local test_name=$2
-  if [ $test_errcode -eq 0 ]; then
+  if [ "${test_errcode}" -eq 0 ]; then
     log "PASSED ${test_name}"
   else
     log "FAILED ${test_name}"
@@ -142,7 +142,8 @@ then
     exit 1
 fi
 # Download seaweed.
-readonly weed_binary_path="$(download_weed "${scratch_dir}")"
+readonly weed_binary_path
+weed_binary_path="$(download_weed "${scratch_dir}")"
 if [ $? -ne 0 ] || [ ! -f "${weed_binary_path}" ]; then
   echo "ERROR: failed download of weed binary." >&2
   exit 1

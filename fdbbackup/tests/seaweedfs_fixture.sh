@@ -101,27 +101,27 @@ start_weed() {
     local weed_pid=$!
     # Loop while process is coming up. It can take 25 seconds.
     while  kill -0 ${weed_pid} &> /dev/null; do
-       if grep "Start Seaweed S3 API Server" "${weed_dir}/weed.INFO" &> /dev/null ; then
-         # Its up and running. Breakout of this while loop and the wrapping 'for' loop
-         # (hence the '2' in the below)
-         break 2
-       fi
+      if grep "Start Seaweed S3 API Server" "${weed_dir}/weed.INFO" &> /dev/null ; then
+        # Its up and running. Breakout of this while loop and the wrapping 'for' loop
+        # (hence the '2' in the below)
+        break 2
+      fi
       sleep 5
-     done
-     # The process died. If it was because of port clash, go around again w/ new ports.
-     if grep "bind: address already in use" "${weed_dir}/weed.INFO" &> /dev/null ; then
-       # Clashed w/ existing port. Go around again and get new ports.
-       :
-     else
-       # Seaweed is not up and it is not because of port clash. Exit.
-       # Dump out the tail of the weed log because its going to get cleaned up when
-       # we exit this script. Give the user an idea of what went wrong.
-       if [ -f "${weed_dir}/weed.INFO" ]; then
+    done
+    # The process died. If it was because of port clash, go around again w/ new ports.
+    if grep "bind: address already in use" "${weed_dir}/weed.INFO" &> /dev/null ; then
+      # Clashed w/ existing port. Go around again and get new ports.
+      :
+    else
+      # Seaweed is not up and it is not because of port clash. Exit.
+      # Dump out the tail of the weed log because its going to get cleaned up when
+      # we exit this script. Give the user an idea of what went wrong.
+      if [ -f "${weed_dir}/weed.INFO" ]; then
         tail -50 "${weed_dir}/weed.INFO" >&2
-       fi
-       echo "ERROR: Failed to start weed" >&2
-       exit 1
-     fi
+      fi
+      echo "ERROR: Failed to start weed" >&2
+      exit 1
+    fi
   done
   if [ "${index}" -ge "${max}" ]; then
     echo "ERROR: Ran out of retries (${index})"
