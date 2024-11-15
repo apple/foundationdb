@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Functions to download and start https://github.com/seaweedfs/seaweedfs
+# Functions to download and start https://github.com/seaweedfs/seaweedfs,
+# a blob store with an S3 API.
 
 # Cleanup the mess we've made. For calling from signal trap on exit.
 # $1 Weed PID to kill if running.
@@ -11,7 +12,7 @@ shutdown() {
   if [ -n "${pid}" ]; then
     # KILL! If we send SIGTERM, seaweedfs hangs out
     # ten seconds before shutting down (could config.
-    # but just kill -- no state to save).
+    # time but just kill it -- there is no state to save).
     kill -9 "${pid}"
   fi
   if [ -d "${dir}" ]; then
@@ -27,6 +28,12 @@ download_weed() {
   local dir="${1}"
   local tgz
   local os=
+  # Make sure we have curl installed.
+  if ! command -v curl &> /dev/null
+  then
+      echo "ERROR: 'curl' not found."
+      exit 1
+  fi
   if [[ "$OSTYPE" =~ ^linux ]]; then
     os="linux"
   elif [[ "$OSTYPE" =~ ^darwin ]]; then

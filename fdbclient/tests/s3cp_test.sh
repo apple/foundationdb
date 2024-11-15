@@ -5,9 +5,8 @@
 # For use by ctest. seaweed server takes about 25
 # seconds to come up. Tests run for a few seconds after that.
 #
-# Used https://www.shellcheck.net/
+# Used https://www.shellcheck.net/, https://bertvv.github.io/cheat-sheets/Bash.html,
 # and https://bertvv.github.io/cheat-sheets/Bash.html
-#
 
 # Some copied from down the page on
 # https://stackoverflow.com/questions/192249/how-do-i-parse-command-line-arguments-in-bash
@@ -33,8 +32,8 @@ WEED_DIR=
 WEED_PID=
 # Use one bucket only for all tests. More buckets means
 # we need more volumes which can be an issue when little
-# diskspace
-readonly BUCKET="testbucket"
+# diskspace.
+readonly BUCKET="${S3_BUCKET:-testbucket}"
 
 # Make sure cleanup on script exit.
 trap "exit 1" HUP INT PIPE QUIT TERM
@@ -131,15 +130,9 @@ if [ ! -d "${build_dir}" ]; then
   echo "ERROR: ${build_dir} is not a directory";
   exit 1
 fi
-scratch_dir="${TMPDIR}"
+scratch_dir="${TMPDIR:-/tmp}"
 if [ $# -eq 2 ]; then
   scratch_dir="${2}"
-fi
-# Make sure we have curl installed.
-if ! command -v curl &> /dev/null
-then
-    echo "ERROR: 'curl' not found."
-    exit 1
 fi
 # Download seaweed.
 readonly weed_binary_path="$(download_weed "${scratch_dir}")"
