@@ -145,10 +145,10 @@ start_servers $LOGS_COUNT "$LOGS_TASKSET" log DC1
 start_servers $STORAGE_COUNT "$STORAGE_TASKSET" storage DC1
 
 CLI="$BUILD/bin/fdbcli -C ${CLUSTER} --exec"
-echo "configure new ssd-sharded-rocksdb $replication - stand by"
+echo "configure new ssd $replication - stand by"
 
 # sleep 2 seconds to wait for workers to join cluster, then configure database and coordinators
-( sleep 2 ; $CLI "configure new ssd-sharded-rocksdb $replication" ; $CLI "coordinators auto")
+( sleep 2 ; $CLI "configure new ssd $replication" ; $CLI "coordinators auto")
 
 if [ $LOGROUTER_COUNT -gt 0 ]; then
 	start_servers $LOGROUTER_COUNT "$STORAGE_TASKSET" router DC3

@@ -32,7 +32,6 @@
 #include <io.h>
 #endif
 
-#include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/BuildFlags.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/FDBTypes.h"
@@ -64,6 +63,81 @@ extern const char* getSourceVersion();
 
 namespace s3cp {
 const std::string BLOBSTORE_PREFIX = "blobstore://";
+
+// TLS and blob credentials for backups and setup for these credentials.
+// Copied from fdbbackup/BackupTLSConfig.* and renamed S3CpTLSConfig.
+struct S3CpTLSConfig {
+	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword, tlsVerifyPeers;
+	std::vector<std::string> blobCredentials;
+
+	// Returns if TLS setup is successful
+	bool setupTLS();
+
+	// Sets up blob crentials. Add the file specified by FDB_BLOB_CREDENTIALS as well.
+	// Note this must be called after g_network is set up.
+	void setupBlobCredentials();
+};
+
+void S3CpTLSConfig::setupBlobCredentials() {
+	// Add blob credentials files from the environment to the list collected from the command line.
+	const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+	if (blobCredsFromENV != nullptr) {
+		StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
+		do {
+			StringRef file = t.eat(":");
+			if (file.size() != 0)
+				blobCredentials.push_back(file.toString());
+		} while (t.size() != 0);
+	}
+
+	// Update the global blob credential files list
+	std::vector<std::string>* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+	if (pFiles != nullptr) {
+		for (auto& f : blobCredentials) {
+			pFiles->push_back(f);
+		}
+	}
+}
+
+bool S3CpTLSConfig::setupTLS() {
+	if (tlsCertPath.size()) {
+		try {
+			setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, tlsCertPath);
+		} catch (Error& e) {
+			std::cerr << "ERROR: cannot set TLS certificate path to " << tlsCertPath << " (" << e.what() << ")\n";
+			return false;
+		}
+	}
+
+	if (tlsCAPath.size()) {
+		try {
+			setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, tlsCAPath);
+		} catch (Error& e) {
+			std::cerr << "ERROR: cannot set TLS CA path to " << tlsCAPath << " (" << e.what() << ")\n";
+			return false;
+		}
+	}
+	if (tlsKeyPath.size()) {
+		try {
+			if (tlsPassword.size())
+				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, tlsPassword);
+
+			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, tlsKeyPath);
+		} catch (Error& e) {
+			std::cerr << "ERROR: cannot set TLS key path to " << tlsKeyPath << " (" << e.what() << ")\n";
+			return false;
+		}
+	}
+	if (tlsVerifyPeers.size()) {
+		try {
+			setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, tlsVerifyPeers);
+		} catch (Error& e) {
+			std::cerr << "ERROR: cannot set TLS peer verification to " << tlsVerifyPeers << " (" << e.what() << ")\n";
+			return false;
+		}
+	}
+	return true;
+}
 
 // Get the endpoint for the given s3url.
 // Populates parameters and resource with parse of s3url.
@@ -247,7 +321,7 @@ struct Params : public ReferenceCounted<Params> {
 	Optional<std::string> proxy;
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
-	BackupTLSConfig tlsConfig;
+	s3cp::S3CpTLSConfig tlsConfig;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	std::string src;
 	std::string tgt;

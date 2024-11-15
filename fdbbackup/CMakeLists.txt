@@ -21,15 +21,6 @@ add_flow_target(EXECUTABLE NAME fdbdecode SRCS ${FDBDECODE_SRCS})
 target_include_directories(fdbdecode PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 target_link_libraries(fdbdecode PRIVATE fdbclient)
 
-set(S3CP_SRCS
-	Decode.cpp
-	BackupTLSConfig.cpp
-  S3Cp.actor.cpp)
-add_flow_target(EXECUTABLE NAME s3cp SRCS ${S3CP_SRCS})
-target_include_directories(s3cp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
-target_link_libraries(s3cp PRIVATE fdbclient)
-
-
 if(NOT OPEN_FOR_IDE)
   if(GENERATE_DEBUG_PACKAGES)
     fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
@@ -58,9 +49,4 @@ endif()
 if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbbackup PRIVATE gperftools)
-endif()
-
-if (NOT WIN32 AND NOT OPEN_FOR_IDE)
-  enable_testing()
-  add_test(NAME s3cp_test COMMAND ${CMAKE_SOURCE_DIR}/fdbbackup/tests/s3cp_test.sh ${CMAKE_BINARY_DIR})
 endif()

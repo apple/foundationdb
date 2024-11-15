@@ -142,8 +142,7 @@ then
     exit 1
 fi
 # Download seaweed.
-readonly weed_binary_path
-weed_binary_path="$(download_weed "${scratch_dir}")"
+readonly weed_binary_path="$(download_weed "${scratch_dir}")"
 if [ $? -ne 0 ] || [ ! -f "${weed_binary_path}" ]; then
   echo "ERROR: failed download of weed binary." >&2
   exit 1
