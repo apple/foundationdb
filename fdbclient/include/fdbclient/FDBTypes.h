@@ -370,6 +370,8 @@ struct KeyRangeRef {
 		return KeyRangeRef(begin.removePrefix(prefix), end.removePrefix(prefix));
 	}
 
+	int prefixLength() const { return commonPrefixLength(begin, end); }
+
 	const KeyRangeRef& operator=(const KeyRangeRef& rhs) {
 		const_cast<KeyRef&>(begin) = rhs.begin;
 		const_cast<KeyRef&>(end) = rhs.end;
