@@ -142,11 +142,11 @@ bool S3CpTLSConfig::setupTLS() {
 // Get the endpoint for the given s3url.
 // Populates parameters and resource with parse of s3url.
 static Reference<S3BlobStoreEndpoint> getEndpoint(std::string s3url,
-		std::string& resource,
-		S3BlobStoreEndpoint::ParametersT &parameters) {
+                                                  std::string& resource,
+                                                  S3BlobStoreEndpoint::ParametersT& parameters) {
 	std::string error;
 	Reference<S3BlobStoreEndpoint> endpoint =
-		S3BlobStoreEndpoint::fromString(s3url, {}, &resource, &error, &parameters);
+	    S3BlobStoreEndpoint::fromString(s3url, {}, &resource, &error, &parameters);
 	if (resource.empty()) {
 		TraceEvent(SevError, "EmptyResource").detail("s3url", s3url);
 		throw backup_invalid_url();
@@ -166,16 +166,19 @@ static Reference<S3BlobStoreEndpoint> getEndpoint(std::string s3url,
 
 // Copy filepath to bucket at resource in s3.
 ACTOR Future<Void> copy_up_file(Reference<S3BlobStoreEndpoint> endpoint,
-		std::string bucket,
-		std::string resource,
-		std::string filepath) {
+                                std::string bucket,
+                                std::string resource,
+                                std::string filepath) {
 	// Reading an SST file fully into memory is pretty obnoxious. They are about 16MB on
 	// average. Streaming would require changing this s3blobstore interface.
 	// Make 32MB the max size for now even though its arbitrary and way to big.
 	state std::string content = readFileBytes(filepath, 1024 * 1024 * 32);
 	wait(endpoint->writeEntireFile(bucket, resource, content));
-	TraceEvent("Upload").detail("filepath", filepath).detail("bucket", bucket).
-		detail("resource", resource).detail("size", content.size());
+	TraceEvent("Upload")
+	    .detail("filepath", filepath)
+	    .detail("bucket", bucket)
+	    .detail("resource", resource)
+	    .detail("size", content.size());
 	return Void();
 }
 
@@ -196,31 +199,35 @@ ACTOR Future<Void> copy_up_directory(std::string dirpath, std::string s3url) {
 	state std::string bucket = parameters["bucket"];
 	state std::vector<std::string> files;
 	platform::findFilesRecursively(dirpath, files);
-	TraceEvent("UploadDirStart").detail("filecount", files.size()).
-		detail("bucket", bucket).detail("resource", resource);
+	TraceEvent("UploadDirStart")
+	    .detail("filecount", files.size())
+	    .detail("bucket", bucket)
+	    .detail("resource", resource);
 	for (const auto& file : files) {
 		std::string filepath = file;
 		std::string s3path = resource + "/" + file.substr(dirpath.size() + 1);
 		wait(copy_up_file(endpoint, bucket, s3path, filepath));
 	}
-	TraceEvent("UploadDirEnd").detail("bucket", bucket).
-		detail("resource", resource);
+	TraceEvent("UploadDirEnd").detail("bucket", bucket).detail("resource", resource);
 	return Void();
 }
 
 // Copy filepath to bucket at resource in s3.
 ACTOR Future<Void> copy_down_file(Reference<S3BlobStoreEndpoint> endpoint,
-		std::string bucket,
-		std::string resource,
-		std::string filepath) {
+                                  std::string bucket,
+                                  std::string resource,
+                                  std::string filepath) {
 	std::string content = wait(endpoint->readEntireFile(bucket, resource));
 	auto parent = std::filesystem::path(filepath).parent_path();
 	if (parent != "" && !std::filesystem::exists(parent)) {
 		std::filesystem::create_directories(parent);
 	}
 	writeFile(filepath, content);
-	TraceEvent("Download").detail("filepath", filepath).detail("bucket", bucket).
-		detail("resource", resource).detail("size", content.size());
+	TraceEvent("Download")
+	    .detail("filepath", filepath)
+	    .detail("bucket", bucket)
+	    .detail("resource", resource)
+	    .detail("size", content.size());
 	return Void();
 }
 
@@ -240,18 +247,18 @@ ACTOR Future<Void> copy_down_directory(std::string s3url, std::string dirpath) {
 	S3BlobStoreEndpoint::ParametersT parameters;
 	state Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
 	state std::string bucket = parameters["bucket"];
-	S3BlobStoreEndpoint::ListResult items =
-		wait(endpoint->listObjects(parameters["bucket"], resource));
+	S3BlobStoreEndpoint::ListResult items = wait(endpoint->listObjects(parameters["bucket"], resource));
 	state std::vector<S3BlobStoreEndpoint::ObjectInfo> objects = items.objects;
-	TraceEvent("DownloadDirStart").detail("filecount", objects.size()).
-		detail("bucket", bucket).detail("resource", resource);
+	TraceEvent("DownloadDirStart")
+	    .detail("filecount", objects.size())
+	    .detail("bucket", bucket)
+	    .detail("resource", resource);
 	for (const auto& object : objects) {
 		std::string filepath = dirpath + "/" + object.name.substr(resource.size());
 		std::string s3path = object.name;
 		wait(copy_down_file(endpoint, bucket, s3path, filepath));
 	}
-	TraceEvent("DownloadDirEnd").detail("bucket", bucket).
-		detail("resource", resource);
+	TraceEvent("DownloadDirEnd").detail("bucket", bucket).detail("resource", resource);
 	return Void();
 }
 
@@ -266,25 +273,25 @@ enum {
 	OPT_HELP
 };
 
-CSimpleOpt::SOption Options[] = {
-	{ OPT_TRACE, "--log", SO_NONE },
-	{ OPT_TRACE, "--logs", SO_NONE },
-	{ OPT_TRACE, "-l", SO_NONE },
-	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
-	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
-	TLS_OPTION_FLAGS,
-	{ OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
-	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	{ OPT_HELP, "-h", SO_NONE },
-	{ OPT_HELP, "--help", SO_NONE },
-	SO_END_OF_OPTIONS };
+CSimpleOpt::SOption Options[] = { { OPT_TRACE, "--log", SO_NONE },
+	                              { OPT_TRACE, "--logs", SO_NONE },
+	                              { OPT_TRACE, "-l", SO_NONE },
+	                              { OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	                              { OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
+	                              { OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	                              { OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
+	                              TLS_OPTION_FLAGS,
+	                              { OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
+	                              { OPT_KNOB, "--knob-", SO_REQ_SEP },
+	                              { OPT_HELP, "-h", SO_NONE },
+	                              { OPT_HELP, "--help", SO_NONE },
+	                              SO_END_OF_OPTIONS };
 
 static void printUsage(std::string const& programName) {
-	std::cout << "Usage: " << programName << " [OPTIONS] SOURCE TARGET\n"
-				 "Copy files to and from S3.\n"
-				 "Options:\n"
+	std::cout << "Usage: " << programName
+	          << " [OPTIONS] SOURCE TARGET\n"
+	             "Copy files to and from S3.\n"
+	             "Options:\n"
 	             "  --log          Enables trace file logging for the CLI session.\n"
 	             "  --logdir PATH  Specifies the output directory for trace files. If\n"
 	             "                 unspecified, defaults to the current directory. Has\n"
@@ -301,15 +308,20 @@ static void printUsage(std::string const& programName) {
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --knob-KNOBNAME KNOBVALUE\n"
 	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
-				 "Arguments:\n"
-				 " SOURCE          File, directory, or s3 bucket URL to copy from.\n"
-				 "                 If SOURCE is an s3 bucket URL, TARGET must be a directory and vice versa.\n"
-				 "                 See 'Backup URLs' in https://apple.github.io/foundationdb/backups.html for\n"
-				 "                 the fdb s3 'blobstore://' url format."
-				 " TARGET          Where to place the copy.\n"
-				 "Examples:\n"
-				 " " << programName << " --blob-credentials /path/to/credentials.json /path/to/source /path/to/target\n"
-				 " " << programName << " --knob_http_verbose_level=10 --log  'blobstore://localhost:8333/x?bucket=backup&region=us&secure_connection=0' dir3\n";
+	             "Arguments:\n"
+	             " SOURCE          File, directory, or s3 bucket URL to copy from.\n"
+	             "                 If SOURCE is an s3 bucket URL, TARGET must be a directory and vice versa.\n"
+	             "                 See 'Backup URLs' in https://apple.github.io/foundationdb/backups.html for\n"
+	             "                 the fdb s3 'blobstore://' url format."
+	             " TARGET          Where to place the copy.\n"
+	             "Examples:\n"
+	             " "
+	          << programName
+	          << " --blob-credentials /path/to/credentials.json /path/to/source /path/to/target\n"
+	             " "
+	          << programName
+	          << " --knob_http_verbose_level=10 --log  "
+	             "'blobstore://localhost:8333/x?bucket=backup&region=us&secure_connection=0' dir3\n";
 	return;
 }
 
@@ -454,8 +466,9 @@ static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
 	param->tgt = args->Files()[1];
 	param->whichIsBlobstoreURL = isBlobStoreURL(param->src) ? 0 : isBlobStoreURL(param->tgt) ? 1 : -1;
 	if (param->whichIsBlobstoreURL < 0) {
-		std::cerr << "ERROR: Either SOURCE or TARGET needs to be a blobstore URL " <<
-			"(e.g. blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400?bucket=backups)" << std::endl;
+		std::cerr << "ERROR: Either SOURCE or TARGET needs to be a blobstore URL "
+		          << "(e.g. blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400?bucket=backups)"
+		          << std::endl;
 		return FDB_EXIT_ERROR;
 	}
 	return FDB_EXIT_SUCCESS;
@@ -543,9 +556,8 @@ int main(int argc, char** argv) {
 
 		TraceEvent::setNetworkThread();
 		std::string path(argv[0]);
-		openTraceFile({}, 10 << 20, 500 << 20,
-			param->log_dir, path.substr(path.find_last_of("/\\") + 1),
-			param->trace_log_group);
+		openTraceFile(
+		    {}, 10 << 20, 500 << 20, param->log_dir, path.substr(path.find_last_of("/\\") + 1), param->trace_log_group);
 		param->tlsConfig.setupBlobCredentials();
 
 		auto f = stopAfter(run(param));
