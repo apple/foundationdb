@@ -20,6 +20,6 @@
 
 #include "fdbclient/BulkDumping.h"
 
-BulkDumpState newBulkDumpTaskLocalSST(KeyRange range, std::string folder) {
+BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& folder) {
 	return BulkDumpState(range, BulkDumpFileType::SST, BulkDumpTransportMethod::CP, BulkDumpExportMethod::File, folder);
 }

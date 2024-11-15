@@ -69,6 +69,10 @@ struct BulkDumping : TestWorkload {
 			return Void();
 		}
 
+		state int oldBulkDumpMode = 0;
+		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1)));
+		TraceEvent("BulkDumpingSetMode").detail("OldMode", oldBulkDumpMode).detail("NewMode", 1);
+
 		BulkDumpState newTask = newBulkDumpTaskLocalSST(normalKeys, simulationBulkDumpFolder);
 		TraceEvent("BulkDumpingTaskNew").detail("Task", newTask.toString());
 		wait(submitBulkDumpTask(cx, newTask));

@@ -400,6 +400,9 @@ public:
 	int DD_BULKLOAD_PARALLELISM; // the maximum number of running bulk load tasks
 	double DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk load scheduler has to wait
 	                                              // between two rounds
+	int DD_BULKDUMP_TASK_METADATA_READ_SIZE; // the number of bulk dump tasks read from metadata at a time
+	double DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk dump scheduler has to wait
+	                                              // between two rounds
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;

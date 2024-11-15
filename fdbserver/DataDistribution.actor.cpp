@@ -23,6 +23,7 @@
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/BulkDumping.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
@@ -33,6 +34,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/Replication.h"
+#include "fdbserver/BulkDumpUtil.actor.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbserver/DDTeamCollection.h"
@@ -422,6 +424,7 @@ public:
 
 	ActorCollection bulkLoadActors;
 	bool bulkLoadEnabled = false;
+	ActorCollection bulkDumpActors;
 	bool bulkDumpEnabled = false;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
@@ -1336,6 +1339,109 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 	}
 }
 
+ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
+	state Database cx = self->txnProcessor->context();
+
+	state Key beginKey = normalKeys.begin;
+	state Key endKey = normalKeys.end;
+	state KeyRange rangeToRead;
+
+	state int bulkDumpResultIndex = 0;
+	state BulkDumpState bulkDumpState;
+	state KeyRange bulkDumpRange;
+	state RangeResult bulkDumpResult;
+
+	state int rangeLocationIndex = 0;
+	state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations;
+
+	state bool allComplete = true;
+
+	while (beginKey < endKey) {
+		state Transaction tr(cx);
+		try {
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			bulkDumpResult.clear();
+			wait(store(
+			    bulkDumpResult,
+			    krmGetRanges(&tr, bulkDumpPrefix, rangeToRead, SERVER_KNOBS->DD_BULKDUMP_TASK_METADATA_READ_SIZE)));
+			bulkDumpResultIndex = 0;
+			for (; bulkDumpResultIndex < bulkDumpResult.size() - 1; bulkDumpResultIndex++) {
+				if (bulkDumpResult[bulkDumpResultIndex].value.empty()) {
+					continue;
+				}
+				bulkDumpRange = Standalone(
+				    KeyRangeRef(bulkDumpResult[bulkDumpResultIndex].key, bulkDumpResult[bulkDumpResultIndex + 1].key));
+				bulkDumpState = decodeBulkDumpState(bulkDumpResult[bulkDumpResultIndex].value);
+				if (bulkDumpState.phase == BulkDumpPhase::Running || bulkDumpState.phase == BulkDumpPhase::Complete) {
+					continue;
+				}
+				ASSERT_WE_THINK(bulkDumpState.phase == BulkDumpPhase::Submitted ||
+				                bulkDumpState.phase == BulkDumpPhase::Failed);
+				// Partition the job in the unit of shard
+				allComplete = false;
+				wait(store(rangeLocations, self->txnProcessor->getSourceServerInterfacesForRange(bulkDumpRange)));
+				rangeLocationIndex = 0;
+				for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
+					SSBulkDumpRequest req =
+					    getSSBulkDumpRequest(rangeLocations[rangeLocationIndex].servers,
+					                         bulkDumpState.spawn(rangeLocations[rangeLocationIndex].range));
+					// Issue task
+					TraceEvent(SevInfo, "DDBulkDumpScheduleTask", self->ddId).detail("Request", req.toString());
+					beginKey = rangeLocations.back().range.end;
+				}
+			}
+			beginKey = bulkDumpResult.back().key;
+			wait(delay(0.1));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			wait(tr.onError(e));
+		}
+	}
+	return allComplete;
+}
+
+ACTOR Future<Void> bulkDumpTaskScheduler(Reference<DataDistributor> self) {
+	state bool allComplete = false;
+	loop {
+		try {
+			wait(store(allComplete, scheduleBulkDumpTasks(self)) &&
+			     delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC));
+			if (allComplete) {
+				TraceEvent(SevInfo, "DDBulkDumpTaskSchedulerComplete", self->ddId);
+				return Void();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			TraceEvent(SevInfo, "DDBulkDumpTaskSchedulerError", self->ddId);
+		}
+	}
+}
+
+ACTOR Future<Void> bulkDumpingCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
+	wait(readyToStart);
+	state Database cx = self->txnProcessor->context();
+	loop {
+		try {
+			self->bulkDumpActors.add(bulkDumpTaskScheduler(self));
+			wait(self->bulkDumpActors.getResult());
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			TraceEvent(SevInfo, "DDBulkDumpCoreError", self->ddId).errorUnsuppressed(e);
+			if (e.code() == error_code_movekeys_conflict) {
+				throw e;
+			}
+		}
+		self->bulkDumpActors.clear(false);
+		wait(delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC));
+	}
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -1582,6 +1688,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				TraceEvent(SevInfo, "DDBulkDumpModeEnabled", self->ddId)
 				    .detail("UsableRegions", self->configuration.usableRegions);
 				self->bulkDumpEnabled = true;
+				if (self->configuration.usableRegions > 1) {
+					actors.push_back(
+					    bulkDumpingCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+				} else {
+					actors.push_back(bulkDumpingCore(self, self->initialized.getFuture()));
+				}
 			}
 
 			wait(waitForAll(actors));
