@@ -131,7 +131,7 @@ if [[ ! -d "${build_dir}" ]]; then
   exit 1
 fi
 scratch_dir="${TMPDIR:-/tmp}"
-if [ $# -eq 2 ]; then
+if (( $# -eq 2 )); then
   scratch_dir="${2}"
 fi
 # Download seaweed.
