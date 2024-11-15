@@ -9,13 +9,13 @@
 shutdown() {
   local pid="${1}"
   local dir="${2}"
-  if [ -n "${pid}" ]; then
+  if [[ -n "${pid}" ]]; then
     # KILL! If we send SIGTERM, seaweedfs hangs out
     # ten seconds before shutting down (could config.
     # time but just kill it -- there is no state to save).
     kill -9 "${pid}"
   fi
-  if [ -d "${dir}" ]; then
+  if [[ -d "${dir}" ]]; then
     rm -rf "${dir}"
   fi
 }
@@ -29,8 +29,7 @@ download_weed() {
   local tgz
   local os=
   # Make sure we have curl installed.
-  if ! command -v curl &> /dev/null
-  then
+  if ! command -v curl &> /dev/null; then
       echo "ERROR: 'curl' not found."
       exit 1
   fi
@@ -46,7 +45,7 @@ download_weed() {
   tgz="${os}_$(uname -m).tar.gz"
   # If not already present, download it.
   local fullpath_tgz="${dir}/${tgz}"
-  if [ ! -f "${fullpath_tgz}" ]; then
+  if [[ ! -f "${fullpath_tgz}" ]]; then
     # Change directory because awkward telling curl where to put download.
     ( cd "${dir}" || exit 1 
       curl -sL "https://github.com/seaweedfs/seaweedfs/releases/download/3.79/${tgz}" \
@@ -54,7 +53,7 @@ download_weed() {
       )
   fi
   local weed_binary="${dir}/weed"
-  if [ ! -f "${weed_binary}" ]; then
+  if [[ ! -f "${weed_binary}" ]]; then
     tar xfz "${fullpath_tgz}" --directory "${dir}"
   fi
   echo "${weed_binary}"
@@ -69,7 +68,7 @@ create_weed_dir() {
   local weed_dir
   weed_dir=$(mktemp -d -p "${dir}")
   # Exit if the temp directory wasn't created successfully.
-  if [ ! -d "${weed_dir}" ]; then
+  if [[ ! -d "${weed_dir}" ]]; then
     echo "ERROR: Failed create of weed directory ${weed_dir}" >&2
     exit 1
   fi
@@ -123,14 +122,14 @@ start_weed() {
       # Seaweed is not up and it is not because of port clash. Exit.
       # Dump out the tail of the weed log because its going to get cleaned up when
       # we exit this script. Give the user an idea of what went wrong.
-      if [ -f "${weed_dir}/weed.INFO" ]; then
+      if [[ -f "${weed_dir}/weed.INFO" ]]; then
         tail -50 "${weed_dir}/weed.INFO" >&2
       fi
       echo "ERROR: Failed to start weed" >&2
       exit 1
     fi
   done
-  if [ "${index}" -ge "${max}" ]; then
+  if (( "${index}" >= "${max}" )); then
     echo "ERROR: Ran out of retries (${index})"
     exit 1
   fi

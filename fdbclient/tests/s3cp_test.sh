@@ -18,7 +18,7 @@ set -o noclobber
 
 # From https://stackoverflow.com/questions/59895/how-can-i-get-the-source-directory-of-a-bash-script-from-within-the-script-itsel
 source=${BASH_SOURCE[0]}
-while [ -h "${source}" ]; do # resolve $source until the file is no longer a symlink
+while [[ -h "${source}" ]]; do # resolve $source until the file is no longer a symlink
   dir=$( cd -P "$( dirname "${source}" )" >/dev/null 2>&1 && pwd )
   source=$(readlink "${source}")
   [[ ${source} != /* ]] && source="${dir}/${source}" # if $source was a relative symlink, we need to resolve it relative to the path where the symlink file was located
@@ -59,7 +59,7 @@ test_file_upload_and_download() {
   local dir="${2}"
   local s3cp="${3}"
   local logsdir="${2}/logs"
-  if [ ! -d "${logsdir}" ]; then
+  if [[ ! -d "${logsdir}" ]]; then
     mkdir "${logsdir}"
   fi
   local testfileup="${dir}/testfile.up"
@@ -69,7 +69,7 @@ test_file_upload_and_download() {
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testfileup}" "${blobstoreurl}"
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testfiledown}"
   diff "${testfileup}" "${testfiledown}"
-  if test $? -ne 0; then
+  if (( $? != 0 )); then
     echo "ERROR: Test $0 failed; upload and download are not the same."
     exit 1
   fi
@@ -84,7 +84,7 @@ test_dir_upload_and_download() {
   local dir="${2}"
   local s3cp="${3}"
   local logsdir="${2}/logs"
-  if [ ! -d "${logsdir}" ]; then
+  if [[ ! -d "${logsdir}" ]]; then
     mkdir "${logsdir}"
   fi
   local testdirup="${dir}/testdir.up"
@@ -98,7 +98,7 @@ test_dir_upload_and_download() {
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testdirup}" "${blobstoreurl}"
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testdirdown}"
   diff "${testdirup}" "${testdirdown}"
-  if test $? -ne 0; then
+  if (( $? != 0 )); then
     echo "ERROR: Test $0 failed; upload and download are not the same."
     exit 1
   fi
@@ -110,7 +110,7 @@ test_dir_upload_and_download() {
 log_test_result() {
   local test_errcode=$1
   local test_name=$2
-  if [ "${test_errcode}" -eq 0 ]; then
+  if (( "${test_errcode}" == 0 )); then
     log "PASSED ${test_name}"
   else
     log "FAILED ${test_name}"
@@ -118,7 +118,7 @@ log_test_result() {
 }
 
 # Process command-line options.
-if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+if (( $# < 1 )) || (( $# > 2 )); then
     echo "ERROR: ${0} requires the fdb build directory -- CMAKE_BUILD_DIR -- as its"
     echo "first argument and then, optionally, a directory into which we write scratch"
     echo "test data and logs (otherwise we'll write to subdirs under $TMPDIR)."
@@ -126,7 +126,7 @@ if [ $# -lt 1 ] || [ $# -gt 2 ]; then
     exit 1
 fi
 readonly build_dir="${1}"
-if [ ! -d "${build_dir}" ]; then
+if [[ ! -d "${build_dir}" ]]; then
   echo "ERROR: ${build_dir} is not a directory";
   exit 1
 fi
@@ -136,18 +136,18 @@ if [ $# -eq 2 ]; then
 fi
 # Download seaweed.
 readonly weed_binary_path="$(download_weed "${scratch_dir}")"
-if [ $? -ne 0 ] || [ ! -f "${weed_binary_path}" ]; then
+if (( $? != 0 )) || [[ ! -f "${weed_binary_path}" ]]; then
   echo "ERROR: failed download of weed binary." >&2
   exit 1
 fi
 WEED_DIR="$(create_weed_dir "${scratch_dir}")"
-if [ $? -ne 0 ] || [ ! -d "${WEED_DIR}" ]; then
+if (( $? != 0 )) || [[ ! -d "${WEED_DIR}" ]]; then
   echo "ERROR: failed create of the weed dir." >&2
   exit 1
 fi
 log "Starting seaweed; logfile=${WEED_DIR}/weed.INFO"
 readonly returns=($(start_weed "${weed_binary_path}" "${WEED_DIR}"))
-if [ $? -ne 0 ]; then
+if (( $? != 0 )); then
   echo "ERROR: failed start of weed server." >&2
   exit 1
 fi
