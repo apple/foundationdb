@@ -687,7 +687,7 @@ public:
 	int tag;
 	std::vector<RestoreConfig::RestoreFile> files;
 	bool hasMoreData; // Flag indicating if more data is available
-	size_t bufferOffset; // Current read offset within each buffer
+	size_t bufferOffset; // Current read offset
 	// empty means no data, future is valid but not ready means being fetched
 	// future is ready means it currently holds data
 
@@ -842,6 +842,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 	while (self->bufferOffset >= self->twobuffer->getBufferSize()) {
 		fmt::print(stderr, "offset={}, size={}\n", self->bufferOffset, self->twobuffer->getBufferSize());
 		self->twobuffer->discardAndSwap();
+		self->bufferOffset = 0;
 		// data for one version cannot exceed single buffer size
 		// if hitting the end of a batch, check the next batch in case version is
 		if (self->twobuffer->hasNext()) {
