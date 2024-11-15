@@ -1520,7 +1520,6 @@ private:
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				setThreadLocalDeterministicRandomSeed(randomSeed);
 				break;
 			}
 			case OPT_MACHINEID: {
@@ -1787,6 +1786,8 @@ private:
 			}
 			}
 		}
+
+		setThreadLocalDeterministicRandomSeed(randomSeed);
 
 		try {
 			ProfilerConfig::instance().reset(profilerConfig);
