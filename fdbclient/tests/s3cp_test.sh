@@ -70,7 +70,7 @@ test_file_upload_and_download() {
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testfiledown}"
   diff "${testfileup}" "${testfiledown}"
   if (( $? != 0 )); then
-    echo "ERROR: Test $0 failed; upload and download are not the same."
+    echo "ERROR: Test $0 failed; upload and download are not the same." >&2
     exit 1
   fi
 }
@@ -99,7 +99,7 @@ test_dir_upload_and_download() {
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testdirdown}"
   diff "${testdirup}" "${testdirdown}"
   if (( $? != 0 )); then
-    echo "ERROR: Test $0 failed; upload and download are not the same."
+    echo "ERROR: Test $0 failed; upload and download are not the same." >&2
     exit 1
   fi
 }
@@ -127,7 +127,7 @@ if (( $# < 1 )) || (( $# > 2 )); then
 fi
 readonly build_dir="${1}"
 if [[ ! -d "${build_dir}" ]]; then
-  echo "ERROR: ${build_dir} is not a directory";
+  echo "ERROR: ${build_dir} is not a directory"; >&2
   exit 1
 fi
 scratch_dir="${TMPDIR:-/tmp}"

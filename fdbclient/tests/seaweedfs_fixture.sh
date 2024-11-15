@@ -28,29 +28,44 @@ download_weed() {
   local dir="${1}"
   local tgz
   local os=
+  local arch=
   # Make sure we have curl installed.
   if ! command -v curl &> /dev/null; then
-      echo "ERROR: 'curl' not found."
+      echo "ERROR: 'curl' not found." >&2
       exit 1
   fi
   if [[ "$OSTYPE" =~ ^linux ]]; then
     os="linux"
+    arch="$(uname -m)"
+    # The seaweedfs site is looking for amd64 as arch.
+    if [[ "${arch}" ==  "x86_64" ]]; then
+      arch="amd64"
+    fi
   elif [[ "$OSTYPE" =~ ^darwin ]]; then
     os="darwin"
+    arch="$(uname -m)"
   else
     echo "ERROR: Unsupported operating system" >&2
     # Return out of this function (does not exit program).
     exit 1
   fi
-  tgz="${os}_$(uname -m).tar.gz"
+  tgz="${os}_${arch}.tar.gz"
   # If not already present, download it.
   local fullpath_tgz="${dir}/${tgz}"
   if [[ ! -f "${fullpath_tgz}" ]]; then
     # Change directory because awkward telling curl where to put download.
-    ( cd "${dir}" || exit 1 
-      curl -sL "https://github.com/seaweedfs/seaweedfs/releases/download/3.79/${tgz}" \
-        -o "${tgz}"
-      )
+    local url="https://github.com/seaweedfs/seaweedfs/releases/download/3.79/${tgz}"
+    (
+      cd "${dir}" || exit 1
+      local httpcode=$(curl -sL "${url}" -o "${tgz}" --write-out "%{http_code}")
+      if (( $? != 0 )) || (( "${httpcode}" < 200 )) || (( "${httpcode}" > 299 )); then
+        echo "ERROR: Failed curl download of ${url}; httpcode=${httpcode}." >&2
+        # Clean up the tgz -- curl will touch it even if it fails.
+        rm -f "${tgz}"
+        exit 1
+      fi
+    )
+    (( $? == 0 )) || exit 1
   fi
   local weed_binary="${dir}/weed"
   if [[ ! -f "${weed_binary}" ]]; then
@@ -130,7 +145,7 @@ start_weed() {
     fi
   done
   if (( "${index}" >= "${max}" )); then
-    echo "ERROR: Ran out of retries (${index})"
+    echo "ERROR: Ran out of retries (${index})" >&2
     exit 1
   fi
   # Check server is up from client's perspective. Get a file id (fid) and volume URL.
