@@ -514,10 +514,9 @@ public:
 			size = 0;
 			capacity = _capacity;
 		}
-
 		bool is_valid() { return fetchingData.has_value(); }
 	};
-	TwoBuffers(int);
+	TwoBuffers(int capacity, Reference<IBackupContainer> _bc, std::vector<RestoreConfig::RestoreFile>& _files);
 	// ready need to be called first before calling peek
 	// because a shared_ptr cannot be wrapped by a Future
 	// this method ensures the current buffer has available data
@@ -552,16 +551,26 @@ private:
 	size_t currentFilePosition; // Current read position in the current file
 };
 
-TwoBuffers::TwoBuffers(int capacity) : currentFileIndex(0), currentFilePosition(0), cur(0) {
-	// 	bufferCapacity = BATCH_READ_BLOCK_COUNT * BLOCK_SIZE;
+TwoBuffers::TwoBuffers(int capacity, Reference<IBackupContainer> _bc, std::vector<RestoreConfig::RestoreFile>& _files)
+  : currentFileIndex(0), currentFilePosition(0), cur(0) {
 	bufferCapacity = capacity;
+	files = _files;
+	bc = _bc;
 	buffers[0] = makeReference<IteratorBuffer>(capacity);
 	buffers[1] = makeReference<IteratorBuffer>(capacity);
 }
 
 bool TwoBuffers::hasNext() {
-	return currentFileIndex < files.size() ||
-	       (buffers[0]->is_valid() || buffers[1]->is_valid()); // as long as not reset
+	if (buffers[0]->is_valid() && buffers[0]->size > 0 || buffers[1]->is_valid() && buffers[1]->size > 0) {
+		return true;
+	}
+	while (currentFileIndex < files.size() && files[currentFileIndex].fileSize == 0) {
+		// skip empty files
+		++currentFileIndex;
+	}
+	fmt::print(stderr, "hasNext currentFileIndex={}, fileSize={}\n", currentFileIndex, files.size());
+	return currentFileIndex != files.size();
+	// fillBufferIfAbsent(cur);
 }
 
 Future<Void> TwoBuffers::ready() {
@@ -570,15 +579,19 @@ Future<Void> TwoBuffers::ready() {
 
 ACTOR Future<Void> TwoBuffers::ready(Reference<TwoBuffers> self) {
 	// if cur is not ready, then wait
+	fmt::print(stderr, "Ready:: hasNext={}\n", self->hasNext());
 	if (!self->hasNext()) {
 		return Void();
 	}
 	// try to fill the current buffer, and wait before it is filled
+	fmt::print(stderr, "Ready:: beforeFillBuffer\n");
 	self->fillBufferIfAbsent(self->cur);
+	fmt::print(stderr, "Ready:: afterFillBuffer\n");
 	wait(self->buffers[self->cur]->fetchingData.value());
-
+	fmt::print(stderr, "Ready:: afterWaitForData\n");
 	// try to fill the next buffer, do not wait for the filling
 	self->fillBufferIfAbsent(1 - self->cur);
+	fmt::print(stderr, "Ready:: afterFillOtherBuffer\n");
 	return Void();
 }
 
@@ -602,12 +615,27 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 		self->buffers[index]->size = 0;
 		return Void();
 	}
-	state Reference<IAsyncFile> asyncFile = wait(self->bc->readFile(self->files[self->currentFileIndex].fileName));
+	fmt::print(stderr,
+	           "readNextBlock::beforeReadFile, name={}, size={}\n",
+	           self->files[self->currentFileIndex].fileName,
+	           self->files[self->currentFileIndex].fileSize);
+	state Reference<IAsyncFile> asyncFile;
+	Reference<IAsyncFile> asyncFileTmp = wait(self->bc->readFile(self->files[self->currentFileIndex].fileName));
+	asyncFile = asyncFileTmp;
 	state size_t fileSize = self->files[self->currentFileIndex].fileSize;
 	size_t remaining = fileSize - self->currentFilePosition;
 	state size_t bytesToRead = std::min(self->bufferCapacity, remaining);
+	fmt::print(stderr,
+	           "readNextBlock::beforeActualRead, name={}, size={}, bytesToRead={}\n",
+	           self->files[self->currentFileIndex].fileName,
+	           fileSize,
+	           bytesToRead);
 	state int bytesRead =
 	    wait(asyncFile->read((uint8_t*)self->buffers[index]->data.get(), bytesToRead, self->currentFilePosition));
+	fmt::print(stderr,
+	           "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
+	           self->files[self->currentFileIndex].fileName,
+	           bytesRead);
 	if (bytesRead != bytesToRead)
 		throw restore_bad_read();
 	self->buffers[index]->size = bytesRead; // Set to actual bytes read
@@ -622,10 +650,13 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 
 void TwoBuffers::fillBufferIfAbsent(int index) {
 	auto self = Reference<TwoBuffers>::addRef(this);
+	fmt::print(stderr, "fillBufferIfAbsent::[{}] valid={}\n", index, self->buffers[index]->is_valid());
+
 	if (self->buffers[index]->is_valid()) {
 		// if this buffer is valid, then do not overwrite it
 		return;
 	}
+	fmt::print(stderr, "fillBufferIfAbsent::beforeReadNextBlock\n");
 	self->buffers[index]->fetchingData = readNextBlock(self, index);
 	return;
 }
@@ -750,7 +781,10 @@ void PartitionedLogIteratorTwoBuffers::removeBlockHeader() {
 PartitionedLogIteratorTwoBuffers::PartitionedLogIteratorTwoBuffers(Reference<IBackupContainer> _bc,
                                                                    int _tag,
                                                                    std::vector<RestoreConfig::RestoreFile> _files)
-  : bc(_bc), tag(_tag), files(std::move(_files)), bufferOffset(0) {}
+  : bc(_bc), tag(_tag), files(std::move(_files)), bufferOffset(0) {
+	int bufferCapacity = BATCH_READ_BLOCK_COUNT * BLOCK_SIZE;
+	twobuffer = makeReference<TwoBuffers>(bufferCapacity, _bc, files);
+}
 
 bool PartitionedLogIteratorTwoBuffers::hasNext() const {
 	// if there are no more data, return false, else return true
@@ -759,6 +793,7 @@ bool PartitionedLogIteratorTwoBuffers::hasNext() const {
 	//			because bufferDataSize and buffer are set before adding fileIndex
 	// 		if currentFileIndex >= files.size(), then bufferDataSize must has been set
 	//
+	fmt::print(stderr, "hasNext tag={}, hasNext={}\n", tag, twobuffer->hasNext());
 	return twobuffer->hasNext();
 }
 
@@ -771,12 +806,22 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	if (!self->hasNext()) {
 		return Version(0);
 	}
+	fmt::print(stderr, "peekNextVersion::BeforeReady, tag={} \n", self->tag);
 	wait(self->twobuffer->ready());
+	fmt::print(stderr, "peekNextVersion::AfterReady, tag={} \n", self->tag);
 	std::shared_ptr<char[]> start = self->twobuffer->peek();
+	fmt::print(stderr,
+	           "peekNextVersion::afterPeek, tag={} , startNull={}, offset={}, bufferSize={}\n",
+	           self->tag,
+	           start == nullptr,
+	           self->bufferOffset,
+	           self->twobuffer->getBufferSize());
 	self->removeBlockHeader();
+	fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
 	Version version;
 	std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
+	fmt::print(stderr, "peekNextVersion::afterMemcpy, tag={}, version={}\n", self->tag, version);
 	return version;
 }
 
@@ -792,7 +837,10 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 	mutations = firstBatch;
 	// If the current buffer is fully consumed, then we need to check the next buffer in case
 	// the version is sliced across this buffer boundary
+	fmt::print(stderr, "GetNextBeforeWhile\n");
+
 	while (self->bufferOffset >= self->twobuffer->getBufferSize()) {
+		fmt::print(stderr, "offset={}, size={}\n", self->bufferOffset, self->twobuffer->getBufferSize());
 		self->twobuffer->discardAndSwap();
 		// data for one version cannot exceed single buffer size
 		// if hitting the end of a batch, check the next batch in case version is
@@ -803,6 +851,8 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			for (const VersionedMutation& vm : batch) {
 				mutations.push_back_deep(mutations.arena(), vm);
 			}
+		} else {
+			break;
 		}
 	}
 	return mutations;
@@ -4731,15 +4781,20 @@ Standalone<StringRef> transformMutationToOldFormat(MutationRef m) {
 Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
     Version commitVersion,
     std::vector<Standalone<VectorRef<VersionedMutation>>>& newFormatMutations) {
+	fmt::print(stderr, "StartTransform, version={}, mutationListSize={}\n", commitVersion, newFormatMutations.size());
 	Standalone<VectorRef<KeyValueRef>> results;
 	std::vector<Standalone<VectorRef<KeyValueRef>>> oldFormatMutations;
 	// mergeSort subversion here
 	// just do a global sort for everyone
 	int64_t totalBytes = 0;
 	std::map<uint32_t, std::vector<Standalone<StringRef>>> mutationsBySub;
+	int i = 0;
 	for (auto& vec : newFormatMutations) {
+		fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
+		int j = 0;
 		for (auto& p : vec) {
 			uint32_t sub = p.subsequence;
+			fmt::print(stderr, "Transform inner mutationList[{}], mutation[{}], subsequence={}\n", i, j, sub);
 			BinaryReader reader(p.mutation, IncludeVersion());
 			MutationRef mutation;
 			reader >> mutation;
@@ -4748,7 +4803,9 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 			Standalone<StringRef> mutationOldFormat = transformMutationToOldFormat(mutation);
 			mutationsBySub[sub].push_back(mutationOldFormat);
 			totalBytes += mutationOldFormat.size();
+			++j;
 		}
+		++i;
 	}
 	BinaryWriter param2Writer(Unversioned());
 	param2Writer << totalBytes;
@@ -4959,6 +5016,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		std::vector<std::vector<RestoreConfig::RestoreFile>> filesByTag(maxTagID + 1);
 		for (RestoreConfig::RestoreFile& f : logs) {
 			// find the tag, aggregate files by tags
+			fmt::print(stderr, "LogFile name={}, tag={}, size={}\n", f.fileName, f.tagId, f.fileSize);
 			if (f.tagId == -1) {
 				// inconsistent data
 				TraceEvent(SevError, "PartitionedLogFileNoTag")
@@ -4973,7 +5031,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state std::vector<Reference<PartitionedLogIterator>> iterators(maxTagID + 1);
 		// for each tag, create an iterator
 		for (int k = 0; k < filesByTag.size(); k++) {
-			iterators[i] = makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k]);
+			iterators[k] = makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k]);
 		}
 
 		// mergeSort all iterator until all are exhausted
@@ -4981,36 +5039,60 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// it stores all mutations for the next min version, in new format
 		state std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion;
 		state bool atLeastOneIteratorHasNext = true;
-		while (atLeastOneIteratorHasNext) {
+		state int64_t minVersion;
+		state int k;
+		fmt::print(stderr, "FlowguruLoopBefore\n");
+		loop {
+			fmt::print(stderr, "FlowguruLoopStart atLeastOneIteratorHasNext={}\n", atLeastOneIteratorHasNext);
+			if (!atLeastOneIteratorHasNext) {
+				break;
+			}
 			atLeastOneIteratorHasNext = false;
-			state int64_t minVersion = std::numeric_limits<int64_t>::max();
-			state int k = 0;
-			for (; k < totalItereators; k++) {
-				if (!iterators[i]->hasNext()) {
+			minVersion = std::numeric_limits<int64_t>::max();
+			k = 0;
+			loop {
+				if (k >= totalItereators) {
+					fmt::print(stderr, "FlowguruLoopBreak k={}\n", k);
+					break;
+				}
+				if (!iterators[k]->hasNext()) {
+					TraceEvent("FlowguruLoopNotHaveNext").detail("K", k).log();
+					fmt::print(stderr, "FlowguruLoopNotHaveNext k={}\n", k);
+					++k;
 					continue;
 				}
 				// TODO: maybe embed filtering key into iterator,
 				// as a result, backup agent should not worry about key range filtering
 				atLeastOneIteratorHasNext = true;
-				Version v = wait(iterators[i]->peekNextVersion());
+				fmt::print(stderr, "FlowguruLoop0 atLeastOneIteratorHasNext={}\n", atLeastOneIteratorHasNext);
+
+				TraceEvent("FlowguruLoop1").detail("K", k).log();
+				fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
+				Version v = wait(iterators[k]->peekNextVersion());
+				TraceEvent("FlowguruLoop2").detail("Version", v).log();
+				fmt::print(stderr, "FlowguruLoop2 k={}, v={}\n", k, v);
 				if (v < minVersion) {
 					minVersion = v;
 					mutationsSingleVersion.clear();
-					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[i]->getNext());
+					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
 					mutationsSingleVersion.push_back(tmp);
 				} else if (v == minVersion) {
-					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[i]->getNext());
+					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
 					mutationsSingleVersion.push_back(tmp);
 				}
+				++k;
 			}
 
+			fmt::print(stderr, "AfterBreak k={}\n", k);
 			if (atLeastOneIteratorHasNext) {
 				// transform from new format to old format(param1, param2)
 				// in the current implementation, each version will trigger a mutation
 				// if each version data is too small, we might want to combine multiple versions
 				// for a single mutation
+				fmt::print(stderr, "StartTransform\n");
 				state Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
 				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
+				fmt::print(stderr, "FinishTransform\n");
 				state int mutationIndex = 0;
 				state int txBytes = 0;
 				state int totalMutation = oldFormatMutations.size();
@@ -5047,7 +5129,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			}
 			mutationsSingleVersion.clear();
 		}
-
+		TraceEvent("FlowguruAfterLoop").detail("VersionRestored", versionRestored).log();
 		// even if file exsists, but they are empty, in this case just start the next batch
 		if (versionRestored == 0) {
 			addTaskFutures.push_back(
@@ -5737,7 +5819,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		if (!inconsistentSnapshotOnly) {
 			for (const LogFile& f : restorable.get().logs) {
 				// hfu5: log files are added to files here
-				files.push_back({ f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion });
+				files.push_back(
+				    { f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.tagId, f.totalTags });
 			}
 		}
 		// First version for which log data should be applied
