@@ -636,6 +636,8 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	           "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
 	           self->files[self->currentFileIndex].fileName,
 	           bytesRead);
+	// fmt::print(stderr,
+	//            "readNextBlock::Index={}", self->currentFileIndex);
 	if (bytesRead != bytesToRead)
 		throw restore_bad_read();
 	self->buffers[index]->size = bytesRead; // Set to actual bytes read
@@ -4872,6 +4874,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 	                                  Reference<Task> task) {
 		state RestoreConfig restore(task);
 
+		state bool atLeastOneIteratorHasNext;
 		state Version beginVersion = Params.beginVersion().get(task);
 		state Version endVersion = Params.endVersion().get(task);
 		Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
@@ -4885,6 +4888,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 		state int nextEndVersion =
 		    std::min(restoreVersion, endVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE);
+		fmt::print(stderr, "Begin={}, End={}, nextEnd={}\n", beginVersion, endVersion, nextEndVersion);		
 		// update the apply mutations end version so the mutations from the
 		// previous batch can be applied.
 		// Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
@@ -4897,7 +4901,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 		// The applyLag must be retrieved AFTER potentially updating the apply end version.
 		state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
-
+		
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
@@ -5039,27 +5043,19 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state int totalItereators = iterators.size();
 		// it stores all mutations for the next min version, in new format
 		state std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion;
-		state bool atLeastOneIteratorHasNext = true;
+		atLeastOneIteratorHasNext = true;
 		state int64_t minVersion;
 		state int k;
 		fmt::print(stderr, "FlowguruLoopBefore\n");
-		loop {
-			fmt::print(stderr, "FlowguruLoopStart atLeastOneIteratorHasNext={}\n", atLeastOneIteratorHasNext);
-			if (!atLeastOneIteratorHasNext) {
-				break;
-			}
+		while (atLeastOneIteratorHasNext) {
+			fmt::print(stderr, "FlowguruLoopStart atLeastOneIteratorHasNext={}, totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
 			atLeastOneIteratorHasNext = false;
 			minVersion = std::numeric_limits<int64_t>::max();
 			k = 0;
-			loop {
-				if (k >= totalItereators) {
-					fmt::print(stderr, "FlowguruLoopBreak k={}\n", k);
-					break;
-				}
+			for (;k < totalItereators; k++) {
+				fmt::print(stderr, "FlowguruLoopNotHaveNext k={}, hasNext={}\n", k, iterators[k]->hasNext());
 				if (!iterators[k]->hasNext()) {
 					TraceEvent("FlowguruLoopNotHaveNext").detail("K", k).log();
-					fmt::print(stderr, "FlowguruLoopNotHaveNext k={}\n", k);
-					++k;
 					continue;
 				}
 				// TODO: maybe embed filtering key into iterator,
@@ -5081,10 +5077,9 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
 					mutationsSingleVersion.push_back(tmp);
 				}
-				++k;
 			}
 
-			fmt::print(stderr, "AfterBreak k={}\n", k);
+			fmt::print(stderr, "AfterBreak k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
 			if (atLeastOneIteratorHasNext) {
 				// transform from new format to old format(param1, param2)
 				// in the current implementation, each version will trigger a mutation
@@ -5694,6 +5689,7 @@ ACTOR Future<ERestoreState> abortRestore(Database cx, Key tagName) {
 struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
 	static constexpr uint32_t version = 1;
+	static constexpr uint32_t step = 1000000;
 
 	static struct {
 		static TaskParam<Version> firstVersion() { return __FUNCTION__sr; }
@@ -5915,8 +5911,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 
 		if (transformPartitionedLog) {
+			fmt::print(stderr, "StartInitial task, begin={}, endVersion={}\n", 0, restoreVersion);
 			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(
-				tr, taskBucket, task, 0, restoreVersion)));
+				tr, taskBucket, task, 0, step)));
 		} else {
 			wait(success(RestoreDispatchTaskFunc::addTask(
 			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
