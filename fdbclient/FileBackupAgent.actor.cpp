@@ -304,6 +304,8 @@ public:
 
 		Version beginVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
 		Version endVersion = BinaryReader::fromStringRef<Version>(endVal.get().get(), Unversioned());
+		fmt::print(stderr, "GetLag: begin={}, end={}\n", beginVersion, endVersion);
+
 		return endVersion - beginVersion;
 	}
 
@@ -4901,7 +4903,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 		// The applyLag must be retrieved AFTER potentially updating the apply end version.
 		state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
-		
+
+		fmt::print(stderr, "ApplyLag={}\n", applyLag);
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
@@ -5125,11 +5128,15 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			}
 			mutationsSingleVersion.clear();
 		}
+		fmt::print(stderr, "FlowguruAfterLoop VersionRestored={}\n", versionRestored);
 		TraceEvent("FlowguruAfterLoop").detail("VersionRestored", versionRestored).log();
 		// even if file exsists, but they are empty, in this case just start the next batch
 		if (versionRestored == 0) {
 			addTaskFutures.push_back(
 			    RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, endVersion, nextEndVersion));
+			fmt::print(stderr, "After add new task begin={}, end={}\n", endVersion, nextEndVersion);
+			wait(waitForAll(addTaskFutures));
+			wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
@@ -5145,7 +5152,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    .detail("EndVersion", endVersion)
 		    .detail("ApplyLag", applyLag)
 		    .detail("Decision", "dispatch_batch_complete")
-		    .detail("TaskInstance", THIS_ADDR);
+		    .detail("TaskInstance", THIS_ADDR)
+		    .log();
 
 		return Void();
 	}
@@ -5788,6 +5796,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state std::vector<RestoreConfig::RestoreFile> files;
 		if (!logsOnly) {
 			beginVersion = restorable.get().snapshot.beginVersion;
+			fmt::print(stderr, "FullRestoreTask, set beginVersion={}\n", beginVersion);
+
 			if (!inconsistentSnapshotOnly) {
 				for (const RangeFile& f : restorable.get().ranges) {
 					files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
@@ -5821,6 +5831,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 		// First version for which log data should be applied
+		fmt::print(stderr, "FullRestoreTask:: beginVersion={}\n", beginVersion);
 		Params.firstVersion().set(task, beginVersion);
 
 		tr->reset();
@@ -5911,9 +5922,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 
 		if (transformPartitionedLog) {
-			fmt::print(stderr, "StartInitial task, begin={}, endVersion={}\n", 0, restoreVersion);
-			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(
-				tr, taskBucket, task, 0, step)));
+			fmt::print(stderr,
+			           "StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
+			           firstVersion,
+			           0,
+			           restoreVersion);
+			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, 0, firstVersion + step)));
 		} else {
 			wait(success(RestoreDispatchTaskFunc::addTask(
 			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));

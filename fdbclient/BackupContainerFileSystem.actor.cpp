@@ -259,12 +259,16 @@ public:
 		for (int idx : indices) {
 			const LogFile& file = files[idx];
 			if (lastEnd == invalidVersion) {
-				if (file.beginVersion > begin)
+				if (file.beginVersion > begin) {
+					// flowguru: the first version of the first file must be smaller or equal to the desired
+					// beginVersion
 					return false;
+				}
 				if (file.endVersion > begin) {
 					lastBegin = begin;
 					lastTags = file.totalTags;
 				} else {
+					// if endVerison of file is smaller than desired beginVersion, then do not include this file
 					continue;
 				}
 			} else if (lastEnd < file.beginVersion) {
@@ -984,9 +988,17 @@ public:
 			// hfu5 question: why? what if target version is 8500, and this snapshot has [8000, 8200, 8800]
 			// do we give up directly? why it is not restorable?
 			// not give up, try to find the next smaller one
+			// if max is 1000, target is 500, then try to find a smaller max
+			// if max is 300, target is 500, then do the restore
+			// as a result, find the first snapshot, whose max version is smaller than targetVersion,
+			// [1, 100], [101, 200], [201, 300], [301, 400], if i want to restore to 230,
+			// then continue on [201, 300] and [301, 400], and return on [101, 200]
+			// later will list all log files from [101, 230]
 			if (restorable.targetVersion < maxKeyRangeVersion)
 				continue;
 
+			// restorable.snapshot.beginVersion is set to the smallest(oldest) snapshot's beginVersion
+			// question: should i always find a smaller log file that is smaller than this range's version?
 			restorable.snapshot = snapshots[i];
 
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
