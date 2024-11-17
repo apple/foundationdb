@@ -304,7 +304,7 @@ public:
 
 		Version beginVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
 		Version endVersion = BinaryReader::fromStringRef<Version>(endVal.get().get(), Unversioned());
-		fmt::print(stderr, "GetLag: begin={}, end={}\n", beginVersion, endVersion);
+		fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
 
 		return endVersion - beginVersion;
 	}
@@ -504,17 +504,24 @@ class TwoBuffers : public ReferenceCounted<TwoBuffers>, NonCopyable {
 public:
 	class IteratorBuffer : public ReferenceCounted<IteratorBuffer> {
 	public:
-		std::shared_ptr<char[]> data;
+		// std::shared_ptr<char[]> data;
+		char* data;
 		// has_value means there is data, otherwise it means there is no data being fetched or ready
 		// is_valid means data is being fetched, is_ready means data is ready
 		std::optional<Future<Void>> fetchingData;
 		size_t size;
 		int capacity;
 		IteratorBuffer(int _capacity) {
-			data = std::shared_ptr<char[]>(new char[capacity]());
+			// data = std::shared_ptr<char[]>(new char[capacity]());
+			data = new char[_capacity]();
+			fmt::print(stderr, "Allocating {}\n", _capacity);
 			fetchingData.reset();
 			size = 0;
 			capacity = _capacity;
+		}
+		~IteratorBuffer() {
+			// data = std::shared_ptr<char[]>(new char[capacity]());
+			delete[] data;
 		}
 		bool is_valid() { return fetchingData.has_value(); }
 	};
@@ -529,7 +536,8 @@ public:
 	ACTOR static Future<Void> readNextBlock(Reference<TwoBuffers> self, int index);
 	// peek can only be called after ready is called
 	// it returns the pointer to the active buffer
-	std::shared_ptr<char[]> peek();
+	// std::shared_ptr<char[]> peek();
+	char* peek();
 
 	bool hasNext();
 
@@ -570,7 +578,6 @@ bool TwoBuffers::hasNext() {
 		// skip empty files
 		++currentFileIndex;
 	}
-	fmt::print(stderr, "hasNext currentFileIndex={}, fileSize={}\n", currentFileIndex, files.size());
 	return currentFileIndex != files.size();
 	// fillBufferIfAbsent(cur);
 }
@@ -588,7 +595,7 @@ ACTOR Future<Void> TwoBuffers::ready(Reference<TwoBuffers> self) {
 	// try to fill the current buffer, and wait before it is filled
 	fmt::print(stderr, "Ready:: beforeFillBuffer\n");
 	self->fillBufferIfAbsent(self->cur);
-	fmt::print(stderr, "Ready:: afterFillBuffer\n");
+	fmt::print(stderr, "Ready:: afterFillBuffer, index={}, has_value={}\n", self->cur, self->buffers[self->cur]->fetchingData.has_value());
 	wait(self->buffers[self->cur]->fetchingData.value());
 	fmt::print(stderr, "Ready:: afterWaitForData\n");
 	// try to fill the next buffer, do not wait for the filling
@@ -597,7 +604,7 @@ ACTOR Future<Void> TwoBuffers::ready(Reference<TwoBuffers> self) {
 	return Void();
 }
 
-std::shared_ptr<char[]> TwoBuffers::peek() {
+char* TwoBuffers::peek() {
 	return buffers[cur]->data;
 }
 
@@ -613,6 +620,7 @@ size_t TwoBuffers::getBufferSize() {
 
 // only one readNextBlock can be run at a single time, otherwie the same block might be loaded twice
 ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int index) {
+	state Reference<IAsyncFile> asyncFile;
 	if (self->currentFileIndex >= self->files.size()) {
 		self->buffers[index]->size = 0;
 		return Void();
@@ -621,19 +629,19 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	           "readNextBlock::beforeReadFile, name={}, size={}\n",
 	           self->files[self->currentFileIndex].fileName,
 	           self->files[self->currentFileIndex].fileSize);
-	state Reference<IAsyncFile> asyncFile;
 	Reference<IAsyncFile> asyncFileTmp = wait(self->bc->readFile(self->files[self->currentFileIndex].fileName));
 	asyncFile = asyncFileTmp;
 	state size_t fileSize = self->files[self->currentFileIndex].fileSize;
 	size_t remaining = fileSize - self->currentFilePosition;
 	state size_t bytesToRead = std::min(self->bufferCapacity, remaining);
 	fmt::print(stderr,
-	           "readNextBlock::beforeActualRead, name={}, size={}, bytesToRead={}\n",
+	           "readNextBlock::beforeActualRead, name={}, position={}, size={}, bytesToRead={}\n",
 	           self->files[self->currentFileIndex].fileName,
+			   self->currentFilePosition,
 	           fileSize,
 	           bytesToRead);
 	state int bytesRead =
-	    wait(asyncFile->read((uint8_t*)self->buffers[index]->data.get(), bytesToRead, self->currentFilePosition));
+	    wait(asyncFile->read(static_cast<void*>(self->buffers[index]->data), bytesToRead, self->currentFilePosition));
 	fmt::print(stderr,
 	           "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
 	           self->files[self->currentFileIndex].fileName,
@@ -684,7 +692,7 @@ private:
 public:
 	// read up to a fixed number of block count
 	// noted that each version has to be contained within 2 blocks
-	const int BATCH_READ_BLOCK_COUNT = 10;
+	const int BATCH_READ_BLOCK_COUNT = 1;
 	const int BLOCK_SIZE = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
 	const int mutationHeaderBytes = sizeof(int64_t) + sizeof(int32_t) + sizeof(int32_t);
 	Reference<IBackupContainer> bc;
@@ -722,16 +730,17 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
     Version firstVersion) {
 	state Standalone<VectorRef<VersionedMutation>> mutations = Standalone<VectorRef<VersionedMutation>>();
 	wait(self->twobuffer->ready());
-	std::shared_ptr<char[]> start = self->twobuffer->peek();
+	fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
+	char* start = self->twobuffer->peek();
 	int size = self->twobuffer->getBufferSize();
 	bool foundNewVersion = false;
 	while (self->bufferOffset < size) {
-		while (self->bufferOffset < size && *(start.get() + self->bufferOffset) != 0xFF) {
+		while (self->bufferOffset < size && *(start + self->bufferOffset) != 0xFF) {
 			// for each block
 			self->removeBlockHeader();
 
 			Version version;
-			std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
+			std::memcpy(&version, start + self->bufferOffset, sizeof(Version));
 			version = bigEndian64(version);
 			if (version != firstVersion) {
 				foundNewVersion = true;
@@ -739,12 +748,12 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			}
 
 			int32_t subsequence;
-			std::memcpy(&subsequence, start.get() + self->bufferOffset + sizeof(Version), sizeof(int32_t));
+			std::memcpy(&subsequence, start + self->bufferOffset + sizeof(Version), sizeof(int32_t));
 			subsequence = bigEndian32(subsequence);
 
 			int32_t mutationSize;
 			std::memcpy(
-			    &mutationSize, start.get() + self->bufferOffset + sizeof(Version) + sizeof(int32_t), sizeof(int32_t));
+			    &mutationSize, start + self->bufferOffset + sizeof(Version) + sizeof(int32_t), sizeof(int32_t));
 			mutationSize = bigEndian32(mutationSize);
 
 			// assumption: the entire mutation is within the buffer
@@ -753,7 +762,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 
 			Standalone<StringRef> mutationData = makeString(mutationSize);
 			std::memcpy(
-			    mutateString(mutationData), start.get() + self->bufferOffset + self->mutationHeaderBytes, mutationSize);
+			    mutateString(mutationData), start + self->bufferOffset + self->mutationHeaderBytes, mutationSize);
 			VersionedMutation mutation;
 			mutation.version = version;
 			mutation.subsequence = subsequence;
@@ -762,7 +771,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			// Move the bufferOffset to include this mutation
 			self->bufferOffset += mutationTotalSize;
 		}
-		if (self->bufferOffset < size && *(start.get() + self->bufferOffset) == 0xFF) {
+		if (self->bufferOffset < size && *(start + self->bufferOffset) == 0xFF) {
 			// there are paddings
 			int remain = self->BLOCK_SIZE - (self->bufferOffset % self->BLOCK_SIZE);
 			self->bufferOffset += remain;
@@ -813,7 +822,7 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	fmt::print(stderr, "peekNextVersion::BeforeReady, tag={} \n", self->tag);
 	wait(self->twobuffer->ready());
 	fmt::print(stderr, "peekNextVersion::AfterReady, tag={} \n", self->tag);
-	std::shared_ptr<char[]> start = self->twobuffer->peek();
+	char* start = self->twobuffer->peek();
 	fmt::print(stderr,
 	           "peekNextVersion::afterPeek, tag={} , startNull={}, offset={}, bufferSize={}\n",
 	           self->tag,
@@ -823,7 +832,7 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	self->removeBlockHeader();
 	fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
 	Version version;
-	std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
+	std::memcpy(&version, start + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
 	fmt::print(stderr, "peekNextVersion::afterMemcpy, tag={}, version={}\n", self->tag, version);
 	return version;
@@ -4890,7 +4899,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 		state int nextEndVersion =
 		    std::min(restoreVersion, endVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE);
-		fmt::print(stderr, "Begin={}, End={}, nextEnd={}\n", beginVersion, endVersion, nextEndVersion);		
+		fmt::print(stderr, "Very begin Begin={}, End={}, nextEnd={}\n", beginVersion, endVersion, nextEndVersion);		
 		// update the apply mutations end version so the mutations from the
 		// previous batch can be applied.
 		// Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
@@ -4953,6 +4962,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// if there are no files and i am the last batch, then just wait for applying to finish
 		// do we need this files.results.size() == 0 at all?
 		// if (files.results.size() == 0 && beginVersion >= restoreVersion) {
+		fmt::print(stderr, "CheckBegin and restore, begin={}, restore={}, applyLag={}\n", beginVersion, restoreVersion, applyLag);
 		if (beginVersion >= restoreVersion) {
 			if (applyLag == 0) {
 				// i am the last batch
@@ -5050,7 +5060,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state int64_t minVersion;
 		state int k;
 		fmt::print(stderr, "FlowguruLoopBefore\n");
-		while (atLeastOneIteratorHasNext) {
+		// TODO: set this to false
+		while (false) {
 			fmt::print(stderr, "FlowguruLoopStart atLeastOneIteratorHasNext={}, totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
 			atLeastOneIteratorHasNext = false;
 			minVersion = std::numeric_limits<int64_t>::max();
@@ -5083,14 +5094,16 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			}
 
 			fmt::print(stderr, "AfterBreak k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
-			if (atLeastOneIteratorHasNext) {
+			if (false) {
+			// if (atLeastOneIteratorHasNext) {
 				// transform from new format to old format(param1, param2)
 				// in the current implementation, each version will trigger a mutation
 				// if each version data is too small, we might want to combine multiple versions
 				// for a single mutation
 				fmt::print(stderr, "StartTransform\n");
 				state Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
-				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
+				    generateOldForma
+					tMutations(minVersion, mutationsSingleVersion);
 				fmt::print(stderr, "FinishTransform\n");
 				state int mutationIndex = 0;
 				state int txBytes = 0;
@@ -5131,10 +5144,10 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		fmt::print(stderr, "FlowguruAfterLoop VersionRestored={}\n", versionRestored);
 		TraceEvent("FlowguruAfterLoop").detail("VersionRestored", versionRestored).log();
 		// even if file exsists, but they are empty, in this case just start the next batch
+		fmt::print(stderr, "After add new task begin={}, end={}\n", endVersion, nextEndVersion);
 		if (versionRestored == 0) {
 			addTaskFutures.push_back(
 			    RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, endVersion, nextEndVersion));
-			fmt::print(stderr, "After add new task begin={}, end={}\n", endVersion, nextEndVersion);
 			wait(waitForAll(addTaskFutures));
 			wait(taskBucket->finish(tr, task));
 			return Void();
