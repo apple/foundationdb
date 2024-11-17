@@ -501,7 +501,7 @@ int main(int argc, char** argv) {
 		}
 		commandLine += argv[a];
 	}
-
+	int status;
 	try {
 		// This csimpleopt parser is not the smartest. If you pass --logs instead of --log, it will
 		// treat the --logs as an argument though it is a misnamed option. Doesn't seem to be a way
@@ -509,7 +509,7 @@ int main(int argc, char** argv) {
 		std::unique_ptr<CSimpleOpt> args(
 		    new CSimpleOpt(argc, argv, s3cp::Options, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE | SO_O_NOERR));
 		auto param = makeReference<s3cp::Params>();
-		int status = s3cp::parseCommandLine(param, args.get());
+		status = s3cp::parseCommandLine(param, args.get());
 		if (status != FDB_EXIT_SUCCESS) {
 			s3cp::printUsage(argv[0]);
 			return status;
@@ -559,16 +559,8 @@ int main(int argc, char** argv) {
 		openTraceFile(
 		    {}, 10 << 20, 500 << 20, param->log_dir, path.substr(path.find_last_of("/\\") + 1), param->trace_log_group);
 		param->tlsConfig.setupBlobCredentials();
-
 		auto f = stopAfter(run(param));
-
 		runNetwork();
-
-		flushTraceFileVoid();
-		fflush(stdout);
-		closeTraceFile();
-
-		return status;
 	} catch (Error& e) {
 		std::cerr << "ERROR: " << e.what() << "\n";
 		return FDB_EXIT_ERROR;
@@ -576,4 +568,5 @@ int main(int argc, char** argv) {
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		return FDB_EXIT_MAIN_EXCEPTION;
 	}
+	flushAndExit(status);
 }
