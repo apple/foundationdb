@@ -7,7 +7,7 @@
 struct VersionedMutation {
 	Version version;
 	int32_t subsequence;
-	StringRef mutation;
+	MutationRef mutation;
 	VersionedMutation(Arena& p, const VersionedMutation& toCopy) : mutation(p, toCopy.mutation) {
 		version = toCopy.version;
 		subsequence = toCopy.subsequence;

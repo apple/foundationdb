@@ -760,14 +760,24 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			size_t mutationTotalSize = self->mutationHeaderBytes + mutationSize;
 			ASSERT(self->bufferOffset + mutationTotalSize <= size);
 
+			// this is reported wrong
+			fmt::print(stderr, "ConsumeData:: size={}\n", mutationSize);
+
 			Standalone<StringRef> mutationData = makeString(mutationSize);
 			std::memcpy(
 			    mutateString(mutationData), start + self->bufferOffset + self->mutationHeaderBytes, mutationSize);
-			VersionedMutation mutation;
-			mutation.version = version;
-			mutation.subsequence = subsequence;
-			mutation.mutation = mutationData;
-			mutations.push_back_deep(mutations.arena(), mutation);
+			// BinaryWriter bw(Unversioned());
+			// // todo: transform from stringref to mutationref here
+			// bw.serializeBytes(mutationData);
+			ArenaReader reader(mutationData.arena(), mutationData, AssumeVersion(g_network->protocolVersion()));
+			MutationRef mutation;
+			reader >> mutation;
+
+			VersionedMutation vm;
+			vm.version = version;
+			vm.subsequence = subsequence;
+			vm.mutation = mutation;
+			mutations.push_back_deep(mutations.arena(), vm);
 			// Move the bufferOffset to include this mutation
 			self->bufferOffset += mutationTotalSize;
 		}
@@ -819,9 +829,9 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	if (!self->hasNext()) {
 		return Version(0);
 	}
-	fmt::print(stderr, "peekNextVersion::BeforeReady, tag={} \n", self->tag);
+	// fmt::print(stderr, "peekNextVersion::BeforeReady, tag={} \n", self->tag);
 	wait(self->twobuffer->ready());
-	fmt::print(stderr, "peekNextVersion::AfterReady, tag={} \n", self->tag);
+	// fmt::print(stderr, "peekNextVersion::AfterReady, tag={} \n", self->tag);
 	char* start = self->twobuffer->peek();
 	fmt::print(stderr,
 	           "peekNextVersion::afterPeek, tag={} , startNull={}, offset={}, bufferSize={}\n",
@@ -834,6 +844,8 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	Version version;
 	std::memcpy(&version, start + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
+	// now i have peekNextVersion::afterMemcpy, tag=0, version=-1
+	// seeing version = -1, means there are 8 0xff
 	fmt::print(stderr, "peekNextVersion::afterMemcpy, tag={}, version={}\n", self->tag, version);
 	return version;
 }
@@ -853,7 +865,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 	fmt::print(stderr, "GetNextBeforeWhile\n");
 
 	while (self->bufferOffset >= self->twobuffer->getBufferSize()) {
-		fmt::print(stderr, "offset={}, size={}\n", self->bufferOffset, self->twobuffer->getBufferSize());
+		fmt::print(stderr, "getNext: offset={}, size={}\n", self->bufferOffset, self->twobuffer->getBufferSize());
 		self->twobuffer->discardAndSwap();
 		self->bufferOffset = 0;
 		// data for one version cannot exceed single buffer size
@@ -873,6 +885,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 }
 
 Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffers::getNext() {
+	fmt::print(stderr, "getNext, k={}, offset={}\n", tag, bufferOffset);
 	return getNext(Reference<PartitionedLogIteratorTwoBuffers>::addRef(this));
 }
 
@@ -4808,15 +4821,12 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		int j = 0;
 		for (auto& p : vec) {
 			uint32_t sub = p.subsequence;
-			fmt::print(stderr, "Transform inner mutationList[{}], mutation[{}], subsequence={}\n", i, j, sub);
-			BinaryReader reader(p.mutation, IncludeVersion());
-			MutationRef mutation;
-			reader >> mutation;
-			fmt::print(stderr, "before transform each mutation");
-			fmt::print(stderr, "Transform each mutation, mutation={}\n", mutation.toString());
+			// fmt::print(stderr, "Transform inner mutationList[{}], mutation[{}], subsequence={}\n", i, j, sub);
+			// fmt::print(stderr, "before transform each mutation\n");
+			fmt::print(stderr, "Transform each mutation, mutation={}\n", p.mutation.toString());
 			// transform the mutation format and add to each subversion
 			// where is mutation written in new format
-			Standalone<StringRef> mutationOldFormat = transformMutationToOldFormat(mutation);
+			Standalone<StringRef> mutationOldFormat = transformMutationToOldFormat(p.mutation);
 			mutationsBySub[sub].push_back(mutationOldFormat);
 			totalBytes += mutationOldFormat.size();
 			++j;
@@ -4863,7 +4873,9 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 			*partBuffer = bigEndian32(part);
 		}
 		backupKV.key = wrParam1.toValue();
-		results.push_back_deep(results.arena(), backupKV);
+		results.push_back_deep(results.arena(), backupKV);		
+		fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
+
 	}
 	return results;
 }
@@ -5084,7 +5096,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
 				Version v = wait(iterators[k]->peekNextVersion());
 				TraceEvent("FlowguruLoop2").detail("Version", v).log();
-				fmt::print(stderr, "FlowguruLoop2 k={}, v={}\n", k, v);
+				fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
 				if (v < minVersion) {
 					minVersion = v;
 					mutationsSingleVersion.clear();
@@ -5096,7 +5108,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				}
 			}
 
-			fmt::print(stderr, "AfterBreak k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
+			fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
 			if (atLeastOneIteratorHasNext) {
 				// transform from new format to old format(param1, param2)
 				// in the current implementation, each version will trigger a mutation
@@ -5107,6 +5119,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
 				fmt::print(stderr, "FinishTransform, size={}\n", oldFormatMutations.size());
 				state int mutationIndex = 0;
+				state int txnCount = 0;
 				state int txBytes = 0;
 				state int totalMutation = oldFormatMutations.size();
 				state int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
@@ -5114,6 +5127,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 				loop {
 					try {
+						fmt::print(stderr, "Commit:, mutationIndex={}, total={}\n", mutationIndex, totalMutation);
 						if (mutationIndex == totalMutation) {
 							break;
 						}
@@ -5122,15 +5136,18 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-						while (mutationIndex < totalMutation && txBytes < txBytesLimit) {
-							Key k = oldFormatMutations[mutationIndex].key.withPrefix(mutationLogPrefix);
-							ValueRef v = oldFormatMutations[mutationIndex]
+						while (mutationIndex + txnCount < totalMutation && txBytes < txBytesLimit) {
+							Key k = oldFormatMutations[mutationIndex + txnCount].key.withPrefix(mutationLogPrefix);
+							ValueRef v = oldFormatMutations[mutationIndex + txnCount]
 							                 .value; // each KV is a [param1 with added prefix -> param2]
 							tr->set(k, v);
 							txBytes += k.expectedSize();
 							txBytes += v.expectedSize();
+							++txnCount;
 						}
 						wait(tr->commit());
+						mutationIndex += txnCount; // update mutationIndex after commit 
+						txnCount = 0;
 					} catch (Error& e) {
 						if (e.code() == error_code_transaction_too_large)
 							txBytesLimit /= 2;
@@ -5140,6 +5157,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				}
 				++versionRestored;
 			}
+			fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
 			mutationsSingleVersion.clear();
 		}
 		fmt::print(stderr, "FlowguruAfterLoop VersionRestored={}\n", versionRestored);
