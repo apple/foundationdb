@@ -4812,6 +4812,8 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 			BinaryReader reader(p.mutation, IncludeVersion());
 			MutationRef mutation;
 			reader >> mutation;
+			fmt::print(stderr, "before transform each mutation");
+			fmt::print(stderr, "Transform each mutation, mutation={}\n", mutation.toString());
 			// transform the mutation format and add to each subversion
 			// where is mutation written in new format
 			Standalone<StringRef> mutationOldFormat = transformMutationToOldFormat(mutation);
@@ -5061,7 +5063,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state int k;
 		fmt::print(stderr, "FlowguruLoopBefore\n");
 		// TODO: set this to false
-		while (false) {
+		// now it stuck here
+		while (atLeastOneIteratorHasNext) {
 			fmt::print(stderr, "FlowguruLoopStart atLeastOneIteratorHasNext={}, totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
 			atLeastOneIteratorHasNext = false;
 			minVersion = std::numeric_limits<int64_t>::max();
@@ -5094,17 +5097,15 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			}
 
 			fmt::print(stderr, "AfterBreak k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
-			if (false) {
-			// if (atLeastOneIteratorHasNext) {
+			if (atLeastOneIteratorHasNext) {
 				// transform from new format to old format(param1, param2)
 				// in the current implementation, each version will trigger a mutation
 				// if each version data is too small, we might want to combine multiple versions
 				// for a single mutation
 				fmt::print(stderr, "StartTransform\n");
 				state Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
-				    generateOldForma
-					tMutations(minVersion, mutationsSingleVersion);
-				fmt::print(stderr, "FinishTransform\n");
+				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
+				fmt::print(stderr, "FinishTransform, size={}\n", oldFormatMutations.size());
 				state int mutationIndex = 0;
 				state int txBytes = 0;
 				state int totalMutation = oldFormatMutations.size();
