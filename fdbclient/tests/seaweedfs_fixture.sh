@@ -40,6 +40,12 @@ download_weed() {
     # The seaweedfs site is looking for amd64 as arch.
     if [[ "${arch}" ==  "x86_64" ]]; then
       arch="amd64"
+    elif [[ "${arch}" == "aarch64" ]]; then
+      arch="arm64"
+    else
+      echo "ERROR: Unsupported architecture ${arch}" >&2
+      # Return out of this function (does not exit program).
+      exit 1
     fi
   elif [[ "$OSTYPE" =~ ^darwin ]]; then
     os="darwin"
