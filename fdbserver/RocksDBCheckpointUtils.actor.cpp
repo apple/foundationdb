@@ -280,8 +280,9 @@ public:
 			options.iterate_upper_bound = &endSlice;
 			options.fill_cache = false; // Optimized for bulk scan.
 			options.readahead_size = SERVER_KNOBS->ROCKSDB_CHECKPOINT_READ_AHEAD_SIZE;
-			// db->GetEnv()->NowMicros() is not deterministic so we don't use it in simulation
-			if (!g_network->isSimulated()) {
+			// Note: ROCKSDB_SET_READ_TIMEOUT is false in simulation. If turned on, this code could lead to
+			// non-deterministic simulation because of db->GetEnv()->NowMicros().
+			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
 				const uint64_t deadlineMicros =
 				    reader->db->GetEnv()->NowMicros() + SERVER_KNOBS->ROCKSDB_READ_CHECKPOINT_TIMEOUT * 1000000;
 				options.deadline = std::chrono::microseconds(deadlineMicros);

@@ -1355,10 +1355,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    .detail("KnobRocksDBWriteRateLimiterAutoTune", SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)
 			    .detail("ColumnFamily", cf->GetName());
 			if (g_network->isSimulated()) {
+				// The current thread and main thread are same when the code runs in simulation.
+				// blockUntilReady() is getting the thread into deadlock state, so directly calling
+				// the metricsLogger.
 				if (SERVER_KNOBS->ROCKSDB_METRICS_IN_SIMULATION) {
-					// The current thread and main thread are same when the code runs in simulation.
-					// blockUntilReady() is getting the thread into deadlock state, so directly calling
-					// the metricsLogger.
 					a.metrics = rocksDBMetricLogger(id,
 					                                sharedState,
 					                                options.statistics,
@@ -1368,6 +1368,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					                                &a.counters,
 					                                cf) &&
 					            flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool) &&
+					            manualFlush(id, db, sharedState, a.lastFlushTime, cf);
+				} else {
+					a.metrics = flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool) &&
 					            manualFlush(id, db, sharedState, a.lastFlushTime, cf);
 				}
 			} else {
