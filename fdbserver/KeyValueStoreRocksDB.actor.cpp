@@ -105,22 +105,33 @@ public:
 	rocksdb::ColumnFamilyOptions getCfOptions() const { return this->cfOptions; }
 	rocksdb::Options getOptions() const { return rocksdb::Options(this->dbOptions, this->cfOptions); }
 	rocksdb::ReadOptions getReadOptions() { return this->readOptions; }
+	rocksdb::FlushOptions getFlushOptions() { return this->flushOptions; }
 
 private:
 	const UID id;
 	rocksdb::ColumnFamilyOptions initialCfOptions();
 	rocksdb::DBOptions initialDbOptions();
 	rocksdb::ReadOptions initialReadOptions();
+	rocksdb::FlushOptions initialFlushOptions();
 
 	bool closing;
 	rocksdb::DBOptions dbOptions;
 	rocksdb::ColumnFamilyOptions cfOptions;
 	rocksdb::ReadOptions readOptions;
+	rocksdb::FlushOptions flushOptions;
 };
 
 SharedRocksDBState::SharedRocksDBState(UID id)
   : id(id), closing(false), dbOptions(initialDbOptions()), cfOptions(initialCfOptions()),
-    readOptions(initialReadOptions()) {}
+    readOptions(initialReadOptions()), flushOptions(initialFlushOptions()) {}
+
+rocksdb::FlushOptions SharedRocksDBState::initialFlushOptions() {
+	rocksdb::FlushOptions fOptions;
+	fOptions.wait = SERVER_KNOBS->ROCKSDB_WAIT_ON_CF_FLUSH;
+	fOptions.allow_write_stall = SERVER_KNOBS->ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
+
+	return fOptions;
+}
 
 rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	rocksdb::ColumnFamilyOptions options;
@@ -359,6 +370,17 @@ private:
 	std::mutex mutex;
 	UID id;
 };
+
+class RocksDBEventListener : public rocksdb::EventListener {
+public:
+	RocksDBEventListener(std::shared_ptr<double> lastFlushTime) : lastFlushTime(lastFlushTime){};
+
+	void OnFlushCompleted(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override { *lastFlushTime = now(); }
+
+private:
+	std::shared_ptr<double> lastFlushTime;
+};
+
 using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
 
@@ -963,6 +985,25 @@ ACTOR Future<Void> flowLockLogger(UID id, const FlowLock* readLock, const FlowLo
 	}
 }
 
+ACTOR Future<Void> manualFlush(UID id,
+                               rocksdb::DB* db,
+                               std::shared_ptr<SharedRocksDBState> sharedState,
+                               std::shared_ptr<double> lastFlushTime,
+                               CF cf) {
+	if (SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL) {
+		state rocksdb::FlushOptions fOptions = sharedState->getFlushOptions();
+		loop {
+			wait(delay(SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL));
+
+			if ((now() - *lastFlushTime) > SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL) {
+				db->Flush(fOptions, cf);
+				TraceEvent e("RocksDBManualFlush", id);
+			}
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> rocksDBMetricLogger(UID id,
                                        std::shared_ptr<SharedRocksDBState> sharedState,
                                        std::shared_ptr<rocksdb::Statistics> statistics,
@@ -1238,15 +1279,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			const FlowLock* readLock;
 			const FlowLock* fetchLock;
 			std::shared_ptr<RocksDBErrorListener> errorListener;
+			std::shared_ptr<RocksDBEventListener> eventListener;
+			std::shared_ptr<double> lastFlushTime;
 			Counters& counters;
 			OpenAction(std::string path,
 			           Optional<Future<Void>>& metrics,
 			           const FlowLock* readLock,
 			           const FlowLock* fetchLock,
 			           std::shared_ptr<RocksDBErrorListener> errorListener,
+			           std::shared_ptr<RocksDBEventListener> eventListener,
+			           std::shared_ptr<double> lastFlushTime,
 			           Counters& counters)
 			  : path(std::move(path)), metrics(metrics), readLock(readLock), fetchLock(fetchLock),
-			    errorListener(errorListener), counters(counters) {}
+			    errorListener(errorListener), eventListener(eventListener), lastFlushTime(lastFlushTime),
+			    counters(counters) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -1267,6 +1313,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			options.listeners.push_back(a.errorListener);
+			if (SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL > 0) {
+				options.listeners.push_back(a.eventListener);
+			}
 			if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
 				options.rate_limiter = rateLimiter;
 			}
@@ -1311,7 +1360,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.metrics =
 				    rocksDBMetricLogger(
 				        id, sharedState, options.statistics, perfContextMetrics, db, readIterPool, &a.counters, cf) &&
-				    flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
+				    flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool) &&
+				    manualFlush(id, db, sharedState, a.lastFlushTime, cf);
 			} else {
 				onMainThread([&] {
 					a.metrics = rocksDBMetricLogger(id,
@@ -1322,7 +1372,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					                                readIterPool,
 					                                &a.counters,
 					                                cf) &&
-					            flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
+					            flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool) &&
+					            manualFlush(id, db, sharedState, a.lastFlushTime, cf);
 					return Future<bool>(true);
 				}).blockUntilReady();
 			}
@@ -1858,6 +1909,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    errorListener(std::make_shared<RocksDBErrorListener>(id)), errorFuture(errorListener->getFuture()) {
+		lastFlushTime = std::make_shared<double>(now());
+		eventListener = std::make_shared<RocksDBEventListener>(lastFlushTime);
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
@@ -2044,21 +2097,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	void close() override { doClose(this, false); }
 
-	KeyValueStoreType getType() const override {
-		if (SERVER_KNOBS->ENABLE_SHARDED_ROCKSDB)
-			// KVSRocks pretends as KVSShardedRocksDB
-			// TODO: to remove when the ShardedRocksDB KVS implementation is added in the future
-			return KeyValueStoreType(KeyValueStoreType::SSD_SHARDED_ROCKSDB);
-		else
-			return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1);
-	}
+	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1); }
 
 	Future<Void> init() override {
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
 		auto a = std::make_unique<Writer::OpenAction>(
-		    path, metrics, &readSemaphore, &fetchSemaphore, errorListener, counters);
+		    path, metrics, &readSemaphore, &fetchSemaphore, errorListener, eventListener, lastFlushTime, counters);
 		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
 		return openFuture;
@@ -2373,6 +2419,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
 	std::shared_ptr<RocksDBErrorListener> errorListener;
+	std::shared_ptr<RocksDBEventListener> eventListener;
+	std::shared_ptr<double> lastFlushTime;
 	Future<Void> errorFuture;
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
@@ -2395,7 +2443,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	std::vector<std::unique_ptr<ThreadReturnPromiseStream<std::pair<std::string, double>>>> metricPromiseStreams;
 	// ThreadReturnPromiseStream pair.first stores the histogram name and
 	// pair.second stores the corresponding measured latency (seconds)
-	Future<Void> actorErrorListener;
 	Future<Void> collection;
 	PromiseStream<Future<Void>> addActor;
 	Counters counters;
