@@ -29,6 +29,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
+#include "flow/Platform.h"
 #include "flow/network.h"
 #include "fmt/format.h"
 #include "fdbclient/Audit.h"
@@ -71,6 +72,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
+#include "fdbserver/BulkDumpUtil.actor.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -214,6 +216,7 @@ static const std::string serverCheckpointFolder = "serverCheckpoints";
 static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
 static const std::string bulkLoadFolder = "bulkLoadFiles";
+static const std::string bulkDumpFolder = "bulkDumpFiles";
 
 // Accumulative checksum related prefix
 static const KeyRangeRef persistAccumulativeChecksumKeys =
@@ -1399,6 +1402,8 @@ public:
 
 	FlowLock serveAuditStorageParallelismLock;
 
+	FlowLock serveBulkDumpParallelismLock;
+
 	int64_t instanceID;
 
 	Promise<Void> otherError;
@@ -1631,6 +1636,10 @@ public:
 			specialCounter(cc, "ServeValidateStorageWaiting", [self]() {
 				return self->serveAuditStorageParallelismLock.waiters();
 			});
+			specialCounter(
+			    cc, "ServerBulkDumpActive", [self]() { return self->serveBulkDumpParallelismLock.activePermits(); });
+			specialCounter(
+			    cc, "ServerBulkDumpWaiting", [self]() { return self->serveBulkDumpParallelismLock.waiters(); });
 			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
 			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
 			specialCounter(cc, "WatchBytes", [self]() { return self->watchBytes; });
@@ -1705,6 +1714,7 @@ public:
 	    ssLock(makeReference<PriorityMultiLock>(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY,
 	                                            SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES)),
 	    serveAuditStorageParallelismLock(SERVER_KNOBS->SERVE_AUDIT_STORAGE_PARALLELISM),
+	    serveBulkDumpParallelismLock(SERVER_KNOBS->SS_SERVE_BULK_DUMP_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0),
@@ -5948,6 +5958,137 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 		}
 	}
 
+	return Void();
+}
+
+ACTOR Future<Version> getReadVersion(StorageServer* data) {
+	state Version version;
+	state Transaction tr(data->cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			wait(store(version, tr.getReadVersion()));
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return version;
+}
+
+struct RangeDumpData {
+	std::map<Key, Value> kvs;
+	Key lastKey;
+	int64_t kvsBytes;
+	RangeDumpData() = default;
+	RangeDumpData(const std::map<Key, Value>& kvs, const Key& lastKey, int64_t kvsBytes)
+	  : kvs(kvs), lastKey(lastKey), kvsBytes(kvsBytes) {}
+};
+
+ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange range, Version version) {
+	state GetKeyValuesRequest localReq;
+	localReq.begin = firstGreaterOrEqual(range.begin);
+	localReq.end = firstGreaterOrEqual(range.end);
+	localReq.version = version;
+	localReq.tags = TagSet();
+	data->actors.add(getKeyValuesQ(data, localReq));
+	state ErrorOr<GetKeyValuesReply> rep = wait(errorOr(localReq.reply.getFuture()));
+	if (rep.isError()) {
+		throw rep.getError();
+	}
+	if (rep.get().error.present()) {
+		throw rep.get().error.get();
+	}
+	std::map<Key, Value> kvsToDump;
+	// TODO: sampled bytes
+	for (const auto& kv : rep.get().data) {
+		auto res = kvsToDump.insert({ kv.key, kv.value });
+		ASSERT(res.second);
+	}
+	Key lastKey = range.end;
+	if (kvsToDump.size() > 0) {
+		lastKey = kvsToDump.rbegin()->first;
+	}
+	return RangeDumpData(kvsToDump, lastKey, rep.get().data.expectedSize());
+}
+
+std::string getBulkDumpLocalRoot(StorageServer* data) {
+	return abspath(joinPath(data->folder, bulkDumpFolder));
+}
+
+ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
+	wait(data->serveBulkDumpParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holder(data->serveBulkDumpParallelismLock);
+	state Key rangeBegin = req.bulkDumpState.getRange().begin;
+	state Key rangeEnd = req.bulkDumpState.getRange().end;
+	state int64_t readBytes = 0;
+	state int retryCount = 0;
+	state int batchNum = 0;
+	state Version versionToDump;
+	state RangeDumpData rangeDumpData;
+	state std::string rootFolder = getBulkDumpLocalRoot(data);
+	ASSERT(req.bulkDumpState.getSubFolder().present());
+	state std::string taskFolder = req.bulkDumpState.getSubFolder().get();
+
+	platform::eraseDirectoryRecursive(abspath(joinPath(rootFolder, taskFolder)));
+	loop {
+		try {
+			// Dump data of rangeToDump in a relativeFolder
+			state KeyRange rangeToDump = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+			state std::string relativeFolder = joinPath(taskFolder, std::to_string(batchNum));
+
+			// Get version to dump
+			wait(store(versionToDump, getReadVersion(data)));
+
+			// Read data from local server
+			wait(store(rangeDumpData, getRangeDataToDump(data, rangeToDump, versionToDump)));
+
+			TraceEvent(SevInfo, "SSBulkDump", data->thisServerID)
+			    .detail("Task", req.bulkDumpState.toString())
+			    .detail("ChecksumServers", describe(req.checksumServers))
+			    .detail("RangeToDump", rangeToDump)
+			    .detail("RootFolder", rootFolder)
+			    .detail("RelativeFolder", relativeFolder);
+
+			// Write to SST file
+			dumpDataFileToLocalDirectory(rangeDumpData.kvs, rootFolder, relativeFolder, versionToDump);
+			readBytes = readBytes + rangeDumpData.kvsBytes;
+
+			// Upload Files
+			wait(uploadFiles(req.bulkDumpState.getTransportMethod(),
+			                 rootFolder,
+			                 req.bulkDumpState.getFolder(),
+			                 relativeFolder,
+			                 data->thisServerID));
+
+			// Clean up local files
+			platform::eraseDirectoryRecursive(abspath(joinPath(rootFolder, relativeFolder)));
+
+			// TODO: Update metadata
+
+			// Move to the next range
+			if (rangeBegin >= rangeEnd) {
+				req.reply.send(req.bulkDumpState);
+				break;
+			} else {
+				rangeBegin = keyAfter(rangeDumpData.lastKey);
+			}
+			batchNum++;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			retryCount++;
+			if (retryCount > 50) {
+				req.reply.sendError(bulkdump_task_failed()); // give up
+				break;
+			}
+		}
+		wait(delay(1.0));
+	}
+	platform::eraseDirectoryRecursive(abspath(joinPath(rootFolder, taskFolder))); // clean up
 	return Void();
 }
 
@@ -14125,6 +14266,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				} else {
 					req.reply.sendError(not_implemented());
 				}
+			}
+			when(BulkDumpRequest req = waitNext(ssi.bulkdump.getFuture())) {
+				self->actors.add(bulkDumpQ(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);

@@ -64,10 +64,49 @@ struct BulkDumping : TestWorkload {
 		}
 	}
 
+	std::vector<KeyValue> generateOrderedKVS(BulkDumping* self, KeyRange range, size_t count) {
+		std::set<Key> keys; // ordered
+		while (keys.size() < count) {
+			Standalone<StringRef> str = self->getRandomStringRef();
+			Key key = range.begin.withSuffix(str);
+			if (keys.contains(key)) {
+				continue;
+			}
+			if (!range.contains(key)) {
+				continue;
+			}
+			keys.insert(key);
+		}
+		std::vector<KeyValue> res;
+		for (const auto& key : keys) {
+			Value val = self->getRandomStringRef();
+			res.push_back(Standalone(KeyValueRef(key, val)));
+		}
+		return res; // ordered
+	}
+
+	ACTOR Future<Void> setKeys(Database cx, std::vector<KeyValue> kvs) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				for (const auto& kv : kvs) {
+					tr.set(kv.key, kv.value);
+				}
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<Void> _start(BulkDumping* self, Database cx) {
 		if (self->clientId != 0) {
 			return Void();
 		}
+
+		std::vector<KeyValue> kvs = self->generateOrderedKVS(self, normalKeys, 1000);
+		wait(self->setKeys(cx, kvs));
 
 		state int oldBulkDumpMode = 0;
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1)));
@@ -80,6 +119,12 @@ struct BulkDumping : TestWorkload {
 		for (const auto& task : res) {
 			TraceEvent("BulkDumpingTaskRes").detail("Task", task.toString());
 		}
+		wait(delay(100.0));
+		wait(delay(100.0));
+		wait(delay(100.0));
+		wait(delay(100.0));
+		wait(delay(100.0));
+		wait(delay(100.0));
 
 		return Void();
 	}

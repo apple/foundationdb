@@ -53,6 +53,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
+#include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/genericactors.actor.h"
@@ -1339,6 +1340,25 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 	}
 }
 
+ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
+                                  StorageServerInterface ssi,
+                                  BulkDumpState bulkDumpState,
+                                  std::vector<UID> checksumServers) {
+	TraceEvent(SevInfo, "DDBulkDumpDoTask", self->ddId).detail("BulkDumpState", bulkDumpState.toString());
+	try {
+		ErrorOr<BulkDumpState> vResult =
+		    wait(ssi.bulkdump.tryGetReply(BulkDumpRequest(checksumServers, bulkDumpState)));
+		if (vResult.isError()) {
+			throw vResult.getError();
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 	state Database cx = self->txnProcessor->context();
 
@@ -1382,11 +1402,12 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 				wait(store(rangeLocations, self->txnProcessor->getSourceServerInterfacesForRange(bulkDumpRange)));
 				rangeLocationIndex = 0;
 				for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
-					SSBulkDumpRequest req =
-					    getSSBulkDumpRequest(rangeLocations[rangeLocationIndex].servers,
-					                         bulkDumpState.spawn(rangeLocations[rangeLocationIndex].range));
+					SSBulkDumpTask task =
+					    getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
+					                      bulkDumpState.spawn(rangeLocations[rangeLocationIndex].range));
 					// Issue task
-					TraceEvent(SevInfo, "DDBulkDumpScheduleTask", self->ddId).detail("Request", req.toString());
+					self->bulkDumpActors.add(
+					    doBulkDumpTask(self, task.targetServer, task.bulkDumpState, task.checksumServers));
 					beginKey = rangeLocations.back().range.end;
 				}
 			}

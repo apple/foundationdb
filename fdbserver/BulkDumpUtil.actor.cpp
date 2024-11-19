@@ -19,12 +19,15 @@
  */
 
 #include "fdbserver/BulkDumpUtil.actor.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/RocksDBCheckpointUtils.actor.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-SSBulkDumpRequest getSSBulkDumpRequest(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
-                                       const BulkDumpState& bulkDumpState) {
+SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
+                                 const BulkDumpState& bulkDumpState) {
 	StorageServerInterface targetServer;
-	std::vector<UID> otherServers;
+	std::vector<UID> checksumServers;
 	int dcid = 0;
 	for (const auto& [_, dcServers] : locations) {
 		if (dcid == 0) {
@@ -35,10 +38,103 @@ SSBulkDumpRequest getSSBulkDumpRequest(const std::map<std::string, std::vector<S
 			if (dcServers[i].id() == targetServer.id()) {
 				ASSERT_WE_THINK(dcid == 0);
 			} else {
-				otherServers.push_back(dcServers[i].id());
+				checksumServers.push_back(dcServers[i].id());
 			}
 		}
 		dcid++;
 	}
-	return SSBulkDumpRequest(targetServer, otherServers, bulkDumpState);
+	return SSBulkDumpTask(targetServer, checksumServers, bulkDumpState);
+}
+
+std::string generateRandomBulkDumpDataFileName(Version version) {
+	return std::to_string(version) + "-data.sst";
+}
+
+void dumpDataFileToLocalDirectory(const std::map<Key, Value>& sortedKVS,
+                                  const std::string& rootFolder,
+                                  const std::string& relativeFolder,
+                                  Version dumpVersion) {
+	if (sortedKVS.size() == 0) {
+		return;
+	}
+	const std::string dumpFolder = abspath(joinPath(rootFolder, relativeFolder));
+	platform::eraseDirectoryRecursive(dumpFolder);
+	if (!platform::createDirectory(dumpFolder)) {
+		throw retry();
+	}
+	std::string dataFileName = generateRandomBulkDumpDataFileName(dumpVersion);
+	std::string dataFile = abspath(joinPath(dumpFolder, dataFileName));
+	ASSERT(!fileExists(dataFile));
+	// TODO: generate metadata file
+	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+	sstWriter->open(dataFile);
+	for (const auto& [key, value] : sortedKVS) {
+		sstWriter->write(key, value); // assuming sorted
+	}
+	ASSERT(sstWriter->finish());
+	return;
+}
+
+void bulkDumpFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
+	std::string content = readFileBytes(fromFile, fileBytesMax);
+	writeFile(toFile, content);
+	return;
+}
+
+ACTOR Future<Void> bulkDumpTransportCP_impl(std::string fromRoot,
+                                            std::string toRoot,
+                                            std::string relativeFolder,
+                                            size_t fileBytesMax,
+                                            UID logId) {
+	loop {
+		state std::string toFolder = abspath(joinPath(toRoot, relativeFolder));
+		state std::string fromFolder = abspath(joinPath(fromRoot, relativeFolder));
+		state std::string fromFile;
+		state std::string toFile;
+		try {
+			// Clear existing folder
+			platform::eraseDirectoryRecursive(toFolder);
+			if (!platform::createDirectory(toFolder)) {
+				throw retry();
+			}
+
+			// Move bulk dump files to the target folder
+			for (const auto& filePath : platform::listFiles(fromFolder)) {
+				fromFile = abspath(joinPath(fromFolder, basename(filePath)));
+				toFile = abspath(joinPath(toFolder, basename(filePath)));
+				bulkDumpFileCopy(fromFile, toFile, fileBytesMax);
+				TraceEvent(SevInfo, "SSBulkDumpSSTFileCopied", logId)
+				    .detail("FromFile", fromFile)
+				    .detail("ToFile", toFile);
+			}
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			TraceEvent(SevInfo, "SSBulkDumpSSTFileCopyError", logId)
+			    .errorUnsuppressed(e)
+			    .detail("FromRoot", fromRoot)
+			    .detail("ToRoot", toRoot)
+			    .detail("RelativeFolder", relativeFolder)
+			    .detail("FromFile", fromFile)
+			    .detail("ToFile", toFile);
+			wait(delay(5.0));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
+                               std::string fromRoot,
+                               std::string toRoot,
+                               std::string relativeFolder,
+                               UID logId) {
+	// Upload to S3 or mock file copy
+	if (transportMethod != BulkDumpTransportMethod::CP) {
+		ASSERT(false);
+		throw not_implemented();
+	}
+	wait(bulkDumpTransportCP_impl(fromRoot, toRoot, relativeFolder, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
+	return Void();
 }

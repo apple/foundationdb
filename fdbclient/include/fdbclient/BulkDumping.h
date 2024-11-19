@@ -93,6 +93,8 @@ struct BulkDumpState {
 
 	std::string getFolder() const { return folder; }
 
+	Optional<std::string> getSubFolder() const { return subFolder; }
+
 	BulkDumpTransportMethod getTransportMethod() const { return transportMethod; }
 
 	bool isValid() const {

@@ -29,31 +29,42 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-struct SSBulkDumpRequest {
-public:
-	SSBulkDumpRequest(const StorageServerInterface& targetServer,
-	                  const std::vector<UID>& otherServers,
-	                  const BulkDumpState& bulkDumpState)
-	  : targetServer(targetServer), otherServers(otherServers), bulkDumpState(bulkDumpState){};
+struct SSBulkDumpTask {
+	SSBulkDumpTask(const StorageServerInterface& targetServer,
+	               const std::vector<UID>& checksumServers,
+	               const BulkDumpState& bulkDumpState)
+	  : targetServer(targetServer), checksumServers(checksumServers), bulkDumpState(bulkDumpState){};
 
 	std::string toString() const {
 		return "[BulkDumpState]: " + bulkDumpState.toString() + ", [TargetServer]: " + targetServer.toString() +
-		       ", [OtherServers]: " + describe(otherServers);
+		       ", [ChecksumServers]: " + describe(checksumServers);
 	}
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, targetServer, otherServers, bulkDumpState);
-	}
-
-private:
 	StorageServerInterface targetServer;
-	std::vector<UID> otherServers;
+	std::vector<UID> checksumServers;
 	BulkDumpState bulkDumpState;
 };
 
-SSBulkDumpRequest getSSBulkDumpRequest(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
-                                       const BulkDumpState& bulkDumpState);
+SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
+                                 const BulkDumpState& bulkDumpState);
+
+std::string generateRandomBulkDumpDataFileName(Version version);
+
+void dumpDataFileToLocalDirectory(const std::map<Key, Value>& sortedKVS,
+                                  const std::string& rootFolder,
+                                  const std::string& relativeFolder,
+                                  Version dumpVersion);
+
+ACTOR Future<Void> bulkDumpTransportCP_impl(std::string fromFolder,
+                                            std::string toFolder,
+                                            size_t fileBytesMax,
+                                            UID logId);
+
+ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
+                               std::string fromPath,
+                               std::string toPath,
+                               std::string relativeFolder,
+                               UID logId);
 
 #include "flow/unactorcompiler.h"
 #endif
