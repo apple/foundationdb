@@ -600,7 +600,6 @@ ACTOR Future<Void> TwoBuffers::ready(Reference<TwoBuffers> self) {
 	// fmt::print(stderr, "Ready:: afterWaitForData\n");
 	// try to fill the next buffer, do not wait for the filling
 	self->fillBufferIfAbsent(1 - self->cur);
-	// fmt::print(stderr, "Ready:: afterFillOtherBuffer\n");
 	return Void();
 }
 
@@ -5133,6 +5132,10 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				state int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 				state Key mutationLogPrefix = restore.mutationLogPrefix();
 
+				// this method should be executed exactly once, the transaction parameter indicates this
+				// however, i need to KV into alog prefix, I need multiple transaction for this 
+				// the good part is taht it is idempotent
+				// but i guess i still hve to extract it out to a execute method of another taskfunc
 				loop {
 					try {
 						fmt::print(stderr, "Commit:, mutationIndex={}, total={}\n", mutationIndex, totalMutation);
@@ -5157,10 +5160,13 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 						mutationIndex += txnCount; // update mutationIndex after commit 
 						txnCount = 0;
 					} catch (Error& e) {
-						if (e.code() == error_code_transaction_too_large)
+						fmt::print(stderr, "CommitError={}, mutationIndex={}, total={}\n", e.code(), mutationIndex, totalMutation);
+						if (e.code() == error_code_transaction_too_large) {
 							txBytesLimit /= 2;
-						else
+							tr->reset();
+						} else {
 							wait(tr->onError(e));
+						}
 					}
 				}
 				++versionRestored;
@@ -5168,10 +5174,9 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
 			mutationsSingleVersion.clear();
 		}
-		fmt::print(stderr, "FlowguruAfterLoop VersionRestored={}\n", versionRestored);
-		TraceEvent("FlowguruAfterLoop").detail("VersionRestored", versionRestored).log();
+		tr->reset();
 		// even if file exsists, but they are empty, in this case just start the next batch
-		fmt::print(stderr, "After add new task begin={}, end={}\n", endVersion, nextEndVersion);
+		fmt::print(stderr, "After add new task begin={}, end={}, VersionRestored={}\n", endVersion, nextEndVersion, versionRestored);
 		if (versionRestored == 0) {
 			addTaskFutures.push_back(
 			    RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, endVersion, nextEndVersion));
