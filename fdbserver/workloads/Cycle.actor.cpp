@@ -21,6 +21,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/WipedString.h"
 #include "flow/serialize.h"
 #include "fdbrpc/simulator.h"
@@ -57,6 +58,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	static constexpr auto TenantEnabled = MultiTenancy;
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
+	bool unseedCheck{ true };
 	Key keyPrefix;
 
 	std::vector<Future<Void>> clients;
@@ -73,6 +75,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
+		unseedCheck = getOption(options, "unseedCheck"_sr, true);
 		if constexpr (MultiTenancy) {
 			ASSERT(g_network->isSimulated());
 			this->useToken = getOption(options, "useToken"_sr, true);
@@ -82,6 +85,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	}
 
 	Future<Void> setup(Database const& cx) override {
+		if (!unseedCheck) {
+			noUnseed = true;
+		}
 		Future<Void> prepare;
 		if constexpr (MultiTenancy) {
 			prepare = prepareToken(cx, this);
@@ -321,6 +327,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 					wait(tr.onError(e));
 				}
 			}
+		}
+		if (!self->unseedCheck) {
+			ASSERT(noUnseed);
 		}
 		return ok;
 	}
