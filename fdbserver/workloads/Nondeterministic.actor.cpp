@@ -1,5 +1,5 @@
 /*
- * RocksCycle.actor.cpp
+ * Nondeterministic.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -39,8 +39,8 @@
 // why the test sets noUnseed to true. There are cases where we can't pick deterministic random values for rocksdb
 // properties, but still want to exercise the code for test coverage purpose. This workload is meant to solve the test
 // coverage problem while still ensuring all other tests are deterministic.
-struct RocksCycleWorkload : TestWorkload {
-	static constexpr auto NAME = "RocksCycle";
+struct NondeterministicWorkload : TestWorkload {
+	static constexpr auto NAME = "Nondeterministic";
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
@@ -49,7 +49,7 @@ struct RocksCycleWorkload : TestWorkload {
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
 
-	RocksCycleWorkload(WorkloadContext const& wcx)
+	NondeterministicWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), tooOldRetries("Retries.too_old"),
 	    commitFailedRetries("Retries.commit_failed"), totalLatency("Latency") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
@@ -109,7 +109,7 @@ struct RocksCycleWorkload : TestWorkload {
 		    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken);
 	}
 
-	ACTOR Future<Void> cycleClient(Database cx, RocksCycleWorkload* self, double delay) {
+	ACTOR Future<Void> cycleClient(Database cx, NondeterministicWorkload* self, double delay) {
 		state double lastTime = now();
 		try {
 			loop {
@@ -246,7 +246,7 @@ struct RocksCycleWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR Future<bool> cycleCheck(Database cx, RocksCycleWorkload* self, bool ok) {
+	ACTOR Future<bool> cycleCheck(Database cx, NondeterministicWorkload* self, bool ok) {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure")
 			    .detail("Reason", "Rate below desired rate")
@@ -289,4 +289,4 @@ struct RocksCycleWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<RocksCycleWorkload> RocksCycleWorkloadFactory(UntrustedMode::False);
+WorkloadFactory<NondeterministicWorkload> NondeterministicWorkloadFactory(UntrustedMode::False);
