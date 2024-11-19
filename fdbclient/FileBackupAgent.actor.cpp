@@ -588,19 +588,19 @@ Future<Void> TwoBuffers::ready() {
 
 ACTOR Future<Void> TwoBuffers::ready(Reference<TwoBuffers> self) {
 	// if cur is not ready, then wait
-	fmt::print(stderr, "Ready:: hasNext={}\n", self->hasNext());
+	// fmt::print(stderr, "Ready:: hasNext={}\n", self->hasNext());
 	if (!self->hasNext()) {
 		return Void();
 	}
 	// try to fill the current buffer, and wait before it is filled
-	fmt::print(stderr, "Ready:: beforeFillBuffer\n");
+	// fmt::print(stderr, "Ready:: beforeFillBuffer\n");
 	self->fillBufferIfAbsent(self->cur);
-	fmt::print(stderr, "Ready:: afterFillBuffer, index={}, has_value={}\n", self->cur, self->buffers[self->cur]->fetchingData.has_value());
+	// fmt::print(stderr, "Ready:: afterFillBuffer, index={}, has_value={}\n", self->cur, self->buffers[self->cur]->fetchingData.has_value());
 	wait(self->buffers[self->cur]->fetchingData.value());
-	fmt::print(stderr, "Ready:: afterWaitForData\n");
+	// fmt::print(stderr, "Ready:: afterWaitForData\n");
 	// try to fill the next buffer, do not wait for the filling
 	self->fillBufferIfAbsent(1 - self->cur);
-	fmt::print(stderr, "Ready:: afterFillOtherBuffer\n");
+	// fmt::print(stderr, "Ready:: afterFillOtherBuffer\n");
 	return Void();
 }
 
@@ -725,6 +725,11 @@ Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffer
 	return consumeData(Reference<PartitionedLogIteratorTwoBuffers>::addRef(this), firstVersion);
 }
 
+bool endOfBlock(char* start, int offset) {
+	unsigned char paddingChar = '\xff';
+	return (unsigned char)*(start + offset) == paddingChar;
+}
+
 ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffers::consumeData(
     Reference<PartitionedLogIteratorTwoBuffers> self,
     Version firstVersion) {
@@ -735,7 +740,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 	int size = self->twobuffer->getBufferSize();
 	bool foundNewVersion = false;
 	while (self->bufferOffset < size) {
-		while (self->bufferOffset < size && *(start + self->bufferOffset) != 0xFF) {
+		while (self->bufferOffset < size && !endOfBlock(start, self->bufferOffset)) {
 			// for each block
 			self->removeBlockHeader();
 
@@ -761,7 +766,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			ASSERT(self->bufferOffset + mutationTotalSize <= size);
 
 			// this is reported wrong
-			fmt::print(stderr, "ConsumeData:: size={}\n", mutationSize);
+			// fmt::print(stderr, "ConsumeData:: size={}\n", mutationSize);
 
 			Standalone<StringRef> mutationData = makeString(mutationSize);
 			std::memcpy(
@@ -780,11 +785,16 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			mutations.push_back_deep(mutations.arena(), vm);
 			// Move the bufferOffset to include this mutation
 			self->bufferOffset += mutationTotalSize;
+			// fmt::print(stderr, "ConsumeData NewOffset={}, size={}, end={}\n", self->bufferOffset, size, endOfBlock(start, self->bufferOffset));
 		}
-		if (self->bufferOffset < size && *(start + self->bufferOffset) == 0xFF) {
-			// there are paddings
+		// need to see if this is printed
+		fmt::print(stderr, "ConsumeData: Finish while loop NewOffset={}, size={}, end={}\n", self->bufferOffset, size, endOfBlock(start, self->bufferOffset));
+
+		if (self->bufferOffset < size && endOfBlock(start, self->bufferOffset)) {
+			// there are paddings	
 			int remain = self->BLOCK_SIZE - (self->bufferOffset % self->BLOCK_SIZE);
 			self->bufferOffset += remain;
+			fmt::print(stderr, "SkipPadding newOffset={}\n", self->bufferOffset);
 		}
 		if (foundNewVersion) {
 			break;
@@ -4823,7 +4833,7 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 			uint32_t sub = p.subsequence;
 			// fmt::print(stderr, "Transform inner mutationList[{}], mutation[{}], subsequence={}\n", i, j, sub);
 			// fmt::print(stderr, "before transform each mutation\n");
-			fmt::print(stderr, "Transform each mutation, mutation={}\n", p.mutation.toString());
+			// fmt::print(stderr, "Transform each mutation, mutation={}\n", p.mutation.toString());
 			// transform the mutation format and add to each subversion
 			// where is mutation written in new format
 			Standalone<StringRef> mutationOldFormat = transformMutationToOldFormat(p.mutation);
@@ -4874,7 +4884,7 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
+		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 
 	}
 	return results;
@@ -5077,7 +5087,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// TODO: set this to false
 		// now it stuck here
 		while (atLeastOneIteratorHasNext) {
-			fmt::print(stderr, "FlowguruLoopStart atLeastOneIteratorHasNext={}, totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
+			fmt::print(stderr, "FlowguruLoopStart totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
 			atLeastOneIteratorHasNext = false;
 			minVersion = std::numeric_limits<int64_t>::max();
 			k = 0;
@@ -5090,8 +5100,6 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				// TODO: maybe embed filtering key into iterator,
 				// as a result, backup agent should not worry about key range filtering
 				atLeastOneIteratorHasNext = true;
-				fmt::print(stderr, "FlowguruLoop0 atLeastOneIteratorHasNext={}\n", atLeastOneIteratorHasNext);
-
 				TraceEvent("FlowguruLoop1").detail("K", k).log();
 				fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
 				Version v = wait(iterators[k]->peekNextVersion());
