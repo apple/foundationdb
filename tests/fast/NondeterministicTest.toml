@@ -12,7 +12,7 @@ testName = 'Cycle'
 transactionsPerSecond = 2500.0
 testDuration = 10.0
 expectedRate = 0
-testNondeterminism = true
+unseedCheck = false
 
 [[test.workload]]
 testName = 'RandomClogging'
@@ -45,4 +45,4 @@ testName = 'Cycle'
 transactionsPerSecond = 250.0
 testDuration = 10.0
 expectedRate = 0.80
-testNondeterminism = true
+unseedCheck = false
