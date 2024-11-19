@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/IRandom.h"
 #ifdef WITH_ROCKSDB
 
 #include <rocksdb/c.h>
@@ -1354,14 +1355,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    .detail("KnobRocksDBWriteRateLimiterAutoTune", SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)
 			    .detail("ColumnFamily", cf->GetName());
 			if (g_network->isSimulated()) {
-				// The current thread and main thread are same when the code runs in simulation.
-				// blockUntilReady() is getting the thread into deadlock state, so directly calling
-				// the metricsLogger.
-				a.metrics =
-				    rocksDBMetricLogger(
-				        id, sharedState, options.statistics, perfContextMetrics, db, readIterPool, &a.counters, cf) &&
-				    flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool) &&
-				    manualFlush(id, db, sharedState, a.lastFlushTime, cf);
+				if (SERVER_KNOBS->ROCKSDB_METRICS_IN_SIMULATION) {
+					// The current thread and main thread are same when the code runs in simulation.
+					// blockUntilReady() is getting the thread into deadlock state, so directly calling
+					// the metricsLogger.
+					a.metrics = rocksDBMetricLogger(id,
+					                                sharedState,
+					                                options.statistics,
+					                                perfContextMetrics,
+					                                db,
+					                                readIterPool,
+					                                &a.counters,
+					                                cf) &&
+					            flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool) &&
+					            manualFlush(id, db, sharedState, a.lastFlushTime, cf);
+				}
 			} else {
 				onMainThread([&] {
 					a.metrics = rocksDBMetricLogger(id,
@@ -2166,6 +2174,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
+	static bool overloaded(const uint64_t estPendCompactBytes, const uint64_t numImmutableMemtables) {
+		// Rocksdb metadata estPendCompactBytes and numImmutableMemtables is not deterministic so we don't
+		// use it in simulation. We still want to exercise the overload functionality for test coverage, so we return
+		// overloaded = true 5% of the time.
+		if (g_network->isSimulated()) {
+			return deterministicRandom()->randomInt(0, 100) < 5;
+		}
+		return (estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT ||
+		        numImmutableMemtables >= SERVER_KNOBS->ROCKSDB_CAN_COMMIT_IMMUTABLE_MEMTABLES_LIMIT);
+	}
+
 	// Checks and waits for few seconds if rocskdb is overloaded.
 	ACTOR Future<Void> checkRocksdbState(RocksDBKeyValueStore* self) {
 		state uint64_t estPendCompactBytes;
@@ -2174,8 +2193,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		self->db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
 		                                   &estPendCompactBytes);
 		self->db->GetAggregatedIntProperty(rocksdb::DB::Properties::kNumImmutableMemTable, &numImmutableMemtables);
-		while (count && (estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT ||
-		                 numImmutableMemtables >= SERVER_KNOBS->ROCKSDB_CAN_COMMIT_IMMUTABLE_MEMTABLES_LIMIT)) {
+		while (count && overloaded(estPendCompactBytes, numImmutableMemtables)) {
 			wait(delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD));
 			++self->counters.commitDelayed;
 			count--;
@@ -2342,6 +2360,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		int64_t free;
 		int64_t total;
 		g_network->getDiskBytes(path, free, total);
+
+		// Rocksdb metadata kLiveSstFilesSize is not deterministic so don't rely on it for simulation. Instead, we pick
+		// a sane value that is deterministically random.
+		if (g_network->isSimulated()) {
+			live = (total - free) * deterministicRandom()->random01();
+		}
 
 		return StorageBytes(free, total, live, free);
 	}

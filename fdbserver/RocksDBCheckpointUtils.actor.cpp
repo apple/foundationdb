@@ -280,9 +280,12 @@ public:
 			options.iterate_upper_bound = &endSlice;
 			options.fill_cache = false; // Optimized for bulk scan.
 			options.readahead_size = SERVER_KNOBS->ROCKSDB_CHECKPOINT_READ_AHEAD_SIZE;
-			const uint64_t deadlineMicros =
-			    reader->db->GetEnv()->NowMicros() + SERVER_KNOBS->ROCKSDB_READ_CHECKPOINT_TIMEOUT * 1000000;
-			options.deadline = std::chrono::microseconds(deadlineMicros);
+			// db->GetEnv()->NowMicros() is not deterministic so we don't use it in simulation
+			if (!g_network->isSimulated()) {
+				const uint64_t deadlineMicros =
+				    reader->db->GetEnv()->NowMicros() + SERVER_KNOBS->ROCKSDB_READ_CHECKPOINT_TIMEOUT * 1000000;
+				options.deadline = std::chrono::microseconds(deadlineMicros);
+			}
 			this->iterator = std::unique_ptr<rocksdb::Iterator>(reader->db->NewIterator(options, reader->cf));
 			iterator->Seek(this->beginSlice);
 		}

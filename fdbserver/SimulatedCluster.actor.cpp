@@ -1805,11 +1805,6 @@ void redwoodStorageEngineConfig(SimulationConfig* simCfg) {
 void rocksdbStorageEngineConfig(SimulationConfig* simCfg) {
 	CODE_PROBE(true, "Simulated cluster using RocksDB storage engine", probe::assert::hasRocksDB);
 	simCfg->set_config("ssd-rocksdb-v1");
-	// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
-	// background threads.
-	TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
-	    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
-	noUnseed = true;
 }
 
 void shardedRocksDBStorageEngineConfig(SimulationConfig* simCfg) {
