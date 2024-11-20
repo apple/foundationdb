@@ -1715,7 +1715,7 @@ public:
 	    ssLock(makeReference<PriorityMultiLock>(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY,
 	                                            SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES)),
 	    serveAuditStorageParallelismLock(SERVER_KNOBS->SERVE_AUDIT_STORAGE_PARALLELISM),
-	    serveBulkDumpParallelismLock(SERVER_KNOBS->SS_SERVE_BULK_DUMP_PARALLELISM),
+	    serveBulkDumpParallelismLock(SERVER_KNOBS->SS_SERVE_BULKDUMP_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0),
@@ -5993,8 +5993,8 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 	localReq.begin = firstGreaterOrEqual(range.begin);
 	localReq.end = firstGreaterOrEqual(range.end);
 	localReq.version = version;
-	localReq.limit = 1e6; // TODO(BulkDump): make this configurable
-	localReq.limitBytes = 1e8;
+	localReq.limit = SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT;
+	localReq.limitBytes = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
 	localReq.tags = TagSet();
 	data->actors.add(getKeyValuesQ(data, localReq));
 	state ErrorOr<GetKeyValuesReply> rep = wait(errorOr(localReq.reply.getFuture()));

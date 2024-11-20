@@ -384,7 +384,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// BulkDumping
 	init( DD_BULKDUMP_TASK_METADATA_READ_SIZE,                   100 ); if( randomize && BUGGIFY ) DD_BULKDUMP_TASK_METADATA_READ_SIZE = deterministicRandom()->randomInt(2, 100);
 	init( DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC,                 2.0 ); if( randomize && BUGGIFY ) DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC = deterministicRandom()->random01() * 10 + 1;
-	init( SS_SERVE_BULK_DUMP_PARALLELISM,                          1 ); // TODO(BulkDump): Do not set to 1 after SS can resolve the file folder conflict
+	init( SS_SERVE_BULKDUMP_PARALLELISM,                           1 ); // TODO(BulkDump): Do not set to 1 after SS can resolve the file folder conflict
+	init( DD_BULKDUMP_PARALLELISM,                                50 ); if ( randomize && BUGGIFY ) DD_BULKDUMP_PARALLELISM =  deterministicRandom()->randomInt(1, 5);
 
 	// TeamRemover
 	init( TR_LOW_SPACE_PIVOT_DELAY_SEC,                            0 ); if (isSimulated) TR_LOW_SPACE_PIVOT_DELAY_SEC = deterministicRandom()->randomInt(0, 3);

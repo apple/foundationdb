@@ -425,9 +425,10 @@ public:
 
 	ActorCollection bulkLoadActors;
 	bool bulkLoadEnabled = false;
-	ActorCollection bulkDumpActors;
+
 	bool bulkDumpEnabled = false;
 	KeyRangeActorMap ongoingBulkDumpActors;
+	ParallelismLimitor bulkDumpParallelismLimitor;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
@@ -438,7 +439,8 @@ public:
 	    teamCollection(nullptr), bulkLoadTaskCollection(nullptr), auditStorageHaLaunchingLock(1),
 	    auditStorageReplicaLaunchingLock(1), auditStorageLocationMetadataLaunchingLock(1),
 	    auditStorageSsShardLaunchingLock(1), auditStorageInitStarted(false), bulkLoadActors(false),
-	    bulkLoadEnabled(false), bulkDumpEnabled(false) {}
+	    bulkLoadEnabled(false), bulkDumpEnabled(false),
+	    bulkDumpParallelismLimitor(SERVER_KNOBS->DD_BULKDUMP_PARALLELISM) {}
 
 	// bootstrap steps
 
@@ -1357,6 +1359,7 @@ ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 			throw e;
 		}
 	}
+	self->bulkDumpParallelismLimitor.decrementTaskCounter();
 	return Void();
 }
 
@@ -1374,7 +1377,7 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 
 	state int rangeLocationIndex = 0;
 	state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations;
-
+	state KeyRange taskRange;
 	state bool allComplete = true;
 
 	while (beginKey < endKey) {
@@ -1403,9 +1406,16 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 				rangeLocationIndex = 0;
 				for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
 					// Spawn task per shard
-					KeyRange taskRange = rangeLocations[rangeLocationIndex].range;
+					taskRange = rangeLocations[rangeLocationIndex].range;
 					ASSERT(!taskRange.empty());
 					if (!self->ongoingBulkDumpActors.liveActorAt(taskRange.begin)) {
+						// Limit parallelism
+						loop {
+							if (self->bulkDumpParallelismLimitor.tryIncrementTaskCounter()) {
+								break;
+							}
+							wait(self->bulkDumpParallelismLimitor.waitUntilCounterChanged());
+						}
 						// In case no ongoing task on the same range
 						SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
 						                                        bulkDumpState.spawn(taskRange));
@@ -1453,8 +1463,7 @@ ACTOR Future<Void> bulkDumpingCore(Reference<DataDistributor> self, Future<Void>
 	state Database cx = self->txnProcessor->context();
 	loop {
 		try {
-			self->bulkDumpActors.add(bulkDumpTaskScheduler(self));
-			wait(self->bulkDumpActors.getResult());
+			wait(bulkDumpTaskScheduler(self));
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
@@ -1464,7 +1473,6 @@ ACTOR Future<Void> bulkDumpingCore(Reference<DataDistributor> self, Future<Void>
 				throw e;
 			}
 		}
-		self->bulkDumpActors.clear(false);
 		wait(delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC));
 	}
 }

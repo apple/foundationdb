@@ -101,5 +101,32 @@ ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
 
 ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState);
 
+class ParallelismLimitor {
+public:
+	ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}
+
+	inline void decrementTaskCounter() {
+		ASSERT(numRunningTasks.get() <= maxParallelism);
+		numRunningTasks.set(numRunningTasks.get() - 1);
+		ASSERT(numRunningTasks.get() >= 0);
+	}
+
+	// return true if succeed
+	inline bool tryIncrementTaskCounter() {
+		if (numRunningTasks.get() < maxParallelism) {
+			numRunningTasks.set(numRunningTasks.get() + 1);
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	inline Future<Void> waitUntilCounterChanged() const { return numRunningTasks.onChange(); }
+
+private:
+	AsyncVar<int> numRunningTasks;
+	int maxParallelism;
+};
+
 #include "flow/unactorcompiler.h"
 #endif
