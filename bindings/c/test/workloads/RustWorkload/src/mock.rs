@@ -11,7 +11,7 @@ struct MockWorkload {
 
 impl RustWorkload for MockWorkload {
     fn setup(&'static mut self, _db: MockDatabase, done: Promise) {
-        println!("workload_setup({}_{})", self.name, self.client_id);
+        println!("rust_setup({}_{})", self.name, self.client_id);
         self.context.trace(
             Severity::Debug,
             "Test",
@@ -20,7 +20,7 @@ impl RustWorkload for MockWorkload {
         done.send(true);
     }
     fn start(&'static mut self, _db: MockDatabase, done: Promise) {
-        println!("workload_start({}_{})", self.name, self.client_id);
+        println!("rust_start({}_{})", self.name, self.client_id);
         self.context.trace(
             Severity::Debug,
             "Test",
@@ -29,7 +29,7 @@ impl RustWorkload for MockWorkload {
         done.send(true);
     }
     fn check(&'static mut self, _db: MockDatabase, done: Promise) {
-        println!("workload_check({}_{})", self.name, self.client_id);
+        println!("rust_check({}_{})", self.name, self.client_id);
         self.context.trace(
             Severity::Debug,
             "Test",
@@ -38,10 +38,12 @@ impl RustWorkload for MockWorkload {
         done.send(true);
     }
     fn get_metrics(&self, mut out: Metrics) {
+        println!("rust_getMetrics({}_{})", self.name, self.client_id);
         out.reserve(8);
         out.push(Metric::val("test", 42));
     }
     fn get_check_timeout(&self) -> f64 {
+        println!("rust_getCheckTimeout({}_{})", self.name, self.client_id);
         3000.
     }
 }
@@ -56,7 +58,7 @@ impl MockWorkload {
 }
 impl Drop for MockWorkload {
     fn drop(&mut self) {
-        println!("workload_free({}_{})", self.name, self.client_id);
+        println!("rust_free({}_{})", self.name, self.client_id);
     }
 }
 

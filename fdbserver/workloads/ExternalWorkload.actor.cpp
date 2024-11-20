@@ -100,6 +100,9 @@ struct FDBLoggerImpl : FDBLogger {
 	}
 };
 
+namespace capi {
+#include "foundationdb/CWorkload.h"
+}
 namespace translator {
 template <typename T>
 struct Wrapper {
@@ -111,10 +114,16 @@ void reserve(capi::OpaqueMetrics* c_metrics, int n) {
 	auto metrics = (std::vector<FDBPerfMetric>*)c_metrics;
 	metrics->reserve(metrics->size() + n);
 }
-void push(capi::OpaqueMetrics* c_metrics, capi::FDBMetric metric) {
+void push(capi::OpaqueMetrics* c_metrics, capi::FDBMetric c_metric) {
 	auto metrics = (std::vector<FDBPerfMetric>*)c_metrics;
-	auto fmt = metric.fmt ? metric.fmt : "0.3g";
-	metrics->emplace_back(std::string(metric.key), metric.val, metric.avg, std::string(fmt));
+	auto fmt = c_metric.fmt ? c_metric.fmt : "%.3g";
+	auto metric = FDBPerfMetric{
+		.name = std::string(c_metric.key),
+		.value = c_metric.val,
+		.averaged = c_metric.avg,
+		.format_code = std::string(fmt),
+	};
+	metrics->emplace_back(metric);
 }
 capi::FDBMetrics wrap(std::vector<FDBPerfMetric>* metrics) {
 	return capi::FDBMetrics{
@@ -135,7 +144,7 @@ void free(capi::OpaquePromise* c_promise) {
 	delete promise;
 }
 capi::FDBPromise wrap(GenericPromise<bool> promise) {
-	auto wrapped = (capi::FDBPromise*)new Wrapper<GenericPromise<bool>>{ promise };
+	auto wrapped = new Wrapper<GenericPromise<bool>>{ promise };
 	return capi::FDBPromise{
 		.inner = (capi::OpaquePromise*)wrapped,
 		.send = send,
@@ -151,13 +160,30 @@ void trace(capi::OpaqueWorkloadContext* c_context,
            const capi::FDBStringPair* c_details,
            int n) {
 	auto context = (FDBWorkloadContext*)c_context;
-	auto severity = (FDBSeverity)c_severity;
+	FDBSeverity severity;
+	switch (c_severity) {
+	case capi::FDBSeverity_Debug:
+		severity = FDBSeverity::Debug;
+		break;
+	case capi::FDBSeverity_Info:
+		severity = FDBSeverity::Info;
+		break;
+	case capi::FDBSeverity_Warn:
+		severity = FDBSeverity::Warn;
+		break;
+	case capi::FDBSeverity_WarnAlways:
+		severity = FDBSeverity::WarnAlways;
+		break;
+	case capi::FDBSeverity_Error:
+		severity = FDBSeverity::Error;
+		break;
+	}
 	std::vector<std::pair<std::string, std::string>> details;
 	details.reserve(n);
 	for (int i = 0; i < n; i++) {
 		details.emplace_back(std::pair<std::string, std::string>(c_details[i].key, c_details[i].val));
 	}
-	return context->trace(severity, name, details);
+	context->trace(severity, name, details);
 }
 uint64_t getProcessID(capi::OpaqueWorkloadContext* c_context) {
 	auto context = (FDBWorkloadContext*)c_context;
@@ -177,12 +203,12 @@ uint32_t rnd(capi::OpaqueWorkloadContext* c_context) {
 }
 capi::FDBString getOption(capi::OpaqueWorkloadContext* c_context, const char* name, const char* defaultValue) {
 	auto context = (FDBWorkloadContext*)c_context;
-	std::string str = context->getOption(name, std::string(defaultValue));
-	size_t len = str.length() + 1;
-	char* c_str = (char*)malloc(len);
-	memcpy(c_str, str.c_str(), len);
+	std::string value = context->getOption(name, std::string(defaultValue));
+	size_t len = value.length() + 1;
+	char* c_value = (char*)malloc(len);
+	memcpy(c_value, value.c_str(), len);
 	return capi::FDBString{
-		.inner = c_str,
+		.inner = c_value,
 		.free = (void (*)(const char*))free,
 	};
 }

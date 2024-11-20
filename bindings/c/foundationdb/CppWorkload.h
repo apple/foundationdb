@@ -26,10 +26,6 @@
 #include <functional>
 #include <memory>
 
-namespace capi {
-#include "foundationdb/CWorkload.h"
-}
-
 #ifndef DLLEXPORT
 #if defined(_MSC_VER)
 #define DLLEXPORT __declspec(dllexport)
@@ -45,13 +41,7 @@ typedef struct FDB_result FDBResult;
 typedef struct FDB_database FDBDatabase;
 typedef struct FDB_transaction FDBTransaction;
 
-enum class FDBSeverity {
-	Debug = capi::FDBSeverity_Debug,
-	Info = capi::FDBSeverity_Info,
-	Warn = capi::FDBSeverity_Warn,
-	WarnAlways = capi::FDBSeverity_WarnAlways,
-	Error = capi::FDBSeverity_Error,
-};
+enum class FDBSeverity { Debug, Info, Warn, WarnAlways, Error };
 
 class FDBLogger {
 public:

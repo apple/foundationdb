@@ -34,7 +34,7 @@ typedef struct CWorkload {
 
 static void workload_setup(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
 	BIND(raw_workload);
-	printf("workload_setup(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_setup(%s_%d)\n", this->name, this->cliend_id);
 	FDBStringPair details[2] = {
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "setup" },
@@ -45,7 +45,7 @@ static void workload_setup(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPro
 }
 static void workload_start(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
 	BIND(raw_workload);
-	printf("workload_start(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_start(%s_%d)\n", this->name, this->cliend_id);
 	FDBStringPair details[2] = {
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "start" },
@@ -56,7 +56,7 @@ static void workload_start(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPro
 }
 static void workload_check(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
 	BIND(raw_workload);
-	printf("workload_check(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_check(%s_%d)\n", this->name, this->cliend_id);
 	FDBStringPair details[2] = {
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "check" },
@@ -67,18 +67,18 @@ static void workload_check(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPro
 }
 static void workload_getMetrics(OpaqueWorkload* raw_workload, FDBMetrics out) {
 	BIND(raw_workload);
-	printf("workload_getMetrics(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_getMetrics(%s_%d)\n", this->name, this->cliend_id);
 	WITH(out, reserve, 8);
 	WITH(out, push, (FDBMetric){ .key = "test", .val = 42., .avg = false });
 }
 static double workload_getCheckTimeout(OpaqueWorkload* raw_workload) {
 	BIND(raw_workload);
-	printf("workload_getCheckTimeout(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_getCheckTimeout(%s_%d)\n", this->name, this->cliend_id);
 	return 3000.;
 };
 static void workload_free(OpaqueWorkload* raw_workload) {
 	BIND(raw_workload);
-	printf("workload_free(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_free(%s_%d)\n", this->name, this->cliend_id);
 	free(this->name);
 	free(this);
 }

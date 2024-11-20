@@ -1,12 +1,12 @@
-use std::{os::raw::c_char, ptr::NonNull};
+use std::ptr::NonNull;
 
 mod bindings;
 mod mock;
 
 use bindings::{
-    str_from_c, FDBMetrics, FDBPromise, FDBWorkload, FDBWorkloadContext, OpaqueWorkload,
+    str_from_c, FDBMetrics, FDBPromise, FDBWorkloadContext, OpaqueWorkload,
 };
-pub use bindings::{FDBDatabase, Metric, Metrics, Promise, Severity, WorkloadContext};
+pub use bindings::{FDBDatabase, FDBWorkload, Metric, Metrics, Promise, Severity, WorkloadContext};
 
 // Should be replaced by a Rust wrapper over the FDBDatabase bindings, like the one provided by
 // foundationdb-rs
@@ -126,12 +126,12 @@ macro_rules! register_factory {
     ($name:ident) => {
         #[no_mangle]
         extern "C" fn workloadCFactory(
-            raw_name: *const $crate::c_char,
+            raw_name: *const i8,
             raw_context: $crate::FDBWorkloadContext,
         ) -> $crate::FDBWorkload {
             let name = $crate::str_from_c(raw_name);
             let context = $crate::WorkloadContext::new(raw_context);
-            $name::create(name, context)
+            <$name as $crate::RustWorkloadFactory>::create(name, context)
         }
     };
 }

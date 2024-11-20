@@ -1,4 +1,4 @@
-use std::{ffi, os::raw::c_char, str::FromStr};
+use std::{ffi, str::FromStr};
 
 mod raw_bindings {
     #![allow(non_camel_case_types)]
@@ -20,7 +20,7 @@ use raw_bindings::{
 // String conversions
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn str_from_c(c_buf: *const c_char) -> String {
+pub fn str_from_c(c_buf: *const i8) -> String {
     let c_str = unsafe { ffi::CStr::from_ptr(c_buf) };
     c_str.to_str().unwrap().to_string()
 }
@@ -132,7 +132,7 @@ impl WorkloadContext {
             .and_then(|value| value.parse::<T>().ok())
     }
     fn get_option_raw(&self, name: &str) -> Option<String> {
-        let null = "null";
+        let null = "";
         let name = str_for_c(name);
         let default_value = str_for_c(null);
         let raw_value = unsafe {
@@ -187,7 +187,7 @@ impl Metrics {
     }
     pub fn push(&mut self, metric: Metric) {
         let key_storage = str_for_c(metric.key);
-        let fmt_storage = str_for_c(metric.fmt.as_deref().unwrap_or("0.3g"));
+        let fmt_storage = str_for_c(metric.fmt.as_deref().unwrap_or("%.3g"));
         unsafe {
             self.0.push.unwrap_unchecked()(
                 self.0.inner,
