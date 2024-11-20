@@ -427,6 +427,7 @@ public:
 	bool bulkLoadEnabled = false;
 	ActorCollection bulkDumpActors;
 	bool bulkDumpEnabled = false;
+	KeyRangeActorMap ongoingBulkDumpActors;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
@@ -1392,22 +1393,27 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 				bulkDumpRange = Standalone(
 				    KeyRangeRef(bulkDumpResult[bulkDumpResultIndex].key, bulkDumpResult[bulkDumpResultIndex + 1].key));
 				bulkDumpState = decodeBulkDumpState(bulkDumpResult[bulkDumpResultIndex].value);
-				if (bulkDumpState.phase == BulkDumpPhase::Running || bulkDumpState.phase == BulkDumpPhase::Complete) {
+				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
 					continue;
 				}
-				ASSERT_WE_THINK(bulkDumpState.phase == BulkDumpPhase::Submitted ||
-				                bulkDumpState.phase == BulkDumpPhase::Failed);
+				ASSERT_WE_THINK(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
 				// Partition the job in the unit of shard
 				allComplete = false;
 				wait(store(rangeLocations, self->txnProcessor->getSourceServerInterfacesForRange(bulkDumpRange)));
 				rangeLocationIndex = 0;
 				for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
-					SSBulkDumpTask task =
-					    getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
-					                      bulkDumpState.spawn(rangeLocations[rangeLocationIndex].range));
-					// Issue task
-					self->bulkDumpActors.add(
-					    doBulkDumpTask(self, task.targetServer, task.bulkDumpState, task.checksumServers));
+					// Spawn task per shard
+					KeyRange taskRange = rangeLocations[rangeLocationIndex].range;
+					ASSERT(!taskRange.empty());
+					if (!self->ongoingBulkDumpActors.liveActorAt(taskRange.begin)) {
+						// In case no ongoing task on the same range
+						SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
+						                                        bulkDumpState.spawn(taskRange));
+						// Issue task
+						self->ongoingBulkDumpActors.insert(
+						    taskRange,
+						    doBulkDumpTask(self, task.targetServer, task.bulkDumpState, task.checksumServers));
+					}
 					beginKey = rangeLocations.back().range.end;
 				}
 			}

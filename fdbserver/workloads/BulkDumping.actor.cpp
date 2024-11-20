@@ -22,6 +22,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/Error.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const std::string simulationBulkDumpFolder = "bulkDump";
@@ -100,6 +101,41 @@ struct BulkDumping : TestWorkload {
 		}
 	}
 
+	ACTOR Future<Void> waitUntilTaskComplete(Database cx, BulkDumpState newTask) {
+		state std::vector<BulkDumpState> res;
+		state bool complete = true;
+		loop {
+			try {
+				res.clear();
+				complete = true;
+				wait(store(res, getValidBulkDumpTasksWithinRange(cx, normalKeys)));
+				for (const auto& bulkDumpState : res) {
+					BulkDumpPhase phase = bulkDumpState.getPhase();
+					ASSERT(phase != BulkDumpPhase::Invalid);
+					if (!bulkDumpState.getParentFolder().present() || !bulkDumpState.getParentId().present()) {
+						complete = false;
+						break;
+					}
+					ASSERT(bulkDumpState.getParentFolder().get() == newTask.getFolder());
+					ASSERT(bulkDumpState.getParentId().get() == newTask.getTaskId());
+					if (phase != BulkDumpPhase::Complete) {
+						complete = false;
+						break;
+					}
+				}
+				if (complete) {
+					break;
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+			}
+			wait(delay(30.0));
+		}
+		return Void();
+	}
+
 	ACTOR Future<Void> _start(BulkDumping* self, Database cx) {
 		if (self->clientId != 0) {
 			return Void();
@@ -112,19 +148,14 @@ struct BulkDumping : TestWorkload {
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1)));
 		TraceEvent("BulkDumpingSetMode").detail("OldMode", oldBulkDumpMode).detail("NewMode", 1);
 
-		BulkDumpState newTask = newBulkDumpTaskLocalSST(normalKeys, simulationBulkDumpFolder);
+		state BulkDumpState newTask = newBulkDumpTaskLocalSST(normalKeys, simulationBulkDumpFolder);
 		TraceEvent("BulkDumpingTaskNew").detail("Task", newTask.toString());
 		wait(submitBulkDumpTask(cx, newTask));
 		std::vector<BulkDumpState> res = wait(getValidBulkDumpTasksWithinRange(cx, normalKeys, 100));
 		for (const auto& task : res) {
 			TraceEvent("BulkDumpingTaskRes").detail("Task", task.toString());
 		}
-		wait(delay(100.0));
-		wait(delay(100.0));
-		wait(delay(100.0));
-		wait(delay(100.0));
-		wait(delay(100.0));
-		wait(delay(100.0));
+		wait(self->waitUntilTaskComplete(cx, newTask));
 
 		return Void();
 	}

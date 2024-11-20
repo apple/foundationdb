@@ -18,10 +18,15 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BulkDumping.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/BulkDumpUtil.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/StorageMetrics.actor.h"
+#include "flow/Optional.h"
 #include "flow/Platform.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
@@ -46,33 +51,70 @@ SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<Storage
 	return SSBulkDumpTask(targetServer, checksumServers, bulkDumpState);
 }
 
-std::string generateRandomBulkDumpDataFileName(Version version) {
+std::string generateBulkDumpDataFileName(Version version) {
 	return std::to_string(version) + "-data.sst";
 }
 
-void dumpDataFileToLocalDirectory(const std::map<Key, Value>& sortedKVS,
-                                  const std::string& rootFolder,
-                                  const std::string& relativeFolder,
-                                  Version dumpVersion) {
-	if (sortedKVS.size() == 0) {
-		return;
-	}
+std::string generateBulkDumpManifestFileName(Version version) {
+	return std::to_string(version) + "-manifest.txt";
+}
+
+std::string generateBulkDumpByteSampleFileName(Version version) {
+	return std::to_string(version) + "-sample.sst";
+}
+
+BulkDumpManifest dumpDataFileToLocalDirectory(const std::map<Key, Value>& sortedKVS,
+                                              const std::string& rootFolder,
+                                              const std::string& relativeFolder,
+                                              Version dumpVersion,
+                                              const KeyRange& dumpRange,
+                                              int64_t dumpBytes) {
 	const std::string dumpFolder = abspath(joinPath(rootFolder, relativeFolder));
 	platform::eraseDirectoryRecursive(dumpFolder);
 	if (!platform::createDirectory(dumpFolder)) {
 		throw retry();
 	}
-	std::string dataFileName = generateRandomBulkDumpDataFileName(dumpVersion);
-	std::string dataFile = abspath(joinPath(dumpFolder, dataFileName));
-	ASSERT(!fileExists(dataFile));
-	// TODO: generate metadata file
-	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
-	sstWriter->open(dataFile);
-	for (const auto& [key, value] : sortedKVS) {
-		sstWriter->write(key, value); // assuming sorted
+
+	std::string dataFilePath = "";
+	std::string byteSampleFilePath = "";
+	if (sortedKVS.size() > 0) {
+		std::string dataFileName = generateBulkDumpDataFileName(dumpVersion);
+		dataFilePath = abspath(joinPath(dumpFolder, dataFileName));
+		ASSERT(!fileExists(dataFilePath));
+		std::string byteSampleFileName = generateBulkDumpByteSampleFileName(dumpVersion);
+		byteSampleFilePath = abspath(joinPath(dumpFolder, byteSampleFileName));
+		ASSERT(!fileExists(byteSampleFilePath));
+
+		std::unique_ptr<IRocksDBSstFileWriter> sstWriterData = newRocksDBSstFileWriter();
+		std::unique_ptr<IRocksDBSstFileWriter> sstWriterByteSample = newRocksDBSstFileWriter();
+		sstWriterData->open(dataFilePath);
+		sstWriterByteSample->open(byteSampleFilePath);
+		bool anySampled = false;
+		for (const auto& [key, value] : sortedKVS) {
+			sstWriterData->write(key, value); // assuming sorted
+			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(key, value));
+			if (sampleInfo.inSample) {
+				sstWriterByteSample->write(key, value);
+				anySampled = true;
+			}
+		}
+		ASSERT(sstWriterData->finish());
+		if (anySampled) {
+			ASSERT(sstWriterByteSample->finish());
+		} else {
+			ASSERT(deleteFile(byteSampleFilePath));
+		}
 	}
-	ASSERT(sstWriter->finish());
-	return;
+
+	std::string manifestFileName = generateBulkDumpManifestFileName(dumpVersion);
+	std::string manifestFilePath = abspath(joinPath(dumpFolder, manifestFileName));
+	ASSERT(!fileExists(manifestFilePath));
+
+	BulkDumpManifest manifest(
+	    dataFilePath, manifestFilePath, byteSampleFilePath, dumpRange.begin, dumpRange.end, dumpVersion, "", dumpBytes);
+	writeFile(manifestFilePath, manifest.toString());
+
+	return manifest;
 }
 
 void bulkDumpFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
@@ -136,5 +178,52 @@ ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
 		throw not_implemented();
 	}
 	wait(bulkDumpTransportCP_impl(fromRoot, toRoot, relativeFolder, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
+	return Void();
+}
+
+ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			RangeResult result = wait(krmGetRanges(&tr, bulkDumpPrefix, bulkDumpState.getRange()));
+			ASSERT(result[result.size() - 1].key == bulkDumpState.getRange().end); // assume complete
+			bool anyNew = false;
+			for (int i = 0; i < result.size() - 1; i++) {
+				if (result[i].value.empty()) {
+					throw bulkdump_task_outdated();
+				}
+				BulkDumpState currentBulkDumpState = decodeBulkDumpState(result[i].value);
+				if (currentBulkDumpState.getPhase() != BulkDumpPhase::Complete) {
+					ASSERT(!currentBulkDumpState.getParentId().present());
+					ASSERT(bulkDumpState.getParentId().present());
+					if (currentBulkDumpState.getTaskId() != bulkDumpState.getParentId().get()) {
+						throw bulkdump_task_outdated();
+					}
+				} else {
+					ASSERT(currentBulkDumpState.getParentId().present());
+					ASSERT(bulkDumpState.getParentId().present());
+					if (currentBulkDumpState.getParentId() != bulkDumpState.getParentId()) {
+						throw bulkdump_task_outdated();
+					} else {
+						ASSERT(currentBulkDumpState.getTaskId() == bulkDumpState.getTaskId());
+					}
+				}
+				if (!anyNew && currentBulkDumpState.getPhase() == BulkDumpPhase::Submitted) {
+					anyNew = true;
+				}
+			}
+			if (!anyNew) {
+				throw bulkdump_task_outdated();
+			}
+			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpState.getRange(), bulkDumpStateValue(bulkDumpState)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 	return Void();
 }

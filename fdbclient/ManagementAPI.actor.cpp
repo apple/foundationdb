@@ -3013,7 +3013,7 @@ ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpTask) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			if (bulkDumpTask.phase != BulkDumpPhase::Submitted) {
+			if (bulkDumpTask.getPhase() != BulkDumpPhase::Submitted) {
 				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkDumpTaskError")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
@@ -3041,7 +3041,7 @@ ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpTask) {
 
 ACTOR Future<std::vector<BulkDumpState>> getValidBulkDumpTasksWithinRange(Database cx,
                                                                           KeyRange rangeToRead,
-                                                                          size_t limit,
+                                                                          Optional<size_t> limit,
                                                                           Optional<BulkDumpPhase> phase) {
 	state Transaction tr(cx);
 	state Key readBegin = rangeToRead.begin;
@@ -3080,10 +3080,10 @@ ACTOR Future<std::vector<BulkDumpState>> getValidBulkDumpTasksWithinRange(Databa
 				ASSERT(bulkDumpState.getRange().contains(range));
 				continue;
 			}
-			if (!phase.present() || phase.get() == bulkDumpState.phase) {
+			if (!phase.present() || phase.get() == bulkDumpState.getPhase()) {
 				res.push_back(bulkDumpState);
 			}
-			if (res.size() >= limit) {
+			if (limit.present() && res.size() >= limit.get()) {
 				return res;
 			}
 		}

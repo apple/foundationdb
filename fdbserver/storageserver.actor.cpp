@@ -27,6 +27,7 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
 #include "flow/Platform.h"
@@ -5992,6 +5993,8 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 	localReq.begin = firstGreaterOrEqual(range.begin);
 	localReq.end = firstGreaterOrEqual(range.end);
 	localReq.version = version;
+	localReq.limit = 1e6; // TODO(BulkDump): make this configurable
+	localReq.limitBytes = 1e8;
 	localReq.tags = TagSet();
 	data->actors.add(getKeyValuesQ(data, localReq));
 	state ErrorOr<GetKeyValuesReply> rep = wait(errorOr(localReq.reply.getFuture()));
@@ -6029,10 +6032,10 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	state Version versionToDump;
 	state RangeDumpData rangeDumpData;
 	state std::string rootFolder = getBulkDumpLocalRoot(data);
-	ASSERT(req.bulkDumpState.getSubFolder().present());
-	state std::string taskFolder = req.bulkDumpState.getSubFolder().get();
-
+	state std::string taskFolder = req.bulkDumpState.getFolder();
+	state KeyRange completedRange = Standalone(KeyRangeRef(rangeBegin, rangeBegin));
 	platform::eraseDirectoryRecursive(abspath(joinPath(rootFolder, taskFolder)));
+
 	loop {
 		try {
 			// Dump data of rangeToDump in a relativeFolder
@@ -6042,44 +6045,58 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// Get version to dump
 			wait(store(versionToDump, getReadVersion(data)));
 
-			// Read data from local server
+			// Read data locally
 			wait(store(rangeDumpData, getRangeDataToDump(data, rangeToDump, versionToDump)));
+
+			// TODO(BulkDump): Read data from other servers and do checksum
+
+			// Write to SST file
+			KeyRange dataRange = rangeToDump & Standalone(KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey)));
+			BulkDumpManifest manifest = dumpDataFileToLocalDirectory(
+			    rangeDumpData.kvs, rootFolder, relativeFolder, versionToDump, dataRange, rangeDumpData.kvsBytes);
+			readBytes = readBytes + rangeDumpData.kvsBytes;
 
 			TraceEvent(SevInfo, "SSBulkDump", data->thisServerID)
 			    .detail("Task", req.bulkDumpState.toString())
 			    .detail("ChecksumServers", describe(req.checksumServers))
 			    .detail("RangeToDump", rangeToDump)
 			    .detail("RootFolder", rootFolder)
-			    .detail("RelativeFolder", relativeFolder);
-
-			// Write to SST file
-			dumpDataFileToLocalDirectory(rangeDumpData.kvs, rootFolder, relativeFolder, versionToDump);
-			readBytes = readBytes + rangeDumpData.kvsBytes;
+			    .detail("RelativeFolder", relativeFolder)
+			    .detail("CompletedRange", completedRange)
+			    .detail("DataBytes", rangeDumpData.kvsBytes)
+			    .detail("Manifest", manifest.toString());
 
 			// Upload Files
+			ASSERT(req.bulkDumpState.getParentFolder().present());
 			wait(uploadFiles(req.bulkDumpState.getTransportMethod(),
 			                 rootFolder,
-			                 req.bulkDumpState.getFolder(),
+			                 req.bulkDumpState.getParentFolder().get(),
 			                 relativeFolder,
 			                 data->thisServerID));
 
 			// Clean up local files
 			platform::eraseDirectoryRecursive(abspath(joinPath(rootFolder, relativeFolder)));
 
-			// TODO: Update metadata
+			// Progressively set metadata of the task range as complete phase
+			completedRange = Standalone(KeyRangeRef(completedRange.begin, rangeDumpData.lastKey));
+			if (!completedRange.empty()) {
+				wait(persistCompleteBulkDumpRange(data->cx, req.bulkDumpState.getRangeCompleteState(completedRange)));
+			}
 
 			// Move to the next range
+			rangeBegin = keyAfter(rangeDumpData.lastKey);
 			if (rangeBegin >= rangeEnd) {
 				req.reply.send(req.bulkDumpState);
 				break;
-			} else {
-				rangeBegin = keyAfter(rangeDumpData.lastKey);
 			}
 			batchNum++;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
-				throw e;
+				return Void(); // silently exit
 			}
+			TraceEvent(SevInfo, "SSBulkDumpError", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("Task", req.bulkDumpState.toString());
 			retryCount++;
 			if (retryCount > 50) {
 				req.reply.sendError(bulkdump_task_failed()); // give up

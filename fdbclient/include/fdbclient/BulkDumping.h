@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_BULKDUMPING_H
 #define FDBCLIENT_BULKDUMPING_H
+#include "flow/Trace.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -28,9 +29,7 @@
 enum class BulkDumpPhase : uint8_t {
 	Invalid = 0,
 	Submitted = 1,
-	Running = 2,
-	Complete = 3,
-	Failed = 4,
+	Complete = 2,
 };
 
 enum class BulkDumpFileType : uint8_t {
@@ -75,14 +74,14 @@ struct BulkDumpState {
 		                  ", [ExportMethod]: " + std::to_string(static_cast<uint8_t>(exportMethod)) +
 		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) + ", [Folder]: " + folder +
 		                  ", [TaskId]: " + taskId.toString();
-		if (subTaskId.present()) {
-			res = res + ", [SubTaskId]: " + subTaskId.get().toString();
-		}
-		if (subFolder.present()) {
-			res = res + ", [SubFolder]: " + subFolder.get();
-		}
 		if (version.present()) {
 			res = res + ", [Version]: " + std::to_string(version.get());
+		}
+		if (parentTaskId.present()) {
+			res = res + ", [ParentTaskId]: " + parentTaskId.get().toString();
+		}
+		if (parentTaskFolder.present()) {
+			res = res + ", [ParentTaskFolder]: " + parentTaskFolder.get();
 		}
 		return res;
 	}
@@ -93,11 +92,18 @@ struct BulkDumpState {
 
 	std::string getFolder() const { return folder; }
 
-	Optional<std::string> getSubFolder() const { return subFolder; }
+	BulkDumpPhase getPhase() const { return phase; }
 
 	BulkDumpTransportMethod getTransportMethod() const { return transportMethod; }
 
+	Optional<std::string> getParentFolder() const { return parentTaskFolder; }
+
+	Optional<UID> getParentId() const { return parentTaskId; }
+
 	bool isValid() const {
+		if (parentTaskId.present() && !parentTaskId.get().isValid()) {
+			return false;
+		}
 		if (!taskId.isValid()) {
 			return false;
 		}
@@ -120,28 +126,50 @@ struct BulkDumpState {
 		return true;
 	}
 
-	BulkDumpState spawn(const KeyRange& subRange) {
-		ASSERT(range.contains(subRange));
-		UID randomSubtaskId = deterministicRandom()->randomUniqueID();
-		BulkDumpState res(taskId,
-		                  subRange,
-		                  fileType,
-		                  transportMethod,
-		                  exportMethod,
-		                  folder,
-		                  randomSubtaskId,
-		                  randomSubtaskId.toString());
-		// the child task keeps the parent task id
+	BulkDumpState spawn(const KeyRange& childTaskRange) {
+		ASSERT(range.contains(childTaskRange));
+		UID childTaskId = deterministicRandom()->randomUniqueID();
+		std::string childTaskFolder = childTaskId.toString();
+		// Spawn a new state as a child and set this as the parent of the child
+		BulkDumpState res(childTaskId, childTaskRange, fileType, transportMethod, exportMethod, childTaskFolder);
+		if (parentTaskId.present()) {
+			res.setParentId(parentTaskId.get());
+		} else {
+			res.setParentId(taskId);
+		}
+		if (parentTaskFolder.present()) {
+			res.setParentFolder(parentTaskFolder.get());
+		} else {
+			res.setParentFolder(folder);
+		}
+		return res;
+	}
+
+	BulkDumpState getRangeCompleteState(const KeyRange& completeRange) {
+		ASSERT(range.contains(completeRange));
+		ASSERT(parentTaskId.present());
+		ASSERT(parentTaskFolder.present());
+		BulkDumpState res(taskId, completeRange, fileType, transportMethod, exportMethod, folder);
+		res.setParentId(parentTaskId.get());
+		res.setParentFolder(parentTaskFolder.get());
+		res.phase = BulkDumpPhase::Complete;
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, phase, taskId, range, fileType, transportMethod, exportMethod, folder, subTaskId, subFolder, version);
+		serializer(ar,
+		           phase,
+		           taskId,
+		           range,
+		           fileType,
+		           transportMethod,
+		           exportMethod,
+		           folder,
+		           version,
+		           parentTaskId,
+		           parentTaskFolder);
 	}
-
-	BulkDumpPhase phase = BulkDumpPhase::Invalid;
 
 private:
 	// for spawning a task
@@ -150,29 +178,45 @@ private:
 	              BulkDumpFileType fileType,
 	              BulkDumpTransportMethod transportMethod,
 	              BulkDumpExportMethod exportMethod,
-	              std::string folder,
-	              UID subTaskId,
-	              std::string subFolder)
+	              std::string folder)
 	  : taskId(taskId), range(range), fileType(fileType), transportMethod(transportMethod), exportMethod(exportMethod),
-	    folder(folder), phase(BulkDumpPhase::Submitted), subTaskId(subTaskId), subFolder(subFolder) {
+	    folder(folder), phase(BulkDumpPhase::Submitted) {
 		ASSERT(isValid());
 	}
 
-	UID taskId; // Unique ID of the task
-	KeyRange range; // Load the key-value within this range "[begin, end)" from data file
+	void setParentId(const UID& inputParentId) {
+		if (parentTaskId.present()) {
+			ASSERT(parentTaskId.get() == inputParentId);
+		} else {
+			parentTaskId = inputParentId;
+		}
+		return;
+	}
+
+	void setParentFolder(const std::string inputParentFolder) {
+		if (parentTaskFolder.present()) {
+			ASSERT(parentTaskFolder.get() == inputParentFolder);
+		} else {
+			parentTaskFolder = inputParentFolder;
+		}
+		return;
+	}
+
+	// Unique ID of the task
+	UID taskId;
+
 	// File dump config
+	KeyRange range; // Dump the key-value within this range "[begin, end)" from data file
 	BulkDumpFileType fileType = BulkDumpFileType::Invalid;
 	BulkDumpTransportMethod transportMethod = BulkDumpTransportMethod::Invalid;
 	BulkDumpExportMethod exportMethod = BulkDumpExportMethod::Invalid;
-	// Folder includes all files to be exported
-	std::string folder;
+	std::string folder; // Folder includes all files to be exported
 
-	// The data of a subrange must be at the same version --- snapshot
-	Optional<UID> subTaskId;
-	Optional<std::string> subFolder;
 	Optional<Version> version;
+	BulkDumpPhase phase = BulkDumpPhase::Invalid;
 
-	void setTaskId(const UID& inputTaskId) { taskId = inputTaskId; }
+	Optional<UID> parentTaskId;
+	Optional<std::string> parentTaskFolder;
 };
 
 BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& folder);

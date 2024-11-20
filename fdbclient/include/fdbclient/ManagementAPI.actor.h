@@ -200,7 +200,7 @@ ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpState);
 ACTOR Future<std::vector<BulkDumpState>> getValidBulkDumpTasksWithinRange(
     Database cx,
     KeyRange rangeToRead,
-    size_t limit = 10,
+    Optional<size_t> limit = Optional<size_t>(),
     Optional<BulkDumpPhase> phase = Optional<BulkDumpPhase>());
 
 // Persist a rangeLock owner to database metadata

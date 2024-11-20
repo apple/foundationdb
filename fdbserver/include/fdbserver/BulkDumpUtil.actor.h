@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cstdint>
+#include <string>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BULKDUMPUTIL_ACTOR_G_H)
 #define FDBSERVER_BULKDUMPUTIL_ACTOR_G_H
 #include "fdbserver/BulkDumpUtil.actor.g.h"
@@ -45,15 +47,46 @@ struct SSBulkDumpTask {
 	BulkDumpState bulkDumpState;
 };
 
+struct BulkDumpManifest {
+	std::string dataFilePath;
+	std::string manifestFilePath;
+	std::string bytesSampleFilePath;
+	Key beginKey;
+	Key endKey;
+	Version version;
+	std::string checksum;
+	int64_t bytes;
+
+	BulkDumpManifest(const std::string& dataFilePath,
+	                 const std::string& manifestFilePath,
+	                 const std::string& bytesSampleFilePath,
+	                 const Key& beginKey,
+	                 const Key& endKey,
+	                 const Version& version,
+	                 const std::string& checksum,
+	                 int64_t bytes)
+	  : dataFilePath(dataFilePath), manifestFilePath(manifestFilePath), bytesSampleFilePath(bytesSampleFilePath),
+	    beginKey(beginKey), endKey(endKey), version(version), checksum(checksum), bytes(bytes) {}
+
+	std::string toString() const {
+		return "[DataFilePath]: " + dataFilePath + ", [ManifestFilePath]: " + manifestFilePath +
+		       ", [BytesSampleFilePath]: " + bytesSampleFilePath + ", [BeginKey]: " + beginKey.toHexString() +
+		       ", [EndKey]: " + endKey.toHexString() + ", [Version]: " + std::to_string(version) +
+		       ", [Checksum]: " + checksum + ", [Bytes]: " + std::to_string(bytes);
+	}
+};
+
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
                                  const BulkDumpState& bulkDumpState);
 
 std::string generateRandomBulkDumpDataFileName(Version version);
 
-void dumpDataFileToLocalDirectory(const std::map<Key, Value>& sortedKVS,
-                                  const std::string& rootFolder,
-                                  const std::string& relativeFolder,
-                                  Version dumpVersion);
+BulkDumpManifest dumpDataFileToLocalDirectory(const std::map<Key, Value>& sortedKVS,
+                                              const std::string& rootFolder,
+                                              const std::string& relativeFolder,
+                                              Version dumpVersion,
+                                              const KeyRange& dumpRange,
+                                              int64_t dumpBytes);
 
 ACTOR Future<Void> bulkDumpTransportCP_impl(std::string fromFolder,
                                             std::string toFolder,
@@ -65,6 +98,8 @@ ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
                                std::string toPath,
                                std::string relativeFolder,
                                UID logId);
+
+ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState);
 
 #include "flow/unactorcompiler.h"
 #endif
