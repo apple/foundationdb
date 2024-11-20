@@ -4,6 +4,21 @@
 Release Notes
 #############
 
+7.3.57
+======
+* Same as 7.3.56 release with AVX enabled.
+
+7.3.56
+======
+* Manual flush if the rocksdb flush does not happen within a time interval `(PR #11792) <https://github.com/apple/foundationdb/pull/11792>`_
+* Have RocksDB histogram sample rate updated to 1 `(PR #11794) <https://github.com/apple/foundationdb/pull/11794>`_
+* TLS should accept same key with different values. `(PR #11763) <https://github.com/apple/foundationdb/pull/11763>`_
+* Add knobs and metrics for bloom filter. `(PR #11785) <https://github.com/apple/foundationdb/pull/11785>`_
+* Fix backup dryrun bug caused by out of variable and lack of wait. `(PR #11774) <https://github.com/apple/foundationdb/pull/11774>`_
+* Add debug id trace event 7.3 in tagPartitionedLogSystem. `(PR #11776) <https://github.com/apple/foundationdb/pull/11776>`_
+* Update ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS Knob to prevent OOMs `(PR #11739) <https://github.com/apple/foundationdb/pull/11739>`_
+* Enable backward read in consistency checker. `(PR #11743) <https://github.com/apple/foundationdb/pull/11743>`_
+
 7.3.55
 ======
 * Same as 7.3.54 release with AVX enabled.
