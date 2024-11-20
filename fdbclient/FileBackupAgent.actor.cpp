@@ -4884,10 +4884,239 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
-
 	}
 	return results;
 }
+
+struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
+	static StringRef name;
+	static constexpr uint32_t version = 1;
+	StringRef getName() const override { return name; };
+
+	static struct {
+		static TaskParam<int64_t> maxTagID() { return __FUNCTION__sr; }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
+		static TaskParam<std::vector<RestoreConfig::RestoreFile>> logs() { return __FUNCTION__sr; }
+	} Params;
+
+	ACTOR static Future<Void> _execute(Database cx,
+	                                   Reference<TaskBucket> taskBucket,
+	                                   Reference<FutureBucket> futureBucket,
+	                                   Reference<Task> task) {
+		state RestoreConfig restore(task);
+
+		state int64_t maxTagID = Params.maxTagID().get(task);
+		state std::vector<RestoreConfig::RestoreFile> logs = Params.logs().get(task);
+		state Version begin = Params.beginVersion().get(task);
+		state Version end = Params.endVersion().get(task);
+
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		state Reference<IBackupContainer> bc;
+		state std::vector<KeyRange> ranges; // this is the actual KV, not version
+
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
+				bc = getBackupContainerWithProxy(_bc);
+
+				wait(store(ranges, restore.getRestoreRangesOrDefault(tr)));
+
+				wait(checkTaskVersion(tr->getDatabase(), task, name, version));
+				wait(taskBucket->keepRunning(tr, task));
+
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		std::vector<std::vector<RestoreConfig::RestoreFile>> filesByTag(maxTagID + 1);
+		for (RestoreConfig::RestoreFile& f : logs) {
+			// find the tag, aggregate files by tags
+			fmt::print(stderr, "LogFile name={}, tag={}, size={}\n", f.fileName, f.tagId, f.fileSize);
+			if (f.tagId == -1) {
+				// inconsistent data
+				TraceEvent(SevError, "PartitionedLogFileNoTag")
+				    .detail("FileName", f.fileName)
+				    .detail("FileSize", f.fileSize)
+				    .log();
+			} else {
+				filesByTag[f.tagId].push_back(f);
+			}
+		}
+
+		state std::vector<Reference<PartitionedLogIterator>> iterators(maxTagID + 1);
+		// for each tag, create an iterator
+		for (int k = 0; k < filesByTag.size(); k++) {
+			iterators[k] = makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k]);
+		}
+
+		// mergeSort all iterator until all are exhausted
+		state int totalItereators = iterators.size();
+		// it stores all mutations for the next min version, in new format
+		state std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion;
+		state bool atLeastOneIteratorHasNext = true;
+		state int64_t minVersion;
+		state int k;
+		state int versionRestored = 0;
+
+		fmt::print(stderr, "FlowguruLoopBefore\n");
+		// TODO: set this to false
+		// now it stuck here
+		while (atLeastOneIteratorHasNext) {
+			fmt::print(stderr, "FlowguruLoopStart totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
+			atLeastOneIteratorHasNext = false;
+			minVersion = std::numeric_limits<int64_t>::max();
+			k = 0;
+			for (;k < totalItereators; k++) {
+				fmt::print(stderr, "FlowguruLoopNotHaveNext k={}, hasNext={}\n", k, iterators[k]->hasNext());
+				if (!iterators[k]->hasNext()) {
+					TraceEvent("FlowguruLoopNotHaveNext").detail("K", k).log();
+					continue;
+				}
+				// TODO: maybe embed filtering key into iterator,
+				// as a result, backup agent should not worry about key range filtering
+				atLeastOneIteratorHasNext = true;
+				TraceEvent("FlowguruLoop1").detail("K", k).log();
+				fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
+				Version v = wait(iterators[k]->peekNextVersion());
+				TraceEvent("FlowguruLoop2").detail("Version", v).log();
+				fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
+				if (v < minVersion) {
+					minVersion = v;
+					mutationsSingleVersion.clear();
+					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
+					mutationsSingleVersion.push_back(tmp);
+				} else if (v == minVersion) {
+					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
+					mutationsSingleVersion.push_back(tmp);
+				}
+			}
+
+			fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
+			if (atLeastOneIteratorHasNext) {
+				// transform from new format to old format(param1, param2)
+				// in the current implementation, each version will trigger a mutation
+				// if each version data is too small, we might want to combine multiple versions
+				// for a single mutation
+				fmt::print(stderr, "StartTransform\n");
+				state Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
+				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
+				fmt::print(stderr, "FinishTransform, size={}\n", oldFormatMutations.size());
+				state int mutationIndex = 0;
+				state int txnCount = 0;
+				state int txBytes = 0;
+				state int totalMutation = oldFormatMutations.size();
+				state int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+				state Key mutationLogPrefix = restore.mutationLogPrefix();
+
+				// this method should be executed exactly once, the transaction parameter indicates this
+				// however, i need to KV into alog prefix, I need multiple transaction for this 
+				// the good part is taht it is idempotent
+				// but i guess i still hve to extract it out to a execute method of another taskfunc
+				loop {
+					try {
+						fmt::print(stderr, "Commit:, mutationIndex={}, total={}\n", mutationIndex, totalMutation);
+						if (mutationIndex == totalMutation) {
+							break;
+						}
+						txBytes = 0;
+						tr->reset();
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+						while (mutationIndex + txnCount < totalMutation && txBytes < txBytesLimit) {
+							Key k = oldFormatMutations[mutationIndex + txnCount].key.withPrefix(mutationLogPrefix);
+							ValueRef v = oldFormatMutations[mutationIndex + txnCount]
+							                 .value; // each KV is a [param1 with added prefix -> param2]
+							tr->set(k, v);
+							txBytes += k.expectedSize();
+							txBytes += v.expectedSize();
+							++txnCount;
+						}
+						wait(tr->commit());
+						mutationIndex += txnCount; // update mutationIndex after commit 
+						txnCount = 0;
+					} catch (Error& e) {
+						fmt::print(stderr, "CommitError={}, mutationIndex={}, total={}\n", e.code(), mutationIndex, totalMutation);
+						if (e.code() == error_code_transaction_too_large) {
+							txBytesLimit /= 2;
+						} else {
+							wait(tr->onError(e));
+						}
+					}
+				}
+				++versionRestored;
+			}
+			fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
+			mutationsSingleVersion.clear();
+		}
+		fmt::print(stderr, "QuitLoop: begin={}, end={}, versionRestored={}\n", begin, end, versionRestored);
+		return Void();
+	}
+
+	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
+	                                  Reference<TaskBucket> taskBucket,
+	                                  Reference<FutureBucket> futureBucket,
+	                                  Reference<Task> task) {
+		RestoreConfig(task).fileBlocksFinished().atomicOp(tr, 1, MutationRef::Type::AddValue);
+
+		state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
+
+		// TODO:  Check to see if there is a leak in the FutureBucket since an invalid task (validation key fails)
+		// will never set its taskFuture.
+		wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
+
+		return Void();
+	}
+
+	ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
+	                                 Reference<TaskBucket> taskBucket,
+	                                 Reference<Task> parentTask,
+	                                 int64_t maxTagID,
+	                                 std::vector<RestoreConfig::RestoreFile> logs,
+									 Version begin,
+									 Version end,
+	                                 TaskCompletionKey completionKey,
+	                                 Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+		Key doneKey = wait(completionKey.get(tr, taskBucket));
+		state Reference<Task> task(new Task(RestoreLogDataPartitionedTaskFunc::name, RestoreLogDataPartitionedTaskFunc::version, doneKey));
+
+		// Create a restore config from the current task and bind it to the new task.
+		// RestoreConfig(parentTask) createsa prefix of : fileRestorePrefixRange.begin/uid->config/[uid]
+		wait(RestoreConfig(parentTask).toTask(tr, task));
+		Params.maxTagID().set(task, maxTagID);
+		Params.beginVersion().set(task, begin);
+		Params.endVersion().set(task, end);
+		Params.logs().set(task, logs);
+
+		if (!waitFor) {
+			return taskBucket->addTask(tr, task);
+		}
+
+		wait(waitFor->onSetAddTask(tr, taskBucket, task));
+		return "OnSetAddTask"_sr;
+	}
+
+	Future<Void> execute(Database cx,
+	                     Reference<TaskBucket> tb,
+	                     Reference<FutureBucket> fb,
+	                     Reference<Task> task) override {
+		return _execute(cx, tb, fb, task);
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
+	                    Reference<TaskBucket> tb,
+	                    Reference<FutureBucket> fb,
+	                    Reference<Task> task) override {
+		return _finish(tr, tb, fb, task);
+	};
+};
+StringRef RestoreLogDataPartitionedTaskFunc::name = "restore_log_data_partitioned"_sr;
+REGISTER_TASKFUNC(RestoreLogDataPartitionedTaskFunc);
 
 // each task can be partitioned to smaller ranges because commit proxy would
 // only start to commit alog/ prefix mutations to original prefix when
@@ -4908,7 +5137,6 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 	                                  Reference<Task> task) {
 		state RestoreConfig restore(task);
 
-		state bool atLeastOneIteratorHasNext;
 		state Version beginVersion = Params.beginVersion().get(task);
 		state Version endVersion = Params.endVersion().get(task);
 		Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
@@ -4936,7 +5164,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// The applyLag must be retrieved AFTER potentially updating the apply end version.
 		state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
 
-		fmt::print(stderr, "ApplyLag={}\n", applyLag);
+		fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
@@ -5030,7 +5258,6 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// blocks per Dispatch task and target batchSize total per batch but a batch must end on a complete version
 		// boundary so exceed the limit if necessary to reach the end of a version of files.
 		state std::vector<Future<Key>> addTaskFutures;
-		state int versionRestored = 0;
 		state int i = 0;
 		// need to process all range files, because RestoreRangeTaskFunc takes a block offset, keep using ti here.
 		// this can be done first, because they are not overlap within a restore uid
@@ -5054,141 +5281,23 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 		// aggregate logs by tag id
-		std::vector<std::vector<RestoreConfig::RestoreFile>> filesByTag(maxTagID + 1);
-		for (RestoreConfig::RestoreFile& f : logs) {
-			// find the tag, aggregate files by tags
-			fmt::print(stderr, "LogFile name={}, tag={}, size={}\n", f.fileName, f.tagId, f.fileSize);
-			if (f.tagId == -1) {
-				// inconsistent data
-				TraceEvent(SevError, "PartitionedLogFileNoTag")
-				    .detail("FileName", f.fileName)
-				    .detail("FileSize", f.fileSize)
-				    .log();
-			} else {
-				filesByTag[f.tagId].push_back(f);
-			}
-		}
-
-		state std::vector<Reference<PartitionedLogIterator>> iterators(maxTagID + 1);
-		// for each tag, create an iterator
-		for (int k = 0; k < filesByTag.size(); k++) {
-			iterators[k] = makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k]);
-		}
-
-		// mergeSort all iterator until all are exhausted
-		state int totalItereators = iterators.size();
-		// it stores all mutations for the next min version, in new format
-		state std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion;
-		atLeastOneIteratorHasNext = true;
-		state int64_t minVersion;
-		state int k;
-		fmt::print(stderr, "FlowguruLoopBefore\n");
-		// TODO: set this to false
-		// now it stuck here
-		while (atLeastOneIteratorHasNext) {
-			fmt::print(stderr, "FlowguruLoopStart totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
-			atLeastOneIteratorHasNext = false;
-			minVersion = std::numeric_limits<int64_t>::max();
-			k = 0;
-			for (;k < totalItereators; k++) {
-				fmt::print(stderr, "FlowguruLoopNotHaveNext k={}, hasNext={}\n", k, iterators[k]->hasNext());
-				if (!iterators[k]->hasNext()) {
-					TraceEvent("FlowguruLoopNotHaveNext").detail("K", k).log();
-					continue;
-				}
-				// TODO: maybe embed filtering key into iterator,
-				// as a result, backup agent should not worry about key range filtering
-				atLeastOneIteratorHasNext = true;
-				TraceEvent("FlowguruLoop1").detail("K", k).log();
-				fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
-				Version v = wait(iterators[k]->peekNextVersion());
-				TraceEvent("FlowguruLoop2").detail("Version", v).log();
-				fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
-				if (v < minVersion) {
-					minVersion = v;
-					mutationsSingleVersion.clear();
-					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
-					mutationsSingleVersion.push_back(tmp);
-				} else if (v == minVersion) {
-					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
-					mutationsSingleVersion.push_back(tmp);
-				}
-			}
-
-			fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
-			if (atLeastOneIteratorHasNext) {
-				// transform from new format to old format(param1, param2)
-				// in the current implementation, each version will trigger a mutation
-				// if each version data is too small, we might want to combine multiple versions
-				// for a single mutation
-				fmt::print(stderr, "StartTransform\n");
-				state Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
-				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
-				fmt::print(stderr, "FinishTransform, size={}\n", oldFormatMutations.size());
-				state int mutationIndex = 0;
-				state int txnCount = 0;
-				state int txBytes = 0;
-				state int totalMutation = oldFormatMutations.size();
-				state int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
-				state Key mutationLogPrefix = restore.mutationLogPrefix();
-
-				// this method should be executed exactly once, the transaction parameter indicates this
-				// however, i need to KV into alog prefix, I need multiple transaction for this 
-				// the good part is taht it is idempotent
-				// but i guess i still hve to extract it out to a execute method of another taskfunc
-				loop {
-					try {
-						fmt::print(stderr, "Commit:, mutationIndex={}, total={}\n", mutationIndex, totalMutation);
-						if (mutationIndex == totalMutation) {
-							break;
-						}
-						txBytes = 0;
-						tr->reset();
-						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-						while (mutationIndex + txnCount < totalMutation && txBytes < txBytesLimit) {
-							Key k = oldFormatMutations[mutationIndex + txnCount].key.withPrefix(mutationLogPrefix);
-							ValueRef v = oldFormatMutations[mutationIndex + txnCount]
-							                 .value; // each KV is a [param1 with added prefix -> param2]
-							tr->set(k, v);
-							txBytes += k.expectedSize();
-							txBytes += v.expectedSize();
-							++txnCount;
-						}
-						wait(tr->commit());
-						mutationIndex += txnCount; // update mutationIndex after commit 
-						txnCount = 0;
-					} catch (Error& e) {
-						fmt::print(stderr, "CommitError={}, mutationIndex={}, total={}\n", e.code(), mutationIndex, totalMutation);
-						if (e.code() == error_code_transaction_too_large) {
-							txBytesLimit /= 2;
-							tr->reset();
-						} else {
-							wait(tr->onError(e));
-						}
-					}
-				}
-				++versionRestored;
-			}
-			fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
-			mutationsSingleVersion.clear();
-		}
-		tr->reset();
+		addTaskFutures.push_back(RestoreLogDataPartitionedTaskFunc::addTask(tr,
+																			taskBucket,
+																			task,
+																			maxTagID,
+																			logs,
+																			beginVersion,
+																			endVersion,
+																			TaskCompletionKey::joinWith(allPartsDone)));
 		// even if file exsists, but they are empty, in this case just start the next batch
-		fmt::print(stderr, "After add new task begin={}, end={}, VersionRestored={}\n", endVersion, nextEndVersion, versionRestored);
-		if (versionRestored == 0) {
-			addTaskFutures.push_back(
-			    RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, endVersion, nextEndVersion));
-			wait(waitForAll(addTaskFutures));
-			wait(taskBucket->finish(tr, task));
-			return Void();
-		}
+		fmt::print(stderr, "After add new task begin={}, end={}\n", endVersion, nextEndVersion);
 
 		addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(
 		    tr, taskBucket, task, endVersion, nextEndVersion, TaskCompletionKey::noSignal(), allPartsDone));
 
 		wait(waitForAll(addTaskFutures));
+		fmt::print(stderr, "Add parent task begin={}, end={}, should happen only after children are done \n", endVersion, nextEndVersion);
+
 		wait(taskBucket->finish(tr, task));
 
 		TraceEvent("RestorePartitionDispatch")
