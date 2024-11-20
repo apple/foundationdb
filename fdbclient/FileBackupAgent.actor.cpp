@@ -304,7 +304,7 @@ public:
 
 		Version beginVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
 		Version endVersion = BinaryReader::fromStringRef<Version>(endVal.get().get(), Unversioned());
-		fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
+		// fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
 
 		return endVersion - beginVersion;
 	}
@@ -624,27 +624,27 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 		self->buffers[index]->size = 0;
 		return Void();
 	}
-	fmt::print(stderr,
-	           "readNextBlock::beforeReadFile, name={}, size={}\n",
-	           self->files[self->currentFileIndex].fileName,
-	           self->files[self->currentFileIndex].fileSize);
+	// fmt::print(stderr,
+	//            "readNextBlock::beforeReadFile, name={}, size={}\n",
+	//            self->files[self->currentFileIndex].fileName,
+	//            self->files[self->currentFileIndex].fileSize);
 	Reference<IAsyncFile> asyncFileTmp = wait(self->bc->readFile(self->files[self->currentFileIndex].fileName));
 	asyncFile = asyncFileTmp;
 	state size_t fileSize = self->files[self->currentFileIndex].fileSize;
 	size_t remaining = fileSize - self->currentFilePosition;
 	state size_t bytesToRead = std::min(self->bufferCapacity, remaining);
-	fmt::print(stderr,
-	           "readNextBlock::beforeActualRead, name={}, position={}, size={}, bytesToRead={}\n",
-	           self->files[self->currentFileIndex].fileName,
-			   self->currentFilePosition,
-	           fileSize,
-	           bytesToRead);
+	// fmt::print(stderr,
+	//            "readNextBlock::beforeActualRead, name={}, position={}, size={}, bytesToRead={}\n",
+	//            self->files[self->currentFileIndex].fileName,
+	// 		   self->currentFilePosition,
+	//            fileSize,
+	//            bytesToRead);
 	state int bytesRead =
 	    wait(asyncFile->read(static_cast<void*>(self->buffers[index]->data), bytesToRead, self->currentFilePosition));
-	fmt::print(stderr,
-	           "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
-	           self->files[self->currentFileIndex].fileName,
-	           bytesRead);
+	// fmt::print(stderr,
+	//            "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
+	//            self->files[self->currentFileIndex].fileName,
+	//            bytesRead);
 	// fmt::print(stderr,
 	//            "readNextBlock::Index={}", self->currentFileIndex);
 	if (bytesRead != bytesToRead)
@@ -661,13 +661,13 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 
 void TwoBuffers::fillBufferIfAbsent(int index) {
 	auto self = Reference<TwoBuffers>::addRef(this);
-	fmt::print(stderr, "fillBufferIfAbsent::[{}] valid={}\n", index, self->buffers[index]->is_valid());
+	// fmt::print(stderr, "fillBufferIfAbsent::[{}] valid={}\n", index, self->buffers[index]->is_valid());
 
 	if (self->buffers[index]->is_valid()) {
 		// if this buffer is valid, then do not overwrite it
 		return;
 	}
-	fmt::print(stderr, "fillBufferIfAbsent::beforeReadNextBlock\n");
+	// fmt::print(stderr, "fillBufferIfAbsent::beforeReadNextBlock\n");
 	self->buffers[index]->fetchingData = readNextBlock(self, index);
 	return;
 }
@@ -734,7 +734,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
     Version firstVersion) {
 	state Standalone<VectorRef<VersionedMutation>> mutations = Standalone<VectorRef<VersionedMutation>>();
 	wait(self->twobuffer->ready());
-	fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
+	// fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
 	char* start = self->twobuffer->peek();
 	int size = self->twobuffer->getBufferSize();
 	bool foundNewVersion = false;
@@ -787,13 +787,13 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			// fmt::print(stderr, "ConsumeData NewOffset={}, size={}, end={}\n", self->bufferOffset, size, endOfBlock(start, self->bufferOffset));
 		}
 		// need to see if this is printed
-		fmt::print(stderr, "ConsumeData: Finish while loop NewOffset={}, size={}, end={}\n", self->bufferOffset, size, endOfBlock(start, self->bufferOffset));
+		// fmt::print(stderr, "ConsumeData: Finish while loop NewOffset={}, size={}, end={}\n", self->bufferOffset, size, endOfBlock(start, self->bufferOffset));
 
 		if (self->bufferOffset < size && endOfBlock(start, self->bufferOffset)) {
 			// there are paddings	
 			int remain = self->BLOCK_SIZE - (self->bufferOffset % self->BLOCK_SIZE);
 			self->bufferOffset += remain;
-			fmt::print(stderr, "SkipPadding newOffset={}\n", self->bufferOffset);
+			// fmt::print(stderr, "SkipPadding newOffset={}\n", self->bufferOffset);
 		}
 		if (foundNewVersion) {
 			break;
@@ -825,7 +825,7 @@ bool PartitionedLogIteratorTwoBuffers::hasNext() const {
 	//			because bufferDataSize and buffer are set before adding fileIndex
 	// 		if currentFileIndex >= files.size(), then bufferDataSize must has been set
 	//
-	fmt::print(stderr, "hasNext tag={}, hasNext={}\n", tag, twobuffer->hasNext());
+	// fmt::print(stderr, "hasNext tag={}, hasNext={}\n", tag, twobuffer->hasNext());
 	return twobuffer->hasNext();
 }
 
@@ -842,20 +842,20 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	wait(self->twobuffer->ready());
 	// fmt::print(stderr, "peekNextVersion::AfterReady, tag={} \n", self->tag);
 	char* start = self->twobuffer->peek();
-	fmt::print(stderr,
-	           "peekNextVersion::afterPeek, tag={} , startNull={}, offset={}, bufferSize={}\n",
-	           self->tag,
-	           start == nullptr,
-	           self->bufferOffset,
-	           self->twobuffer->getBufferSize());
+	// fmt::print(stderr,
+	//            "peekNextVersion::afterPeek, tag={} , startNull={}, offset={}, bufferSize={}\n",
+	//            self->tag,
+	//            start == nullptr,
+	//            self->bufferOffset,
+	//            self->twobuffer->getBufferSize());
 	self->removeBlockHeader();
-	fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
+	// fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
 	Version version;
 	std::memcpy(&version, start + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
 	// now i have peekNextVersion::afterMemcpy, tag=0, version=-1
 	// seeing version = -1, means there are 8 0xff
-	fmt::print(stderr, "peekNextVersion::afterMemcpy, tag={}, version={}\n", self->tag, version);
+	// fmt::print(stderr, "peekNextVersion::afterMemcpy, tag={}, version={}\n", self->tag, version);
 	return version;
 }
 
@@ -871,10 +871,10 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 	mutations = firstBatch;
 	// If the current buffer is fully consumed, then we need to check the next buffer in case
 	// the version is sliced across this buffer boundary
-	fmt::print(stderr, "GetNextBeforeWhile\n");
+	// fmt::print(stderr, "GetNextBeforeWhile\n");
 
 	while (self->bufferOffset >= self->twobuffer->getBufferSize()) {
-		fmt::print(stderr, "getNext: offset={}, size={}\n", self->bufferOffset, self->twobuffer->getBufferSize());
+		// fmt::print(stderr, "getNext: offset={}, size={}\n", self->bufferOffset, self->twobuffer->getBufferSize());
 		self->twobuffer->discardAndSwap();
 		self->bufferOffset = 0;
 		// data for one version cannot exceed single buffer size
@@ -894,7 +894,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 }
 
 Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffers::getNext() {
-	fmt::print(stderr, "getNext, k={}, offset={}\n", tag, bufferOffset);
+	// fmt::print(stderr, "getNext, k={}, offset={}\n", tag, bufferOffset);
 	return getNext(Reference<PartitionedLogIteratorTwoBuffers>::addRef(this));
 }
 
@@ -4817,7 +4817,7 @@ Standalone<StringRef> transformMutationToOldFormat(MutationRef m) {
 Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
     Version commitVersion,
     std::vector<Standalone<VectorRef<VersionedMutation>>>& newFormatMutations) {
-	fmt::print(stderr, "StartTransform, version={}, mutationListSize={}\n", commitVersion, newFormatMutations.size());
+	// fmt::print(stderr, "StartTransform, version={}, mutationListSize={}\n", commitVersion, newFormatMutations.size());
 	Standalone<VectorRef<KeyValueRef>> results;
 	std::vector<Standalone<VectorRef<KeyValueRef>>> oldFormatMutations;
 	// mergeSort subversion here
@@ -4826,7 +4826,7 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	std::map<uint32_t, std::vector<Standalone<StringRef>>> mutationsBySub;
 	int i = 0;
 	for (auto& vec : newFormatMutations) {
-		fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
+		// fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
 		int j = 0;
 		for (auto& p : vec) {
 			uint32_t sub = p.subsequence;
@@ -4937,7 +4937,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		std::vector<std::vector<RestoreConfig::RestoreFile>> filesByTag(maxTagID + 1);
 		for (RestoreConfig::RestoreFile& f : logs) {
 			// find the tag, aggregate files by tags
-			fmt::print(stderr, "LogFile name={}, tag={}, size={}\n", f.fileName, f.tagId, f.fileSize);
+			// fmt::print(stderr, "LogFile name={}, tag={}, size={}\n", f.fileName, f.tagId, f.fileSize);
 			if (f.tagId == -1) {
 				// inconsistent data
 				TraceEvent(SevError, "PartitionedLogFileNoTag")
@@ -4968,12 +4968,12 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		// TODO: set this to false
 		// now it stuck here
 		while (atLeastOneIteratorHasNext) {
-			fmt::print(stderr, "FlowguruLoopStart totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
+			// fmt::print(stderr, "FlowguruLoopStart totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
 			atLeastOneIteratorHasNext = false;
 			minVersion = std::numeric_limits<int64_t>::max();
 			k = 0;
 			for (;k < totalItereators; k++) {
-				fmt::print(stderr, "FlowguruLoopNotHaveNext k={}, hasNext={}\n", k, iterators[k]->hasNext());
+				// fmt::print(stderr, "FlowguruLoopNotHaveNext k={}, hasNext={}\n", k, iterators[k]->hasNext());
 				if (!iterators[k]->hasNext()) {
 					TraceEvent("FlowguruLoopNotHaveNext").detail("K", k).log();
 					continue;
@@ -4981,11 +4981,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// TODO: maybe embed filtering key into iterator,
 				// as a result, backup agent should not worry about key range filtering
 				atLeastOneIteratorHasNext = true;
-				TraceEvent("FlowguruLoop1").detail("K", k).log();
-				fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
+				// fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
 				Version v = wait(iterators[k]->peekNextVersion());
 				TraceEvent("FlowguruLoop2").detail("Version", v).log();
-				fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
+				// fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
 				if (v < minVersion) {
 					minVersion = v;
 					mutationsSingleVersion.clear();
@@ -4997,16 +4996,16 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				}
 			}
 
-			fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
+			// fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
 			if (atLeastOneIteratorHasNext) {
 				// transform from new format to old format(param1, param2)
 				// in the current implementation, each version will trigger a mutation
 				// if each version data is too small, we might want to combine multiple versions
 				// for a single mutation
-				fmt::print(stderr, "StartTransform\n");
+				// fmt::print(stderr, "StartTransform\n");
 				state Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
 				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
-				fmt::print(stderr, "FinishTransform, size={}\n", oldFormatMutations.size());
+				// fmt::print(stderr, "FinishTransform, size={}\n", oldFormatMutations.size());
 				state int mutationIndex = 0;
 				state int txnCount = 0;
 				state int txBytes = 0;
@@ -5020,7 +5019,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// but i guess i still hve to extract it out to a execute method of another taskfunc
 				loop {
 					try {
-						fmt::print(stderr, "Commit:, mutationIndex={}, total={}\n", mutationIndex, totalMutation);
+						// fmt::print(stderr, "Commit:, mutationIndex={}, total={}\n", mutationIndex, totalMutation);
 						if (mutationIndex == totalMutation) {
 							break;
 						}
@@ -5052,7 +5051,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				}
 				++versionRestored;
 			}
-			fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
+			// fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
 			mutationsSingleVersion.clear();
 		}
 		fmt::print(stderr, "QuitLoop: begin={}, end={}, versionRestored={}\n", begin, end, versionRestored);
@@ -5213,7 +5212,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// if there are no files and i am the last batch, then just wait for applying to finish
 		// do we need this files.results.size() == 0 at all?
 		// if (files.results.size() == 0 && beginVersion >= restoreVersion) {
-		fmt::print(stderr, "CheckBegin and restore, begin={}, restore={}, applyLag={}\n", beginVersion, restoreVersion, applyLag);
+		// fmt::print(stderr, "CheckBegin and restore, begin={}, restore={}, applyLag={}\n", beginVersion, restoreVersion, applyLag);
 		if (beginVersion >= restoreVersion) {
 			if (applyLag == 0) {
 				// i am the last batch
@@ -5296,9 +5295,10 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    tr, taskBucket, task, endVersion, nextEndVersion, TaskCompletionKey::noSignal(), allPartsDone));
 
 		wait(waitForAll(addTaskFutures));
-		fmt::print(stderr, "Add parent task begin={}, end={}, should happen only after children are done \n", endVersion, nextEndVersion);
-
+		fmt::print(stderr, "before wait finish begin={}, end={} \n", beginVersion, beginVersion);
 		wait(taskBucket->finish(tr, task));
+		fmt::print(stderr, "Add parent task begin={}, end={}, nextEnd={}, should happen only after children are done \n", beginVersion, endVersion, nextEndVersion);
+
 
 		TraceEvent("RestorePartitionDispatch")
 		    .detail("RestoreUID", restore.getUid())
