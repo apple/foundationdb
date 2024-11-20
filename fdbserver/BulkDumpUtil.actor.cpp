@@ -20,6 +20,8 @@
 
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbrpc/FlowTransport.h"
 #include "fdbserver/BulkDumpUtil.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
@@ -183,13 +185,17 @@ ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
 
 ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState) {
 	state Transaction tr(cx);
+	state Key beginKey = bulkDumpState.getRange().begin;
+	state Key endKey = bulkDumpState.getRange().end;
+	state KeyRange rangeToPersist;
+	state RangeResult result;
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult result = wait(krmGetRanges(&tr, bulkDumpPrefix, bulkDumpState.getRange()));
-			ASSERT(result[result.size() - 1].key == bulkDumpState.getRange().end); // assume complete
+			rangeToPersist = Standalone(KeyRangeRef(beginKey, endKey));
+			wait(store(result, krmGetRanges(&tr, bulkDumpPrefix, rangeToPersist)));
 			bool anyNew = false;
 			for (int i = 0; i < result.size() - 1; i++) {
 				if (result[i].value.empty()) {
@@ -207,8 +213,6 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 					ASSERT(bulkDumpState.getParentId().present());
 					if (currentBulkDumpState.getParentId() != bulkDumpState.getParentId()) {
 						throw bulkdump_task_outdated();
-					} else {
-						ASSERT(currentBulkDumpState.getTaskId() == bulkDumpState.getTaskId());
 					}
 				}
 				if (!anyNew && currentBulkDumpState.getPhase() == BulkDumpPhase::Submitted) {
@@ -218,9 +222,16 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 			if (!anyNew) {
 				throw bulkdump_task_outdated();
 			}
-			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpState.getRange(), bulkDumpStateValue(bulkDumpState)));
+			wait(krmSetRangeCoalescing(&tr,
+			                           bulkDumpPrefix,
+			                           Standalone(KeyRangeRef(beginKey, result[result.size() - 1].key)),
+			                           bulkDumpState.getRange(),
+			                           bulkDumpStateValue(bulkDumpState)));
 			wait(tr.commit());
-			break;
+			beginKey = result[result.size() - 1].key;
+			if (beginKey >= endKey) {
+				break;
+			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
