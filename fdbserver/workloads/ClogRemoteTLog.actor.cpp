@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
@@ -175,14 +176,52 @@ struct ClogRemoteTLog : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<bool> grayFailureStatusCheck(Database db, NetworkAddress cloggedRemoteTLog) {
-		StatusObject status = wait(StatusClient::statusFetcher(db));
-		StatusObjectReader reader(status);
+	// Returns true if and only if there's a general error in fetching status json
+	// An example failure is network issue from client to CC (server)
+	static bool statusError(StatusObjectReader reader) {
+		static const auto errors{ []() {
+			std::unordered_set<std::string> errors;
+			std::for_each(messageTypeToName.begin(), messageTypeToName.end(), [&errors](const auto& kvPair) {
+				errors.insert(kvPair.second);
+			});
+			return errors;
+		}() };
+
+		StatusObjectReader client;
+		if (!reader.get("client", client)) {
+			TraceEvent("NoClient");
+			return true;
+		}
+
 		StatusObjectReader cluster;
 		if (!reader.get("cluster", cluster)) {
 			TraceEvent("NoCluster");
-			return false;
+			return true;
 		}
+
+		ASSERT(client.has("messages"));
+		StatusArray messages = client["messages"].get_array();
+		for (StatusObjectReader message : messages) {
+			if (message.has("name") && errors.contains(message["name"].get_str())) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	ACTOR static Future<bool> grayFailureStatusCheck(Database db, NetworkAddress cloggedRemoteTLog) {
+		StatusObject status = wait(StatusClient::statusFetcher(db));
+		StatusObjectReader reader(status);
+
+		if (statusError(reader)) {
+			// If there is some error to get the status (e.g. network issue), we let gray failure status check pass
+			// since that's not what we are testing for here.
+			return true;
+		}
+
+		StatusObjectReader cluster;
+		ASSERT(reader.get("cluster", cluster));
 		StatusObjectReader grayFailure;
 		if (!cluster.get("gray_failure", grayFailure)) {
 			TraceEvent("NoGrayFailure");
