@@ -6004,8 +6004,8 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 	if (rep.get().error.present()) {
 		throw rep.get().error.get();
 	}
+	// TODO(BulkDump): Single scan
 	std::map<Key, Value> kvsToDump;
-	// TODO: sampled bytes
 	for (const auto& kv : rep.get().data) {
 		auto res = kvsToDump.insert({ kv.key, kv.value });
 		ASSERT(res.second);
@@ -6068,11 +6068,11 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 
 			// Upload Files
 			ASSERT(req.bulkDumpState.getParentFolder().present());
-			wait(uploadFiles(req.bulkDumpState.getTransportMethod(),
+			/*wait(uploadFiles(req.bulkDumpState.getTransportMethod(),
 			                 rootFolder,
 			                 req.bulkDumpState.getParentFolder().get(),
 			                 relativeFolder,
-			                 data->thisServerID));
+			                 data->thisServerID));*/
 
 			// Clean up local files
 			platform::eraseDirectoryRecursive(abspath(joinPath(rootFolder, relativeFolder)));

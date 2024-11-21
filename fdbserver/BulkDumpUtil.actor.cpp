@@ -26,6 +26,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
+#include "flow/Buggify.h"
 #include "flow/Optional.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
@@ -163,7 +164,9 @@ ACTOR Future<Void> bulkDumpTransportCP_impl(std::string fromRoot,
 			    .detail("RelativeFolder", relativeFolder)
 			    .detail("FromFile", fromFile)
 			    .detail("ToFile", toFile);
-			wait(delay(5.0));
+			if (g_network->isSimulated()) {
+				wait(delay(5.0));
+			}
 		}
 	}
 	return Void();
@@ -231,6 +234,8 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 			beginKey = result[result.size() - 1].key;
 			if (beginKey >= endKey) {
 				break;
+			} else {
+				tr.reset();
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
