@@ -513,6 +513,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 	// Serialize the log range mutations within the map
 	for (; logRangeMutation != logRangeMutations->cend(); ++logRangeMutation) {
 		// FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
+		// this is 0x0FDB00A200090001
 		valueWriter = BinaryWriter(IncludeVersion(ProtocolVersion::withBackupMutations()));
 		valueWriter << logRangeMutation->second.totalSize();
 

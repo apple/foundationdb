@@ -1078,6 +1078,10 @@ public:
 		taskFuture->futureBucket->setOptions(tr);
 
 		bool is_set = wait(isSet(tr, taskFuture));
+		// this means that if the task future is already set, then just return
+		// so the taskFuture cannot be completed already if we want to join
+		// vectorFuture with taskFuture
+		fmt::print(stderr, "TaskFuture isSet={}\n", is_set);		
 		if (is_set) {
 			return Void();
 		}
@@ -1127,6 +1131,7 @@ public:
 
 		bool is_set = wait(isSet(tr, taskFuture));
 
+		fmt::print(stderr, "TaskFuture::onSet, isSet={}\n", is_set);		
 		if (is_set) {
 			CODE_PROBE(true, "is_set == true");
 			wait(performAction(tr, taskBucket, taskFuture, task));
@@ -1137,6 +1142,7 @@ public:
 			for (auto& v : task->params) {
 				tr->set(callbackSpace.pack(v.key), v.value);
 			}
+			fmt::print(stderr, "TaskFuture::onSet callback added, isSet={}\n", is_set);		
 		}
 
 		return Void();
@@ -1262,6 +1268,8 @@ public:
 		taskFuture->futureBucket->setOptions(tr);
 
 		std::vector<Reference<TaskFuture>> vectorFuture;
+		// the next line means generate a new task future with different key, 
+		// but share the same prefix of futureBucket with the input taskFuture
 		state Reference<TaskFuture> future = taskFuture->futureBucket->future(tr);
 		vectorFuture.push_back(future);
 		wait(join(tr, taskBucket, taskFuture, vectorFuture));
@@ -1276,7 +1284,7 @@ TaskFuture::TaskFuture(const Reference<FutureBucket> bucket, Key k) : futureBuck
 		key = deterministicRandom()->randomUniqueID().toString();
 	}
 
-	prefix = futureBucket->prefix.get(key);
+	prefix = futureBucket->prefix.get(key); // this ::get actually append the key to the taskBucket prefix
 	blocks = prefix.get("bl"_sr);
 	callbacks = prefix.get("cb"_sr);
 }
@@ -1347,5 +1355,6 @@ ACTOR Future<Key> getCompletionKey(TaskCompletionKey* self, Future<Reference<Tas
 
 Future<Key> TaskCompletionKey::get(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
 	ASSERT(key.present() == (joinFuture.getPtr() == nullptr));
+	// from the parent bucket, it generate a new taskfuture and returns the key of the new taskfuture
 	return key.present() ? key.get() : getCompletionKey(this, joinFuture->joinedFuture(tr, taskBucket));
 }

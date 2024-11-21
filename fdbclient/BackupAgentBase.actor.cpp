@@ -315,6 +315,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
 		offset += sizeof(uint64_t);
 		if (protocolVersion <= 0x0FDB00A200090001) {
+			// it fails here now
 			TraceEvent(SevError, "DecodeBackupLogValue")
 			    .detail("IncompatibleProtocolVersion", protocolVersion)
 			    .detail("ValueSize", value.size())
@@ -347,6 +348,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			memcpy(&len2, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
 
+			fmt::print(stderr, "DecodeProcess, offset={}, len1={}, len2={}, size={}, type={}, valid={}\n", 
+				offset, len1, len2, value.size(), type, isValidMutationType(type));
 			ASSERT(offset + len1 + len2 <= value.size() && isValidMutationType(type));
 
 			state MutationRef logValue;
@@ -744,6 +747,9 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 
 	// mutations and encrypted mutations (and their relationship) is described in greater detail in the defenition of
 	// CommitTransactionRef in CommitTransaction.h
+	fmt::print(stderr, "BackupAgentBase: newBeginVersion={}\n", newBeginVersion);
+	TraceEvent("BackupAgentBaseNewBeginVersion").detail("NewBeginVersion", newBeginVersion).log();
+
 	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
 	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
 	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
@@ -783,6 +789,9 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 	state int totalBytes = 0;
 	// two layer of loops, outside loop for each file range,
 	// inside look for each transaction(version)
+	fmt::print(stderr, "BackupAgentBase-kvMutationLogToTransactions-beforeLoop\n");
+	TraceEvent("BackupAgentBaseKvMutationLogToTransactionsBeforeLoop")
+		.log();
 	loop {
 		state CommitTransactionRequest req;
 		state Version newBeginVersion = invalidVersion;
@@ -790,7 +799,14 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 		state bool tenantMapChanging = false;
 		loop {
 			try {
+				fmt::print(stderr, "BackupAgentBase-RCGroup-Before\n");
+				TraceEvent("BackupAgentBaseRCGroupBefore")
+					.log();
 				state RCGroup group = waitNext(results.getFuture());
+				fmt::print(stderr, "BackupAgentBase-RCGroup-After group={}\n", group.groupKey);
+				TraceEvent("BackupAgentBaseRCGroupAfter")
+					.detail("Version", group.groupKey)
+					.log();
 				state CommitTransactionRequest curReq;
 				lock->release(group.items.expectedSize());
 				state int curBatchMutationSize = 0;
@@ -853,6 +869,12 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				}
 				mutationSize += curBatchMutationSize;
 				newBeginVersion = group.groupKey + 1;
+				
+				fmt::print(stderr, "BackupAgentBase-kvMutationLogToTransactions: newBeginVersion={}, groupKey={}\n", newBeginVersion, group.groupKey);
+				TraceEvent("BackupAgentBaseKvMutationLogToTransactions")
+					.detail("NewBeginVersion", newBeginVersion)
+					.detail("GroupKey", group.groupKey)
+					.log();
 
 				// At this point if the tenant map changed we would have already sent any normalKey mutations
 				// accumulated thus far, so all thats left to do is to send all the mutations in the the offending
@@ -862,6 +884,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 					break;
 				}
 			} catch (Error& e) {
+				fmt::print(stderr, "BackupAgentBaseError error={}", e.code());
 				if (e.code() == error_code_end_of_stream) {
 					if (endVersion.present() && endVersion.get() > lastVersion && endVersion.get() > newBeginVersion) {
 						newBeginVersion = endVersion.get();
@@ -961,6 +984,11 @@ ACTOR Future<Void> applyMutations(Database cx,
 	state int maxBytes = CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES;
 
 	keyVersion->insert(metadataVersionKey, 0);
+	fmt::print(stderr, "BackupAgentBaseApplyMutationBegin: begin={}, end={}\n", beginVersion, *endVersion);
+	TraceEvent("BackupAgentBaseApplyMutationsBegin")
+		.detail("BeginVersion", beginVersion)
+		.detail("EndVersion", *endVersion)
+		.log();
 
 	try {
 		loop {
@@ -981,6 +1009,7 @@ ACTOR Future<Void> applyMutations(Database cx,
 			// ranges each represent a partition of version, e.g. [100, 200], [201, 300], [301, 400]
 			// (64, 200) -> [(64, 128), (128, 192), (192, 200)] assuming block size is 64
 			state Standalone<VectorRef<KeyRangeRef>> ranges = getApplyRanges(beginVersion, newEndVersion, uid);
+			fmt::print(stderr, "BackupAgentBaseApplyMutationRangeSize={}\n", ranges.size());
 			//	ranges have format: applyLogKeys.begin/uid/hash(uint8)/version(64bites)/part
 			state size_t idx;
 			state std::vector<PromiseStream<RCGroup>> results;
@@ -990,6 +1019,7 @@ ACTOR Future<Void> applyMutations(Database cx,
 			// each RCGroup is for a single version, each results[i] is for a single range
 			// one range might have multiple versions
 			for (int i = 0; i < ranges.size(); ++i) {
+				fmt::print(stderr, "BackupAgentBaseApplyMutationRangeRecord begin={}, end={}\n", ranges[i].begin, ranges[i].end);
 				results.push_back(PromiseStream<RCGroup>());
 				locks.push_back(makeReference<FlowLock>(
 				    std::max(CLIENT_KNOBS->APPLY_MAX_LOCK_BYTES / ranges.size(), CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES)));

@@ -412,61 +412,62 @@ typedef RestoreConfig::RestoreFile RestoreFile;
 
 ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
                                                           Reference<ReadYourWritesTransaction> tr) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	return "";													
+	// tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	// tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state Future<int64_t> fileCount = restore.fileCount().getD(tr);
-	state Future<int64_t> fileBlockCount = restore.fileBlockCount().getD(tr);
-	state Future<int64_t> fileBlocksDispatched = restore.filesBlocksDispatched().getD(tr);
-	state Future<int64_t> fileBlocksFinished = restore.fileBlocksFinished().getD(tr);
-	state Future<int64_t> bytesWritten = restore.bytesWritten().getD(tr);
-	state Future<StringRef> status = restore.stateText(tr);
-	state Future<Version> currentVersion = restore.getCurrentVersion(tr);
-	state Future<Version> lag = restore.getApplyVersionLag(tr);
-	state Future<Version> firstConsistentVersion = restore.firstConsistentVersion().getD(tr);
-	state Future<std::string> tag = restore.tag().getD(tr);
-	state Future<std::pair<std::string, Version>> lastError = restore.lastError().getD(tr);
+	// state Future<int64_t> fileCount = restore.fileCount().getD(tr);
+	// state Future<int64_t> fileBlockCount = restore.fileBlockCount().getD(tr);
+	// state Future<int64_t> fileBlocksDispatched = restore.filesBlocksDispatched().getD(tr);
+	// state Future<int64_t> fileBlocksFinished = restore.fileBlocksFinished().getD(tr);
+	// state Future<int64_t> bytesWritten = restore.bytesWritten().getD(tr);
+	// state Future<StringRef> status = restore.stateText(tr);
+	// state Future<Version> currentVersion = restore.getCurrentVersion(tr);
+	// state Future<Version> lag = restore.getApplyVersionLag(tr);
+	// state Future<Version> firstConsistentVersion = restore.firstConsistentVersion().getD(tr);
+	// state Future<std::string> tag = restore.tag().getD(tr);
+	// state Future<std::pair<std::string, Version>> lastError = restore.lastError().getD(tr);
 
-	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
-	state UID uid = restore.getUid();
-	wait(success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
-	     success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
-	     success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError));
+	// // restore might no longer be valid after the first wait so make sure it is not needed anymore.
+	// state UID uid = restore.getUid();
+	// wait(success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
+	//      success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(currentVersion) &&
+	//      success(lag) && success(firstConsistentVersion) && success(tag) && success(lastError));
 
-	std::string errstr = "None";
-	if (lastError.get().second != 0)
-		errstr = format("'%s' %" PRId64 "s ago.\n",
-		                lastError.get().first.c_str(),
-		                (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+	// std::string errstr = "None";
+	// if (lastError.get().second != 0)
+	// 	errstr = format("'%s' %" PRId64 "s ago.\n",
+	// 	                lastError.get().first.c_str(),
+	// 	                (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 
-	TraceEvent("FileRestoreProgress")
-	    .detail("RestoreUID", uid)
-	    .detail("Tag", tag.get())
-	    .detail("State", status.get().toString())
-	    .detail("FileCount", fileCount.get())
-	    .detail("FileBlocksFinished", fileBlocksFinished.get())
-	    .detail("FileBlocksTotal", fileBlockCount.get())
-	    .detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
-	    .detail("BytesWritten", bytesWritten.get())
-	    .detail("CurrentVersion", currentVersion.get())
-	    .detail("FirstConsistentVersion", firstConsistentVersion.get())
-	    .detail("ApplyLag", lag.get())
-	    .detail("TaskInstance", THIS_ADDR);
+	// TraceEvent("FileRestoreProgress")
+	//     .detail("RestoreUID", uid)
+	//     .detail("Tag", tag.get())
+	//     .detail("State", status.get().toString())
+	//     .detail("FileCount", fileCount.get())
+	//     .detail("FileBlocksFinished", fileBlocksFinished.get())
+	//     .detail("FileBlocksTotal", fileBlockCount.get())
+	//     .detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
+	//     .detail("BytesWritten", bytesWritten.get())
+	//     .detail("CurrentVersion", currentVersion.get())
+	//     .detail("FirstConsistentVersion", firstConsistentVersion.get())
+	//     .detail("ApplyLag", lag.get())
+	//     .detail("TaskInstance", THIS_ADDR);
 
-	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
-	              "%lld  CurrentVersion: %lld FirstConsistentVersion: %lld  ApplyVersionLag: %lld  LastError: %s",
-	              tag.get().c_str(),
-	              uid.toString().c_str(),
-	              status.get().toString().c_str(),
-	              fileBlocksFinished.get(),
-	              fileBlockCount.get(),
-	              fileBlocksDispatched.get() - fileBlocksFinished.get(),
-	              fileCount.get(),
-	              bytesWritten.get(),
-	              currentVersion.get(),
-	              firstConsistentVersion.get(),
-	              lag.get(),
-	              errstr.c_str());
+	// return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
+	//               "%lld  CurrentVersion: %lld FirstConsistentVersion: %lld  ApplyVersionLag: %lld  LastError: %s",
+	//               tag.get().c_str(),
+	//               uid.toString().c_str(),
+	//               status.get().toString().c_str(),
+	//               fileBlocksFinished.get(),
+	//               fileBlockCount.get(),
+	//               fileBlocksDispatched.get() - fileBlocksFinished.get(),
+	//               fileCount.get(),
+	//               bytesWritten.get(),
+	//               currentVersion.get(),
+	//               firstConsistentVersion.get(),
+	//               lag.get(),
+	//               errstr.c_str());
 }
 
 ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore,
@@ -4385,6 +4386,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	                                 int64_t len,
 	                                 TaskCompletionKey completionKey,
 	                                 Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+		// 
 		Key doneKey = wait(completionKey.get(tr, taskBucket));
 		state Reference<Task> task(new Task(RestoreRangeTaskFunc::name, RestoreRangeTaskFunc::version, doneKey));
 
@@ -4446,6 +4448,7 @@ std::pair<Version, int32_t> decodeMutationLogKey(const StringRef& key) {
 //   [includeVersion:uint64_t][val_length:uint32_t][mutation_1][mutation_2]...[mutation_k],
 // where a mutation is encoded as:
 //   [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][param1][param2]
+// noted version needs to be included here
 std::vector<MutationRef> decodeMutationLogValue(const StringRef& value) {
 	StringRefReader reader(value, restore_corrupted_data());
 
@@ -4659,9 +4662,10 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		tr->reset();
 		loop {
 			try {
-				if (start == end)
+				if (start == end) {
+					fmt::print(stderr, "Old Task Finish Log\n");
 					return Void();
-
+				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -4842,7 +4846,8 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		++i;
 	}
-	BinaryWriter param2Writer(Unversioned());
+	// the list of param2 needs to have the first 64 bites as 0x0FDB00A200090001
+	BinaryWriter param2Writer(IncludeVersion(ProtocolVersion::withBackupMutations()));
 	param2Writer << totalBytes;
 
 	for (auto& mutationsForSub : mutationsBySub) {
@@ -5149,7 +5154,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 		state int nextEndVersion =
 		    std::min(restoreVersion, endVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE);
-		fmt::print(stderr, "Very begin Begin={}, End={}, nextEnd={}\n", beginVersion, endVersion, nextEndVersion);		
+		fmt::print(stderr, "Very begin Begin={}, End={}, nextEnd={}, restoreVersion={}\n", beginVersion, endVersion, nextEndVersion, restoreVersion);		
 		// update the apply mutations end version so the mutations from the
 		// previous batch can be applied.
 		// Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
@@ -5205,7 +5210,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		}
 		// allPartsDone will be set once all block tasks in the current batch are finished.
 		// create a new future for the new batch
-		state Reference<TaskFuture> allPartsDone = allPartsDone = futureBucket->future(tr);
+		state Reference<TaskFuture> allPartsDone = futureBucket->future(tr);
 		restore.batchFuture().set(tr, allPartsDone->pack());
 
 		// if there are no files, if i am not the last batch, then on to the next batch
@@ -5214,6 +5219,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// if (files.results.size() == 0 && beginVersion >= restoreVersion) {
 		// fmt::print(stderr, "CheckBegin and restore, begin={}, restore={}, applyLag={}\n", beginVersion, restoreVersion, applyLag);
 		if (beginVersion >= restoreVersion) {
+			fmt::print(stderr, "Reaching end, beginVersion={}, restoreVersion={}, ApplyLag={}\n", beginVersion, restoreVersion, applyLag);
 			if (applyLag == 0) {
 				// i am the last batch
 				// If apply lag is 0 then we are done so create the completion task
@@ -5242,11 +5248,6 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				    .detail("Decision", "apply_still_behind")
 				    .detail("TaskInstance", THIS_ADDR);
 			}
-
-			// If adding to existing batch then task is joined with a batch future so set done future
-			// Note that this must be done after joining at least one task with the batch future in case all other
-			// blockers already finished.
-
 			wait(taskBucket->finish(tr, task));
 			return Void();
 		}
@@ -5279,6 +5280,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				                                                       TaskCompletionKey::joinWith(allPartsDone)));
 			}
 		}
+		bool is_set = wait(allPartsDone->isSet(tr));
+		fmt::print(stderr, "Before add new task begin={}, end={}, nextEnd={}, isSet={} \n", beginVersion, endVersion, nextEndVersion, is_set);
 		// aggregate logs by tag id
 		addTaskFutures.push_back(RestoreLogDataPartitionedTaskFunc::addTask(tr,
 																			taskBucket,
@@ -5289,13 +5292,13 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 																			endVersion,
 																			TaskCompletionKey::joinWith(allPartsDone)));
 		// even if file exsists, but they are empty, in this case just start the next batch
-		fmt::print(stderr, "After add new task begin={}, end={}\n", endVersion, nextEndVersion);
+		fmt::print(stderr, "After add new task begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
 
 		addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(
 		    tr, taskBucket, task, endVersion, nextEndVersion, TaskCompletionKey::noSignal(), allPartsDone));
 
 		wait(waitForAll(addTaskFutures));
-		fmt::print(stderr, "before wait finish begin={}, end={} \n", beginVersion, beginVersion);
+		fmt::print(stderr, "before wait finish begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
 		wait(taskBucket->finish(tr, task));
 		fmt::print(stderr, "Add parent task begin={}, end={}, nextEnd={}, should happen only after children are done \n", beginVersion, endVersion, nextEndVersion);
 
@@ -5686,6 +5689,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			                                                          allPartsDone));
 
 		wait(waitForAll(addTaskFutures));
+		fmt::print(stderr, "Old Task Add parent task begin={}, end={}, should happen only after children are done \n", beginVersion, endVersion);
 
 		// If adding to existing batch then task is joined with a batch future so set done future.
 		Future<Void> setDone = addingToExistingBatch ? onDone->set(tr, taskBucket) : Void();
