@@ -304,7 +304,7 @@ public:
 
 		Version beginVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
 		Version endVersion = BinaryReader::fromStringRef<Version>(endVal.get().get(), Unversioned());
-		// fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
+		fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
 
 		return endVersion - beginVersion;
 	}
@@ -4809,12 +4809,39 @@ REGISTER_TASKFUNC(RestoreLogDataTaskFunc);
 // similar to addBackupMutations(
 // MutationList::push_back_deep
 Standalone<StringRef> transformMutationToOldFormat(MutationRef m) {
+	// i need to customize the encoding here according to 
+			/*
+				// hfu5: format should be type|kLen|vLen|Key|Value
+				memcpy(&type, value.begin() + offset, sizeof(uint32_t));
+				offset += sizeof(uint32_t);
+				state uint32_t len1 = 0;
+				memcpy(&len1, value.begin() + offset, sizeof(uint32_t));
+				offset += sizeof(uint32_t);
+				state uint32_t len2 = 0;
+				memcpy(&len2, value.begin() + offset, sizeof(uint32_t));
+				offset += sizeof(uint32_t);
+
+				// mutationref is constructed here
+				state MutationRef logValue;
+				state Arena tempArena;
+				logValue.type = type;
+				logValue.param1 = value.substr(offset, len1);
+				offset += len1;
+				logValue.param2 = value.substr(offset, len2);
+				offset += len2;
+			*/
 	BinaryWriter bw(Unversioned());
-	bw << m.type;
-	bw << m.param1.size();
-	bw << m.param1;
-	bw << m.param2.size();
-	bw << m.param2;
+	uint32_t len1, len2, type;
+	type = m.type;
+	len1 = m.param1.size();
+	len2 = m.param2.size();
+	bw << type;
+	bw << len1;
+	bw << len2;
+	bw.serializeBytes(m.param1); // << is overloaded for stringref to write its size first, so 
+	bw.serializeBytes(m.param2);
+	// next step to see if there are additional bytes added by binary writer
+	// fmt::print(stderr, "generate old format transaction, type={}, len1={}, len2={}, total={}\n", type, len1, len2, bw.toValue().size());
 	return bw.toValue();
 }
 
@@ -4853,10 +4880,16 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	for (auto& mutationsForSub : mutationsBySub) {
 		// concatenate them to param2Str
 		for (auto& m : mutationsForSub.second) {
+			// refer to transformMutationToOldFormat
+			// binary writer adds additional 8 bytes at the beginning for version, need to remove it
+			// because it is concatenated here and we will use memcpy to process this long string
+			// instead of binary reader
+			// fmt::print(stderr, "Combine param2, currentSize={}, eachSize={}\n", param2Writer.toValue().size(), m.size());
 			param2Writer.serializeBytes(m);
 		}
 	}
 	Key param2Concat = param2Writer.toValue();
+	// fmt::print(stderr, "param2Concat size={}\n", param2Concat.size());
 
 	// deal with param1
 	int32_t hashBase = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
@@ -5298,9 +5331,9 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    tr, taskBucket, task, endVersion, nextEndVersion, TaskCompletionKey::noSignal(), allPartsDone));
 
 		wait(waitForAll(addTaskFutures));
-		fmt::print(stderr, "before wait finish begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
+		// fmt::print(stderr, "before wait finish begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
 		wait(taskBucket->finish(tr, task));
-		fmt::print(stderr, "Add parent task begin={}, end={}, nextEnd={}, should happen only after children are done \n", beginVersion, endVersion, nextEndVersion);
+		// fmt::print(stderr, "Add parent task begin={}, end={}, nextEnd={}, should happen only after children are done \n", beginVersion, endVersion, nextEndVersion);
 
 
 		TraceEvent("RestorePartitionDispatch")
