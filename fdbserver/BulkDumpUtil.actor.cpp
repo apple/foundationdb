@@ -27,6 +27,7 @@
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "flow/Buggify.h"
+#include "flow/Error.h"
 #include "flow/Optional.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
@@ -66,7 +67,8 @@ std::string generateBulkDumpByteSampleFileName(Version version) {
 	return std::to_string(version) + "-sample.sst";
 }
 
-BulkDumpManifest dumpDataFileToLocalDirectory(const std::map<Key, Value>& sortedKVS,
+BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
+                                              const std::map<Key, Value>& sortedKVS,
                                               const std::string& rootFolder,
                                               const std::string& relativeFolder,
                                               Version dumpVersion,
@@ -75,6 +77,9 @@ BulkDumpManifest dumpDataFileToLocalDirectory(const std::map<Key, Value>& sorted
 	const std::string dumpFolder = abspath(joinPath(rootFolder, relativeFolder));
 	platform::eraseDirectoryRecursive(dumpFolder);
 	if (!platform::createDirectory(dumpFolder)) {
+		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
+		    .detail("Reason", "failed to re-create director")
+		    .detail("DumpFolder", dumpFolder);
 		throw retry();
 	}
 
@@ -83,10 +88,22 @@ BulkDumpManifest dumpDataFileToLocalDirectory(const std::map<Key, Value>& sorted
 	if (sortedKVS.size() > 0) {
 		std::string dataFileName = generateBulkDumpDataFileName(dumpVersion);
 		dataFilePath = abspath(joinPath(dumpFolder, dataFileName));
-		ASSERT(!fileExists(dataFilePath));
+		if (fileExists(dataFilePath)) {
+			TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
+			    .detail("Reason", "exist old dataFile")
+			    .detail("DataFilePath", dataFilePath);
+			ASSERT_WE_THINK(false);
+			throw retry();
+		}
 		std::string byteSampleFileName = generateBulkDumpByteSampleFileName(dumpVersion);
 		byteSampleFilePath = abspath(joinPath(dumpFolder, byteSampleFileName));
-		ASSERT(!fileExists(byteSampleFilePath));
+		if (fileExists(byteSampleFilePath)) {
+			TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
+			    .detail("Reason", "exist old byteSampleFile")
+			    .detail("ByteSampleFilePath", byteSampleFilePath);
+			ASSERT_WE_THINK(false);
+			throw retry();
+		}
 
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriterData = newRocksDBSstFileWriter();
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriterByteSample = newRocksDBSstFileWriter();
@@ -101,17 +118,41 @@ BulkDumpManifest dumpDataFileToLocalDirectory(const std::map<Key, Value>& sorted
 				anySampled = true;
 			}
 		}
-		ASSERT(sstWriterData->finish());
+		if (!sstWriterData->finish()) {
+			TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
+			    .detail("Reason", "failed to finish data sst writer")
+			    .detail("DataFilePath", dataFilePath);
+			ASSERT_WE_THINK(false);
+			throw retry();
+		}
 		if (anySampled) {
-			ASSERT(sstWriterByteSample->finish());
+			if (!sstWriterByteSample->finish()) {
+				TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
+				    .detail("Reason", "failed to finish byte sample sst writer")
+				    .detail("ByteSampleFilePath", byteSampleFilePath);
+				ASSERT_WE_THINK(false);
+				throw retry();
+			}
 		} else {
-			ASSERT(deleteFile(byteSampleFilePath));
+			if (!deleteFile(byteSampleFilePath)) {
+				TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
+				    .detail("Reason", "failed to delete empty byte sample file")
+				    .detail("ByteSampleFilePath", byteSampleFilePath);
+				ASSERT_WE_THINK(false);
+				throw retry();
+			}
 		}
 	}
 
 	std::string manifestFileName = generateBulkDumpManifestFileName(dumpVersion);
 	std::string manifestFilePath = abspath(joinPath(dumpFolder, manifestFileName));
-	ASSERT(!fileExists(manifestFilePath));
+	if (fileExists(manifestFilePath)) {
+		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
+		    .detail("Reason", "exist old manifestFile")
+		    .detail("ManifestFilePath", manifestFilePath);
+		ASSERT_WE_THINK(false);
+		throw retry();
+	}
 
 	BulkDumpManifest manifest(
 	    dataFilePath, manifestFilePath, byteSampleFilePath, dumpRange.begin, dumpRange.end, dumpVersion, "", dumpBytes);
@@ -164,7 +205,7 @@ ACTOR Future<Void> bulkDumpTransportCP_impl(std::string fromRoot,
 			    .detail("RelativeFolder", relativeFolder)
 			    .detail("FromFile", fromFile)
 			    .detail("ToFile", toFile);
-			if (g_network->isSimulated()) {
+			if (!g_network->isSimulated()) {
 				wait(delay(5.0));
 			}
 		}
@@ -179,8 +220,11 @@ ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
                                UID logId) {
 	// Upload to S3 or mock file copy
 	if (transportMethod != BulkDumpTransportMethod::CP) {
-		ASSERT(false);
-		throw not_implemented();
+		TraceEvent(SevWarnAlways, "SSBulkDumpNotRetriableError", logId)
+		    .detail("Reason", "Transport method is not implemented")
+		    .detail("TransportMethod", transportMethod);
+		ASSERT_WE_THINK(false);
+		throw bulkdump_task_failed();
 	}
 	wait(bulkDumpTransportCP_impl(fromRoot, toRoot, relativeFolder, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
 	return Void();

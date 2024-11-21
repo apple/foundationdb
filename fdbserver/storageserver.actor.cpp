@@ -6021,6 +6021,11 @@ std::string getBulkDumpLocalRoot(StorageServer* data) {
 	return abspath(joinPath(data->folder, bulkDumpFolder));
 }
 
+void cleanUpBulkDumpFolder(StorageServer* data) {
+	std::string rootFolder = getBulkDumpLocalRoot(data);
+	platform::eraseDirectoryRecursive(abspath(rootFolder));
+}
+
 ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	wait(data->serveBulkDumpParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveBulkDumpParallelismLock);
@@ -6052,8 +6057,13 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 
 			// Write to SST file
 			KeyRange dataRange = rangeToDump & Standalone(KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey)));
-			BulkDumpManifest manifest = dumpDataFileToLocalDirectory(
-			    rangeDumpData.kvs, rootFolder, relativeFolder, versionToDump, dataRange, rangeDumpData.kvsBytes);
+			BulkDumpManifest manifest = dumpDataFileToLocalDirectory(data->thisServerID,
+			                                                         rangeDumpData.kvs,
+			                                                         rootFolder,
+			                                                         relativeFolder,
+			                                                         versionToDump,
+			                                                         dataRange,
+			                                                         rangeDumpData.kvsBytes);
 			readBytes = readBytes + rangeDumpData.kvsBytes;
 
 			TraceEvent(SevInfo, "SSBulkDump", data->thisServerID)
@@ -6068,11 +6078,11 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 
 			// Upload Files
 			ASSERT(req.bulkDumpState.getParentFolder().present());
-			/*wait(uploadFiles(req.bulkDumpState.getTransportMethod(),
+			wait(uploadFiles(req.bulkDumpState.getTransportMethod(),
 			                 rootFolder,
 			                 req.bulkDumpState.getParentFolder().get(),
 			                 relativeFolder,
-			                 data->thisServerID));*/
+			                 data->thisServerID));
 
 			// Clean up local files
 			platform::eraseDirectoryRecursive(abspath(joinPath(rootFolder, relativeFolder)));
@@ -6092,7 +6102,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			batchNum++;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
-				return Void(); // silently exit
+				break; // silently exit
 			}
 			TraceEvent(SevInfo, "SSBulkDumpError", data->thisServerID)
 			    .errorUnsuppressed(e)
@@ -14672,6 +14682,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		platform::createDirectory(self.checkpointFolder);
 		platform::createDirectory(self.fetchedCheckpointFolder);
 
+		cleanUpBulkDumpFolder(&self);
+
 		EncryptionAtRestMode encryptionMode = wait(self.storage.encryptionMode());
 		TraceEvent("StorageServerInitProgress", ssi.id())
 		    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
@@ -14781,6 +14793,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent(SevWarnAlways, "SSRebootFetchedCheckpointDirNotExists", self.thisServerID);
 		platform::createDirectory(self.fetchedCheckpointFolder);
 	}
+
+	cleanUpBulkDumpFolder(&self);
 
 	self.actors.add(rocksdbLogCleaner(folder));
 	try {

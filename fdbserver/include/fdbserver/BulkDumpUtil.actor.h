@@ -81,7 +81,8 @@ SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<Storage
 
 std::string generateRandomBulkDumpDataFileName(Version version);
 
-BulkDumpManifest dumpDataFileToLocalDirectory(const std::map<Key, Value>& sortedKVS,
+BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
+                                              const std::map<Key, Value>& sortedKVS,
                                               const std::string& rootFolder,
                                               const std::string& relativeFolder,
                                               Version dumpVersion,
