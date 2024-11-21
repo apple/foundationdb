@@ -1,9 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-ROOT=`pwd`
 SERVER_COUNT=1
-PORT_PREFIX=1500
+readonly PORT_PREFIX="${PORT_PREFIX:-1500}"
 
 # default cluster settings, override with options
 STATELESS_COUNT=4
@@ -14,34 +13,68 @@ KNOBS=""
 LOGS_TASKSET=""
 STATELESS_TASKSET=""
 STORAGE_TASKSET=""
+STORAGE_TYPE="ssd"
 LOGROUTER_COUNT=0
+DUMP_PIDS=
+PIDS=()
 
 function usage {
 	echo "Usage"
-	printf "\tcd working-directory; ${0} path-to-build-root [OPTIONS]\n\r"
+	printf "\tcd working-directory; %s path-to-build-root [OPTIONS]\n\r" "${0}"
 	echo "Options"
 	printf "\t--knobs '--knob-KNOBNAME=KNOBVALUE' \n\r\t\tChanges a database knob. Enclose in single quotes.\n\r"
-	printf "\t--stateless_count COUNT\n\r\t\t number of stateless daemons to start.  Default ${STATELESS_COUNT}\n\r"
+	printf "\t--stateless_count COUNT\n\r\t\t number of stateless daemons to start.  Default %s\n\r" "${STATELESS_COUNT}"
 	printf "\t--stateless_taskset BITMASK\n\r\t\tBitmask of CPUs to pin stateless tasks to. Default is all CPUs.\n\r"
-	printf "\t--logs_count COUNT\n\r\t\tNumber of stateless daemons to start.  Default ${LOGS_COUNT}\n\r"
+	printf "\t--logs_count COUNT\n\r\t\tNumber of stateless daemons to start.  Default %s\n\r" "${LOGS_COUNT}"
 	printf "\t--logs_taskset BITMASK\n\r\t\tbitmask of CPUs to pin logs to. Default is all CPUs.\n\r"
-	printf "\t--storage_count COUNT\n\r\t\tnumber of storage daemons to start.  Default ${STORAGE_COUNT}\n\r"
+	printf "\t--storage_count COUNT\n\r\t\tnumber of storage daemons to start.  Default %s\n\r" "${STORAGE_COUNT}"
 	printf "\t--storage_taskset BITMASK\n\r\t\tBitmask of CPUs to pin storage to. Default is all CPUs.\n\r"
+	printf "\t--storage_type [ssd|ssd-rocksdb-v1|ssd-sharded-rocksdb]\n\r\t\tStorage type to use. Default is ssd.\n\r"
 	printf "\t--replication_count COUNT\n\r\t\tReplication count may be 1,2 or 3. Default is 1.\n\r"
+	printf "\t--dump_pids [on|off]\n\r\t\tDump out the PIDs of all processes started by this script. Default is off.\n\r"
 	echo "Example"
-	printf "\t${0} . --knobs '--knob_proxy_use_resolver_private_mutations=1' --stateless_count 4 --stateless_taskset 0xf --logs_count 8 --logs_taskset 0xff0 --storage_taskset 0xffff000\n\r"
+	printf "\t%s . --knobs '--knob_proxy_use_resolver_private_mutations=1' --stateless_count 4 --stateless_taskset 0xf --logs_count 8 --logs_taskset 0xff0 --storage_taskset 0xffff000\n\r" "${0}"
 	exit 1
 }
 
+# Print passed in parameters on STDERR
+function err {
+  echo "$(date -Iseconds) ERROR: $*" >&2
+}
+
 function start_servers {
-	for j in `seq 1 $1`; do
-		LOG=${DIR}/${SERVER_COUNT}/log
-		DATA=${DIR}/${SERVER_COUNT}/data
-		mkdir -p ${LOG} ${DATA}
-		PORT=$(( $PORT_PREFIX + $SERVER_COUNT ))
-		ZONE=$4-Z-$(( $j % $REPLICATION_COUNT ))
-		$2 ${FDB} -p auto:${PORT} $KNOBS -c $3 -d $DATA -L $LOG -C $CLUSTER --datacenter_id=$4 --locality-zoneid $ZONE --locality-machineid M-$SERVER_COUNT &
-		SERVER_COUNT=$(( $SERVER_COUNT + 1 ))
+  for j in $(seq 1 "${1}"); do
+    local logdir="${LOOPBACK_DIR}/${SERVER_COUNT}/log"
+    local datadir="${LOOPBACK_DIR}/${SERVER_COUNT}/data"
+    if ! mkdir -p "${logdir}" "${datadir}"; then
+      echo "Failed to create the directories ${logdir} and ${datadir}"
+      exit 1
+    fi
+    local port=$(( PORT_PREFIX + SERVER_COUNT ))
+    local zone="${4}-Z-$(( j % REPLICATION_COUNT ))"
+    ${2} "${FDB}" -p auto:"${port}" "${KNOBS}" -c "${3}" \
+      -d "${datadir}" -L "${logdir}" -C "${CLUSTER}" \
+      --datacenter_id="${4}" \
+      --locality-zoneid "${zone}" \
+      --locality-machineid M-$SERVER_COUNT &
+    local pid=$!
+    # Sleep so the pid has time to show in process list.
+    sleep 1
+    if ! ps -p "${pid}" &> /dev/null; then
+      wait "${pid}"
+      status=$?
+      # Kill any servers that we started before this failure.
+      # We collect them in the global PIDS
+      for (( i=0; i<${#PIDS[@]}; ++i )); do
+        echo kill -9 "${PIDS[i]}"
+        kill -9 "${PIDS[i]}"
+      done
+      err "Failed to start server on port ${port}"
+      return "${status}"
+    fi
+    # Add this successfully started server to our PIDS array.
+    PIDS+=("${pid}")
+		SERVER_COUNT=$(( SERVER_COUNT + 1 ))
 	done
 }
 
@@ -83,6 +116,9 @@ shift;
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
+    --dump_pids)
+      DUMP_PIDS="${2}"
+      ;;
 		--knobs)
 			KNOBS="$2"
 			;;
@@ -95,6 +131,9 @@ while [[ $# -gt 0 ]]; do
 		--storage_taskset)
 			STORAGE_TASKSET="taskset ${2}"
 			;;	
+		--storage_type)
+			STORAGE_TYPE="${2}"
+			;;
 		--stateless_count)
 			STATELESS_COUNT=$2
 			;;			
@@ -115,48 +154,72 @@ while [[ $# -gt 0 ]]; do
 done
 
 FDB=${BUILD}/bin/fdbserver
-if [ ! -f ${FDB} ]; then
+if [[ ! -f "${FDB}" ]]; then
 	echo "Error: ${FDB} not found!"
 	usage
 fi
 
-if [ $REPLICATION_COUNT -eq 1 ]; then
+if (( "${REPLICATION_COUNT}" == 1 )); then
 	replication="single"
-elif [ $REPLICATION_COUNT -eq 2 ]; then
+elif (( "${REPLICATION_COUNT}" == 2 )); then
 	replication="double"
-elif [ $REPLICATION_COUNT -eq 3 ]; then
+elif (( "${REPLICATION_COUNT}" == 3 )); then
 	replication="triple"
 else
 	usage
 fi
 
-DIR=./loopback-cluster
-rm -rf $DIR
-mkdir -p ${DIR}
+LOOPBACK_DIR=${LOOPBACK_DIR:-./loopback-cluster}
+rm -rf "${LOOPBACK_DIR}"
+mkdir -p "${LOOPBACK_DIR}"
 
-CLUSTER_FILE="test1:testdb1@127.0.0.1:$(( $PORT_PREFIX + 1))"
-CLUSTER=${DIR}/fdb.cluster
-echo $CLUSTER_FILE > $CLUSTER
+CLUSTER_FILE="test1:testdb1@127.0.0.1:$(( PORT_PREFIX + 1))"
+CLUSTER="${LOOPBACK_DIR}/fdb.cluster"
+echo "${CLUSTER_FILE}" > "${CLUSTER}"
 
 echo "Starting Cluster: " $CLUSTER_FILE
 
-start_servers $STATELESS_COUNT "$STATELESS_TASKSET" stateless DC1
-start_servers $LOGS_COUNT "$LOGS_TASKSET" log DC1
-start_servers $STORAGE_COUNT "$STORAGE_TASKSET" storage DC1
+if ! start_servers "${STATELESS_COUNT}" "$STATELESS_TASKSET" stateless DC1; then
+  err "Failed to start DC1 stateless"
+  exit 1
+fi
+if ! start_servers "${LOGS_COUNT}" "$LOGS_TASKSET" log DC1; then
+  err "Failed to start DC1 logs"
+  exit 1
+fi
+if ! start_servers "${STORAGE_COUNT}" "$STORAGE_TASKSET" storage DC1; then
+  err "Failed to start DC1 storage"
+  exit 1
+fi
 
 CLI="$BUILD/bin/fdbcli -C ${CLUSTER} --exec"
-echo "configure new ssd $replication - stand by"
+echo "configure new ${STORAGE_TYPE} $replication - stand by"
 
 # sleep 2 seconds to wait for workers to join cluster, then configure database and coordinators
-( sleep 2 ; $CLI "configure new ssd $replication" ; $CLI "coordinators auto")
+( sleep 2 ; $CLI "configure new ${STORAGE_TYPE} $replication" ; $CLI "coordinators auto")
 
-if [ $LOGROUTER_COUNT -gt 0 ]; then
-	start_servers $LOGROUTER_COUNT "$STORAGE_TASKSET" router DC3
+if (( "${LOGROUTER_COUNT}" > 0 )); then
+	if ! start_servers "${LOGROUTER_COUNT}" "$STORAGE_TASKSET" router DC3; then
+    err "Failed to start DC3 logrouters"
+    exit 1
+  fi
 	# Same number remote/satellite logs and ss as primary
-	start_servers $LOGS_COUNT "$LOGS_TASKSET" log DC2
-	start_servers $LOGS_COUNT "$LOGS_TASKSET" log DC3
-	start_servers $STORAGE_COUNT "$STORAGE_TASKSET" storage DC3
+	if ! start_servers "${LOGS_COUNT}" "$LOGS_TASKSET" log DC2; then
+    err "Failed to start DC2 logs"
+    exit 1
+  fi
+	if ! start_servers "${LOGS_COUNT}" "$LOGS_TASKSET" log DC3; then
+    err "Failed to start DC3 logs"
+    exit 1
+  fi
+	if ! start_servers "${STORAGE_COUNT}" "$STORAGE_TASKSET" storage DC3; then
+    err "Failed to start DC3 storage"
+    exit 1
+  fi
 	create_fileconfig
 	$CLI "fileconfigure /tmp/fdbfileconfig.json"
 	echo "Wait for data to be fully replicated (Healthy), then issue: $CLI configure usable_regions=2"
+fi
+if [[ -n "${DUMP_PIDS}" ]]; then
+  echo "PIDS=${PIDS[*]}"
 fi
