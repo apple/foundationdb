@@ -4,13 +4,14 @@ mod bindings;
 mod mock;
 
 use bindings::{
-    str_from_c, FDBMetrics, FDBPromise, FDBWorkloadContext, OpaqueWorkload,
+    str_from_c, FDBDatabase, FDBMetrics, FDBPromise, FDBWorkload, FDBWorkloadContext, Metric,
+    Metrics, OpaqueWorkload, Promise, Severity, WorkloadContext,
 };
-pub use bindings::{FDBDatabase, FDBWorkload, Metric, Metrics, Promise, Severity, WorkloadContext};
 
-// Should be replaced by a Rust wrapper over the FDBDatabase bindings, like the one provided by
-// foundationdb-rs
+/// Should be replaced by a Rust wrapper over the `FDBDatabase` bindings, like the one provided by foundationdb-rs
 pub type MockDatabase = NonNull<FDBDatabase>;
+/// FFI-safe wrapprer around a specific `RustWorkload` implementation
+pub type WrappedWorkload = FDBWorkload;
 
 /// Equivalent to the C++ abstract class `FDBWorkload`
 pub trait RustWorkload {
@@ -48,7 +49,7 @@ pub trait RustWorkload {
     /// * `out` - A metric sink
     fn get_metrics(&self, out: Metrics);
 
-    /// Set the check timeout for this workload.
+    /// Set the check timeout in simulated seconds for this workload.
     fn get_check_timeout(&self) -> f64;
 }
 
@@ -57,7 +58,7 @@ pub trait RustWorkloadFactory {
     /// If the test file contains a key-value pair workloadName the value will be passed to this method (empty string otherwise).
     /// This way, a library author can implement many workloads in one library and use the test file to chose which one to run
     /// (or run multiple workloads either concurrently or serially).
-    fn create(name: String, context: WorkloadContext) -> FDBWorkload;
+    fn create(name: String, context: WorkloadContext) -> WrappedWorkload;
 }
 
 unsafe extern "C" fn workload_setup<W: RustWorkload + 'static>(
@@ -108,19 +109,23 @@ unsafe extern "C" fn workload_drop<W: RustWorkload>(raw_workload: *mut OpaqueWor
     unsafe { drop(Box::from_raw(raw_workload as *mut W)) };
 }
 
-pub fn wrap<W: RustWorkload + 'static>(workload: W) -> FDBWorkload {
-    let workload = Box::into_raw(Box::new(workload));
-    FDBWorkload {
-        inner: workload as *mut _,
-        setup: Some(workload_setup::<W>),
-        start: Some(workload_start::<W>),
-        check: Some(workload_check::<W>),
-        getMetrics: Some(workload_get_metrics::<W>),
-        getCheckTimeout: Some(workload_get_check_timeout::<W>),
-        free: Some(workload_drop::<W>),
+impl WrappedWorkload {
+    pub fn new<W: RustWorkload + 'static>(workload: W) -> Self {
+        let workload = Box::into_raw(Box::new(workload));
+        WrappedWorkload {
+            inner: workload as *mut _,
+            setup: Some(workload_setup::<W>),
+            start: Some(workload_start::<W>),
+            check: Some(workload_check::<W>),
+            getMetrics: Some(workload_get_metrics::<W>),
+            getCheckTimeout: Some(workload_get_check_timeout::<W>),
+            free: Some(workload_drop::<W>),
+        }
     }
 }
 
+/// Register a `RustWorkloadFactory` in the FoundationDB simulation.
+/// This macro must be invoked exactly once in a program.
 #[macro_export]
 macro_rules! register_factory {
     ($name:ident) => {
@@ -128,7 +133,7 @@ macro_rules! register_factory {
         extern "C" fn workloadCFactory(
             raw_name: *const i8,
             raw_context: $crate::FDBWorkloadContext,
-        ) -> $crate::FDBWorkload {
+        ) -> $crate::WrappedWorkload {
             let name = $crate::str_from_c(raw_name);
             let context = $crate::WorkloadContext::new(raw_context);
             <$name as $crate::RustWorkloadFactory>::create(name, context)
