@@ -1448,7 +1448,7 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 	return allComplete;
 }
 
-// The actor monitors whether the all tasks completed by the scheduleBulkDumpTasks. 
+// The actor monitors whether the all tasks completed by the scheduleBulkDumpTasks.
 // If not, it issue a new scheduleBulkDumpTasks to do the remaining tasks.
 ACTOR Future<Void> bulkDumpTaskScheduler(Reference<DataDistributor> self) {
 	state bool allComplete = false;

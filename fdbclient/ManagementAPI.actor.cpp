@@ -3042,9 +3042,9 @@ ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpTask) {
 // TODO(BulkDump): add a method of cancelling the existing bulkdump task
 
 ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(Database cx,
-                                                                          KeyRange rangeToRead,
-                                                                          Optional<size_t> limit,
-                                                                          Optional<BulkDumpPhase> phase) {
+                                                                     KeyRange rangeToRead,
+                                                                     Optional<size_t> limit,
+                                                                     Optional<BulkDumpPhase> phase) {
 	state Transaction tr(cx);
 	state Key readBegin = rangeToRead.begin;
 	state Key readEnd = rangeToRead.end;

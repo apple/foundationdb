@@ -191,7 +191,8 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
                                             UID taskId,
                                             std::vector<BulkLoadPhase> phases);
 
-// Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning the metadata.
+// Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
+// the metadata.
 ACTOR Future<int> setBulkDumpMode(Database cx, int mode);
 
 // Submit a bulkdump task. If there is any existing task, reject the new task

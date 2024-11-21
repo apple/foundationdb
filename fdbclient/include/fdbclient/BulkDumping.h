@@ -202,8 +202,9 @@ private:
 		}
 	}
 
-	// The taskId is the unique identifier of a task. 
-	// Any SS can do a task. If a task is failed, this remaining part of the task can be picked up by any SS with a changed taskId
+	// The taskId is the unique identifier of a task.
+	// Any SS can do a task. If a task is failed, this remaining part of the task can be picked up by any SS with a
+	// changed taskId
 	UID taskId;
 
 	// File dump config
