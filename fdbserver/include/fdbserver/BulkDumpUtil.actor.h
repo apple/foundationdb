@@ -88,11 +88,6 @@ BulkDumpManifest dumpDataFileToLocalDirectory(const std::map<Key, Value>& sorted
                                               const KeyRange& dumpRange,
                                               int64_t dumpBytes);
 
-ACTOR Future<Void> bulkDumpTransportCP_impl(std::string fromFolder,
-                                            std::string toFolder,
-                                            size_t fileBytesMax,
-                                            UID logId);
-
 ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
                                std::string fromPath,
                                std::string toPath,

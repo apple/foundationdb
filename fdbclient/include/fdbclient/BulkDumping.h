@@ -126,22 +126,21 @@ struct BulkDumpState {
 		return true;
 	}
 
+	// A parent task is the task on a large range set by user. The user task will spawn a series of small ranges tasks
+	// based on shard boundary to cover the user task range. Those spawned tasks are executed by SSes.
 	BulkDumpState spawn(const KeyRange& childTaskRange) {
 		ASSERT(range.contains(childTaskRange));
 		UID childTaskId = deterministicRandom()->randomUniqueID();
 		std::string childTaskFolder = childTaskId.toString();
 		// Spawn a new state as a child and set this as the parent of the child
-		BulkDumpState res(childTaskId, childTaskRange, fileType, transportMethod, exportMethod, childTaskFolder);
-		if (parentTaskId.present()) {
-			res.setParentId(parentTaskId.get());
-		} else {
-			res.setParentId(taskId);
-		}
-		if (parentTaskFolder.present()) {
-			res.setParentFolder(parentTaskFolder.get());
-		} else {
-			res.setParentFolder(folder);
-		}
+		BulkDumpState res(childTaskId,
+		                  childTaskRange,
+		                  fileType,
+		                  transportMethod,
+		                  exportMethod,
+		                  childTaskFolder,
+		                  parentTaskId.present() ? parentTaskId.get() : taskId,
+		                  parentTaskFolder.present() ? parentTaskFolder.get() : folder);
 		return res;
 	}
 
@@ -149,9 +148,14 @@ struct BulkDumpState {
 		ASSERT(range.contains(completeRange));
 		ASSERT(parentTaskId.present());
 		ASSERT(parentTaskFolder.present());
-		BulkDumpState res(taskId, completeRange, fileType, transportMethod, exportMethod, folder);
-		res.setParentId(parentTaskId.get());
-		res.setParentFolder(parentTaskFolder.get());
+		BulkDumpState res(taskId,
+		                  completeRange,
+		                  fileType,
+		                  transportMethod,
+		                  exportMethod,
+		                  folder,
+		                  parentTaskId.get(),
+		                  parentTaskFolder.get());
 		res.phase = BulkDumpPhase::Complete;
 		return res;
 	}
@@ -178,28 +182,22 @@ private:
 	              BulkDumpFileType fileType,
 	              BulkDumpTransportMethod transportMethod,
 	              BulkDumpExportMethod exportMethod,
-	              std::string folder)
+	              std::string folder,
+	              UID inputParentId,
+	              std::string inputParentFolder)
 	  : taskId(taskId), range(range), fileType(fileType), transportMethod(transportMethod), exportMethod(exportMethod),
 	    folder(folder), phase(BulkDumpPhase::Submitted) {
 		ASSERT(isValid());
-	}
-
-	void setParentId(const UID& inputParentId) {
 		if (parentTaskId.present()) {
 			ASSERT(parentTaskId.get() == inputParentId);
 		} else {
 			parentTaskId = inputParentId;
 		}
-		return;
-	}
-
-	void setParentFolder(const std::string inputParentFolder) {
 		if (parentTaskFolder.present()) {
 			ASSERT(parentTaskFolder.get() == inputParentFolder);
 		} else {
 			parentTaskFolder = inputParentFolder;
 		}
-		return;
 	}
 
 	// Unique ID of the task

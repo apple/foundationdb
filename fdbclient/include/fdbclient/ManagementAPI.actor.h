@@ -170,6 +170,7 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
                                      double timeoutSeconds);
 
 // Set bulk load mode
+// When the mode is on, DD will periodically check if there is any bulkload task to do by scaning the metadata.
 ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
 
 // Get valid bulk load task state within the input range
@@ -191,6 +192,7 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
                                             std::vector<BulkLoadPhase> phases);
 
 // Set bulk dump mode
+// When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning the metadata.
 ACTOR Future<int> setBulkDumpMode(Database cx, int mode);
 
 // Submit a bulk load task
