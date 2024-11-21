@@ -48,8 +48,12 @@ struct BulkLoadingS3Client : TestWorkload {
 		/* Add S3 function call here */
 		/* Need to have an alive seaweed running with simulation */
 		TraceEvent("BulkLoadingS3ClientWorkloadStart");
-		// Run with ../build_output/bin/fdbserver -r simulation -f
+		wait(delay(0.1)); // code place holder for passing ACTOR compiling
+
+		// Run this workload with ../build_output/bin/fdbserver -r simulation -f
 		// ../src/foundationdb/tests/fast/BulkLoadingS3Client.toml
+
+		return Void();
 	}
 };
 

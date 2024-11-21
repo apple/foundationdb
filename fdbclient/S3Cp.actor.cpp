@@ -136,7 +136,7 @@ struct Params : public ReferenceCounted<Params> {
 	Optional<std::string> proxy;
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
-	s3cp::S3CpTLSConfig tlsConfig;
+	S3CpTLSConfig tlsConfig;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	std::string src;
 	std::string tgt;

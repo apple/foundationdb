@@ -1,5 +1,5 @@
 /*
- * S3Cp.actor.cpp
+ * S3Client.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -32,48 +32,20 @@
 #include <io.h>
 #endif
 
-#include "fdbclient/BuildFlags.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/versions.h"
-#include "fdbclient/S3BlobStore.h"
 #include "fdbclient/S3Client.actor.h"
 #include "flow/Platform.h"
-#include "flow/ArgParseUtil.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/TLSConfig.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
 extern const char* getSourceVersion();
-
-// Copy files and directories to and from s3.
-// Has a main function so can exercise the actor from the command line. Uses
-// the S3BlobStoreEndpoint to interact with s3. The s3url is of the form
-// expected by S3BlobStoreEndpoint:
-//   blobstore://<access_key>:<secret_key>@<endpoint>/resource?bucket=<bucket>, etc.
-// See the section 'Backup URls' in the backup documentation,
-// https://apple.github.io/foundationdb/backups.html, for more information.
-// TODO: Handle prefix as a parameter on the URL so can strip the first part
-// of the resource from the blobstore URL.
-
-// TLS and blob credentials for backups and setup for these credentials.
-// Copied from fdbbackup/BackupTLSConfig.* and renamed S3CpTLSConfig.
-struct S3CpTLSConfig {
-	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword, tlsVerifyPeers;
-	std::vector<std::string> blobCredentials;
-
-	// Returns if TLS setup is successful
-	bool setupTLS();
-
-	// Sets up blob crentials. Add the file specified by FDB_BLOB_CREDENTIALS as well.
-	// Note this must be called after g_network is set up.
-	void setupBlobCredentials();
-};
 
 void S3CpTLSConfig::setupBlobCredentials() {
 	// Add blob credentials files from the environment to the list collected from the command line.
