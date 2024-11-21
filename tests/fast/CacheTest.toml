@@ -1,3 +1,6 @@
+[configuration]
+storageEngineExcludeTypes = [5] #FIXME: remove after external timeout is resolved
+
 [[test]]
 testTitle = 'Cached'
 
