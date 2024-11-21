@@ -1142,7 +1142,7 @@ public:
 			for (auto& v : task->params) {
 				tr->set(callbackSpace.pack(v.key), v.value);
 			}
-			fmt::print(stderr, "TaskFuture::onSet callback added, isSet={}\n", is_set);		
+			// fmt::print(stderr, "TaskFuture::onSet callback added, isSet={}\n", is_set);		
 		}
 
 		return Void();
