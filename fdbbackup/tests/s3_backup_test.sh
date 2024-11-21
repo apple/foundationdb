@@ -143,6 +143,11 @@ function test_s3_backup_and_restore {
     err "Failed verification of data in fdb"
     exit 1
   fi
+  log "Check for Severity=40 errors"
+  if ! grep_for_severity40 "${scratch_dir}"; then
+    err "Found Severity=40 errors in logs"
+    exit 1
+  fi
 }
 
 # Log pass or fail.
@@ -190,7 +195,10 @@ if (( $# < 2 )) || (( $# > 3 )); then
     echo "ERROR: ${0} requires the fdb src and build directories --"
     echo "CMAKE_SOURCE_DIR and CMAKE_BINARY_DIR -- and then, optionally,"
     echo "a directory into which we write scratch test data and logs"
-    echo "(otherwise we will write to subdirs under $TMPDIR)."
+    echo "(otherwise we will write to subdirs under $TMPDIR). We will"
+    echo "leave the download of seaweed this directory for other"
+    echo "tests to find if they need it. Otherwise, we clean everything"
+    echo "else up on our way out."
     echo "Example: ${0} ./foundationdb ./build_output ./scratch_dir"
     exit 1
 fi
@@ -209,6 +217,7 @@ base_scratch_dir="${TMPDIR:-/tmp}"
 if (( $# == 3 )); then
   base_scratch_dir="${3}"
 fi
+readonly base_scratch_dir
 # mktemp works differently on mac than on unix; the XXXX's are ignored on mac.
 if ! tmpdir=$(mktemp -p "${base_scratch_dir}" --directory -t s3backup.XXXX); then
   err "Failed mktemp"
@@ -230,7 +239,9 @@ fi
 log "Backup_agent is up"
 
 # Download seaweed.
-if ! weed_binary_path="$(download_weed "${SCRATCH_DIR}")"; then
+# Download to base_scratch_dir so its there for the next test.
+log "Fetching seaweedfs..."
+if ! weed_binary_path="$(download_weed "${base_scratch_dir}")"; then
   err "Failed download of weed binary."
   exit 1
 fi

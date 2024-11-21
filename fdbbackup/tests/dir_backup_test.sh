@@ -119,6 +119,11 @@ function test_dir_backup_and_restore {
     err "Failed verification of data in fdb"
     exit 1
   fi
+  log "Check for Severity=40 errors"
+  if ! grep_for_severity40 "${scratch_dir}"; then
+    err "Found Severity=40 errors in logs"
+    exit 1
+  fi
 }
 
 # Get the working directory for this script.

@@ -169,3 +169,13 @@ function log_test_result {
     log "FAILED ${test_name}"
   fi
 }
+
+# Grep for 'Severity=40' errors in logs.
+# $1 Dir to search under.
+function grep_for_severity40 {
+  local dir="${1}"
+  if grep -r -e "Severity=\"40\"" "${dir}"; then
+    err "Found 'Severity=40' errors"
+    exit 1
+  fi
+}
