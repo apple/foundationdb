@@ -52,7 +52,8 @@ struct BulkDumpState {
 
 	BulkDumpState() = default;
 
-	// for submitting a task
+	// The only public interface to create a valid task
+	// This constructor is call when users submitting a task, e.g. by newBulkDumpTaskLocalSST()
 	BulkDumpState(KeyRange range,
 	              BulkDumpFileType fileType,
 	              BulkDumpTransportMethod transportMethod,
@@ -144,6 +145,7 @@ struct BulkDumpState {
 		return res;
 	}
 
+	// Generate a metadata with Complete state.
 	BulkDumpState getRangeCompleteState(const KeyRange& completeRange) {
 		ASSERT(range.contains(completeRange));
 		ASSERT(parentTaskId.present());
@@ -200,7 +202,8 @@ private:
 		}
 	}
 
-	// Unique ID of the task
+	// The taskId is the unique identifier of a task. 
+	// Any SS can do a task. If a task is failed, this remaining part of the task can be picked up by any SS with a changed taskId
 	UID taskId;
 
 	// File dump config
@@ -217,6 +220,10 @@ private:
 	Optional<std::string> parentTaskFolder;
 };
 
+// User API to create bulkDump task metadata
+// The dumped data is within the input range
+// The data is dumped to the input folder
+// The folder can be either a local file path or a remote blobstore file path
 BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& folder);
 
 #endif

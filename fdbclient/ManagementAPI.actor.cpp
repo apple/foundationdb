@@ -3006,13 +3006,13 @@ ACTOR Future<int> setBulkDumpMode(Database cx, int mode) {
 	}
 }
 
-// Submit bulkdump task and overwrite any existing task
 ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpTask) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			// TODO(BulkDump): reject the request if there is an ongoing bulk dump job
 			if (bulkDumpTask.getPhase() != BulkDumpPhase::Submitted) {
 				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkDumpTaskError")
 				    .setMaxEventLength(-1)
@@ -3039,7 +3039,9 @@ ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpTask) {
 	return Void();
 }
 
-ACTOR Future<std::vector<BulkDumpState>> getValidBulkDumpTasksWithinRange(Database cx,
+// TODO(BulkDump): add a method of cancelling the existing bulkdump task
+
+ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(Database cx,
                                                                           KeyRange rangeToRead,
                                                                           Optional<size_t> limit,
                                                                           Optional<BulkDumpPhase> phase) {

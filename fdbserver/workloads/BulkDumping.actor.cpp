@@ -108,7 +108,7 @@ struct BulkDumping : TestWorkload {
 			try {
 				res.clear();
 				complete = true;
-				wait(store(res, getValidBulkDumpTasksWithinRange(cx, normalKeys)));
+				wait(store(res, getBulkDumpTasksWithinRange(cx, normalKeys)));
 				for (const auto& bulkDumpState : res) {
 					BulkDumpPhase phase = bulkDumpState.getPhase();
 					ASSERT(phase != BulkDumpPhase::Invalid);
@@ -151,7 +151,7 @@ struct BulkDumping : TestWorkload {
 		state BulkDumpState newTask = newBulkDumpTaskLocalSST(normalKeys, simulationBulkDumpFolder);
 		TraceEvent("BulkDumpingTaskNew").detail("Task", newTask.toString());
 		wait(submitBulkDumpTask(cx, newTask));
-		std::vector<BulkDumpState> res = wait(getValidBulkDumpTasksWithinRange(cx, normalKeys, 100));
+		std::vector<BulkDumpState> res = wait(getBulkDumpTasksWithinRange(cx, normalKeys, 100));
 		for (const auto& task : res) {
 			TraceEvent("BulkDumpingTaskRes").detail("Task", task.toString());
 		}

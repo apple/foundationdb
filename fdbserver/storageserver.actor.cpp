@@ -6026,9 +6026,19 @@ void cleanUpBulkDumpFolder(StorageServer* data) {
 	platform::eraseDirectoryRecursive(abspath(rootFolder));
 }
 
+// The SS actor handling bulk dump task sent from DD.
+// The SS partitions the task range into batches and make progress on each batch one by one.
+// Each batch is a subrange of the task range sent from DD.
+// When SS completes one batch, SS persists the metadata indicating this batch range completed.
+// If the SS fails on dumping a batch data, the SS will send an error to DD and the leftover files
+// is cleaned up when this actor returns.
+// In the case of SS crashes, the leftover files will be cleared at the init step when the SS restores.
+// If the SS uploads any file with succeed but the blob store is actually stored, this inconsistency will
+// be captured by DD and DD will retry to dump the problematic range with a new task.
+// DD will retry later if it receives any error from SS.
 ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	wait(data->serveBulkDumpParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holder(data->serveBulkDumpParallelismLock);
+	state FlowLock::Releaser holder(data->serveBulkDumpParallelismLock); // A SS can handle one bulkDump task at a time
 	state Key rangeBegin = req.bulkDumpState.getRange().begin;
 	state Key rangeEnd = req.bulkDumpState.getRange().end;
 	state int64_t readBytes = 0;

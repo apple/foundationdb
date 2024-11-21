@@ -1343,6 +1343,10 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 	}
 }
 
+// The actor spawned by DD dedicated to listen on a SS bulkdump task and holding a budget of parallelismLimitor.
+// The parallelismLimitor is used to limit the maximum concurrent bulkloading tasks spawned by DD.
+// Each DD spawned task corresponds to an actual alive SS bulk dumping task.
+// This actor silently exit if SS suceeds or fails to handle a task.
 ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
                                   StorageServerInterface ssi,
                                   BulkDumpState bulkDumpState,
@@ -1363,6 +1367,11 @@ ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 	return Void();
 }
 
+// The actor to expand the bulk dump metadata. If there is a task submitted,
+// the actor will spawn a doBulkDumpTask working on it under the concurrency
+// limitation controlled by bulkDumpParallelismLimitor.
+// DD_BULKDUMP_PARALLELISM defines the maximum number of concurrent bulkdump
+// tasks spawned by DD.
 ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 	state Database cx = self->txnProcessor->context();
 
@@ -1439,6 +1448,8 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 	return allComplete;
 }
 
+// The actor monitors whether the all tasks completed by the scheduleBulkDumpTasks. 
+// If not, it issue a new scheduleBulkDumpTasks to do the remaining tasks.
 ACTOR Future<Void> bulkDumpTaskScheduler(Reference<DataDistributor> self) {
 	state bool allComplete = false;
 	loop {
@@ -1447,6 +1458,9 @@ ACTOR Future<Void> bulkDumpTaskScheduler(Reference<DataDistributor> self) {
 			     delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC));
 			if (allComplete) {
 				TraceEvent(SevInfo, "DDBulkDumpTaskSchedulerComplete", self->ddId);
+				// TODO(BulkDump): double check with S3 to see if there is missing any file
+				// TODO(BulkDump): generate a big manifest file indicating all ranges and their data paths
+				// TODO(BulkDump): clear all bulkdump metadata
 				return Void();
 			}
 		} catch (Error& e) {

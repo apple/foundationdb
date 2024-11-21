@@ -47,6 +47,8 @@ struct SSBulkDumpTask {
 	BulkDumpState bulkDumpState;
 };
 
+// Define the metadata of bulkdump manifest file
+// The file is uploaded along with the data files
 struct BulkDumpManifest {
 	std::string dataFilePath;
 	std::string manifestFilePath;
@@ -68,6 +70,7 @@ struct BulkDumpManifest {
 	  : dataFilePath(dataFilePath), manifestFilePath(manifestFilePath), bytesSampleFilePath(bytesSampleFilePath),
 	    beginKey(beginKey), endKey(endKey), version(version), checksum(checksum), bytes(bytes) {}
 
+	// Generating human readable string to stored in the manifest file
 	std::string toString() const {
 		return "[DataFilePath]: " + dataFilePath + ", [ManifestFilePath]: " + manifestFilePath +
 		       ", [BytesSampleFilePath]: " + bytesSampleFilePath + ", [BeginKey]: " + beginKey.toHexString() +
@@ -76,11 +79,15 @@ struct BulkDumpManifest {
 	}
 };
 
+// Used by DD to generate a SSBulkDumpTask and send to SS
+// SS dumps the data based on the configuration of the SSBulkDumpTask
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
                                  const BulkDumpState& bulkDumpState);
 
 std::string generateRandomBulkDumpDataFileName(Version version);
 
+// The size of sortedKVS is defined at the place of generating the data (getRangeDataToDump).
+// The size is configured by MOVE_SHARD_KRM_ROW_LIMIT.
 BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
                                               const std::map<Key, Value>& sortedKVS,
                                               const std::string& rootFolder,
@@ -95,6 +102,8 @@ ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
                                std::string relativeFolder,
                                UID logId);
 
+// Persist the complete progress of bulkDump by writing the metadata with Complete phase
+// to the bulk dump system key space
 ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState);
 
 class ParallelismLimitor {

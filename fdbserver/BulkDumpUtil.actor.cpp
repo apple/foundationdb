@@ -167,6 +167,7 @@ void bulkDumpFileCopy(std::string fromFile, std::string toFile, size_t fileBytes
 	return;
 }
 
+// Copy files between local file folders, used to mock blobstore in the test
 ACTOR Future<Void> bulkDumpTransportCP_impl(std::string fromRoot,
                                             std::string toRoot,
                                             std::string relativeFolder,
