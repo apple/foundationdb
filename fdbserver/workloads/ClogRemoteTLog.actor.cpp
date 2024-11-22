@@ -203,6 +203,7 @@ struct ClogRemoteTLog : TestWorkload {
 		StatusArray messages = client["messages"].get_array();
 		for (StatusObjectReader message : messages) {
 			if (message.has("name") && errors.contains(message["name"].get_str())) {
+				TraceEvent("StatusError").detail("Name", message["name"].get_str());
 				return true;
 			}
 		}
