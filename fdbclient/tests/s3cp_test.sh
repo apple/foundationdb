@@ -25,11 +25,10 @@ while [[ -h "${source}" ]]; do # resolve $source until the file is no longer a s
 done
 cwd=$( cd -P "$( dirname "${source}" )" >/dev/null 2>&1 && pwd )
 # Now source in the seaweedfs fixture so we can use its methods in the below.
+# shellcheck source=/dev/null
 source "${cwd}/seaweedfs_fixture.sh"
 
 # Globals that get set below and are used when we cleanup.
-WEED_DIR=
-WEED_PID=
 # Use one bucket only for all tests. More buckets means
 # we need more volumes which can be an issue when little
 # diskspace.
@@ -40,13 +39,13 @@ trap "exit 1" HUP INT PIPE QUIT TERM
 trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
-cleanup() {
-  shutdown "${WEED_PID}" "${WEED_DIR}"
+function cleanup {
+  shutdown_weed
 }
 
 # Log a message to STDOUT with timestamp prefix
 # $1 message to log
-log() {
+function log {
   printf "%s %s\n" "$(date -Iseconds)" "${1}"
 }
 
@@ -54,7 +53,7 @@ log() {
 # $1 The port on localhost where seaweed s3 is running.
 # $2 Directory I can write test files in.
 # $3 The s3cp binary.
-test_file_upload_and_download() {
+function test_file_upload_and_download {
   local port="${1}"
   local dir="${2}"
   local s3cp="${3}"
@@ -68,8 +67,7 @@ test_file_upload_and_download() {
   local blobstoreurl="blobstore://localhost:${port}/x/y/z?bucket=${BUCKET}&region=us&secure_connection=0"
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testfileup}" "${blobstoreurl}"
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testfiledown}"
-  diff "${testfileup}" "${testfiledown}"
-  if (( $? != 0 )); then
+  if ! diff "${testfileup}" "${testfiledown}"; then
     echo "ERROR: Test $0 failed; upload and download are not the same." >&2
     exit 1
   fi
@@ -79,7 +77,7 @@ test_file_upload_and_download() {
 # $1 The port on localhost where seaweed s3 is running.
 # $2 Directory I can write test file in.
 # $3 The s3cp binary.
-test_dir_upload_and_download() {
+function test_dir_upload_and_download {
   local port="${1}"
   local dir="${2}"
   local s3cp="${3}"
@@ -97,8 +95,7 @@ test_dir_upload_and_download() {
   local blobstoreurl="blobstore://localhost:${port}/dir1/dir2?bucket=${BUCKET}&region=us&secure_connection=0"
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testdirup}" "${blobstoreurl}"
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testdirdown}"
-  diff "${testdirup}" "${testdirdown}"
-  if (( $? != 0 )); then
+  if ! diff "${testdirup}" "${testdirdown}"; then
     echo "ERROR: Test $0 failed; upload and download are not the same." >&2
     exit 1
   fi
@@ -107,7 +104,7 @@ test_dir_upload_and_download() {
 # Log pass or fail.
 # $1 Test errcode
 # $2 Test name
-log_test_result() {
+function log_test_result {
   local test_errcode=$1
   local test_name=$2
   if (( "${test_errcode}" == 0 )); then
@@ -127,33 +124,31 @@ if (( $# < 1 )) || (( $# > 2 )); then
 fi
 readonly build_dir="${1}"
 if [[ ! -d "${build_dir}" ]]; then
-  echo "ERROR: ${build_dir} is not a directory"; >&2
+  echo "ERROR: ${build_dir} is not a directory" >&2
   exit 1
 fi
 scratch_dir="${TMPDIR:-/tmp}"
 if (( $# == 2 )); then
   scratch_dir="${2}"
 fi
+
 # Download seaweed.
-readonly weed_binary_path="$(download_weed "${scratch_dir}")"
-if (( $? != 0 )) || [[ ! -f "${weed_binary_path}" ]]; then
+if ! weed_binary_path="$(download_weed "${scratch_dir}")"; then
   echo "ERROR: failed download of weed binary." >&2
   exit 1
 fi
-WEED_DIR="$(create_weed_dir "${scratch_dir}")"
-if (( $? != 0 )) || [[ ! -d "${WEED_DIR}" ]]; then
+readonly weed_binary_path
+if ! create_weed_dir "${scratch_dir}"; then
   echo "ERROR: failed create of the weed dir." >&2
   exit 1
 fi
-log "Starting seaweed; logfile=${WEED_DIR}/weed.INFO"
-readonly returns=($(start_weed "${weed_binary_path}" "${WEED_DIR}"))
-if (( $? != 0 )); then
+log "Starting seaweed..."
+if ! s3_port=$(start_weed "${weed_binary_path}"); then
   echo "ERROR: failed start of weed server." >&2
   exit 1
 fi
-WEED_PID="${returns[0]}"
-readonly s3_port="${returns[1]}"
-log "Seaweed server is up; pid=${WEED_PID}, s3.port=${s3_port}"
+readonly s3_port
+log "Seaweed server is up; s3.port=${s3_port}"
 
 # Seaweed is up. Run some tests. 
 test_file_upload_and_download "${s3_port}" "${WEED_DIR}" "${build_dir}/bin/s3cp"
