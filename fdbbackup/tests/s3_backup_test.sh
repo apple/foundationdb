@@ -31,6 +31,7 @@ readonly BUCKET="${S3_BUCKET:-testbucket}"
 readonly TAG="test_backup"
 S3_RESOURCE="backup-$(date -Iseconds | sed -e 's/[[:punct:]]/-/g')"
 readonly S3_RESOURCE
+readonly HTTP_VERBOSE_LEVEL=2
 # Clear these environment variables. fdbbackup goes looking for them
 # and if EITHER is set, it will go via a proxy instead of to where we.
 # want it to go.
@@ -81,7 +82,7 @@ function backup {
     -d "blobstore://localhost:${weed_s3_port}/${S3_RESOURCE}?bucket=${BUCKET}&secure_connection=0&region=us" \
     -k '"" \xff' \
     --log --logdir="${scratch_dir}" \
-    --knob_http_verbose_level=10 \
+    --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
     --knob_http_request_aws_v4_header=true
   then
     err "Start fdbbackup failed"
@@ -102,7 +103,7 @@ function restore {
     -t "${TAG}" -w \
     -r "blobstore://localhost:${weed_s3_port}/${S3_RESOURCE}?bucket=${BUCKET}&secure_connection=0&region=us" \
     --log --logdir="${scratch_dir}" \
-    --knob_http_verbose_level=10 -t first_backup  \
+    --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" -t first_backup  \
     --knob_http_request_aws_v4_header=true
   then
     err "Start fdbrestore failed"

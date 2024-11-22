@@ -131,9 +131,6 @@ function verify_data {
       -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
       --exec "get $(make_key "${i}")" | \
       sed -e "s/.*is [[:punct:]]//" | sed -e "s/[[:punct:]]*$//")
-    #value='`key__0'\'' is `0.2024-11-19T09:20:30-08:00'\'''
-    echo $value
-    #value=$(echo "${value}" | sed -e "s/.*is \`//" | sed -e "s/[[:punct:]]*$//") 
     if [[ "${FDB_DATA[i]}" != "${value}" ]]; then
       err "${FDB_DATA[i]} is not equal to ${value}"
       exit 1
@@ -174,8 +171,9 @@ function log_test_result {
 # $1 Dir to search under.
 function grep_for_severity40 {
   local dir="${1}"
-  if grep -r -e "Severity=\"40\"" "${dir}"; then
+  if output=$(grep -r -e "Severity=\"40\"" "${dir}"); then
     err "Found 'Severity=40' errors"
+    echo "${output}"
     exit 1
   fi
 }
