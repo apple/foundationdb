@@ -45,7 +45,7 @@ trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
 function cleanup {
-  #shutdown_weed
+  shutdown_weed
   shutdown_fdb_cluster
   if [[ -d "${SCRATCH_DIR}" ]]; then
     rm -rf "${SCRATCH_DIR}"
