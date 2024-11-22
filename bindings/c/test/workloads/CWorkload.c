@@ -31,6 +31,7 @@ typedef struct CWorkload {
 
 #define BIND(W) CWorkload* this = (CWorkload*)W
 #define WITH(C, M, ...) (C).M((C).inner, ##__VA_ARGS__)
+#define EXPORT extern __attribute__((visibility("default")))
 
 static void workload_setup(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
 	BIND(raw_workload);
@@ -83,7 +84,7 @@ static void workload_free(OpaqueWorkload* raw_workload) {
 	free(this);
 }
 
-extern FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext context) {
+EXPORT FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext context) {
 	int len = strlen(borrow_name) + 1;
 	char* name = (char*)malloc(len);
 	memcpy(name, borrow_name, len);
