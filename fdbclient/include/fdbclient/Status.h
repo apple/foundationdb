@@ -21,6 +21,7 @@
 #ifndef FDBCLIENT_STATUS_H
 #define FDBCLIENT_STATUS_H
 
+#include <unordered_map>
 #include "fdbclient/JSONDoc.h"
 
 // Reads the entire string s as a JSON value
