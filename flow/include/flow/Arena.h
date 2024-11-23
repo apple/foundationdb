@@ -501,6 +501,18 @@ public:
 		return s;
 	}
 
+	std::string toHexStringPlain() const {
+		std::string s;
+		s.reserve(length * 7);
+		for (int i = 0; i < length; i++) {
+			uint8_t b = (*this)[i];
+			s.append(format("%02x ", b));
+		}
+		if (s.size() > 0)
+			s.resize(s.size() - 1);
+		return s;
+	}
+
 	int expectedSize() const { return size(); }
 
 	int compare(StringRef const& other) const {

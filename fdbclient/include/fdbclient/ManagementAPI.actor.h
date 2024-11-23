@@ -195,8 +195,11 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
 // the metadata.
 ACTOR Future<int> setBulkDumpMode(Database cx, int mode);
 
-// Submit a bulkdump task. If there is any existing task, reject the new task
-ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpState);
+// Clear the existing bulkdump job metadata
+ACTOR Future<Void> clearBulkDumpJob(Database cx);
+
+// Submit a bulkdump job. If there is any existing job, reject the new job
+ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpState);
 
 // Get bulkdump tasks within the input range. Each range has at most one task running on.
 ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(

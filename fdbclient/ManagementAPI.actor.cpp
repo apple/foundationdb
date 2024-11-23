@@ -24,6 +24,7 @@
 
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/RangeLock.h"
+#include "flow/Error.h"
 #include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
@@ -3006,7 +3007,7 @@ ACTOR Future<int> setBulkDumpMode(Database cx, int mode) {
 	}
 }
 
-ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpTask) {
+ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpTask) {
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -3039,7 +3040,19 @@ ACTOR Future<Void> submitBulkDumpTask(Database cx, BulkDumpState bulkDumpTask) {
 	return Void();
 }
 
-// TODO(BulkDump): add a method of cancelling the existing bulkdump task
+ACTOR Future<Void> clearBulkDumpJob(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.clear(allKeys.withPrefix(bulkDumpPrefix));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
 
 ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(Database cx,
                                                                      KeyRange rangeToRead,

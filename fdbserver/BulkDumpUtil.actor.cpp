@@ -32,6 +32,7 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include <string>
 
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
                                  const BulkDumpState& bulkDumpState) {
@@ -67,6 +68,18 @@ std::string generateBulkDumpByteSampleFileName(Version version) {
 	return std::to_string(version) + "-sample.sst";
 }
 
+std::string generateBulkDumpJobFolder(const UID& jobId) {
+	return jobId.toString();
+}
+
+std::string generateBulkDumpTaskFolder(const UID& jobId, const UID& taskId) {
+	return joinPath(jobId.toString(), taskId.toString());
+}
+
+std::string getJobManifestFileName(const UID& jobId) {
+	return jobId.toString() + "-job-manifest.txt";
+}
+
 std::pair<BulkDumpFileSet, BulkDumpFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,
                                                                          const std::string& relativeFolder,
                                                                          const std::string& rootLocal,
@@ -96,14 +109,14 @@ std::pair<BulkDumpFileSet, BulkDumpFileSet> getLocalRemoteFileSetSetting(Version
 }
 
 // Return first value: if has data file; second value: if has bytes sampling file
-BulkDumpFileSet dumpDataFileToLocalDirectory(UID logId,
-                                             const std::map<Key, Value>& sortedKVS,
-                                             const BulkDumpFileSet& localFileSetConfig,
-                                             const BulkDumpFileSet& remoteFileSetConfig,
-                                             const ByteSampleSetting& byteSampleSetting,
-                                             Version dumpVersion,
-                                             const KeyRange& dumpRange,
-                                             int64_t dumpBytes) {
+BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
+                                              const std::map<Key, Value>& sortedKVS,
+                                              const BulkDumpFileSet& localFileSetConfig,
+                                              const BulkDumpFileSet& remoteFileSetConfig,
+                                              const ByteSampleSetting& byteSampleSetting,
+                                              Version dumpVersion,
+                                              const KeyRange& dumpRange,
+                                              int64_t dumpBytes) {
 	// Clean up local folder
 	platform::eraseDirectoryRecursive(localFileSetConfig.folderPath);
 	if (!platform::createDirectory(localFileSetConfig.folderPath)) {
@@ -193,7 +206,7 @@ BulkDumpFileSet dumpDataFileToLocalDirectory(UID logId,
 	BulkDumpManifest manifest(
 	    fileSetRemote, dumpRange.begin, dumpRange.end, dumpVersion, "", dumpBytes, byteSampleSetting);
 	writeFile(localFileSetConfig.manifestPath, manifest.toString());
-	return fileSetRemote;
+	return manifest;
 }
 
 void bulkDumpFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax, UID logId) {
@@ -267,13 +280,13 @@ ACTOR Future<Void> bulkDumpTransportCP_impl(BulkDumpFileSet sourceFileSet,
 	return Void();
 }
 
-ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
-                               BulkDumpFileSet sourceFileSet,
-                               BulkDumpFileSet destinationFileSet,
-                               UID logId) {
+ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod,
+                                         BulkDumpFileSet sourceFileSet,
+                                         BulkDumpFileSet destinationFileSet,
+                                         UID logId) {
 	// Upload to S3 or mock file copy
 	if (transportMethod != BulkDumpTransportMethod::CP) {
-		TraceEvent(SevWarnAlways, "SSBulkDumpNotRetriableError", logId)
+		TraceEvent(SevWarnAlways, "SSBulkDumpUploadFilesError", logId)
 		    .detail("Reason", "Transport method is not implemented")
 		    .detail("TransportMethod", transportMethod);
 		ASSERT_WE_THINK(false);
@@ -287,6 +300,44 @@ ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
 	}
 	wait(bulkDumpTransportCP_impl(sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
 	return Void();
+}
+
+void uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
+                                   const std::string& content,
+                                   const std::string& localRoot,
+                                   const std::string& jobFolder,
+                                   const std::string& localJobManifestFilePath,
+                                   const std::string& remoteJobManifestFilePath,
+                                   UID logId) {
+	platform::eraseDirectoryRecursive(abspath(localRoot));
+	if (!platform::createDirectory(abspath(joinPath(localRoot, jobFolder)))) {
+		TraceEvent(SevWarn, "UploadBulkDumpJobManifestFileError", logId)
+		    .detail("Reason", "failed to re-create director")
+		    .detail("LocalRoot", localRoot);
+		throw retry();
+	}
+	TraceEvent(SevWarn, "UploadBulkDumpJobManifestWriteLocal", logId)
+	    .detail("LocalRoot", localRoot)
+	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+	    .detail("Content", content);
+	writeFile(localJobManifestFilePath, content);
+	// Upload to S3 or mock file copy
+	if (transportMethod != BulkDumpTransportMethod::CP) {
+		TraceEvent(SevWarnAlways, "UploadBulkDumpJobManifestFileError", logId)
+		    .detail("Reason", "Transport method is not implemented")
+		    .detail("TransportMethod", transportMethod);
+		ASSERT_WE_THINK(false);
+		throw bulkdump_task_failed();
+	}
+	TraceEvent(SevWarn, "UploadBulkDumpJobManifestWriteLocal", logId)
+	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
+	bulkDumpFileCopy(abspath(localJobManifestFilePath),
+	                 abspath(remoteJobManifestFilePath),
+	                 SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX,
+	                 logId);
+	// TODO(BulkDump): check uploaded file exist
+	platform::eraseDirectoryRecursive(abspath(localRoot)); // clean up
+	return;
 }
 
 ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState) {
@@ -323,11 +374,7 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 			if (!anyNew) {
 				throw bulkdump_task_outdated();
 			}
-			wait(krmSetRangeCoalescing(&tr,
-			                           bulkDumpPrefix,
-			                           Standalone(KeyRangeRef(beginKey, result[result.size() - 1].key)),
-			                           bulkDumpState.getRange(),
-			                           bulkDumpStateValue(bulkDumpState)));
+			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpState.getRange(), bulkDumpStateValue(bulkDumpState)));
 			wait(tr.commit());
 			beginKey = result[result.size() - 1].key;
 			if (beginKey >= endKey) {
@@ -340,4 +387,14 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 		}
 	}
 	return Void();
+}
+
+std::string generateJobManifestFileContent(const std::map<Key, BulkDumpManifest>& manifests) {
+	std::string res;
+	for (const auto& [beginKey, manifest] : manifests) {
+		res = res + manifest.getBeginKeyString() + ", " + manifest.getEndKeyString() + ", " +
+		      std::to_string(manifest.version) + ", " + std::to_string(manifest.bytes) + ", " +
+		      manifest.fileSet.manifestPath + "\n";
+	}
+	return res;
 }

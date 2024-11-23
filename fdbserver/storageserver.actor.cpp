@@ -217,8 +217,7 @@ static const KeyRangeRef persistPendingCheckpointKeys =
 static const std::string serverCheckpointFolder = "serverCheckpoints";
 static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
-static const std::string bulkLoadFolder = "bulkLoadFiles";
-static const std::string bulkDumpFolder = "bulkDumpFiles";
+static const std::string serverBulkDumpFolder = "bulkDumpFiles";
 
 // Accumulative checksum related prefix
 static const KeyRangeRef persistAccumulativeChecksumKeys =
@@ -1373,6 +1372,7 @@ public:
 	std::string folder;
 	std::string checkpointFolder;
 	std::string fetchedCheckpointFolder;
+	std::string bulkDumpFolder;
 
 	// defined only during splitMutations()/addMutation()
 	UpdateEagerReadInfo* updateEagerReads;
@@ -6012,19 +6012,24 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 		ASSERT(res.second);
 	}
 	Key lastKey = range.end;
-	if (kvsToDump.size() > 0) {
+	if (rep.get().more) {
 		lastKey = kvsToDump.rbegin()->first;
 	}
 	return RangeDumpData(kvsToDump, lastKey, rep.get().data.expectedSize());
 }
 
 std::string getBulkDumpLocalRoot(StorageServer* data) {
-	return abspath(joinPath(data->folder, bulkDumpFolder));
+	return data->bulkDumpFolder;
 }
 
 void cleanUpBulkDumpFolder(StorageServer* data) {
-	std::string rootFolder = getBulkDumpLocalRoot(data);
-	platform::eraseDirectoryRecursive(abspath(rootFolder));
+	try {
+		std::string rootFolder = getBulkDumpLocalRoot(data);
+		platform::eraseDirectoryRecursive(abspath(rootFolder));
+	} catch (Error& e) {
+		return;
+	}
+	return;
 }
 
 // The SS actor handling bulk dump task sent from DD.
@@ -6060,12 +6065,15 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	// Use jobId and taskId as the folder to store the data of the task range
 	ASSERT(req.bulkDumpState.getTaskId().present());
 	state std::string taskFolder =
-	    joinPath(req.bulkDumpState.getJobId().toString(), req.bulkDumpState.getTaskId().get().toString());
+	    generateBulkDumpTaskFolder(req.bulkDumpState.getJobId(), req.bulkDumpState.getTaskId().get());
 	state BulkDumpFileSet destinationFileSets;
-	platform::eraseDirectoryRecursive(abspath(joinPath(rootFolderLocal, taskFolder)));
 
 	loop {
 		try {
+			if (batchNum == 0) { // clean up working folder initially
+				platform::eraseDirectoryRecursive(abspath(joinPath(rootFolderLocal, taskFolder)));
+			}
+
 			// Dump data of rangeToDump in a relativeFolder
 			state KeyRange rangeToDump = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
 
@@ -6104,7 +6112,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// Write to SST file
 			state KeyRange dataRange =
 			    rangeToDump & Standalone(KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey)));
-			state BulkDumpFileSet remoteFileSet =
+			state BulkDumpManifest manifest =
 			    dumpDataFileToLocalDirectory(data->thisServerID,
 			                                 rangeDumpData.kvs,
 			                                 localFileSetSetting,
@@ -6122,24 +6130,20 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			    .detail("RootFolderLocal", rootFolderLocal)
 			    .detail("RelativeFolder", relativeFolder)
 			    .detail("DataBytes", rangeDumpData.kvsBytes)
-			    .detail("RemoteFileSet", remoteFileSet.toString());
+			    .detail("RemoteFileSet", manifest.fileSet.toString())
+			    .detail("BatchNum", batchNum);
 
 			// Upload Files
 			state BulkDumpFileSet localFileSet = localFileSetSetting;
-			if (remoteFileSet.dataPath.empty()) {
+			if (manifest.fileSet.dataPath.empty()) {
 				localFileSet.dataPath = "";
 			}
-			if (remoteFileSet.byteSamplePath.empty()) {
+			if (manifest.fileSet.byteSamplePath.empty()) {
 				localFileSet.byteSamplePath = "";
 			}
 
-			// TODO(BulkDump): remove after bulk dump use Flow file system
-			if (!g_network->isSimulated()) {
-				wait(uploadFiles(
-				    req.bulkDumpState.getTransportMethod(), localFileSet, remoteFileSet, data->thisServerID));
-			}
-
-			// TODO(BulkDump): check file existence in the remote
+			wait(uploadBulkDumpFileSet(
+			    req.bulkDumpState.getTransportMethod(), localFileSet, manifest.fileSet, data->thisServerID));
 
 			// Clean up local files
 			platform::eraseDirectoryRecursive(localFileSet.folderPath);
@@ -6148,7 +6152,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// Persist remoteFilePaths to the corresponding range
 			if (!dataRange.empty()) {
 				wait(persistCompleteBulkDumpRange(data->cx,
-				                                  req.bulkDumpState.getRangeCompleteState(dataRange, remoteFileSet)));
+				                                  req.bulkDumpState.getRangeCompleteState(dataRange, manifest)));
 			}
 
 			// Move to the next range
@@ -6160,11 +6164,16 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			batchNum++;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			if (e.code() == error_code_bulkdump_task_outdated || e.code() == error_code_wrong_shard_server) {
 				break; // silently exit
 			}
 			TraceEvent(SevInfo, "SSBulkDumpError", data->thisServerID)
 			    .errorUnsuppressed(e)
-			    .detail("Task", req.bulkDumpState.toString());
+			    .detail("Task", req.bulkDumpState.toString())
+			    .detail("RetryCount", retryCount)
+			    .detail("BatchNum", batchNum);
 			retryCount++;
 			if (retryCount > 50) {
 				req.reply.sendError(bulkdump_task_failed()); // give up
@@ -6173,7 +6182,11 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 		}
 		wait(delay(1.0));
 	}
-	platform::eraseDirectoryRecursive(abspath(joinPath(rootFolderLocal, taskFolder))); // clean up
+	try {
+		platform::eraseDirectoryRecursive(abspath(joinPath(rootFolderLocal, taskFolder))); // clean up
+	} catch (Error& e) {
+		// exit
+	}
 	return Void();
 }
 
@@ -14724,6 +14737,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.folder = folder;
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
+	self.bulkDumpFolder = joinPath(self.folder, serverBulkDumpFolder);
 	self.actors.add(rocksdbLogCleaner(folder));
 
 	try {
@@ -14842,6 +14856,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.folder = folder;
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
+	self.bulkDumpFolder = joinPath(self.folder, serverBulkDumpFolder);
 
 	if (!directoryExists(self.checkpointFolder)) {
 		TraceEvent(SevWarnAlways, "SSRebootCheckpointDirNotExists", self.thisServerID);

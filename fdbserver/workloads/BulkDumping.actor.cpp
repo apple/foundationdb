@@ -103,22 +103,12 @@ struct BulkDumping : TestWorkload {
 
 	ACTOR Future<Void> waitUntilTaskComplete(Database cx, BulkDumpState newTask) {
 		state std::vector<BulkDumpState> res;
-		state bool complete = true;
 		loop {
 			try {
 				res.clear();
-				complete = true;
 				wait(store(res, getBulkDumpTasksWithinRange(cx, normalKeys)));
-				for (const auto& bulkDumpState : res) {
-					BulkDumpPhase phase = bulkDumpState.getPhase();
-					ASSERT(phase != BulkDumpPhase::Invalid);
-					ASSERT(bulkDumpState.getJobId() == newTask.getJobId());
-					if (phase != BulkDumpPhase::Complete) {
-						complete = false;
-						break;
-					}
-				}
-				if (complete) {
+				// When complete, the job metadata is cleared
+				if (res.empty()) {
 					break;
 				}
 			} catch (Error& e) {
@@ -145,7 +135,7 @@ struct BulkDumping : TestWorkload {
 
 		state BulkDumpState newTask = newBulkDumpTaskLocalSST(normalKeys, simulationBulkDumpFolder);
 		TraceEvent("BulkDumpingTaskNew").detail("Task", newTask.toString());
-		wait(submitBulkDumpTask(cx, newTask));
+		wait(submitBulkDumpJob(cx, newTask));
 		std::vector<BulkDumpState> res = wait(getBulkDumpTasksWithinRange(cx, normalKeys, 100));
 		for (const auto& task : res) {
 			TraceEvent("BulkDumpingTaskRes").detail("Task", task.toString());
