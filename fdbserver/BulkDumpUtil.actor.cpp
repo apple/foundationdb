@@ -55,60 +55,86 @@ SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<Storage
 	return SSBulkDumpTask(targetServer, checksumServers, bulkDumpState);
 }
 
-std::string generateBulkDumpDataFileName(Version version) {
-	return std::to_string(version) + "-data.sst";
-}
-
 std::string generateBulkDumpManifestFileName(Version version) {
 	return std::to_string(version) + "-manifest.txt";
+}
+
+std::string generateBulkDumpDataFileName(Version version) {
+	return std::to_string(version) + "-data.sst";
 }
 
 std::string generateBulkDumpByteSampleFileName(Version version) {
 	return std::to_string(version) + "-sample.sst";
 }
 
-BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
-                                              const std::map<Key, Value>& sortedKVS,
-                                              const std::string& rootFolder,
-                                              const std::string& relativeFolder,
-                                              Version dumpVersion,
-                                              const KeyRange& dumpRange,
-                                              int64_t dumpBytes) {
-	const std::string dumpFolder = abspath(joinPath(rootFolder, relativeFolder));
-	platform::eraseDirectoryRecursive(dumpFolder);
-	if (!platform::createDirectory(dumpFolder)) {
+std::pair<BulkDumpFileSet, BulkDumpFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,
+                                                                         const std::string& relativeFolder,
+                                                                         const std::string& rootLocal,
+                                                                         const std::string& rootRemote) {
+	// Generate file names based on data version
+	std::string manifestFileName = generateBulkDumpManifestFileName(dumpVersion);
+	std::string dataFileName = generateBulkDumpDataFileName(dumpVersion);
+	std::string byteSampleFileName = generateBulkDumpByteSampleFileName(dumpVersion);
+
+	// Generate local file path to dump
+	const std::string dumpFolderLocal = abspath(joinPath(rootLocal, relativeFolder));
+	std::string manifestFilePathLocal = abspath(joinPath(dumpFolderLocal, manifestFileName));
+	std::string dataFilePathLocal = abspath(joinPath(dumpFolderLocal, dataFileName));
+	std::string byteSampleFilePathLocal = abspath(joinPath(dumpFolderLocal, byteSampleFileName));
+
+	// Generate remote file path used to fill manifest file content
+	const std::string dumpFolderRemote = joinPath(rootRemote, relativeFolder);
+	std::string manifestFilePathRemote = joinPath(dumpFolderRemote, manifestFileName);
+	std::string dataFilePathRemote = joinPath(dumpFolderRemote, dataFileName);
+	std::string byteSampleFilePathRemote = joinPath(dumpFolderRemote, byteSampleFileName);
+
+	BulkDumpFileSet fileSetLocal(
+	    rootLocal, dumpFolderLocal, manifestFilePathLocal, dataFilePathLocal, byteSampleFilePathLocal);
+	BulkDumpFileSet fileSetRemote(
+	    rootRemote, dumpFolderRemote, manifestFilePathRemote, dataFilePathRemote, byteSampleFilePathRemote);
+	return std::make_pair(fileSetLocal, fileSetRemote);
+}
+
+// Return first value: if has data file; second value: if has bytes sampling file
+BulkDumpFileSet dumpDataFileToLocalDirectory(UID logId,
+                                             const std::map<Key, Value>& sortedKVS,
+                                             const BulkDumpFileSet& localFileSetConfig,
+                                             const BulkDumpFileSet& remoteFileSetConfig,
+                                             const ByteSampleSetting& byteSampleSetting,
+                                             Version dumpVersion,
+                                             const KeyRange& dumpRange,
+                                             int64_t dumpBytes) {
+	// Clean up local folder
+	platform::eraseDirectoryRecursive(localFileSetConfig.folderPath);
+	if (!platform::createDirectory(localFileSetConfig.folderPath)) {
 		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
 		    .detail("Reason", "failed to re-create director")
-		    .detail("DumpFolder", dumpFolder);
+		    .detail("DumpFolderLocal", localFileSetConfig.folderPath);
 		throw retry();
 	}
-
-	std::string dataFilePath = "";
-	std::string byteSampleFilePath = "";
+	// Dump data and bytes sampling to files
+	bool containDataFile = false;
+	bool containByteSampleFile = false;
 	if (sortedKVS.size() > 0) {
-		std::string dataFileName = generateBulkDumpDataFileName(dumpVersion);
-		dataFilePath = abspath(joinPath(dumpFolder, dataFileName));
-		if (fileExists(dataFilePath)) {
+		containDataFile = true;
+		if (fileExists(localFileSetConfig.dataPath)) {
 			TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
 			    .detail("Reason", "exist old dataFile")
-			    .detail("DataFilePath", dataFilePath);
+			    .detail("DataFilePathLocal", localFileSetConfig.dataPath);
 			ASSERT_WE_THINK(false);
 			throw retry();
 		}
-		std::string byteSampleFileName = generateBulkDumpByteSampleFileName(dumpVersion);
-		byteSampleFilePath = abspath(joinPath(dumpFolder, byteSampleFileName));
-		if (fileExists(byteSampleFilePath)) {
+		if (fileExists(localFileSetConfig.byteSamplePath)) {
 			TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
 			    .detail("Reason", "exist old byteSampleFile")
-			    .detail("ByteSampleFilePath", byteSampleFilePath);
+			    .detail("ByteSampleFilePathLocal", localFileSetConfig.byteSamplePath);
 			ASSERT_WE_THINK(false);
 			throw retry();
 		}
-
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriterData = newRocksDBSstFileWriter();
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriterByteSample = newRocksDBSstFileWriter();
-		sstWriterData->open(dataFilePath);
-		sstWriterByteSample->open(byteSampleFilePath);
+		sstWriterData->open(localFileSetConfig.dataPath);
+		sstWriterByteSample->open(localFileSetConfig.byteSamplePath);
 		bool anySampled = false;
 		for (const auto& [key, value] : sortedKVS) {
 			sstWriterData->write(key, value); // assuming sorted
@@ -121,78 +147,108 @@ BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
 		if (!sstWriterData->finish()) {
 			TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
 			    .detail("Reason", "failed to finish data sst writer")
-			    .detail("DataFilePath", dataFilePath);
+			    .detail("DataFilePath", localFileSetConfig.dataPath);
 			ASSERT_WE_THINK(false);
 			throw retry();
 		}
 		if (anySampled) {
+			containByteSampleFile = true;
 			if (!sstWriterByteSample->finish()) {
 				TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
 				    .detail("Reason", "failed to finish byte sample sst writer")
-				    .detail("ByteSampleFilePath", byteSampleFilePath);
+				    .detail("ByteSampleFilePathLocal", localFileSetConfig.byteSamplePath);
 				ASSERT_WE_THINK(false);
 				throw retry();
 			}
 		} else {
-			if (!deleteFile(byteSampleFilePath)) {
+			containByteSampleFile = false;
+			if (!deleteFile(localFileSetConfig.byteSamplePath)) {
 				TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
 				    .detail("Reason", "failed to delete empty byte sample file")
-				    .detail("ByteSampleFilePath", byteSampleFilePath);
+				    .detail("ByteSampleFilePathLocal", localFileSetConfig.byteSamplePath);
 				ASSERT_WE_THINK(false);
 				throw retry();
 			}
 		}
+	} else {
+		containDataFile = false;
 	}
 
-	std::string manifestFileName = generateBulkDumpManifestFileName(dumpVersion);
-	std::string manifestFilePath = abspath(joinPath(dumpFolder, manifestFileName));
-	if (fileExists(manifestFilePath)) {
+	// Generate manifest file
+	if (fileExists(localFileSetConfig.manifestPath)) {
 		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
 		    .detail("Reason", "exist old manifestFile")
-		    .detail("ManifestFilePath", manifestFilePath);
+		    .detail("ManifestFilePathLocal", localFileSetConfig.manifestPath);
 		ASSERT_WE_THINK(false);
 		throw retry();
 	}
-
+	if (containByteSampleFile) {
+		ASSERT(containDataFile);
+	}
+	BulkDumpFileSet fileSetRemote(remoteFileSetConfig.rootPath,
+	                              remoteFileSetConfig.folderPath,
+	                              remoteFileSetConfig.manifestPath,
+	                              containDataFile ? remoteFileSetConfig.dataPath : "",
+	                              containByteSampleFile ? remoteFileSetConfig.byteSamplePath : "");
 	BulkDumpManifest manifest(
-	    dataFilePath, manifestFilePath, byteSampleFilePath, dumpRange.begin, dumpRange.end, dumpVersion, "", dumpBytes);
-	writeFile(manifestFilePath, manifest.toString());
-
-	return manifest;
+	    fileSetRemote, dumpRange.begin, dumpRange.end, dumpVersion, "", dumpBytes, byteSampleSetting);
+	writeFile(localFileSetConfig.manifestPath, manifest.toString());
+	return fileSetRemote;
 }
 
-void bulkDumpFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
+void bulkDumpFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax, UID logId) {
 	std::string content = readFileBytes(fromFile, fileBytesMax);
 	writeFile(toFile, content);
+	TraceEvent(SevInfo, "SSBulkDumpSSTFileCopied", logId)
+	    .detail("FromFile", fromFile)
+	    .detail("ToFile", toFile)
+	    .detail("ContentSize", content.size());
 	return;
 }
 
+bool validateSourceDestinationFileSets(const BulkDumpFileSet& source, const BulkDumpFileSet& destination) {
+	if (source.manifestPath.empty() || destination.manifestPath.empty()) {
+		return false;
+	}
+	if (source.dataPath.empty() && (!destination.dataPath.empty() || !source.byteSamplePath.empty())) {
+		return false;
+	}
+	if (destination.dataPath.empty() && (!source.dataPath.empty() || !source.byteSamplePath.empty())) {
+		return false;
+	}
+	if (!source.dataPath.empty() && basename(source.dataPath) != basename(destination.dataPath)) {
+		return false;
+	}
+	if (!source.byteSamplePath.empty() && basename(source.byteSamplePath) != basename(destination.byteSamplePath)) {
+		return false;
+	}
+	return true;
+}
+
 // Copy files between local file folders, used to mock blobstore in the test
-ACTOR Future<Void> bulkDumpTransportCP_impl(std::string fromRoot,
-                                            std::string toRoot,
-                                            std::string relativeFolder,
+ACTOR Future<Void> bulkDumpTransportCP_impl(BulkDumpFileSet sourceFileSet,
+                                            BulkDumpFileSet destinationFileSet,
                                             size_t fileBytesMax,
                                             UID logId) {
 	loop {
-		state std::string toFolder = abspath(joinPath(toRoot, relativeFolder));
-		state std::string fromFolder = abspath(joinPath(fromRoot, relativeFolder));
-		state std::string fromFile;
-		state std::string toFile;
 		try {
 			// Clear existing folder
-			platform::eraseDirectoryRecursive(toFolder);
-			if (!platform::createDirectory(toFolder)) {
+			platform::eraseDirectoryRecursive(abspath(destinationFileSet.folderPath));
+			if (!platform::createDirectory(abspath(destinationFileSet.folderPath))) {
 				throw retry();
 			}
-
 			// Move bulk dump files to the target folder
-			for (const auto& filePath : platform::listFiles(fromFolder)) {
-				fromFile = abspath(joinPath(fromFolder, basename(filePath)));
-				toFile = abspath(joinPath(toFolder, basename(filePath)));
-				bulkDumpFileCopy(fromFile, toFile, fileBytesMax);
-				TraceEvent(SevInfo, "SSBulkDumpSSTFileCopied", logId)
-				    .detail("FromFile", fromFile)
-				    .detail("ToFile", toFile);
+			bulkDumpFileCopy(
+			    abspath(sourceFileSet.manifestPath), abspath(destinationFileSet.manifestPath), fileBytesMax, logId);
+			if (sourceFileSet.dataPath.size() > 0) {
+				bulkDumpFileCopy(
+				    abspath(sourceFileSet.dataPath), abspath(destinationFileSet.dataPath), fileBytesMax, logId);
+				if (sourceFileSet.byteSamplePath.size() > 0) {
+					bulkDumpFileCopy(abspath(sourceFileSet.byteSamplePath),
+					                 abspath(destinationFileSet.byteSamplePath),
+					                 fileBytesMax,
+					                 logId);
+				}
 			}
 			break;
 		} catch (Error& e) {
@@ -201,11 +257,8 @@ ACTOR Future<Void> bulkDumpTransportCP_impl(std::string fromRoot,
 			}
 			TraceEvent(SevInfo, "SSBulkDumpSSTFileCopyError", logId)
 			    .errorUnsuppressed(e)
-			    .detail("FromRoot", fromRoot)
-			    .detail("ToRoot", toRoot)
-			    .detail("RelativeFolder", relativeFolder)
-			    .detail("FromFile", fromFile)
-			    .detail("ToFile", toFile);
+			    .detail("SourceFileSet", sourceFileSet.toString())
+			    .detail("DestinationFileSet", destinationFileSet.toString());
 			if (!g_network->isSimulated()) {
 				wait(delay(5.0));
 			}
@@ -215,9 +268,8 @@ ACTOR Future<Void> bulkDumpTransportCP_impl(std::string fromRoot,
 }
 
 ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
-                               std::string fromRoot,
-                               std::string toRoot,
-                               std::string relativeFolder,
+                               BulkDumpFileSet sourceFileSet,
+                               BulkDumpFileSet destinationFileSet,
                                UID logId) {
 	// Upload to S3 or mock file copy
 	if (transportMethod != BulkDumpTransportMethod::CP) {
@@ -227,7 +279,13 @@ ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
 		ASSERT_WE_THINK(false);
 		throw bulkdump_task_failed();
 	}
-	wait(bulkDumpTransportCP_impl(fromRoot, toRoot, relativeFolder, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
+	if (!validateSourceDestinationFileSets(sourceFileSet, destinationFileSet)) {
+		TraceEvent(SevInfo, "SSBulkDumpUploadFilesError", logId)
+		    .detail("SourceFileSet", sourceFileSet.toString())
+		    .detail("DestinationFileSet", destinationFileSet.toString());
+		throw bulkdump_task_failed();
+	}
+	wait(bulkDumpTransportCP_impl(sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
 	return Void();
 }
 
@@ -250,18 +308,13 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 					throw bulkdump_task_outdated();
 				}
 				BulkDumpState currentBulkDumpState = decodeBulkDumpState(result[i].value);
-				if (currentBulkDumpState.getPhase() != BulkDumpPhase::Complete) {
-					ASSERT(!currentBulkDumpState.getParentId().present());
-					ASSERT(bulkDumpState.getParentId().present());
-					if (currentBulkDumpState.getTaskId() != bulkDumpState.getParentId().get()) {
-						throw bulkdump_task_outdated();
-					}
-				} else {
-					ASSERT(currentBulkDumpState.getParentId().present());
-					ASSERT(bulkDumpState.getParentId().present());
-					if (currentBulkDumpState.getParentId() != bulkDumpState.getParentId()) {
-						throw bulkdump_task_outdated();
-					}
+				if (currentBulkDumpState.getJobId() != bulkDumpState.getJobId()) {
+					throw bulkdump_task_outdated();
+				}
+				ASSERT(bulkDumpState.getTaskId().present());
+				if (currentBulkDumpState.getTaskId().present() &&
+				    currentBulkDumpState.getTaskId().get() != bulkDumpState.getTaskId().get()) {
+					throw bulkdump_task_outdated();
 				}
 				if (!anyNew && currentBulkDumpState.getPhase() == BulkDumpPhase::Submitted) {
 					anyNew = true;

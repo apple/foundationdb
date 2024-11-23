@@ -112,12 +112,7 @@ struct BulkDumping : TestWorkload {
 				for (const auto& bulkDumpState : res) {
 					BulkDumpPhase phase = bulkDumpState.getPhase();
 					ASSERT(phase != BulkDumpPhase::Invalid);
-					if (!bulkDumpState.getParentFolder().present() || !bulkDumpState.getParentId().present()) {
-						complete = false;
-						break;
-					}
-					ASSERT(bulkDumpState.getParentFolder().get() == newTask.getFolder());
-					ASSERT(bulkDumpState.getParentId().get() == newTask.getTaskId());
+					ASSERT(bulkDumpState.getJobId() == newTask.getJobId());
 					if (phase != BulkDumpPhase::Complete) {
 						complete = false;
 						break;

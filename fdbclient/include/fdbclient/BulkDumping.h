@@ -47,6 +47,50 @@ enum class BulkDumpExportMethod : uint8_t {
 	File = 1,
 };
 
+// Definition of bulkdump files metadata
+struct BulkDumpFileSet {
+	constexpr static FileIdentifier file_identifier = 1384500;
+
+	BulkDumpFileSet() = default;
+
+	BulkDumpFileSet(const std::string& rootPath,
+	                const std::string& folderPath,
+	                const std::string& manifestPath,
+	                const std::string& dataPath,
+	                const std::string& byteSamplePath)
+	  : rootPath(rootPath), folderPath(folderPath), manifestPath(manifestPath), dataPath(dataPath),
+	    byteSamplePath(byteSamplePath) {
+		ASSERT(isValid());
+	}
+
+	bool isValid() const {
+		if (manifestPath.size() == 0) {
+			return false;
+		}
+		if (dataPath.size() == 0 && byteSamplePath.size() > 0) {
+			return false;
+		}
+		return true;
+	}
+
+	std::string toString() const {
+		return "[RootPath]: " + rootPath + ", [FolderPath]: " + folderPath + ", [ManifestPath]: " + manifestPath +
+		       ", [DataPath]: " + dataPath + ", [ByteSamplePath]: " + byteSamplePath;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rootPath, folderPath, manifestPath, dataPath, byteSamplePath);
+	}
+
+	std::string rootPath = "";
+	std::string folderPath = "";
+	std::string manifestPath = "";
+	std::string dataPath = "";
+	std::string byteSamplePath = "";
+};
+
+// Definition of bulkdump metadata
 struct BulkDumpState {
 	constexpr static FileIdentifier file_identifier = 1384498;
 
@@ -58,14 +102,15 @@ struct BulkDumpState {
 	              BulkDumpFileType fileType,
 	              BulkDumpTransportMethod transportMethod,
 	              BulkDumpExportMethod exportMethod,
-	              std::string folder)
-	  : taskId(deterministicRandom()->randomUniqueID()), range(range), fileType(fileType),
-	    transportMethod(transportMethod), exportMethod(exportMethod), folder(folder), phase(BulkDumpPhase::Submitted) {
+	              std::string remoteRoot)
+	  : jobId(deterministicRandom()->randomUniqueID()), range(range), fileType(fileType),
+	    transportMethod(transportMethod), exportMethod(exportMethod), remoteRoot(remoteRoot),
+	    phase(BulkDumpPhase::Submitted) {
 		ASSERT(isValid());
 	}
 
 	bool operator==(const BulkDumpState& rhs) const {
-		return taskId == rhs.taskId && range == rhs.range && folder == rhs.folder;
+		return jobId == rhs.jobId && taskId == rhs.taskId && range == rhs.range && remoteRoot == rhs.remoteRoot;
 	}
 
 	std::string toString() const {
@@ -73,39 +118,37 @@ struct BulkDumpState {
 		                  ", [FileType]: " + std::to_string(static_cast<uint8_t>(fileType)) +
 		                  ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod)) +
 		                  ", [ExportMethod]: " + std::to_string(static_cast<uint8_t>(exportMethod)) +
-		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) + ", [Folder]: " + folder +
-		                  ", [TaskId]: " + taskId.toString();
+		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) +
+		                  ", [RemoteRoot]: " + remoteRoot + ", [JobId]: " + jobId.toString();
+		if (taskId.present()) {
+			res = res + ", [TaskId]: " + taskId.get().toString();
+		}
 		if (version.present()) {
 			res = res + ", [Version]: " + std::to_string(version.get());
 		}
-		if (parentTaskId.present()) {
-			res = res + ", [ParentTaskId]: " + parentTaskId.get().toString();
-		}
-		if (parentTaskFolder.present()) {
-			res = res + ", [ParentTaskFolder]: " + parentTaskFolder.get();
+		if (remoteFileSet.present()) {
+			res = res + ", [RemoteFileSet]: " + remoteFileSet.get().toString();
 		}
 		return res;
 	}
 
 	KeyRange getRange() const { return range; }
 
-	UID getTaskId() const { return taskId; }
+	UID getJobId() const { return jobId; }
 
-	std::string getFolder() const { return folder; }
+	Optional<UID> getTaskId() const { return taskId; }
+
+	std::string getRemoteRoot() const { return remoteRoot; }
 
 	BulkDumpPhase getPhase() const { return phase; }
 
 	BulkDumpTransportMethod getTransportMethod() const { return transportMethod; }
 
-	Optional<std::string> getParentFolder() const { return parentTaskFolder; }
-
-	Optional<UID> getParentId() const { return parentTaskId; }
-
 	bool isValid() const {
-		if (parentTaskId.present() && !parentTaskId.get().isValid()) {
+		if (!jobId.isValid()) {
 			return false;
 		}
-		if (!taskId.isValid()) {
+		if (taskId.present() && !taskId.get().isValid()) {
 			return false;
 		}
 		if (range.empty()) {
@@ -121,110 +164,86 @@ struct BulkDumpState {
 		} else if (exportMethod != BulkDumpExportMethod::File) {
 			throw not_implemented();
 		}
-		if (folder.empty()) {
+		if (remoteRoot.empty()) {
 			return false;
 		}
 		return true;
 	}
 
-	// A parent task is the task on a large range set by user. The user task will spawn a series of small ranges tasks
-	// based on shard boundary to cover the user task range. Those spawned tasks are executed by SSes.
-	BulkDumpState spawn(const KeyRange& childTaskRange) {
-		ASSERT(range.contains(childTaskRange));
-		UID childTaskId = deterministicRandom()->randomUniqueID();
-		std::string childTaskFolder = childTaskId.toString();
-		// Spawn a new state as a child and set this as the parent of the child
-		BulkDumpState res(childTaskId,
-		                  childTaskRange,
-		                  fileType,
-		                  transportMethod,
-		                  exportMethod,
-		                  childTaskFolder,
-		                  parentTaskId.present() ? parentTaskId.get() : taskId,
-		                  parentTaskFolder.present() ? parentTaskFolder.get() : folder);
+	// The user job spawns a series of ranges tasks based on shard boundary to cover the user task range.
+	// Those spawned tasks are executed by SSes.
+	// Return metadata of the task.
+	BulkDumpState getRangeTaskState(const KeyRange& taskRange) {
+		ASSERT(range.contains(taskRange));
+		BulkDumpState res = *this; // the task inherits configuration from the job
+		UID newTaskId;
+		// Guarantee to have a brand new taskId for the new spawned task
+		int retryCount = 0;
+		while (true) {
+			newTaskId = deterministicRandom()->randomUniqueID();
+			if (!res.taskId.present() || res.taskId.get() != newTaskId) {
+				break;
+			}
+			retryCount++;
+			if (retryCount > 50) {
+				TraceEvent(SevError, "GetRangeTaskStateRetryTooManyTimes").detail("TaskRange", taskRange);
+				throw bulkdump_task_failed();
+			}
+		}
+		res.taskId = newTaskId;
+		res.range = taskRange;
 		return res;
 	}
 
 	// Generate a metadata with Complete state.
-	BulkDumpState getRangeCompleteState(const KeyRange& completeRange) {
+	BulkDumpState getRangeCompleteState(const KeyRange& completeRange, const BulkDumpFileSet& remoteFileSet) {
 		ASSERT(range.contains(completeRange));
-		ASSERT(parentTaskId.present());
-		ASSERT(parentTaskFolder.present());
-		BulkDumpState res(taskId,
-		                  completeRange,
-		                  fileType,
-		                  transportMethod,
-		                  exportMethod,
-		                  folder,
-		                  parentTaskId.get(),
-		                  parentTaskFolder.get());
+		ASSERT(remoteFileSet.isValid());
+		ASSERT(taskId.present() && taskId.get().isValid());
+		BulkDumpState res = *this;
 		res.phase = BulkDumpPhase::Complete;
+		res.remoteFileSet = remoteFileSet;
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
-		           phase,
-		           taskId,
+		           jobId,
 		           range,
 		           fileType,
 		           transportMethod,
 		           exportMethod,
-		           folder,
+		           remoteRoot,
+		           phase,
+		           taskId,
 		           version,
-		           parentTaskId,
-		           parentTaskFolder);
+		           remoteFileSet);
 	}
 
 private:
-	// for spawning a task
-	BulkDumpState(UID taskId,
-	              KeyRange range,
-	              BulkDumpFileType fileType,
-	              BulkDumpTransportMethod transportMethod,
-	              BulkDumpExportMethod exportMethod,
-	              std::string folder,
-	              UID inputParentId,
-	              std::string inputParentFolder)
-	  : taskId(taskId), range(range), fileType(fileType), transportMethod(transportMethod), exportMethod(exportMethod),
-	    folder(folder), phase(BulkDumpPhase::Submitted) {
-		ASSERT(isValid());
-		if (parentTaskId.present()) {
-			ASSERT(parentTaskId.get() == inputParentId);
-		} else {
-			parentTaskId = inputParentId;
-		}
-		if (parentTaskFolder.present()) {
-			ASSERT(parentTaskFolder.get() == inputParentFolder);
-		} else {
-			parentTaskFolder = inputParentFolder;
-		}
-	}
+	UID jobId; // The unique identifier of a job. Set by user. Any task spawned by the job shares the same jobId and
+	           // configuration.
 
-	// The taskId is the unique identifier of a task.
-	// Any SS can do a task. If a task is failed, this remaining part of the task can be picked up by any SS with a
-	// changed taskId
-	UID taskId;
-
-	// File dump config
+	// File dump config:
 	KeyRange range; // Dump the key-value within this range "[begin, end)" from data file
 	BulkDumpFileType fileType = BulkDumpFileType::Invalid;
 	BulkDumpTransportMethod transportMethod = BulkDumpTransportMethod::Invalid;
 	BulkDumpExportMethod exportMethod = BulkDumpExportMethod::Invalid;
-	std::string folder; // Folder includes all files to be exported
+	std::string remoteRoot; // remoteRoot is the root string to where the data is set to be uploaded
 
-	Optional<Version> version;
+	// Task dynamics:
 	BulkDumpPhase phase = BulkDumpPhase::Invalid;
-
-	Optional<UID> parentTaskId;
-	Optional<std::string> parentTaskFolder;
+	Optional<UID> taskId; // The unique identifier of a task. Any SS can do a task. If a task is failed, this remaining
+	                      // part of the task can be picked up by any SS with a changed taskId.
+	Optional<Version> version;
+	Optional<BulkDumpFileSet> remoteFileSet; // Resulting remote filepaths after the dumping task completes
 };
 
 // User API to create bulkDump task metadata
 // The dumped data is within the input range
-// The data is dumped to the input folder
-// The folder can be either a local file path or a remote blobstore file path
-BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& folder);
+// The data is dumped to the input remoteRoot
+// The remoteRoot can be either a local root or a remote blobstore root string
+BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& remoteRoot);
 
 #endif

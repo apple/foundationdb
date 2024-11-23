@@ -47,35 +47,88 @@ struct SSBulkDumpTask {
 	BulkDumpState bulkDumpState;
 };
 
+struct BulkDumpJobManifestFileSet {
+	UID jobId;
+	std::string manifestPath;
+	std::vector<std::string> taskManifestFiles;
+
+	BulkDumpJobManifestFileSet() = default;
+
+	BulkDumpJobManifestFileSet(const UID& jobId,
+	                           const std::string& manifestPath,
+	                           const std::vector<std::string>& taskManifestFiles)
+	  : jobId(jobId), manifestPath(manifestPath), taskManifestFiles(taskManifestFiles) {
+		ASSERT(isValid());
+	}
+
+	bool isValid() const {
+		if (!jobId.isValid()) {
+			return false;
+		}
+		if (manifestPath.size() == 0) {
+			return false;
+		}
+		for (const auto& taskManifestFile : taskManifestFiles) {
+			if (!taskManifestFile.empty()) {
+				return false;
+			}
+		}
+		return true;
+	}
+};
+
+// Define the configuration of bytes sampling
+// Use for setting manifest file
+struct ByteSampleSetting {
+	int version = 0;
+	std::string method;
+	int factor = 0;
+	int overhead = 0;
+	double minimalProbability = 0.0;
+	ByteSampleSetting(int version, const std::string& method, int factor, int overhead, double minimalProbability)
+	  : version(version), method(method), factor(factor), overhead(overhead), minimalProbability(minimalProbability) {
+		ASSERT(isValid());
+	}
+	bool isValid() const {
+		if (method.size() == 0) {
+			return false;
+		}
+		return true;
+	}
+	std::string toString() const {
+		return "[ByteSampleVersion]: " + std::to_string(version) + ", [ByteSampleMethod]: " + method +
+		       ", [ByteSampleFactor]: " + std::to_string(factor) +
+		       ", [ByteSampleOverhead]: " + std::to_string(overhead) +
+		       ", [ByteSampleMinimalProbability]: " + std::to_string(minimalProbability);
+	}
+};
+
 // Define the metadata of bulkdump manifest file
 // The file is uploaded along with the data files
 struct BulkDumpManifest {
-	std::string dataFilePath;
-	std::string manifestFilePath;
-	std::string bytesSampleFilePath;
+	BulkDumpFileSet fileSet;
 	Key beginKey;
 	Key endKey;
 	Version version;
 	std::string checksum;
 	int64_t bytes;
+	ByteSampleSetting byteSampleSetting;
 
-	BulkDumpManifest(const std::string& dataFilePath,
-	                 const std::string& manifestFilePath,
-	                 const std::string& bytesSampleFilePath,
+	BulkDumpManifest(const BulkDumpFileSet& fileSet,
 	                 const Key& beginKey,
 	                 const Key& endKey,
 	                 const Version& version,
 	                 const std::string& checksum,
-	                 int64_t bytes)
-	  : dataFilePath(dataFilePath), manifestFilePath(manifestFilePath), bytesSampleFilePath(bytesSampleFilePath),
-	    beginKey(beginKey), endKey(endKey), version(version), checksum(checksum), bytes(bytes) {}
+	                 int64_t bytes,
+	                 const ByteSampleSetting& byteSampleSetting)
+	  : fileSet(fileSet), beginKey(beginKey), endKey(endKey), version(version), checksum(checksum), bytes(bytes),
+	    byteSampleSetting(byteSampleSetting) {}
 
 	// Generating human readable string to stored in the manifest file
 	std::string toString() const {
-		return "[DataFilePath]: " + dataFilePath + ", [ManifestFilePath]: " + manifestFilePath +
-		       ", [BytesSampleFilePath]: " + bytesSampleFilePath + ", [BeginKey]: " + beginKey.toHexString() +
-		       ", [EndKey]: " + endKey.toHexString() + ", [Version]: " + std::to_string(version) +
-		       ", [Checksum]: " + checksum + ", [Bytes]: " + std::to_string(bytes);
+		return fileSet.toString() + ", [BeginKey]: " + beginKey.toHexString() + ", [EndKey]: " + endKey.toHexString() +
+		       ", [Version]: " + std::to_string(version) + ", [Checksum]: " + checksum +
+		       ", [Bytes]: " + std::to_string(bytes) + ", " + byteSampleSetting.toString();
 	}
 };
 
@@ -86,20 +139,34 @@ SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<Storage
 
 std::string generateRandomBulkDumpDataFileName(Version version);
 
+// Return two file settings: first: LocalFilePaths; Second: RemoteFilePaths.
+// The local file path:
+//	<rootLocal>/<relativeFolder>/<dumpVersion>-manifest.sst
+//	<rootLocal>/<relativeFolder>/<dumpVersion>-data.sst
+//	<rootLocal>/<relativeFolder>/<dumpVersion>-sample.sst
+// The remote file path:
+//	<rootRemote>/<relativeFolder>/<dumpVersion>-manifest.sst
+//	<rootRemote>/<relativeFolder>/<dumpVersion>-data.sst
+//	<rootRemote>/<relativeFolder>/<dumpVersion>-sample.sst
+std::pair<BulkDumpFileSet, BulkDumpFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,
+                                                                         const std::string& relativeFolder,
+                                                                         const std::string& rootLocal,
+                                                                         const std::string& rootRemote);
+
 // The size of sortedKVS is defined at the place of generating the data (getRangeDataToDump).
 // The size is configured by MOVE_SHARD_KRM_ROW_LIMIT.
-BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
-                                              const std::map<Key, Value>& sortedKVS,
-                                              const std::string& rootFolder,
-                                              const std::string& relativeFolder,
-                                              Version dumpVersion,
-                                              const KeyRange& dumpRange,
-                                              int64_t dumpBytes);
+BulkDumpFileSet dumpDataFileToLocalDirectory(UID logId,
+                                             const std::map<Key, Value>& sortedKVS,
+                                             const BulkDumpFileSet& localFileSet,
+                                             const BulkDumpFileSet& remoteFileSet,
+                                             const ByteSampleSetting& byteSampleSetting,
+                                             Version dumpVersion,
+                                             const KeyRange& dumpRange,
+                                             int64_t dumpBytes);
 
 ACTOR Future<Void> uploadFiles(BulkDumpTransportMethod transportMethod,
-                               std::string fromPath,
-                               std::string toPath,
-                               std::string relativeFolder,
+                               BulkDumpFileSet sourceFileSet,
+                               BulkDumpFileSet destinationFileSet,
                                UID logId);
 
 // Persist the complete progress of bulkDump by writing the metadata with Complete phase

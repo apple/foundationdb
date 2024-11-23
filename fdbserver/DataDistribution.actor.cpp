@@ -1427,7 +1427,7 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 						}
 						// In case no ongoing task on the same range
 						SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
-						                                        bulkDumpState.spawn(taskRange));
+						                                        bulkDumpState.getRangeTaskState(taskRange));
 						// Issue task
 						self->ongoingBulkDumpActors.insert(
 						    taskRange,
