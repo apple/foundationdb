@@ -56,7 +56,7 @@ function backup {
     --log --logdir="${scratch_dir}"
   then
     err "Start fdbbackup failed"
-    exit 1
+    return 1
   fi
 }
 
@@ -70,11 +70,11 @@ function restore {
   # https://forums.foundationdb.org/t/restoring-a-completed-backup-version-results-in-an-error/1845
   if ! backup=$(ls -dt "${scratch_dir}"/backups/backup-* | head -1 ); then
     err "Failed to list backups under ${scratch_dir}/backups/"
-    exit 1
+    return 1
   fi
   if ! backup_name=$(basename "${backup}"); then
     err "Failed to get basename"
-    exit 1
+    return 1
   fi
   if ! "${local_build_dir}"/bin/fdbrestore start \
     --dest-cluster-file "${scratch_dir}/loopback_cluster/fdb.cluster" \
@@ -83,7 +83,7 @@ function restore {
     --log --logdir="${scratch_dir}"
   then
     err "Start fdbrestore failed"
-    exit 1
+    return 1
   fi
 }
 
@@ -97,32 +97,32 @@ function test_dir_backup_and_restore {
   # Just do a few keys.
   if ! load_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed loading data into fdb"
-    exit 1
+    return 1
   fi
   log "Run backup"
   if ! backup "${local_build_dir}" "${scratch_dir}"; then
     err "Failed backup"
-    exit 1
+    return 1
   fi
   log "Clear fdb data"
   if ! clear_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed clear data in fdb"
-    exit 1
+    return 1
   fi
   log "Restore"
   if ! restore "${local_build_dir}" "${scratch_dir}"; then
     err "Failed restore"
-    exit 1
+    return 1
   fi
   log "Verify restore"
   if ! verify_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed verification of data in fdb"
-    exit 1
+    return 1
   fi
   log "Check for Severity=40 errors"
   if ! grep_for_severity40 "${scratch_dir}"; then
     err "Found Severity=40 errors in logs"
-    exit 1
+    return 1
   fi
 }
 

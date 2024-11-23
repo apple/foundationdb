@@ -69,7 +69,7 @@ function test_file_upload_and_download {
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testfiledown}"
   if ! diff "${testfileup}" "${testfiledown}"; then
     echo "ERROR: Test $0 failed; upload and download are not the same." >&2
-    exit 1
+    return 1
   fi
 }
 
@@ -97,7 +97,7 @@ function test_dir_upload_and_download {
   "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testdirdown}"
   if ! diff "${testdirup}" "${testdirdown}"; then
     echo "ERROR: Test $0 failed; upload and download are not the same." >&2
-    exit 1
+    return 1
   fi
 }
 

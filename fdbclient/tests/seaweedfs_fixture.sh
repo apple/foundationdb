@@ -42,7 +42,7 @@ function download_weed {
   # Make sure we have curl installed.
   if ! command -v curl &> /dev/null; then
       echo "ERROR: 'curl' not found." >&2
-      exit 1
+      return 1
   fi
   if [[ "$OSTYPE" =~ ^linux ]]; then
     os="linux"
@@ -55,7 +55,7 @@ function download_weed {
     else
       echo "ERROR: Unsupported architecture ${arch}" >&2
       # Return out of this function (does not exit program).
-      exit 1
+      return 1
     fi
   elif [[ "$OSTYPE" =~ ^darwin ]]; then
     os="darwin"
@@ -63,7 +63,7 @@ function download_weed {
   else
     echo "ERROR: Unsupported operating system" >&2
     # Return out of this function (does not exit program).
-    exit 1
+    return 1
   fi
   tgz="${os}_${arch}.tar.gz"
   # If not already present, download it.
@@ -74,18 +74,18 @@ function download_weed {
     # Presuming! that an error in subshell will be propagated because of bash -e?
     # else, wrap in an if ! /then exit?
     (
-      cd "${dir}" || exit 1
+      cd "${dir}" || return 1
       if ! httpcode=$(curl -sL "${url}" -o "${tgz}" --write-out "%{http_code}"); then
         echo "ERROR: Failed curl download of ${url}; httpcode=${httpcode}." >&2
         # Clean up the tgz -- curl will touch it even if it fails.
         rm -f "${tgz}"
-        exit 1
+        return 1
       fi
       if (( "${httpcode}" < 200 )) || (( "${httpcode}" > 299 )); then
         echo "ERROR: Bad HTTP code downloading ${url}; httpcode=${httpcode}." >&2
         # Clean up the tgz -- curl will touch it even if it fails.
         rm -f "${tgz}"
-        exit 1
+        return 1
       fi
     )
   fi
@@ -106,7 +106,7 @@ function create_weed_dir {
   # Exit if the temp directory wasn't created successfully.
   if [[ ! -d "${weed_dir}" ]]; then
     echo "ERROR: Failed create of weed directory ${weed_dir}" >&2
-    exit 1
+    return 1
   fi
   WEED_DIR="${weed_dir}"
 }
@@ -161,17 +161,17 @@ function start_weed {
         tail -50 "${WEED_DIR}/weed.INFO" >&2
       fi
       echo "ERROR: Failed to start weed" >&2
-      exit 1
+      return 1
     fi
   done
   if (( "${index}" >= "${max}" )); then
     echo "ERROR: Ran out of retries (${index})" >&2
-    exit 1
+    return 1
   fi
   # Check server is up from client's perspective. Get a file id (fid) and volume URL.
   if ! curl -s "http://localhost:${master_port}/dir/assign" | grep fid &> /dev/null; then
     echo "ERROR: Failed to curl fid" >&2
-    exit 1
+    return 1
   fi
   # Return two values.
   WEED_PID="${weed_pid}"
