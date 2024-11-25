@@ -86,7 +86,7 @@ function backup {
     --knob_http_request_aws_v4_header=true
   then
     err "Start fdbbackup failed"
-    exit 1
+    return 1
   fi
 }
 
@@ -107,7 +107,7 @@ function restore {
     --knob_http_request_aws_v4_header=true
   then
     err "Start fdbrestore failed"
-    exit 1
+    return 1
   fi
 }
 
@@ -122,32 +122,32 @@ function test_s3_backup_and_restore {
   log "Load data"
   if ! load_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed loading data into fdb"
-    exit 1
+    return 1
   fi
   log "Run s3 backup"
   if ! backup "${local_build_dir}" "${scratch_dir}" "${local_s3_port}"; then
     err "Failed backup"
-    exit 1
+    return 1
   fi
   log "Clear fdb data"
   if ! clear_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed clear data in fdb"
-    exit 1
+    return 1
   fi
   log "Restore from s3"
   if ! restore "${local_build_dir}" "${scratch_dir}" "${local_s3_port}"; then
     err "Failed restore"
-    exit 1
+    return 1
   fi
   log "Verify restore"
   if ! verify_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed verification of data in fdb"
-    exit 1
+    return 1
   fi
   log "Check for Severity=40 errors"
   if ! grep_for_severity40 "${scratch_dir}"; then
     err "Found Severity=40 errors in logs"
-    exit 1
+    return 1
   fi
 }
 

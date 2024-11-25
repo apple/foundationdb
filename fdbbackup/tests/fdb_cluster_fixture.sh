@@ -53,7 +53,7 @@ function start_fdb_cluster {
       sleep 1
       if ! "${local_build_dir}/bin/fdbcli" -C "${scratch_dir}/loopback_cluster/fdb.cluster" --exec status; then
         err "Client failed to obtain healthy status"
-        exit 1
+        return 1
       fi
       break;
     fi
@@ -63,7 +63,7 @@ function start_fdb_cluster {
       continue
     fi
     err "Failed to start fdb cluster"
-    exit 1
+    return 1
   done
 }
 
@@ -82,7 +82,7 @@ function start_backup_agent {
     wait "${pid}"
     status=$?
     err "Failed to start backup_agent."
-    exit "${status}"
+    return "${status}"
   fi
   # Otherwise, it came up. Add it to pids to kill on way out.
   FDB_PIDS+=( "${pid}" ) 

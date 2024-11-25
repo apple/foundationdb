@@ -40,12 +40,12 @@ function has_data {
     --exec "getrange \"\" \xff 1000" 2>&1 )
   then
     err "Failed to getrange"
-    exit 1
+    return 1
   fi
   if ! echo "${result}" | grep "${FDB_KEY_PREFIX}"
   then
     err "No data"
-    exit 1
+    return 1
   fi
 }
 
@@ -60,14 +60,14 @@ function has_nodata {
     --exec "getrange \"\" \xff 1000" 2>&1 )
   then
     err "Failed to getrange"
-    exit 1
+    return 1
   fi
   if ! echo "${result}" | grep "${FDB_KEY_PREFIX}"; then
     # We did not find any keys in the output. Good.
     :
   else
     err "Has data"
-    exit 1
+    return 1
   fi
 }
 
@@ -90,11 +90,11 @@ function load_data {
     "${local_build_dir}/bin/fdbcli" -C "${scratch_dir}/loopback_cluster/fdb.cluster" >&2
   then
     err "Failed to load data"
-    exit 1
+    return 1
   fi
   if ! has_data "${local_build_dir}" "${scratch_dir}"; then
     err "No data"
-    exit 1
+    return 1
   fi
 }
 
@@ -109,7 +109,7 @@ function clear_data {
     --exec "writemode on; clearrange \"\" \xff;"
   then
     err "Failed to clearrange"
-    exit 1
+    return 1
   fi
   if ! has_nodata "${local_build_dir}" "${scratch_dir}"; then
     err "Has data"
@@ -133,7 +133,7 @@ function verify_data {
       sed -e "s/.*is [[:punct:]]//" | sed -e "s/[[:punct:]]*$//")
     if [[ "${FDB_DATA[i]}" != "${value}" ]]; then
       err "${FDB_DATA[i]} is not equal to ${value}"
-      exit 1
+      return 1
     fi
   done
 }
@@ -145,11 +145,11 @@ function is_fdb_source_dir {
   local dir="${1}"
   if [[ ! -d "${dir}" ]]; then
     err "${dir} is not a directory"
-    exit 1
+    return 1
   fi
   if [[ ! -f "${dir}/LICENSE" ]]; then
     err "${dir} is not an fdb source directory"
-    exit 1
+    return 1
   fi
   echo "${dir}"
 }
@@ -171,9 +171,8 @@ function log_test_result {
 # $1 Dir to search under.
 function grep_for_severity40 {
   local dir="${1}"
-  if output=$(grep -r -e "Severity=\"40\"" "${dir}"); then
+  if grep -r -e "Severity=\"40\"" "${dir}"; then
     err "Found 'Severity=40' errors"
-    echo "${output}"
-    exit 1
+    return 1
   fi
 }
