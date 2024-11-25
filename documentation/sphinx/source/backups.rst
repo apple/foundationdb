@@ -61,10 +61,10 @@ By default, the FoundationDB packages are configured to start a single ``backup_
 
 If instead you want to perform a backup to the local disk of a particular machine or machines which are not network accessible to the FoundationDB servers, then you should disable the backup agents on the FoundationDB servers. This is accomplished by commenting out all of the ``[backup_agent.<ID>]`` sections in :ref:`foundationdb.conf <foundationdb-conf>`. Do not comment out the global ``[backup_agent]`` section. Next, start backup agents on the destination machine or machines. Now, when you start a backup, you can specify the destination directory (as a Backup URL) using a local path on the destination machines. The backup agents will fetch data from the database and store it locally on the destination machines.
 
-Blobstore Access Permisions
+Blobstore Access Permissions
 ===========
 
-If a remote blobstore like AWS S3 is used to store the backup data, you should ensure to restrict the backup agent permissions as much as possible.
+If a remote blobstore, like AWS S3, is used to store the backup data, you should ensure to restrict the backup agent permissions as much as possible.
 You can either use the same policy for the ``backup_agent`` and ``fdbbackup`` or separate those.
 Note: Your actual required permissions might be different, depending on your setup and requirements.
 
@@ -87,7 +87,7 @@ Required permissions for the ``backup_agent`` and ``fdbbackup`` at the object le
     s3:ListMultipartUploadParts
 
 Note: If you want that the ``backup_agent`` or ``fdbbackup`` can create a bucket, you have to add the ``s3:CreateBucket`` permission.
-If you want to encrypt the data at rest in S3 you have to make sure that S3 is properly configured and that the `backup_agent` and `fdbbackup` have access to [KMS]
+If you want to encrypt the data at rest in S3 you have to make sure that S3 is properly configured and that the `backup_agent` and `fdbbackup` have access to `KMS <https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.Keys.html>`_.
 For additional information read the AWS S3 documention for `Policy Actions <https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html>`_ or the equivalent documentation for your blobstore.
 
 Backup URLs
