@@ -62,7 +62,7 @@ By default, the FoundationDB packages are configured to start a single ``backup_
 If instead you want to perform a backup to the local disk of a particular machine or machines which are not network accessible to the FoundationDB servers, then you should disable the backup agents on the FoundationDB servers. This is accomplished by commenting out all of the ``[backup_agent.<ID>]`` sections in :ref:`foundationdb.conf <foundationdb-conf>`. Do not comment out the global ``[backup_agent]`` section. Next, start backup agents on the destination machine or machines. Now, when you start a backup, you can specify the destination directory (as a Backup URL) using a local path on the destination machines. The backup agents will fetch data from the database and store it locally on the destination machines.
 
 Blobstore Access Permissions
-===========
+============================
 
 If a remote blobstore, like AWS S3, is used to store the backup data, you should ensure to restrict the backup agent permissions as much as possible.
 You can either use the same policy for the ``backup_agent`` and ``fdbbackup`` or separate those.
