@@ -146,7 +146,13 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 		// fdb.Error
 		var ep Error
 		if errors.As(e, &ep) {
-			e = onError(ep).Get()
+			processedErr := onError(ep).Get()
+			var newEp Error
+			if !errors.As(processedErr, &newEp) || newEp.Code != ep.Code {
+				// override original error only if not an Error or code changed
+				// fdb_transaction_on_error(), called by OnError, will currently almost always return same error as the original one
+				e = processedErr
+			}
 		}
 
 		// If OnError returns an error, then it's not
