@@ -108,16 +108,45 @@ std::pair<BulkDumpFileSet, BulkDumpFileSet> getLocalRemoteFileSetSetting(Version
 	return std::make_pair(fileSetLocal, fileSetRemote);
 }
 
-// Return first value: if has data file; second value: if has bytes sampling file
+// Generate SST file given the input sortedKVS to the input filePath
+void writeKVSToSSTFile(std::string filePath, const std::map<Key, Value>& sortedKVS, UID logId) {
+	// Check file
+	if (fileExists(filePath)) {
+		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
+		    .detail("Reason", "exist old File when writeKVSToSSTFile")
+		    .detail("DataFilePathLocal", filePath);
+		ASSERT_WE_THINK(false);
+		throw retry();
+	}
+	// Dump data to file
+	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+	sstWriter->open(filePath);
+	for (const auto& [key, value] : sortedKVS) {
+		sstWriter->write(key, value); // assuming sorted
+	}
+	if (!sstWriter->finish()) {
+		// Unexpected: having data but failed to finish
+		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
+		    .detail("Reason", "failed to finish data sst writer when writeKVSToSSTFile")
+		    .detail("DataFilePath", filePath);
+		ASSERT_WE_THINK(false);
+		throw retry();
+	}
+	return;
+}
+
+// Generate key-value data, byte sampling data, and manifest file given a range at a version with a certain bytes
+// Return BulkDumpManifest metadata (equivalent to content of the manifest file)
 BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
-                                              const std::map<Key, Value>& sortedKVS,
+                                              const std::map<Key, Value>& sortedData,
+                                              const std::map<Key, Value>& sortedSample,
                                               const BulkDumpFileSet& localFileSetConfig,
                                               const BulkDumpFileSet& remoteFileSetConfig,
                                               const ByteSampleSetting& byteSampleSetting,
                                               Version dumpVersion,
                                               const KeyRange& dumpRange,
                                               int64_t dumpBytes) {
-	// Clean up local folder
+	// Step 1: Clean up local folder
 	platform::eraseDirectoryRecursive(localFileSetConfig.folderPath);
 	if (!platform::createDirectory(localFileSetConfig.folderPath)) {
 		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
@@ -125,78 +154,34 @@ BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
 		    .detail("DumpFolderLocal", localFileSetConfig.folderPath);
 		throw retry();
 	}
-	// Dump data and bytes sampling to files
+
+	// Step 2: Dump data to file
 	bool containDataFile = false;
-	bool containByteSampleFile = false;
-	if (sortedKVS.size() > 0) {
+	if (sortedData.size() > 0) {
+		writeKVSToSSTFile(localFileSetConfig.dataPath, sortedData, logId);
 		containDataFile = true;
-		if (fileExists(localFileSetConfig.dataPath)) {
-			TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-			    .detail("Reason", "exist old dataFile")
-			    .detail("DataFilePathLocal", localFileSetConfig.dataPath);
-			ASSERT_WE_THINK(false);
-			throw retry();
-		}
-		if (fileExists(localFileSetConfig.byteSamplePath)) {
-			TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-			    .detail("Reason", "exist old byteSampleFile")
-			    .detail("ByteSampleFilePathLocal", localFileSetConfig.byteSamplePath);
-			ASSERT_WE_THINK(false);
-			throw retry();
-		}
-		std::unique_ptr<IRocksDBSstFileWriter> sstWriterData = newRocksDBSstFileWriter();
-		std::unique_ptr<IRocksDBSstFileWriter> sstWriterByteSample = newRocksDBSstFileWriter();
-		sstWriterData->open(localFileSetConfig.dataPath);
-		sstWriterByteSample->open(localFileSetConfig.byteSamplePath);
-		bool anySampled = false;
-		for (const auto& [key, value] : sortedKVS) {
-			sstWriterData->write(key, value); // assuming sorted
-			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(key, value));
-			if (sampleInfo.inSample) {
-				sstWriterByteSample->write(key, value);
-				anySampled = true;
-			}
-		}
-		if (!sstWriterData->finish()) {
-			TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-			    .detail("Reason", "failed to finish data sst writer")
-			    .detail("DataFilePath", localFileSetConfig.dataPath);
-			ASSERT_WE_THINK(false);
-			throw retry();
-		}
-		if (anySampled) {
-			containByteSampleFile = true;
-			if (!sstWriterByteSample->finish()) {
-				TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-				    .detail("Reason", "failed to finish byte sample sst writer")
-				    .detail("ByteSampleFilePathLocal", localFileSetConfig.byteSamplePath);
-				ASSERT_WE_THINK(false);
-				throw retry();
-			}
-		} else {
-			containByteSampleFile = false;
-			if (!deleteFile(localFileSetConfig.byteSamplePath)) {
-				TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
-				    .detail("Reason", "failed to delete empty byte sample file")
-				    .detail("ByteSampleFilePathLocal", localFileSetConfig.byteSamplePath);
-				ASSERT_WE_THINK(false);
-				throw retry();
-			}
-		}
 	} else {
+		ASSERT(sortedSample.empty());
 		containDataFile = false;
 	}
 
-	// Generate manifest file
+	// Step 3: Dump sample to file
+	bool containByteSampleFile = false;
+	if (sortedSample.size() > 0) {
+		writeKVSToSSTFile(localFileSetConfig.byteSamplePath, sortedSample, logId);
+		ASSERT(containDataFile);
+		containByteSampleFile = true;
+	} else {
+		containByteSampleFile = false;
+	}
+
+	// Step 4: Generate manifest file
 	if (fileExists(localFileSetConfig.manifestPath)) {
 		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
 		    .detail("Reason", "exist old manifestFile")
 		    .detail("ManifestFilePathLocal", localFileSetConfig.manifestPath);
 		ASSERT_WE_THINK(false);
 		throw retry();
-	}
-	if (containByteSampleFile) {
-		ASSERT(containDataFile);
 	}
 	BulkDumpFileSet fileSetRemote(remoteFileSetConfig.rootPath,
 	                              remoteFileSetConfig.folderPath,

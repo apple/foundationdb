@@ -87,10 +87,11 @@ std::string getJobManifestFileName(const UID& jobId);
 // dataVersion should be always valid. dataBytes can be 0 in case of an empty range.
 std::string generateJobManifestFileContent(const std::map<Key, BulkDumpManifest>& manifests);
 
-// The size of sortedKVS is defined at the place of generating the data (getRangeDataToDump).
+// The size of sortedData is defined at the place of generating the data (getRangeDataToDump).
 // The size is configured by MOVE_SHARD_KRM_ROW_LIMIT.
 BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
-                                              const std::map<Key, Value>& sortedKVS,
+                                              const std::map<Key, Value>& sortedData,
+                                              const std::map<Key, Value>& sortedSample,
                                               const BulkDumpFileSet& localFileSet,
                                               const BulkDumpFileSet& remoteFileSet,
                                               const ByteSampleSetting& byteSampleSetting,

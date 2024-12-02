@@ -5982,11 +5982,15 @@ ACTOR Future<Version> getReadVersion(StorageServer* data) {
 
 struct RangeDumpData {
 	std::map<Key, Value> kvs;
+	std::map<Key, Value> sampled;
 	Key lastKey;
 	int64_t kvsBytes;
 	RangeDumpData() = default;
-	RangeDumpData(const std::map<Key, Value>& kvs, const Key& lastKey, int64_t kvsBytes)
-	  : kvs(kvs), lastKey(lastKey), kvsBytes(kvsBytes) {}
+	RangeDumpData(const std::map<Key, Value>& kvs,
+	              const std::map<Key, Value>& sampled,
+	              const Key& lastKey,
+	              int64_t kvsBytes)
+	  : kvs(kvs), sampled(sampled), lastKey(lastKey), kvsBytes(kvsBytes) {}
 };
 
 ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange range, Version version) {
@@ -6005,17 +6009,22 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 	if (rep.get().error.present()) {
 		throw rep.get().error.get();
 	}
-	// TODO(BulkDump): Single scan
 	std::map<Key, Value> kvsToDump;
+	std::map<Key, Value> sample;
 	for (const auto& kv : rep.get().data) {
 		auto res = kvsToDump.insert({ kv.key, kv.value });
 		ASSERT(res.second);
+		ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(kv.key, kv.value));
+		if (sampleInfo.inSample) {
+			auto resSample = sample.insert({ kv.key, kv.value });
+			ASSERT(resSample.second);
+		}
 	}
 	Key lastKey = range.end;
 	if (rep.get().more) {
 		lastKey = kvsToDump.rbegin()->first;
 	}
-	return RangeDumpData(kvsToDump, lastKey, rep.get().data.expectedSize());
+	return RangeDumpData(kvsToDump, sample, lastKey, rep.get().data.expectedSize());
 }
 
 std::string getBulkDumpLocalRoot(StorageServer* data) {
@@ -6115,6 +6124,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			state BulkDumpManifest manifest =
 			    dumpDataFileToLocalDirectory(data->thisServerID,
 			                                 rangeDumpData.kvs,
+			                                 rangeDumpData.sampled,
 			                                 localFileSetSetting,
 			                                 remoteFileSetSetting,
 			                                 byteSampleSetting,
