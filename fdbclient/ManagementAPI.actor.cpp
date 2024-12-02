@@ -3007,13 +3007,56 @@ ACTOR Future<int> setBulkDumpMode(Database cx, int mode) {
 	}
 }
 
+// Return job Id if existing any bulk dump job globally.
+// There is at most on bulk dump job at any time on the entire key space.
+// A job of a range can spawn multiple tasks according to the shard boundary.
+// Those tasks share the same job Id (aka belonging to the same job).
+ACTOR Future<Optional<UID>> existAnyBulkDumpTask(Transaction* tr) {
+	state RangeResult rangeResult;
+	wait(store(rangeResult,
+	           krmGetRanges(tr,
+	                        bulkDumpPrefix,
+	                        normalKeys,
+	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+	// krmGetRanges splits the result into batches.
+	// Check first batch is enough since we only check if any task exists
+	for (int i = 0; i < rangeResult.size() - 1; ++i) {
+		if (rangeResult[i].value.empty()) {
+			continue;
+		}
+		BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+		return bulkDumpState.getJobId();
+	}
+	return Optional<UID>();
+}
+
 ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpTask) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			// TODO(BulkDump): reject the request if there is an ongoing bulk dump job
+			Optional<UID> existJobId = wait(existAnyBulkDumpTask(&tr));
+			if (existJobId.present() && existJobId.get() != bulkDumpTask.getJobId()) {
+				TraceEvent(SevWarn, "SubmitBulkDumpTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "ExistingDifferentJob")
+				    .detail("ExistingJobId", existJobId.get())
+				    .detail("NewJobId", bulkDumpTask.getJobId())
+				    .detail("Task", bulkDumpTask.toString());
+			}
+			if (existJobId.present() && existJobId.get() == bulkDumpTask.getJobId()) {
+				TraceEvent(SevWarn, "SubmitBulkDumpTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "ExistingSameJob")
+				    .detail("ExistingJobId", existJobId.get())
+				    .detail("NewJobId", bulkDumpTask.getJobId())
+				    .detail("Task", bulkDumpTask.toString());
+				return Void(); // give up if a job with same id has been submitted
+			}
 			if (bulkDumpTask.getPhase() != BulkDumpPhase::Submitted) {
 				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkDumpTaskError")
 				    .setMaxEventLength(-1)
