@@ -6151,7 +6151,6 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			if (manifest.fileSet.byteSamplePath.empty()) {
 				localFileSet.byteSamplePath = "";
 			}
-
 			wait(uploadBulkDumpFileSet(
 			    req.bulkDumpState.getTransportMethod(), localFileSet, manifest.fileSet, data->thisServerID));
 
@@ -6176,7 +6175,12 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			if (e.code() == error_code_bulkdump_task_outdated || e.code() == error_code_wrong_shard_server) {
+			if (e.code() == error_code_bulkdump_task_outdated) {
+				req.reply.sendError(bulkdump_task_outdated()); // give up
+				break; // silently exit
+			}
+			if (e.code() == error_code_wrong_shard_server) {
+				req.reply.sendError(bulkdump_task_failed()); // give up
 				break; // silently exit
 			}
 			TraceEvent(SevInfo, "SSBulkDumpError", data->thisServerID)
