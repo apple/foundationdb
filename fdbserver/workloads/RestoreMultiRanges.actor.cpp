@@ -150,15 +150,15 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		state Standalone<VectorRef<KeyRangeRef>> ranges;
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("a"_sr, "aaaaa"_sr));
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("bb"_sr, "bbbbb"_sr)); // Skip "b"
-		wait(success(self->backupAgent.restore(cx,
-		                                       cx,
-		                                       Key(tagName),
-		                                       Key(container->getURL()),
-		                                       {},
-		                                       ranges,
-		                                       WaitForComplete::True,
-		                                       ::invalidVersion,
-		                                       Verbose::True)));
+		wait(success(self->backupAgent.restoreConstructVersion(cx,
+		                                                       cx,
+		                                                       Key(tagName),
+		                                                       Key(container->getURL()),
+		                                                       {},
+		                                                       ranges,
+		                                                       WaitForComplete::True,
+		                                                       ::invalidVersion,
+		                                                       Verbose::True)));
 		TraceEvent("RestoreMultiRanges_Success");
 		return Void();
 	}
