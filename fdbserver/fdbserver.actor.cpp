@@ -2226,7 +2226,9 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests", "fdbblob" };
+			const std::set<std::string> allowedDirectories = {
+				".", "..", "backups", "unittests", "fdbblob", "bulkdump"
+			};
 
 			for (const auto& dir : directories) {
 				if (dir.size() != 32 && !allowedDirectories.contains(dir) && dir.find("snap") == std::string::npos) {

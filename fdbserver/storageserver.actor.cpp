@@ -6080,7 +6080,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	loop {
 		try {
 			if (batchNum == 0) { // clean up working folder initially
-				platform::eraseDirectoryRecursive(abspath(joinPath(rootFolderLocal, taskFolder)));
+				clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
 			}
 
 			// Dump data of rangeToDump in a relativeFolder
@@ -6155,7 +6155,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			    req.bulkDumpState.getTransportMethod(), localFileSet, manifest.fileSet, data->thisServerID));
 
 			// Clean up local files
-			platform::eraseDirectoryRecursive(localFileSet.folderPath);
+			clearFileFolder(localFileSet.folderPath);
 
 			// Progressively set metadata of the data range as complete phase
 			// Persist remoteFilePaths to the corresponding range
@@ -6175,6 +6175,11 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
+			TraceEvent(SevInfo, "SSBulkDumpError", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("Task", req.bulkDumpState.toString())
+			    .detail("RetryCount", retryCount)
+			    .detail("BatchNum", batchNum);
 			if (e.code() == error_code_bulkdump_task_outdated) {
 				req.reply.sendError(bulkdump_task_outdated()); // give up
 				break; // silently exit
@@ -6183,11 +6188,14 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 				req.reply.sendError(bulkdump_task_failed()); // give up
 				break; // silently exit
 			}
-			TraceEvent(SevInfo, "SSBulkDumpError", data->thisServerID)
-			    .errorUnsuppressed(e)
-			    .detail("Task", req.bulkDumpState.toString())
-			    .detail("RetryCount", retryCount)
-			    .detail("BatchNum", batchNum);
+			if (e.code() == error_code_platform_error) {
+				req.reply.sendError(bulkdump_task_failed()); // give up
+				break; // silently exit
+			}
+			if (e.code() == error_code_io_error) {
+				req.reply.sendError(bulkdump_task_failed()); // give up
+				break; // silently exit
+			}
 			retryCount++;
 			if (retryCount > 50) {
 				req.reply.sendError(bulkdump_task_failed()); // give up
@@ -6197,7 +6205,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 		wait(delay(1.0));
 	}
 	try {
-		platform::eraseDirectoryRecursive(abspath(joinPath(rootFolderLocal, taskFolder))); // clean up
+		clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder))); // clean up
 	} catch (Error& e) {
 		// exit
 	}

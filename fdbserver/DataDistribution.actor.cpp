@@ -1486,14 +1486,11 @@ void bulkDumpUploadJobManifestFile(Reference<DataDistributor> self,
 	std::string jobFolder = generateBulkDumpJobFolder(jobId);
 	std::string jobManifestFileName = joinPath(jobFolder, getJobManifestFileName(jobId));
 	std::string localJobManifestFilePath = joinPath(self->bulkDumpFolder, jobManifestFileName);
+	std::string localFolder = abspath(joinPath(self->bulkDumpFolder, jobFolder));
 	std::string remoteJobManifestFilePath = joinPath(remoteRoot, jobManifestFileName);
-	uploadBulkDumpJobManifestFile(transportMethod,
-	                              content,
-	                              self->bulkDumpFolder,
-	                              jobFolder,
-	                              localJobManifestFilePath,
-	                              remoteJobManifestFilePath,
-	                              self->ddId);
+	generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, content, self->ddId);
+	uploadBulkDumpJobManifestFile(transportMethod, localJobManifestFilePath, remoteJobManifestFilePath, self->ddId);
+	clearFileFolder(localFolder);
 	return;
 }
 

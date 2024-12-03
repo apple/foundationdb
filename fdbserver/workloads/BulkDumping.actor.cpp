@@ -23,9 +23,10 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const std::string simulationBulkDumpFolder = "bulkDump";
+const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkdump");
 
 struct BulkDumping : TestWorkload {
 	static constexpr auto NAME = "BulkDumpingWorkload";

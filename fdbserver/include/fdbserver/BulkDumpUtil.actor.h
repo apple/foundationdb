@@ -99,6 +99,11 @@ BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
                                               const KeyRange& dumpRange,
                                               int64_t dumpBytes);
 
+void generateBulkDumpJobManifestFile(const std::string& workFolder,
+                                     const std::string& localJobManifestFilePath,
+                                     const std::string& content,
+                                     const UID& logId);
+
 // Upload manifest file for bulkdump job
 // Each job has one manifest file including manifest paths of all tasks.
 // The local file path:
@@ -106,9 +111,6 @@ BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
 // The remote file path:
 //	<rootRemote>/<jobId>-manifest.txt
 void uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
-                                   const std::string& content,
-                                   const std::string& localRoot,
-                                   const std::string& jobFolder,
                                    const std::string& localJobManifestFilePath,
                                    const std::string& remoteJobManifestFilePath,
                                    UID logId);
@@ -118,6 +120,10 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod
                                          BulkDumpFileSet sourceFileSet,
                                          BulkDumpFileSet destinationFileSet,
                                          UID logId);
+
+// Erase file folder
+void clearFileFolder(const std::string& folderPath);
+
 class ParallelismLimitor {
 public:
 	ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}
