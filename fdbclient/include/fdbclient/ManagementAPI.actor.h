@@ -208,6 +208,12 @@ ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(
     Optional<size_t> limit = Optional<size_t>(),
     Optional<BulkDumpPhase> phase = Optional<BulkDumpPhase>());
 
+// Return the existing Job ID
+ACTOR Future<Optional<UID>> existAnyBulkDumpTask(Transaction* tr);
+
+// Get total number of completed tasks within the input range
+ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);
+
 // Persist a rangeLock owner to database metadata
 // A range can only be locked by a registered owner
 ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description);

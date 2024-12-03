@@ -298,6 +298,7 @@ struct BulkDumpState {
 		BulkDumpState res = *this;
 		res.phase = BulkDumpPhase::Complete;
 		res.bulkDumpManifest = bulkDumpManifest;
+		res.range = completeRange;
 		return res;
 	}
 

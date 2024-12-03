@@ -19,9 +19,11 @@
  */
 
 #include <cinttypes>
+#include <cstddef>
 #include <string>
 #include <vector>
 
+#include "fdbclient/BulkDumping.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/RangeLock.h"
 #include "flow/Error.h"
@@ -3149,6 +3151,48 @@ ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(Database cx
 	}
 
 	return res;
+}
+
+ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
+	state Transaction tr(cx);
+	state Key readBegin = rangeToRead.begin;
+	state Key readEnd = rangeToRead.end;
+	state RangeResult rangeResult;
+	state size_t completeTaskCount = 0;
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkDumpPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+		for (int i = 0; i < rangeResult.size() - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+			if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
+				completeTaskCount++;
+			}
+		}
+		readBegin = rangeResult.back().key;
+	}
+	return completeTaskCount;
 }
 
 // Persist a new owner if input uniqueId is not existing; Update description if input uniqueId exists

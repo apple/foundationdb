@@ -6160,6 +6160,8 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// Progressively set metadata of the data range as complete phase
 			// Persist remoteFilePaths to the corresponding range
 			if (!dataRange.empty()) {
+				// The persisting range (dataRange) must be exactly same as the range presented in the manifest file
+				ASSERT(dataRange == KeyRangeRef(manifest.beginKey, manifest.endKey));
 				wait(persistCompleteBulkDumpRange(data->cx,
 				                                  req.bulkDumpState.getRangeCompleteState(dataRange, manifest)));
 			}
@@ -6184,23 +6186,12 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 				req.reply.sendError(bulkdump_task_outdated()); // give up
 				break; // silently exit
 			}
-			if (e.code() == error_code_wrong_shard_server) {
-				req.reply.sendError(bulkdump_task_failed()); // give up
-				break; // silently exit
-			}
-			if (e.code() == error_code_platform_error) {
-				req.reply.sendError(bulkdump_task_failed()); // give up
-				break; // silently exit
-			}
-			if (e.code() == error_code_io_error) {
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_platform_error ||
+			    e.code() == error_code_io_error || retryCount >= 50) {
 				req.reply.sendError(bulkdump_task_failed()); // give up
 				break; // silently exit
 			}
 			retryCount++;
-			if (retryCount > 50) {
-				req.reply.sendError(bulkdump_task_failed()); // give up
-				break;
-			}
 		}
 		wait(delay(1.0));
 	}

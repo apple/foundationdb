@@ -50,13 +50,19 @@ When loading a cluster, users can use this global manifest to rebuild the data.
 
 How to use?
 -----------
-Currently, low-level transactional APIs are provided to submit a job or clear a job. 
+Currently, FDBCLI tools and low-level ManagementAPIs are provided to submit a job or clear a job. 
 These operations are achieved by issuing transactions to update the bulkdump metadata.
 Submitting a job is achieved by writting the job metadata to the bulkdump metadata range of the job.
 When submitting a job, the API checks if there is any ongoing bulkdump job. If yes, it will reject the job. Otherwise, it accepts the job.
 Clearing a job is achieved by erasing the entire user range space of the bulkdump metadata range. When clearing a job, all metadata will be cleared and any ongoing task is stopped (with some latency).
 
-Currently, ManagementAPI provides following interfaces to do the operations:
+FDBCLI provides following interfaces to do the operations:
+
+1. Submit a job: bulkdump local (BeginKey) (EndKey) (RootFolder) // "local" indicates to dump the data to a local folder. Will support dumping to a blob storage.
+2. Clear a job: bulkdump clear
+3. Enable the feature: bulkdump mode on \| off
+
+ManagementAPI provides following interfaces to do the operations:
 
 1. Submit a job: submitBulkDumpJob(BulkDumpState job); // For generating the input job metadata, see the point 4.
 2. Clear a job: clearBulkDumpJob();

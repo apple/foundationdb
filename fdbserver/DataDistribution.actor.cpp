@@ -1542,8 +1542,10 @@ ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
 					throw bulkdump_task_failed();
 				}
 				ASSERT(bulkDumpState.getManifest().present());
-				ASSERT(bulkDumpState.getManifest().get().beginKey == bulkDumpResult[bulkDumpResultIndex].key &&
-				       bulkDumpState.getManifest().get().endKey == bulkDumpResult[bulkDumpResultIndex + 1].key);
+				if (bulkDumpState.getManifest().get().beginKey != bulkDumpResult[bulkDumpResultIndex].key ||
+				    bulkDumpState.getManifest().get().endKey != bulkDumpResult[bulkDumpResultIndex + 1].key) {
+					ASSERT(false);
+				}
 				auto res =
 				    manifests.insert({ bulkDumpState.getManifest().get().beginKey, bulkDumpState.getManifest().get() });
 				ASSERT(res.second);
