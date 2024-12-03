@@ -12,7 +12,7 @@ Overview
 In a FoundationDB (FDB) key-value cluster, every key-value pair is replicated across multiple storage servers. 
 The BulkDump tool is developed to dump all key-value pairs within the input range to files.
 Note that when the input range is large, the range is splitted into smaller ranges.
-Each subrange data is dumped to a file at a version. All data within a file is at the same version. However, different files' version can be different.
+Each subrange data is dumped to a file at a version. All data within a file is at the same version. However, different files' versions can be different.
 
 Input and output
 ----------------
@@ -23,18 +23,18 @@ The path root can be either a blobstore url (TBD) or a path of a file system.
 Given the input range, if the range is large, the range is splitted into smaller ranges.
 Each subrange is dump at a version to a folder. In particular, the folder is organized as following:
 
-1. <rootLocal>/<relativeFolder>/<dumpVersion>-manifest.txt (must have)
-2. <rootLocal>/<relativeFolder>/<dumpVersion>-data.sst (omitted if the subrange is empty)
-3. <rootLocal>/<relativeFolder>/<dumpVersion>-sample.sst (omitted if data size is too small to have a sample)
+1. (rootLocal)/(relativeFolder)/(dumpVersion)-manifest.txt (must have)
+2. (rootLocal)/(relativeFolder)/(dumpVersion)-data.sst (omitted if the subrange is empty)
+3. (rootLocal)/(relativeFolder)/(dumpVersion)-sample.sst (omitted if data size is too small to have a sample)
 
-The <relativeFolder> is defined as <JobId>/<TaskId>/<BatchId>. 
+The (relativeFolder) is defined as (JobId)/(TaskId)/(BatchId). 
 At any time, a FDB cluster can have at most one bulkdump job. 
 A bulkdump job is partitioned into tasks by range and according to the shard boundary.
 When dumping the range of a task, the data is collected in batches. All key-value pairs of a batch is collected at the same version.
-Above all, <JobId> is the unique ID of a job. <TaskId> is the unique ID of a task. <BatchId> is the unique ID of a batch.
+Above all, (JobId) is the unique ID of a job. (TaskId) is the unique ID of a task. (BatchId) is the unique ID of a batch.
 All tasks's data files of the same job locates at the same Job folder named by the JobId.
 
-Each <relativeFolder> corresponds to exactly one subrange with exactly one manifest file. 
+Each (relativeFolder) corresponds to exactly one subrange with exactly one manifest file. 
 The manifest file includes all necessary information for loading the data from the folder to a FDB cluster.
 The manifest file content includes following information:
 
@@ -80,17 +80,16 @@ Workflow
 
 Invariant
 ---------
-- At any time, FDB cluster accepts at most one bulkdump job.
+- At any time, FDB cluster accepts at most one bulkdump job. When user issuing a bulk dump job, the client will check if there is an existing bulk load job. If yes, reject the request.
 - DD partitions the range into subranges according to the shard boundary. For a subrange, the data is guaranteed to put into the same folder --- same as task ID. 
 - Each data filename is the version indicating the version of the data read by the SS.
-- Each subrange always has one manifest file indicating the metadata information of the data, such as Range, Checksum (to implement later in a separate PR), and FilePath. 
+- Each subrange always has one manifest file indicating the metadata information of the data, such as Range, Checksum (to be implemented later in a separate PR), and FilePath. 
 - In SS, we dump files at first and then write metadata in the system key space. If any phase is failed, DD will re-do the range. For each time SS writes the folder (locally or in BlobStore), the SS erases the folder at first.
 - A SS handles at most one dump task at a time (the parallelism is protected by the knob SS_SERVE_BULKDUMP_PARALLELISM. With current implementation, this knob is set to 1. However, we leave the flexibility of setting bulkdump parallelism at a SS here).
 - Each subrange does not necessarily have a byteSample file and data file which depends on the data size. A SS may be assigned a range but the range is empty.
-- When user issuing a bulk dump task, the client will check if there is an ongoing bulk load task. If yes, reject the request.
 
 Failure handling
 ----------------
-- SS failure: DD will receive broken_promise. DD gives up working on the range at this time. DD will issue the request in the future until the range completes.
+- SS failure: DD will receive broken_promise. DD gives up working on the range at this time. DD will re-issue the request (via a different task) in the future until the range completes.
 - DD failure: It is possible that the same SS recieves two requests to work on the same range. SS uses a FlowLock to guarantee that SS handles one request at a time. So, there is no conflict.
 - S3 outage: Result in task failure. The failed task will be retried by DD.

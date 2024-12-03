@@ -139,9 +139,9 @@ struct BulkDumpManifest {
 		return true;
 	}
 
-	std::string getBeginKeyString() const { return beginKey.toHexStringPlain(); }
+	std::string getBeginKeyString() const { return beginKey.toFullHexStringPlain(); }
 
-	std::string getEndKeyString() const { return endKey.toHexStringPlain(); }
+	std::string getEndKeyString() const { return endKey.toFullHexStringPlain(); }
 
 	// Generating human readable string to stored in the manifest file
 	std::string toString() const {
