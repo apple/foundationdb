@@ -33,6 +33,7 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 #include "flow/flow.h"
+#include <string>
 
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
                                  const BulkDumpState& bulkDumpState) {

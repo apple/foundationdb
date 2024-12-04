@@ -5994,37 +5994,63 @@ struct RangeDumpData {
 };
 
 ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange range, Version version) {
-	state GetKeyValuesRequest localReq;
-	localReq.begin = firstGreaterOrEqual(range.begin);
-	localReq.end = firstGreaterOrEqual(range.end);
-	localReq.version = version;
-	localReq.limit = SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT;
-	localReq.limitBytes = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
-	localReq.tags = TagSet();
-	data->actors.add(getKeyValuesQ(data, localReq));
-	state ErrorOr<GetKeyValuesReply> rep = wait(errorOr(localReq.reply.getFuture()));
-	if (rep.isError()) {
-		throw rep.getError();
-	}
-	if (rep.get().error.present()) {
-		throw rep.get().error.get();
-	}
-	std::map<Key, Value> kvsToDump;
-	std::map<Key, Value> sample;
-	for (const auto& kv : rep.get().data) {
-		auto res = kvsToDump.insert({ kv.key, kv.value });
-		ASSERT(res.second);
-		ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(kv.key, kv.value));
-		if (sampleInfo.inSample) {
-			auto resSample = sample.insert({ kv.key, kv.value });
-			ASSERT(resSample.second);
+	state std::map<Key, Value> kvsToDump;
+	state std::map<Key, Value> sample;
+	state int64_t currentExpectedBytes = 0;
+	state Key beginKey = range.begin;
+	state Key lastKey = range.end;
+	// Accumulate data read from local storage to kvsToDump and make sampling until any error presents
+	loop {
+		// Read data and stop for any error
+		try {
+			state GetKeyValuesRequest localReq;
+			localReq.begin = firstGreaterOrEqual(beginKey);
+			localReq.end = firstGreaterOrEqual(range.end);
+			localReq.version = version;
+			localReq.limit = SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT;
+			localReq.limitBytes = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
+			localReq.tags = TagSet();
+			data->actors.add(getKeyValuesQ(data, localReq));
+			state ErrorOr<GetKeyValuesReply> rep = wait(errorOr(localReq.reply.getFuture()));
+			if (rep.isError()) {
+				throw rep.getError();
+			}
+			if (rep.get().error.present()) {
+				throw rep.get().error.get();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			break;
 		}
+
+		// Given the data, create KVS and sample. Stop if the accumulated data size is too large.
+		for (const auto& kv : rep.get().data) {
+			lastKey = kv.key;
+			auto res = kvsToDump.insert({ kv.key, kv.value });
+			ASSERT(res.second);
+			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(kv.key, kv.value));
+			if (sampleInfo.inSample) {
+				auto resSample = sample.insert({ kv.key, kv.value });
+				ASSERT(resSample.second);
+			}
+			currentExpectedBytes = currentExpectedBytes + kv.expectedSize() + kv.expectedSize();
+			if (currentExpectedBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
+				break;
+			}
+		}
+
+		// Stop if no more data or having too large bytes
+		if (!rep.get().more || currentExpectedBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
+			break;
+		}
+
+		// Yield and go to the next round
+		wait(delay(0.1));
+		beginKey = keyAfter(lastKey);
 	}
-	Key lastKey = range.end;
-	if (rep.get().more) {
-		lastKey = kvsToDump.rbegin()->first;
-	}
-	return RangeDumpData(kvsToDump, sample, lastKey, rep.get().data.expectedSize());
+	return RangeDumpData(kvsToDump, sample, lastKey, currentExpectedBytes);
 }
 
 std::string getBulkDumpLocalRoot(StorageServer* data) {
@@ -6067,7 +6093,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	state Key rangeEnd = req.bulkDumpState.getRange().end;
 	state int64_t readBytes = 0;
 	state int retryCount = 0;
-	state int batchNum = 0;
+	state uint64_t batchNum = 0;
 	state Version versionToDump;
 	state RangeDumpData rangeDumpData;
 	state std::string rootFolderLocal = getBulkDumpLocalRoot(data);
@@ -6093,10 +6119,9 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// Get version to dump
 			wait(store(versionToDump, getReadVersion(data)));
 
-			// Read data locally
-			wait(store(rangeDumpData, getRangeDataToDump(data, rangeToDump, versionToDump)));
-
+			// Read data
 			// TODO(BulkDump): Read data from other servers and do checksum
+			wait(store(rangeDumpData, getRangeDataToDump(data, rangeToDump, versionToDump)));
 
 			// Generate local file paths and remote file paths
 			// The data in KVStore is dumped to the local folder at first and then
