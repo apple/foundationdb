@@ -505,24 +505,19 @@ class TwoBuffers : public ReferenceCounted<TwoBuffers>, NonCopyable {
 public:
 	class IteratorBuffer : public ReferenceCounted<IteratorBuffer> {
 	public:
-		// std::shared_ptr<char[]> data;
-		char* data;
+		std::shared_ptr<char[]> data;
 		// has_value means there is data, otherwise it means there is no data being fetched or ready
 		// is_valid means data is being fetched, is_ready means data is ready
 		std::optional<Future<Void>> fetchingData;
 		size_t size;
 		int capacity;
 		IteratorBuffer(int _capacity) {
-			// data = std::shared_ptr<char[]>(new char[capacity]());
-			fmt::print(stderr, "Allocating {}\n", _capacity);
-			data = new char[_capacity]();
-			fmt::print(stderr, "Finish Allocating {}\n", _capacity);
+			capacity = _capacity;
+			data = std::shared_ptr<char[]>(new char[capacity]());
+			fmt::print(stderr, "Allocating {}\n", capacity);
+			fmt::print(stderr, "Finish Allocating {}\n", capacity);
 			fetchingData.reset();
 			size = 0;
-			capacity = _capacity;
-		}
-		~IteratorBuffer() {
-			delete[] data;
 		}
 		bool is_valid() { return fetchingData.has_value(); }
 	};
@@ -538,7 +533,7 @@ public:
 	// peek can only be called after ready is called
 	// it returns the pointer to the active buffer
 	// std::shared_ptr<char[]> peek();
-	char* peek();
+	std::shared_ptr<char[]> peek();
 
 	bool hasNext();
 
@@ -604,7 +599,7 @@ ACTOR Future<Void> TwoBuffers::ready(Reference<TwoBuffers> self) {
 	return Void();
 }
 
-char* TwoBuffers::peek() {
+std::shared_ptr<char[]> TwoBuffers::peek() {
 	return buffers[cur]->data;
 }
 
@@ -641,7 +636,7 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	//            fileSize,
 	//            bytesToRead);
 	state int bytesRead =
-	    wait(asyncFile->read(static_cast<void*>(self->buffers[index]->data), bytesToRead, self->currentFilePosition));
+	    wait(asyncFile->read(static_cast<void*>(self->buffers[index]->data.get()), bytesToRead, self->currentFilePosition));
 	// fmt::print(stderr,
 	//            "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
 	//            self->files[self->currentFileIndex].fileName,
@@ -736,16 +731,16 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 	state Standalone<VectorRef<VersionedMutation>> mutations = Standalone<VectorRef<VersionedMutation>>();
 	wait(self->twobuffer->ready());
 	// fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
-	char* start = self->twobuffer->peek();
+	std::shared_ptr<char[]> start = self->twobuffer->peek();
 	int size = self->twobuffer->getBufferSize();
 	bool foundNewVersion = false;
 	while (self->bufferOffset < size) {
-		while (self->bufferOffset < size && !endOfBlock(start, self->bufferOffset)) {
+		while (self->bufferOffset < size && !endOfBlock(start.get(), self->bufferOffset)) {
 			// for each block
 			self->removeBlockHeader();
 
 			Version version;
-			std::memcpy(&version, start + self->bufferOffset, sizeof(Version));
+			std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
 			version = bigEndian64(version);
 			if (version != firstVersion) {
 				foundNewVersion = true;
@@ -753,12 +748,12 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			}
 
 			int32_t subsequence;
-			std::memcpy(&subsequence, start + self->bufferOffset + sizeof(Version), sizeof(int32_t));
+			std::memcpy(&subsequence, start.get() + self->bufferOffset + sizeof(Version), sizeof(int32_t));
 			subsequence = bigEndian32(subsequence);
 
 			int32_t mutationSize;
 			std::memcpy(
-			    &mutationSize, start + self->bufferOffset + sizeof(Version) + sizeof(int32_t), sizeof(int32_t));
+			    &mutationSize, start.get() + self->bufferOffset + sizeof(Version) + sizeof(int32_t), sizeof(int32_t));
 			mutationSize = bigEndian32(mutationSize);
 
 			// assumption: the entire mutation is within the buffer
@@ -770,7 +765,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 
 			Standalone<StringRef> mutationData = makeString(mutationSize);
 			std::memcpy(
-			    mutateString(mutationData), start + self->bufferOffset + self->mutationHeaderBytes, mutationSize);
+			    mutateString(mutationData), start.get() + self->bufferOffset + self->mutationHeaderBytes, mutationSize);
 			// BinaryWriter bw(Unversioned());
 			// // todo: transform from stringref to mutationref here
 			// bw.serializeBytes(mutationData);
@@ -790,7 +785,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 		// need to see if this is printed
 		// fmt::print(stderr, "ConsumeData: Finish while loop NewOffset={}, size={}, end={}\n", self->bufferOffset, size, endOfBlock(start, self->bufferOffset));
 
-		if (self->bufferOffset < size && endOfBlock(start, self->bufferOffset)) {
+		if (self->bufferOffset < size && endOfBlock(start.get(), self->bufferOffset)) {
 			// there are paddings	
 			int remain = self->BLOCK_SIZE - (self->bufferOffset % self->BLOCK_SIZE);
 			self->bufferOffset += remain;
@@ -842,7 +837,7 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	// fmt::print(stderr, "peekNextVersion::BeforeReady, tag={} \n", self->tag);
 	wait(self->twobuffer->ready());
 	// fmt::print(stderr, "peekNextVersion::AfterReady, tag={} \n", self->tag);
-	char* start = self->twobuffer->peek();
+	std::shared_ptr<char[]> start = self->twobuffer->peek();
 	// fmt::print(stderr,
 	//            "peekNextVersion::afterPeek, tag={} , startNull={}, offset={}, bufferSize={}\n",
 	//            self->tag,
@@ -852,7 +847,7 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	self->removeBlockHeader();
 	// fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
 	Version version;
-	std::memcpy(&version, start + self->bufferOffset, sizeof(Version));
+	std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
 	// now i have peekNextVersion::afterMemcpy, tag=0, version=-1
 	// seeing version = -1, means there are 8 0xff
