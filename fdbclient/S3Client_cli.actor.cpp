@@ -52,7 +52,6 @@
 
 // CLI for S3Client.
 
-
 extern const char* getSourceVersion();
 
 namespace s3client_cli {
