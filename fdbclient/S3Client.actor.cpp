@@ -73,7 +73,7 @@ static Reference<S3BlobStoreEndpoint> getEndpoint(std::string s3url,
 }
 
 // Copy filepath to bucket at resource in s3.
-ACTOR Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
+ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
                               std::string bucket,
                               std::string resource,
                               std::string filepath) {
@@ -119,7 +119,7 @@ ACTOR Future<Void> copyUpDirectory(std::string dirpath, std::string s3url) {
 }
 
 // Copy down file from s3 to filepath.
-ACTOR Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
+ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
                                 std::string bucket,
                                 std::string resource,
                                 std::string filepath) {
