@@ -488,24 +488,24 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		TraceEvent("FlowguruClearRangeFinish").log();
 		state Standalone<StringRef> restoreTag(self->backupTag.toString() + "_system");
 		printf("BackupCorrectness, backupAgent.restore is called for tag:%s\n", restoreTag.toString().c_str());
-		// wait(success(backupAgent->restoreConstructVersion(cx,
-		//                                                   cx,
-		//                                                   restoreTag,
-		//                                                   KeyRef(lastBackupContainer->getURL()),
-		//                                                   lastBackupContainer->getProxy(),
-		//                                                   systemRestoreRanges,
-		//                                                   WaitForComplete::True,
-		//                                                   targetVersion,
-		//                                                   Verbose::True,
-		//                                                   Key(),
-		//                                                   Key(),
-		//                                                   self->locked,
-		//                                                   UnlockDB::True,
-		//                                                   OnlyApplyMutationLogs::False,
-		//                                                   InconsistentSnapshotOnly::False,
-		//                                                   ::invalidVersion,
-		//                                                   self->encryptionKeyFileName,
-		//                                                   TransformPartitionedLog::True)));
+		wait(success(backupAgent->restoreConstructVersion(cx,
+		                                                  cx,
+		                                                  restoreTag,
+		                                                  KeyRef(lastBackupContainer->getURL()),
+		                                                  lastBackupContainer->getProxy(),
+		                                                  systemRestoreRanges,
+		                                                  WaitForComplete::True,
+		                                                  targetVersion,
+		                                                  Verbose::True,
+		                                                  Key(),
+		                                                  Key(),
+		                                                  self->locked,
+		                                                  UnlockDB::True,
+		                                                  OnlyApplyMutationLogs::False,
+		                                                  InconsistentSnapshotOnly::False,
+		                                                  ::invalidVersion,
+		                                                  self->encryptionKeyFileName,
+		                                                  TransformPartitionedLog::True)));
 		printf("BackupCorrectness, backupAgent.restore finished for tag:%s\n", restoreTag.toString().c_str());
 		return Void();
 	}
@@ -641,165 +641,164 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 				}
 				// and here
 
-		// 		multipleRangesInOneTag = true;
-		// 		Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
-		// 		restoreTags.push_back(restoreTag);
-		// 		printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
-		// 		       restoreIndex,
-		// 		       restoreTag.toString().c_str());
-		// 		// restores.push_back(backupAgent.restoreConstructVersion(cx,
-		// 		//                                                        cx,
-		// 		//                                                        restoreTag,
-		// 		//                                                        KeyRef(lastBackupContainer->getURL()),
-		// 		//                                                        lastBackupContainer->getProxy(),
-		// 		//                                                        self->restoreRanges,
-		// 		//                                                        WaitForComplete::True,
-		// 		//                                                        targetVersion,
-		// 		//                                                        Verbose::True,
-		// 		//                                                        Key(),
-		// 		//                                                        Key(),
-		// 		//                                                        self->locked,
-		// 		//                                                        UnlockDB::True,
-		// 		//                                                        OnlyApplyMutationLogs::False,
-		// 		//                                                        InconsistentSnapshotOnly::False,
-		// 		//                                                        ::invalidVersion,
-		// 		//                                                        self->encryptionKeyFileName,
-		// 		//                                                        TransformPartitionedLog::True));
+				multipleRangesInOneTag = true;
+				Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
+				restoreTags.push_back(restoreTag);
+				printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
+				       restoreIndex,
+				       restoreTag.toString().c_str());
+				restores.push_back(backupAgent.restoreConstructVersion(cx,
+				                                                       cx,
+				                                                       restoreTag,
+				                                                       KeyRef(lastBackupContainer->getURL()),
+				                                                       lastBackupContainer->getProxy(),
+				                                                       self->restoreRanges,
+				                                                       WaitForComplete::True,
+				                                                       targetVersion,
+				                                                       Verbose::True,
+				                                                       Key(),
+				                                                       Key(),
+				                                                       self->locked,
+				                                                       UnlockDB::True,
+				                                                       OnlyApplyMutationLogs::False,
+				                                                       InconsistentSnapshotOnly::False,
+				                                                       ::invalidVersion,
+				                                                       self->encryptionKeyFileName,
+				                                                       TransformPartitionedLog::True));
 
-		// 		wait(waitForAll(restores));
+				wait(waitForAll(restores));
 
-		// 		for (auto& restore : restores) {
-		// 			ASSERT(!restore.isError());
-		// 		}
+				for (auto& restore : restores) {
+					ASSERT(!restore.isError());
+				}
+			}
+			state Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
+			state Key backupLogValuesKey = destUidValue.withPrefix(backupLogKeys.begin);
+			state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
+			state Key backupLatestVersionsKey = uidPrefixKey(backupLatestVersionsPath, logUid);
+			state int displaySystemKeys = 0;
+
+			// Ensure that there is no left over key within the backup subspace
+			loop {
+				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+
+				TraceEvent("BARW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(self->backupTag));
+
+				try {
+					// Check the left over tasks
+					// We have to wait for the list to empty since an abort and get status
+					// can leave extra tasks in the queue
+					TraceEvent("BARW_CheckLeftoverTasks", randomID).detail("BackupTag", printable(self->backupTag));
+					state int64_t taskCount = wait(backupAgent.getTaskCount(tr));
+					state int waitCycles = 0;
+
+					if ((taskCount) && false) {
+						TraceEvent("BARW_EndingNonzeroTaskCount", randomID)
+						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("TaskCount", taskCount)
+						    .detail("WaitCycles", waitCycles);
+						printf("EndingNonZeroTasks: %ld\n", (long)taskCount);
+						wait(TaskBucket::debugPrintRange(cx, normalKeys.end, StringRef()));
+					}
+
+					while (taskCount > 0) {
+						waitCycles++;
+
+						TraceEvent("BARW_NonzeroTaskWait", randomID)
+						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("TaskCount", taskCount)
+						    .detail("WaitCycles", waitCycles);
+						printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
+						       now(),
+						       randomID.toString().c_str(),
+						       waitCycles,
+						       (long long)taskCount);
+
+						wait(delay(5.0));
+
+						tr = makeReference<ReadYourWritesTransaction>(cx);
+						wait(store(taskCount, backupAgent.getTaskCount(tr)));
+					}
+
+					RangeResult agentValues =
+					    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
+
+					// Error if the system keyspace for the backup tag is not empty
+					if (agentValues.size() > 0) {
+						displaySystemKeys++;
+						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
+						       agentValues.size(),
+						       printable(backupAgentKey).c_str());
+						TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", randomID)
+						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("LeftOverKeys", agentValues.size())
+						    .detail("KeySpace", printable(backupAgentKey));
+						for (auto& s : agentValues) {
+							TraceEvent("BARW_LeftOverKey", randomID)
+							    .detail("Key", printable(StringRef(s.key.toString())))
+							    .detail("Value", printable(StringRef(s.value.toString())));
+							printf("   Key: %-50s  Value: %s\n",
+							       printable(StringRef(s.key.toString())).c_str(),
+							       printable(StringRef(s.value.toString())).c_str());
+						}
+					} else {
+						printf("No left over backup agent configuration keys\n");
+					}
+
+					Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
+					if (latestVersion.present()) {
+						TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID)
+						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("BackupLatestVersionsKey", backupLatestVersionsKey.printable())
+						    .detail("DestUidValue", destUidValue.printable());
+					} else {
+						printf("No left over backup version key\n");
+					}
+
+					RangeResult versions = wait(tr->getRange(
+					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
+					if (!self->shareLogRange || !versions.size()) {
+						RangeResult logValues = wait(
+						    tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
+
+						// Error if the log/mutation keyspace for the backup tag  is not empty
+						if (logValues.size() > 0) {
+							displaySystemKeys++;
+							printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
+							       logValues.size(),
+							       printable(backupLogValuesKey).c_str());
+							TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID)
+							    .detail("BackupTag", printable(self->backupTag))
+							    .detail("LeftOverKeys", logValues.size())
+							    .detail("KeySpace", printable(backupLogValuesKey));
+						} else {
+							printf("No left over backup log keys\n");
+						}
+					}
+
+					break;
+				} catch (Error& e) {
+					TraceEvent("BARW_CheckException", randomID).error(e);
+					wait(tr->onError(e));
+				}
 			}
 
-		// 	state Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
-		// 	state Key backupLogValuesKey = destUidValue.withPrefix(backupLogKeys.begin);
-		// 	state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
-		// 	state Key backupLatestVersionsKey = uidPrefixKey(backupLatestVersionsPath, logUid);
-		// 	state int displaySystemKeys = 0;
+			if (displaySystemKeys) {
+				wait(TaskBucket::debugPrintRange(cx, normalKeys.end, StringRef()));
+			}
 
-		// 	// Ensure that there is no left over key within the backup subspace
-		// 	loop {
-		// 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			TraceEvent("BARW_Complete", randomID).detail("BackupTag", printable(self->backupTag));
 
-		// 		TraceEvent("BARW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(self->backupTag));
+			// Decrement the backup agent requets
+			if (self->agentRequest) {
+				BackupAndRestorePartitionedCorrectnessWorkload::backupAgentRequests--;
+			}
 
-		// 		try {
-		// 			// Check the left over tasks
-		// 			// We have to wait for the list to empty since an abort and get status
-		// 			// can leave extra tasks in the queue
-		// 			TraceEvent("BARW_CheckLeftoverTasks", randomID).detail("BackupTag", printable(self->backupTag));
-		// 			state int64_t taskCount = wait(backupAgent.getTaskCount(tr));
-		// 			state int waitCycles = 0;
-
-		// 			if ((taskCount) && false) {
-		// 				TraceEvent("BARW_EndingNonzeroTaskCount", randomID)
-		// 				    .detail("BackupTag", printable(self->backupTag))
-		// 				    .detail("TaskCount", taskCount)
-		// 				    .detail("WaitCycles", waitCycles);
-		// 				printf("EndingNonZeroTasks: %ld\n", (long)taskCount);
-		// 				wait(TaskBucket::debugPrintRange(cx, normalKeys.end, StringRef()));
-		// 			}
-
-		// 			while (taskCount > 0) {
-		// 				waitCycles++;
-
-		// 				TraceEvent("BARW_NonzeroTaskWait", randomID)
-		// 				    .detail("BackupTag", printable(self->backupTag))
-		// 				    .detail("TaskCount", taskCount)
-		// 				    .detail("WaitCycles", waitCycles);
-		// 				printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
-		// 				       now(),
-		// 				       randomID.toString().c_str(),
-		// 				       waitCycles,
-		// 				       (long long)taskCount);
-
-		// 				wait(delay(5.0));
-
-		// 				tr = makeReference<ReadYourWritesTransaction>(cx);
-		// 				wait(store(taskCount, backupAgent.getTaskCount(tr)));
-		// 			}
-
-		// 			RangeResult agentValues =
-		// 			    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
-
-		// 			// Error if the system keyspace for the backup tag is not empty
-		// 			if (agentValues.size() > 0) {
-		// 				displaySystemKeys++;
-		// 				printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
-		// 				       agentValues.size(),
-		// 				       printable(backupAgentKey).c_str());
-		// 				TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", randomID)
-		// 				    .detail("BackupTag", printable(self->backupTag))
-		// 				    .detail("LeftOverKeys", agentValues.size())
-		// 				    .detail("KeySpace", printable(backupAgentKey));
-		// 				for (auto& s : agentValues) {
-		// 					TraceEvent("BARW_LeftOverKey", randomID)
-		// 					    .detail("Key", printable(StringRef(s.key.toString())))
-		// 					    .detail("Value", printable(StringRef(s.value.toString())));
-		// 					printf("   Key: %-50s  Value: %s\n",
-		// 					       printable(StringRef(s.key.toString())).c_str(),
-		// 					       printable(StringRef(s.value.toString())).c_str());
-		// 				}
-		// 			} else {
-		// 				printf("No left over backup agent configuration keys\n");
-		// 			}
-
-		// 			Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
-		// 			if (latestVersion.present()) {
-		// 				TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID)
-		// 				    .detail("BackupTag", printable(self->backupTag))
-		// 				    .detail("BackupLatestVersionsKey", backupLatestVersionsKey.printable())
-		// 				    .detail("DestUidValue", destUidValue.printable());
-		// 			} else {
-		// 				printf("No left over backup version key\n");
-		// 			}
-
-		// 			RangeResult versions = wait(tr->getRange(
-		// 			    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
-		// 			if (!self->shareLogRange || !versions.size()) {
-		// 				RangeResult logValues = wait(
-		// 				    tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
-
-		// 				// Error if the log/mutation keyspace for the backup tag  is not empty
-		// 				if (logValues.size() > 0) {
-		// 					displaySystemKeys++;
-		// 					printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
-		// 					       logValues.size(),
-		// 					       printable(backupLogValuesKey).c_str());
-		// 					TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID)
-		// 					    .detail("BackupTag", printable(self->backupTag))
-		// 					    .detail("LeftOverKeys", logValues.size())
-		// 					    .detail("KeySpace", printable(backupLogValuesKey));
-		// 				} else {
-		// 					printf("No left over backup log keys\n");
-		// 				}
-		// 			}
-
-		// 			break;
-		// 		} catch (Error& e) {
-		// 			TraceEvent("BARW_CheckException", randomID).error(e);
-		// 			wait(tr->onError(e));
-		// 		}
-		// 	}
-
-		// 	if (displaySystemKeys) {
-		// 		wait(TaskBucket::debugPrintRange(cx, normalKeys.end, StringRef()));
-		// 	}
-
-		// 	TraceEvent("BARW_Complete", randomID).detail("BackupTag", printable(self->backupTag));
-
-		// 	// Decrement the backup agent requets
-		// 	if (self->agentRequest) {
-		// 		BackupAndRestorePartitionedCorrectnessWorkload::backupAgentRequests--;
-		// 	}
-
-		// 	// SOMEDAY: Remove after backup agents can exist quiescently
-		// 	if ((g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
-		// 	    (!BackupAndRestorePartitionedCorrectnessWorkload::backupAgentRequests)) {
-		// 		g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
-		// 	}
+			// SOMEDAY: Remove after backup agents can exist quiescently
+			if ((g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
+			    (!BackupAndRestorePartitionedCorrectnessWorkload::backupAgentRequests)) {
+				g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestorePartitionedCorrectness").error(e).GetLastError();
 			throw;
