@@ -71,40 +71,67 @@ struct BulkDumpFileSet {
 	BulkDumpFileSet() = default;
 
 	BulkDumpFileSet(const std::string& rootPath,
-	                const std::string& folderPath,
-	                const std::string& manifestPath,
-	                const std::string& dataPath,
-	                const std::string& byteSamplePath)
-	  : rootPath(rootPath), folderPath(folderPath), manifestPath(manifestPath), dataPath(dataPath),
-	    byteSamplePath(byteSamplePath) {
-		ASSERT(isValid());
+	                const std::string& relativePath,
+	                const std::string& manifestFileName,
+	                const std::string& dataFileName,
+	                const std::string& byteSampleFileName)
+	  : rootPath(rootPath), relativePath(relativePath), manifestFileName(manifestFileName), dataFileName(dataFileName),
+	    byteSampleFileName(byteSampleFileName) {
+		if (!isValid()) {
+			TraceEvent(SevError, "BulkDumpFileSetInvalid").detail("Content", toString());
+			ASSERT(false);
+		}
 	}
 
 	bool isValid() const {
-		if (manifestPath.size() == 0) {
+		if (rootPath.empty()) {
+			ASSERT(false);
 			return false;
 		}
-		if (dataPath.size() == 0 && byteSamplePath.size() > 0) {
+		if (relativePath.empty()) {
+			ASSERT(false);
+			return false;
+		}
+		if (manifestFileName.empty()) {
+			ASSERT(false);
+			return false;
+		}
+		if (dataFileName.empty() && !byteSampleFileName.empty()) {
+			ASSERT(false);
 			return false;
 		}
 		return true;
 	}
 
 	std::string toString() const {
-		return "[RootPath]: " + rootPath + ", [FolderPath]: " + folderPath + ", [ManifestPath]: " + manifestPath +
-		       ", [DataPath]: " + dataPath + ", [ByteSamplePath]: " + byteSamplePath;
+		return "[RootPath]: " + rootPath + ", [RelativePath]: " + relativePath +
+		       ", [ManifestFileName]: " + manifestFileName + ", [DataFileName]: " + dataFileName +
+		       ", [ByteSampleFileName]: " + byteSampleFileName;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rootPath, folderPath, manifestPath, dataPath, byteSamplePath);
+		serializer(ar, rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName);
 	}
 
 	std::string rootPath = "";
-	std::string folderPath = "";
-	std::string manifestPath = "";
-	std::string dataPath = "";
-	std::string byteSamplePath = "";
+	std::string relativePath = "";
+	std::string manifestFileName = "";
+	std::string dataFileName = "";
+	std::string byteSampleFileName = "";
+};
+
+struct BulkDumpFileFullPathSet {
+	BulkDumpFileFullPathSet(const BulkDumpFileSet& fileSet) {
+		folder = joinPath(fileSet.rootPath, fileSet.relativePath);
+		dataFilePath = joinPath(folder, fileSet.dataFileName);
+		byteSampleFilePath = joinPath(folder, fileSet.byteSampleFileName);
+		manifestFilePath = joinPath(folder, fileSet.manifestFileName);
+	}
+	std::string folder = "";
+	std::string dataFilePath = "";
+	std::string byteSampleFilePath = "";
+	std::string manifestFilePath = "";
 };
 
 // Define the metadata of bulkdump manifest file

@@ -5999,6 +5999,7 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 	state int64_t currentExpectedBytes = 0;
 	state Key beginKey = range.begin;
 	state Key lastKey = range.end;
+	state ErrorOr<GetKeyValuesReply> rep;
 	// Accumulate data read from local storage to kvsToDump and make sampling until any error presents
 	loop {
 		// Read data and stop for any error
@@ -6011,7 +6012,7 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 			localReq.limitBytes = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
 			localReq.tags = TagSet();
 			data->actors.add(getKeyValuesQ(data, localReq));
-			state ErrorOr<GetKeyValuesReply> rep = wait(errorOr(localReq.reply.getFuture()));
+			wait(store(rep, errorOr(localReq.reply.getFuture())));
 			if (rep.isError()) {
 				throw rep.getError();
 			}
@@ -6053,14 +6054,9 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 	return RangeDumpData(kvsToDump, sample, lastKey, currentExpectedBytes);
 }
 
-std::string getBulkDumpLocalRoot(StorageServer* data) {
-	return data->bulkDumpFolder;
-}
-
 void cleanUpBulkDumpFolder(StorageServer* data) {
 	try {
-		std::string rootFolder = getBulkDumpLocalRoot(data);
-		platform::eraseDirectoryRecursive(abspath(rootFolder));
+		platform::eraseDirectoryRecursive(abspath(data->bulkDumpFolder));
 	} catch (Error& e) {
 		return;
 	}
@@ -6096,18 +6092,18 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	state uint64_t batchNum = 0;
 	state Version versionToDump;
 	state RangeDumpData rangeDumpData;
-	state std::string rootFolderLocal = getBulkDumpLocalRoot(data);
+	state std::string rootFolderLocal = getBulkDumpJobRoot(data->bulkDumpFolder, req.bulkDumpState.getJobId());
+	state std::string rootFolderRemote =
+	    getBulkDumpJobRoot(req.bulkDumpState.getRemoteRoot(), req.bulkDumpState.getJobId());
 	// Use jobId and taskId as the folder to store the data of the task range
 	ASSERT(req.bulkDumpState.getTaskId().present());
-	state std::string taskFolder =
-	    generateBulkDumpTaskFolder(req.bulkDumpState.getJobId(), req.bulkDumpState.getTaskId().get());
+	state std::string taskFolder = getBulkDumpTaskFolder(req.bulkDumpState.getTaskId().get());
 	state BulkDumpFileSet destinationFileSets;
 
 	loop {
 		try {
-			if (batchNum == 0) { // clean up working folder initially
-				clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
-			}
+			// Clear local files
+			clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
 
 			// Dump data of rangeToDump in a relativeFolder
 			state KeyRange rangeToDump = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
@@ -6126,11 +6122,12 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// Generate local file paths and remote file paths
 			// The data in KVStore is dumped to the local folder at first and then
 			// the local files are uploaded to the remote folder
+			// Local files and remotes files have the same relative path but different root
 			state std::pair<BulkDumpFileSet, BulkDumpFileSet> resFileSets =
 			    getLocalRemoteFileSetSetting(versionToDump,
 			                                 relativeFolder,
 			                                 /*rootLocal=*/rootFolderLocal,
-			                                 /*rootRemote=*/req.bulkDumpState.getRemoteRoot());
+			                                 /*rootRemote=*/rootFolderRemote);
 
 			// The remote file path:
 			state BulkDumpFileSet localFileSetSetting = resFileSets.first;
@@ -6170,17 +6167,14 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 
 			// Upload Files
 			state BulkDumpFileSet localFileSet = localFileSetSetting;
-			if (manifest.fileSet.dataPath.empty()) {
-				localFileSet.dataPath = "";
+			if (manifest.fileSet.dataFileName.empty()) {
+				localFileSet.dataFileName = "";
 			}
-			if (manifest.fileSet.byteSamplePath.empty()) {
-				localFileSet.byteSamplePath = "";
+			if (manifest.fileSet.byteSampleFileName.empty()) {
+				localFileSet.byteSampleFileName = "";
 			}
 			wait(uploadBulkDumpFileSet(
 			    req.bulkDumpState.getTransportMethod(), localFileSet, manifest.fileSet, data->thisServerID));
-
-			// Clean up local files
-			clearFileFolder(localFileSet.folderPath);
 
 			// Progressively set metadata of the data range as complete phase
 			// Persist remoteFilePaths to the corresponding range
@@ -6221,7 +6215,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 		wait(delay(1.0));
 	}
 	try {
-		clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder))); // clean up
+		clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
 	} catch (Error& e) {
 		// exit
 	}

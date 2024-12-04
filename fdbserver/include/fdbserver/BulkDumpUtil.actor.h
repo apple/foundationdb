@@ -75,11 +75,14 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 // Define bulk dump job folder. Job is set by user. At most one job at a time globally.
 std::string generateBulkDumpJobFolder(const UID& jobId);
 
-// Define bulk dump task folder. A job spawns a set of tasks according to the shard boundary.
-std::string generateBulkDumpTaskFolder(const UID& jobId, const UID& taskId);
-
 // Define job manifest file name.
 std::string getJobManifestFileName(const UID& jobId);
+
+// Define task folder name.
+std::string getBulkDumpTaskFolder(const UID& taskId);
+
+// Define job root folder.
+std::string getBulkDumpJobRoot(const std::string& root, const UID& jobId);
 
 // Define job manifest file content based on job's all BulkDumpManifest.
 // Each row is a range sorted by the beginKey. Any two ranges do not have overlapping.

@@ -69,16 +69,16 @@ std::string generateBulkDumpByteSampleFileName(Version version) {
 	return std::to_string(version) + "-sample.sst";
 }
 
-std::string generateBulkDumpJobFolder(const UID& jobId) {
-	return jobId.toString();
-}
-
-std::string generateBulkDumpTaskFolder(const UID& jobId, const UID& taskId) {
-	return joinPath(jobId.toString(), taskId.toString());
-}
-
 std::string getJobManifestFileName(const UID& jobId) {
 	return jobId.toString() + "-job-manifest.txt";
+}
+
+std::string getBulkDumpTaskFolder(const UID& taskId) {
+	return taskId.toString();
+}
+
+std::string getBulkDumpJobRoot(const std::string& root, const UID& jobId) {
+	return joinPath(root, jobId.toString());
 }
 
 std::pair<BulkDumpFileSet, BulkDumpFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,
@@ -89,23 +89,8 @@ std::pair<BulkDumpFileSet, BulkDumpFileSet> getLocalRemoteFileSetSetting(Version
 	const std::string manifestFileName = generateBulkDumpManifestFileName(dumpVersion);
 	const std::string dataFileName = generateBulkDumpDataFileName(dumpVersion);
 	const std::string byteSampleFileName = generateBulkDumpByteSampleFileName(dumpVersion);
-
-	// Generate local file path to dump
-	const std::string dumpFolderLocal = joinPath(rootLocal, relativeFolder);
-	const std::string manifestFilePathLocal = joinPath(dumpFolderLocal, manifestFileName);
-	const std::string dataFilePathLocal = joinPath(dumpFolderLocal, dataFileName);
-	const std::string byteSampleFilePathLocal = joinPath(dumpFolderLocal, byteSampleFileName);
-
-	// Generate remote file path used to fill manifest file content
-	const std::string dumpFolderRemote = joinPath(rootRemote, relativeFolder);
-	const std::string manifestFilePathRemote = joinPath(dumpFolderRemote, manifestFileName);
-	const std::string dataFilePathRemote = joinPath(dumpFolderRemote, dataFileName);
-	const std::string byteSampleFilePathRemote = joinPath(dumpFolderRemote, byteSampleFileName);
-
-	BulkDumpFileSet fileSetLocal(
-	    rootLocal, dumpFolderLocal, manifestFilePathLocal, dataFilePathLocal, byteSampleFilePathLocal);
-	BulkDumpFileSet fileSetRemote(
-	    rootRemote, dumpFolderRemote, manifestFilePathRemote, dataFilePathRemote, byteSampleFilePathRemote);
+	BulkDumpFileSet fileSetLocal(rootLocal, relativeFolder, manifestFileName, dataFileName, byteSampleFileName);
+	BulkDumpFileSet fileSetRemote(rootRemote, relativeFolder, manifestFileName, dataFileName, byteSampleFileName);
 	return std::make_pair(fileSetLocal, fileSetRemote);
 }
 
@@ -173,13 +158,15 @@ BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
                                               Version dumpVersion,
                                               const KeyRange& dumpRange,
                                               int64_t dumpBytes) {
+	BulkDumpFileFullPathSet localFiles(localFileSetConfig);
+
 	// Step 1: Clean up local folder
-	resetFileFolder(localFileSetConfig.folderPath, logId);
+	resetFileFolder((abspath(localFiles.folder)), logId);
 
 	// Step 2: Dump data to file
 	bool containDataFile = false;
 	if (sortedData.size() > 0) {
-		writeKVSToSSTFile(localFileSetConfig.dataPath, sortedData, logId);
+		writeKVSToSSTFile(abspath(localFiles.dataFilePath), sortedData, logId);
 		containDataFile = true;
 	} else {
 		ASSERT(sortedSample.empty());
@@ -189,7 +176,7 @@ BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
 	// Step 3: Dump sample to file
 	bool containByteSampleFile = false;
 	if (sortedSample.size() > 0) {
-		writeKVSToSSTFile(localFileSetConfig.byteSamplePath, sortedSample, logId);
+		writeKVSToSSTFile(abspath(localFiles.byteSampleFilePath), sortedSample, logId);
 		ASSERT(containDataFile);
 		containByteSampleFile = true;
 	} else {
@@ -197,43 +184,43 @@ BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
 	}
 
 	// Step 4: Generate manifest file
-	if (fileExists(abspath(localFileSetConfig.manifestPath))) {
+	if (fileExists(abspath(localFiles.manifestFilePath))) {
 		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
 		    .detail("Reason", "exist old manifestFile")
-		    .detail("ManifestFilePathLocal", localFileSetConfig.manifestPath);
+		    .detail("ManifestFilePathLocal", abspath(localFiles.manifestFilePath));
 		ASSERT_WE_THINK(false);
 		throw retry();
 	}
 	BulkDumpFileSet fileSetRemote(remoteFileSetConfig.rootPath,
-	                              remoteFileSetConfig.folderPath,
-	                              remoteFileSetConfig.manifestPath,
-	                              containDataFile ? remoteFileSetConfig.dataPath : "",
-	                              containByteSampleFile ? remoteFileSetConfig.byteSamplePath : "");
+	                              remoteFileSetConfig.relativePath,
+	                              remoteFileSetConfig.manifestFileName,
+	                              containDataFile ? remoteFileSetConfig.dataFileName : "",
+	                              containByteSampleFile ? remoteFileSetConfig.byteSampleFileName : "");
 	BulkDumpManifest manifest(
 	    fileSetRemote, dumpRange.begin, dumpRange.end, dumpVersion, "", dumpBytes, byteSampleSetting);
-	writeStringToFile(localFileSetConfig.manifestPath, manifest.toString());
+	writeStringToFile(abspath(localFiles.manifestFilePath), manifest.toString());
 	return manifest;
 }
 
 // Validate the invariant of filenames. Source is the file stored locally. Destination is the file going to move to.
 bool validateSourceDestinationFileSets(const BulkDumpFileSet& source, const BulkDumpFileSet& destination) {
 	// Manifest file must be present
-	if (source.manifestPath.empty() || destination.manifestPath.empty()) {
+	if (source.manifestFileName.empty() || destination.manifestFileName.empty()) {
 		return false;
 	}
 	// Source data file and destination data file must present at same time
 	// If data file not present, byte sampling file must not present
-	if (source.dataPath.empty() && (!destination.dataPath.empty() || !source.byteSamplePath.empty())) {
+	if (source.dataFileName.empty() && (!destination.dataFileName.empty() || !source.byteSampleFileName.empty())) {
 		return false;
 	}
-	if (destination.dataPath.empty() && (!source.dataPath.empty() || !source.byteSamplePath.empty())) {
+	if (destination.dataFileName.empty() && (!source.dataFileName.empty() || !source.byteSampleFileName.empty())) {
 		return false;
 	}
 	// Data file path and byte sampling file path must have the same basename between source and destination
-	if (!source.dataPath.empty() && basename(source.dataPath) != basename(destination.dataPath)) {
+	if (!source.dataFileName.empty() && source.dataFileName != destination.dataFileName) {
 		return false;
 	}
-	if (!source.byteSamplePath.empty() && basename(source.byteSamplePath) != basename(destination.byteSamplePath)) {
+	if (!source.byteSampleFileName.empty() && source.byteSampleFileName != destination.byteSampleFileName) {
 		return false;
 	}
 	return true;
@@ -244,16 +231,20 @@ void bulkDumpTransportCP_impl(BulkDumpFileSet sourceFileSet,
                               BulkDumpFileSet destinationFileSet,
                               size_t fileBytesMax,
                               UID logId) {
-	// Clear existing folder
-	resetFileFolder(destinationFileSet.folderPath, logId);
-	// Copy bulk dump files to the target folder
-	bulkDumpFileCopy(sourceFileSet.manifestPath, destinationFileSet.manifestPath, fileBytesMax, logId);
-	if (sourceFileSet.dataPath.size() > 0) {
-		bulkDumpFileCopy(sourceFileSet.dataPath, destinationFileSet.dataPath, fileBytesMax, logId);
+	BulkDumpFileFullPathSet localFiles(sourceFileSet);
+	BulkDumpFileFullPathSet remoteFiles(destinationFileSet);
+
+	// Clear remote existing folder
+	resetFileFolder(abspath(remoteFiles.folder), logId);
+	// Copy bulk dump files to the remote folder
+	bulkDumpFileCopy(abspath(localFiles.manifestFilePath), abspath(remoteFiles.manifestFilePath), fileBytesMax, logId);
+	if (sourceFileSet.dataFileName.size() > 0) {
+		bulkDumpFileCopy(abspath(localFiles.dataFilePath), abspath(remoteFiles.dataFilePath), fileBytesMax, logId);
 	}
-	if (sourceFileSet.byteSamplePath.size() > 0) {
-		ASSERT(sourceFileSet.dataPath.size() > 0);
-		bulkDumpFileCopy(sourceFileSet.byteSamplePath, destinationFileSet.byteSamplePath, fileBytesMax, logId);
+	if (sourceFileSet.byteSampleFileName.size() > 0) {
+		ASSERT(sourceFileSet.dataFileName.size() > 0);
+		bulkDumpFileCopy(
+		    abspath(localFiles.byteSampleFilePath), abspath(remoteFiles.byteSampleFilePath), fileBytesMax, logId);
 	}
 	return;
 }
@@ -364,11 +355,18 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 }
 
 std::string generateJobManifestFileContent(const std::map<Key, BulkDumpManifest>& manifests) {
-	std::string res;
+	std::string root = "";
+	std::string manifestList;
 	for (const auto& [beginKey, manifest] : manifests) {
-		res = res + manifest.getBeginKeyString() + ", " + manifest.getEndKeyString() + ", " +
-		      std::to_string(manifest.version) + ", " + std::to_string(manifest.bytes) + ", " +
-		      manifest.fileSet.manifestPath + "\n";
+		if (root.empty()) {
+			root = manifest.fileSet.rootPath;
+		} else {
+			ASSERT(manifest.fileSet.rootPath == root);
+		}
+		manifestList = manifestList + manifest.getBeginKeyString() + ", " + manifest.getEndKeyString() + ", " +
+		               std::to_string(manifest.version) + ", " + std::to_string(manifest.bytes) + ", " +
+		               joinPath(manifest.fileSet.relativePath, manifest.fileSet.manifestFileName) + "\n";
 	}
-	return res;
+	std::string head = "Manifest count: " + std::to_string(manifests.size()) + ", Root: " + root + "\n";
+	return head + manifestList;
 }
