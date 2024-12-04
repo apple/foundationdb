@@ -697,6 +697,41 @@ public:
 		return res;
 	}
 
+	void setOptionReuseAddress(bool reuse) override {
+		boost::system::error_code ec;
+		socket.set_option(boost::asio::ip::udp::socket::reuse_address(reuse), ec);
+		if (ec) {
+			Error x = invalid_option_value();
+			TraceEvent(SevWarnAlways, "Net2UDPSetOptReuseAddressError").error(x);
+			throw x;
+		}
+	}
+
+	void setOptionMulticastGroup(NetworkAddress const& ifaddr, NetworkAddress const& mcaddr) override {
+		boost::system::error_code ec;
+		boost::asio::ip::address i;
+		boost::asio::ip::address m;
+		i = boost::asio::ip::address::from_string(ifaddr.ip.toString());
+		m = boost::asio::ip::address::from_string(mcaddr.ip.toString());
+
+		socket.set_option(boost::asio::ip::multicast::join_group(m.to_v4(), i.to_v4()), ec);
+		if (ec) {
+			Error x = invalid_option_value();
+			TraceEvent(SevWarnAlways, "Net2UDPSetOptMulticastGroupError").error(x);
+			throw x;
+		}
+	}
+
+	void setOptionEnableLoopback(bool enable) override {
+		boost::system::error_code ec;
+		socket.set_option(boost::asio::ip::multicast::enable_loopback(enable), ec);
+		if (ec) {
+			Error x = invalid_option_value();
+			TraceEvent(SevWarnAlways, "Net2UDPSetOptEnableLoopbackError").error(x);
+			throw x;
+		}
+	}
+
 	void bind(NetworkAddress const& addr) override {
 		boost::system::error_code ec;
 		socket.bind(udpEndpoint(addr), ec);
