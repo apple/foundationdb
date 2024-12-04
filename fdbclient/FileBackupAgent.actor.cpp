@@ -514,14 +514,14 @@ public:
 		int capacity;
 		IteratorBuffer(int _capacity) {
 			// data = std::shared_ptr<char[]>(new char[capacity]());
-			data = new char[_capacity]();
 			fmt::print(stderr, "Allocating {}\n", _capacity);
+			data = new char[_capacity]();
+			fmt::print(stderr, "Finish Allocating {}\n", _capacity);
 			fetchingData.reset();
 			size = 0;
 			capacity = _capacity;
 		}
 		~IteratorBuffer() {
-			// data = std::shared_ptr<char[]>(new char[capacity]());
 			delete[] data;
 		}
 		bool is_valid() { return fetchingData.has_value(); }

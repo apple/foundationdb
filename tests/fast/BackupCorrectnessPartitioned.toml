@@ -9,7 +9,7 @@ simBackupAgents = 'BackupToFile'
     testName = 'Cycle'
     nodeCount = 30000
     transactionsPerSecond = 10000.0
-    testDuration = 300.0
+    testDuration = 180.0
     expectedRate = 0
 
     [[test.workload]]
