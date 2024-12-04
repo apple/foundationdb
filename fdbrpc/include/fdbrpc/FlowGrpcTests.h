@@ -47,7 +47,7 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 		return Status::OK;
 	}
 
-	Status EchoRecv10(ServerContext* context, const EchoRequest* request, ServerWriter<EchoResponse>* writer) override {
+	Status EchoRecvStream10(ServerContext* context, const EchoRequest* request, ServerWriter<EchoResponse>* writer) override {
 		for (int ii = 0; ii < 10; ii++) {
 			if (context->IsCancelled()) {
 				std::cout << "Request Cancelled.\n";
@@ -60,7 +60,7 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 		return Status::OK;
 	}
 
-	Status EchoSend10(ServerContext* context, ServerReader<EchoRequest>* reader, EchoResponse* reply) override {
+	Status EchoSendStream10(ServerContext* context, ServerReader<EchoRequest>* reader, EchoResponse* reply) override {
 		EchoRequest request;
 		std::string res;
 		int count = 0;

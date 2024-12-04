@@ -20,7 +20,6 @@
  */
 #include "flow/UnitTest.h"
 #include "fdbrpc/FlowGrpc.h"
-#include "fdbrpc/FileTransfer.h"
 #include "fdbrpc/FlowGrpcTests.h"
 #include "flow/flow.h"
 
@@ -64,7 +63,7 @@ TEST_CASE("/fdbrpc/grpc/basic_stream_server") {
 	try {
 		EchoRequest request;
 		request.set_message("Ping!");
-		auto stream = client.call(&TestEchoService::Stub::EchoRecv10, request);
+		auto stream = client.call(&TestEchoService::Stub::EchoRecvStream10, request);
 		loop {
 			auto response = co_await stream;
 		    ASSERT_EQ(response.message(), "Echo: Ping!");
@@ -118,7 +117,7 @@ TEST_CASE("/fdbrpc/grpc/stream_destroy") {
 		EchoRequest request;
 		request.set_message("Ping!");
 		{
-			auto stream = client.call(&TestEchoService::Stub::EchoRecv10, request);
+			auto stream = client.call(&TestEchoService::Stub::EchoRecvStream10, request);
 			auto response = co_await stream;
 			ASSERT_EQ(response.message(), "Echo: Ping!");
 		}
@@ -146,7 +145,7 @@ TEST_CASE("/fdbrpc/grpc/stream_destroy") {
 // 	try {
 // 		EchoRequest request;
 // 		request.set_message("Ping!");
-// 		auto stream = client.call(&TestEchoService::Stub::EchoSend10, request);
+// 		auto stream = client.call(&TestEchoService::Stub::EchoSendStream10, request);
 // 		loop {
 // 			auto response = co_await stream;
 // 		    ASSERT_EQ(response.message(), "Echo: Ping!");
@@ -161,30 +160,5 @@ TEST_CASE("/fdbrpc/grpc/stream_destroy") {
 // 	}
 // 	co_return;
 // }
-
-TEST_CASE("/fdbrpc/grpc/file_transfer") {
-	// -- Server --
-	std::string server_address("127.0.0.1:50051");
-	FileTransferServiceImpl service;
-
-	grpc::ServerBuilder builder;
-	builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-	builder.RegisterService(&service);
-
-	std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-	std::cout << "Server listening on " << server_address << std::endl;
-
-	// -- Client --
-	auto channel = grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials());
-	auto client = FileTransferClient(channel);
-	auto start = std::chrono::high_resolution_clock::now();
-	client.DownloadFile("/root/ftexample.bin", "example.bin");
-	auto end = std::chrono::high_resolution_clock::now();
-	auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-	std::cout << "Time taken: " << diff.count() << std::endl;
-
-	server->Shutdown();
-    return Void();
-}
 
 } // namespace fdbrpc_test

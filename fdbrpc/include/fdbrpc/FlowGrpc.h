@@ -78,6 +78,8 @@ public:
 	  : pool_(pool), channel_(grpc::CreateChannel(endpoint, grpc::InsecureChannelCredentials())),
 	    stub_(ServiceType::NewStub(channel_)) {}
 
+	// NOTE: Must be called from network thread. This is because the underlying primitive used
+	//   is ThreadReturnPromise.
 	template <class RequestType, class ResponseType>
 	Future<grpc::Status> call(UnaryRpcFn<RequestType, ResponseType> rpc,
 	                          const RequestType& request,
@@ -97,6 +99,8 @@ public:
 		return promise->getFuture();
 	}
 
+	// NOTE: Must be called from network thread. This is because the underlying primitive used
+	//   is ThreadReturnPromise.
 	template <class RequestType, class ResponseType>
 	Future<ResponseType> call(UnaryRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
 		// ASSERT(g_network->isOnMainThread());
@@ -125,7 +129,8 @@ public:
 
 		return promise->getFuture();
 	}
-
+	// NOTE: Must be called from network thread. This is because the underlying primitive used
+	//   is ThreadReturnPromis
 	template <class RequestType, class ResponseType>
 	FutureStream<ResponseType> call(ServerStreamingRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
 		// ASSERT(g_network->isOnMainThread());

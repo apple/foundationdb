@@ -1,0 +1,24 @@
+From e9ebd4be6ef486b171ded21f59dc4603936ee09c Mon Sep 17 00:00:00 2001
+From: Vishesh Yadav <vishesh_yadav@apple.com>
+Date: Wed, 16 Oct 2024 10:26:53 +0530
+Subject: [PATCH] Call IThreadReceiver::init() in DummyThreadPool
+
+---
+ flow/include/flow/IThreadPool.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/flow/include/flow/IThreadPool.h b/flow/include/flow/IThreadPool.h
+index 42f7eb7b1..04660f5f5 100644
+--- a/flow/include/flow/IThreadPool.h
++++ b/flow/include/flow/IThreadPool.h
+@@ -154,6 +154,7 @@ public:
+ 	void addThread(IThreadPoolReceiver* userData, const char* name = nullptr) override {
+ 		ASSERT(!thread);
+ 		thread = userData;
++		userData->init();
+ 	}
+ 	void post(PThreadAction action) override {
+ 		try {
+-- 
+2.46.2
+
