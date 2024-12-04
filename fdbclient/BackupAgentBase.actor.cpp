@@ -330,8 +330,13 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 		offset += sizeof(uint64_t);
 		state uint32_t consumed = 0;
 
-		if (totalBytes + offset > value.size())
+		if (totalBytes + offset > value.size()) {
+			TraceEvent(SevError, "FlowguruOffsetBoundary")
+			    .detail("TotalBytes", totalBytes)
+			    .detail("Offset", offset)
+			    .detail("Size", value.size());
 			throw restore_missing_data();
+		}
 
 		state int originalOffset = offset;
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));

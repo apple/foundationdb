@@ -165,8 +165,10 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						self->setAuthToken(tr);
 						// Reverse next and next^2 node
 						Optional<Value> v = wait(tr.get(self->key(r)));
-						if (!v.present())
+						if (!v.present()) {
+							TraceEvent("FlowGuruBadRead").detail("Key", r).log();
 							self->badRead("KeyR", r, tr);
+						} 
 						state int r2 = self->fromValue(v.get());
 						Optional<Value> v2 = wait(tr.get(self->key(r2)));
 						if (!v2.present())
