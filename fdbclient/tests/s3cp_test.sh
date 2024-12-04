@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Start a weed server and then run tests of the s3cp
+# Start a weed server and then run tests of the s3client
 # command line tool against it (which uses S3Cp.actor.cpp).
 # For use by ctest. seaweed server takes about 25
 # seconds to come up. Tests run for a few seconds after that.
@@ -52,11 +52,11 @@ function log {
 # Test file upload and download
 # $1 The port on localhost where seaweed s3 is running.
 # $2 Directory I can write test files in.
-# $3 The s3cp binary.
+# $3 The s3client binary.
 function test_file_upload_and_download {
   local port="${1}"
   local dir="${2}"
-  local s3cp="${3}"
+  local s3client="${3}"
   local logsdir="${2}/logs"
   if [[ ! -d "${logsdir}" ]]; then
     mkdir "${logsdir}"
@@ -65,8 +65,8 @@ function test_file_upload_and_download {
   local testfiledown="${dir}/testfile.down"
   date -Iseconds &> "${testfileup}"
   local blobstoreurl="blobstore://localhost:${port}/x/y/z?bucket=${BUCKET}&region=us&secure_connection=0"
-  "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testfileup}" "${blobstoreurl}"
-  "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testfiledown}"
+  "${s3client}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testfileup}" "${blobstoreurl}"
+  "${s3client}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testfiledown}"
   if ! diff "${testfileup}" "${testfiledown}"; then
     echo "ERROR: Test $0 failed; upload and download are not the same." >&2
     return 1
@@ -76,11 +76,11 @@ function test_file_upload_and_download {
 # Test dir upload and download
 # $1 The port on localhost where seaweed s3 is running.
 # $2 Directory I can write test file in.
-# $3 The s3cp binary.
+# $3 The s3client binary.
 function test_dir_upload_and_download {
   local port="${1}"
   local dir="${2}"
-  local s3cp="${3}"
+  local s3client="${3}"
   local logsdir="${2}/logs"
   if [[ ! -d "${logsdir}" ]]; then
     mkdir "${logsdir}"
@@ -93,8 +93,8 @@ function test_dir_upload_and_download {
   mkdir "${testdirup}/subdir"
   date -Iseconds  &> "${testdirup}/subdir/three"
   local blobstoreurl="blobstore://localhost:${port}/dir1/dir2?bucket=${BUCKET}&region=us&secure_connection=0"
-  "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testdirup}" "${blobstoreurl}"
-  "${s3cp}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testdirdown}"
+  "${s3client}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testdirup}" "${blobstoreurl}"
+  "${s3client}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testdirdown}"
   if ! diff "${testdirup}" "${testdirdown}"; then
     echo "ERROR: Test $0 failed; upload and download are not the same." >&2
     return 1
@@ -151,8 +151,8 @@ readonly s3_port
 log "Seaweed server is up; s3.port=${s3_port}"
 
 # Seaweed is up. Run some tests. 
-test_file_upload_and_download "${s3_port}" "${WEED_DIR}" "${build_dir}/bin/s3cp"
+test_file_upload_and_download "${s3_port}" "${WEED_DIR}" "${build_dir}/bin/s3client"
 log_test_result $? "test_file_upload_and_download"
 
-test_dir_upload_and_download "${s3_port}" "${WEED_DIR}" "${build_dir}/bin/s3cp"
+test_dir_upload_and_download "${s3_port}" "${WEED_DIR}" "${build_dir}/bin/s3client"
 log_test_result $? "test_dir_upload_and_download"

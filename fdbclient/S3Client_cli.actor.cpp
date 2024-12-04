@@ -1,5 +1,5 @@
 /*
- * S3Cp.actor.cpp
+ * S3Client_cli.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -34,11 +34,12 @@
 
 #include "fdbclient/BuildFlags.h"
 #include "fdbclient/BackupContainerFileSystem.h"
+#import "fdbclient/BlobTLSConfig.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/versions.h"
-#include "fdbclient/S3BlobStore.h"
+#include "fdbclient/S3Client.actor.h"
 #include "flow/Platform.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/FastRef.h"
@@ -49,218 +50,12 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+// CLI for S3Client.
+
+
 extern const char* getSourceVersion();
 
-// Copy files and directories to and from s3.
-// Has a main function so can exercise the actor from the command line. Uses
-// the S3BlobStoreEndpoint to interact with s3. The s3url is of the form
-// expected by S3BlobStoreEndpoint:
-//   blobstore://<access_key>:<secret_key>@<endpoint>/resource?bucket=<bucket>, etc.
-// See the section 'Backup URls' in the backup documentation,
-// https://apple.github.io/foundationdb/backups.html, for more information.
-// TODO: Handle prefix as a parameter on the URL so can strip the first part
-// of the resource from the blobstore URL.
-
-namespace s3cp {
-const std::string BLOBSTORE_PREFIX = "blobstore://";
-
-// TLS and blob credentials for backups and setup for these credentials.
-// Copied from fdbbackup/BackupTLSConfig.* and renamed S3CpTLSConfig.
-struct S3CpTLSConfig {
-	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword, tlsVerifyPeers;
-	std::vector<std::string> blobCredentials;
-
-	// Returns if TLS setup is successful
-	bool setupTLS();
-
-	// Sets up blob crentials. Add the file specified by FDB_BLOB_CREDENTIALS as well.
-	// Note this must be called after g_network is set up.
-	void setupBlobCredentials();
-};
-
-void S3CpTLSConfig::setupBlobCredentials() {
-	// Add blob credentials files from the environment to the list collected from the command line.
-	const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
-	if (blobCredsFromENV != nullptr) {
-		StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
-		do {
-			StringRef file = t.eat(":");
-			if (file.size() != 0)
-				blobCredentials.push_back(file.toString());
-		} while (t.size() != 0);
-	}
-
-	// Update the global blob credential files list
-	std::vector<std::string>* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
-	if (pFiles != nullptr) {
-		for (auto& f : blobCredentials) {
-			pFiles->push_back(f);
-		}
-	}
-}
-
-bool S3CpTLSConfig::setupTLS() {
-	if (tlsCertPath.size()) {
-		try {
-			setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, tlsCertPath);
-		} catch (Error& e) {
-			std::cerr << "ERROR: cannot set TLS certificate path to " << tlsCertPath << " (" << e.what() << ")\n";
-			return false;
-		}
-	}
-
-	if (tlsCAPath.size()) {
-		try {
-			setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, tlsCAPath);
-		} catch (Error& e) {
-			std::cerr << "ERROR: cannot set TLS CA path to " << tlsCAPath << " (" << e.what() << ")\n";
-			return false;
-		}
-	}
-	if (tlsKeyPath.size()) {
-		try {
-			if (tlsPassword.size())
-				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, tlsPassword);
-
-			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, tlsKeyPath);
-		} catch (Error& e) {
-			std::cerr << "ERROR: cannot set TLS key path to " << tlsKeyPath << " (" << e.what() << ")\n";
-			return false;
-		}
-	}
-	if (tlsVerifyPeers.size()) {
-		try {
-			setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, tlsVerifyPeers);
-		} catch (Error& e) {
-			std::cerr << "ERROR: cannot set TLS peer verification to " << tlsVerifyPeers << " (" << e.what() << ")\n";
-			return false;
-		}
-	}
-	return true;
-}
-
-// Get the endpoint for the given s3url.
-// Populates parameters and resource with parse of s3url.
-static Reference<S3BlobStoreEndpoint> getEndpoint(std::string s3url,
-                                                  std::string& resource,
-                                                  S3BlobStoreEndpoint::ParametersT& parameters) {
-	std::string error;
-	Reference<S3BlobStoreEndpoint> endpoint =
-	    S3BlobStoreEndpoint::fromString(s3url, {}, &resource, &error, &parameters);
-	if (resource.empty()) {
-		TraceEvent(SevError, "EmptyResource").detail("s3url", s3url);
-		throw backup_invalid_url();
-	}
-	for (auto c : resource) {
-		if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/') {
-			TraceEvent(SevError, "IllegalCharacter").detail("s3url", s3url);
-			throw backup_invalid_url();
-		}
-	}
-	if (error.size()) {
-		TraceEvent(SevError, "GetEndpointError").detail("s3url", s3url).detail("error", error);
-		throw backup_invalid_url();
-	}
-	return endpoint;
-}
-
-// Copy filepath to bucket at resource in s3.
-ACTOR Future<Void> copy_up_file(Reference<S3BlobStoreEndpoint> endpoint,
-                                std::string bucket,
-                                std::string resource,
-                                std::string filepath) {
-	// Reading an SST file fully into memory is pretty obnoxious. They are about 16MB on
-	// average. Streaming would require changing this s3blobstore interface.
-	// Make 32MB the max size for now even though its arbitrary and way to big.
-	state std::string content = readFileBytes(filepath, 1024 * 1024 * 32);
-	wait(endpoint->writeEntireFile(bucket, resource, content));
-	TraceEvent("Upload")
-	    .detail("filepath", filepath)
-	    .detail("bucket", bucket)
-	    .detail("resource", resource)
-	    .detail("size", content.size());
-	return Void();
-}
-
-// Copy the file from the local filesystem up to s3.
-ACTOR Future<Void> copy_up_file(std::string filepath, std::string s3url) {
-	std::string resource;
-	S3BlobStoreEndpoint::ParametersT parameters;
-	Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
-	wait(copy_up_file(endpoint, parameters["bucket"], resource, filepath));
-	return Void();
-}
-
-// Copy the directory content from the local filesystem up to s3.
-ACTOR Future<Void> copy_up_directory(std::string dirpath, std::string s3url) {
-	state std::string resource;
-	S3BlobStoreEndpoint::ParametersT parameters;
-	state Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
-	state std::string bucket = parameters["bucket"];
-	state std::vector<std::string> files;
-	platform::findFilesRecursively(dirpath, files);
-	TraceEvent("UploadDirStart")
-	    .detail("filecount", files.size())
-	    .detail("bucket", bucket)
-	    .detail("resource", resource);
-	for (const auto& file : files) {
-		std::string filepath = file;
-		std::string s3path = resource + "/" + file.substr(dirpath.size() + 1);
-		wait(copy_up_file(endpoint, bucket, s3path, filepath));
-	}
-	TraceEvent("UploadDirEnd").detail("bucket", bucket).detail("resource", resource);
-	return Void();
-}
-
-// Copy filepath to bucket at resource in s3.
-ACTOR Future<Void> copy_down_file(Reference<S3BlobStoreEndpoint> endpoint,
-                                  std::string bucket,
-                                  std::string resource,
-                                  std::string filepath) {
-	std::string content = wait(endpoint->readEntireFile(bucket, resource));
-	auto parent = std::filesystem::path(filepath).parent_path();
-	if (parent != "" && !std::filesystem::exists(parent)) {
-		std::filesystem::create_directories(parent);
-	}
-	writeFile(filepath, content);
-	TraceEvent("Download")
-	    .detail("filepath", filepath)
-	    .detail("bucket", bucket)
-	    .detail("resource", resource)
-	    .detail("size", content.size());
-	return Void();
-}
-
-// Copy the file from s3 down to the local filesystem.
-// Overwrites existing file.
-ACTOR Future<Void> copy_down_file(std::string s3url, std::string filepath) {
-	std::string resource;
-	S3BlobStoreEndpoint::ParametersT parameters;
-	Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
-	wait(copy_down_file(endpoint, parameters["bucket"], resource, filepath));
-	return Void();
-}
-
-// Copy down the directory content from s3 to the local filesystem.
-ACTOR Future<Void> copy_down_directory(std::string s3url, std::string dirpath) {
-	state std::string resource;
-	S3BlobStoreEndpoint::ParametersT parameters;
-	state Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
-	state std::string bucket = parameters["bucket"];
-	S3BlobStoreEndpoint::ListResult items = wait(endpoint->listObjects(parameters["bucket"], resource));
-	state std::vector<S3BlobStoreEndpoint::ObjectInfo> objects = items.objects;
-	TraceEvent("DownloadDirStart")
-	    .detail("filecount", objects.size())
-	    .detail("bucket", bucket)
-	    .detail("resource", resource);
-	for (const auto& object : objects) {
-		std::string filepath = dirpath + "/" + object.name.substr(resource.size());
-		std::string s3path = object.name;
-		wait(copy_down_file(endpoint, bucket, s3path, filepath));
-	}
-	TraceEvent("DownloadDirEnd").detail("bucket", bucket).detail("resource", resource);
-	return Void();
-}
+namespace s3client_cli {
 
 enum {
 	OPT_BLOB_CREDENTIALS,
@@ -333,7 +128,7 @@ struct Params : public ReferenceCounted<Params> {
 	Optional<std::string> proxy;
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
-	s3cp::S3CpTLSConfig tlsConfig;
+	BlobTLSConfig tlsConfig;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	std::string src;
 	std::string tgt;
@@ -373,7 +168,7 @@ struct Params : public ReferenceCounted<Params> {
 };
 
 static int isBlobStoreURL(const std::string& url) {
-	return url.starts_with(s3cp::BLOBSTORE_PREFIX);
+	return url.starts_with(BLOBSTORE_PREFIX);
 }
 
 static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
@@ -478,20 +273,20 @@ static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
 ACTOR Future<Void> run(Reference<Params> params) {
 	if (params->whichIsBlobstoreURL == 1) {
 		if (std::filesystem::is_directory(params->src)) {
-			wait(copy_up_directory(params->src, params->tgt));
+			wait(copyUpDirectory(params->src, params->tgt));
 		} else {
-			wait(copy_up_file(params->src, params->tgt));
+			wait(copyUpFile(params->src, params->tgt));
 		}
 	} else {
 		if (std::filesystem::is_directory(params->tgt)) {
-			wait(copy_down_directory(params->src, params->tgt));
+			wait(copyDownDirectory(params->src, params->tgt));
 		} else {
-			wait(copy_down_file(params->src, params->tgt));
+			wait(copyDownFile(params->src, params->tgt));
 		}
 	}
 	return Void();
 }
-} // namespace s3cp
+} // namespace s3client_cli
 
 int main(int argc, char** argv) {
 	std::string commandLine;
@@ -507,11 +302,11 @@ int main(int argc, char** argv) {
 		// treat the --logs as an argument though it is a misnamed option. Doesn't seem to be a way
 		// around it.
 		std::unique_ptr<CSimpleOpt> args(
-		    new CSimpleOpt(argc, argv, s3cp::Options, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE | SO_O_NOERR));
-		auto param = makeReference<s3cp::Params>();
-		status = s3cp::parseCommandLine(param, args.get());
+		    new CSimpleOpt(argc, argv, s3client_cli::Options, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE | SO_O_NOERR));
+		auto param = makeReference<s3client_cli::Params>();
+		status = s3client_cli::parseCommandLine(param, args.get());
 		if (status != FDB_EXIT_SUCCESS) {
-			s3cp::printUsage(argv[0]);
+			s3client_cli::printUsage(argv[0]);
 			return status;
 		}
 		if (param->log_enabled) {
