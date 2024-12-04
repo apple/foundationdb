@@ -3009,6 +3009,26 @@ ACTOR Future<int> setBulkDumpMode(Database cx, int mode) {
 	}
 }
 
+ACTOR Future<int> getBulkDumpMode(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state int oldMode = 0;
+			Optional<Value> oldModeValue = wait(tr.get(bulkDumpModeKey));
+			if (oldModeValue.present()) {
+				BinaryReader rd(oldModeValue.get(), Unversioned());
+				rd >> oldMode;
+			}
+			return oldMode;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 // Return job Id if existing any bulk dump job globally.
 // There is at most on bulk dump job at any time on the entire key space.
 // A job of a range can spawn multiple tasks according to the shard boundary.

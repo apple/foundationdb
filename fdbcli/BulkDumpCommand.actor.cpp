@@ -65,11 +65,22 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
                                        Database cx,
                                        std::vector<StringRef> tokens) {
 	if (tokencmp(tokens[1], "mode")) {
-		// Set bulk dumping mode
-		if (tokens.size() != 3) {
+		if (tokens.size() != 2 && tokens.size() != 3) {
 			printUsage(tokens[0]);
 			return UID();
 		}
+		if (tokens.size() == 2) {
+			int old = wait(getBulkDumpMode(cx));
+			if (old == 0) {
+				fmt::println("Bulk dump is disabled");
+			} else if (old == 1) {
+				fmt::println("Bulk dump is enabled");
+			} else {
+				fmt::println("Invalid mode value {}", old);
+			}
+			return UID();
+		}
+		ASSERT(tokens.size() == 3);
 		if (tokencmp(tokens[2], "on")) {
 			int old = wait(setBulkDumpMode(cx, 1));
 			TraceEvent("SetBulkDumpModeCommand").detail("OldValue", old).detail("NewValue", 1);

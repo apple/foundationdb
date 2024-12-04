@@ -195,6 +195,9 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
 // the metadata.
 ACTOR Future<int> setBulkDumpMode(Database cx, int mode);
 
+// Get bulk dump mode value.
+ACTOR Future<int> getBulkDumpMode(Database cx);
+
 // Clear the existing bulkdump job metadata
 ACTOR Future<Void> clearBulkDumpJob(Database cx);
 
