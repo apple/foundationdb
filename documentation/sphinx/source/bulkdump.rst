@@ -34,6 +34,7 @@ A bulkdump job is partitioned into tasks by range and aligned to the shard bound
 When dumping the range of a task, the data is collected in batches. All key-value pairs of a batch are collected at the same version.
 Above all, (JobId) is the unique ID of a job. (TaskId) is the unique ID of a task. (BatchId) is the unique ID of a batch.
 All tasks's data files of the same job locates at the same Job folder named by the JobId.
+A task can consist of multiple batches, where each batch has a distinct version. However, all the data within a single batch shares the same version.
 
 Each (relativeFolder) corresponds to exactly one subrange with exactly one manifest file. 
 The manifest file includes all necessary information for loading the data from the folder to a FDB cluster.

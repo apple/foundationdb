@@ -3030,7 +3030,7 @@ ACTOR Future<int> getBulkDumpMode(Database cx) {
 }
 
 // Return job Id if existing any bulk dump job globally.
-// There is at most on bulk dump job at any time on the entire key space.
+// There is at most one bulk dump job at any time on the entire key space.
 // A job of a range can spawn multiple tasks according to the shard boundary.
 // Those tasks share the same job Id (aka belonging to the same job).
 ACTOR Future<Optional<UID>> existAnyBulkDumpTask(Transaction* tr) {
