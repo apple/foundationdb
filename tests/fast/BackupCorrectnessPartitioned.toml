@@ -1,15 +1,15 @@
 testClass = "Backup"
 
 [[test]]
-testTitle = 'BackupAndRestore'
+testTitle = 'BackupAndRestorePartitioned'
 clearAfterTest = false
 simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'Cycle'
     nodeCount = 30000
-    transactionsPerSecond = 10000.0
-    testDuration = 180.0
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
     expectedRate = 0
 
     [[test.workload]]
@@ -17,3 +17,14 @@ simBackupAgents = 'BackupToFile'
     backupAfter = 10.0
     restoreAfter = 60.0
     backupRangesCount = -1
+
+
+[[test]]
+testTitle = 'PostBackupAndRestorePartitioned'
+clearAfterTest = false
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0

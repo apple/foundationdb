@@ -168,7 +168,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						if (!v.present()) {
 							TraceEvent("FlowGuruBadRead").detail("Key", r).log();
 							self->badRead("KeyR", r, tr);
-						} 
+						}
 						state int r2 = self->fromValue(v.get());
 						Optional<Value> v2 = wait(tr.get(self->key(r2)));
 						if (!v2.present())
