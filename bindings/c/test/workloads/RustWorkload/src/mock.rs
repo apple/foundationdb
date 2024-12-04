@@ -1,6 +1,6 @@
 use crate::{
-    register_factory, wrap, FDBWorkload, Metric, Metrics, MockDatabase, Promise, RustWorkload,
-    RustWorkloadFactory, Severity, WorkloadContext,
+    register_factory, Metric, Metrics, MockDatabase, Promise, RustWorkload, RustWorkloadFactory,
+    Severity, WorkloadContext, WrappedWorkload,
 };
 
 struct MockWorkload {
@@ -64,20 +64,20 @@ impl Drop for MockWorkload {
 
 struct MockFactory;
 impl RustWorkloadFactory for MockFactory {
-    fn create(name: String, context: WorkloadContext) -> FDBWorkload {
+    fn create(name: String, context: WorkloadContext) -> WrappedWorkload {
         let client_id = context.client_id();
         let client_count = context.client_count();
         println!("RustWorkloadFactory::create({name})[{client_id}/{client_count}]");
         println!(
             "my_c_option: {:?}",
-            context.get_option::<String>("my_c_option")
+            context.get_option::<String>("my_rust_option")
         );
         println!(
             "my_c_option: {:?}",
-            context.get_option::<String>("my_c_option")
+            context.get_option::<String>("my_rust_option")
         );
         match name.as_str() {
-            "MockWorkload" => wrap(MockWorkload::new(name, client_id, context)),
+            "MockWorkload" => WrappedWorkload::new(MockWorkload::new(name, client_id, context)),
             _ => panic!("Unknown workload name: {name}"),
         }
     }

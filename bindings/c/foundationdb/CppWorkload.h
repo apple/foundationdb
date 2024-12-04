@@ -85,7 +85,7 @@ struct FDBPerfMetric {
 	std::string name;
 	double value;
 	bool averaged;
-	std::string format_code = "0.3g";
+	std::string format_code = "%.3g";
 };
 
 class DLLEXPORT FDBWorkload {
