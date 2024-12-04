@@ -74,9 +74,9 @@ static Reference<S3BlobStoreEndpoint> getEndpoint(std::string s3url,
 
 // Copy filepath to bucket at resource in s3.
 ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
-                              std::string bucket,
-                              std::string resource,
-                              std::string filepath) {
+                                     std::string bucket,
+                                     std::string resource,
+                                     std::string filepath) {
 	// Reading an SST file fully into memory is pretty obnoxious. They are about 16MB on
 	// average. Streaming would require changing this s3blobstore interface.
 	// Make 32MB the max size for now even though its arbitrary and way to big.
@@ -120,9 +120,9 @@ ACTOR Future<Void> copyUpDirectory(std::string dirpath, std::string s3url) {
 
 // Copy down file from s3 to filepath.
 ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
-                                std::string bucket,
-                                std::string resource,
-                                std::string filepath) {
+                                       std::string bucket,
+                                       std::string resource,
+                                       std::string filepath) {
 	std::string content = wait(endpoint->readEntireFile(bucket, resource));
 	auto parent = std::filesystem::path(filepath).parent_path();
 	if (parent != "" && !std::filesystem::exists(parent)) {
