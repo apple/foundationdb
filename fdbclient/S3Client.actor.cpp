@@ -33,7 +33,7 @@
 #endif
 
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/BlobTLSConfig.h"
+#include "fdbclient/BackupTLSConfig.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/Knobs.h"

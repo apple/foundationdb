@@ -34,7 +34,7 @@
 
 #include "fdbclient/BuildFlags.h"
 #include "fdbclient/BackupContainerFileSystem.h"
-#import "fdbclient/BlobTLSConfig.h"
+#import "fdbclient/BackupTLSConfig.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/Knobs.h"
@@ -127,7 +127,7 @@ struct Params : public ReferenceCounted<Params> {
 	Optional<std::string> proxy;
 	bool log_enabled = false;
 	std::string log_dir, trace_format, trace_log_group;
-	BlobTLSConfig tlsConfig;
+	BackupTLSConfig tlsConfig;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	std::string src;
 	std::string tgt;

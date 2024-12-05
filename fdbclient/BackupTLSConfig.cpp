@@ -1,5 +1,5 @@
 /*
- * BlobTLSConfig.cpp
+ * BackupTLSConfig.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,25 +18,16 @@
  * limitations under the License.
  */
 
-#include <algorithm>
-#include <cstdlib>
 #include <iostream>
-#include <limits>
-#include <memory>
-#include <string>
-#include <vector>
-#include <fcntl.h>
-#include <filesystem>
 
-#ifdef _WIN32
-#include <io.h>
-#endif
+#include "fdbclient/NativeAPI.actor.h"
+#include "flow/Arena.h"
+#include "flow/Error.h"
+#include "flow/network.h"
 
-#include "fdbclient/BlobTLSConfig.h"
-#include "fdbclient/BackupContainerFileSystem.h"
-#include "flow/TLSConfig.actor.h"
+#include "fdbclient/BackupTLSConfig.h"
 
-void BlobTLSConfig::setupBlobCredentials() {
+void BackupTLSConfig::setupBlobCredentials() {
 	// Add blob credentials files from the environment to the list collected from the command line.
 	const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
 	if (blobCredsFromENV != nullptr) {
@@ -57,7 +48,7 @@ void BlobTLSConfig::setupBlobCredentials() {
 	}
 }
 
-bool BlobTLSConfig::setupTLS() {
+bool BackupTLSConfig::setupTLS() {
 	if (tlsCertPath.size()) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, tlsCertPath);

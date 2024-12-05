@@ -31,7 +31,7 @@
 #include <io.h>
 #endif
 
-#include "fdbbackup/BackupTLSConfig.h"
+#include "fdbclient/BackupTLSConfig.h"
 #include "fdbclient/BuildFlags.h"
 #include "fdbbackup/FileConverter.h"
 #include "fdbbackup/Decode.h"
