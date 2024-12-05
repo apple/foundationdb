@@ -45,9 +45,7 @@ public:
 		return server;
 	}
 
-	static GrpcServer* instance() {
-		return static_cast<GrpcServer*>((void*)g_network->global(INetwork::enGrpcServer));
-	}
+	static GrpcServer* instance() { return static_cast<GrpcServer*>((void*)g_network->global(INetwork::enGrpcServer)); }
 
 private:
 	NetworkAddress address_;

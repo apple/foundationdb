@@ -68,7 +68,7 @@ TEST_CASE("/fdbrpc/grpc/basic_stream_server") {
 		auto stream = client.call(&TestEchoService::Stub::EchoRecvStream10, request);
 		loop {
 			auto response = co_await stream;
-		    ASSERT_EQ(response.message(), "Echo: Ping!");
+			ASSERT_EQ(response.message(), "Echo: Ping!");
 			count += 1;
 		}
 	} catch (Error& e) {
@@ -104,7 +104,6 @@ TEST_CASE("/fdbrpc/grpc/future_destroy") {
 	co_return;
 }
 
-
 TEST_CASE("/fdbrpc/grpc/stream_destroy") {
 	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50501"));
 	GrpcServer server(addr);
@@ -123,7 +122,7 @@ TEST_CASE("/fdbrpc/grpc/stream_destroy") {
 			auto response = co_await stream;
 			ASSERT_EQ(response.message(), "Echo: Ping!");
 		}
-		//TODO: Test if server cancels.
+		// TODO: Test if server cancels.
 	} catch (Error& e) {
 		if (e.code() == error_code_end_of_stream) {
 			ASSERT_EQ(count, 10); // Should send 10 reponses.

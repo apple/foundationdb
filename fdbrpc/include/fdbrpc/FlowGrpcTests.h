@@ -48,7 +48,9 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 		return Status::OK;
 	}
 
-	Status EchoRecvStream10(ServerContext* context, const EchoRequest* request, ServerWriter<EchoResponse>* writer) override {
+	Status EchoRecvStream10(ServerContext* context,
+	                        const EchoRequest* request,
+	                        ServerWriter<EchoResponse>* writer) override {
 		for (int ii = 0; ii < 10; ii++) {
 			if (context->IsCancelled()) {
 				std::cout << "Request Cancelled.\n";
@@ -66,10 +68,10 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 		std::string res;
 		int count = 0;
 		while (reader->Read(&request)) {
-            count++;
+			count++;
 			res += request.message();
-        }
-        reply->set_message(res);
+		}
+		reply->set_message(res);
 		ASSERT_EQ(count, 10);
 		return Status::OK;
 	}
@@ -99,7 +101,6 @@ public:
 private:
 	std::unique_ptr<TestEchoService::Stub> stub_;
 };
-
 
 } // namespace fdbrpc_test
 
