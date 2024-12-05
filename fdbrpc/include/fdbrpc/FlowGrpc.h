@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+#ifdef FLOW_GRPC_ENABLED
 #ifndef FDBRPC_FLOW_GRPC_H
 #define FDBRPC_FLOW_GRPC_H
 
@@ -192,3 +192,4 @@ private:
 };
 
 #endif // FDBRPC_FLOW_GRPC_H
+#endif // FLOW_GRPC_ENABLED

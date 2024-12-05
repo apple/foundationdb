@@ -235,7 +235,17 @@ endif()
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/generated/")
 
 set(gRPC_DIR /usr/local/lib/cmake/grpc)
-find_package(gRPC CONFIG REQUIRED)
+find_package(gRPC CONFIG)
+if (gRPC_FOUND)
+    message(STATUS "gRPC found. Enabling gRPC for Flow.")
+    set(FLOW_GRPC_ENABLED ON)
+    add_compile_definitions(FLOW_GRPC_ENABLED=1)
+else ()
+    message(WARNING "gRPC not found. Disabling gRPC for Flow.")
+    set(FLOW_GRPC_ENABLED OFF)
+    add_compile_definitions(GRPC_ENABLED_FOR_FEAT=0)
+endif ()
+
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)

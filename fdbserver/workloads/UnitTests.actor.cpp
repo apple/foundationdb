@@ -127,8 +127,11 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkSimKmsVaultTests();
 		forceLinkRESTSimKmsVaultTest();
 		forceLinkActorFuzzUnitTests();
+
+#ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();
 		forceLinkGrpcTests2();
+#endif
 	}
 
 	Future<Void> setup(Database const& cx) override {

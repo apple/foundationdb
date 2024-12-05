@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#ifdef FLOW_GRPC_ENABLED
 #include <cstdio>
 #include <thread>
 #include "flow/Error.h"
@@ -101,3 +102,5 @@ private:
 
 
 } // namespace fdbrpc_test
+
+#endif

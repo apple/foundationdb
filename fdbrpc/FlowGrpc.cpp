@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#ifdef FLOW_GRPC_ENABLED
 #include <cstdio>
 #include <thread>
 #include "fdbrpc/FlowGrpc.h"
@@ -55,3 +56,5 @@ void GrpcServer::shutdown() {
 void GrpcServer::registerService(std::shared_ptr<grpc::Service> service) {
 	registered_services_.push_back(service);
 }
+
+#endif

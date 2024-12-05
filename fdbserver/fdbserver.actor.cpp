@@ -2415,10 +2415,12 @@ int main(int argc, char* argv[]) {
 				                      opts.consistencyCheckUrgentMode));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+#ifdef FLOW_GRPC_ENABLED
 				if (opts.grpcAddressStrs.size() > 0) {
 					auto grpcServer = GrpcServer::initInstance(NetworkAddress::parse(opts.grpcAddressStrs[0]));
 					actors.push_back(grpcServer->run());
 				}
+#endif
 				f = stopAfter(waitForAll(actors));
 				g_network->run();
 			}

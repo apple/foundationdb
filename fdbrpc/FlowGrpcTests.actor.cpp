@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+#ifdef FLOW_GRPC_ENABLED
 #include <cstdio>
 
 #include "flow/UnitTest.h"
@@ -97,3 +97,5 @@ TEST_CASE("/fdbrpc/grpc/destroy_server_without_shutdown") {
 }
 
 } // namespace fdbrpc_test
+
+#endif
