@@ -789,6 +789,12 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			stoppedPromise.send(Void());
 		}
 	}
+
+	void purgeUnknownCommittedVersions(Version upToVersion) {
+		while (!unknownCommittedVersions.empty() && unknownCommittedVersions.back().version <= upToVersion) {
+			unknownCommittedVersions.pop_back();
+		}
+	}
 };
 
 template <class T>
@@ -2474,11 +2480,8 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			ASSERT(req.tLogCount == req.tLogLocIds.size());
 			logData->unknownCommittedVersions.emplace_front(req.version, req.seqPrevVersion, req.tLogLocIds);
-
-			while (!logData->unknownCommittedVersions.empty() &&
-			       logData->unknownCommittedVersions.back().version <= req.knownCommittedVersion) {
-				logData->unknownCommittedVersions.pop_back();
-			}
+			// Purge versions from "unknownCommittedVersions" list till "req.knownCommittedVersion".
+			logData->purgeUnknownCommittedVersions(req.knownCommittedVersion);
 		} else {
 			ASSERT(req.prevVersion == req.seqPrevVersion); // @todo remove this assert later
 		}
@@ -3483,11 +3486,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && spillTargetLogDataId.present() &&
 						    qe.id == spillTargetLogDataId.get() && qe.version < logData->persistentDataDurableVersion) {
 							logData->unknownCommittedVersions.emplace_front(qe.version, qe.prevVersion, qe.tLogLocIds);
-
-							while (!logData->unknownCommittedVersions.empty() &&
-							       logData->unknownCommittedVersions.back().version <= logData->knownCommittedVersion) {
-								logData->unknownCommittedVersions.pop_back();
-							}
+							// Purge versions from "unknownCommittedVersions" list till the "knownCommittedVersion".
+							logData->purgeUnknownCommittedVersions(logData->knownCommittedVersion);
 							continue;
 						}
 
@@ -3499,11 +3499,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 							logData->unknownCommittedVersions.emplace_front(qe.version, qe.prevVersion, qe.tLogLocIds);
-
-							while (!logData->unknownCommittedVersions.empty() &&
-							       logData->unknownCommittedVersions.back().version <= logData->knownCommittedVersion) {
-								logData->unknownCommittedVersions.pop_back();
-							}
+							// Purge versions from "unknownCommittedVersions" list till the "knownCommittedVersion".
+							logData->purgeUnknownCommittedVersions(logData->knownCommittedVersion);
 						}
 
 						if (qe.version > logData->version.get()) {
