@@ -127,7 +127,7 @@ Future<uint64_t> setupRange(Database cx,
 			for (uint64_t n = begin; n < end; n++) {
 				Standalone<KeyValueRef> kv = (*workload)(n);
 				// verified size is 16 here
-				fmt::print(stderr, "GuruBulkload Key={}, size={}, Value={}, size={}\n", kv.key, kv.key.size(), kv.value, kv.value.size());
+				// fmt::print(stderr, "GuruBulkload Key={}, size={}, Value={}, size={}\n", kv.key, kv.key.size(), kv.value, kv.value.size());
 				tr.set(kv.key, kv.value);
 				bytesInserted += kv.key.size() + kv.value.size();
 			}

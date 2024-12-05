@@ -699,7 +699,7 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	BinaryReader reader(mutation, AssumeVersion(g_network->protocolVersion()));
 	MutationRef m2;
 	reader >> m2;
-	fmt::print(stderr, "GuruaddM2::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m2.toString(), m2.expectedSize(), m2.type, m2.param1, m2.param1.size(), m2.param2, m2.param2.size());
+	// fmt::print(stderr, "GuruaddM2::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m2.toString(), m2.expectedSize(), m2.type, m2.param1, m2.param1.size(), m2.param2, m2.param2.size());
 
 	wait(logFile->append((void*)header.begin(), header.size()));
 	wait(logFile->append(mutation.begin(), mutation.size()));
@@ -1000,7 +1000,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			// MutationRef mutation;
 			// reader >> mutation;
 			// fmt::print(stderr, "GuruPullAsyncData:: len1={}, len2={} \n", mutation.param1.size(), mutation.param2.size());
-
+			// guru: message here is not necessarily mutation, so if i deserilize it here it woud fail
 			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena(), takeBytes);
 			r->nextMessage();
 		}

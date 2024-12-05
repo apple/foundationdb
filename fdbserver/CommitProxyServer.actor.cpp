@@ -203,10 +203,11 @@ struct ResolutionRequestBuilder {
 		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
 
 		bool isTXNStateTransaction = false;
-		DisabledTraceEvent("AddTransaction", self->dbgid).detail("TenantMode", (int)self->getTenantMode());
+		TraceEvent("AddTransaction", self->dbgid).detail("TenantMode", (int)self->getTenantMode()).log();
 		bool needParseTenantId = !trRequest.tenantInfo.hasTenant() && self->getTenantMode() == TenantMode::REQUIRED;
 		VectorRef<int64_t> tenantIds;
 		for (auto& m : trIn.mutations) {
+			// fmt::print(stderr, "GuruProxyServerAddTransaction::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m.toString(), m.expectedSize(), m.type, m.param1, m.param1.size(), m.param2, m.param2.size());
 			DEBUG_MUTATION("AddTr", ver, m, self->dbgid).detail("Idx", transactionNumberInBatch);
 			if (m.type == MutationRef::SetVersionstampedKey) {
 				transformVersionstampMutation(m, &MutationRef::param1, requests[0].version, transactionNumberInBatch);
@@ -1906,6 +1907,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			}
 
 			state MutationRef m = (*pMutations)[mutationNum];
+			// fmt::print(stderr, "GuruProxyServer::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m.toString(), m.expectedSize(), m.type, m.param1, m.param1.size(), m.param2, m.param2.size());
 			if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM) {
 				m.setAccumulativeChecksumIndex(
 				    getCommitProxyAccumulativeChecksumIndex(self->pProxyCommitData->commitProxyIndex));

@@ -267,6 +267,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 						return false;
 					}
 				}
+				TraceEvent("BackupCorrectnessFinish").log();
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
