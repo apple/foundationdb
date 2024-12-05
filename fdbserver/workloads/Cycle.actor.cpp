@@ -56,6 +56,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	static constexpr auto NAME = MultiTenancy ? "TenantCycle" : "Cycle";
 	static constexpr auto TenantEnabled = MultiTenancy;
 	int actorCount, nodeCount;
+	bool skipLoading;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
 
@@ -73,6 +74,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
+		skipLoading = getOption(options, "skipLoading"_sr, false);
 		if constexpr (MultiTenancy) {
 			ASSERT(g_network->isSimulated());
 			this->useToken = getOption(options, "useToken"_sr, true);
@@ -82,6 +84,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	}
 
 	Future<Void> setup(Database const& cx) override {
+		if (skipLoading) {
+			return Void();
+		}
 		Future<Void> prepare;
 		if constexpr (MultiTenancy) {
 			prepare = prepareToken(cx, this);
