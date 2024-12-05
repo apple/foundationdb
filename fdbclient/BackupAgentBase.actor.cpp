@@ -289,6 +289,12 @@ void _addResult(bool* tenantMapChanging,
 	*mutationSize += logValue.expectedSize();
 }
 
+static double testKeyToDouble(const KeyRef& p) {
+	uint64_t x = 0;
+	sscanf(p.toString().c_str(), "%" SCNx64, &x);
+	return *(double*)&x;
+}
+
 /*
  This actor is responsible for taking an original transaction which was added to the backup mutation log (represented
  by "value" parameter), breaking it up into the individual MutationRefs (that constitute the transaction), decrypting
@@ -343,7 +349,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 		state KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
 
 		while (consumed < totalBytes) {
-			// fmt::print(stderr, "DecodeProcess11111, offset={}\n", offset);
+			fmt::print(stderr, "DecodeStartRound, offset={}\n", offset);
 			uint32_t type = 0;
 			// hfu5: format should be type|kLen|vLen|Key|Value
 			memcpy(&type, value.begin() + offset, sizeof(uint32_t));
@@ -356,8 +362,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			memcpy(&len2, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
 
-			// fmt::print(stderr, "DecodeProcess, offset={}, len1={}, len2={}, size={}, type={}, valid={}\n", 
-			// 	offset, len1, len2, value.size(), type, isValidMutationType(type));
+			fmt::print(stderr, "DecodeProcess, offset={}, len1={}, len2={}, size={}, type={}, valid={}\n", 
+				offset, len1, len2, value.size(), type, isValidMutationType(type));
 			ASSERT(offset + len1 + len2 <= value.size() && isValidMutationType(type));
 
 			// mutationref is constructed here
@@ -367,6 +373,10 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			logValue.param1 = value.substr(offset, len1);
 			offset += len1;
 			logValue.param2 = value.substr(offset, len2);
+			double p1 = testKeyToDouble(logValue.param1);
+			double p2 = testKeyToDouble(logValue.param2);
+			fmt::print(stderr, "GuruPrintParam: param1={}, param2={}\n", p1, p2);
+
 			offset += len2;
 			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
 			ASSERT(!config.encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());

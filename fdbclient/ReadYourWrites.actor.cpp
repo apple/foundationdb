@@ -1508,6 +1508,7 @@ public:
 			}
 
 			bool retry_limit_hit = ryw->options.maxRetries != -1 && ryw->retries >= ryw->options.maxRetries;
+			fmt::print(stderr, "FlowGuruRYWError, e={}, ryw->retries={}, retry_limit_hit={}\n", e.code(), ryw->retries, retry_limit_hit);
 			if (ryw->retries < std::numeric_limits<int>::max())
 				ryw->retries++;
 			if (retry_limit_hit) {
