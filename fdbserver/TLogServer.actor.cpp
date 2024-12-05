@@ -976,9 +976,18 @@ ACTOR Future<Void> popDiskQueue(TLogData* self, Reference<LogData> logData) {
 	IDiskQueue::location minLocation = 0;
 	Version minVersion = 0;
 	auto locationIter = logData->versionLocation.lower_bound(logData->persistentDataVersion);
+	// If version vector is enabled then we need to preserve all versions from "knownCommittedVersion"
+	// onwards (for recovery purpose). Adjust the iterator position accordingly.
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+	    logData->knownCommittedVersion < logData->persistentDataVersion) {
+		locationIter = logData->versionLocation.lastLessOrEqual(logData->knownCommittedVersion);
+	}
 	if (locationIter != logData->versionLocation.end()) {
 		minLocation = locationIter->value.first;
 		minVersion = locationIter->key;
+	}
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		ASSERT_WE_THINK(minVersion <= logData->knownCommittedVersion);
 	}
 	logData->minPoppedTagVersion = std::numeric_limits<Version>::max();
 
