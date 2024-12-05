@@ -304,8 +304,12 @@ public:
 
 		Version beginVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
 		Version endVersion = BinaryReader::fromStringRef<Version>(endVal.get().get(), Unversioned());
-		// fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
-
+		fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
+		TraceEvent("FlowGuruLagInternal")
+			.detail("Begin", beginVersion)
+			.detail("End", endVersion)
+			.detail("Lag", endVersion - beginVersion)
+			.log();
 		return endVersion - beginVersion;
 	}
 
@@ -5215,7 +5219,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
 
 		fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
-		TraceEvent("GuruBegin")
+		TraceEvent("FlowGuruBegin")
 			.detail("Begin", beginVersion)
 			.detail("End", endVersion)
 			.detail("NextEndVersion", nextEndVersion)
