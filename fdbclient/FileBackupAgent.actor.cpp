@@ -778,6 +778,11 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			vm.version = version;
 			vm.subsequence = subsequence;
 			vm.mutation = mutation;
+			TraceEvent("FlowGuruRestoreMutation")
+				.detail("Sub", subsequence)
+				.detail("Mutation", mutation.toString())
+				.detail("Param1", mutation.param1)
+				.log();
 			mutations.push_back_deep(mutations.arena(), vm);
 			// Move the bufferOffset to include this mutation
 			self->bufferOffset += mutationTotalSize;
@@ -5021,17 +5026,24 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
 				if (v < minVersion) {
 					minVersion = v;
-					mutationsSingleVersion.clear();
-					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
-					mutationsSingleVersion.push_back(tmp);
-				} else if (v == minVersion) {
-					Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
-					mutationsSingleVersion.push_back(tmp);
 				}
 			}
 
 			// fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
 			if (atLeastOneIteratorHasNext) {
+				k = 0;
+				for (;k < totalItereators; k++) {
+					// fmt::print(stderr, "FlowguruLoopNotHaveNext k={}, hasNext={}\n", k, iterators[k]->hasNext());
+					if (!iterators[k]->hasNext()) {
+						TraceEvent("FlowguruLoopNotHaveNext2").detail("K", k).log();
+						continue;
+					}
+					Version v = wait(iterators[k]->peekNextVersion());
+					if (v == minVersion) {
+						Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
+						mutationsSingleVersion.push_back(tmp);
+					}
+				}
 				// transform from new format to old format(param1, param2)
 				// in the current implementation, each version will trigger a mutation
 				// if each version data is too small, we might want to combine multiple versions
