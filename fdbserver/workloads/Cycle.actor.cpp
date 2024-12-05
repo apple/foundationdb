@@ -183,9 +183,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						tr.set(self->key(r), self->value(r3));
 						tr.set(self->key(r2), self->value(r4));
 						tr.set(self->key(r3), self->value(r2));
-						// TraceEvent("CyclicTest").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
-						// TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
-						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
+						TraceEvent("CyclicTest").detail("RawKey", r).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
+						TraceEvent("CyclicTest").detail("RawKey", r2).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
+						TraceEvent("CyclicTest").detail("RawKey", r3).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait(tr.commit());
 						// TraceEvent("CycleCommit");

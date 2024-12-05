@@ -696,6 +696,11 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 		wait(logFile->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION)));
 	}
 
+	BinaryReader reader(mutation, AssumeVersion(g_network->protocolVersion()));
+	MutationRef m2;
+	reader >> m2;
+	fmt::print(stderr, "GuruaddM2::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m2.toString(), m2.expectedSize(), m2.type, m2.param1, m2.param1.size(), m2.param2, m2.param2.size());
+
 	wait(logFile->append((void*)header.begin(), header.size()));
 	wait(logFile->append(mutation.begin(), mutation.size()));
 	return Void();
@@ -991,6 +996,11 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 				wait(self->lock->take(TaskPriority::DefaultYield, takeBytes));
 				prev = r->arena();
 			}
+			// BinaryReader reader(r->getMessage(), AssumeVersion(g_network->protocolVersion()));
+			// MutationRef mutation;
+			// reader >> mutation;
+			// fmt::print(stderr, "GuruPullAsyncData:: len1={}, len2={} \n", mutation.param1.size(), mutation.param2.size());
+
 			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena(), takeBytes);
 			r->nextMessage();
 		}

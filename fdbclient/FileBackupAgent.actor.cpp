@@ -761,17 +761,18 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			ASSERT(self->bufferOffset + mutationTotalSize <= size);
 
 			// this is reported wrong
-			// fmt::print(stderr, "ConsumeData:: size={}\n", mutationSize);
-
+			fmt::print(stderr, "ConsumeData:: size={}\n", mutationSize);
 			Standalone<StringRef> mutationData = makeString(mutationSize);
 			std::memcpy(
 			    mutateString(mutationData), start.get() + self->bufferOffset + self->mutationHeaderBytes, mutationSize);
 			// BinaryWriter bw(Unversioned());
 			// // todo: transform from stringref to mutationref here
 			// bw.serializeBytes(mutationData);
+			// GuruTODO: make sure this mutationRef deserialize is good
 			ArenaReader reader(mutationData.arena(), mutationData, AssumeVersion(g_network->protocolVersion()));
 			MutationRef mutation;
 			reader >> mutation;
+			fmt::print(stderr, "MutationDataSize:: len1={}, len2={} \n", mutation.param1.size(), mutation.param2.size());
 
 			VersionedMutation vm;
 			vm.version = version;
@@ -4836,7 +4837,7 @@ Standalone<StringRef> transformMutationToOldFormat(MutationRef m) {
 	bw.serializeBytes(m.param1); // << is overloaded for stringref to write its size first, so 
 	bw.serializeBytes(m.param2);
 	// next step to see if there are additional bytes added by binary writer
-	// fmt::print(stderr, "generate old format transaction, type={}, len1={}, len2={}, total={}\n", type, len1, len2, bw.toValue().size());
+	fmt::print(stderr, "generate old format transaction, type={}, len1={}, len2={}, total={}\n", type, len1, len2, bw.toValue().size());
 	return bw.toValue();
 }
 
