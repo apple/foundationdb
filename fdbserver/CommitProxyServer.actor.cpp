@@ -207,6 +207,7 @@ struct ResolutionRequestBuilder {
 		bool needParseTenantId = !trRequest.tenantInfo.hasTenant() && self->getTenantMode() == TenantMode::REQUIRED;
 		VectorRef<int64_t> tenantIds;
 		for (auto& m : trIn.mutations) {
+			TraceEvent("GuruProxyServerAddTransaction").detail("Len1", m.param1.size()).detail("Param1", m.param1).detail("Len2", m.param2.size()).detail("Param2", m.param2).log();
 			// fmt::print(stderr, "GuruProxyServerAddTransaction::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m.toString(), m.expectedSize(), m.type, m.param1, m.param1.size(), m.param2, m.param2.size());
 			DEBUG_MUTATION("AddTr", ver, m, self->dbgid).detail("Idx", transactionNumberInBatch);
 			if (m.type == MutationRef::SetVersionstampedKey) {

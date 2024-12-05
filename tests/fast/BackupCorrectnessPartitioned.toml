@@ -1,5 +1,9 @@
 testClass = "Backup"
 
+[configuration]
+tenantModes = ['disabled'] # Do not support tenant
+encryptModes = ['disabled'] # Do not support encryption
+
 [[test]]
 testTitle = 'BackupAndRestorePartitioned'
 clearAfterTest = false
@@ -25,6 +29,7 @@ clearAfterTest = false
     [[test.workload]]
     testName = 'Cycle'
     nodeCount = 30000
+    skipLoading = true
     transactionsPerSecond = 2500.0
     testDuration = 30.0
     expectedRate = 0
