@@ -205,7 +205,7 @@ public:
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        TransformPartitionedLog transformPartitionedLog = TransformPartitionedLog::True);
+	                        TransformPartitionedLog transformPartitionedLog = TransformPartitionedLog::False);
 
 	// this method will construct range and version vectors and then call restore()
 	Future<Version> restoreKeyRange(Database cx,

@@ -5088,6 +5088,11 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			// fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
 			mutationsSingleVersion.clear();
 		}
+		TraceEvent("GuruQuitLoop")
+			.detail("Begin", begin)
+			.detail("End", end)
+			.detail("VersionRestored", versionRestored)
+			.log();
 		// fmt::print(stderr, "QuitLoop: begin={}, end={}, versionRestored={}\n", begin, end, versionRestored);
 		return Void();
 	}
@@ -5197,7 +5202,14 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// The applyLag must be retrieved AFTER potentially updating the apply end version.
 		state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
 
-		// fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
+		fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
+		TraceEvent("GuruBegin")
+			.detail("Begin", beginVersion)
+			.detail("End", endVersion)
+			.detail("NextEndVersion", nextEndVersion)
+			.detail("RestoreVersion", restoreVersion)
+			.detail("Lag", applyLag)
+			.log();
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait

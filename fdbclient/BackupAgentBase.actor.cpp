@@ -362,6 +362,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			memcpy(&len2, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
 
+			// guru: here len1 is 24, but initially it is 16. so i am not sure if restore can handle tenant mode correctly
 			// fmt::print(stderr, "DecodeProcess, offset={}, len1={}, len2={}, size={}, type={}, valid={}\n", 
 				// offset, len1, len2, value.size(), type, isValidMutationType(type));
 			ASSERT(offset + len1 + len2 <= value.size() && isValidMutationType(type));

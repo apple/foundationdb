@@ -664,6 +664,12 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 	}
 }
 
+static double testKeyToDouble(const KeyRef& p) {
+	uint64_t x = 0;
+	sscanf(p.toString().c_str(), "%" SCNx64, &x);
+	return *(double*)&x;
+}
+
 // Write a mutation to a log file. Note the mutation can be different from
 // message.message for clear mutations.
 ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
@@ -699,7 +705,18 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	BinaryReader reader(mutation, AssumeVersion(g_network->protocolVersion()));
 	MutationRef m2;
 	reader >> m2;
+	double d1 = testKeyToDouble(m2.param1);
+	double d2 = testKeyToDouble(m2.param2);
 	// fmt::print(stderr, "GuruaddM2::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m2.toString(), m2.expectedSize(), m2.type, m2.param1, m2.param1.size(), m2.param2, m2.param2.size());
+	TraceEvent("GuruaddM2")
+		.detail("Str", m2.toString())
+		.detail("Len1", m2.param1.size())
+		.detail("Param1", m2.param1)
+		.detail("Num1", d1)
+		.detail("Len2", m2.param2.size())
+		.detail("Param2", m2.param2)
+		.detail("Num2", d2)
+		.log();
 
 	wait(logFile->append((void*)header.begin(), header.size()));
 	wait(logFile->append(mutation.begin(), mutation.size()));

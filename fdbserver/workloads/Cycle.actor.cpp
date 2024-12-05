@@ -172,7 +172,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						// Reverse next and next^2 node
 						Optional<Value> v = wait(tr.get(self->key(r)));
 						if (!v.present()) {
-							TraceEvent("FlowGuruBadRead").detail("Key", r).log();
+							TraceEvent("FlowGuruBadRead").detail("Key", r).detail("Raw", self->key(r)).detail("Num", testKeyToDouble(self->key(r))).log();
 							self->badRead("KeyR", r, tr);
 						} else {
 							TraceEvent("FlowGuruGoodRead").detail("Key", r).detail("Value", v.get()).log();
@@ -191,9 +191,11 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						tr.set(self->key(r), self->value(r3));
 						tr.set(self->key(r2), self->value(r4));
 						tr.set(self->key(r3), self->value(r2));
-						TraceEvent("CyclicTest").detail("RawKey", r).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
-						TraceEvent("CyclicTest").detail("RawKey", r2).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
-						TraceEvent("CyclicTest").detail("RawKey", r3).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
+						// flowguru: it seems to be an order issue -- within the same txn, even though clear is called first
+						// but it is restored last
+						TraceEvent("CyclicTest1").detail("RawKey", r).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
+						TraceEvent("CyclicTest2").detail("RawKey", r2).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
+						TraceEvent("CyclicTest3").detail("RawKey", r3).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait(tr.commit());
 						// TraceEvent("CycleCommit");
