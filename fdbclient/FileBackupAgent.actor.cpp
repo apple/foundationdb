@@ -304,7 +304,7 @@ public:
 
 		Version beginVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
 		Version endVersion = BinaryReader::fromStringRef<Version>(endVal.get().get(), Unversioned());
-		fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
+		// fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
 
 		return endVersion - beginVersion;
 	}
@@ -514,8 +514,8 @@ public:
 		IteratorBuffer(int _capacity) {
 			capacity = _capacity;
 			data = std::shared_ptr<char[]>(new char[capacity]());
-			fmt::print(stderr, "Allocating {}\n", capacity);
-			fmt::print(stderr, "Finish Allocating {}\n", capacity);
+			// fmt::print(stderr, "Allocating {}\n", capacity);
+			// fmt::print(stderr, "Finish Allocating {}\n", capacity);
 			fetchingData.reset();
 			size = 0;
 		}
@@ -761,7 +761,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			ASSERT(self->bufferOffset + mutationTotalSize <= size);
 
 			// this is reported wrong
-			fmt::print(stderr, "ConsumeData:: size={}\n", mutationSize);
+			// fmt::print(stderr, "ConsumeData:: size={}\n", mutationSize);
 			Standalone<StringRef> mutationData = makeString(mutationSize);
 			std::memcpy(
 			    mutateString(mutationData), start.get() + self->bufferOffset + self->mutationHeaderBytes, mutationSize);
@@ -772,7 +772,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			ArenaReader reader(mutationData.arena(), mutationData, AssumeVersion(g_network->protocolVersion()));
 			MutationRef mutation;
 			reader >> mutation;
-			fmt::print(stderr, "MutationDataSize:: len1={}, len2={} \n", mutation.param1.size(), mutation.param2.size());
+			// fmt::print(stderr, "MutationDataSize:: len1={}, len2={} \n", mutation.param1.size(), mutation.param2.size());
 
 			VersionedMutation vm;
 			vm.version = version;
@@ -4659,7 +4659,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		loop {
 			try {
 				if (start == end) {
-					fmt::print(stderr, "Old Task Finish Log\n");
+					// fmt::print(stderr, "Old Task Finish Log\n");
 					return Void();
 				}
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -4837,7 +4837,7 @@ Standalone<StringRef> transformMutationToOldFormat(MutationRef m) {
 	bw.serializeBytes(m.param1); // << is overloaded for stringref to write its size first, so 
 	bw.serializeBytes(m.param2);
 	// next step to see if there are additional bytes added by binary writer
-	fmt::print(stderr, "generate old format transaction, type={}, len1={}, len2={}, total={}\n", type, len1, len2, bw.toValue().size());
+	// fmt::print(stderr, "generate old format transaction, type={}, len1={}, len2={}, total={}\n", type, len1, len2, bw.toValue().size());
 	return bw.toValue();
 }
 
@@ -4998,7 +4998,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state int k;
 		state int versionRestored = 0;
 
-		fmt::print(stderr, "FlowguruLoopBefore\n");
+		// fmt::print(stderr, "FlowguruLoopBefore\n");
 		// TODO: set this to false
 		// now it stuck here
 		while (atLeastOneIteratorHasNext) {
@@ -5075,7 +5075,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 						mutationIndex += txnCount; // update mutationIndex after commit 
 						txnCount = 0;
 					} catch (Error& e) {
-						fmt::print(stderr, "CommitError={}, mutationIndex={}, total={}\n", e.code(), mutationIndex, totalMutation);
+						// fmt::print(stderr, "CommitError={}, mutationIndex={}, total={}\n", e.code(), mutationIndex, totalMutation);
 						if (e.code() == error_code_transaction_too_large) {
 							txBytesLimit /= 2;
 						} else {
@@ -5088,7 +5088,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			// fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
 			mutationsSingleVersion.clear();
 		}
-		fmt::print(stderr, "QuitLoop: begin={}, end={}, versionRestored={}\n", begin, end, versionRestored);
+		// fmt::print(stderr, "QuitLoop: begin={}, end={}, versionRestored={}\n", begin, end, versionRestored);
 		return Void();
 	}
 
@@ -5183,7 +5183,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 		state int nextEndVersion =
 		    std::min(restoreVersion, endVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE);
-		fmt::print(stderr, "Very begin Begin={}, End={}, nextEnd={}, restoreVersion={}\n", beginVersion, endVersion, nextEndVersion, restoreVersion);		
+		// fmt::print(stderr, "Very begin Begin={}, End={}, nextEnd={}, restoreVersion={}\n", beginVersion, endVersion, nextEndVersion, restoreVersion);		
 		// update the apply mutations end version so the mutations from the
 		// previous batch can be applied.
 		// Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
@@ -5197,7 +5197,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// The applyLag must be retrieved AFTER potentially updating the apply end version.
 		state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
 
-		fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
+		// fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
@@ -5248,7 +5248,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// if (files.results.size() == 0 && beginVersion >= restoreVersion) {
 		// fmt::print(stderr, "CheckBegin and restore, begin={}, restore={}, applyLag={}\n", beginVersion, restoreVersion, applyLag);
 		if (beginVersion >= restoreVersion) {
-			fmt::print(stderr, "Reaching end, beginVersion={}, restoreVersion={}, ApplyLag={}\n", beginVersion, restoreVersion, applyLag);
+			// fmt::print(stderr, "Reaching end, beginVersion={}, restoreVersion={}, ApplyLag={}\n", beginVersion, restoreVersion, applyLag);
 			if (applyLag == 0) {
 				// i am the last batch
 				// If apply lag is 0 then we are done so create the completion task
@@ -5310,7 +5310,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 		bool is_set = wait(allPartsDone->isSet(tr));
-		fmt::print(stderr, "Before add new task begin={}, end={}, nextEnd={}, isSet={} \n", beginVersion, endVersion, nextEndVersion, is_set);
+		// fmt::print(stderr, "Before add new task begin={}, end={}, nextEnd={}, isSet={} \n", beginVersion, endVersion, nextEndVersion, is_set);
 		// aggregate logs by tag id
 		addTaskFutures.push_back(RestoreLogDataPartitionedTaskFunc::addTask(tr,
 																			taskBucket,
@@ -5321,7 +5321,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 																			endVersion,
 																			TaskCompletionKey::joinWith(allPartsDone)));
 		// even if file exsists, but they are empty, in this case just start the next batch
-		fmt::print(stderr, "After add new task begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
+		// fmt::print(stderr, "After add new task begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
 
 		addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(
 		    tr, taskBucket, task, endVersion, nextEndVersion, TaskCompletionKey::noSignal(), allPartsDone));
@@ -5718,7 +5718,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			                                                          allPartsDone));
 
 		wait(waitForAll(addTaskFutures));
-		fmt::print(stderr, "Old Task Add parent task begin={}, end={}, should happen only after children are done \n", beginVersion, endVersion);
+		// fmt::print(stderr, "Old Task Add parent task begin={}, end={}, should happen only after children are done \n", beginVersion, endVersion);
 
 		// If adding to existing batch then task is joined with a batch future so set done future.
 		Future<Void> setDone = addingToExistingBatch ? onDone->set(tr, taskBucket) : Void();
@@ -5983,7 +5983,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state std::vector<RestoreConfig::RestoreFile> files;
 		if (!logsOnly) {
 			beginVersion = restorable.get().snapshot.beginVersion;
-			fmt::print(stderr, "FullRestoreTask, set beginVersion={}\n", beginVersion);
+			// fmt::print(stderr, "FullRestoreTask, set beginVersion={}\n", beginVersion);
 
 			if (!inconsistentSnapshotOnly) {
 				for (const RangeFile& f : restorable.get().ranges) {
@@ -6018,7 +6018,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 		// First version for which log data should be applied
-		fmt::print(stderr, "FullRestoreTask:: beginVersion={}\n", beginVersion);
+		// fmt::print(stderr, "FullRestoreTask:: beginVersion={}\n", beginVersion);
 		Params.firstVersion().set(task, beginVersion);
 
 		tr->reset();
@@ -6109,11 +6109,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 
 		if (transformPartitionedLog) {
-			fmt::print(stderr,
-			           "StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
-			           firstVersion,
-			           0,
-			           restoreVersion);
+			// fmt::print(stderr,
+			//            "StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
+			//            firstVersion,
+			//            0,
+			//            restoreVersion);
 			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, 0, firstVersion + step)));
 		} else {
 			wait(success(RestoreDispatchTaskFunc::addTask(
@@ -7242,7 +7242,7 @@ public:
 			    .detail("BackupContainer", bc->getURL())
 			    .detail("BeginVersion", beginVersion)
 			    .detail("TargetVersion", targetVersion);
-			fmt::print(stderr, "ERROR: Restore version {0} is not possible from {1}\n", targetVersion, bc->getURL());
+			// fmt::print(stderr, "ERROR: Restore version {0} is not possible from {1}\n", targetVersion, bc->getURL());
 			throw restore_invalid_version();
 		}
 

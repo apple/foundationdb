@@ -533,7 +533,7 @@ private:
 		auto addPrefixValue = txnStateStore->readValue(uid.withPrefix(applyMutationsAddPrefixRange.begin)).get();
 		auto removePrefixValue = txnStateStore->readValue(uid.withPrefix(applyMutationsRemovePrefixRange.begin)).get();
 		auto beginValue = txnStateStore->readValue(uid.withPrefix(applyMutationsBeginRange.begin)).get();
-		fmt::print(stderr, "ApplyMedataMutationBegin: begin={}, end={}\n", beginValue.present() ? BinaryReader::fromStringRef<Version>(beginValue.get(), Unversioned()) : 0, p.endVersion);
+		// fmt::print(stderr, "ApplyMedataMutationBegin: begin={}, end={}\n", beginValue.present() ? BinaryReader::fromStringRef<Version>(beginValue.get(), Unversioned()) : 0, p.endVersion);
 		TraceEvent("BackupAgentBaseApplyMutationsBegin")
 			.detail("BeginVersion", beginValue.present() ? BinaryReader::fromStringRef<Version>(beginValue.get(), Unversioned()) : 0)
 			.detail("EndVersion", p.endVersion)

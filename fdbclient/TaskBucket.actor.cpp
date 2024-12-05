@@ -1081,7 +1081,7 @@ public:
 		// this means that if the task future is already set, then just return
 		// so the taskFuture cannot be completed already if we want to join
 		// vectorFuture with taskFuture
-		fmt::print(stderr, "TaskFuture isSet={}\n", is_set);		
+		// fmt::print(stderr, "TaskFuture isSet={}\n", is_set);		
 		if (is_set) {
 			return Void();
 		}
@@ -1131,7 +1131,7 @@ public:
 
 		bool is_set = wait(isSet(tr, taskFuture));
 
-		fmt::print(stderr, "TaskFuture::onSet, isSet={}\n", is_set);		
+		// fmt::print(stderr, "TaskFuture::onSet, isSet={}\n", is_set);		
 		if (is_set) {
 			CODE_PROBE(true, "is_set == true");
 			wait(performAction(tr, taskBucket, taskFuture, task));
