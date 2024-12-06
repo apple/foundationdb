@@ -304,12 +304,12 @@ public:
 
 		Version beginVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
 		Version endVersion = BinaryReader::fromStringRef<Version>(endVal.get().get(), Unversioned());
-		fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
-		TraceEvent("FlowGuruLagInternal")
-			.detail("Begin", beginVersion)
-			.detail("End", endVersion)
-			.detail("Lag", endVersion - beginVersion)
-			.log();
+		// fmt::print(stderr, "GetLag internal: begin={}, end={}\n", beginVersion, endVersion);
+		// TraceEvent("FlowGuruLagInternal")
+		// 	.detail("Begin", beginVersion)
+		// 	.detail("End", endVersion)
+		// 	.detail("Lag", endVersion - beginVersion)
+		// 	.log();
 		return endVersion - beginVersion;
 	}
 
@@ -4878,15 +4878,15 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		for (auto& p : vec) {
 			uint32_t sub = p.subsequence;
 			MutationRef mutation = p.mutation;
-			TraceEvent("FlowGuruAddEachSubVersion")
-				.detail("CommitVersion", commitVersion)
-				.detail("Sub", sub)
-				.detail("Mutation", mutation.toString())
-				.detail("Param1", mutation.param1)
-				.detail("Num1", testKeyToDouble(mutation.param1))
-				.detail("Param2", mutation.param2)
-				.detail("Num2", testKeyToDouble(mutation.param2))
-				.log();
+			// TraceEvent("FlowGuruAddEachSubVersion")
+			// 	.detail("CommitVersion", commitVersion)
+			// 	.detail("Sub", sub)
+			// 	.detail("Mutation", mutation.toString())
+			// 	.detail("Param1", mutation.param1)
+			// 	.detail("Num1", testKeyToDouble(mutation.param1))
+			// 	.detail("Param2", mutation.param2)
+			// 	.detail("Num2", testKeyToDouble(mutation.param2))
+			// 	.log();
 			// fmt::print(stderr, "Transform inner mutationList[{}], mutation[{}], subsequence={}\n", i, j, sub);
 			// fmt::print(stderr, "before transform each mutation\n");
 			// fmt::print(stderr, "Transform each mutation, mutation={}\n", p.mutation.toString());
@@ -4901,23 +4901,23 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		++i;
 	}
 
-	for (auto& mutationsForSub : tmpMap) {
-		TraceEvent("FlowGuruPrintNewSubVersion")
-			.detail("CommitVersion", commitVersion)
-			.detail("Sub", mutationsForSub.first)
-			.log();
-		for (auto& mutation : mutationsForSub.second) {
-			TraceEvent("FlowGuruPrintBySubVersion")
-				.detail("CommitVersion", commitVersion)
-				.detail("Sub", mutationsForSub.first)
-				.detail("Mutation", mutation.toString())
-				.detail("Param1", mutation.param1)
-				.detail("Num1", testKeyToDouble(mutation.param1))
-				.detail("Param2", mutation.param2)
-				.detail("Num2", testKeyToDouble(mutation.param2))
-				.log();
-		}
-	}
+	// for (auto& mutationsForSub : tmpMap) {
+	// 	TraceEvent("FlowGuruPrintNewSubVersion")
+	// 		.detail("CommitVersion", commitVersion)
+	// 		.detail("Sub", mutationsForSub.first)
+	// 		.log();
+	// 	for (auto& mutation : mutationsForSub.second) {
+	// 		TraceEvent("FlowGuruPrintBySubVersion")
+	// 			.detail("CommitVersion", commitVersion)
+	// 			.detail("Sub", mutationsForSub.first)
+	// 			.detail("Mutation", mutation.toString())
+	// 			.detail("Param1", mutation.param1)
+	// 			.detail("Num1", testKeyToDouble(mutation.param1))
+	// 			.detail("Param2", mutation.param2)
+	// 			.detail("Num2", testKeyToDouble(mutation.param2))
+	// 			.log();
+	// 	}
+	// }
 	// the list of param2 needs to have the first 64 bites as 0x0FDB00A200090001
 	BinaryWriter param2Writer(IncludeVersion(ProtocolVersion::withBackupMutations()));
 	param2Writer << totalBytes;
@@ -4966,12 +4966,12 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		TraceEvent("FlowGuruWriteOldFormat")
-			.detail("CommitVersion", commitVersion)
-			.detail("Part", part)
-			.detail("KeySize", backupKV.key.size())
-			.detail("ValueSize", backupKV.value.size())
-			.log();
+		// TraceEvent("FlowGuruWriteOldFormat")
+		// 	.detail("CommitVersion", commitVersion)
+		// 	.detail("Part", part)
+		// 	.detail("KeySize", backupKV.key.size())
+		// 	.detail("ValueSize", backupKV.value.size())
+		// 	.log();
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 	}
 	return results;
@@ -5063,7 +5063,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			for (;k < totalItereators; k++) {
 				// fmt::print(stderr, "FlowguruLoopNotHaveNext k={}, hasNext={}\n", k, iterators[k]->hasNext());
 				if (!iterators[k]->hasNext()) {
-					TraceEvent("FlowguruLoopNotHaveNext").detail("K", k).log();
+					// TraceEvent("FlowguruLoopNotHaveNext").detail("K", k).log();
 					continue;
 				}
 				// TODO: maybe embed filtering key into iterator,
@@ -5071,7 +5071,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				atLeastOneIteratorHasNext = true;
 				// fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
 				Version v = wait(iterators[k]->peekNextVersion());
-				TraceEvent("FlowguruLoop2").detail("Version", v).log();
+				// TraceEvent("FlowguruLoop2").detail("Version", v).log();
 				// fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
 				if (v < minVersion) {
 					minVersion = v;
@@ -5084,7 +5084,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				for (;k < totalItereators; k++) {
 					// fmt::print(stderr, "FlowguruLoopNotHaveNext k={}, hasNext={}\n", k, iterators[k]->hasNext());
 					if (!iterators[k]->hasNext()) {
-						TraceEvent("FlowguruLoopNotHaveNext2").detail("K", k).log();
+						// TraceEvent("FlowguruLoopNotHaveNext2").detail("K", k).log();
 						continue;
 					}
 					Version v = wait(iterators[k]->peekNextVersion());
@@ -5114,14 +5114,14 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// but i guess i still have to extract it out to a execute method of another taskfunc
 				loop {
 					try {
-						TraceEvent("FlowGuruLoopBegin")
-								.detail("Version", minVersion)
-								.detail("Index", mutationIndex)
-								.detail("Count", txnCount)
-								.detail("Total", totalMutation)
-								.detail("TxBytes", txBytes)
-								.detail("BytesLimit", txBytesLimit)
-								.log();
+						// TraceEvent("FlowGuruLoopBegin")
+						// 		.detail("Version", minVersion)
+						// 		.detail("Index", mutationIndex)
+						// 		.detail("Count", txnCount)
+						// 		.detail("Total", totalMutation)
+						// 		.detail("TxBytes", txBytes)
+						// 		.detail("BytesLimit", txBytesLimit)
+						// 		.log();
 						// fmt::print(stderr, "Commit:, mutationIndex={}, total={}\n", mutationIndex, totalMutation);
 						if (mutationIndex == totalMutation) {
 							break;
@@ -5140,25 +5140,25 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 							txBytes += k.expectedSize();
 							txBytes += v.expectedSize();
 							// succeed after retry, but this mutation is never saw from the other side! how?!
-							TraceEvent("FlowGuruCommitAddedTransaction")
-								.detail("Version", minVersion)
-								.detail("Index", mutationIndex + txnCount)
-								.detail("Key", k.toString())
-								.detail("Value", v.toString())
-								.log();
+							// TraceEvent("FlowGuruCommitAddedTransaction")
+							// 	.detail("Version", minVersion)
+							// 	.detail("Index", mutationIndex + txnCount)
+							// 	.detail("Key", k.toString())
+							// 	.detail("Value", v.toString())
+							// 	.log();
 							++txnCount;
 						}
 						wait(tr->commit());
 						mutationIndex += txnCount; // update mutationIndex after commit 
-						TraceEvent("FlowGuruCommitSucceed")
-							.detail("Version", minVersion)
-							.log();
+						// TraceEvent("FlowGuruCommitSucceed")
+						// 	.detail("Version", minVersion)
+						// 	.log();
 					} catch (Error& e) {
-						TraceEvent("FlowGuruCommitError")
-							.detail("Version", minVersion)
-							.detail("Error", e.code())
-							.log();
-						fmt::print(stderr, "CommitError={}, mutationIndex={}, total={}\n", e.code(), mutationIndex, totalMutation);
+						// TraceEvent("FlowGuruCommitError")
+						// 	.detail("Version", minVersion)
+						// 	.detail("Error", e.code())
+						// 	.log();
+						// fmt::print(stderr, "CommitError={}, mutationIndex={}, total={}\n", e.code(), mutationIndex, totalMutation);
 						if (e.code() == error_code_transaction_too_large) {
 							txBytesLimit /= 2;
 						} else {
@@ -5285,14 +5285,14 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// The applyLag must be retrieved AFTER potentially updating the apply end version.
 		state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
 
-		fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
-		TraceEvent("FlowGuruBegin")
-			.detail("Begin", beginVersion)
-			.detail("End", endVersion)
-			.detail("NextEndVersion", nextEndVersion)
-			.detail("RestoreVersion", restoreVersion)
-			.detail("Lag", applyLag)
-			.log();
+		// fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
+		// TraceEvent("FlowGuruBegin")
+		// 	.detail("Begin", beginVersion)
+		// 	.detail("End", endVersion)
+		// 	.detail("NextEndVersion", nextEndVersion)
+		// 	.detail("RestoreVersion", restoreVersion)
+		// 	.detail("Lag", applyLag)
+		// 	.log();
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait

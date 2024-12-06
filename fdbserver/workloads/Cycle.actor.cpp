@@ -108,7 +108,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		return delay(testDuration);
 	}
 	Future<bool> check(Database const& cx) override {
-		TraceEvent("FlowGuruEnterCheck").log();
+		// TraceEvent("FlowGuruEnterCheck").log();
 		if constexpr (MultiTenancy) {
 			cx->defaultTenant = this->tenant;
 		}
@@ -176,10 +176,10 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						// Reverse next and next^2 node
 						Optional<Value> v = wait(tr.get(self->key(r)));
 						if (!v.present()) {
-							TraceEvent("FlowGuruBadRead").detail("Key", r).detail("Raw", self->key(r)).detail("Num", testKeyToDouble(self->key(r))).log();
+							// TraceEvent("FlowGuruBadRead").detail("Key", r).detail("Raw", self->key(r)).detail("Num", testKeyToDouble(self->key(r))).log();
 							self->badRead("KeyR", r, tr);
 						} else {
-							TraceEvent("FlowGuruGoodRead").detail("Key", r).detail("Value", v.get()).log();
+							// TraceEvent("FlowGuruGoodRead").detail("Key", r).detail("Value", v.get()).log();
 						}
 						state int r2 = self->fromValue(v.get());
 						Optional<Value> v2 = wait(tr.get(self->key(r2)));
@@ -270,7 +270,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			}
 			d = testKeyToDouble(data[i].value, keyPrefix);
 			// flowguru: print each kv here, and compare it with restore
-			TraceEvent("FlowguruCheckCycle").detail("Cur", i).detail("Next", d).log();
+			// TraceEvent("FlowguruCheckCycle").detail("Cur", i).detail("Next", d).log();
 			iPrev = i;
 			i = (int)d;
 			if (i != d || i < 0 || i >= nodeCount) {
