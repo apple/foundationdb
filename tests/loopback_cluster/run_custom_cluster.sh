@@ -9,7 +9,7 @@ STATELESS_COUNT=4
 REPLICATION_COUNT=1
 LOGS_COUNT=8
 STORAGE_COUNT=16
-KNOBS=""
+KNOBS=
 LOGS_TASKSET=""
 STATELESS_TASKSET=""
 STORAGE_TASKSET=""
@@ -52,7 +52,7 @@ function start_servers {
     fi
     local port=$(( PORT_PREFIX + SERVER_COUNT ))
     local zone="${4}-Z-$(( j % REPLICATION_COUNT ))"
-    ${2} "${FDB}" -p auto:"${port}" "${KNOBS}" -c "${3}" \
+    ${2} "${FDB}" -p auto:"${port}" ${KNOBS:+"$KNOBS"} -c "${3}" \
       -d "${datadir}" -L "${logdir}" -C "${CLUSTER}" \
       --datacenter_id="${4}" \
       --locality-zoneid "${zone}" \
