@@ -8,7 +8,6 @@ if(NOT WIN32)
   endif()
 endif()
 
-include(AddFdbTest)
 if(FLOW_GRPC_ENABLED)
   generate_grpc_protobuf(fdbrpc.test echo.proto)
 endif()

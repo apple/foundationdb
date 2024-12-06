@@ -234,7 +234,6 @@ endif()
 # TODO (Vishesh): Replace with target_include_directories.
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/generated/")
 
-set(gRPC_DIR /usr/local/lib/cmake/grpc)
 find_package(gRPC CONFIG)
 if (gRPC_FOUND)
     message(STATUS "gRPC found. Enabling gRPC for Flow.")
@@ -243,7 +242,7 @@ if (gRPC_FOUND)
 else ()
     message(WARNING "gRPC not found. Disabling gRPC for Flow.")
     set(FLOW_GRPC_ENABLED OFF)
-    add_compile_definitions(GRPC_ENABLED_FOR_FEAT=0)
+    add_compile_definitions(FLOW_GRPC_ENABLED=0)
 endif ()
 
 

@@ -128,7 +128,7 @@ public:
 		return promise->getFuture();
 	}
 	// NOTE: Must be called from network thread. This is because the underlying primitive used
-	//   is ThreadReturnPromis
+	//   is ThreadReturnPromise.
 	template <class RequestType, class ResponseType>
 	FutureStream<ResponseType> call(ServerStreamingRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
 		// ASSERT(g_network->isOnMainThread());

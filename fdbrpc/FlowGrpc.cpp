@@ -18,12 +18,13 @@
  * limitations under the License.
  */
 
-#ifdef FLOW_GRPC_ENABLED
 #include <cstdio>
 #include <thread>
 #include "fdbrpc/FlowGrpc.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+#ifdef FLOW_GRPC_ENABLED
 
 GrpcServer::GrpcServer(const NetworkAddress& addr) : address_(addr) {}
 
