@@ -13,17 +13,16 @@
 
 # Globals.
 WEED_DIR=
-WEED_PID=
 
 # Cleanup the mess we've made. For calling from signal trap on exit.
 # $1 Weed PID to kill if running.
 # $2 The seasweed directory to clean up on exit.
 function shutdown_weed {
-  if [[ -n "${WEED_PID}" ]]; then
+  if [[ -f "${WEED_DIR}/weed.pid" ]]; then
     # KILL! If we send SIGTERM, seaweedfs hangs out
     # ten seconds before shutting down (could config.
     # time but just kill it -- there is no state to save).
-    kill -9 "${WEED_PID}"
+    kill -9 $(cat "${WEED_DIR}/weed.pid")
   fi
   if [[ -d "${WEED_DIR}" ]]; then
     rm -rf "${WEED_DIR}"
@@ -173,7 +172,8 @@ function start_weed {
     echo "ERROR: Failed to curl fid" >&2
     return 1
   fi
+  # Set the PID into the global.
+  echo "${weed_pid}" > "${WEED_DIR}/weed.pid"
   # Return two values.
-  WEED_PID="${weed_pid}"
   echo "${s3_port}"
 }
