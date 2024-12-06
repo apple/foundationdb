@@ -1459,6 +1459,9 @@ public:
 		return queue->onEmpty.getFuture();
 	}
 
+	int getFutureReferenceCount() const { return queue->getFutureReferenceCount(); }
+	int getPromiseReferenceCount() const { return queue->getPromiseReferenceCount(); }
+
 private:
 	NotifiedQueue<T>* queue;
 };
