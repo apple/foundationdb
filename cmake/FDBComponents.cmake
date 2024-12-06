@@ -242,9 +242,7 @@ if (gRPC_FOUND)
 else ()
     message(WARNING "gRPC not found. Disabling gRPC for Flow.")
     set(FLOW_GRPC_ENABLED OFF)
-    add_compile_definitions(FLOW_GRPC_ENABLED=0)
 endif ()
-
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)
