@@ -20,7 +20,7 @@
 
 #include "flow/ApiVersion.h"
 #include "fmt/format.h"
-#include "fdbbackup/BackupTLSConfig.h"
+#include "fdbclient/BackupTLSConfig.h"
 #include "fdbbackup/Decode.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"

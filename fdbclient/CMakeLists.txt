@@ -74,9 +74,9 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINA
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
 
-add_flow_target(EXECUTABLE NAME s3cp SRCS S3Cp.actor.cpp)
-target_include_directories(s3cp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
-target_link_libraries(s3cp PRIVATE fdbclient)
+add_flow_target(EXECUTABLE NAME s3client SRCS S3Client_cli.actor.cpp)
+target_include_directories(s3client PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_link_libraries(s3client PRIVATE fdbclient)
 
 # Setup the Swift sources in FDBClient.
 if(WITH_SWIFT)
@@ -144,5 +144,5 @@ endif()
 
 if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   enable_testing()
-  add_test(NAME s3cp_test COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3cp_test.sh ${CMAKE_BINARY_DIR})
+  add_test(NAME s3client_test COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3client_test.sh ${CMAKE_BINARY_DIR})
 endif()

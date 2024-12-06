@@ -25,7 +25,7 @@
 #include "flow/Error.h"
 #include "flow/network.h"
 
-#include "fdbbackup/BackupTLSConfig.h"
+#include "fdbclient/BackupTLSConfig.h"
 
 void BackupTLSConfig::setupBlobCredentials() {
 	// Add blob credentials files from the environment to the list collected from the command line.
