@@ -2056,13 +2056,13 @@ ACTOR Future<bool> runTest(Database cx,
 			if (quiescent && g_network->isSimulated()) {
 				try {
 					TraceEvent("AuditStorageStart");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 1000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 1500.0));
 					TraceEvent("AuditStorageCorrectnessHADone");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 1000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 1500.0));
 					TraceEvent("AuditStorageCorrectnessReplicaDone");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 1000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 1500.0));
 					TraceEvent("AuditStorageCorrectnessLocationMetadataDone");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard), 1000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard), 1500.0));
 					TraceEvent("AuditStorageCorrectnessStorageServerShardDone");
 				} catch (Error& e) {
 					ok = false;

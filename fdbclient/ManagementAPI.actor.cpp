@@ -19,11 +19,14 @@
  */
 
 #include <cinttypes>
+#include <cstddef>
 #include <string>
 #include <vector>
 
+#include "fdbclient/BulkDumping.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/RangeLock.h"
+#include "flow/Error.h"
 #include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
@@ -2971,6 +2974,245 @@ ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID task
 		}
 	}
 	return Void();
+}
+
+ACTOR Future<int> setBulkDumpMode(Database cx, int mode) {
+	state Transaction tr(cx);
+	state BinaryWriter wr(Unversioned());
+	wr << mode;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state int oldMode = 0;
+			Optional<Value> oldModeValue = wait(tr.get(bulkDumpModeKey));
+			if (oldModeValue.present()) {
+				BinaryReader rd(oldModeValue.get(), Unversioned());
+				rd >> oldMode;
+			}
+			if (oldMode != mode) {
+				BinaryWriter wrMyOwner(Unversioned());
+				wrMyOwner << dataDistributionModeLock;
+				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+				BinaryWriter wrLastWrite(Unversioned());
+				wrLastWrite << deterministicRandom()->randomUniqueID(); // triger DD restarts
+				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
+				tr.set(bulkDumpModeKey, wr.toValue());
+				wait(tr.commit());
+				TraceEvent("DDBulkDumpModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
+			}
+			return oldMode;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<int> getBulkDumpMode(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state int oldMode = 0;
+			Optional<Value> oldModeValue = wait(tr.get(bulkDumpModeKey));
+			if (oldModeValue.present()) {
+				BinaryReader rd(oldModeValue.get(), Unversioned());
+				rd >> oldMode;
+			}
+			return oldMode;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Return job Id if existing any bulk dump job globally.
+// There is at most one bulk dump job at any time on the entire key space.
+// A job of a range can spawn multiple tasks according to the shard boundary.
+// Those tasks share the same job Id (aka belonging to the same job).
+ACTOR Future<Optional<UID>> existAnyBulkDumpTask(Transaction* tr) {
+	state RangeResult rangeResult;
+	wait(store(rangeResult,
+	           krmGetRanges(tr,
+	                        bulkDumpPrefix,
+	                        normalKeys,
+	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+	// krmGetRanges splits the result into batches.
+	// Check first batch is enough since we only check if any task exists
+	for (int i = 0; i < rangeResult.size() - 1; ++i) {
+		if (rangeResult[i].value.empty()) {
+			continue;
+		}
+		BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+		return bulkDumpState.getJobId();
+	}
+	return Optional<UID>();
+}
+
+ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpTask) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<UID> existJobId = wait(existAnyBulkDumpTask(&tr));
+			if (existJobId.present() && existJobId.get() != bulkDumpTask.getJobId()) {
+				TraceEvent(SevWarn, "SubmitBulkDumpTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "ExistingDifferentJob")
+				    .detail("ExistingJobId", existJobId.get())
+				    .detail("NewJobId", bulkDumpTask.getJobId())
+				    .detail("Task", bulkDumpTask.toString());
+			}
+			if (existJobId.present() && existJobId.get() == bulkDumpTask.getJobId()) {
+				TraceEvent(SevWarn, "SubmitBulkDumpTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "ExistingSameJob")
+				    .detail("ExistingJobId", existJobId.get())
+				    .detail("NewJobId", bulkDumpTask.getJobId())
+				    .detail("Task", bulkDumpTask.toString());
+				return Void(); // give up if a job with same id has been submitted
+			}
+			if (bulkDumpTask.getPhase() != BulkDumpPhase::Submitted) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkDumpTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "WrongPhase")
+				    .detail("Task", bulkDumpTask.toString());
+				throw bulkdump_task_failed();
+			}
+			if (!normalKeys.contains(bulkDumpTask.getRange())) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "RangeOutOfScope")
+				    .detail("Task", bulkDumpTask.toString());
+				throw bulkdump_task_failed();
+			}
+			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpTask.getRange(), bulkDumpStateValue(bulkDumpTask)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> clearBulkDumpJob(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.clear(allKeys.withPrefix(bulkDumpPrefix));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(Database cx,
+                                                                     KeyRange rangeToRead,
+                                                                     Optional<size_t> limit,
+                                                                     Optional<BulkDumpPhase> phase) {
+	state Transaction tr(cx);
+	state Key readBegin = rangeToRead.begin;
+	state Key readEnd = rangeToRead.end;
+	state RangeResult rangeResult;
+	state std::vector<BulkDumpState> res;
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkDumpPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+		for (int i = 0; i < rangeResult.size() - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+			KeyRange range = Standalone(KeyRangeRef(rangeResult[i].key, rangeResult[i + 1].key));
+			if (range != bulkDumpState.getRange()) {
+				ASSERT(bulkDumpState.getRange().contains(range));
+				continue;
+			}
+			if (!phase.present() || phase.get() == bulkDumpState.getPhase()) {
+				res.push_back(bulkDumpState);
+			}
+			if (limit.present() && res.size() >= limit.get()) {
+				return res;
+			}
+		}
+		readBegin = rangeResult.back().key;
+	}
+
+	return res;
+}
+
+ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
+	state Transaction tr(cx);
+	state Key readBegin = rangeToRead.begin;
+	state Key readEnd = rangeToRead.end;
+	state RangeResult rangeResult;
+	state size_t completeTaskCount = 0;
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkDumpPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+		for (int i = 0; i < rangeResult.size() - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+			if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
+				completeTaskCount++;
+			}
+		}
+		readBegin = rangeResult.back().key;
+	}
+	return completeTaskCount;
 }
 
 // Persist a new owner if input uniqueId is not existing; Update description if input uniqueId exists

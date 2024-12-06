@@ -170,6 +170,7 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
                                      double timeoutSeconds);
 
 // Set bulk load mode
+// When the mode is on, DD will periodically check if there is any bulkload task to do by scaning the metadata.
 ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
 
 // Get valid bulk load task state within the input range
@@ -189,6 +190,32 @@ ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
                                             KeyRange range,
                                             UID taskId,
                                             std::vector<BulkLoadPhase> phases);
+
+// Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
+// the metadata.
+ACTOR Future<int> setBulkDumpMode(Database cx, int mode);
+
+// Get bulk dump mode value.
+ACTOR Future<int> getBulkDumpMode(Database cx);
+
+// Clear the existing bulkdump job metadata
+ACTOR Future<Void> clearBulkDumpJob(Database cx);
+
+// Submit a bulkdump job. If there is any existing job, reject the new job
+ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpState);
+
+// Get bulkdump tasks within the input range. Each range has at most one task running on.
+ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(
+    Database cx,
+    KeyRange rangeToRead,
+    Optional<size_t> limit = Optional<size_t>(),
+    Optional<BulkDumpPhase> phase = Optional<BulkDumpPhase>());
+
+// Return the existing Job ID
+ACTOR Future<Optional<UID>> existAnyBulkDumpTask(Transaction* tr);
+
+// Get total number of completed tasks within the input range
+ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);
 
 // Persist a rangeLock owner to database metadata
 // A range can only be locked by a registered owner

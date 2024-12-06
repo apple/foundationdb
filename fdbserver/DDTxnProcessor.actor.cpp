@@ -307,6 +307,14 @@ class DDTxnProcessorImpl {
 				}
 				TraceEvent(SevInfo, "DDBulkLoadInitMode").detail("Mode", result->bulkLoadMode);
 
+				result->bulkDumpMode = 0;
+				Optional<Value> bulkDumpMode = wait(tr.get(bulkDumpModeKey));
+				if (bulkDumpMode.present()) {
+					BinaryReader rd(bulkDumpMode.get(), Unversioned());
+					rd >> result->bulkDumpMode;
+				}
+				TraceEvent(SevInfo, "DDBulkDumpInitMode").detail("Mode", result->bulkDumpMode);
+
 				state Future<std::vector<ProcessData>> workers = getWorkers(&tr);
 				state Future<RangeResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 				wait(success(workers) && success(serverList));

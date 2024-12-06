@@ -501,6 +501,20 @@ public:
 		return s;
 	}
 
+	// Get string with full content in hex format. Different digits are splitted by a space.
+	// This is currently used for bulk dumping manifest text file when recording key ranges.
+	std::string toFullHexStringPlain() const {
+		std::string s;
+		s.reserve(length * 7);
+		for (int i = 0; i < length; i++) {
+			uint8_t b = (*this)[i];
+			s.append(format("%02x ", b));
+		}
+		if (s.size() > 0)
+			s.resize(s.size() - 1);
+		return s;
+	}
+
 	int expectedSize() const { return size(); }
 
 	int compare(StringRef const& other) const {

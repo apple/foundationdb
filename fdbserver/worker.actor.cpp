@@ -2770,7 +2770,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					startRole(Role::DATA_DISTRIBUTOR, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
 
-					Future<Void> dataDistributorProcess = dataDistributor(recruited, dbInfo);
+					Future<Void> dataDistributorProcess = dataDistributor(recruited, dbInfo, folder);
 					errorForwarders.add(forwardError(
 					    errors,
 					    Role::DATA_DISTRIBUTOR,
@@ -2778,7 +2778,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    setWhenDoneOrError(dataDistributorProcess, ddInterf, Optional<DataDistributorInterface>())));
 					ddInterf->set(Optional<DataDistributorInterface>(recruited));
 				}
-				TraceEvent("DataDistributorReceived", req.reqId).detail("DataDistributorId", recruited.id());
+				TraceEvent("DataDistributorReceived", req.reqId)
+				    .detail("DataDistributorId", recruited.id())
+				    .detail("Folder", folder); // double check if this works with SS restore
 				req.reply.send(recruited);
 			}
 			when(InitializeRatekeeperRequest req = waitNext(interf.ratekeeper.getFuture())) {

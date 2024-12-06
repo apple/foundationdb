@@ -36,6 +36,8 @@ These documents explain the engineering design of FoundationDB, with detailed in
 
 * :doc:`consistency-check-urgent` describes how to complete a consistency scan of the entire database in a fast way.
 
+* :doc:`bulkdump` describes how to do snapshot data dump to blobstore or local file system.
+
 .. toctree::
    :maxdepth: 1
    :titlesonly:
@@ -57,3 +59,4 @@ These documents explain the engineering design of FoundationDB, with detailed in
    read-write-path
    ha-write-path
    consistency-check-urgent
+   bulkdump

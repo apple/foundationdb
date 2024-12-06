@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/Audit.h"
+#include "fdbclient/BulkDumping.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/StorageServerShard.h"
@@ -125,6 +126,7 @@ struct StorageServerInterface {
 	RequestStream<struct AuditStorageRequest> auditStorage;
 	RequestStream<struct GetHotShardsRequest> getHotShards;
 	RequestStream<struct GetStorageCheckSumRequest> getCheckSum;
+	RequestStream<struct BulkDumpRequest> bulkdump;
 
 private:
 	bool acceptingRequests;
@@ -194,6 +196,7 @@ public:
 			getHotShards = RequestStream<struct GetHotShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
 			getCheckSum =
 			    RequestStream<struct GetStorageCheckSumRequest>(getValue.getEndpoint().getAdjustedEndpoint(25));
+			bulkdump = RequestStream<struct BulkDumpRequest>(getValue.getEndpoint().getAdjustedEndpoint(26));
 		}
 	}
 	bool operator==(StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
@@ -226,6 +229,7 @@ public:
 		streams.push_back(auditStorage.getReceiver());
 		streams.push_back(getHotShards.getReceiver());
 		streams.push_back(getCheckSum.getReceiver());
+		streams.push_back(bulkdump.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -1290,6 +1294,26 @@ struct GetStorageCheckSumRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, ranges, actionId, checkSumMethod, reply);
+	}
+};
+
+struct BulkDumpRequest {
+	constexpr static FileIdentifier file_identifier = 3828145;
+	std::vector<UID> checksumServers;
+	BulkDumpState bulkDumpState;
+	ReplyPromise<BulkDumpState> reply;
+
+	BulkDumpRequest() {}
+	BulkDumpRequest(const std::vector<UID>& checksumServers, const BulkDumpState& bulkDumpState)
+	  : checksumServers(checksumServers), bulkDumpState(bulkDumpState){};
+
+	std::string toString() const {
+		return "[BulkDumpState]: " + bulkDumpState.toString() + ", [ChecksumServers]: " + describe(checksumServers);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checksumServers, bulkDumpState, reply);
 	}
 };
 
