@@ -5116,12 +5116,18 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 					try {
 						TraceEvent("FlowGuruLoopBegin")
 								.detail("Version", minVersion)
+								.detail("Index", mutationIndex)
+								.detail("Count", txnCount)
+								.detail("Total", totalMutation)
+								.detail("TxBytes", txBytes)
+								.detail("BytesLimit", txBytesLimit)
 								.log();
 						// fmt::print(stderr, "Commit:, mutationIndex={}, total={}\n", mutationIndex, totalMutation);
 						if (mutationIndex == totalMutation) {
 							break;
 						}
 						txBytes = 0;
+						txnCount = 0;
 						tr->reset();
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5144,7 +5150,6 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 						}
 						wait(tr->commit());
 						mutationIndex += txnCount; // update mutationIndex after commit 
-						txnCount = 0;
 						TraceEvent("FlowGuruCommitSucceed")
 							.detail("Version", minVersion)
 							.log();
