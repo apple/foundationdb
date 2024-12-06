@@ -528,6 +528,7 @@ extern const KeyRef bulkLoadPrefix;
 const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState);
 BulkLoadState decodeBulkLoadState(const ValueRef& value);
 
+extern const std::string rangeLockNameForBulkLoad;
 extern const KeyRangeRef rangeLockKeys;
 extern const KeyRef rangeLockPrefix;
 const Value rangeLockStateSetValue(const RangeLockStateSet& rangeLockStateSet);

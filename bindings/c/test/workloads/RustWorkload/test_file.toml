@@ -1,0 +1,11 @@
+[[test]]
+testTitle = 'Rust_CAPI_Test'
+
+  [[test.workload]]
+    testName = 'External'
+    useCAPI = true
+    libraryPath = './target/release'
+    libraryName = 'rust_workload'
+    workloadName = 'MockWorkload'
+    my_rust_option = 'my_value'
+

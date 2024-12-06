@@ -177,6 +177,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT,    true );
 	init( CONSISTENCY_CHECK_REQUIRED_REPLICAS,                     1 );
+	
+	init( PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST, 0.0 ); if (isSimulated) PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST = deterministicRandom()->random01();
+	init( PROBABILITY_TEAM_UNHEALTHY_DATAMOVE_CHOOSE_TRUE_BEST_DEST, 0.0 ); if (isSimulated) PROBABILITY_TEAM_UNHEALTHY_DATAMOVE_CHOOSE_TRUE_BEST_DEST = deterministicRandom()->random01();
 
 	// Data distribution
 	init( AVAILABLE_SPACE_PIVOT_RATIO,                         0.5 );
@@ -194,6 +197,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( DD_PHYSICAL_SHARD_MOVE_PROBABILITY,                    0.0 ); // FIXME: re-enable after ShardedRocksDB is well tested by simulation
 	init( ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT,               false ); // FIXME: re-enable after ShardedRocksDB is well tested by simulation
+	init( BULKLOAD_ONLY_USE_PHYSICAL_SHARD_MOVE,                true ); // FIXME(BulkLoad): disable after bulk load supports fetchKeys
 	init( MAX_PHYSICAL_SHARD_BYTES,                         10000000 ); // 10 MB; for ENABLE_DD_PHYSICAL_SHARD; smaller leads to larger number of physicalShard per storage server
  	init( PHYSICAL_SHARD_METRICS_DELAY,                        300.0 ); // 300 seconds; for ENABLE_DD_PHYSICAL_SHARD
 	init( ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME,            600.0 ); if( randomize && BUGGIFY )  ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME = 0.0; // 600 seconds; for ENABLE_DD_PHYSICAL_SHARD
@@ -368,6 +372,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_MAXIMUM_LARGE_TEAM_CLEANUP,                       10000 ); if( randomize && BUGGIFY ) DD_MAXIMUM_LARGE_TEAM_CLEANUP = 10;
 	init( DD_LARGE_TEAM_DELAY,                                  60.0 );
 	init( DD_FIX_WRONG_REPLICAS_DELAY,                          60.0 );
+	init (DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM,      false ); if (isSimulated) DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM = true;
 	
 	// BulkLoading
 	init( BULKLOAD_FILE_BYTES_MAX,                  1*1024*1024*1024 ); // 1GB
@@ -377,6 +382,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC,                 2.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC = deterministicRandom()->random01() * 10 + 1;
 
 	// TeamRemover
+	init( TR_LOW_SPACE_PIVOT_DELAY_SEC,                            0 ); if (isSimulated) TR_LOW_SPACE_PIVOT_DELAY_SEC = deterministicRandom()->randomInt(0, 3);
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
 	init( TR_REMOVE_MACHINE_TEAM_DELAY,                         60.0 ); if( randomize && BUGGIFY ) TR_REMOVE_MACHINE_TEAM_DELAY =  deterministicRandom()->random01() * 60.0;
 	init( TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS,                    true ); if( randomize && BUGGIFY ) TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS = deterministicRandom()->random01() < 0.1 ? true : false;
@@ -495,7 +501,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_QUEUE_SOFT_MAX,                           500 );
 	init( ROCKSDB_FETCH_QUEUE_HARD_MAX,                          100 );
 	init( ROCKSDB_FETCH_QUEUE_SOFT_MAX,                           50 );
-	init( ROCKSDB_HISTOGRAMS_SAMPLE_RATE,                      0.001 ); if( randomize && BUGGIFY ) ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
+	init( ROCKSDB_HISTOGRAMS_SAMPLE_RATE,                          1 ); if( isSimulated ) ROCKSDB_HISTOGRAMS_SAMPLE_RATE = deterministicRandom()->random01();
 	init( ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME,             30.0 ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME = 0.1;
 	init( ROCKSDB_PROBABILITY_REUSE_ITERATOR_SIM,               0.01 );
 	init( ROCKSDB_READ_RANGE_REUSE_ITERATORS,                   true ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_ITERATORS = deterministicRandom()->coinflip();
@@ -575,12 +581,14 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MAX_OPEN_FILES,                                 -1 ); // RocksDB default.
 	init( ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS,            false ); 
 	init( ROCKSDB_CF_RANGE_DELETION_LIMIT,                         0 );
-	init( ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,                    0 );
+	init( ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS,                10000 );
 	init( ROCKSDB_WAIT_ON_CF_FLUSH,                            false );
-	init( ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                  false );
+	init( ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,                   true );
 	init( ROCKSDB_CF_METRICS_DELAY,                            900.0 );
 	init( ROCKSDB_MAX_LOG_FILE_SIZE,                        10485760 ); // 10MB.
 	init( ROCKSDB_KEEP_LOG_FILE_NUM,                             100 ); // Keeps 1GB log per storage server.
+	// Does manual flushes at regular intervals(seconds), incase rocksdb did not flush. Feature disable if the value is 0.
+	init( ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL,                      0 ); if( randomize && BUGGIFY ) ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL = deterministicRandom()->randomInt(4, 10);
 	init( ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    true );
 	init( ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 true );
 	init( ROCKSDB_FULLFILE_CHECKSUM,                           false ); if ( randomize && BUGGIFY ) ROCKSDB_FULLFILE_CHECKSUM = true;
@@ -591,6 +599,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY,               0 ); if ( randomize && BUGGIFY ) ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY = 8; // Default: 0 (disabled). Supported values: 0, 1, 2, 4, 8.
 	// Block cache key-value checksum. Checksum is validated during read, so has non-trivial impact on read performance.
 	init( ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY,                  0 ); if ( randomize && BUGGIFY ) ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY = 8; // Default: 0 (disabled). Supported values: 0, 1, 2, 4, 8.
+	init( ROCKSDB_METRICS_IN_SIMULATION,                       false );
+	init( SHARDED_ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,          false );	
 	init( SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,               0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01();
 	init( SHARD_METADATA_SCAN_BYTES_LIMIT,                  10485760 ); // 10MB
 	init( ROCKSDB_MAX_MANIFEST_FILE_SIZE,                  100 << 20 ); if (isSimulated) ROCKSDB_MAX_MANIFEST_FILE_SIZE = 500 << 20; // 500MB in simulation
@@ -622,6 +632,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_MAX_OPEN_FILES,                      50000 ); // Should be smaller than OS's fd limit.
 	init (SHARDED_ROCKSDB_READ_ASYNC_IO,                       false ); if (isSimulated) SHARDED_ROCKSDB_READ_ASYNC_IO = deterministicRandom()->coinflip();
 	init( SHARDED_ROCKSDB_PREFIX_LEN,                              0 ); if( randomize && BUGGIFY )  SHARDED_ROCKSDB_PREFIX_LEN = deterministicRandom()->randomInt(1, 20);
+	init( SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE,              0.001 ); if( randomize && BUGGIFY ) SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
 
 
 	// Leader election
@@ -792,9 +803,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER,                 3 );
 	init( CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING,   false); 
 	init( CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING,                true); 
-	init( CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING,         false); if (isSimulated && deterministicRandom()->coinflip()) CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING = true;
-	init( CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING,          false); if (isSimulated && deterministicRandom()->coinflip()) CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING = true;
-	init( CC_ONLY_CONSIDER_INTRA_DC_LATENCY,                    false); if (isSimulated && deterministicRandom()->coinflip()) CC_ONLY_CONSIDER_INTRA_DC_LATENCY = true;
+	init( CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING,         false); if (isSimulated) CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING = deterministicRandom()->coinflip();
+	init( CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING,          false); if (isSimulated) CC_ENABLE_REMOTE_TLOG_DISCONNECT_MONITORING = deterministicRandom()->coinflip();
+	init( CC_ONLY_CONSIDER_INTRA_DC_LATENCY,                    false); if (isSimulated) CC_ONLY_CONSIDER_INTRA_DC_LATENCY = deterministicRandom()->coinflip();
+	init( CC_INVALIDATE_EXCLUDED_PROCESSES,                     false); if (isSimulated) CC_INVALIDATE_EXCLUDED_PROCESSES = deterministicRandom()->coinflip();
+	init( CC_GRAY_FAILURE_STATUS_JSON,                          false); if (isSimulated) CC_GRAY_FAILURE_STATUS_JSON = true;
 	init( CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL,              0.5 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
@@ -1100,7 +1113,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD,         0.1 );
 	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               5 );
 	init( WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER,           true );
-	init( GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING,         true );
+	init( GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING,         true );	
+	init( GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN,           false ); if (isSimulated) GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN = deterministicRandom()->coinflip();
+	init( GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN,            false ); if (isSimulated) GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN = deterministicRandom()->coinflip();
 	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
 	init( STORAGE_DISK_CLEANUP_MAX_RETRIES,                       10 );
 	init( STORAGE_DISK_CLEANUP_RETRY_INTERVAL,  isSimulated ? 2 : 30 );

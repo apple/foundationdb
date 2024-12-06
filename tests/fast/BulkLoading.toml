@@ -4,7 +4,8 @@ storageEngineType = 5
 processesPerMachine = 2
 machineCount = 15
 extraStorageMachineCountPerDC = 8
-tenantModes = ['disabled'] # BulkLoading test injects SST files with raw bytes. Therefore, disable tenant
+tenantModes = ['disabled'] # Do not support tenant
+encryptModes = ['disabled'] # Do not support encryption
 
 [[knobs]]
 # This knob is commented out since the knob override is done *after* the simulation system is set up. However,
@@ -14,7 +15,14 @@ tenantModes = ['disabled'] # BulkLoading test injects SST files with raw bytes. 
 # The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check
 # so for this BulkLoading test, the shard RocksDB storage engine is always turned on.
 shard_encode_location_metadata = true
-dd_physical_shard_move_probability = 1.0
+
+# BulkLoad relies on RangeLock
+enable_read_lock_on_range = true
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+
+# Set high enough sample rate to test bytes sampling
+min_byte_sampling_probability = 0.5
 
 [[test]]
 testTitle = 'BulkLoadingWorkload'

@@ -382,21 +382,30 @@ if(NOT WIN32)
 
 endif()
 
-set(c_workloads_srcs
+set(cpp_workloads_srcs
   test/workloads/workloads.cpp
   test/workloads/workloads.h
   test/workloads/SimpleWorkload.cpp)
 
+set(c_workloads_srcs
+  test/workloads/CWorkload.c)
+
 if(OPEN_FOR_IDE)
+  add_library(cpp_workloads OBJECT ${cpp_workloads_srcs})
   add_library(c_workloads OBJECT ${c_workloads_srcs})
 else()
+  add_library(cpp_workloads SHARED ${cpp_workloads_srcs})
   add_library(c_workloads SHARED ${c_workloads_srcs})
 endif()
+set_target_properties(cpp_workloads PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
 set_target_properties(c_workloads PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
-target_link_libraries(c_workloads PUBLIC fdb_c)
+target_link_libraries(cpp_workloads PUBLIC fdb_c)
+target_include_directories(c_workloads PUBLIC ${CMAKE_SOURCE_DIR}/bindings/c)
 
 if(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+  target_link_options(cpp_workloads PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map,-z,nodelete")
   target_link_options(c_workloads PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map,-z,nodelete")
 endif()
 

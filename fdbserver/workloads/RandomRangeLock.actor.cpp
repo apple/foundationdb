@@ -22,6 +22,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
@@ -40,7 +41,10 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	int lockActorCount = 10;
 
 	RandomRangeLockWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {
-		enabled = (clientId == 0) && g_network->isSimulated();
+		enabled = SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
+		          !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+		          !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
+		enabled &= (clientId == 0) && g_network->isSimulated();
 	}
 
 	RandomRangeLockWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {

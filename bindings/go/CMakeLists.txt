@@ -10,6 +10,7 @@ set(SRCS
   src/fdb/transaction.go
   src/fdb/directory/directory_layer.go
   src/fdb/errors.go
+  src/fdb/errors_test.go
   src/fdb/keyselector.go
   src/fdb/tuple/tuple.go
   src/fdb/cluster.go

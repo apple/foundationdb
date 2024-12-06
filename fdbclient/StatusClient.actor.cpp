@@ -390,9 +390,11 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecor
 	if (coordsStatusObj.present()) {
 		statusObj["coordinators"] = coordsStatusObj.get();
 		if (!*quorum_reachable)
-			messages->push_back(makeMessage("quorum_not_reachable", "Unable to reach a quorum of coordinators."));
+			messages->push_back(
+			    makeMessage(MessageType::QUORUM_NOT_REACHABLE, "Unable to reach a quorum of coordinators."));
 	} else
-		messages->push_back(makeMessage("status_incomplete_coordinators", "Could not fetch coordinator info."));
+		messages->push_back(
+		    makeMessage(MessageType::STATUS_INCOMPLETE_COORDINATORS, "Could not fetch coordinator info."));
 
 	StatusObject statusObjClusterFile;
 	statusObjClusterFile["path"] = connRecord->getLocation();
@@ -411,7 +413,7 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecor
 		               "cluster file and its containing folder must be writable by all servers and clients. If a "
 		               "majority of the coordinators referenced by the old connection string are lost, the database "
 		               "will stop working until the correct cluster file is distributed to all processes.";
-		messages->push_back(makeMessage("incorrect_cluster_file_contents", description.c_str()));
+		messages->push_back(makeMessage(MessageType::INCORRECT_CLUSTER_FILE_CONTENTS, description.c_str()));
 	}
 
 	return statusObj;
@@ -433,24 +435,25 @@ ACTOR Future<Optional<StatusObject>> clusterStatusFetcher(ClusterInterface cI,
 			when(ErrorOr<StatusReply> result = wait(statusReply)) {
 				if (result.isError()) {
 					if (result.getError().code() == error_code_request_maybe_delivered)
-						messages->push_back(makeMessage("unreachable_cluster_controller",
+						messages->push_back(makeMessage(MessageType::UNREACHABLE_CLUSTER_CONTROLLER,
 						                                ("Unable to communicate with the cluster controller at " +
 						                                 cI.address().toString() + " to get status.")
 						                                    .c_str()));
 					else if (result.getError().code() == error_code_server_overloaded)
-						messages->push_back(makeMessage("server_overloaded",
+						messages->push_back(makeMessage(MessageType::SERVER_OVERLOADED,
 						                                "The cluster controller is currently processing too many "
 						                                "status requests and is unable to respond"));
 					else
-						messages->push_back(
-						    makeMessage("status_incomplete_error", "Cluster encountered an error fetching status."));
+						messages->push_back(makeMessage(MessageType::STATUS_INCOMPLETE_ERROR,
+						                                "Cluster encountered an error fetching status."));
 				} else {
 					oStatusObj = result.get().statusObj;
 				}
 				break;
 			}
 			when(wait(clusterTimeout)) {
-				messages->push_back(makeMessage("status_incomplete_timeout", "Timed out fetching cluster status."));
+				messages->push_back(
+				    makeMessage(MessageType::STATUS_INCOMPLETE_TIMEOUT, "Timed out fetching cluster status."));
 				break;
 			}
 		}
@@ -535,7 +538,7 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord>
 			throw;
 		TraceEvent(SevError, "ClientStatusFetchError").error(e);
 		clientMessages.push_back(
-		    makeMessage("status_incomplete_client", "Could not retrieve client status information."));
+		    makeMessage(MessageType::STATUS_INCOMPLETE_CLIENT, "Could not retrieve client status information."));
 
 		// quorum_reachable will be false because clientStatusFetcher won't throw and it's the only thing would change
 		// it.
@@ -578,7 +581,7 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord>
 				choose {
 					when(wait(clusterInterface->onChange())) {}
 					when(wait(interfaceTimeout)) {
-						clientMessages.push_back(makeMessage("no_cluster_controller",
+						clientMessages.push_back(makeMessage(MessageType::NO_CLUSTER_CONTROLLER,
 						                                     "Unable to locate a cluster controller within 2 seconds.  "
 						                                     "Check that there are server processes running."));
 						break;
@@ -592,7 +595,7 @@ ACTOR Future<StatusObject> statusFetcherImpl(Reference<IClusterConnectionRecord>
 			    .error(e);
 			// Set client.messages to an array of one message
 			clientMessages.push_back(
-			    makeMessage("status_incomplete_cluster", "Could not retrieve cluster status information."));
+			    makeMessage(MessageType::STATUS_INCOMPLETE_CLUSTER, "Could not retrieve cluster status information."));
 		}
 	}
 

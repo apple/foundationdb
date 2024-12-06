@@ -71,16 +71,22 @@ function(compile_boost)
   # Build boost
   include(ExternalProject)
 
+  set(BOOST_SRC_URL https://boostorg.jfrog.io/artifactory/main/release/1.86.0/source/boost_1_86_0.tar.bz2)
+  set(BOOST_SRC_SHA SHA256=1bed88e40401b2cb7a1f76d4bab499e352fa4d0c5f31c0dbae64e24d34d7513b)
+
+  if(USE_ASAN)
+    set(B2_ADDTTIONAL_BUILD_ARGS context-impl=ucontext)
+  endif()
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
-    URL                "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
-    URL_HASH           SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
+    URL                ${BOOST_SRC_URL}
+    URL_HASH           ${BOOST_SRC_SHA}
     CONFIGURE_COMMAND  ${BOOTSTRAP_COMMAND}
                        ${BOOTSTRAP_ARGS}
                        --with-libraries=${BOOTSTRAP_LIBRARIES}
                        --with-toolset=${BOOST_TOOLSET}
     BUILD_COMMAND      ${B2_COMMAND}
-                       link=static
+                       link=static ${B2_ADDTTIONAL_BUILD_ARGS}
                        ${COMPILE_BOOST_BUILD_ARGS}
                        --prefix=${BOOST_INSTALL_DIR}
                        ${USER_CONFIG_FLAG} install
@@ -133,6 +139,10 @@ if(USE_SANITIZER)
   if (USE_VALGRIND)
     compile_boost(TARGET boost_target BUILD_ARGS valgrind=on
       CXXFLAGS ${BOOST_CXX_OPTIONS} LDFLAGS ${BOOST_LINK_OPTIONS})
+  elseif(USE_ASAN)
+    list(APPEND BOOST_CXX_OPTIONS -DBOOST_COROUTINES_NO_DEPRECATION_WARNING)
+    compile_boost(TARGET boost_target BUILD_ARGS
+      CXXFLAGS ${BOOST_CXX_OPTIONS} LDFLAGS ${BOOST_LINK_OPTIONS})
   else()
     compile_boost(TARGET boost_target BUILD_ARGS context-impl=ucontext
       CXXFLAGS ${BOOST_COMPILE_OPTIONS} LDFLAGS ${BOOST_LINK_OPTIONS})
@@ -145,12 +155,12 @@ set(Boost_USE_STATIC_LIBS ON)
 
 # Clang and Gcc will have different name mangling to std::call_once, etc.
 if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$" AND USE_LIBCXX)
-  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0_clang)
-  set(BOOST_HINT_PATHS /opt/boost_1_78_0_clang)
+  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_86_0_clang)
+  set(BOOST_HINT_PATHS /opt/boost_1_86_0_clang)
   message(STATUS "Using Clang version of boost")
 else ()
-  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0)
-  set(BOOST_HINT_PATHS /opt/boost_1_78_0)
+  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_86_0)
+  set(BOOST_HINT_PATHS /opt/boost_1_86_0)
   message(STATUS "Using g++ version of boost")
 endif ()
 
@@ -163,7 +173,7 @@ if(WIN32)
   # properly for config mode. So we use the old way on Windows
   #  find_package(Boost 1.72.0 EXACT QUIET REQUIRED CONFIG PATHS ${BOOST_HINT_PATHS})
   # I think depending on the cmake version this will cause weird warnings
-  find_package(Boost 1.78 COMPONENTS filesystem iostreams serialization system program_options)
+  find_package(Boost 1.86 COMPONENTS filesystem iostreams serialization system program_options)
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target INTERFACE Boost::boost Boost::filesystem Boost::iostreams Boost::serialization Boost::system)
 
@@ -172,7 +182,7 @@ if(WIN32)
   return()
 endif()
 
-find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams program_options serialization system CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.86.0 EXACT QUIET COMPONENTS context filesystem iostreams program_options serialization system CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
 # The precompiled boost silently broke in CI.  While investigating, I considered extending

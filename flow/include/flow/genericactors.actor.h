@@ -333,7 +333,7 @@ Future<Void> holdWhileVoid(X object, Future<T> what) {
 
 // Assign the future value of what to out
 template <class T, class X>
-Future<Void> store(X& out, Future<T> what) {
+[[nodiscard]] Future<Void> store(X& out, Future<T> what) {
 	return map(what, [&out](T const& v) {
 		out = v;
 		return Void();

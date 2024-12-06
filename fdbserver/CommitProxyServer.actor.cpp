@@ -738,9 +738,15 @@ struct CommitBatchContext {
 
 	void checkHotShards();
 
+	bool rangeLockEnabled();
+
 private:
 	void evaluateBatchSize();
 };
+
+bool CommitBatchContext::rangeLockEnabled() {
+	return pProxyCommitData->rangeLockEnabled();
+}
 
 void CommitBatchContext::checkHotShards() {
 	// removed expired hot shards
@@ -1991,16 +1997,15 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 		MutationRef acsMutation;
 		acsMutation.type = MutationRef::SetValue;
 		acsMutation.param1 = accumulativeChecksumKey; // private mutation
-		Value acsValue = accumulativeChecksumValue(
-		    AccumulativeChecksumState(acsIndex, acsState.acs, self->commitVersion, self->pProxyCommitData->epoch));
+		AccumulativeChecksumState acsToSend(acsIndex, acsState.acs, self->commitVersion, self->pProxyCommitData->epoch);
+		Value acsValue = accumulativeChecksumValue(acsToSend);
 		acsMutation.param2 = acsValue;
 		acsMutation.setAccumulativeChecksumIndex(acsIndex);
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 			TraceEvent(SevInfo, "AcsBuilderIssueAccumulativeChecksumMutation", self->pProxyCommitData->dbgid)
-			    .detail("Acs", acsState.acs)
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", acsIndex)
-			    .detail("CommitVersion", self->commitVersion)
+			    .detail("AcsToSend", acsToSend.toString())
 			    .detail("Mutation", acsMutation)
 			    .detail("CommitProxyIndex", self->pProxyCommitData->commitProxyIndex);
 		}
@@ -2008,18 +2013,17 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 		self->toCommit.writeTypedMessage(acsMutation);
 	}
 }
-
 // RangeLock takes effect only when the feature flag is on and database is unlocked and the mutation is not encrypted
 void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
-	ASSERT(SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !self->locked &&
-	       !self->pProxyCommitData->encryptMode.isEncryptionEnabled() &&
-	       self->pProxyCommitData->getTenantMode() == TenantMode::DISABLED);
+	ASSERT(self->rangeLockEnabled());
 	ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	ASSERT(pProxyCommitData->rangeLock != nullptr);
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	for (int i = self->transactionNum; i < trs.size(); i++) {
 		if (self->committed[i] != ConflictBatch::TransactionCommitted) {
 			continue;
+		} else if (trs[i].isLockAware()) {
+			continue; // rangeLock is transparent to lock-aware transactions
 		}
 		VectorRef<MutationRef>* pMutations = &trs[i].transaction.mutations;
 		bool transactionRejected = false;
@@ -2344,10 +2348,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// After applyed metadata change, this commit proxy has the latest view of locked ranges.
 	// If a transaction has any mutation accessing to the locked range, reject the transaction with
 	// error_code_transaction_rejected_range_locked
-	// This feature is disabled when the database is locked
-	if (SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !self->locked &&
-	    !pProxyCommitData->encryptMode.isEncryptionEnabled() &&
-	    self->pProxyCommitData->getTenantMode() == TenantMode::DISABLED) {
+	if (self->rangeLockEnabled()) {
 		rejectMutationsForReadLockOnRange(self);
 	}
 
@@ -3778,8 +3779,11 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				uniquify(info.tags);
 				keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 			} else if (kv.key.startsWith(rangeLockPrefix)) {
-				Key keyInsert = kv.key.removePrefix(rangeLockPrefix);
-				pContext->pCommitData->rangeLock->initKeyPoint(keyInsert, kv.value);
+				if (pContext->pCommitData->rangeLockEnabled()) {
+					ASSERT(pContext->pCommitData->rangeLock != nullptr);
+					Key keyInsert = kv.key.removePrefix(rangeLockPrefix);
+					pContext->pCommitData->rangeLock->initKeyPoint(keyInsert, kv.value);
+				}
 			} else {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 				continue;
@@ -4009,6 +4013,12 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		                         SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
 	}
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
+
+	// Initialize RangeLock
+	if (commitData.rangeLockEnabled()) {
+		commitData.rangeLock = std::make_shared<RangeLock>(&commitData);
+		TraceEvent(SevInfo, "CommitProxyRangeLockEnabled", commitData.dbgid);
+	}
 
 	addActor.send(monitorRemoteCommitted(&commitData));
 	addActor.send(tenantIdServer(proxy, addActor, &commitData));

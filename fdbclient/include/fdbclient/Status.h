@@ -21,6 +21,7 @@
 #ifndef FDBCLIENT_STATUS_H
 #define FDBCLIENT_STATUS_H
 
+#include <unordered_map>
 #include "fdbclient/JSONDoc.h"
 
 // Reads the entire string s as a JSON value
@@ -68,9 +69,35 @@ struct StatusValue : json_spirit::mValue {
 	StatusValue(json_spirit::mValue const& o) : json_spirit::mValue(o) {}
 };
 
-inline StatusObject makeMessage(const char* name, const char* description) {
+enum class MessageType {
+	INCORRECT_CLUSTER_FILE_CONTENTS,
+	NO_CLUSTER_CONTROLLER,
+	QUORUM_NOT_REACHABLE,
+	SERVER_OVERLOADED,
+	STATUS_INCOMPLETE_CLIENT,
+	STATUS_INCOMPLETE_CLUSTER,
+	STATUS_INCOMPLETE_COORDINATORS,
+	STATUS_INCOMPLETE_ERROR,
+	STATUS_INCOMPLETE_TIMEOUT,
+	UNREACHABLE_CLUSTER_CONTROLLER,
+};
+
+inline const std::unordered_map<MessageType, std::string> messageTypeToName{
+	{ MessageType::INCORRECT_CLUSTER_FILE_CONTENTS, "incorrect_cluster_file_contents" },
+	{ MessageType::NO_CLUSTER_CONTROLLER, "no_cluster_controller" },
+	{ MessageType::QUORUM_NOT_REACHABLE, "quorum_not_reachable" },
+	{ MessageType::SERVER_OVERLOADED, "server_overloaded" },
+	{ MessageType::STATUS_INCOMPLETE_CLIENT, "status_incomplete_client" },
+	{ MessageType::STATUS_INCOMPLETE_CLUSTER, "status_incomplete_cluster" },
+	{ MessageType::STATUS_INCOMPLETE_COORDINATORS, "status_incomplete_coordinators" },
+	{ MessageType::STATUS_INCOMPLETE_ERROR, "status_incomplete_error" },
+	{ MessageType::STATUS_INCOMPLETE_TIMEOUT, "status_incomplete_timeout" },
+	{ MessageType::UNREACHABLE_CLUSTER_CONTROLLER, "unreachable_cluster_controller" },
+};
+
+inline StatusObject makeMessage(const MessageType messageType, const char* description) {
 	StatusObject out;
-	out["name"] = name;
+	out["name"] = messageTypeToName.at(messageType);
 	out["description"] = description;
 	return out;
 }

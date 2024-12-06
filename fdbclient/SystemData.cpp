@@ -1211,6 +1211,8 @@ BulkLoadState decodeBulkLoadState(const ValueRef& value) {
 }
 
 // Range Lock
+const std::string rangeLockNameForBulkLoad = "BulkLoad";
+
 const KeyRangeRef rangeLockKeys = KeyRangeRef("\xff/rangeLock/"_sr, "\xff/rangeLock0"_sr);
 const KeyRef rangeLockPrefix = rangeLockKeys.begin;
 

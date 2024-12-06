@@ -1141,6 +1141,19 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	return processMap;
 }
 
+static JsonBuilderObject grayFailureStatus(const std::unordered_map<NetworkAddress, double>& excludedDegradedServers) {
+	JsonBuilderObject status;
+	JsonBuilderArray excludedServers;
+	for (const auto& [excludedServer, time] : excludedDegradedServers) {
+		JsonBuilderObject server;
+		server["address"] = excludedServer.toString();
+		server["time"] = time;
+		excludedServers.push_back(server);
+	}
+	status["excluded_servers"] = excludedServers;
+	return status;
+}
+
 static JsonBuilderObject clientStatusFetcher(
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatusMap) {
 	JsonBuilderObject clientStatus;
@@ -3046,7 +3059,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
     Version dcStorageServerVersionDifference,
     ConfigBroadcaster const* configBroadcaster,
     Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration,
-    metacluster::MetaclusterMetrics metaclusterMetrics) {
+    metacluster::MetaclusterMetrics metaclusterMetrics,
+    std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
 
 	state double tStart = timer();
 
@@ -3680,6 +3694,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		int64_t clusterTime = g_network->timer();
 		if (clusterTime != -1) {
 			statusObj["cluster_controller_timestamp"] = clusterTime;
+		}
+
+		if (SERVER_KNOBS->CC_GRAY_FAILURE_STATUS_JSON) {
+			statusObj["gray_failure"] = grayFailureStatus(excludedDegradedServers);
 		}
 
 		TraceEvent("ClusterGetStatus")
