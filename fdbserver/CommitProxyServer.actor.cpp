@@ -2620,9 +2620,14 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 
 	state const Optional<UID>& debugID = self->debugID;
 
-	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
-		//TraceEvent("CPAdvanceMinVersion", self->pProxyCommitData->dbgid).detail("PrvVersion", self->prevVersion).detail("CommitVersion", self->commitVersion).detail("Master", self->pProxyCommitData->master.id().toString()).detail("TxSize", self->trs.size());
-		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		// Do not advance min committed version at this point when version vector is enabled, as we can treat the
+		// current transaction as committed only after receiving a reply from the sequencer (at which point we can
+		// guarantee that all the versions prior to the current version have also been made durable).
+		if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
+			//TraceEvent("CPAdvanceMinVersion", self->pProxyCommitData->dbgid).detail("PrvVersion", self->prevVersion).detail("CommitVersion", self->commitVersion).detail("Master", self->pProxyCommitData->master.id().toString()).detail("TxSize", self->trs.size());
+			debug_advanceMinCommittedVersion(UID(), self->commitVersion);
+		}
 	}
 
 	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
@@ -2664,6 +2669,15 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AfterReportRawCommittedVersion");
+	}
+
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		// We have received a reply from the sequencer, so all versions prior to the current version have been
+		// made durable and we can consider the current transaction to be committed - advance min commit version now.
+		if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
+			//TraceEvent("CPAdvanceMinVersion", self->pProxyCommitData->dbgid).detail("PrvVersion", self->prevVersion).detail("CommitVersion", self->commitVersion).detail("Master", self->pProxyCommitData->master.id().toString()).detail("TxSize", self->trs.size());
+			debug_advanceMinCommittedVersion(UID(), self->commitVersion);
+		}
 	}
 
 	if (self->commitVersion > pProxyCommitData->committedVersion.get()) {
