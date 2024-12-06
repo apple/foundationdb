@@ -106,7 +106,7 @@ static void printUsage(std::string const& programName) {
 	             " SOURCE          File, directory, or s3 bucket URL to copy from.\n"
 	             "                 If SOURCE is an s3 bucket URL, TARGET must be a directory and vice versa.\n"
 	             "                 See 'Backup URLs' in https://apple.github.io/foundationdb/backups.html for\n"
-	             "                 the fdb s3 'blobstore://' url format."
+	             "                 the fdb s3 'blobstore://' url format.\n"
 	             " TARGET          Where to place the copy.\n"
 	             "Examples:\n"
 	             " "
