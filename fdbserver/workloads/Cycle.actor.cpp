@@ -96,6 +96,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		return runAfter(prepare, [this, cx](Void) { return bulkSetup(cx, this, nodeCount, Promise<double>()); });
 	}
 	Future<Void> start(Database const& cx) override {
+		if (skipLoading) {
+			return Void();
+		}
 		if constexpr (MultiTenancy) {
 			cx->defaultTenant = this->tenant;
 		}
@@ -105,6 +108,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		return delay(testDuration);
 	}
 	Future<bool> check(Database const& cx) override {
+		TraceEvent("FlowGuruEnterCheck").log();
 		if constexpr (MultiTenancy) {
 			cx->defaultTenant = this->tenant;
 		}
@@ -191,11 +195,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						tr.set(self->key(r), self->value(r3));
 						tr.set(self->key(r2), self->value(r4));
 						tr.set(self->key(r3), self->value(r2));
-						// flowguru: it seems to be an order issue -- within the same txn, even though clear is called first
-						// but it is restored last
-						TraceEvent("CyclicTest1").detail("RawKey", r).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
-						TraceEvent("CyclicTest2").detail("RawKey", r2).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
-						TraceEvent("CyclicTest3").detail("RawKey", r3).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
+						TraceEvent("CyclicTest1").detail("RawKey", r).detail("RawValue", r3).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
+						TraceEvent("CyclicTest2").detail("RawKey", r2).detail("RawValue", r4).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
+						TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait(tr.commit());
 						// TraceEvent("CycleCommit");
@@ -267,6 +269,8 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				return false;
 			}
 			d = testKeyToDouble(data[i].value, keyPrefix);
+			// flowguru: print each kv here, and compare it with restore
+			TraceEvent("FlowguruCheckCycle").detail("Cur", i).detail("Next", d).log();
 			iPrev = i;
 			i = (int)d;
 			if (i != d || i < 0 || i >= nodeCount) {

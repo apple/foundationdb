@@ -707,8 +707,9 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	reader >> m2;
 	double d1 = testKeyToDouble(m2.param1);
 	double d2 = testKeyToDouble(m2.param2);
-	// fmt::print(stderr, "GuruaddM2::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m2.toString(), m2.expectedSize(), m2.type, m2.param1, m2.param1.size(), m2.param2, m2.param2.size());
-	TraceEvent("GuruaddM2")
+	// fmt::print(stderr, "FlowGuruAddM2::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m2.toString(), m2.expectedSize(), m2.type, m2.param1, m2.param1.size(), m2.param2, m2.param2.size());
+	fmt::print(stderr, "FlowGuruAddM2:: key={}, value={} \n", d1, d2);
+	TraceEvent("FlowGuruAddM2")
 		.detail("Str", m2.toString())
 		.detail("Len1", m2.param1.size())
 		.detail("Param1", m2.param1)

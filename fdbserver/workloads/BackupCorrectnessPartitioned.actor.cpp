@@ -477,16 +477,13 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 	                                                    Reference<IBackupContainer> lastBackupContainer,
 	                                                    Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges) {
 		// restore system keys before restoring any other ranges
-		TraceEvent("FlowguruClearRangeStart").log();
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			for (auto& range : systemRestoreRanges) {
-				// why this can be cleared here?
 				tr->clear(range);
 			}
 			return Void();
 		}));
-		TraceEvent("FlowguruClearRangeFinish").log();
 		state Standalone<StringRef> restoreTag(self->backupTag.toString() + "_system");
 		printf("BackupCorrectness, backupAgent.restore is called for tag:%s\n", restoreTag.toString().c_str());
 		wait(success(backupAgent->restoreConstructVersion(cx,
