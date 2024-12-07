@@ -331,9 +331,9 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 
 		// hfu5: this is the format for Param2
 		// change total bytes to 64 bytes in generateOldFormatMutations
-		state uint64_t totalBytes = 0;
-		memcpy(&totalBytes, value.begin() + offset, sizeof(uint64_t));
-		offset += sizeof(uint64_t);
+		state uint32_t totalBytes = 0;
+		memcpy(&totalBytes, value.begin() + offset, sizeof(uint32_t));
+		offset += sizeof(uint32_t);
 		state uint32_t consumed = 0;
 
 		if (totalBytes + offset > value.size()) {

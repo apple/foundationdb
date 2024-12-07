@@ -517,7 +517,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 		// FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
 		// this is 0x0FDB00A200090001
 		valueWriter = BinaryWriter(IncludeVersion(ProtocolVersion::withBackupMutations()));
-		valueWriter << logRangeMutation->second.totalSize();
+		valueWriter << logRangeMutation->second.totalSize(); // this is int32 by default
 
 		state MutationListRef::Blob* blobIter = logRangeMutation->second.blob_begin;
 		while (blobIter) {

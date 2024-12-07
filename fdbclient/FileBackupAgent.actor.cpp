@@ -4868,7 +4868,7 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	std::vector<Standalone<VectorRef<KeyValueRef>>> oldFormatMutations;
 	// mergeSort subversion here
 	// just do a global sort for everyone
-	int64_t totalBytes = 0;
+	int32_t totalBytes = 0;
 	std::map<uint32_t, std::vector<Standalone<StringRef>>> mutationsBySub;
 	std::map<uint32_t, std::vector<Standalone<MutationRef>>> tmpMap;
 	int i = 0;
