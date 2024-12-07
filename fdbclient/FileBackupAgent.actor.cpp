@@ -6209,7 +6209,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			//            firstVersion,
 			//            0,
 			//            restoreVersion);
-			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, 0, firstVersion + step)));
+			Version endVersion = std::min(firstVersion + step, restoreVersion);
+			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, 0, endVersion)));
 		} else {
 			wait(success(RestoreDispatchTaskFunc::addTask(
 			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
