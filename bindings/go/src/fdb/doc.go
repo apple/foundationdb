@@ -32,40 +32,40 @@ extensive guidance to programming with FoundationDB, as well as API
 documentation for the other FoundationDB interfaces, please see
 https://apple.github.io/foundationdb/index.html.
 
-Basic Usage
+# Basic Usage
 
 A basic interaction with the FoundationDB API is demonstrated below:
 
-    package main
+package main
 
-    import (
-        "github.com/apple/foundationdb/bindings/go/src/fdb"
-        "log"
-        "fmt"
-    )
+import (
+    "github.com/apple/foundationdb/bindings/go/src/fdb"
+    "log"
+    "fmt"
+)
 
-    func main() {
-        // Different API versions may expose different runtime behaviors.
-        fdb.MustAPIVersion(740)
+func main() {
+    // Different API versions may expose different runtime behaviors.
+    fdb.MustAPIVersion(740)
 
-        // Open the default database from the system cluster
-        db := fdb.MustOpenDefault()
+    // Open the default database from the system cluster
+    db := fdb.MustOpenDefault()
 
-        // Database reads and writes happen inside transactions
-        ret, e := db.Transact(func(tr fdb.Transaction) (interface{}, error) {
-            tr.Set(fdb.Key("hello"), []byte("world"))
-            return tr.Get(fdb.Key("foo")).MustGet(), nil
-            // db.Transact automatically commits (and if necessary,
-            // retries) the transaction
-        })
-        if e != nil {
-            log.Fatalf("Unable to perform FDB transaction (%v)", e)
-        }
-
-        fmt.Printf("hello is now world, foo was: %s\n", string(ret.([]byte)))
+    // Database reads and writes happen inside transactions
+    ret, err := db.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	tr.Set(fdb.Key("hello"), []byte("world"))
+	return tr.Get(fdb.Key("foo")).MustGet(), nil
+	// db.Transact automatically commits (and if necessary,
+	// retries) the transaction
+    })
+    if err != nil {
+	log.Fatalf("Unable to perform FDB transaction (%v)", err)
     }
 
-Futures
+    fmt.Printf("hello is now world, foo was: %s\n", string(ret.([]byte)))
+}
+
+# Futures
 
 Many functions in this package are asynchronous and return Future objects. A
 Future represents a value (or error) to be available at some later
@@ -79,7 +79,7 @@ and have multiple Future objects outstanding inside a single goroutine. All
 operations will execute in parallel, and the calling goroutine will not block
 until a blocking method on any one of the Futures is called.
 
-On Panics
+# On Panics
 
 Idiomatic Go code strongly frowns at panics that escape library/package
 boundaries, in favor of explicitly returned errors. Idiomatic FoundationDB
@@ -87,28 +87,28 @@ client programs, however, are built around the idea of retryable
 programmer-provided transactional functions. Retryable transactions can be
 implemented using only error values:
 
-    ret, e := db.Transact(func (tr Transaction) (interface{}, error) {
-        // FoundationDB futures represent a value that will become available
-        futureValueOne := tr.Get(fdb.Key("foo"))
-        futureValueTwo := tr.Get(fdb.Key("bar"))
+	ret, err := db.Transact(func (tr Transaction) (interface{}, error) {
+	    // FoundationDB futures represent a value that will become available
+	    futureValueOne := tr.Get(fdb.Key("foo"))
+	    futureValueTwo := tr.Get(fdb.Key("bar"))
 
-        // Both reads are being carried out in parallel
+	    // Both reads are being carried out in parallel
 
-        // Get the first value (or any error)
-        valueOne, e := futureValueOne.Get()
-        if e != nil {
-            return nil, e
-        }
+	    // Get the first value (or any error)
+	    valueOne, err := futureValueOne.Get()
+	    if err != nil {
+	        return nil, err
+	    }
 
-        // Get the second value (or any error)
-        valueTwo, e := futureValueTwo.Get()
-        if e != nil {
-            return nil, e
-        }
+	    // Get the second value (or any error)
+	    valueTwo, err := futureValueTwo.Get()
+	    if err != nil {
+	        return nil, err
+	    }
 
-        // Return the two values
-        return []string{valueOne, valueTwo}, nil
-    })
+	    // Return the two values
+	    return []string{valueOne, valueTwo}, nil
+	})
 
 If either read encounters an error, it will be returned to Transact, which will
 determine if the error is retryable or not (using (Transaction).OnError). If the
@@ -123,31 +123,31 @@ type also has a MustGet method, which returns the same type and value as Get,
 but exposes FoundationDB Errors via a panic rather than an explicitly returned
 error. The above example may be rewritten as:
 
-    ret, e := db.Transact(func (tr Transaction) (interface{}, error) {
-        // FoundationDB futures represent a value that will become available
-        futureValueOne := tr.Get(fdb.Key("foo"))
-        futureValueTwo := tr.Get(fdb.Key("bar"))
+	ret, err := db.Transact(func (tr Transaction) (interface{}, error) {
+	    // FoundationDB futures represent a value that will become available
+	    futureValueOne := tr.Get(fdb.Key("foo"))
+	    futureValueTwo := tr.Get(fdb.Key("bar"))
 
-        // Both reads are being carried out in parallel
+	    // Both reads are being carried out in parallel
 
-        // Get the first value
-        valueOne := futureValueOne.MustGet()
-        // Get the second value
-        valueTwo := futureValueTwo.MustGet()
+	    // Get the first value
+	    valueOne := futureValueOne.MustGet()
+	    // Get the second value
+	    valueTwo := futureValueTwo.MustGet()
 
-        // Return the two values
-        return []string{valueOne, valueTwo}, nil
-    })
+	    // Return the two values
+	    return []string{valueOne, valueTwo}, nil
+	})
 
 MustGet returns nil (which is different from empty slice []byte{}), when the
 key doesn't exist, and hence non-existence can be checked as follows:
 
-    val := tr.Get(fdb.Key("foobar")).MustGet()
-    if val == nil {
-      fmt.Println("foobar does not exist.")
-    } else {
-      fmt.Println("foobar exists.")
-    }
+	val := tr.Get(fdb.Key("foobar")).MustGet()
+	if val == nil {
+	  fmt.Println("foobar does not exist.")
+	} else {
+	  fmt.Println("foobar exists.")
+	}
 
 Any panic that occurs during execution of the caller-provided function will be
 recovered by the (Database).Transact method. If the error is an FDB Error, it
@@ -159,7 +159,7 @@ Note that (Transaction).Transact also recovers panics, but does not itself
 retry. If the recovered value is an FDB Error, it will be returned to the caller
 of (Transaction).Transact; all other values will be re-panicked.
 
-Transactions and Goroutines
+# Transactions and Goroutines
 
 When using a Transactor in the fdb package, particular care must be taken if
 goroutines are created inside of the function passed to the Transact method. Any
@@ -180,7 +180,7 @@ Given these complexities, it is generally best practice to use a single
 goroutine for each logical thread of interaction with FoundationDB, and allow
 each goroutine to block when necessary to wait for Futures to become ready.
 
-Streaming Modes
+# Streaming Modes
 
 When using GetRange methods in the FoundationDB API, clients can request large
 ranges of the database to iterate over. Making such a request doesn't
@@ -198,7 +198,7 @@ reasonable default balance. Other streaming modes that prioritize throughput or
 latency are available -- see the documented StreamingMode values for specific
 options.
 
-Atomic Operations
+# Atomic Operations
 
 The FDB package provides a number of atomic operations on the Database and
 Transaction objects. An atomic operation is a single database command that

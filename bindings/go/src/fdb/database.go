@@ -133,31 +133,31 @@ func (d Database) RebootWorker(address string, checkFile bool, suspendDuration i
 	return err
 }
 
-func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, e error) {
+func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, err error) {
 	for {
-		ret, e = wrapped()
+		ret, err = wrapped()
 
 		// No error means success!
-		if e == nil {
+		if err == nil {
 			return
 		}
 
 		// Check if the error chain contains an
 		// fdb.Error
 		var ep Error
-		if errors.As(e, &ep) {
+		if errors.As(err, &ep) {
 			processedErr := onError(ep).Get()
 			var newEp Error
 			if !errors.As(processedErr, &newEp) || newEp.Code != ep.Code {
 				// override original error only if not an Error or code changed
 				// fdb_transaction_on_error(), called by OnError, will currently almost always return same error as the original one
-				e = processedErr
+				err = processedErr
 			}
 		}
 
 		// If OnError returns an error, then it's not
 		// retryable; otherwise take another pass at things
-		if e != nil {
+		if err != nil {
 			return
 		}
 	}
@@ -186,19 +186,19 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 // See the Transactor interface for an example of using Transact with
 // Transaction and Database objects.
 func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{}, error) {
-	tr, e := d.CreateTransaction()
+	tr, err := d.CreateTransaction()
 	// Any error here is non-retryable
-	if e != nil {
-		return nil, e
+	if err != nil {
+		return nil, err
 	}
 
-	wrapped := func() (ret interface{}, e error) {
-		defer panicToError(&e)
+	wrapped := func() (ret interface{}, err error) {
+		defer panicToError(&err)
 
-		ret, e = f(tr)
+		ret, err = f(tr)
 
-		if e == nil {
-			e = tr.Commit().Get()
+		if err == nil {
+			err = tr.Commit().Get()
 		}
 
 		return
@@ -230,16 +230,16 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
 func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (interface{}, error) {
-	tr, e := d.CreateTransaction()
-	if e != nil {
+	tr, err := d.CreateTransaction()
+	if err != nil {
 		// Any error here is non-retryable
-		return nil, e
+		return nil, err
 	}
 
-	wrapped := func() (ret interface{}, e error) {
-		defer panicToError(&e)
+	wrapped := func() (ret interface{}, err error) {
+		defer panicToError(&err)
 
-		ret, e = f(tr)
+		ret, err = f(tr)
 
 		// read-only transactions are not committed and will be destroyed automatically via GC,
 		// once all the futures go out of scope
@@ -268,9 +268,9 @@ func (d Database) Options() DatabaseOptions {
 // If readVersion is non-zero, the boundary keys as of readVersion will be
 // returned.
 func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion int64) ([]Key, error) {
-	tr, e := d.CreateTransaction()
-	if e != nil {
-		return nil, e
+	tr, err := d.CreateTransaction()
+	if err != nil {
+		return nil, err
 	}
 
 	if readVersion != 0 {
@@ -286,9 +286,9 @@ func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion 
 		append(Key("\xFF/keyServers/"), ek.FDBKey()...),
 	}
 
-	kvs, e := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).GetSliceWithError()
-	if e != nil {
-		return nil, e
+	kvs, err := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).GetSliceWithError()
+	if err != nil {
+		return nil, err
 	}
 
 	size := len(kvs)

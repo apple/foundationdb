@@ -334,10 +334,10 @@ func OpenDatabase(clusterFile string) (Database, error) {
 	var okDb bool
 	anyy, exist := openDatabases.Load(clusterFile)
 	if db, okDb = anyy.(Database); !exist || !okDb {
-		var e error
-		db, e = createDatabase(clusterFile)
-		if e != nil {
-			return Database{}, e
+		var err error
+		db, err = createDatabase(clusterFile)
+		if err != nil {
+			return Database{}, err
 		}
 		openDatabases.Store(clusterFile, db)
 	}
@@ -511,11 +511,11 @@ func Printable(d []byte) string {
 	return buf.String()
 }
 
-func panicToError(e *error) {
+func panicToError(err *error) {
 	if r := recover(); r != nil {
 		fe, ok := r.(Error)
 		if ok {
-			*e = fe
+			*err = fe
 		} else {
 			panic(r)
 		}
