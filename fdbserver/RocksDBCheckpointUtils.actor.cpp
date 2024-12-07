@@ -366,7 +366,7 @@ private:
 			ThreadReturnPromise<RangeResult> result;
 		};
 
-		explicit Reader(DB& db, CF& cf, const UID& logId);
+		explicit Reader(DB& db, CF& cf, std::vector<rocksdb::ColumnFamilyHandle*>& handles, const UID& logId);
 		~Reader() override {}
 
 		void init() override {}
@@ -385,7 +385,7 @@ private:
 
 		DB& db;
 		CF& cf;
-		std::vector<rocksdb::ColumnFamilyHandle*> handles;
+		std::vector<rocksdb::ColumnFamilyHandle*>& handles;
 		double readRangeTimeout;
 		const UID logId;
 	};
@@ -396,6 +396,7 @@ private:
 
 	DB db = nullptr;
 	CF cf = nullptr;
+	std::vector<rocksdb::ColumnFamilyHandle*> handles;
 	std::string path;
 	const UID logId;
 	Version version;
@@ -419,7 +420,7 @@ RocksDBColumnFamilyReader::RocksDBColumnFamilyReader(const CheckpointMetaData& c
 		threads = createGenericThreadPool();
 	}
 	for (int i = 0; i < SERVER_KNOBS->ROCKSDB_CHECKPOINT_READER_PARALLELISM; ++i) {
-		threads->addThread(new Reader(db, cf, logId), "fdb-rocks-cr");
+		threads->addThread(new Reader(db, cf, handles, logId), "fdb-rocks-cr");
 	}
 	if (checkpoint.getFormat() == DataMoveRocksCF) {
 		const RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
@@ -462,7 +463,11 @@ std::unique_ptr<ICheckpointIterator> RocksDBColumnFamilyReader::getIterator(KeyR
 	}
 }
 
-RocksDBColumnFamilyReader::Reader::Reader(DB& db, CF& cf, const UID& logId) : db(db), cf(cf), logId(logId) {}
+RocksDBColumnFamilyReader::Reader::Reader(DB& db,
+                                          CF& cf,
+                                          std::vector<rocksdb::ColumnFamilyHandle*>& handles,
+                                          const UID& logId)
+  : db(db), cf(cf), handles(handles), logId(logId) {}
 
 void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader::OpenAction& a) {
 	TraceEvent(SevDebug, "RocksDBCheckpointReaderInitBegin", logId).detail("Checkpoint", a.checkpoint.toString());
