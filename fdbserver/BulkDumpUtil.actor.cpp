@@ -149,6 +149,7 @@ void bulkDumpFileCopy(std::string fromFile, std::string toFile, size_t fileBytes
 
 // Generate key-value data, byte sampling data, and manifest file given a range at a version with a certain bytes
 // Return BulkDumpManifest metadata (equivalent to content of the manifest file)
+// TODO(BulkDump): can cause slow tasks, do the task in a separate thread in the future.
 BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
                                               const std::map<Key, Value>& sortedData,
                                               const std::map<Key, Value>& sortedSample,

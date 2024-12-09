@@ -102,7 +102,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
-		if (rangeBegin > normalKeys.end || rangeEnd > normalKeys.end) {
+		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
 			printUsage(tokens[0]);
 			return UID();
 		}
@@ -132,7 +132,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
-		if (rangeBegin > normalKeys.end || rangeEnd > normalKeys.end) {
+		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
 			printUsage(tokens[0]);
 			return UID();
 		}

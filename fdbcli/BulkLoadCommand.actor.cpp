@@ -102,7 +102,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		state UID taskId = UID::fromString(tokens[2].toString());
 		Key rangeBegin = tokens[3];
 		Key rangeEnd = tokens[4];
-		if (rangeBegin > normalKeys.end || rangeEnd > normalKeys.end) {
+		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
 			printUsage(tokens[0]);
 			return UID();
 		}
@@ -119,7 +119,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
-		if (rangeBegin > normalKeys.end || rangeEnd > normalKeys.end) {
+		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
 			printUsage(tokens[0]);
 			return UID();
 		}
@@ -142,7 +142,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
-		if (rangeBegin > normalKeys.end || rangeEnd > normalKeys.end) {
+		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
 			printUsage(tokens[0]);
 			return UID();
 		}

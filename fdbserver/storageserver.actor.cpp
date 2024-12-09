@@ -5963,23 +5963,6 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	return Void();
 }
 
-ACTOR Future<Version> getReadVersion(StorageServer* data) {
-	state Version version;
-	state Transaction tr(data->cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			wait(store(version, tr.getReadVersion()));
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return version;
-}
-
 struct RangeDumpData {
 	std::map<Key, Value> kvs;
 	std::map<Key, Value> sampled;
@@ -6099,6 +6082,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	ASSERT(req.bulkDumpState.getTaskId().present());
 	state std::string taskFolder = getBulkDumpTaskFolder(req.bulkDumpState.getTaskId().get());
 	state BulkDumpFileSet destinationFileSets;
+	state Transaction tr(data->cx);
 
 	loop {
 		try {
@@ -6113,7 +6097,8 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			state std::string relativeFolder = joinPath(taskFolder, std::to_string(batchNum));
 
 			// Get version to dump
-			wait(store(versionToDump, getReadVersion(data)));
+			tr.reset();
+			wait(store(versionToDump, tr.getReadVersion()));
 
 			// Read data
 			// TODO(BulkDump): Read data from other servers and do checksum
