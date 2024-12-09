@@ -996,8 +996,8 @@ void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadState bulkLoad
 	for (auto it : self->shards->intersectingRanges(keys)) {
 		if (it->range().begin < keys.begin) {
 			KeyRange leftRange = Standalone(KeyRangeRef(it->range().begin, keys.begin));
-			restartShardTrackers(self, leftRange);
 			e.detail("FirstSplitShard", it->range());
+			restartShardTrackers(self, leftRange);
 		}
 		break;
 	}
@@ -1006,8 +1006,8 @@ void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadState bulkLoad
 	for (auto it : self->shards->intersectingRanges(keys)) {
 		if (it->range().end > keys.end) {
 			KeyRange rightRange = Standalone(KeyRangeRef(keys.end, it->range().end));
-			restartShardTrackers(self, rightRange);
 			e.detail("LastSplitShard", it->range());
+			restartShardTrackers(self, rightRange);
 			break;
 		}
 	}
