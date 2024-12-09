@@ -562,10 +562,11 @@ ACTOR Future<Void> createBucket_impl(Reference<S3BlobStoreEndpoint> b, std::stri
 			    wait(b->doRequest("PUT", resource, headers, nullptr, 0, { 200, 409 }));
 		} else {
 			UnsentPacketQueue packets;
-			StringRef body(format("<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
-			                      "  <LocationConstraint>%s</LocationConstraint>"
-			                      "</CreateBucketConfiguration>",
-			                      region.c_str()));
+			Standalone<StringRef> body(
+			    format("<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+			           "  <LocationConstraint>%s</LocationConstraint>"
+			           "</CreateBucketConfiguration>",
+			           region.c_str()));
 			PacketWriter pw(packets.getWriteBuffer(), nullptr, Unversioned());
 			pw.serializeBytes(body);
 
