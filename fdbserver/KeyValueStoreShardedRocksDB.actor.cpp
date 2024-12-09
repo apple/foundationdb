@@ -778,6 +778,7 @@ public:
 			}
 		}
 		TraceEvent("RefreshIterators")
+		    .suppressFor(5.0)
 		    .detail("NumReplacedIterators", numReplacedIters)
 		    .detail("NumReusedIterators", numReusedIters)
 		    .detail("NumNewIterators", numNewIterators)
@@ -1775,7 +1776,7 @@ public:
 		}
 		rocksdb::FlushOptions fOptions;
 		fOptions.wait = SERVER_KNOBS->ROCKSDB_WAIT_ON_CF_FLUSH;
-		fOptions.allow_write_stall = SERVER_KNOBS->ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
+		fOptions.allow_write_stall = SERVER_KNOBS->SHARDED_ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
 
 		db->Flush(fOptions, it->second->cf);
 	}
@@ -2737,7 +2738,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			             std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap)
 			  : db(db), writeBatch(std::move(writeBatch)), dirtyShards(std::move(dirtyShards)),
 			    columnFamilyMap(columnFamilyMap) {
-				if (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {
+				if (deterministicRandom()->random01() < SERVER_KNOBS->SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {
 					getHistograms = true;
 					startTime = timer_monotonic();
 				} else {
@@ -2848,7 +2849,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT > 0) {
 				rocksdb::FlushOptions fOptions;
 				fOptions.wait = SERVER_KNOBS->ROCKSDB_WAIT_ON_CF_FLUSH;
-				fOptions.allow_write_stall = SERVER_KNOBS->ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
+				fOptions.allow_write_stall = SERVER_KNOBS->SHARDED_ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
 
 				for (auto shard : (*a.dirtyShards)) {
 					if (shard->shouldFlush()) {
@@ -3324,9 +3325,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			ReadValueAction(KeyRef key, PhysicalShard* shard, ReadType type, Optional<UID> debugID)
 			  : key(key), shard(shard), type(type), debugID(debugID), startTime(timer_monotonic()),
-			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
-			}
+			    getHistograms((deterministicRandom()->random01() < SERVER_KNOBS->SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
+			                      ? true
+			                      : false) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
@@ -3409,7 +3410,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			ReadValuePrefixAction(Key key, int maxLength, PhysicalShard* shard, ReadType type, Optional<UID> debugID)
 			  : key(key), maxLength(maxLength), shard(shard), type(type), debugID(debugID),
 			    startTime(timer_monotonic()),
-			    getHistograms((deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
+			    getHistograms((deterministicRandom()->random01() < SERVER_KNOBS->SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
 			                      ? true
 			                      : false){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
@@ -3496,8 +3497,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<RangeResult> result;
 			ReadRangeAction(KeyRange keys, std::vector<DataShard*> shards, int rowLimit, int byteLimit, ReadType type)
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), type(type), startTime(timer_monotonic()),
-			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
+			    getHistograms((deterministicRandom()->random01() < SERVER_KNOBS->SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
+			                      ? true
+			                      : false) {
 				std::set<PhysicalShard*> usedShards;
 				for (const DataShard* shard : shards) {
 					ASSERT(shard);

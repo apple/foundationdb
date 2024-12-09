@@ -29,7 +29,7 @@
 #include <array>
 
 /*
- * Append-only file encrypted using AES-128-GCM.
+ * Append-only file encrypted using AES-256-GCM.
  * */
 class AsyncFileEncrypted : public IAsyncFile, public ReferenceCounted<AsyncFileEncrypted> {
 public:

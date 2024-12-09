@@ -59,7 +59,7 @@ public:
 		OPEN_NO_AIO =
 		    0x200000, // Don't use AsyncFileKAIO or similar implementations that rely on filesystem support for AIO
 		OPEN_CACHED_READ_ONLY = 0x400000, // AsyncFileCached opens files read/write even if you specify read only
-		OPEN_ENCRYPTED = 0x800000 // File is encrypted using AES-128-GCM (must be either read-only or write-only)
+		OPEN_ENCRYPTED = 0x800000 // File is encrypted using AES-256-GCM (must be either read-only or write-only)
 	};
 
 	virtual void addref() = 0;

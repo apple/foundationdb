@@ -201,6 +201,11 @@ public:
 	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT;
 	int CONSISTENCY_CHECK_REQUIRED_REPLICAS;
 
+	// Probability that a team redundant data move set TrueBest when get destination team
+	double PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
+	// Probability that a team unhealthy data move set TrueBest when get destination team
+	double PROBABILITY_TEAM_UNHEALTHY_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
+
 	// Data distribution
 	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given an array that's descend
 	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
@@ -223,6 +228,7 @@ public:
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].
 	bool ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT;
+	bool BULKLOAD_ONLY_USE_PHYSICAL_SHARD_MOVE; // If true, bulk load only uses physical shard move
 	int64_t MAX_PHYSICAL_SHARD_BYTES;
 	double PHYSICAL_SHARD_METRICS_DELAY;
 	double ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME;
@@ -346,8 +352,15 @@ public:
 	bool DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD; // Enable to allow storage queue rebalancer to move
 	                                                               // light-traffic shards out of the overloading server
 	double DD_WAIT_TSS_DATA_MOVE_DELAY;
+	bool DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM; // Enable to validate server team count per server after build
+	                                                     // team
 
 	// TeamRemover to remove redundant teams
+	double TR_LOW_SPACE_PIVOT_DELAY_SEC; // teamRedundant data moves can make the min SS available % smaller in
+	                                     // particular when the majority of SSes have low available %. So, when the
+	                                     // pivot is below the target, teamRemover wait for the specified time to check
+	                                     // the pivot again. teamRemover triggers teamRedundant data moves only when the
+	                                     // pivot is above the target.
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
 	bool TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS; // guard to select which machineTeamRemover logic to use
@@ -545,6 +558,7 @@ public:
 	double ROCKSDB_CF_METRICS_DELAY;
 	int ROCKSDB_MAX_LOG_FILE_SIZE;
 	int ROCKSDB_KEEP_LOG_FILE_NUM;
+	int ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL;
 	bool ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
 	bool ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	bool ROCKSDB_FULLFILE_CHECKSUM; // For validate sst files when compaction and producing backup files. TODO: set
@@ -555,6 +569,10 @@ public:
 	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+	bool ROCKSDB_METRICS_IN_SIMULATION; // Whether rocksdb traceevent metrics will be emitted in simulation. Note that
+	                                    // turning this on in simulation could lead to non-deterministic runs since we
+	                                    // rely on rocksdb metadata.
+	bool SHARDED_ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
 	int SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
 	int SHARD_METADATA_SCAN_BYTES_LIMIT;
@@ -585,6 +603,7 @@ public:
 	int SHARDED_ROCKSDB_MAX_OPEN_FILES;
 	bool SHARDED_ROCKSDB_READ_ASYNC_IO;
 	int SHARDED_ROCKSDB_PREFIX_LEN;
+	double SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -780,6 +799,9 @@ public:
 	                                        // CC_ENABLE_REMOTE_LOG_ROUTER_DEGRADATION_MONITORING), this knob must be
 	                                        // turned on, because inter-DC latency signal is not reliable and it's
 	                                        // challenging to pick a good latency threshold.
+	bool CC_INVALIDATE_EXCLUDED_PROCESSES; // When enabled, invalidate the complaints by processes that were excluded
+	                                       // in gray failure triggered recoveries.
+	bool CC_GRAY_FAILURE_STATUS_JSON; // When enabled, returns gray failure information in machine readable status json.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 
@@ -1125,6 +1147,12 @@ public:
 	                                                 // cluster controller.
 	bool GRAY_FAILURE_ENABLE_TLOG_RECOVERY_MONITORING; // When enabled, health monitor will try to detect any gray
 	                                                   // failure during tlog recovery during the recovery process.
+	bool GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN; // When enabled, storage servers in the primary DC are allowed to
+	                                                // complain about their peers in the transaction subsystem e.g.
+	                                                // buddy tlogs.
+	bool GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN; // When enabled, storage servers in the remote DC are allowed to
+	                                               // complain about their peers in the transaction subsystem e.g. buddy
+	                                               // tlogs.
 	bool STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT; // When enabled, storage server's worker will crash on io_timeout error;
 	                                          // this allows fdbmonitor to restart the worker and recreate the same SS.
 	                                          // When SS can be temporarily throttled by infrastructure, e.g, k8s,

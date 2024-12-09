@@ -37,8 +37,11 @@ ACTOR Future<Void> tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
 	wait(IFailureMonitor::failureMonitor().onStateEqual(self->interf->get().interf().peekStreamMessages.getEndpoint(),
 	                                                    FailureStatus(false)));
 
-	auto req = TLogPeekStreamRequest(
-	    self->messageVersion.version, self->tag, self->returnIfBlocked, std::numeric_limits<int>::max());
+	auto req = TLogPeekStreamRequest(self->messageVersion.version,
+	                                 self->tag,
+	                                 self->returnIfBlocked,
+	                                 std::numeric_limits<int>::max(),
+	                                 self->end.version);
 	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(req);
 	DebugLogTraceEvent(SevDebug, "SPC_StreamCreated", self->randomID)
 	    .detail("Tag", self->tag)

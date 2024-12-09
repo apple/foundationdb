@@ -1,6 +1,7 @@
 {
   global:
     workloadFactory;
+    workloadCFactory;
   local:
     *;
 };

@@ -1,5 +1,4 @@
 set(FDBBACKUP_SRCS
-	BackupTLSConfig.cpp
 	Decode.cpp
 	backup.actor.cpp)
 
@@ -15,7 +14,6 @@ target_link_libraries(fdbconvert PRIVATE fdbclient)
 
 set(FDBDECODE_SRCS
 	Decode.cpp
-	BackupTLSConfig.cpp
 	FileDecoder.actor.cpp)
 add_flow_target(EXECUTABLE NAME fdbdecode SRCS ${FDBDECODE_SRCS})
 target_include_directories(fdbdecode PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
@@ -49,4 +47,10 @@ endif()
 if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbbackup PRIVATE gperftools)
+endif()
+
+if (NOT WIN32 AND NOT OPEN_FOR_IDE)
+  enable_testing()
+  add_test(NAME dir_backup_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/dir_backup_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+  add_test(NAME s3_backup_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3_backup_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
 endif()

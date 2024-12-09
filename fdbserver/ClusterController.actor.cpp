@@ -606,7 +606,11 @@ bool isHealthySingleton(ClusterControllerData* self,
 		    .detail(roleAbbr + "ID", singleton.getInterface().id())
 		    .detail("Excluded", currWorker.priorityInfo.isExcluded)
 		    .detail("Fitness", currFitness)
-		    .detail("BestFitness", bestFitness);
+		    .detail("BestFitness", bestFitness)
+		    .detail("MasterProcessId", self->masterProcessId)
+		    .detail("CurrentWorkerProcessId", currWorker.details.interf.locality.processId())
+		    .detail("NewWorkerProcessId", newWorker.interf.locality.processId())
+		    .detail("IsUsedNotMaster", self->isUsedNotMaster(currWorker.details.interf.locality.processId()));
 		singleton.recruit(*self); // SIDE EFFECT: initiating recruitment
 		return false; // not healthy since needed to be rerecruited
 	} else {
@@ -1574,7 +1578,8 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                  self->dcStorageServerVersionDifference,
 			                                                                  configBroadcaster,
 			                                                                  self->db.metaclusterRegistration,
-			                                                                  self->db.metaclusterMetrics)));
+			                                                                  self->db.metaclusterMetrics,
+			                                                                  self->excludedDegradedServers)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
@@ -3000,6 +3005,18 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 	}
 }
 
+// If we are excluding processes and triggering recovery because of gray failure, also
+// invalidate the past complaints from such processes because that signal is no longer
+// reliable.
+static void invalidateExcludedProcessComplaints(ClusterControllerData* self) {
+	if (!SERVER_KNOBS->CC_INVALIDATE_EXCLUDED_PROCESSES) {
+		return;
+	}
+	for (const auto& [addr, _] : self->excludedDegradedServers) {
+		self->workerHealth.erase(addr);
+	}
+}
+
 // The actor that periodically monitors the health of tracked workers.
 ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 	loop {
@@ -3013,8 +3030,9 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 			// recovered.
 			bool hasRecoveredServer = false;
 			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
-				if (self->degradationInfo.degradedServers.find(*it) == self->degradationInfo.degradedServers.end() &&
-				    self->degradationInfo.disconnectedServers.find(*it) ==
+				if (self->degradationInfo.degradedServers.find(it->first) ==
+				        self->degradationInfo.degradedServers.end() &&
+				    self->degradationInfo.disconnectedServers.find(it->first) ==
 				        self->degradationInfo.disconnectedServers.end()) {
 					self->excludedDegradedServers.erase(it++);
 					hasRecoveredServer = true;
@@ -3044,9 +3062,14 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
 						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
 							self->recentHealthTriggeredRecoveryTime.push(now());
-							self->excludedDegradedServers = self->degradationInfo.degradedServers;
-							self->excludedDegradedServers.insert(self->degradationInfo.disconnectedServers.begin(),
-							                                     self->degradationInfo.disconnectedServers.end());
+							self->excludedDegradedServers.clear();
+							for (const auto& degradedServer : self->degradationInfo.degradedServers) {
+								self->excludedDegradedServers[degradedServer] = now();
+							}
+							for (const auto& disconnectedServer : self->degradationInfo.disconnectedServers) {
+								self->excludedDegradedServers[disconnectedServer] = now();
+							}
+							invalidateExcludedProcessComplaints(self);
 							TraceEvent(SevWarnAlways, "DegradedServerDetectedAndTriggerRecovery")
 							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
 							self->db.forceMasterFailure.trigger();
@@ -4042,6 +4065,89 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	data.degradationInfo.disconnectedServers.insert(remoteTlog);
 	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
 	data.degradationInfo.disconnectedServers.clear();
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
+	NetworkAddress worker1(IPAddress::parse("1.1.1.0").get(), 1);
+	NetworkAddress worker2(IPAddress::parse("1.1.1.1").get(), 1);
+	NetworkAddress worker3(IPAddress::parse("1.1.1.2").get(), 1);
+	NetworkAddress badPeer(IPAddress::parse("1.1.1.3").get(), 1);
+
+	if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY) {
+		addProcessesToSameDC(data, { worker1, worker2, worker3, badPeer });
+	}
+
+	ASSERT(data.workerHealth.empty());
+
+	// {worker1, worker2, worker3} complain about badPeer
+	data.workerHealth[worker1].degradedPeers[badPeer] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+		                                                  now() };
+	data.workerHealth[worker2].degradedPeers[badPeer] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+		                                                  now() };
+	data.workerHealth[worker3].degradedPeers[badPeer] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+		                                                  now() };
+
+	// badPeer complains about {worker1, worker2, worker3}
+	data.workerHealth[badPeer].degradedPeers[worker1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+		                                                  now() };
+	data.workerHealth[badPeer].degradedPeers[worker2] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+		                                                  now() };
+	data.workerHealth[badPeer].degradedPeers[worker3] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+		                                                  now() };
+
+	// At this point, we should have 4 complaints total
+	ASSERT(data.workerHealth.contains(worker1));
+	ASSERT(data.workerHealth.contains(worker2));
+	ASSERT(data.workerHealth.contains(worker3));
+	ASSERT(data.workerHealth.contains(badPeer));
+	ASSERT(data.workerHealth.size() == 4);
+
+	// Compute degraded processes
+	data.degradationInfo = data.getDegradationInfo();
+	for (const auto& addr : data.degradationInfo.degradedServers) {
+		data.excludedDegradedServers[addr] = now();
+	}
+
+	// Ensure badPeer is successfully added to excluded list
+	// At this point, recovery would also be triggered in a production setting
+	// We would also invalidate complaints by the excluded process at this point
+	ASSERT(data.degradationInfo.degradedServers.size() == 1);
+	ASSERT(data.degradationInfo.degradedServers.contains(badPeer));
+	invalidateExcludedProcessComplaints(&data);
+
+	// Now it's possible because of various factors (e.g. timing, expiration) that
+	// the complaints against badPeer disappear, but the initial complaints that badPeer
+	// made against others are still there.
+	data.workerHealth[worker1].degradedPeers.erase(badPeer);
+	data.workerHealth[worker2].degradedPeers.erase(badPeer);
+	data.workerHealth[worker3].degradedPeers.erase(badPeer);
+
+	// Compute degraded processes again
+	data.degradationInfo = data.getDegradationInfo();
+	for (const auto& addr : data.degradationInfo.degradedServers) {
+		data.excludedDegradedServers[addr] = now();
+	}
+
+	if (SERVER_KNOBS->CC_INVALIDATE_EXCLUDED_PROCESSES) {
+		// With CC_INVALIDATE_EXCLUDE_PROCESSES, we should got 0 degraded processes
+		// because the original complaints by the now excluded badPeer were invalidated
+		ASSERT(data.degradationInfo.degradedServers.empty());
+	} else {
+		// However, without CC_INVALIDATE_EXCLUDE_PROCESSES, we would get 3 degraded processes
+		// which are: worker1, worker2, worker3. This is because we did not invalidate workerHealth
+		// to remove badPeer complaints when badPeer was excluded and recovery was triggered.
+		ASSERT(data.degradationInfo.degradedServers.size() == 3);
+		ASSERT(data.degradationInfo.degradedServers.contains(worker1));
+		ASSERT(data.degradationInfo.degradedServers.contains(worker2));
+		ASSERT(data.degradationInfo.degradedServers.contains(worker3));
+	}
 
 	return Void();
 }

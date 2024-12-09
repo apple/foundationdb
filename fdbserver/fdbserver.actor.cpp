@@ -1799,6 +1799,8 @@ private:
 			}
 		}
 
+		setThreadLocalDeterministicRandomSeed(randomSeed);
+
 		try {
 			ProfilerConfig::instance().reset(profilerConfig);
 		} catch (ConfigError& e) {
@@ -2000,8 +2002,6 @@ int main(int argc, char* argv[]) {
 
 		if (opts.zoneId.present())
 			printf("ZoneId set to %s, dcId to %s\n", printable(opts.zoneId).c_str(), printable(opts.dcId).c_str());
-
-		setThreadLocalDeterministicRandomSeed(opts.randomSeed);
 
 		if (opts.buggifyEnabled) {
 			enableGeneralBuggify();

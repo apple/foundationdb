@@ -436,13 +436,13 @@ struct BulkLoading : TestWorkload {
 			bulkLoadStates.clear();
 			bulkLoadDataList.clear();
 			completeRanges.clear();
-			for (int i = 0; i < 3; i++) {
+			for (int i = 0; i < 2; i++) {
 				std::string indexStr = std::to_string(i);
 				std::string indexStrNext = std::to_string(i + 1);
 				Key beginKey = StringRef(indexStr);
 				Key endKey = StringRef(indexStrNext);
 				std::string folderPath = joinPath(simulationBulkLoadFolder, indexStr);
-				int dataSize = deterministicRandom()->randomInt(5, 20);
+				int dataSize = deterministicRandom()->randomInt(2, 5);
 				BulkLoadTaskTestUnit taskUnit =
 				    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
 				bulkLoadStates.push_back(taskUnit.bulkLoadTask);

@@ -217,14 +217,14 @@ ACTOR Future<Void> shardUsableRegions(DataDistributionTracker::SafeAccessor self
 	double expectedCompletionSeconds = self()->shards->size() * 1.0 / SERVER_KNOBS->DD_SHARD_USABLE_REGION_CHECK_RATE;
 	double delayTime = deterministicRandom()->random01() * expectedCompletionSeconds;
 	wait(delayJittered(delayTime));
-	auto [destTeams, srcTeams] = self()->shardsAffectedByTeamFailure->getTeamsForFirstShard(keys);
-	if (destTeams.size() < self()->usableRegions) {
+	auto [newTeam, previousTeam] = self()->shardsAffectedByTeamFailure->getTeamsForFirstShard(keys);
+	if (newTeam.size() < self()->usableRegions) {
 		TraceEvent(SevWarn, "ShardUsableRegionMismatch", self()->distributorId)
 		    .suppressFor(5.0)
-		    .detail("DestTeamSize", destTeams.size())
-		    .detail("SrcTeamSize", srcTeams.size())
-		    .detail("DestServers", describe(destTeams))
-		    .detail("SrcServers", describe(srcTeams))
+		    .detail("NewTeamSize", newTeam.size())
+		    .detail("PreviousTeamSize", previousTeam.size())
+		    .detail("NewServers", describe(newTeam))
+		    .detail("PreviousServers", describe(previousTeam))
 		    .detail("UsableRegion", self()->usableRegions)
 		    .detail("Shard", keys);
 		RelocateShard rs(keys, DataMovementReason::POPULATE_REGION, RelocateReason::OTHER);
@@ -996,8 +996,8 @@ void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadState bulkLoad
 	for (auto it : self->shards->intersectingRanges(keys)) {
 		if (it->range().begin < keys.begin) {
 			KeyRange leftRange = Standalone(KeyRangeRef(it->range().begin, keys.begin));
-			restartShardTrackers(self, leftRange);
 			e.detail("FirstSplitShard", it->range());
+			restartShardTrackers(self, leftRange);
 		}
 		break;
 	}
@@ -1006,8 +1006,8 @@ void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadState bulkLoad
 	for (auto it : self->shards->intersectingRanges(keys)) {
 		if (it->range().end > keys.end) {
 			KeyRange rightRange = Standalone(KeyRangeRef(keys.end, it->range().end));
-			restartShardTrackers(self, rightRange);
 			e.detail("LastSplitShard", it->range());
+			restartShardTrackers(self, rightRange);
 			break;
 		}
 	}

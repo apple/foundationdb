@@ -20,7 +20,7 @@
 
 #include "flow/ApiVersion.h"
 #include "fmt/format.h"
-#include "fdbbackup/BackupTLSConfig.h"
+#include "fdbclient/BackupTLSConfig.h"
 #include "fdbbackup/Decode.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
@@ -1132,7 +1132,7 @@ static void printBackupUsage(bool devhelp) {
 	       "                 This option indicates to the backup agent that it will only need to record the log files, "
 	       "and ignore the range files.\n");
 	printf("  --encryption-key-file"
-	       "                 The AES-128-GCM key in the provided file is used for encrypting backup files.\n");
+	       "                 The AES-256-GCM key in the provided file is used for encrypting backup files.\n");
 	printf("  --encrypt-files 0/1"
 	       "                 If passed, this argument will allow the user to override the database encryption state to "
 	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
@@ -1216,7 +1216,7 @@ static void printRestoreUsage(bool devhelp) {
 	       "                 Indicates to the backup agent to only begin replaying log files from a certain version, "
 	       "instead of the entire set.\n");
 	printf("  --encryption-key-file"
-	       "                 The AES-128-GCM key in the provided file is used for decrypting backup files.\n");
+	       "                 The AES-256-GCM key in the provided file is used for decrypting backup files.\n");
 	printf("  --blob-manifest-url URL\n"
 	       "                 Restore from blob granules. Manifest files are stored to the destination URL.\n");
 	printf(TLS_HELP);

@@ -26,6 +26,7 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
@@ -535,7 +536,7 @@ public:
 			if (req.storageQueueAware) {
 				storageQueueThreshold = calculateTeamStorageQueueThreshold(self->teams);
 			}
-			if (req.teamSelect == TeamSelect::WANT_TRUE_BEST) {
+			if (req.teamSelect == TeamSelect::WANT_TRUE_BEST || req.wantTrueBestIfMoveout) {
 				ASSERT(!bestOption.present());
 				if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && req.preferWithinShardLimit) {
 					bestOption = getBestTeam(self,
@@ -657,11 +658,14 @@ public:
 				// self->traceAllInfo(true);
 			}
 
-			if (req.storageQueueAware && !bestOption.present()) {
+			if (!bestOption.present() && (req.storageQueueAware || req.wantTrueBestIfMoveout)) {
+				// re-run getTeam without storageQueueAware and wantTrueBestIfMoveout
 				req.storageQueueAware = false;
-				TraceEvent(SevWarn, "StorageQueueAwareGetTeamFailed", self->distributorId)
-				    .detail("Reason", "bestOption not present");
-				wait(getTeam(self, req)); // re-run getTeam without storageQueueAware
+				req.wantTrueBestIfMoveout = false;
+				TraceEvent(SevWarn, "GetTeamRetry", self->distributorId)
+				    .detail("OldStorageQueueAware", req.storageQueueAware)
+				    .detail("OldWantTrueBestIfMoveout", req.wantTrueBestIfMoveout);
+				wait(getTeam(self, req));
 			} else {
 				req.reply.send(std::make_pair(bestOption, foundSrc));
 			}
@@ -918,6 +922,8 @@ public:
 				    .detail("AddedTeams", 0)
 				    .detail("TeamsToBuild", teamsToBuild)
 				    .detail("CurrentServerTeams", self->teams.size())
+				    .detail("Servers", self->server_info.size())
+				    .detail("HealthyServers", serverCount)
 				    .detail("DesiredTeams", desiredTeams)
 				    .detail("MaxTeams", maxTeams)
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
@@ -937,7 +943,8 @@ public:
 			// If there are too few machines to even build teams or there are too few represented datacenters, can't
 			// build any team.
 			self->lastBuildTeamsFailed = true;
-			TraceEvent(SevWarnAlways, "BuildTeamsNotEnoughUniqueMachines", self->distributorId)
+			TraceEvent(SevWarnAlways, "BuildTeamsLastBuildTeamsFailed", self->distributorId)
+			    .detail("Reason", "Do not have enough unique machines")
 			    .detail("Primary", self->primary)
 			    .detail("UniqueMachines", uniqueMachines)
 			    .detail("Replication", self->configuration.storageTeamSize);
@@ -1976,6 +1983,16 @@ public:
 			// tracker) and remove bad team (cancel the team tracker).
 			wait(self->badTeamRemover);
 
+			if (SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC > 0 &&
+			    self->teamPivots.pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+				TraceEvent(SevWarn, "MachineTeamRemoverDelayedForLowSpacePivot", self->distributorId)
+				    .detail("IsPrimary", self->primary)
+				    .detail("CurrentSpacePivot", self->teamPivots.pivotAvailableSpaceRatio)
+				    .detail("TargetSpacePivot", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO);
+				wait(delay(SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC));
+				continue;
+			}
+
 			state int healthyMachineCount = self->calculateHealthyMachineCount();
 			// Check if all machines are healthy, if not, we wait for 1 second and loop back.
 			// Eventually, all machines will become healthy.
@@ -2103,6 +2120,16 @@ public:
 			// Wait for the badTeamRemover() to avoid the potential race between
 			// adding the bad team (add the team tracker) and remove bad team (cancel the team tracker).
 			wait(self->badTeamRemover);
+
+			if (SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC > 0 &&
+			    self->teamPivots.pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+				TraceEvent(SevWarn, "ServerTeamRemoverDelayedForLowSpacePivot", self->distributorId)
+				    .detail("IsPrimary", self->primary)
+				    .detail("CurrentSpacePivot", self->teamPivots.pivotAvailableSpaceRatio)
+				    .detail("TargetSpacePivot", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO);
+				wait(delay(SERVER_KNOBS->TR_LOW_SPACE_PIVOT_DELAY_SEC));
+				continue;
+			}
 
 			// From this point, all server teams should be healthy, because we wait above
 			// until processingUnhealthy is done, and all machines are healthy
@@ -4500,7 +4527,8 @@ bool DDTeamCollection::isValidLocality(Reference<IReplicationPolicy> storagePoli
 void DDTeamCollection::evaluateTeamQuality() const {
 	int teamCount = teams.size(), serverCount = allServers.size();
 	double teamsPerServer = (double)teamCount * configuration.storageTeamSize / serverCount;
-
+	const int targetTeamNumPerServer =
+	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 	ASSERT_EQ(serverCount, server_info.size());
 
 	int minTeams = std::numeric_limits<int>::max();
@@ -4516,6 +4544,16 @@ void DDTeamCollection::evaluateTeamQuality() const {
 			varTeams += (stc - teamsPerServer) * (stc - teamsPerServer);
 			// Use zoneId as server's machine id
 			machineTeams[info->getLastKnownInterface().locality.zoneId()] += stc;
+			// Check invariant: if latest buildTeam succeeds, then each server must have at least
+			// targetTeamNumPerServer serverTeams
+			// lastBuildTeamsFailed is set only when (1) machine count is less than configured team size;
+			// (2) Not find any server team candidates when creating server team; (3) failed to add machine team
+			if (SERVER_KNOBS->DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM && !lastBuildTeamsFailed &&
+			    stc < targetTeamNumPerServer) {
+				TraceEvent(SevError, "NewAddServerNotMatchTargetSTCount", distributorId)
+				    .detail("CurrentServerTeams", stc)
+				    .detail("TargetServerTeams", targetTeamNumPerServer);
+			}
 		}
 	}
 	varTeams /= teamsPerServer * teamsPerServer;
@@ -5139,9 +5177,9 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			// When too many teams exist in simulation, traceAllInfo will buffer too many trace logs before
 			// trace has a chance to flush its buffer, which causes assertion failure.
 			traceAllInfo(!g_network->isSimulated());
-			TraceEvent(SevWarn, "DataDistributionBuildTeams", distributorId)
+			TraceEvent(SevWarn, "BuildTeamsLastBuildTeamsFailed", distributorId)
 			    .detail("Primary", primary)
-			    .detail("Reason", "Unable to make desired machine Teams")
+			    .detail("Reason", "Unable to make desired machineTeams")
 			    .detail("Hint", "Check TraceAllInfo event");
 			lastBuildTeamsFailed = true;
 			break;
@@ -5551,6 +5589,11 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		if (bestServerTeam.size() != configuration.storageTeamSize) {
 			// Not find any team and will unlikely find a team
 			lastBuildTeamsFailed = true;
+			TraceEvent(SevWarn, "BuildTeamsLastBuildTeamsFailed", distributorId)
+			    .detail("Reason", "Unable to find any valid serverTeam")
+			    .detail("Primary", primary)
+			    .detail("BestServerTeam", describe(bestServerTeam))
+			    .detail("ConfigStorageTeamSize", configuration.storageTeamSize);
 			break;
 		}
 

@@ -19,7 +19,7 @@
  */
 
 #pragma once
-#include "foundationdb/ClientWorkload.h"
+#include "foundationdb/CppWorkload.h"
 
 #include <map>
 
