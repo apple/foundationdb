@@ -1421,7 +1421,8 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 			    bulkDumpResult,
 			    krmGetRanges(&tr, bulkDumpPrefix, rangeToRead, SERVER_KNOBS->DD_BULKDUMP_TASK_METADATA_READ_SIZE)));
 			bulkDumpResultIndex = 0;
-			// We rely on random assignment of shards for the load balancing. Also, there is a flow lock to prevent SS from being overloaded.
+			// We rely on random assignment of shards for the load balancing. Also, there is a flow lock to prevent SS
+			// from being overloaded.
 			for (; bulkDumpResultIndex < bulkDumpResult.size() - 1; bulkDumpResultIndex++) {
 				if (bulkDumpResult[bulkDumpResultIndex].value.empty()) {
 					continue;
