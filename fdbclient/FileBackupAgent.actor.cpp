@@ -4966,12 +4966,13 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		// TraceEvent("FlowGuruWriteOldFormat")
-		// 	.detail("CommitVersion", commitVersion)
-		// 	.detail("Part", part)
-		// 	.detail("KeySize", backupKV.key.size())
-		// 	.detail("ValueSize", backupKV.value.size())
-		// 	.log();
+		TraceEvent("FlowGuruWriteOldFormat")
+			.detail("CommitVersion", commitVersion)
+			.detail("Part", part)
+			.detail("KeySize", backupKV.key.size())
+			.detail("ValueSize", backupKV.value.size())
+			.detail("TotalBytes", totalBytes)
+			.log();
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 	}
 	return results;

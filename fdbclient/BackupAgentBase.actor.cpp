@@ -509,9 +509,11 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 
 		ASSERT(consumed == totalBytes);
 		if (value.size() != offset) {
+			// UnexpectedExtraDataSize="5069" Offset="3826" TotalBytes="3814" Consumed="3814" OriginalOffset="12"
 			TraceEvent(SevError, "BA_DecodeBackupLogValue")
 			    .detail("UnexpectedExtraDataSize", value.size())
 			    .detail("Offset", offset)
+				.detail("GroupKey", version)
 			    .detail("TotalBytes", totalBytes)
 			    .detail("Consumed", consumed)
 			    .detail("OriginalOffset", originalOffset);
@@ -832,16 +834,18 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				tenantMapChanging = false;
 
 				BinaryWriter bw(Unversioned());
+				// BinaryWriter bw(IncludeVersion(ProtocolVersion::withBackupMutations()));
+
 				for (int i = 0; i < group.items.size(); ++i) {
 					// hfu5 : each value should be a partition
 					bw.serializeBytes(group.items[i].value);
-					// TraceEvent("FlowGuruCheckOldFormat")
-					// 	.detail("GroupKey", group.groupKey)
-					// 	.detail("Version", group.version)
-					// 	.detail("Index", i)
-					// 	.detail("KeySize", group.items[i].key.size())
-					// 	.detail("ValueSize", group.items[i].value.size())
-					// 	.log();
+					TraceEvent("FlowGuruCheckOldFormat")
+						.detail("GroupKey", group.groupKey)
+						.detail("Version", group.version)
+						.detail("Index", i)
+						.detail("KeySize", group.items[i].key.size())
+						.detail("ValueSize", group.items[i].value.size())
+						.log();
 				}
 				// Parse a single transaction from the backup mutation log
 				Standalone<StringRef> value = bw.toValue();
