@@ -110,6 +110,9 @@ public:
 	bool isValid() const { return promise.isValid(); }
 	bool canBeSet() const { return promise.canBeSet(); }
 
+	int getFutureReferenceCount() const { return promise.getFutureReferenceCount(); }
+	int getPromiseReferenceCount() const { return promise.getPromiseReferenceCount(); }
+
 private:
 	Promise<T> promise;
 };
@@ -139,6 +142,9 @@ public:
 		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
 		                                                    : TaskPriority::DefaultOnMainThread);
 	}
+
+	int getFutureReferenceCount() const { return promiseStream.getFutureReferenceCount(); }
+	int getPromiseReferenceCount() const { return promiseStream.getPromiseReferenceCount(); }
 
 private:
 	PromiseStream<T> promiseStream;

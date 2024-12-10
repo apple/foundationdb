@@ -27,6 +27,7 @@
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <vector>
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -53,6 +54,7 @@
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -1075,7 +1077,7 @@ struct CLIOptions {
 	std::string testServersStr;
 	std::string whitelistBinPaths;
 
-	std::vector<std::string> publicAddressStrs, listenAddressStrs;
+	std::vector<std::string> publicAddressStrs, listenAddressStrs, grpcAddressStrs;
 	NetworkAddressList publicAddresses, listenAddresses;
 
 	const char* targetKey = nullptr;
@@ -1134,6 +1136,10 @@ struct CLIOptions {
 		} catch (Error&) {
 			printHelpTeaser(name);
 			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		for (auto& s : grpcAddressStrs) {
+			fmt::printf("gRPC Endpoint: %s\n", s);
 		}
 
 		if (role == ServerRole::ConsistencyCheck || role == ServerRole::ConsistencyCheckUrgent) {
@@ -1341,7 +1347,13 @@ private:
 			case OPT_PUBLICADDR:
 				argStr = args.OptionArg();
 				boost::split(tmpStrings, argStr, [](char c) { return c == ','; });
-				publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
+				for (auto& addr : tmpStrings) {
+					if (addr.ends_with(":grpc")) {
+						grpcAddressStrs.push_back(addr.substr(0, addr.size() - std::string(":grpc").size()));
+					} else {
+						publicAddressStrs.push_back(addr);
+					}
+				}
 				break;
 			case OPT_LISTEN:
 				argStr = args.OptionArg();
@@ -2405,7 +2417,12 @@ int main(int argc, char* argv[]) {
 				                      opts.consistencyCheckUrgentMode));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
-
+#ifdef FLOW_GRPC_ENABLED
+				if (opts.grpcAddressStrs.size() > 0) {
+					auto grpcServer = GrpcServer::initInstance(NetworkAddress::parse(opts.grpcAddressStrs[0]));
+					actors.push_back(grpcServer->run());
+				}
+#endif
 				f = stopAfter(waitForAll(actors));
 				g_network->run();
 			}
