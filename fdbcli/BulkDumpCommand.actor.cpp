@@ -64,6 +64,7 @@ ACTOR Future<Void> getBulkDumpCompleteRanges(Database cx, KeyRange rangeToRead) 
 ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clusterFile,
                                        Database cx,
                                        std::vector<StringRef> tokens) {
+	state BulkDumpState bulkDumpJob;
 	if (tokencmp(tokens[1], "mode")) {
 		if (tokens.size() != 2 && tokens.size() != 3) {
 			printUsage(tokens[0]);
@@ -101,14 +102,32 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
-		// Bulk load can only inject data to normal key space, aka "" ~ \xff
+		// Bulk dump can only inject data to normal key space, aka "" ~ \xff
 		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
 			printUsage(tokens[0]);
 			return UID();
 		}
 		std::string remoteRoot = tokens[4].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		state BulkDumpState bulkDumpJob = newBulkDumpTaskLocalSST(range, remoteRoot);
+		bulkDumpJob = newBulkDumpTaskLocalSST(range, remoteRoot);
+		wait(submitBulkDumpJob(cx, bulkDumpJob));
+		return bulkDumpJob.getJobId();
+
+	} else if (tokencmp(tokens[1], "s3")) {
+		if (tokens.size() != 5) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		Key rangeBegin = tokens[2];
+		Key rangeEnd = tokens[3];
+		// Bulk dump can only inject data to normal key space, aka "" ~ \xff
+		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		std::string remoteRoot = tokens[4].toString();
+		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+		bulkDumpJob = newBulkDumpTaskS3SST(range, remoteRoot);
 		wait(submitBulkDumpJob(cx, bulkDumpJob));
 		return bulkDumpJob.getJobId();
 
@@ -151,7 +170,7 @@ CommandFactory bulkDumpFactory(
     CommandHelp("bulkdump [mode|local|clear|status] [ARGs]",
                 "bulkdump commands",
                 "To set bulkdump mode: `bulkdump mode [on|off]'\n"
-                "To dump a range to local path in SST files: `bulkdump local <BeginKey> <EndKey> dumpFolder\n"
+                "To dump a range to local path in SST files: `bulkdump [local|s3] <BeginKey> <EndKey> dumpFolder\n"
                 "To clear current bulkdump job: `bulkdump clear\n"
                 "To get completed bulkdump ranges: `bulkdump status <BeginKey> <EndKey>\n"));
 } // namespace fdb_cli
