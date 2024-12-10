@@ -4871,9 +4871,9 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	std::map<uint32_t, std::vector<Standalone<StringRef>>> mutationsBySub;
 	std::map<uint32_t, std::vector<Standalone<MutationRef>>> tmpMap;
 	int i = 0;
-	TraceEvent("FlowGuruGenerateNewVersion")
-		.detail("CommitVersion", commitVersion)
-		.log();
+	// TraceEvent("FlowGuruGenerateNewVersion")
+	// 	.detail("CommitVersion", commitVersion)
+	// 	.log();
 	for (auto& vec : newFormatMutations) {
 		// fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
 		int j = 0;
@@ -5041,10 +5041,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				    .log();
 			} else {
 				filesByTag[f.tagId].push_back(f);
-				TraceEvent("FlowguruAddFile")
-					.detail("TagID", f.tagId)
-					.detail("File", f.fileName)
-					.log();
+				// TraceEvent("FlowguruAddFile")
+				// 	.detail("TagID", f.tagId)
+				// 	.detail("File", f.fileName)
+				// 	.log();
 			}
 		}
 
@@ -5066,7 +5066,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		// TODO: set this to false
 		// now it stuck here
 		while (atLeastOneIteratorHasNext) {
-			// fmt::print(stderr, "FlowguruLoopStart totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
+			fmt::print(stderr, "FlowguruLoopStart totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
 			atLeastOneIteratorHasNext = false;
 			minVersion = std::numeric_limits<int64_t>::max();
 			k = 0;
@@ -5088,9 +5088,9 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 					.log();
 				// fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
 				if (v <= minVersion) {
-					TraceEvent("FlowguruFoundNewMinVersion").detail("K", k)
-						.detail("Version", v).detail("MinVersion", minVersion)
-						.log();
+					// TraceEvent("FlowguruFoundNewMinVersion").detail("K", k)
+					// 	.detail("Version", v).detail("MinVersion", minVersion)
+					// 	.log();
 					minVersion = v;
 				}
 			}
@@ -5351,25 +5351,25 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// and we miss 311782629
 		state Optional<RestoreConfig::RestoreFile> beginFileInclude = wait(restore.fileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({ beginVersion, "" })));
 		state Optional<RestoreConfig::RestoreFile> endFileExclude = wait(restore.fileSet().seekGreaterThan(tr, RestoreConfig::RestoreFile({ endVersion, "" })));
-		TraceEvent("FlowGuruGetAllFiles")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("EndFilePresent", endFileExclude.present())
-					.log();
-		if (beginFileInclude.present()) {
-			TraceEvent("FlowGuruBeginFile")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("EndFile", beginFileInclude.get().fileName)
-					.log();
-		}
-		if (endFileExclude.present()) {
-			TraceEvent("FlowGuruEndFile")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("EndFile", endFileExclude.get().fileName)
-					.log();
-		}
+		// TraceEvent("FlowGuruGetAllFiles")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("EndFilePresent", endFileExclude.present())
+		// 			.log();
+		// if (beginFileInclude.present()) {
+		// 	TraceEvent("FlowGuruBeginFile")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("EndFile", beginFileInclude.get().fileName)
+		// 			.log();
+		// }
+		// if (endFileExclude.present()) {
+		// 	TraceEvent("FlowGuruEndFile")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("EndFile", endFileExclude.get().fileName)
+		// 			.log();
+		// }
 		state RestoreConfig::FileSetT::RangeResultType files =
 		    wait(restore.fileSet().getRange(tr,
 		                                    beginFileInclude,
@@ -6132,7 +6132,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state std::vector<RestoreConfig::RestoreFile> files;
 		if (!logsOnly) {
 			beginVersion = restorable.get().snapshot.beginVersion;
-			// fmt::print(stderr, "FullRestoreTask, set beginVersion={}\n", beginVersion);
+			fmt::print(stderr, "FullRestoreTask, set beginVersion={}\n", beginVersion);
 
 			if (!inconsistentSnapshotOnly) {
 				for (const RangeFile& f : restorable.get().ranges) {
@@ -6167,7 +6167,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 		// First version for which log data should be applied
-		// fmt::print(stderr, "FullRestoreTask:: beginVersion={}\n", beginVersion);
+		fmt::print(stderr, "FullRestoreTask:: beginVersion={}\n", beginVersion);
 		Params.firstVersion().set(task, beginVersion);
 
 		tr->reset();
@@ -6258,11 +6258,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 
 		if (transformPartitionedLog) {
-			// fmt::print(stderr,
-			//            "StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
-			//            firstVersion,
-			//            0,
-			//            restoreVersion);
+			fmt::print(stderr,
+			           "StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
+			           firstVersion,
+			           0,
+			           restoreVersion);
 			Version endVersion = std::min(firstVersion + step, restoreVersion);
 			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, 0, endVersion)));
 		} else {

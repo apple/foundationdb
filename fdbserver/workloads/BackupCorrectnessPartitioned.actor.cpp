@@ -568,8 +568,6 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			state Reference<IBackupContainer> lastBackupContainer =
 			    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
 
-
-
 			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
 			wait(startRestore);
 			// between here

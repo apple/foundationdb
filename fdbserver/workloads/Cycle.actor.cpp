@@ -56,7 +56,6 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	static constexpr auto NAME = MultiTenancy ? "TenantCycle" : "Cycle";
 	static constexpr auto TenantEnabled = MultiTenancy;
 	int actorCount, nodeCount;
-	bool skipLoading;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
 
@@ -74,7 +73,6 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
-		skipLoading = getOption(options, "skipLoading"_sr, false);
 		if constexpr (MultiTenancy) {
 			ASSERT(g_network->isSimulated());
 			this->useToken = getOption(options, "useToken"_sr, true);
@@ -84,9 +82,6 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		if (skipLoading) {
-			return Void();
-		}
 		Future<Void> prepare;
 		if constexpr (MultiTenancy) {
 			prepare = prepareToken(cx, this);
@@ -96,9 +91,6 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		return runAfter(prepare, [this, cx](Void) { return bulkSetup(cx, this, nodeCount, Promise<double>()); });
 	}
 	Future<Void> start(Database const& cx) override {
-		if (skipLoading) {
-			return Void();
-		}
 		if constexpr (MultiTenancy) {
 			cx->defaultTenant = this->tenant;
 		}
@@ -135,7 +127,15 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	Value value(int n) { return doubleToTestKey(n, keyPrefix); }
 	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
 
-	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
+	Standalone<KeyValueRef> operator()(int n) { 
+		TraceEvent("AddKey")
+			.detail("Key", printable(key(n)))
+			.detail("RawKey", testKeyToDouble(key(n), keyPrefix))
+			.detail("Value", value((n + 1) % nodeCount))
+			.detail("RawValue", testKeyToDouble(value((n + 1) % nodeCount), keyPrefix))
+			.log();
+		return KeyValueRef(key(n), value((n + 1) % nodeCount)); 
+	}
 
 	void badRead(const char* name, int r, Transaction& tr) {
 		TraceEvent(SevError, "CycleBadRead")
@@ -321,6 +321,11 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				try {
 					self->setAuthToken(tr);
 					state Version v = wait(tr.getReadVersion());
+					TraceEvent("FlowguruCycleCheck")
+						.detail("NodeCount", self->nodeCount)
+						.detail("Prefix", self->keyPrefix)
+						.detail("Key", printable(doubleToTestKey(0.0, self->keyPrefix)))
+						.log();
 					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
 					                                    firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
 					                                    self->nodeCount + 1));
