@@ -377,18 +377,18 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			try {
 				// TODO: Change to my restore agent code
 				TraceEvent(SevError, "MXFastRestore").detail("RestoreFunction", "ShouldChangeToMyOwnRestoreLogic");
-				wait(success(backupAgent->restore(cx,
-				                                  cx,
-				                                  self->backupTag,
-				                                  KeyRef(lastBackupContainer),
-				                                  {},
-				                                  WaitForComplete::True,
-				                                  ::invalidVersion,
-				                                  Verbose::True,
-				                                  normalKeys,
-				                                  Key(),
-				                                  Key(),
-				                                  self->locked)));
+				wait(success(backupAgent->restoreKeyRange(cx,
+				                                          cx,
+				                                          self->backupTag,
+				                                          KeyRef(lastBackupContainer),
+				                                          {},
+				                                          WaitForComplete::True,
+				                                          ::invalidVersion,
+				                                          Verbose::True,
+				                                          normalKeys,
+				                                          Key(),
+				                                          Key(),
+				                                          self->locked)));
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID).log();
 				ASSERT(false);
 			} catch (Error& e) {
