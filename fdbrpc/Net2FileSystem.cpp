@@ -96,7 +96,7 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power
 // failure.
-Future<Void> Net2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
+Future<Void> Net2FileSystem::deleteFile(const std::filesystem::path& filename, bool mustBeDurable) {
 	return Net2AsyncFile::deleteFile(filename, mustBeDurable);
 }
 
@@ -144,7 +144,7 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPa
 #endif
 }
 
-Future<Void> Net2FileSystem::renameFile(const std::string& from, const std::string& to) {
+Future<Void> Net2FileSystem::renameFile(const std::filesystem::path& from, const std::filesystem::path& to) {
 	return Net2AsyncFile::renameFile(from, to);
 }
 

@@ -133,8 +133,10 @@ TEST_CASE("/fileio/incrementalDelete") {
 TEST_CASE("/fileio/rename") {
 	// create a file
 	state int64_t fileSize = 100e6;
-	state std::string filename = "/tmp/__JUNK__." + deterministicRandom()->randomUniqueID().toString();
-	state std::string renamedFile = "/tmp/__RENAMED_JUNK__." + deterministicRandom()->randomUniqueID().toString();
+	state std::filesystem::path filename =
+	    std::filesystem::path("/tmp/__JUNK__." + deterministicRandom()->randomUniqueID().toString());
+	state std::filesystem::path renamedFile =
+	    std::filesystem::path("/tmp/__RENAMED_JUNK__." + deterministicRandom()->randomUniqueID().toString());
 	state std::unique_ptr<char[]> data(new char[4096]);
 	state std::unique_ptr<char[]> readData(new char[4096]);
 	state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
@@ -161,7 +163,7 @@ TEST_CASE("/fileio/rename") {
 
 	// verify rename happened
 	bool renamedExists = false;
-	auto bName = basename(renamedFile);
+	auto bName = renamedFile.filename();
 	auto files = platform::listFiles("/tmp/");
 	for (const auto& file : files) {
 		if (file == bName) {

@@ -234,17 +234,17 @@ void FileTraceLogWriter::cleanupTraceFiles() {
 			// Rename/finalize any stray files ending in tracePartialFileSuffix for this process.
 			if (!tracePartialFileSuffix.empty()) {
 				for (const auto& f : platform::listFiles(directory, tracePartialFileSuffix)) {
-					if (f.substr(0, processName.length()) == processName) {
-						renameFile(f, f.substr(0, f.size() - tracePartialFileSuffix.size()));
+					if (f.parent_path() == processName) {
+						renameFile(f, f.stem());
 					}
 				}
 			}
 
-			std::vector<std::string> existingFiles = platform::listFiles(directory, extension);
-			std::vector<std::string> existingTraceFiles;
+			std::vector<std::filesystem::path> existingFiles = platform::listFiles(directory, extension);
+			std::vector<std::filesystem::path> existingTraceFiles;
 
 			for (auto f = existingFiles.begin(); f != existingFiles.end(); ++f) {
-				if (f->substr(0, processName.length()) == processName) {
+				if (f->parent_path() == processName) {
 					existingTraceFiles.push_back(*f);
 				}
 			}
@@ -253,15 +253,15 @@ void FileTraceLogWriter::cleanupTraceFiles() {
 			std::sort(existingTraceFiles.begin(), existingTraceFiles.end(), std::greater<std::string>());
 
 			uint64_t runningTotal = 0;
-			std::vector<std::string>::iterator fileListIterator = existingTraceFiles.begin();
+			std::vector<std::filesystem::path>::iterator fileListIterator = existingTraceFiles.begin();
 
 			while (runningTotal < maxLogsSize && fileListIterator != existingTraceFiles.end()) {
-				runningTotal += (fileSize(joinPath(directory, *fileListIterator)) + FLOW_KNOBS->ZERO_LENGTH_FILE_PAD);
+				runningTotal += (fileSize(directory / *fileListIterator) + FLOW_KNOBS->ZERO_LENGTH_FILE_PAD);
 				++fileListIterator;
 			}
 
 			while (fileListIterator != existingTraceFiles.end()) {
-				deleteFile(joinPath(directory, *fileListIterator));
+				deleteFile(directory / *fileListIterator);
 				++fileListIterator;
 			}
 		} catch (Error&) {
