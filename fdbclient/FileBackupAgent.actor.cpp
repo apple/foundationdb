@@ -233,7 +233,6 @@ public:
 
 	// Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
 	// incrementally advancing through the map, saving the version and path of the next starting point.
-	// question: do we want to add tag here?
 	struct RestoreFile {
 		Version version; // this is beginVersion, not endVersion
 		std::string fileName;
@@ -5111,6 +5110,16 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 						mutationsSingleVersion.push_back(tmp);
 					}
 				}
+				
+
+				if (minVersion < begin) {
+					// skip generating mutations, because this is not within desired range
+					// this is already handled by the previous taskfunc
+					continue;
+				} else if (minVersion >= end) {
+					// all valid data has been consumed
+					break;
+				}
 				// transform from new format to old format(param1, param2)
 				// in the current implementation, each version will trigger a mutation
 				// if each version data is too small, we might want to combine multiple versions
@@ -5283,6 +5292,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 		state Version restoreVersion;
+		state int fileLimit = 1000;
 
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)) &&
 		     checkTaskVersion(tr->getDatabase(), task, name, version));
@@ -5332,13 +5342,39 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 		// Get a batch of files.  We're targeting batchSize blocks(30k) being dispatched so query for batchSize(150)
 		// files (each of which is 0 or more blocks).
-		int fileLimit = 1000;
+		// lets say files have [10, 20], [20, 30] then if our range is [15, 25], we need to include both files, 
+		// because [15, 20] is included in the first file, and [20, 25] is included in the second file
+		// say we have b and e
+		// as a result, the first file(inclusive): largest file whose begin <= b,
+		// the last file(exclusive): smallest file whose begin > e
+		// in reality, tag1 has [294336829,311764939] [311764939,324171019], 
+		// and we miss 311782629
+		Optional<RestoreConfig::RestoreFile> beginFileInclude = wait(restore.fileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({ beginVersion, "" })));
+		Optional<RestoreConfig::RestoreFile> endFileExclude = wait(restore.fileSet().seekGreaterThan(tr, RestoreConfig::RestoreFile({ endVersion, "" })));
+		TraceEvent("FlowGuruGetAllFiles")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("EndFilePresent", endFileExclude.present())
+					.log();
+		if (beginFileInclude.present()) {
+			TraceEvent("FlowGuruBeginFile")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("EndFile", beginFileInclude.get().fileName)
+					.log();
+		}
+		if (endFileExclude.present()) {
+			TraceEvent("FlowGuruEndFile")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("EndFile", endFileExclude.get().fileName)
+					.log();
+		}
 		state RestoreConfig::FileSetT::RangeResultType files =
 		    wait(restore.fileSet().getRange(tr,
-		                                    Optional<RestoreConfig::RestoreFile>({ beginVersion, "" }),
-		                                    Optional<RestoreConfig::RestoreFile>({ endVersion, "" }),
+		                                    beginFileInclude,
+		                                    endFileExclude, 
 		                                    fileLimit));
-
 		state int64_t maxTagID = 0;
 		state std::vector<RestoreConfig::RestoreFile> logs;
 		state std::vector<RestoreConfig::RestoreFile> ranges;
