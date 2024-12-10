@@ -27,8 +27,11 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
+#include "flow/Buggify.h"
+#include "flow/Platform.h"
 #include "flow/network.h"
 #include "fmt/format.h"
 #include "fdbclient/Audit.h"
@@ -71,6 +74,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
+#include "fdbserver/BulkDumpUtil.actor.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -213,7 +217,7 @@ static const KeyRangeRef persistPendingCheckpointKeys =
 static const std::string serverCheckpointFolder = "serverCheckpoints";
 static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
-static const std::string bulkLoadFolder = "bulkLoadFiles";
+static const std::string serverBulkDumpFolder = "bulkDumpFiles";
 
 // Accumulative checksum related prefix
 static const KeyRangeRef persistAccumulativeChecksumKeys =
@@ -1368,6 +1372,7 @@ public:
 	std::string folder;
 	std::string checkpointFolder;
 	std::string fetchedCheckpointFolder;
+	std::string bulkDumpFolder;
 
 	// defined only during splitMutations()/addMutation()
 	UpdateEagerReadInfo* updateEagerReads;
@@ -1398,6 +1403,8 @@ public:
 	}
 
 	FlowLock serveAuditStorageParallelismLock;
+
+	FlowLock serveBulkDumpParallelismLock;
 
 	int64_t instanceID;
 
@@ -1631,6 +1638,10 @@ public:
 			specialCounter(cc, "ServeValidateStorageWaiting", [self]() {
 				return self->serveAuditStorageParallelismLock.waiters();
 			});
+			specialCounter(
+			    cc, "ServerBulkDumpActive", [self]() { return self->serveBulkDumpParallelismLock.activePermits(); });
+			specialCounter(
+			    cc, "ServerBulkDumpWaiting", [self]() { return self->serveBulkDumpParallelismLock.waiters(); });
 			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
 			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
 			specialCounter(cc, "WatchBytes", [self]() { return self->watchBytes; });
@@ -1705,6 +1716,7 @@ public:
 	    ssLock(makeReference<PriorityMultiLock>(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY,
 	                                            SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES)),
 	    serveAuditStorageParallelismLock(SERVER_KNOBS->SERVE_AUDIT_STORAGE_PARALLELISM),
+	    serveBulkDumpParallelismLock(SERVER_KNOBS->SS_SERVE_BULKDUMP_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0),
@@ -5948,6 +5960,250 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 		}
 	}
 
+	return Void();
+}
+
+struct RangeDumpData {
+	std::map<Key, Value> kvs;
+	std::map<Key, Value> sampled;
+	Key lastKey;
+	int64_t kvsBytes;
+	RangeDumpData() = default;
+	RangeDumpData(const std::map<Key, Value>& kvs,
+	              const std::map<Key, Value>& sampled,
+	              const Key& lastKey,
+	              int64_t kvsBytes)
+	  : kvs(kvs), sampled(sampled), lastKey(lastKey), kvsBytes(kvsBytes) {}
+};
+
+ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange range, Version version) {
+	state std::map<Key, Value> kvsToDump;
+	state std::map<Key, Value> sample;
+	state int64_t currentExpectedBytes = 0;
+	state Key beginKey = range.begin;
+	state Key lastKey = range.end;
+	state ErrorOr<GetKeyValuesReply> rep;
+	// Accumulate data read from local storage to kvsToDump and make sampling until any error presents
+	loop {
+		// Read data and stop for any error
+		try {
+			state GetKeyValuesRequest localReq;
+			localReq.begin = firstGreaterOrEqual(beginKey);
+			localReq.end = firstGreaterOrEqual(range.end);
+			localReq.version = version;
+			localReq.limit = SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT;
+			localReq.limitBytes = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
+			localReq.tags = TagSet();
+			data->actors.add(getKeyValuesQ(data, localReq));
+			wait(store(rep, errorOr(localReq.reply.getFuture())));
+			if (rep.isError()) {
+				throw rep.getError();
+			}
+			if (rep.get().error.present()) {
+				throw rep.get().error.get();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			break;
+		}
+
+		// Given the data, create KVS and sample. Stop if the accumulated data size is too large.
+		for (const auto& kv : rep.get().data) {
+			lastKey = kv.key;
+			auto res = kvsToDump.insert({ kv.key, kv.value });
+			ASSERT(res.second);
+			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(kv.key, kv.value));
+			if (sampleInfo.inSample) {
+				auto resSample = sample.insert({ kv.key, kv.value });
+				ASSERT(resSample.second);
+			}
+			currentExpectedBytes = currentExpectedBytes + kv.expectedSize() + kv.expectedSize();
+			if (currentExpectedBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
+				break;
+			}
+		}
+
+		// Stop if no more data or having too large bytes
+		if (!rep.get().more || currentExpectedBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
+			break;
+		}
+
+		// Yield and go to the next round
+		wait(delay(0.1));
+		beginKey = keyAfter(lastKey);
+	}
+	return RangeDumpData(kvsToDump, sample, lastKey, currentExpectedBytes);
+}
+
+void cleanUpBulkDumpFolder(StorageServer* data) {
+	try {
+		platform::eraseDirectoryRecursive(abspath(data->bulkDumpFolder));
+	} catch (Error& e) {
+		return;
+	}
+	return;
+}
+
+// The SS actor handling bulk dump task sent from DD.
+// The SS partitions the task range into batches and make progress on each batch one by one.
+// Each batch is a subrange of the task range sent from DD.
+// When SS completes one batch, SS persists the metadata indicating this batch range completed.
+// If the SS fails on dumping a batch data, the SS will send an error to DD and the leftover files
+// is cleaned up when this actor returns.
+// In the case of SS crashes, the leftover files will be cleared at the init step when the SS restores.
+// If the SS uploads any file with succeed but the blob store is actually stored, this inconsistency will
+// be captured by DD and DD will retry to dump the problematic range with a new task.
+// DD will retry later if it receives any error from SS.
+// Upload the data for the range with the following path organization:
+//  <rootRemote>/<JobId>/<TaskId>/<batchNum>/<dumpVersion>-manifest.sst
+//	<rootRemote>/<JobId>/<TaskId>/<batchNum>/<dumpVersion>-data.sst
+//	<rootRemote>/<JobId>/<TaskId>/<batchNum>/<dumpVersion>-sample.sst
+// where rootRemote = req.bulkDumpState.remoteRoot, jobId = req.bulkDumpState.jobId, taskId = req.bulkDumpState.taskId,
+// batchNum and dumpVersion are dynamically generated.
+// Each task must have one manifest file.
+// If the task's range is empty, data file and sample file do not exist
+// If the task's data size is too small, the sample file may omitted
+ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
+	wait(data->serveBulkDumpParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holder(data->serveBulkDumpParallelismLock); // A SS can handle one bulkDump task at a time
+	state Key rangeBegin = req.bulkDumpState.getRange().begin;
+	state Key rangeEnd = req.bulkDumpState.getRange().end;
+	state int64_t readBytes = 0;
+	state int retryCount = 0;
+	state uint64_t batchNum = 0;
+	state Version versionToDump;
+	state RangeDumpData rangeDumpData;
+	state std::string rootFolderLocal = getBulkDumpJobRoot(data->bulkDumpFolder, req.bulkDumpState.getJobId());
+	state std::string rootFolderRemote =
+	    getBulkDumpJobRoot(req.bulkDumpState.getRemoteRoot(), req.bulkDumpState.getJobId());
+	// Use jobId and taskId as the folder to store the data of the task range
+	ASSERT(req.bulkDumpState.getTaskId().present());
+	state std::string taskFolder = getBulkDumpTaskFolder(req.bulkDumpState.getTaskId().get());
+	state BulkDumpFileSet destinationFileSets;
+	state Transaction tr(data->cx);
+
+	loop {
+		try {
+			// Clear local files
+			clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
+
+			// Dump data of rangeToDump in a relativeFolder
+			state KeyRange rangeToDump = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+
+			// relativeFolder = <JobId>/<TaskId>/<batchNum>
+			// relativeFolder remains consistent between local path and remote path
+			state std::string relativeFolder = joinPath(taskFolder, std::to_string(batchNum));
+
+			// Get version to dump
+			tr.reset();
+			wait(store(versionToDump, tr.getReadVersion()));
+
+			// Read data
+			// TODO(BulkDump): Read data from other servers and do checksum
+			wait(store(rangeDumpData, getRangeDataToDump(data, rangeToDump, versionToDump)));
+
+			// Generate local file paths and remote file paths
+			// The data in KVStore is dumped to the local folder at first and then
+			// the local files are uploaded to the remote folder
+			// Local files and remotes files have the same relative path but different root
+			state std::pair<BulkDumpFileSet, BulkDumpFileSet> resFileSets =
+			    getLocalRemoteFileSetSetting(versionToDump,
+			                                 relativeFolder,
+			                                 /*rootLocal=*/rootFolderLocal,
+			                                 /*rootRemote=*/rootFolderRemote);
+
+			// The remote file path:
+			state BulkDumpFileSet localFileSetSetting = resFileSets.first;
+			state BulkDumpFileSet remoteFileSetSetting = resFileSets.second;
+
+			// Generate byte sampling setting
+			ByteSampleSetting byteSampleSetting(0,
+			                                    "hashlittle2", // use function name to represent the method
+			                                    SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
+			                                    SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
+			                                    SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
+
+			// Write to SST file
+			state KeyRange dataRange =
+			    rangeToDump & Standalone(KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey)));
+			state BulkDumpManifest manifest =
+			    dumpDataFileToLocalDirectory(data->thisServerID,
+			                                 rangeDumpData.kvs,
+			                                 rangeDumpData.sampled,
+			                                 localFileSetSetting,
+			                                 remoteFileSetSetting,
+			                                 byteSampleSetting,
+			                                 versionToDump,
+			                                 dataRange, // the actual range of the rangeDumpData.kvs
+			                                 rangeDumpData.kvsBytes);
+			readBytes = readBytes + rangeDumpData.kvsBytes;
+			TraceEvent(SevInfo, "SSBulkDump", data->thisServerID)
+			    .detail("Task", req.bulkDumpState.toString())
+			    .detail("ChecksumServers", describe(req.checksumServers))
+			    .detail("RangeToDump", rangeToDump)
+			    .detail("DataRange", dataRange)
+			    .detail("RootFolderLocal", rootFolderLocal)
+			    .detail("RelativeFolder", relativeFolder)
+			    .detail("DataBytes", rangeDumpData.kvsBytes)
+			    .detail("RemoteFileSet", manifest.fileSet.toString())
+			    .detail("BatchNum", batchNum);
+
+			// Upload Files
+			state BulkDumpFileSet localFileSet = localFileSetSetting;
+			if (manifest.fileSet.dataFileName.empty()) {
+				localFileSet.dataFileName = "";
+			}
+			if (manifest.fileSet.byteSampleFileName.empty()) {
+				localFileSet.byteSampleFileName = "";
+			}
+			wait(uploadBulkDumpFileSet(
+			    req.bulkDumpState.getTransportMethod(), localFileSet, manifest.fileSet, data->thisServerID));
+
+			// Progressively set metadata of the data range as complete phase
+			// Persist remoteFilePaths to the corresponding range
+			if (!dataRange.empty()) {
+				// The persisting range (dataRange) must be exactly same as the range presented in the manifest file
+				ASSERT(dataRange == KeyRangeRef(manifest.beginKey, manifest.endKey));
+				wait(persistCompleteBulkDumpRange(data->cx,
+				                                  req.bulkDumpState.getRangeCompleteState(dataRange, manifest)));
+			}
+
+			// Move to the next range
+			rangeBegin = keyAfter(rangeDumpData.lastKey);
+			if (rangeBegin >= rangeEnd) {
+				req.reply.send(req.bulkDumpState);
+				break;
+			}
+			batchNum++;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+			TraceEvent(SevInfo, "SSBulkDumpError", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("Task", req.bulkDumpState.toString())
+			    .detail("RetryCount", retryCount)
+			    .detail("BatchNum", batchNum);
+			if (e.code() == error_code_bulkdump_task_outdated) {
+				req.reply.sendError(bulkdump_task_outdated()); // give up
+				break; // silently exit
+			}
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_platform_error ||
+			    e.code() == error_code_io_error || retryCount >= 50) {
+				req.reply.sendError(bulkdump_task_failed()); // give up
+				break; // silently exit
+			}
+			retryCount++;
+		}
+		wait(delay(1.0));
+	}
+	try {
+		clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
+	} catch (Error& e) {
+		// exit
+	}
 	return Void();
 }
 
@@ -14126,6 +14382,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					req.reply.sendError(not_implemented());
 				}
 			}
+			when(BulkDumpRequest req = waitNext(ssi.bulkdump.getFuture())) {
+				self->actors.add(bulkDumpQ(self, req));
+			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
@@ -14495,6 +14754,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.folder = folder;
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
+	self.bulkDumpFolder = joinPath(self.folder, serverBulkDumpFolder);
 	self.actors.add(rocksdbLogCleaner(folder));
 
 	try {
@@ -14510,6 +14770,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		platform::createDirectory(self.checkpointFolder);
 		platform::createDirectory(self.fetchedCheckpointFolder);
+
+		cleanUpBulkDumpFolder(&self);
 
 		EncryptionAtRestMode encryptionMode = wait(self.storage.encryptionMode());
 		TraceEvent("StorageServerInitProgress", ssi.id())
@@ -14611,6 +14873,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.folder = folder;
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
+	self.bulkDumpFolder = joinPath(self.folder, serverBulkDumpFolder);
 
 	if (!directoryExists(self.checkpointFolder)) {
 		TraceEvent(SevWarnAlways, "SSRebootCheckpointDirNotExists", self.thisServerID);
@@ -14620,6 +14883,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent(SevWarnAlways, "SSRebootFetchedCheckpointDirNotExists", self.thisServerID);
 		platform::createDirectory(self.fetchedCheckpointFolder);
 	}
+
+	cleanUpBulkDumpFolder(&self);
 
 	self.actors.add(rocksdbLogCleaner(folder));
 	try {
