@@ -5075,9 +5075,11 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				atLeastOneIteratorHasNext = true;
 				// fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
 				Version v = wait(iterators[k]->peekNextVersion());
-				// TraceEvent("FlowguruLoop2").detail("Version", v).log();
 				// fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
-				if (v < minVersion) {
+				if (v <= minVersion) {
+					TraceEvent("FlowguruFoundNewMinVersion").detail("K", k)
+						.detail("Version", v).detail("MinVersion", minVersion)
+						.log();
 					minVersion = v;
 				}
 			}
