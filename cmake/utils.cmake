@@ -86,6 +86,7 @@ function(generate_grpc_protobuf pkg_name)
   package_name_to_path(out_rel_path ${pkg_name})
 
   add_library(${target_name} ${proto_files})
+  target_include_directories(${target_name} PUBLIC ${Protobuf_INCLUDE_DIRS} ${gRPC_INCLUDE_DIRS})
   target_link_libraries(${target_name} PUBLIC gRPC::grpc++)
 
   set(protoc_out_dir "${CMAKE_BINARY_DIR}/generated/${out_rel_path}/")
