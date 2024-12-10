@@ -4872,7 +4872,7 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	std::map<uint32_t, std::vector<Standalone<StringRef>>> mutationsBySub;
 	std::map<uint32_t, std::vector<Standalone<MutationRef>>> tmpMap;
 	int i = 0;
-	TraceEvent("FlowGuruNewVersion")
+	TraceEvent("FlowGuruGenerateNewVersion")
 		.detail("CommitVersion", commitVersion)
 		.log();
 	for (auto& vec : newFormatMutations) {
@@ -5075,6 +5075,11 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				atLeastOneIteratorHasNext = true;
 				// fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
 				Version v = wait(iterators[k]->peekNextVersion());
+				TraceEvent("FlowguruIteration")
+					.detail("K", k)
+					.detail("Version", v)
+					.detail("MinVersion", minVersion)
+					.log();
 				// fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
 				if (v <= minVersion) {
 					TraceEvent("FlowguruFoundNewMinVersion").detail("K", k)
