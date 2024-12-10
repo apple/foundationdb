@@ -3713,9 +3713,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		} else {
 			auto a = std::make_unique<Writer::OpenAction>(&shardManager, metrics, &readSemaphore, &fetchSemaphore);
 			openFuture = a->done.getFuture();
-			this->metrics =
-			    ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
-			    rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager, this->path);
+			if (SERVER_KNOBS->ROCKSDB_METRICS_IN_SIMULATION) {
+				this->metrics =
+				    ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
+				    rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager, this->path);
+			}
 			this->compactionJob = compactShards(this->rState, openFuture, &shardManager, compactionThread);
 			this->refreshHolder = refreshIteratorPool(this->rState, iteratorPool, openFuture);
 			this->refreshRocksDBBackgroundWorkHolder =
@@ -3756,12 +3758,21 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
+	static bool overloaded(const uint64_t estPendCompactBytes) {
+		// Rocksdb metadata estPendCompactBytes is not deterministic so we don't use it in simulation. We still want to
+		// exercise the overload functionality for test coverage, so we return overloaded = true 5% of the time.
+		if (g_network->isSimulated()) {
+			return deterministicRandom()->randomInt(0, 100) < 5;
+		}
+		return estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT;
+	}
+
 	// Checks and waits for few seconds if rocskdb is overloaded.
 	ACTOR Future<Void> checkRocksdbState(rocksdb::DB* db) {
 		state uint64_t estPendCompactBytes;
 		state int count = SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 		db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes, &estPendCompactBytes);
-		while (count && estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT) {
+		while (count && overloaded(estPendCompactBytes)) {
 			wait(delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD));
 			count--;
 			db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
@@ -3930,6 +3941,24 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
+	static bool shouldCompactShard(const std::shared_ptr<PhysicalShard> shard,
+	                               const uint64_t liveDataSize,
+	                               const size_t fileCount) {
+		// Rocksdb metadata kEstimateLiveDataSize and cfMetadata.file_count is not deterministic so we don't
+		// use it in simulation. We still want to exercise the overload functionality for test coverage, so we return
+		// shouldCompactShard = true 25% of the time.
+		if (g_network->isSimulated()) {
+			return deterministicRandom()->randomInt(0, 100) < 25;
+		}
+		if (fileCount <= 5) {
+			return false;
+		}
+		if (liveDataSize / fileCount >= SERVER_KNOBS->SHARDED_ROCKSDB_AVERAGE_FILE_SIZE) {
+			return false;
+		}
+		return true;
+	}
+
 	ACTOR static Future<Void> compactShards(std::shared_ptr<ShardedRocksDBState> rState,
 	                                        Future<Void> openFuture,
 	                                        ShardManager* shardManager,
@@ -3957,16 +3986,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    start - shard->lastCompactionTime < SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PERIOD) {
 						continue;
 					}
+
 					uint64_t liveDataSize = 0;
 					ASSERT(shard->db->GetIntProperty(
 					    shard->cf, rocksdb::DB::Properties::kEstimateLiveDataSize, &liveDataSize));
-
 					rocksdb::ColumnFamilyMetaData cfMetadata;
 					shard->db->GetColumnFamilyMetaData(shard->cf, &cfMetadata);
-					if (cfMetadata.file_count <= 5) {
-						continue;
-					}
-					if (liveDataSize / cfMetadata.file_count >= SERVER_KNOBS->SHARDED_ROCKSDB_AVERAGE_FILE_SIZE) {
+
+					if (!shouldCompactShard(shard, liveDataSize, cfMetadata.file_count)) {
 						continue;
 					}
 
@@ -4032,6 +4059,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int64_t free;
 		int64_t total;
 		g_network->getDiskBytes(path, free, total);
+
+		// Rocksdb metadata kLiveSstFilesSize is not deterministic so don't rely on it for simulation. Instead, we pick
+		// a sane value that is deterministically random.
+		if (g_network->isSimulated()) {
+			live = (total - free) * deterministicRandom()->random01();
+		}
+
 		return StorageBytes(free, total, live, free);
 	}
 

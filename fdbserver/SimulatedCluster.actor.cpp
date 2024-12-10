@@ -1811,11 +1811,6 @@ void shardedRocksDBStorageEngineConfig(SimulationConfig* simCfg) {
 	CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine", probe::assert::hasRocksDB);
 	simCfg->set_config("encryption_at_rest_mode=disabled");
 	simCfg->set_config("ssd-sharded-rocksdb");
-	// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
-	// background threads.
-	TraceEvent(SevWarnAlways, "ShardedRocksDBNonDeterminism")
-	    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
-	noUnseed = true;
 }
 
 const std::unordered_map<SimulationStorageEngine, StorageEngineConfigFunc> STORAGE_ENGINE_CONFIG_MAPPER = {
