@@ -4,6 +4,19 @@
 Release Notes
 #############
 
+7.3.57
+======
+* Same as 7.3.56 release with AVX enabled.
+
+7.3.56
+======
+* Added an option to force flush if RocksCb flush does not happen within a time interval. `(PR #11792) <https://github.com/apple/foundationdb/pull/11792>`_
+* Changed RocksDB histogram sample rate to 1. `(PR #11794) <https://github.com/apple/foundationdb/pull/11794>`_
+* Updated TLS input handling to allow multiple Criteria per NID. `(PR #11763) <https://github.com/apple/foundationdb/pull/11763>`_
+* Added Sharded RocksDB knobs and metrics for bloom filters. `(PR #11785) <https://github.com/apple/foundationdb/pull/11785>`_
+* Fixed a backup agent crash bug when receiving an invalid token error from S3. `(PR #11774) <https://github.com/apple/foundationdb/pull/11774>`_
+* Updated ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS Knob to prevent OOMs of RocksDB storage servers `(PR #11739) <https://github.com/apple/foundationdb/pull/11739>`_
+
 7.3.55
 ======
 * Same as 7.3.54 release with AVX enabled.

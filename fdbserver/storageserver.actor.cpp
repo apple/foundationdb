@@ -1047,6 +1047,7 @@ public:
 	Reference<Histogram> readRangeBytesReturnedHistogram;
 	Reference<Histogram> readRangeBytesLimitHistogram;
 	Reference<Histogram> readRangeKVPairsReturnedHistogram;
+	Reference<Histogram> readRangePrefixLengthHistogram;
 
 	// watch map operations
 	Reference<ServerWatchMetadata> getWatchMetadata(KeyRef key, int64_t tenantId) const;
@@ -1655,6 +1656,11 @@ public:
 	    readRangeKVPairsReturnedHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                              SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM,
 	                                                              Histogram::Unit::bytes)),
+	    readRangePrefixLengthHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                           SS_READ_RANGE_PREFIX_LENGTH_HISTOGRAM,
+	                                                           Histogram::Unit::countLinear,
+	                                                           /*lower=*/0,
+	                                                           /*upper*/ 50)),
 	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
 	    storage(this, storage), shardChangeCounter(0), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    prevVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
@@ -4373,6 +4379,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			}
 		}
 	}
+	data->readRangePrefixLengthHistogram->sampleRecordCounter(range.prefixLength());
 	data->readRangeBytesReturnedHistogram->sample(resultLogicalSize);
 	data->readRangeKVPairsReturnedHistogram->sample(result.data.size());
 
