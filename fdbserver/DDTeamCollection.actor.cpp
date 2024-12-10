@@ -2234,6 +2234,10 @@ public:
 			takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
 			           self->machine_info.size() < self->configuration.storageTeamSize || imbalance;
 
+			if (SERVER_KNOBS->PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET) {
+				takeRest = takeRest || (self->getTargetTSSInDC() > 0 && self->reachTSSPairTarget());
+			}
+
 			// log the extra delay and change the wiggler state
 			if (takeRest) {
 				self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
@@ -2245,7 +2249,9 @@ public:
 					                                                                     : ratio)
 					    .detail("ServerSize", self->server_info.size())
 					    .detail("MachineSize", self->machine_info.size())
-					    .detail("StorageTeamSize", self->configuration.storageTeamSize);
+					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
+					    .detail("TargetTSSInDC", self->getTargetTSSInDC())
+					    .detail("ReachTSSPairTarget", self->reachTSSPairTarget());
 				}
 			}
 		}
