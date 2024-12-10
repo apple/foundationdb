@@ -2,6 +2,13 @@
 StderrSeverity = 30
 
 [[test]]
+testTitle = 'Cached'
+
+    [[test.workload]]
+    testName = 'Cache'
+    keyPrefix = '\x02'
+
+[[test]]
 testTitle = 'WriteDuringReadTest'
 
     [[test.workload]]
