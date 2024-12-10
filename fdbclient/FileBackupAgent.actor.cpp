@@ -5349,8 +5349,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// the last file(exclusive): smallest file whose begin > e
 		// in reality, tag1 has [294336829,311764939] [311764939,324171019], 
 		// and we miss 311782629
-		Optional<RestoreConfig::RestoreFile> beginFileInclude = wait(restore.fileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({ beginVersion, "" })));
-		Optional<RestoreConfig::RestoreFile> endFileExclude = wait(restore.fileSet().seekGreaterThan(tr, RestoreConfig::RestoreFile({ endVersion, "" })));
+		state Optional<RestoreConfig::RestoreFile> beginFileInclude = wait(restore.fileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({ beginVersion, "" })));
+		state Optional<RestoreConfig::RestoreFile> endFileExclude = wait(restore.fileSet().seekGreaterThan(tr, RestoreConfig::RestoreFile({ endVersion, "" })));
 		TraceEvent("FlowGuruGetAllFiles")
 					.detail("Begin", beginVersion)
 					.detail("End", endVersion)
