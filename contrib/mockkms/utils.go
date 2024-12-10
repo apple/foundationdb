@@ -21,31 +21,31 @@
 package main
 
 import (
-    "encoding/json"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 )
 
 type ErrorDetail struct {
-    Detail string                          `json:"details"`
+	Detail string `json:"details"`
 }
 
 type ErrorResponse struct {
-    Err ErrorDetail                        `json:"error"`
+	Err ErrorDetail `json:"error"`
 }
 
 func sendErrorResponse(w http.ResponseWriter, err error) {
-    e := ErrorDetail{}
-    e.Detail = fmt.Sprintf("Error: %s", err.Error())
-    resp := ErrorResponse{
-        Err:    e,
-    }
+	e := ErrorDetail{}
+	e.Detail = fmt.Sprintf("Error: %s", err.Error())
+	resp := ErrorResponse{
+		Err: e,
+	}
 
-    mResp,err  := json.Marshal(resp)
-    if err != nil {
-        log.Printf("Error marshalling error response %s", err.Error())
-        panic(err)
-    }
-    fmt.Fprintf(w, string(mResp))
+	mResp, err := json.Marshal(resp)
+	if err != nil {
+		log.Printf("Error marshalling error response %s", err.Error())
+		panic(err)
+	}
+	fmt.Fprintf(w, string(mResp))
 }
