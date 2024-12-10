@@ -1225,7 +1225,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 			self->persistentQueue->forgetBefore(
 			    (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST
 			         ? minVersion
-			         : std::min(newPersistentDataVersion, logData->knownCommittedVersion)),
+			         : std::min(minVersion, logData->knownCommittedVersion)),
 			    logData); // SOMEDAY: this can cause a slow task (~0.5ms), presumably from erasing too many versions.
 			              // Should we limit the number of versions cleared at a time?
 		}
