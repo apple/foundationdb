@@ -5007,7 +5007,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Reference<IBackupContainer> bc;
 		state std::vector<KeyRange> ranges; // this is the actual KV, not version
-
+		TraceEvent("FlowGuruStartRestoreLogDataPartitionedTaskFunc")
+					.detail("Begin", begin)
+					.detail("End", end)
+					.log();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -5039,6 +5042,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				    .log();
 			} else {
 				filesByTag[f.tagId].push_back(f);
+				TraceEvent("FlowguruAddFile")
+					.detail("TagID", f.tagId)
+					.detail("File", f.fileName)
+					.log();
 			}
 		}
 
@@ -5182,11 +5189,11 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			// fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
 			mutationsSingleVersion.clear();
 		}
-		TraceEvent("GuruQuitLoop")
-			.detail("Begin", begin)
-			.detail("End", end)
-			.detail("VersionRestored", versionRestored)
-			.log();
+		// TraceEvent("FlowGuruQuitLoop")
+		// 	.detail("Begin", begin)
+		// 	.detail("End", end)
+		// 	.detail("VersionRestored", versionRestored)
+		// 	.log();
 		// fmt::print(stderr, "QuitLoop: begin={}, end={}, versionRestored={}\n", begin, end, versionRestored);
 		return Void();
 	}
