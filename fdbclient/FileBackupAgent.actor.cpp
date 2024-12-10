@@ -4872,6 +4872,9 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	std::map<uint32_t, std::vector<Standalone<StringRef>>> mutationsBySub;
 	std::map<uint32_t, std::vector<Standalone<MutationRef>>> tmpMap;
 	int i = 0;
+	TraceEvent("FlowGuruNewVersion")
+		.detail("CommitVersion", commitVersion)
+		.log();
 	for (auto& vec : newFormatMutations) {
 		// fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
 		int j = 0;
