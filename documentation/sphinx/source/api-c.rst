@@ -506,8 +506,8 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
 .. function:: FDBFuture* fdb_database_get_client_status(FDBDatabase* db)
 
-   Returns a JSON string containing database client-side status information. At the top level the report describes the status of the 
-   Multi-Version Client database - its initialization state, the protocol version, the available client versions. The report schema is:
+   Returns a JSON string containing database client-side status information. If the Multi-version client API is disabled an empty string will be returned.
+   At the top level the report describes the status of the Multi-Version Client database - its initialization state, the protocol version, the available client versions. The report schema is:
 
    .. code-block::
 
