@@ -69,7 +69,7 @@ target_include_directories(fdbrpc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "
 target_link_libraries(fdbrpc PUBLIC flow libb64 md5 PRIVATE rapidjson)
 if (FLOW_GRPC_ENABLED)
   target_link_libraries(fdbrpc PUBLIC proto_fdbrpc_test)
-  target_include_directories(fdbrpc PUBLIC ${Protobuf_INCLUDE_DIRS} ${gRPC_INCLUDE_DIRS})
+  target_include_directories(fdbrpc PUBLIC ${Protobuf_INCLUDE_DIRS} ${gRPC_INCLUDE_DIRS} "${CMAKE_BINARY_DIR}/generated/")
   target_link_libraries(fdbrpc PUBLIC  gRPC::grpc++)
 endif()
 
