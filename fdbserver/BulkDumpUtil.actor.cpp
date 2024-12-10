@@ -254,14 +254,7 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod
                                          BulkDumpFileSet sourceFileSet,
                                          BulkDumpFileSet destinationFileSet,
                                          UID logId) {
-	// Upload to blobstore or mock file copy
-	if (transportMethod != BulkDumpTransportMethod::CP) {
-		TraceEvent(SevWarnAlways, "SSBulkDumpUploadFilesError", logId)
-		    .detail("Reason", "Transport method is not implemented")
-		    .detail("TransportMethod", transportMethod);
-		ASSERT_WE_THINK(false);
-		throw bulkdump_task_failed();
-	}
+	// Validate file names of source and destination
 	if (!validateSourceDestinationFileSets(sourceFileSet, destinationFileSet)) {
 		TraceEvent(SevWarnAlways, "SSBulkDumpUploadFilesError", logId)
 		    .detail("SourceFileSet", sourceFileSet.toString())
@@ -269,7 +262,19 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod
 		ASSERT_WE_THINK(false);
 		throw bulkdump_task_failed();
 	}
-	bulkDumpTransportCP_impl(sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
+	// Upload to blobstore or mock file copy
+	if (transportMethod == BulkDumpTransportMethod::S3) {
+		// TODO: add S3 uploading, please check bulkDumpTransportCP_impl accordingly
+
+	} else if (transportMethod != BulkDumpTransportMethod::CP) {
+		bulkDumpTransportCP_impl(sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
+	} else {
+		TraceEvent(SevWarnAlways, "SSBulkDumpUploadFilesError", logId)
+		    .detail("Reason", "Transport method is not implemented")
+		    .detail("TransportMethod", transportMethod);
+		ASSERT_WE_THINK(false);
+		throw bulkdump_task_failed();
+	}
 	return Void();
 }
 

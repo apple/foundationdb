@@ -205,6 +205,7 @@ enum class BulkDumpFileType : uint8_t {
 enum class BulkDumpTransportMethod : uint8_t {
 	Invalid = 0,
 	CP = 1,
+	S3 = 2,
 };
 
 enum class BulkDumpExportMethod : uint8_t {
@@ -370,5 +371,7 @@ private:
 // The data is dumped to the input remoteRoot
 // The remoteRoot can be either a local root or a remote blobstore root string
 BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& remoteRoot);
+
+BulkDumpState newBulkDumpTaskS3SST(const KeyRange& range, const std::string& remoteRoot);
 
 #endif
