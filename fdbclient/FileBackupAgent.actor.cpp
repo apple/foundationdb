@@ -4905,10 +4905,10 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	}
 
 	for (auto& mutationsForSub : tmpMap) {
-		TraceEvent("FlowGuruPrintNewSubVersion")
-			.detail("CommitVersion", commitVersion)
-			.detail("Sub", mutationsForSub.first)
-			.log();
+		// TraceEvent("FlowGuruPrintNewSubVersion")
+		// 	.detail("CommitVersion", commitVersion)
+		// 	.detail("Sub", mutationsForSub.first)
+		// 	.log();
 		for (auto& mutation : mutationsForSub.second) {
 			TraceEvent("FlowGuruPrintBySubVersion")
 				.detail("CommitVersion", commitVersion)

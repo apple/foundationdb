@@ -195,14 +195,15 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						tr.set(self->key(r), self->value(r3));
 						tr.set(self->key(r2), self->value(r4));
 						tr.set(self->key(r3), self->value(r2));
-						TraceEvent("CyclicTest1").detail("RawKey", r).detail("RawValue", r3).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
-						TraceEvent("CyclicTest2").detail("RawKey", r2).detail("RawValue", r4).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
-						TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
+						TraceEvent("CyclicTest1").detail("RawKey", r).detail("RawValue", r3).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString()).log();
+						TraceEvent("CyclicTest2").detail("RawKey", r2).detail("RawValue", r4).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString()).log();
+						TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString()).log();
 
 						wait(tr.commit());
-						// TraceEvent("CyclicTestCommit");
+						TraceEvent("CyclicTestCommit").log();
 						break;
 					} catch (Error& e) {
+						TraceEvent("CyclicTestError").detail("ErrorCode", e.code()).log();
 						if (e.code() == error_code_transaction_too_old)
 							++self->tooOldRetries;
 						else if (e.code() == error_code_not_committed)
