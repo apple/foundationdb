@@ -46,8 +46,8 @@ func _pack(t interface{}) []byte {
 }
 
 func _unpack(t []byte) tuple.Tuple {
-	i, e := tuple.Unpack(t)
-	if e != nil {
+	i, err := tuple.Unpack(t)
+	if err != nil {
 		return nil
 	}
 	return i
@@ -66,20 +66,23 @@ func (prty Priority) Push(trtr fdb.Transactor, value interface{}, priority int) 
 
 func (prty Priority) _NextCount(trtr fdb.Transactor, priority int) int {
 	res, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
-		kr, e := fdb.PrefixRange(prty.PrioritySS.Pack(tuple.Tuple{priority}))
-		if e != nil {
-			return nil, e
+		kr, err := fdb.PrefixRange(prty.PrioritySS.Pack(tuple.Tuple{priority}))
+		if err != nil {
+			return nil, err
 		}
 
-		ks, e := tr.Snapshot().GetRange(kr, fdb.RangeOptions{1, -1, true}).GetSliceWithError()
-		if e != nil {
-			return nil, e
+		ks, err := tr.Snapshot().GetRange(kr, fdb.RangeOptions{1, -1, true}).GetSliceWithError()
+		if err != nil {
+			return nil, err
 		}
 
 		if len(ks) == 0 {
 			return 0, nil
 		}
-		k, e := prty.PrioritySS.Unpack(ks[0].Key)
+		k, err := prty.PrioritySS.Unpack(ks[0].Key)
+		if err != nil {
+			return nil, err
+		}
 		return k[0].(int) + 1, nil
 	})
 	if err != nil {
