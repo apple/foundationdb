@@ -295,9 +295,29 @@ if(NOT WIN32)
     )
 
     file(GLOB API_TEST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/test/apitester/tests/*.toml")
+    set(PATTERNS_TO_SKIP "XXXX")
+    if (USE_ASAN)
+      set(PATTERNS_TO_SKIP
+        ".*BlobGranule.*"  # skip BlobGranule tests because we don't use
+        ".*Tenant.*"       # skip Tenant tests because we don't use
+      )
+    endif()
     foreach(test_file ${API_TEST_FILES})
       get_filename_component(file_name "${test_file}" NAME_WE)
       set(test_name "fdb_c_api_test_${file_name}")
+
+      # skip tests that match the patterns in PATTERNS_TO_SKIP
+      set(SKIP_FILE FALSE)
+      foreach(PATTERN ${PATTERNS_TO_SKIP})
+          if(file_name MATCHES "${PATTERN}")
+              set(SKIP_FILE TRUE)
+              break()
+          endif()
+      endforeach()
+      if(SKIP_FILE)
+        continue()
+      endif()
+
       add_python_venv_test(NAME "${test_name}"
         COMMAND python ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
           --build-dir ${CMAKE_BINARY_DIR}
