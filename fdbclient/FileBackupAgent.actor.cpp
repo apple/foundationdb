@@ -5374,6 +5374,11 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		for (auto f : files.results) {
 			if (f.isRange) {
 				ranges.push_back(f);
+				TraceEvent("FlowGuruRangeFile")
+						.detail("Begin", beginVersion)
+						.detail("End", endVersion)
+						.detail("File", f.fileName)
+						.log();
 			} else {
 				logs.push_back(f);
 				maxTagID = std::max(maxTagID, f.tagId);
