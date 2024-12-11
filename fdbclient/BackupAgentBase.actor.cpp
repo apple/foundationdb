@@ -775,7 +775,7 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	// mutations and encrypted mutations (and their relationship) is described in greater detail in the defenition of
 	// CommitTransactionRef in CommitTransaction.h
 	// fmt::print(stderr, "BackupAgentBase: newBeginVersion={}\n", newBeginVersion);
-	TraceEvent("BackupAgentBaseNewBeginVersion").detail("NewBeginVersion", newBeginVersion).log();
+	TraceEvent("FlowGuruSendCommitTxnBefore").detail("NewBeginVersion", newBeginVersion).log();
 
 	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
 	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
@@ -793,6 +793,7 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	*totalBytes += *mutationSize;
 	wait(commitLock->take(TaskPriority::DefaultYield, *mutationSize));
 	addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize));
+	TraceEvent("FlowGuruSendCommitTxnSucceed").detail("NewBeginVersion", newBeginVersion).log();
 	return Void();
 }
 
