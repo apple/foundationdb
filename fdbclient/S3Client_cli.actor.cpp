@@ -98,7 +98,8 @@ static void printUsage(std::string const& programName) {
 	             "                 Has no effect unless --log is specified.\n"
 	             "  --blob-credentials FILE\n"
 	             "                 File containing blob credentials in JSON format.\n"
-	             "                 The same credential format/file fdbbackup uses.\n" TLS_HELP
+	             "                 The same credential format/file fdbbackup uses.\n"
+	             "                 See 'Blob Credential Files' in https://apple.github.io/foundationdb/backups.html.\n"
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --knob-KNOBNAME KNOBVALUE\n"
 	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
@@ -107,15 +108,13 @@ static void printUsage(std::string const& programName) {
 	             "                 If SOURCE is an s3 bucket URL, TARGET must be a directory and vice versa.\n"
 	             "                 See 'Backup URLs' in https://apple.github.io/foundationdb/backups.html for\n"
 	             "                 the fdb s3 'blobstore://' url format.\n"
-	             " TARGET          Where to place the copy.\n"
+	             " TARGET          Where to place the copy.\n" TLS_HELP
 	             "Examples:\n"
 	             " "
 	          << programName
-	          << " --blob-credentials /path/to/credentials.json /path/to/source /path/to/target\n"
-	             " "
-	          << programName
-	          << " --knob_http_verbose_level=10 --log  "
-	             "'blobstore://localhost:8333/x?bucket=backup&region=us&secure_connection=0' dir3\n";
+	          << " --knob_http_verbose_level=10 --log   --knob_blobstore_encryption_type=aws:kms "
+	          << " --tls-ca-file /etc/ssl/cert.pem --tls-certificate-file /tmp/cert.pem  --tls-key-file /tmp/key.pem "
+	             "'blobstore://AWS_ACCESS_KEY_ID:AWS_SECRET_ACCESS_KEY:AWS_SESSION_TOKEN@localhost:8333/x?bucket=backup&region=us' dir3\n";
 	return;
 }
 
