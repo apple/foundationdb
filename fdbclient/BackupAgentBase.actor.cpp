@@ -374,15 +374,15 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			logValue.param1 = value.substr(offset, len1);
 			offset += len1;
 			logValue.param2 = value.substr(offset, len2);
-			double p1 = testKeyToDouble(logValue.param1);
-			double p2 = testKeyToDouble(logValue.param2);
-			TraceEvent("FlowGuruParsingRequest")
-						.detail("Mutation", logValue.toString())
-						.detail("Param1", logValue.param1)
-						.detail("Num1", p1)
-						.detail("Param2", logValue.param2)
-						.detail("Num2", p2)
-						.log();
+			// double p1 = testKeyToDouble(logValue.param1);
+			// double p2 = testKeyToDouble(logValue.param2);
+			// TraceEvent("FlowGuruParsingRequest")
+			// 			.detail("Mutation", logValue.toString())
+			// 			.detail("Param1", logValue.param1)
+			// 			.detail("Num1", p1)
+			// 			.detail("Param2", logValue.param2)
+			// 			.detail("Num2", p2)
+			// 			.log();
 			offset += len2;
 			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
 			ASSERT(!config.encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());
@@ -775,7 +775,7 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	// mutations and encrypted mutations (and their relationship) is described in greater detail in the defenition of
 	// CommitTransactionRef in CommitTransaction.h
 	// fmt::print(stderr, "BackupAgentBase: newBeginVersion={}\n", newBeginVersion);
-	TraceEvent("FlowGuruSendCommitTxnBefore").detail("NewBeginVersion", newBeginVersion).log();
+	// TraceEvent("FlowGuruSendCommitTxnBefore").detail("NewBeginVersion", newBeginVersion).log();
 
 	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
 	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
@@ -793,7 +793,7 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	*totalBytes += *mutationSize;
 	wait(commitLock->take(TaskPriority::DefaultYield, *mutationSize));
 	addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize));
-	TraceEvent("FlowGuruSendCommitTxnSucceed").detail("NewBeginVersion", newBeginVersion).log();
+	// TraceEvent("FlowGuruSendCommitTxnSucceed").detail("NewBeginVersion", newBeginVersion).log();
 	return Void();
 }
 
@@ -839,13 +839,13 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				for (int i = 0; i < group.items.size(); ++i) {
 					// hfu5 : each value should be a partition
 					bw.serializeBytes(group.items[i].value);
-					TraceEvent("FlowGuruCheckOldFormat")
-						.detail("GroupKey", group.groupKey)
-						.detail("Version", group.version)
-						.detail("Index", i)
-						.detail("KeySize", group.items[i].key.size())
-						.detail("ValueSize", group.items[i].value.size())
-						.log();
+					// TraceEvent("FlowGuruCheckOldFormat")
+					// 	.detail("GroupKey", group.groupKey)
+					// 	.detail("Version", group.version)
+					// 	.detail("Index", i)
+					// 	.detail("KeySize", group.items[i].key.size())
+					// 	.detail("ValueSize", group.items[i].value.size())
+					// 	.log();
 				}
 				// Parse a single transaction from the backup mutation log
 				Standalone<StringRef> value = bw.toValue();
@@ -895,15 +895,15 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				for (i = 0; i < curReq.transaction.mutations.size(); i++) {
 					MutationRef mutation = curReq.transaction.mutations[i];
 					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
-					TraceEvent("FlowGuruBeforeSendRequest")
-						.detail("GroupKey", group.groupKey)
-						.detail("Version", group.version)
-						.detail("Mutation", mutation.toString())
-						.detail("Param1", mutation.param1)
-						.detail("Num1", testKeyToDouble(mutation.param1))
-						.detail("Param2", mutation.param2)
-						.detail("Num2", testKeyToDouble(mutation.param2))
-						.log();
+					// TraceEvent("FlowGuruBeforeSendRequest")
+					// 	.detail("GroupKey", group.groupKey)
+					// 	.detail("Version", group.version)
+					// 	.detail("Mutation", mutation.toString())
+					// 	.detail("Param1", mutation.param1)
+					// 	.detail("Num1", testKeyToDouble(mutation.param1))
+					// 	.detail("Param2", mutation.param2)
+					// 	.detail("Num2", testKeyToDouble(mutation.param2))
+					// 	.log();
 					req.transaction.encryptedMutations.push_back_deep(req.arena,
 					                                                  curReq.transaction.encryptedMutations[i]);
 				}
@@ -1041,10 +1041,10 @@ ACTOR Future<Void> applyMutations(Database cx,
 			// ranges each represent a partition of version, e.g. [100, 200], [201, 300], [301, 400]
 			// (64, 200) -> [(64, 128), (128, 192), (192, 200)] assuming block size is 64
 			state Standalone<VectorRef<KeyRangeRef>> ranges = getApplyRanges(beginVersion, newEndVersion, uid);
-			TraceEvent("FlowGuruGetApplyChanges")
-				.detail("Begin", beginVersion)
-				.detail("End", newEndVersion)
-				.log();
+			// TraceEvent("FlowGuruGetApplyChanges")
+			// 	.detail("Begin", beginVersion)
+			// 	.detail("End", newEndVersion)
+			// 	.log();
 			// fmt::print(stderr, "BackupAgentBaseApplyMutationRangeSize={}\n", ranges.size());
 			//	ranges have format: applyLogKeys.begin/uid/hash(uint8)/version(64bites)/part
 			state size_t idx;

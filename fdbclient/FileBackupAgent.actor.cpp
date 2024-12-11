@@ -788,15 +788,15 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			vm.version = version;
 			vm.subsequence = subsequence;
 			vm.mutation = mutation;
-			TraceEvent("FlowGuruRestoreMutation")
-				.detail("Version", version)
-				.detail("Sub", subsequence)
-				.detail("Mutation", mutation.toString())
-				.detail("Param1", mutation.param1)
-				.detail("Num1", testKeyToDouble(mutation.param1))
-				.detail("Param2", mutation.param2)
-				.detail("Num2", testKeyToDouble(mutation.param2))
-				.log();
+			// TraceEvent("FlowGuruRestoreMutation")
+			// 	.detail("Version", version)
+			// 	.detail("Sub", subsequence)
+			// 	.detail("Mutation", mutation.toString())
+			// 	.detail("Param1", mutation.param1)
+			// 	.detail("Num1", testKeyToDouble(mutation.param1))
+			// 	.detail("Param2", mutation.param2)
+			// 	.detail("Num2", testKeyToDouble(mutation.param2))
+			// 	.log();
 			mutations.push_back_deep(mutations.arena(), vm);
 			// Move the bufferOffset to include this mutation
 			self->bufferOffset += mutationTotalSize;
@@ -4904,23 +4904,23 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		++i;
 	}
 
-	for (auto& mutationsForSub : tmpMap) {
-		TraceEvent("FlowGuruPrintNewSubVersion")
-			.detail("CommitVersion", commitVersion)
-			.detail("Sub", mutationsForSub.first)
-			.log();
-		for (auto& mutation : mutationsForSub.second) {
-			TraceEvent("FlowGuruPrintBySubVersion")
-				.detail("CommitVersion", commitVersion)
-				.detail("Sub", mutationsForSub.first)
-				.detail("Mutation", mutation.toString())
-				.detail("Param1", mutation.param1)
-				.detail("Num1", testKeyToDouble(mutation.param1))
-				.detail("Param2", mutation.param2)
-				.detail("Num2", testKeyToDouble(mutation.param2))
-				.log();
-		}
-	}
+	// for (auto& mutationsForSub : tmpMap) {
+	// 	TraceEvent("FlowGuruPrintNewSubVersion")
+	// 		.detail("CommitVersion", commitVersion)
+	// 		.detail("Sub", mutationsForSub.first)
+	// 		.log();
+	// 	for (auto& mutation : mutationsForSub.second) {
+	// 		TraceEvent("FlowGuruPrintBySubVersion")
+	// 			.detail("CommitVersion", commitVersion)
+	// 			.detail("Sub", mutationsForSub.first)
+	// 			.detail("Mutation", mutation.toString())
+	// 			.detail("Param1", mutation.param1)
+	// 			.detail("Num1", testKeyToDouble(mutation.param1))
+	// 			.detail("Param2", mutation.param2)
+	// 			.detail("Num2", testKeyToDouble(mutation.param2))
+	// 			.log();
+	// 	}
+	// }
 	// the list of param2 needs to have the first 64 bites as 0x0FDB00A200090001
 	BinaryWriter param2Writer(IncludeVersion(ProtocolVersion::withBackupMutations()));
 	param2Writer << totalBytes;
@@ -4969,13 +4969,13 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		TraceEvent("FlowGuruWriteOldFormat")
-			.detail("CommitVersion", commitVersion)
-			.detail("Part", part)
-			.detail("KeySize", backupKV.key.size())
-			.detail("ValueSize", backupKV.value.size())
-			.detail("TotalBytes", totalBytes)
-			.log();
+		// TraceEvent("FlowGuruWriteOldFormat")
+		// 	.detail("CommitVersion", commitVersion)
+		// 	.detail("Part", part)
+		// 	.detail("KeySize", backupKV.key.size())
+		// 	.detail("ValueSize", backupKV.value.size())
+		// 	.detail("TotalBytes", totalBytes)
+		// 	.log();
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 	}
 	return results;
@@ -5131,14 +5131,14 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// but i guess i still have to extract it out to a execute method of another taskfunc
 				loop {
 					try {
-						TraceEvent("FlowGuruLoopBegin")
-								.detail("Version", minVersion)
-								.detail("Index", mutationIndex)
-								.detail("Count", txnCount)
-								.detail("Total", totalMutation)
-								.detail("TxBytes", txBytes)
-								.detail("BytesLimit", txBytesLimit)
-								.log();
+						// TraceEvent("FlowGuruLoopBegin")
+						// 		.detail("Version", minVersion)
+						// 		.detail("Index", mutationIndex)
+						// 		.detail("Count", txnCount)
+						// 		.detail("Total", totalMutation)
+						// 		.detail("TxBytes", txBytes)
+						// 		.detail("BytesLimit", txBytesLimit)
+						// 		.log();
 						// fmt::print(stderr, "Commit:, mutationIndex={}, total={}\n", mutationIndex, totalMutation);
 						if (mutationIndex == totalMutation) {
 							break;
@@ -5157,24 +5157,24 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 							txBytes += k.expectedSize();
 							txBytes += v.expectedSize();
 							// succeed after retry, but this mutation is never saw from the other side! how?!
-							TraceEvent("FlowGuruCommitAddedTransaction")
-								.detail("Version", minVersion)
-								.detail("Index", mutationIndex + txnCount)
-								.detail("Key", k.toString())
-								.detail("Value", v.toString())
-								.log();
+							// TraceEvent("FlowGuruCommitAddedTransaction")
+							// 	.detail("Version", minVersion)
+							// 	.detail("Index", mutationIndex + txnCount)
+							// 	.detail("Key", k.toString())
+							// 	.detail("Value", v.toString())
+							// 	.log();
 							++txnCount;
 						}
 						wait(tr->commit());
 						mutationIndex += txnCount; // update mutationIndex after commit 
-						TraceEvent("FlowGuruCommitSucceed")
-							.detail("Version", minVersion)
-							.log();
+						// TraceEvent("FlowGuruCommitSucceed")
+						// 	.detail("Version", minVersion)
+						// 	.log();
 					} catch (Error& e) {
-						TraceEvent("FlowGuruCommitError")
-							.detail("Version", minVersion)
-							.detail("Error", e.code())
-							.log();
+						// TraceEvent("FlowGuruCommitError")
+						// 	.detail("Version", minVersion)
+						// 	.detail("Error", e.code())
+						// 	.log();
 						// fmt::print(stderr, "CommitError={}, mutationIndex={}, total={}\n", e.code(), mutationIndex, totalMutation);
 						if (e.code() == error_code_transaction_too_large) {
 							txBytesLimit /= 2;
@@ -5376,11 +5376,11 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				// the getRange might get out-of-bound range file because log files need them to work
 				if (f.version >= beginVersion && f.version < endVersion) {
 					ranges.push_back(f);
-					TraceEvent("FlowGuruRangeFile")
-							.detail("Begin", beginVersion)
-							.detail("End", endVersion)
-							.detail("File", f.fileName)
-							.log();
+					// TraceEvent("FlowGuruRangeFile")
+					// 		.detail("Begin", beginVersion)
+					// 		.detail("End", endVersion)
+					// 		.detail("File", f.fileName)
+					// 		.log();
 				}
 			} else {
 				logs.push_back(f);
