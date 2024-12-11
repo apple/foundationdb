@@ -1040,6 +1040,10 @@ ACTOR Future<Void> applyMutations(Database cx,
 			// ranges each represent a partition of version, e.g. [100, 200], [201, 300], [301, 400]
 			// (64, 200) -> [(64, 128), (128, 192), (192, 200)] assuming block size is 64
 			state Standalone<VectorRef<KeyRangeRef>> ranges = getApplyRanges(beginVersion, newEndVersion, uid);
+			TraceEvent("FlowGuruGetApplyChanges")
+				.detail("Begin", beginVersion)
+				.detail("End", newEndVersion)
+				.log();
 			// fmt::print(stderr, "BackupAgentBaseApplyMutationRangeSize={}\n", ranges.size());
 			//	ranges have format: applyLogKeys.begin/uid/hash(uint8)/version(64bites)/part
 			state size_t idx;

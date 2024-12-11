@@ -6251,11 +6251,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 
 		if (transformPartitionedLog) {
-			// fmt::print(stderr,
-			//            "StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
-			//            firstVersion,
-			//            0,
-			//            restoreVersion);
+			fmt::print(stderr,
+			           "FlowGuru StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
+			           firstVersion,
+			           0,
+			           restoreVersion);
 			Version endVersion = std::min(firstVersion + step, restoreVersion);
 			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, 0, endVersion)));
 		} else {
