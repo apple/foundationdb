@@ -788,15 +788,15 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			vm.version = version;
 			vm.subsequence = subsequence;
 			vm.mutation = mutation;
-			// TraceEvent("FlowGuruRestoreMutation")
-			// 	.detail("Version", version)
-			// 	.detail("Sub", subsequence)
-			// 	.detail("Mutation", mutation.toString())
-			// 	.detail("Param1", mutation.param1)
-			// 	.detail("Num1", testKeyToDouble(mutation.param1))
-			// 	.detail("Param2", mutation.param2)
-			// 	.detail("Num2", testKeyToDouble(mutation.param2))
-			// 	.log();
+			TraceEvent("FlowGuruRestoreMutation")
+				.detail("Version", version)
+				.detail("Sub", subsequence)
+				.detail("Mutation", mutation.toString())
+				.detail("Param1", mutation.param1)
+				.detail("Num1", testKeyToDouble(mutation.param1))
+				.detail("Param2", mutation.param2)
+				.detail("Num2", testKeyToDouble(mutation.param2))
+				.log();
 			mutations.push_back_deep(mutations.arena(), vm);
 			// Move the bufferOffset to include this mutation
 			self->bufferOffset += mutationTotalSize;
@@ -5007,10 +5007,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Reference<IBackupContainer> bc;
 		state std::vector<KeyRange> ranges; // this is the actual KV, not version
-		// TraceEvent("FlowGuruStartRestoreLogDataPartitionedTaskFunc")
-		// 			.detail("Begin", begin)
-		// 			.detail("End", end)
-		// 			.log();
+		TraceEvent("FlowGuruStartRestoreLogDataPartitionedTaskFunc")
+					.detail("Begin", begin)
+					.detail("End", end)
+					.log();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -5042,10 +5042,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				    .log();
 			} else {
 				filesByTag[f.tagId].push_back(f);
-				// TraceEvent("FlowguruAddFile")
-				// 	.detail("TagID", f.tagId)
-				// 	.detail("File", f.fileName)
-				// 	.log();
+				TraceEvent("FlowguruAddFile")
+					.detail("TagID", f.tagId)
+					.detail("File", f.fileName)
+					.log();
 			}
 		}
 

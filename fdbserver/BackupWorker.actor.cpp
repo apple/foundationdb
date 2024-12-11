@@ -710,6 +710,8 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	// fmt::print(stderr, "FlowGuruAddM2::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m2.toString(), m2.expectedSize(), m2.type, m2.param1, m2.param1.size(), m2.param2, m2.param2.size());
 	// fmt::print(stderr, "FlowGuruAddM2:: key={}, value={} \n", d1, d2);
 	TraceEvent("FlowGuruAddM2")
+		.detail("Version", message.version.version)
+		.detail("Sub", message.version.sub)
 		.detail("Str", m2.toString())
 		.detail("Len1", m2.param1.size())
 		.detail("Param1", m2.param1)
