@@ -788,14 +788,15 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			vm.version = version;
 			vm.subsequence = subsequence;
 			vm.mutation = mutation;
-			// TraceEvent("FlowGuruRestoreMutation")
-			// 	.detail("Sub", subsequence)
-			// 	.detail("Mutation", mutation.toString())
-			// 	.detail("Param1", mutation.param1)
-			// 	.detail("Num1", testKeyToDouble(mutation.param1))
-			// 	.detail("Param2", mutation.param2)
-			// 	.detail("Num2", testKeyToDouble(mutation.param2))
-			// 	.log();
+			TraceEvent("FlowGuruRestoreMutation")
+				.detail("Version", version)
+				.detail("Sub", subsequence)
+				.detail("Mutation", mutation.toString())
+				.detail("Param1", mutation.param1)
+				.detail("Num1", testKeyToDouble(mutation.param1))
+				.detail("Param2", mutation.param2)
+				.detail("Num2", testKeyToDouble(mutation.param2))
+				.log();
 			mutations.push_back_deep(mutations.arena(), vm);
 			// Move the bufferOffset to include this mutation
 			self->bufferOffset += mutationTotalSize;
@@ -5078,18 +5079,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// TODO: maybe embed filtering key into iterator,
 				// as a result, backup agent should not worry about key range filtering
 				atLeastOneIteratorHasNext = true;
-				// fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
 				Version v = wait(iterators[k]->peekNextVersion());
-				// TraceEvent("FlowguruIteration")
-				// 	.detail("K", k)
-				// 	.detail("Version", v)
-				// 	.detail("MinVersion", minVersion)
-				// 	.log();
-				// fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
 				if (v <= minVersion) {
-					// TraceEvent("FlowguruFoundNewMinVersion").detail("K", k)
-					// 	.detail("Version", v).detail("MinVersion", minVersion)
-					// 	.log();
 					minVersion = v;
 				}
 			}

@@ -374,16 +374,15 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			logValue.param1 = value.substr(offset, len1);
 			offset += len1;
 			logValue.param2 = value.substr(offset, len2);
-			// double p1 = testKeyToDouble(logValue.param1);
-			// double p2 = testKeyToDouble(logValue.param2);
-			// fmt::print(stderr, "GuruPrintParam: param1={}, param2={}\n", p1, p2);
-			// TraceEvent("FlowGuruParsingRequest")
-			// 			.detail("Mutation", logValue.toString())
-			// 			.detail("Param1", logValue.param1)
-			// 			.detail("Num1", p1)
-			// 			.detail("Param2", logValue.param2)
-			// 			.detail("Num2", p2)
-			// 			.log();
+			double p1 = testKeyToDouble(logValue.param1);
+			double p2 = testKeyToDouble(logValue.param2);
+			TraceEvent("FlowGuruParsingRequest")
+						.detail("Mutation", logValue.toString())
+						.detail("Param1", logValue.param1)
+						.detail("Num1", p1)
+						.detail("Param2", logValue.param2)
+						.detail("Num2", p2)
+						.log();
 			offset += len2;
 			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
 			ASSERT(!config.encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());
@@ -895,13 +894,13 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				for (i = 0; i < curReq.transaction.mutations.size(); i++) {
 					MutationRef mutation = curReq.transaction.mutations[i];
 					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
-					// TraceEvent("FlowGuruBeforeSendRequest")
-					// 	.detail("Mutation", mutation.toString())
-					// 	.detail("Param1", mutation.param1)
-					// 	.detail("Num1", testKeyToDouble(mutation.param1))
-					// 	.detail("Param2", mutation.param2)
-					// 	.detail("Num2", testKeyToDouble(mutation.param2))
-					// 	.log();
+					TraceEvent("FlowGuruBeforeSendRequest")
+						.detail("Mutation", mutation.toString())
+						.detail("Param1", mutation.param1)
+						.detail("Num1", testKeyToDouble(mutation.param1))
+						.detail("Param2", mutation.param2)
+						.detail("Num2", testKeyToDouble(mutation.param2))
+						.log();
 					req.transaction.encryptedMutations.push_back_deep(req.arena,
 					                                                  curReq.transaction.encryptedMutations[i]);
 				}
