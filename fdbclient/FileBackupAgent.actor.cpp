@@ -5066,7 +5066,6 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		// TODO: set this to false
 		// now it stuck here
 		while (atLeastOneIteratorHasNext) {
-			fmt::print(stderr, "FlowguruLoopStart totalItereators={}\n", atLeastOneIteratorHasNext, totalItereators);
 			atLeastOneIteratorHasNext = false;
 			minVersion = std::numeric_limits<int64_t>::max();
 			k = 0;
@@ -5351,25 +5350,27 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// and we miss 311782629
 		state Optional<RestoreConfig::RestoreFile> beginFileInclude = wait(restore.fileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({ beginVersion, "" })));
 		state Optional<RestoreConfig::RestoreFile> endFileExclude = wait(restore.fileSet().seekGreaterThan(tr, RestoreConfig::RestoreFile({ endVersion, "" })));
-		// TraceEvent("FlowGuruGetAllFiles")
-		// 			.detail("Begin", beginVersion)
-		// 			.detail("End", endVersion)
-		// 			.detail("EndFilePresent", endFileExclude.present())
-		// 			.log();
-		// if (beginFileInclude.present()) {
-		// 	TraceEvent("FlowGuruBeginFile")
-		// 			.detail("Begin", beginVersion)
-		// 			.detail("End", endVersion)
-		// 			.detail("EndFile", beginFileInclude.get().fileName)
-		// 			.log();
-		// }
-		// if (endFileExclude.present()) {
-		// 	TraceEvent("FlowGuruEndFile")
-		// 			.detail("Begin", beginVersion)
-		// 			.detail("End", endVersion)
-		// 			.detail("EndFile", endFileExclude.get().fileName)
-		// 			.log();
-		// }
+		TraceEvent("FlowGuruGetAllFiles")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("BeginFilePresent", beginFileInclude.present())
+					.detail("EndFilePresent", endFileExclude.present())
+					.log();
+		if (beginFileInclude.present()) {
+			TraceEvent("FlowGuruBeginFile")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("EndFile", beginFileInclude.get().fileName)
+					.log();
+		}
+		if (endFileExclude.present()) {
+			TraceEvent("FlowGuruEndFile")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("EndFile", endFileExclude.get().fileName)
+					.log();
+		}
+		// because 
 		state RestoreConfig::FileSetT::RangeResultType files =
 		    wait(restore.fileSet().getRange(tr,
 		                                    beginFileInclude,
