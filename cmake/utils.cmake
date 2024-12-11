@@ -90,6 +90,7 @@ function(generate_grpc_protobuf pkg_name)
   target_link_libraries(${target_name} PUBLIC gRPC::grpc++)
 
   set(protoc_out_dir "${CMAKE_BINARY_DIR}/generated/${out_rel_path}/")
+  message(STATUS "Generating protobuf target = ${target_name}, out_path = ${protoc_out_dir}")
   protobuf_generate(
       TARGET ${target_name}
       PROTOC_OUT_DIR ${protoc_out_dir}
