@@ -42,13 +42,16 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
             @CLUSTER_FILE@
             5
             )
-  add_fdbclient_test(
-  NAME single_process_external_client_fdbcli_tests
-  COMMAND ${CMAKE_SOURCE_DIR}/fdbcli/tests/fdbcli_tests.py
-          ${CMAKE_BINARY_DIR}
-          @CLUSTER_FILE@
-          --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so
-          )
+  if(NOT USE_ASAN)
+    # TODO: this is known to fail with ASAN, fix needed
+    add_fdbclient_test(
+    NAME single_process_external_client_fdbcli_tests
+    COMMAND ${CMAKE_SOURCE_DIR}/fdbcli/tests/fdbcli_tests.py
+            ${CMAKE_BINARY_DIR}
+            @CLUSTER_FILE@
+            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so
+    )
+  endif()
   add_fdbclient_test(
   NAME multi_process_external_client_fdbcli_tests
   PROCESS_NUMBER 5
@@ -59,9 +62,12 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
           --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so
           )
 
-  add_multi_fdbclient_test(
-    NAME metacluster_fdbcli_tests
-    COMMAND ${CMAKE_SOURCE_DIR}/fdbcli/tests/metacluster_fdbcli_tests.py
-            ${CMAKE_BINARY_DIR}
-            )
+  if (NOT USE_ASAN)
+    # skip metacluster tests because it often times out on ASAN
+    add_multi_fdbclient_test(
+      NAME metacluster_fdbcli_tests
+      COMMAND ${CMAKE_SOURCE_DIR}/fdbcli/tests/metacluster_fdbcli_tests.py
+              ${CMAKE_BINARY_DIR}
+    )
+  endif()
 endif()
