@@ -128,12 +128,12 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
 
 	Standalone<KeyValueRef> operator()(int n) { 
-		TraceEvent("AddKey")
-			.detail("Key", printable(key(n)))
-			.detail("RawKey", testKeyToDouble(key(n), keyPrefix))
-			.detail("Value", value((n + 1) % nodeCount))
-			.detail("RawValue", testKeyToDouble(value((n + 1) % nodeCount), keyPrefix))
-			.log();
+		// TraceEvent("FlowGuruAddKey")
+		// 	.detail("Key", printable(key(n)))
+		// 	.detail("RawKey", testKeyToDouble(key(n), keyPrefix))
+		// 	.detail("Value", value((n + 1) % nodeCount))
+		// 	.detail("RawValue", testKeyToDouble(value((n + 1) % nodeCount), keyPrefix))
+		// 	.log();
 		return KeyValueRef(key(n), value((n + 1) % nodeCount)); 
 	}
 
@@ -321,11 +321,11 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				try {
 					self->setAuthToken(tr);
 					state Version v = wait(tr.getReadVersion());
-					TraceEvent("FlowguruCycleCheck")
-						.detail("NodeCount", self->nodeCount)
-						.detail("Prefix", self->keyPrefix)
-						.detail("Key", printable(doubleToTestKey(0.0, self->keyPrefix)))
-						.log();
+					// TraceEvent("FlowguruCycleCheck")
+					// 	.detail("NodeCount", self->nodeCount)
+					// 	.detail("Prefix", self->keyPrefix)
+					// 	.detail("Key", printable(doubleToTestKey(0.0, self->keyPrefix)))
+					// 	.log();
 					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
 					                                    firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
 					                                    self->nodeCount + 1));

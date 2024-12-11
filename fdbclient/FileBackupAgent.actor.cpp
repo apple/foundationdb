@@ -4968,13 +4968,13 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		TraceEvent("FlowGuruWriteOldFormat")
-			.detail("CommitVersion", commitVersion)
-			.detail("Part", part)
-			.detail("KeySize", backupKV.key.size())
-			.detail("ValueSize", backupKV.value.size())
-			.detail("TotalBytes", totalBytes)
-			.log();
+		// TraceEvent("FlowGuruWriteOldFormat")
+		// 	.detail("CommitVersion", commitVersion)
+		// 	.detail("Part", part)
+		// 	.detail("KeySize", backupKV.key.size())
+		// 	.detail("ValueSize", backupKV.value.size())
+		// 	.detail("TotalBytes", totalBytes)
+		// 	.log();
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 	}
 	return results;
@@ -5006,10 +5006,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Reference<IBackupContainer> bc;
 		state std::vector<KeyRange> ranges; // this is the actual KV, not version
-		TraceEvent("FlowGuruStartRestoreLogDataPartitionedTaskFunc")
-					.detail("Begin", begin)
-					.detail("End", end)
-					.log();
+		// TraceEvent("FlowGuruStartRestoreLogDataPartitionedTaskFunc")
+		// 			.detail("Begin", begin)
+		// 			.detail("End", end)
+		// 			.log();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -5080,11 +5080,11 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				atLeastOneIteratorHasNext = true;
 				// fmt::print(stderr, "FlowguruLoop1 k={}\n", k);
 				Version v = wait(iterators[k]->peekNextVersion());
-				TraceEvent("FlowguruIteration")
-					.detail("K", k)
-					.detail("Version", v)
-					.detail("MinVersion", minVersion)
-					.log();
+				// TraceEvent("FlowguruIteration")
+				// 	.detail("K", k)
+				// 	.detail("Version", v)
+				// 	.detail("MinVersion", minVersion)
+				// 	.log();
 				// fmt::print(stderr, "FlowguruLoop2 k={}, v={}, minVersion={}\n", k, v, minVersion);
 				if (v <= minVersion) {
 					// TraceEvent("FlowguruFoundNewMinVersion").detail("K", k)
@@ -5349,30 +5349,29 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// in reality, tag1 has [294336829,311764939] [311764939,324171019], 
 		// and we miss 311782629
 		state Optional<RestoreConfig::RestoreFile> beginFileInclude = wait(restore.fileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({ beginVersion, "" })));
-		// i can use greaterThanOrEqual(end + 1) instead of greaterThan(end)
+		// greaterThanOrEqual(end + 1) instead of greaterThan(end)
 		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result in a end+1
 		state Optional<RestoreConfig::RestoreFile> endFileExclude = wait(restore.fileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({ endVersion + 1, "" })));
-		TraceEvent("FlowGuruGetAllFiles")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("BeginFilePresent", beginFileInclude.present())
-					.detail("EndFilePresent", endFileExclude.present())
-					.log();
-		if (beginFileInclude.present()) {
-			TraceEvent("FlowGuruBeginFile")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("EndFile", beginFileInclude.get().fileName)
-					.log();
-		}
-		if (endFileExclude.present()) {
-			TraceEvent("FlowGuruEndFile")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("EndFile", endFileExclude.get().fileName)
-					.log();
-		}
-		// because 
+		// TraceEvent("FlowGuruGetAllFiles")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("BeginFilePresent", beginFileInclude.present())
+		// 			.detail("EndFilePresent", endFileExclude.present())
+		// 			.log();
+		// if (beginFileInclude.present()) {
+		// 	TraceEvent("FlowGuruBeginFile")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("EndFile", beginFileInclude.get().fileName)
+		// 			.log();
+		// }
+		// if (endFileExclude.present()) {
+		// 	TraceEvent("FlowGuruEndFile")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("EndFile", endFileExclude.get().fileName)
+		// 			.log();
+		// }
 		state RestoreConfig::FileSetT::RangeResultType files =
 		    wait(restore.fileSet().getRange(tr,
 		                                    beginFileInclude,
@@ -6135,7 +6134,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state std::vector<RestoreConfig::RestoreFile> files;
 		if (!logsOnly) {
 			beginVersion = restorable.get().snapshot.beginVersion;
-			fmt::print(stderr, "FullRestoreTask, set beginVersion={}\n", beginVersion);
+			// fmt::print(stderr, "FullRestoreTask, set beginVersion={}\n", beginVersion);
 
 			if (!inconsistentSnapshotOnly) {
 				for (const RangeFile& f : restorable.get().ranges) {
@@ -6170,7 +6169,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 		// First version for which log data should be applied
-		fmt::print(stderr, "FullRestoreTask:: beginVersion={}\n", beginVersion);
+		// fmt::print(stderr, "FullRestoreTask:: beginVersion={}\n", beginVersion);
 		Params.firstVersion().set(task, beginVersion);
 
 		tr->reset();
@@ -6261,11 +6260,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 
 		if (transformPartitionedLog) {
-			fmt::print(stderr,
-			           "StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
-			           firstVersion,
-			           0,
-			           restoreVersion);
+			// fmt::print(stderr,
+			//            "StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
+			//            firstVersion,
+			//            0,
+			//            restoreVersion);
 			Version endVersion = std::min(firstVersion + step, restoreVersion);
 			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, 0, endVersion)));
 		} else {
