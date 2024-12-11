@@ -668,17 +668,13 @@ ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 	if (pFiles == nullptr)
 		return Void();
 
-	if (!b->credentials.present()) {
-		return Void();
-	}
-
 	state std::vector<Future<Optional<json_spirit::mObject>>> reads;
 	for (auto& f : *pFiles)
 		reads.push_back(tryReadJSONFile(f));
 
 	wait(waitForAll(reads));
 
-	std::string accessKey = b->lookupKey ? "" : b->credentials.get().key;
+	std::string accessKey = b->lookupKey || !b->credentials.present() ? "" : b->credentials.get().key;
 	std::string credentialsFileKey = accessKey + "@" + b->host;
 
 	int invalid = 0;
@@ -695,21 +691,14 @@ ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 			JSONDoc accounts(doc.last().get_obj());
 			if (accounts.has(credentialsFileKey, false) && accounts.last().type() == json_spirit::obj_type) {
 				JSONDoc account(accounts.last());
-				S3BlobStoreEndpoint::Credentials creds = b->credentials.get();
-				if (b->lookupKey) {
-					std::string apiKey;
-					if (account.tryGet("api_key", apiKey))
-						creds.key = apiKey;
-					else
-						continue;
-				}
-				if (b->lookupSecret) {
-					std::string secret;
-					if (account.tryGet("secret", secret))
-						creds.secret = secret;
-					else
-						continue;
-				}
+				S3BlobStoreEndpoint::Credentials creds = b->credentials.present() ?
+					b->credentials.get(): S3BlobStoreEndpoint::Credentials();
+				std::string apiKey;
+				if (account.tryGet("api_key", apiKey))
+					creds.key = apiKey;
+				std::string secret;
+				if (account.tryGet("secret", secret))
+					creds.secret = secret;
 				std::string token;
 				if (account.tryGet("token", token))
 					creds.securityToken = token;
@@ -791,9 +780,7 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	    .detail("ExpiresIn", b->knobs.max_connection_life)
 	    .detail("Proxy", b->proxyHost.orDefault(""));
 
-	if (b->lookupKey || b->lookupSecret || b->knobs.sdk_auth)
-		wait(b->updateSecret());
-
+	wait(b->updateSecret());
 	return S3BlobStoreEndpoint::ReusableConnection({ conn, now() + b->knobs.max_connection_life });
 }
 

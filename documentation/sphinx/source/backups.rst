@@ -77,7 +77,7 @@ For local directories, the Backup URL format is
 An example would be ``file:///home/backups`` which would refer to the directory ``/home/backups``.
 Note that since paths must be absolute this will result in three slashes (/) in a row in the URL.
 
-Note that for local directory URLs the actual backup files will not be written to <base_dir> directly but rather to a uniquely timestamped subdirectory.  When starting a restore the path to the timestamped subdirectory must be specified.
+For local directory URLs the actual backup files will not be written to <base_dir> directly but rather to a uniquely timestamped subdirectory.  When starting a restore the path to the timestamped subdirectory must be specified.
 
 For blob store backup locations, the Backup URL format is
 
@@ -85,9 +85,9 @@ For blob store backup locations, the Backup URL format is
 
     blobstore://[<api_key>][:<secret>[:<security_token>]]@<hostname>[:<port>]/<name>?bucket=<bucket_name>[&region=<region_name>][&<param>=<value>]...]
 
-      <api_key> - API key to use for authentication. Optional.
-      <secret> - API key's secret.  Optional.
-      <security_token> - Security token if temporary credentials are used. Optional.
+      <api_key> - API key to use for authentication. If S3, it is AWS_ACCESS_KEY_ID. Optional.
+      <secret> - API key's secret.  If S3, it is AWS_SECRET_ACCESS_KEY. Optional.
+      <security_token> - Security token if temporary credentials are used. If S3, it is AWS_SESSION_TOKEN. Optional.
       <hostname> - Remote hostname or IP address to connect to
       <port> - Remote port to connect to.  Optional.  Default is 80.
       <name> - Name of the backup within the backup bucket.  It can contain '/' characters in order to organize backups into a folder-like structure.
@@ -101,6 +101,7 @@ A single bucket (specified by <bucket_name>) can hold any number of backups, eac
 If <secret> is not specified, it will be looked up in :ref:`blob credential sources<blob-credential-files>`.
 
 An example blob store Backup URL would be ``blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400?bucket=backups``.
+Another for an S3 blobstore would look like: ``blobstore://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}:${AWS_SESSION_TOKEN}@backup-12345-us-west-2.s3.amazonaws.com/dailies?bucket=backup-12345-us-west-2&region=us-west-2``
 
 Blob store Backup URLs can have optional parameters at the end which set various limits or options used when communicating with the store.  All values must be positive decimal integers unless otherwise specified.  The speed related default values are not very restrictive. A parameter is applied individually on each ``backup_agent``, meaning that a global restriction should be calculated based on the number of agent running. The most likely parameter a user would want to change is ``max_send_bytes_per_second`` (or ``sbps`` for short) which determines the upload speed to the blob service. 
 
@@ -199,8 +200,22 @@ If temporary credentials are being used, the following schema is also supported
 
   {
     "accounts" : {
-      "@host" :     { "api_key" : user, "secret" : "SECRETKEY", token: "TOKEN1" },
-      "@host2" :    { "api_key" : user2, "secret" : "SECRETKEY2", token: "TOKEN2" }
+      "@host" :     { "api_key" : user, "secret" : "SECRETKEY", "token": "TOKEN1" },
+      "@host2" :    { "api_key" : user2, "secret" : "SECRETKEY2", "token": "TOKEN2" }
+    }
+  }
+
+For example:
+
+::
+
+  {
+    "accounts": {
+      "@backup-12345-us-west-2.s3.amazonaws.com": {
+        "api_key": "AWS_ACCESS_KEY_ID",
+        "secret": "AWS_SECRET_ACCESS_KEY",
+        "token": "AWS_SESSION_TOKEN"
+      }
     }
   }
 
