@@ -5080,10 +5080,19 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// as a result, backup agent should not worry about key range filtering
 				atLeastOneIteratorHasNext = true;
 				Version v = wait(iterators[k]->peekNextVersion());
+				TraceEvent("FlowguruCheckEachVersion")
+					.detail("K", k)
+					.detail("Version", v)
+					.log();
+
 				if (v <= minVersion) {
 					minVersion = v;
 				}
 			}
+			TraceEvent("FlowGuruCheckMinVersion")
+				.detail("AtLeastOneIteratorHasNext", atLeastOneIteratorHasNext)
+				.detail("MinVersion", minVersion)
+				.log();
 
 			// fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
 			if (atLeastOneIteratorHasNext) {
