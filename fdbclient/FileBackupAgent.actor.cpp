@@ -5373,12 +5373,15 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state std::vector<RestoreConfig::RestoreFile> ranges;
 		for (auto f : files.results) {
 			if (f.isRange) {
-				ranges.push_back(f);
-				TraceEvent("FlowGuruRangeFile")
-						.detail("Begin", beginVersion)
-						.detail("End", endVersion)
-						.detail("File", f.fileName)
-						.log();
+				// the getRange might get out-of-bound range file because log files need them to work
+				if (f.version >= beginVersion && f.version < endVersion) {
+					ranges.push_back(f);
+					TraceEvent("FlowGuruRangeFile")
+							.detail("Begin", beginVersion)
+							.detail("End", endVersion)
+							.detail("File", f.fileName)
+							.log();
+				}
 			} else {
 				logs.push_back(f);
 				maxTagID = std::max(maxTagID, f.tagId);
@@ -6256,11 +6259,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 
 		if (transformPartitionedLog) {
-			fmt::print(stderr,
-			           "FlowGuru StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
-			           firstVersion,
-			           0,
-			           restoreVersion);
+			// fmt::print(stderr,
+			//            "FlowGuru StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
+			//            firstVersion,
+			//            0,
+			//            restoreVersion);
 			Version endVersion = std::min(firstVersion + step, restoreVersion);
 			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, 0, endVersion)));
 		} else {
