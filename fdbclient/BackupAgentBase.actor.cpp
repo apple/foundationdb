@@ -838,13 +838,13 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				for (int i = 0; i < group.items.size(); ++i) {
 					// hfu5 : each value should be a partition
 					bw.serializeBytes(group.items[i].value);
-					// TraceEvent("FlowGuruCheckOldFormat")
-					// 	.detail("GroupKey", group.groupKey)
-					// 	.detail("Version", group.version)
-					// 	.detail("Index", i)
-					// 	.detail("KeySize", group.items[i].key.size())
-					// 	.detail("ValueSize", group.items[i].value.size())
-					// 	.log();
+					TraceEvent("FlowGuruCheckOldFormat")
+						.detail("GroupKey", group.groupKey)
+						.detail("Version", group.version)
+						.detail("Index", i)
+						.detail("KeySize", group.items[i].key.size())
+						.detail("ValueSize", group.items[i].value.size())
+						.log();
 				}
 				// Parse a single transaction from the backup mutation log
 				Standalone<StringRef> value = bw.toValue();
@@ -895,6 +895,8 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 					MutationRef mutation = curReq.transaction.mutations[i];
 					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
 					TraceEvent("FlowGuruBeforeSendRequest")
+						.detail("GroupKey", group.groupKey)
+						.detail("Version", group.version)
 						.detail("Mutation", mutation.toString())
 						.detail("Param1", mutation.param1)
 						.detail("Num1", testKeyToDouble(mutation.param1))
