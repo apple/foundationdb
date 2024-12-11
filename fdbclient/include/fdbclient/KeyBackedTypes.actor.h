@@ -968,9 +968,15 @@ public:
 			end = self.subspace.end;
 		}
 
+		TraceEvent("FlowGuruSeek")
+			.detail("LessThan", lessThan)
+			.detail("OrEqual", orEqual)
+			.detail("OldBegin", self.packKey(query))
+			.detail("NewBegin", begin)
+			.log();
 		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(begin, end), 1, snapshot, Reverse{ lessThan });
-
+	
 		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
 		if (kvs.empty()) {
 			return Optional<ValueType>();

@@ -5349,7 +5349,9 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// in reality, tag1 has [294336829,311764939] [311764939,324171019], 
 		// and we miss 311782629
 		state Optional<RestoreConfig::RestoreFile> beginFileInclude = wait(restore.fileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({ beginVersion, "" })));
-		state Optional<RestoreConfig::RestoreFile> endFileExclude = wait(restore.fileSet().seekGreaterThan(tr, RestoreConfig::RestoreFile({ endVersion, "" })));
+		// i can use greaterThanOrEqual(end + 1) instead of greaterThan(end)
+		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result in a end+1
+		state Optional<RestoreConfig::RestoreFile> endFileExclude = wait(restore.fileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({ endVersion + 1, "" })));
 		TraceEvent("FlowGuruGetAllFiles")
 					.detail("Begin", beginVersion)
 					.detail("End", endVersion)
