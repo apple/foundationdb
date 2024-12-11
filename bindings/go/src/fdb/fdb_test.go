@@ -389,3 +389,20 @@ func ExampleOpenWithConnectionString() {
 
 	// Output:
 }
+
+func TestGetClientStatus(t *testing.T) {
+	fdb.MustAPIVersion(API_VERSION)
+	err := fdb.Options().SetDisableClientBypass()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := fdb.MustOpenDefault()
+
+	st, e := db.GetClientStatus()
+	if e != nil {
+		t.Fatalf("GetClientStatus failed %v", e)
+	}
+	if len(st) == 0 {
+		t.Fatal("returned status is empty")
+	}
+}
