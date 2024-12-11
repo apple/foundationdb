@@ -8,5 +8,8 @@ if(NOT WIN32)
   endif()
 endif()
 
+if(FLOW_GRPC_ENABLED)
+  generate_grpc_protobuf(fdbrpc.test echo.proto)
+endif()
 add_flow_target(EXECUTABLE NAME fdbrpc_bench SRCS fdbrpc_bench.actor.cpp)
 target_link_libraries(fdbrpc_bench PUBLIC flow fdbrpc boost_target_program_options)
