@@ -4904,23 +4904,23 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		++i;
 	}
 
-	// for (auto& mutationsForSub : tmpMap) {
-	// 	TraceEvent("FlowGuruPrintNewSubVersion")
-	// 		.detail("CommitVersion", commitVersion)
-	// 		.detail("Sub", mutationsForSub.first)
-	// 		.log();
-	// 	for (auto& mutation : mutationsForSub.second) {
-	// 		TraceEvent("FlowGuruPrintBySubVersion")
-	// 			.detail("CommitVersion", commitVersion)
-	// 			.detail("Sub", mutationsForSub.first)
-	// 			.detail("Mutation", mutation.toString())
-	// 			.detail("Param1", mutation.param1)
-	// 			.detail("Num1", testKeyToDouble(mutation.param1))
-	// 			.detail("Param2", mutation.param2)
-	// 			.detail("Num2", testKeyToDouble(mutation.param2))
-	// 			.log();
-	// 	}
-	// }
+	for (auto& mutationsForSub : tmpMap) {
+		TraceEvent("FlowGuruPrintNewSubVersion")
+			.detail("CommitVersion", commitVersion)
+			.detail("Sub", mutationsForSub.first)
+			.log();
+		for (auto& mutation : mutationsForSub.second) {
+			TraceEvent("FlowGuruPrintBySubVersion")
+				.detail("CommitVersion", commitVersion)
+				.detail("Sub", mutationsForSub.first)
+				.detail("Mutation", mutation.toString())
+				.detail("Param1", mutation.param1)
+				.detail("Num1", testKeyToDouble(mutation.param1))
+				.detail("Param2", mutation.param2)
+				.detail("Num2", testKeyToDouble(mutation.param2))
+				.log();
+		}
+	}
 	// the list of param2 needs to have the first 64 bites as 0x0FDB00A200090001
 	BinaryWriter param2Writer(IncludeVersion(ProtocolVersion::withBackupMutations()));
 	param2Writer << totalBytes;
@@ -4969,13 +4969,13 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		// TraceEvent("FlowGuruWriteOldFormat")
-		// 	.detail("CommitVersion", commitVersion)
-		// 	.detail("Part", part)
-		// 	.detail("KeySize", backupKV.key.size())
-		// 	.detail("ValueSize", backupKV.value.size())
-		// 	.detail("TotalBytes", totalBytes)
-		// 	.log();
+		TraceEvent("FlowGuruWriteOldFormat")
+			.detail("CommitVersion", commitVersion)
+			.detail("Part", part)
+			.detail("KeySize", backupKV.key.size())
+			.detail("ValueSize", backupKV.value.size())
+			.detail("TotalBytes", totalBytes)
+			.log();
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 	}
 	return results;
@@ -6259,11 +6259,11 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 
 		if (transformPartitionedLog) {
-			// fmt::print(stderr,
-			//            "FlowGuru StartInitial task, firstVersion={}, begin={}, endVersion={}\n",
-			//            firstVersion,
-			//            0,
-			//            restoreVersion);
+			fmt::print(stderr,
+			           "FlowGuru Start Initial task, firstVersion={}, begin={}, endVersion={}\n",
+			           firstVersion,
+			           0,
+			           restoreVersion);
 			Version endVersion = std::min(firstVersion + step, restoreVersion);
 			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, 0, endVersion)));
 		} else {

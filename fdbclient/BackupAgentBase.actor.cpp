@@ -839,13 +839,13 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				for (int i = 0; i < group.items.size(); ++i) {
 					// hfu5 : each value should be a partition
 					bw.serializeBytes(group.items[i].value);
-					// TraceEvent("FlowGuruCheckOldFormat")
-					// 	.detail("GroupKey", group.groupKey)
-					// 	.detail("Version", group.version)
-					// 	.detail("Index", i)
-					// 	.detail("KeySize", group.items[i].key.size())
-					// 	.detail("ValueSize", group.items[i].value.size())
-					// 	.log();
+					TraceEvent("FlowGuruCheckOldFormat")
+						.detail("GroupKey", group.groupKey)
+						.detail("Version", group.version)
+						.detail("Index", i)
+						.detail("KeySize", group.items[i].key.size())
+						.detail("ValueSize", group.items[i].value.size())
+						.log();
 				}
 				// Parse a single transaction from the backup mutation log
 				Standalone<StringRef> value = bw.toValue();

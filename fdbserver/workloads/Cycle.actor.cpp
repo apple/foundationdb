@@ -195,9 +195,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						tr.set(self->key(r), self->value(r3));
 						tr.set(self->key(r2), self->value(r4));
 						tr.set(self->key(r3), self->value(r2));
-						// TraceEvent("CyclicTest1").detail("RawKey", r).detail("RawValue", r3).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
-						// TraceEvent("CyclicTest2").detail("RawKey", r2).detail("RawValue", r4).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
-						// TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
+						TraceEvent("CyclicTest1").detail("RawKey", r).detail("RawValue", r3).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
+						TraceEvent("CyclicTest2").detail("RawKey", r2).detail("RawValue", r4).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
+						TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait(tr.commit());
 						// TraceEvent("CyclicTestCommit");
@@ -270,7 +270,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			}
 			d = testKeyToDouble(data[i].value, keyPrefix);
 			// flowguru: print each kv here, and compare it with restore
-			// TraceEvent("FlowguruCheckCycle").detail("Cur", i).detail("Next", d).log();
+			TraceEvent("FlowguruCheckCycle").detail("Cur", i).detail("Next", d).log();
 			iPrev = i;
 			i = (int)d;
 			if (i != d || i < 0 || i >= nodeCount) {
