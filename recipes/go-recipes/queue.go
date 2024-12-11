@@ -55,7 +55,7 @@ func (q *Queue) NewQueue(ss subspace.Subspace) {
 }
 
 func (q *Queue) Dequeue(trtr fdb.Transactor) (interface{}, error) {
-	i, e := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	i, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		item, err := q.FirstItem(tr)
 		if err != nil {
 			return nil, err
@@ -63,11 +63,11 @@ func (q *Queue) Dequeue(trtr fdb.Transactor) (interface{}, error) {
 		tr.Clear(item.(fdb.KeyValue).Key)
 		return item.(fdb.KeyValue).Value, err
 	})
-	return i, e
+	return i, err
 }
 
 func (q *Queue) Enqueue(trtr fdb.Transactor, item interface{}) (interface{}, error) {
-	i, e := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	i, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		index, err := q.LastIndex(tr)
 		if err != nil {
 			return nil, err
@@ -82,7 +82,7 @@ func (q *Queue) Enqueue(trtr fdb.Transactor, item interface{}) (interface{}, err
 
 		return nil, nil
 	})
-	return i, e
+	return i, err
 }
 
 func (q *Queue) LastIndex(trtr fdb.Transactor) (interface{}, error) {
@@ -129,9 +129,9 @@ func main() {
 	q.Enqueue(db, "test2")
 	q.Enqueue(db, "test3")
 	for i := 0; i < 5; i++ {
-		item, e := q.Dequeue(db)
-		if e != nil {
-			log.Fatal(e)
+		item, err := q.Dequeue(db)
+		if err != nil {
+			log.Fatal(err)
 		}
 
 		fmt.Println(string(item.([]byte)))

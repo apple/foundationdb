@@ -433,7 +433,6 @@ func (p *packer) encodeTuple(t Tuple, nested bool, versionstamps bool) {
 //
 // This method will panic if it contains an incomplete Versionstamp. Use
 // PackWithVersionstamp instead.
-//
 func (t Tuple) Pack() []byte {
 	p := newPacker()
 	p.encodeTuple(t, false, false)

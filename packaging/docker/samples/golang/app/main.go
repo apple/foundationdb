@@ -8,14 +8,13 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 package main
 
 import (
@@ -50,7 +49,7 @@ func main() {
 }
 
 func incrementCounter(w http.ResponseWriter, r *http.Request) {
-	ret, e := db.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	ret, err := db.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		value := tr.Get(fdb.Key("my-counter")).MustGet()
 		if len(value) == 0 {
 			value = intToBytes(0)
@@ -61,8 +60,8 @@ func incrementCounter(w http.ResponseWriter, r *http.Request) {
 		return intToBytes(counter), nil
 	})
 
-	if e != nil {
-		log.Fatalf("Unable to perform FDB transaction (%v)", e)
+	if err != nil {
+		log.Fatalf("Unable to perform FDB transaction (%v)", err)
 	}
 
 	fmt.Fprintf(w, "Counter is %d", bytesToInt(ret.([]byte)))

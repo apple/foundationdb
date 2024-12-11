@@ -96,14 +96,14 @@ func (tbl Table) TableSetRow(trtr fdb.Transactor, row int, cols ...interface{}) 
 
 func (tbl Table) TableGetRow(tr fdb.ReadTransactor, row int) ([]interface{}, error) {
 	item, err := tr.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
-		kr, e := fdb.PrefixRange(tbl.row.Pack(tuple.Tuple{row}))
-		if e != nil {
-			return nil, e
+		kr, err := fdb.PrefixRange(tbl.row.Pack(tuple.Tuple{row}))
+		if err != nil {
+			return nil, err
 		}
 
-		slice, e := rtr.GetRange(kr, fdb.RangeOptions{0, -1, false}).GetSliceWithError()
-		if e != nil {
-			return nil, e
+		slice, err := rtr.GetRange(kr, fdb.RangeOptions{0, -1, false}).GetSliceWithError()
+		if err != nil {
+			return nil, err
 		}
 
 		ret := make([]interface{}, len(slice))
@@ -122,14 +122,14 @@ func (tbl Table) TableGetRow(tr fdb.ReadTransactor, row int) ([]interface{}, err
 
 func (tbl Table) TableGetCol(tr fdb.ReadTransactor, col int) ([]interface{}, error) {
 	item, err := tr.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
-		kr, e := fdb.PrefixRange(tbl.col.Pack(tuple.Tuple{col}))
-		if e != nil {
-			return nil, e
+		kr, err := fdb.PrefixRange(tbl.col.Pack(tuple.Tuple{col}))
+		if err != nil {
+			return nil, err
 		}
 
-		slice, e := rtr.GetRange(kr, fdb.RangeOptions{0, -1, false}).GetSliceWithError()
-		if e != nil {
-			return nil, e
+		slice, err := rtr.GetRange(kr, fdb.RangeOptions{0, -1, false}).GetSliceWithError()
+		if err != nil {
+			return nil, err
 		}
 
 		ret := make([]interface{}, len(slice))
