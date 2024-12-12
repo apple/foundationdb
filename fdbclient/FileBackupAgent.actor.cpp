@@ -607,7 +607,7 @@ std::shared_ptr<char[]> TwoBuffers::peek() {
 }
 
 void TwoBuffers::discardAndSwap() {
-	// invalid cur and change cur to next
+	// invalidate cur and change cur to next
 	buffers[cur]->fetchingData.reset();
 	cur = 1 - cur;
 }
@@ -632,18 +632,18 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	state size_t fileSize = self->files[self->currentFileIndex].fileSize;
 	size_t remaining = fileSize - self->currentFilePosition;
 	state size_t bytesToRead = std::min(self->bufferCapacity, remaining);
-	// fmt::print(stderr,
-	//            "readNextBlock::beforeActualRead, name={}, position={}, size={}, bytesToRead={}\n",
-	//            self->files[self->currentFileIndex].fileName,
-	// 		   self->currentFilePosition,
-	//            fileSize,
-	//            bytesToRead);
+	fmt::print(stderr,
+	           "readNextBlock::beforeActualRead, name={}, position={}, size={}, bytesToRead={}\n",
+	           self->files[self->currentFileIndex].fileName,
+			   self->currentFilePosition,
+	           fileSize,
+	           bytesToRead);
 	state int bytesRead =
 	    wait(asyncFile->read(static_cast<void*>(self->buffers[index]->data.get()), bytesToRead, self->currentFilePosition));
-	// fmt::print(stderr,
-	//            "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
-	//            self->files[self->currentFileIndex].fileName,
-	//            bytesRead);
+	fmt::print(stderr,
+	           "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
+	           self->files[self->currentFileIndex].fileName,
+	           bytesRead);
 	// fmt::print(stderr,
 	//            "readNextBlock::Index={}", self->currentFileIndex);
 	if (bytesRead != bytesToRead)
