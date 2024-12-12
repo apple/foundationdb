@@ -5377,26 +5377,26 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// greaterThanOrEqual(end + 1) instead of greaterThan(end)
 		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result in a end+1
 		state Optional<RestoreConfig::RestoreFile> endFileExclude = wait(restore.fileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({ endVersion + 1, "" })));
-		// TraceEvent("FlowGuruGetAllFiles")
-		// 			.detail("Begin", beginVersion)
-		// 			.detail("End", endVersion)
-		// 			.detail("BeginFilePresent", beginFileInclude.present())
-		// 			.detail("EndFilePresent", endFileExclude.present())
-		// 			.log();
-		// if (beginFileInclude.present()) {
-		// 	TraceEvent("FlowGuruBeginFile")
-		// 			.detail("Begin", beginVersion)
-		// 			.detail("End", endVersion)
-		// 			.detail("EndFile", beginFileInclude.get().fileName)
-		// 			.log();
-		// }
-		// if (endFileExclude.present()) {
-		// 	TraceEvent("FlowGuruEndFile")
-		// 			.detail("Begin", beginVersion)
-		// 			.detail("End", endVersion)
-		// 			.detail("EndFile", endFileExclude.get().fileName)
-		// 			.log();
-		// }
+		TraceEvent("FlowGuruGetAllFiles")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("BeginFilePresent", beginFileInclude.present())
+					.detail("EndFilePresent", endFileExclude.present())
+					.log();
+		if (beginFileInclude.present()) {
+			TraceEvent("FlowGuruBeginFile")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("BeginFile", beginFileInclude.get().fileName)
+					.log();
+		}
+		if (endFileExclude.present()) {
+			TraceEvent("FlowGuruEndFile")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("EndFile", endFileExclude.get().fileName)
+					.log();
+		}
 		state RestoreConfig::FileSetT::RangeResultType files =
 		    wait(restore.fileSet().getRange(tr,
 		                                    beginFileInclude,
@@ -5405,6 +5405,12 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state int64_t maxTagID = 0;
 		state std::vector<RestoreConfig::RestoreFile> logs;
 		state std::vector<RestoreConfig::RestoreFile> ranges;
+
+		TraceEvent("FlowGuruDispatchTaskFunc")
+			.detail("Files", printFiles(files.results))
+			.detail("Begin", beginVersion)
+			.detail("End", endVersion)
+			.log();
 		for (auto f : files.results) {
 			if (f.isRange) {
 				// the getRange might get out-of-bound range file because log files need them to work
