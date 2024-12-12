@@ -265,6 +265,9 @@ public:
 	typedef KeyBackedSet<RestoreFile> FileSetT;
 	FileSetT fileSet() { return configSpace.pack(__FUNCTION__sr); }
 
+	FileSetT logFileSet() { return configSpace.pack(__FUNCTION__sr); }
+	FileSetT rangeFileSet() { return configSpace.pack(__FUNCTION__sr); }
+
 	Future<bool> isRunnable(Reference<ReadYourWritesTransaction> tr) {
 		return map(stateEnum().getD(tr), [](ERestoreState s) -> bool {
 			return s != ERestoreState::ABORTED && s != ERestoreState::COMPLETED && s != ERestoreState::UNITIALIZED;
@@ -570,7 +573,7 @@ TwoBuffers::TwoBuffers(int capacity, Reference<IBackupContainer> _bc, std::vecto
 }
 
 bool TwoBuffers::hasNext() {
-	if (buffers[0]->is_valid() && buffers[0]->size > 0 || buffers[1]->is_valid() && buffers[1]->size > 0) {
+	if ((buffers[0]->is_valid() && buffers[0]->size > 0) || (buffers[1]->is_valid() && buffers[1]->size > 0)) {
 		return true;
 	}
 	while (currentFileIndex < files.size() && files[currentFileIndex].fileSize == 0) {
@@ -799,17 +802,17 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			vm.version = version;
 			vm.subsequence = subsequence;
 			vm.mutation = mutation;
-			TraceEvent("FlowGuruRestoreMutation")
-				.detail("Version", version)
-				.detail("Sub", subsequence)
-				.detail("Offset", self->bufferOffset)
-				.detail("Files", printFiles(self->files))
-				.detail("Mutation", mutation.toString())
-				.detail("Param1", mutation.param1)
-				.detail("Num1", testKeyToDouble(mutation.param1))
-				.detail("Param2", mutation.param2)
-				.detail("Num2", testKeyToDouble(mutation.param2))
-				.log();
+			// TraceEvent("FlowGuruRestoreMutation")
+			// 	.detail("Version", version)
+			// 	.detail("Sub", subsequence)
+			// 	.detail("Offset", self->bufferOffset)
+			// 	.detail("Files", printFiles(self->files))
+			// 	.detail("Mutation", mutation.toString())
+			// 	.detail("Param1", mutation.param1)
+			// 	.detail("Num1", testKeyToDouble(mutation.param1))
+			// 	.detail("Param2", mutation.param2)
+			// 	.detail("Num2", testKeyToDouble(mutation.param2))
+			// 	.log();
 			mutations.push_back_deep(mutations.arena(), vm);
 			// Move the bufferOffset to include this mutation
 			self->bufferOffset += mutationTotalSize;
@@ -4884,13 +4887,11 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	int32_t totalBytes = 0;
 	std::map<uint32_t, std::vector<Standalone<StringRef>>> mutationsBySub;
 	std::map<uint32_t, std::vector<Standalone<MutationRef>>> tmpMap;
-	int i = 0;
 	// TraceEvent("FlowGuruGenerateNewVersion")
 	// 	.detail("CommitVersion", commitVersion)
 	// 	.log();
 	for (auto& vec : newFormatMutations) {
 		// fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
-		int j = 0;
 		for (auto& p : vec) {
 			uint32_t sub = p.subsequence;
 			MutationRef mutation = p.mutation;
@@ -4912,28 +4913,32 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 			mutationsBySub[sub].push_back(mutationOldFormat);
 			tmpMap[sub].push_back(p.mutation);
 			totalBytes += mutationOldFormat.size();
-			++j;
 		}
-		++i;
 	}
 
-	for (auto& mutationsForSub : tmpMap) {
-		// TraceEvent("FlowGuruPrintNewSubVersion")
-		// 	.detail("CommitVersion", commitVersion)
-		// 	.detail("Sub", mutationsForSub.first)
-		// 	.log();
-		for (auto& mutation : mutationsForSub.second) {
-			TraceEvent("FlowGuruPrintBySubVersion")
-				.detail("CommitVersion", commitVersion)
-				.detail("Sub", mutationsForSub.first)
-				.detail("Mutation", mutation.toString())
-				.detail("Param1", mutation.param1)
-				.detail("Num1", testKeyToDouble(mutation.param1))
-				.detail("Param2", mutation.param2)
-				.detail("Num2", testKeyToDouble(mutation.param2))
-				.log();
-		}
-	}
+	// for (auto& mutationsForSub : tmpMap) {
+	// 	TraceEvent("FlowGuruPrintNewSubVersion")
+	// 		.detail("CommitVersion", commitVersion)
+	// 		.detail("Sub", mutationsForSub.first)
+	// 		.detail("Size", mutationsForSub.second.size())
+	// 		.log();
+	// 	for (auto& mutation : mutationsForSub.second) {
+	// 		TraceEvent("FlowGuruPrintBySubVersion")
+	// 			.detail("CommitVersion", commitVersion)
+	// 			.detail("Sub", mutationsForSub.first)
+	// 			.detail("Mutation", mutation.toString())
+	// 			.detail("Param1", mutation.param1)
+	// 			.detail("Num1", testKeyToDouble(mutation.param1))
+	// 			.detail("Param2", mutation.param2)
+	// 			.detail("Num2", testKeyToDouble(mutation.param2))
+	// 			.log();
+	// 	}
+	// 	TraceEvent("FlowGuruPrintNewSubVersionFinish")
+	// 		.detail("CommitVersion", commitVersion)
+	// 		.detail("Sub", mutationsForSub.first)
+	// 		.detail("Size", mutationsForSub.second.size())
+	// 		.log();
+	// }
 	// the list of param2 needs to have the first 64 bites as 0x0FDB00A200090001
 	BinaryWriter param2Writer(IncludeVersion(ProtocolVersion::withBackupMutations()));
 	param2Writer << totalBytes;
@@ -4982,13 +4987,13 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		TraceEvent("FlowGuruWriteOldFormat")
-			.detail("CommitVersion", commitVersion)
-			.detail("Part", part)
-			.detail("KeySize", backupKV.key.size())
-			.detail("ValueSize", backupKV.value.size())
-			.detail("TotalBytes", totalBytes)
-			.log();
+		// TraceEvent("FlowGuruWriteOldFormat")
+		// 	.detail("CommitVersion", commitVersion)
+		// 	.detail("Part", part)
+		// 	.detail("KeySize", backupKV.key.size())
+		// 	.detail("ValueSize", backupKV.value.size())
+		// 	.detail("TotalBytes", totalBytes)
+		// 	.log();
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 	}
 	return results;
@@ -5095,19 +5100,19 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// as a result, backup agent should not worry about key range filtering
 				atLeastOneIteratorHasNext = true;
 				Version v = wait(iterators[k]->peekNextVersion());
-				TraceEvent("FlowguruCheckEachVersion")
-					.detail("K", k)
-					.detail("Version", v)
-					.log();
+				// TraceEvent("FlowguruCheckEachVersion")
+				// 	.detail("K", k)
+				// 	.detail("Version", v)
+				// 	.log();
 
 				if (v <= minVersion) {
 					minVersion = v;
 				}
 			}
-			TraceEvent("FlowGuruCheckMinVersion")
-				.detail("AtLeastOneIteratorHasNext", atLeastOneIteratorHasNext)
-				.detail("MinVersion", minVersion)
-				.log();
+			// TraceEvent("FlowGuruCheckMinVersion")
+			// 	.detail("AtLeastOneIteratorHasNext", atLeastOneIteratorHasNext)
+			// 	.detail("MinVersion", minVersion)
+			// 	.log();
 
 			// fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
 			if (atLeastOneIteratorHasNext) {
@@ -5321,8 +5326,9 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)) &&
 		     checkTaskVersion(tr->getDatabase(), task, name, version));
 
+		// if current is [40, 50] and restore version is 50, we need another [50, 51] task to process data at version 50
 		state int nextEndVersion =
-		    std::min(restoreVersion, endVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE);
+		    std::min(restoreVersion + 1, endVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE);
 		// fmt::print(stderr, "Very begin Begin={}, End={}, nextEnd={}, restoreVersion={}\n", beginVersion, endVersion, nextEndVersion, restoreVersion);		
 		// update the apply mutations end version so the mutations from the
 		// previous batch can be applied.
@@ -5373,58 +5379,69 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// the last file(exclusive): smallest file whose begin > e
 		// in reality, tag1 has [294336829,311764939] [311764939,324171019], 
 		// and we miss 311782629
-		state Optional<RestoreConfig::RestoreFile> beginFileInclude = wait(restore.fileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({ beginVersion, "" })));
+		state Optional<RestoreConfig::RestoreFile> beginLogInclude = wait(restore.logFileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({beginVersion, "", false})));
 		// greaterThanOrEqual(end + 1) instead of greaterThan(end)
 		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result in a end+1
-		state Optional<RestoreConfig::RestoreFile> endFileExclude = wait(restore.fileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({ endVersion + 1, "" })));
+		state Optional<RestoreConfig::RestoreFile> endLogExclude = wait(restore.logFileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({endVersion + 1, "", false })));
 		TraceEvent("FlowGuruGetAllFiles")
 					.detail("Begin", beginVersion)
 					.detail("End", endVersion)
-					.detail("BeginFilePresent", beginFileInclude.present())
-					.detail("EndFilePresent", endFileExclude.present())
+					.detail("BeginFilePresent", beginLogInclude.present())
+					.detail("EndFilePresent", endLogExclude.present())
 					.log();
-		if (beginFileInclude.present()) {
+		if (beginLogInclude.present()) {
 			TraceEvent("FlowGuruBeginFile")
 					.detail("Begin", beginVersion)
 					.detail("End", endVersion)
-					.detail("BeginFile", beginFileInclude.get().fileName)
+					.detail("BeginFile", beginLogInclude.get().fileName)
 					.log();
 		}
-		if (endFileExclude.present()) {
+		if (endLogExclude.present()) {
 			TraceEvent("FlowGuruEndFile")
 					.detail("Begin", beginVersion)
 					.detail("End", endVersion)
-					.detail("EndFile", endFileExclude.get().fileName)
+					.detail("EndFile", endLogExclude.get().fileName)
 					.log();
 		}
-		state RestoreConfig::FileSetT::RangeResultType files =
-		    wait(restore.fileSet().getRange(tr,
-		                                    beginFileInclude,
-		                                    endFileExclude, 
+		state RestoreConfig::FileSetT::RangeResultType logFiles =
+		    wait(restore.logFileSet().getRange(tr,
+		                                    beginLogInclude,
+		                                    endLogExclude, 
+		                                    fileLimit));
+
+		state Optional<RestoreConfig::RestoreFile> beginRangeInclude = wait(restore.rangeFileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({beginVersion, "", true })));
+		// greaterThanOrEqual(end + 1) instead of greaterThan(end)
+		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result in a end+1
+		state Optional<RestoreConfig::RestoreFile> endRangeExclude = wait(restore.rangeFileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({endVersion + 1, "", true })));
+		
+		state RestoreConfig::FileSetT::RangeResultType rangeFiles =
+		    wait(restore.rangeFileSet().getRange(tr,
+		                                    beginRangeInclude,
+		                                    endRangeExclude, 
 		                                    fileLimit));
 		state int64_t maxTagID = 0;
 		state std::vector<RestoreConfig::RestoreFile> logs;
 		state std::vector<RestoreConfig::RestoreFile> ranges;
 
 		TraceEvent("FlowGuruDispatchTaskFunc")
-			.detail("Files", printFiles(files.results))
+			.detail("LogFiles", printFiles(logFiles.results))
+			.detail("RnageFiles", printFiles(rangeFiles.results))
 			.detail("Begin", beginVersion)
 			.detail("End", endVersion)
 			.log();
-		for (auto f : files.results) {
-			if (f.isRange) {
-				// the getRange might get out-of-bound range file because log files need them to work
-				if (f.version >= beginVersion && f.version < endVersion) {
-					ranges.push_back(f);
-					// TraceEvent("FlowGuruRangeFile")
-					// 		.detail("Begin", beginVersion)
-					// 		.detail("End", endVersion)
-					// 		.detail("File", f.fileName)
-					// 		.log();
-				}
-			} else {
-				logs.push_back(f);
-				maxTagID = std::max(maxTagID, f.tagId);
+		for (auto f : logFiles.results) {
+			logs.push_back(f);
+			maxTagID = std::max(maxTagID, f.tagId);
+		}
+		for (auto f : rangeFiles.results) {
+			// the getRange might get out-of-bound range file because log files need them to work
+			if (f.version >= beginVersion && f.version < endVersion) {
+				ranges.push_back(f);
+				// TraceEvent("FlowGuruRangeFile")
+				// 		.detail("Begin", beginVersion)
+				// 		.detail("End", endVersion)
+				// 		.detail("File", f.fileName)
+				// 		.log();
 			}
 		}
 		// allPartsDone will be set once all block tasks in the current batch are finished.
@@ -6171,6 +6188,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 		// Order does not matter, they will be put in order when written to the restoreFileMap below.
 		state std::vector<RestoreConfig::RestoreFile> files;
+		state std::vector<RestoreConfig::RestoreFile> logFiles;
+		state std::vector<RestoreConfig::RestoreFile> rangeFiles;
 		if (!logsOnly) {
 			beginVersion = restorable.get().snapshot.beginVersion;
 			// fmt::print(stderr, "FullRestoreTask, set beginVersion={}\n", beginVersion);
@@ -6178,6 +6197,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			if (!inconsistentSnapshotOnly) {
 				for (const RangeFile& f : restorable.get().ranges) {
 					files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+					rangeFiles.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 					// In a restore with both snapshots and logs, the firstConsistentVersion is the highest version
 					// of any range file.
 					firstConsistentVersion = std::max(firstConsistentVersion, f.version);
@@ -6187,6 +6207,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 					const RangeFile& f = restorable.get().ranges[i];
 					// hfu5: insert range files first
 					files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
+					rangeFiles.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 					// In inconsistentSnapshotOnly mode, if all range files have the same version, then it is the
 					// firstConsistentVersion, otherwise unknown (use -1).
 					if (i != 0 && f.version != firstConsistentVersion) {
@@ -6205,6 +6226,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				// hfu5: log files are added to files here
 				files.push_back(
 				    { f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.tagId, f.totalTags });
+				logFiles.push_back(
+				    { f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.tagId, f.totalTags });
+			
 			}
 		}
 		// First version for which log data should be applied
@@ -6224,6 +6248,83 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 
+		// add log  files
+		state std::vector<RestoreConfig::RestoreFile>::iterator logStart = logFiles.begin();
+		state std::vector<RestoreConfig::RestoreFile>::iterator logEnd = logFiles.end();
+
+		tr->reset();
+		while (logStart != logEnd) {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				wait(taskBucket->keepRunning(tr, task));
+
+				state std::vector<RestoreConfig::RestoreFile>::iterator i = logStart;
+
+				state int txBytes = 0;
+				state int logFileCount = 0;
+				auto fileSet = restore.logFileSet();
+				// as a result, fileSet has everything, including [beginVersion, endVersion] for each tag
+				for (; i != logEnd && txBytes < 1e6; ++i) {
+					txBytes += fileSet.insert(tr, *i);
+					// handle the remaining
+					++logFileCount;
+				}
+				wait(tr->commit());
+
+				TraceEvent("FileRestoreLoadedLogFiles")
+				    .detail("RestoreUID", restore.getUid())
+				    .detail("FileCount", logFileCount)
+				    .detail("TransactionBytes", txBytes)
+				    .detail("TaskInstance", THIS_ADDR);
+
+				logStart = i;
+				tr->reset();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		state std::vector<RestoreConfig::RestoreFile>::iterator rangeStart = rangeFiles.begin();
+		state std::vector<RestoreConfig::RestoreFile>::iterator rangeEnd = rangeFiles.end();
+
+		tr->reset();
+		while (rangeStart != rangeEnd) {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				wait(taskBucket->keepRunning(tr, task));
+
+				i = rangeStart;
+
+				txBytes = 0;
+				state int rangeFileCount = 0;
+				auto fileSet = restore.rangeFileSet();
+				// as a result, fileSet has everything, including [beginVersion, endVersion] for each tag
+				for (; i != rangeEnd && txBytes < 1e6; ++i) {
+					txBytes += fileSet.insert(tr, *i);
+					// handle the remaining
+					++rangeFileCount;
+				}
+				wait(tr->commit());
+
+				TraceEvent("FileRestoreLoadedRangeFiles")
+				    .detail("RestoreUID", restore.getUid())
+				    .detail("FileCount", rangeFileCount)
+				    .detail("TransactionBytes", txBytes)
+				    .detail("TaskInstance", THIS_ADDR);
+
+				rangeStart = i;
+				tr->reset();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+
+		// add files
 		state std::vector<RestoreConfig::RestoreFile>::iterator start = files.begin();
 		state std::vector<RestoreConfig::RestoreFile>::iterator end = files.end();
 
@@ -6235,9 +6336,9 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				wait(taskBucket->keepRunning(tr, task));
 
-				state std::vector<RestoreConfig::RestoreFile>::iterator i = start;
+				i = start;
 
-				state int txBytes = 0;
+				txBytes = 0;
 				state int nFileBlocks = 0;
 				state int nFiles = 0;
 				auto fileSet = restore.fileSet();
