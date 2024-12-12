@@ -735,6 +735,15 @@ static double testKeyToDouble(const KeyRef& p) {
 	return *(double*)&x;
 }
 
+std::string printFiles(std::vector<RestoreConfig::RestoreFile>& files) {
+	std::string str = "";
+	for (auto& file : files) {
+		str += file.fileName;
+		str += ",";
+	}
+	return str;
+}
+
 ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffers::consumeData(
     Reference<PartitionedLogIteratorTwoBuffers> self,
     Version firstVersion) {
@@ -749,6 +758,8 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			// for each block
 			self->removeBlockHeader();
 
+			// encoding is:
+			// wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) << bigEndian32(mutation.size());
 			Version version;
 			std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
 			version = bigEndian64(version);
@@ -791,6 +802,8 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			TraceEvent("FlowGuruRestoreMutation")
 				.detail("Version", version)
 				.detail("Sub", subsequence)
+				.detail("Offset", self->bufferOffset)
+				.detail("Files", printFiles(self->files))
 				.detail("Mutation", mutation.toString())
 				.detail("Param1", mutation.param1)
 				.detail("Num1", testKeyToDouble(mutation.param1))
