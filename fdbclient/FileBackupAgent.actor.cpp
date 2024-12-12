@@ -5056,6 +5056,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			} else {
 				filesByTag[f.tagId].push_back(f);
 				TraceEvent("FlowguruAddFile")
+					.detail("Begin", begin)
+					.detail("End", end)
 					.detail("TagID", f.tagId)
 					.detail("File", f.fileName)
 					.log();
@@ -5127,9 +5129,19 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				if (minVersion < begin) {
 					// skip generating mutations, because this is not within desired range
 					// this is already handled by the previous taskfunc
+					TraceEvent("FlowGuruFindEarlierVersion")
+						.detail("BeginVersion", begin)
+						.detail("EndVersion", end)
+						.detail("MinVersion", minVersion)
+						.log();
 					continue;
 				} else if (minVersion >= end) {
 					// all valid data has been consumed
+					TraceEvent("FlowGuruAllVersionConsumed")
+						.detail("BeginVersion", begin)
+						.detail("EndVersion", end)
+						.detail("MinVersion", minVersion)
+						.log();
 					break;
 				}
 				// transform from new format to old format(param1, param2)
@@ -5482,7 +5494,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 		bool is_set = wait(allPartsDone->isSet(tr));
-		// fmt::print(stderr, "Before add new task begin={}, end={}, nextEnd={}, isSet={} \n", beginVersion, endVersion, nextEndVersion, is_set);
+		fmt::print(stderr, "Before add new task begin={}, end={}, nextEnd={}, isSet={} \n", beginVersion, endVersion, nextEndVersion, is_set);
 		// aggregate logs by tag id
 		addTaskFutures.push_back(RestoreLogDataPartitionedTaskFunc::addTask(tr,
 																			taskBucket,
@@ -5493,7 +5505,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 																			endVersion,
 																			TaskCompletionKey::joinWith(allPartsDone)));
 		// even if file exsists, but they are empty, in this case just start the next batch
-		// fmt::print(stderr, "After add new task begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
+		fmt::print(stderr, "After add new task begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
 
 		addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(
 		    tr, taskBucket, task, endVersion, nextEndVersion, TaskCompletionKey::noSignal(), allPartsDone));
