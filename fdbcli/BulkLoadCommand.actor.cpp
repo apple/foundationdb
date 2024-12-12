@@ -29,6 +29,7 @@
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
+#include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -128,7 +129,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		std::string byteSampleFile = tokens[6].toString(); // TODO(BulkLoad): reject if the input bytes sampling file is
 		                                                   // not same as the configuration as FDB cluster
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		state BulkLoadState bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFile, byteSampleFile);
+		state BulkLoadState bulkLoadTask = newBulkLoadTaskLocalSST(UID(), range, folder, dataFile, byteSampleFile);
 		wait(submitBulkLoadTask(cx, bulkLoadTask));
 		return bulkLoadTask.getTaskId();
 

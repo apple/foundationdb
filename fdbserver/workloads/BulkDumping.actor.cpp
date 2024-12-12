@@ -21,7 +21,9 @@
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/BulkDumpUtil.actor.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -122,26 +124,50 @@ struct BulkDumping : TestWorkload {
 		return Void();
 	}
 
+	ACTOR Future<Void> clearDatabase(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.clear(normalKeys);
+				tr.clear(bulkDumpKeys);
+				tr.clear(bulkLoadKeys);
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
 	ACTOR Future<Void> _start(BulkDumping* self, Database cx) {
 		if (self->clientId != 0) {
 			return Void();
 		}
 
-		std::vector<KeyValue> kvs = self->generateOrderedKVS(self, normalKeys, 1000);
+		state std::vector<KeyValue> kvs = self->generateOrderedKVS(self, normalKeys, 1000);
 		wait(self->setKeys(cx, kvs));
 
+		// Dumping data to folder
 		state int oldBulkDumpMode = 0;
-		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1)));
+		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDumping
 		TraceEvent("BulkDumpingSetMode").detail("OldMode", oldBulkDumpMode).detail("NewMode", 1);
+		state BulkDumpState newJob = newBulkDumpJobLocalSST(normalKeys, simulationBulkDumpFolder);
+		TraceEvent("BulkDumpingJobNew").detail("Job", newJob.toString());
+		wait(submitBulkDumpJob(cx, newJob));
+		wait(self->waitUntilTaskComplete(cx, newJob));
+		TraceEvent("BulkDumpingJobComplete").detail("Job", newJob.toString());
 
-		state BulkDumpState newTask = newBulkDumpTaskLocalSST(normalKeys, simulationBulkDumpFolder);
-		TraceEvent("BulkDumpingTaskNew").detail("Task", newTask.toString());
-		wait(submitBulkDumpJob(cx, newTask));
-		std::vector<BulkDumpState> res = wait(getBulkDumpTasksWithinRange(cx, normalKeys, 100));
-		for (const auto& task : res) {
-			TraceEvent("BulkDumpingTaskRes").detail("Task", task.toString());
-		}
-		wait(self->waitUntilTaskComplete(cx, newTask));
+		// Clear database
+		wait(self->clearDatabase(cx));
+		TraceEvent("BulkDumpingJobClearDB").detail("Job", newJob.toString());
+
+		// Restore data from folder
+		state int oldBulkLoadMode = 0;
+		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoading
+		state BulkDumpRestoreState restoreTask =
+		    newBulkDumpRestoreJobLocalSST(newJob.getJobId(), newJob.getRange(), newJob.getRemoteRoot());
+		wait(submitBulkDumpRestore(cx, restoreTask));
 
 		return Void();
 	}

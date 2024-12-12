@@ -26,6 +26,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
+#include "flow/Arena.h"
 #include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/Optional.h"
@@ -33,7 +34,9 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 #include "flow/flow.h"
+#include <cstddef>
 #include <string>
+#include <vector>
 
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
                                  const BulkDumpState& bulkDumpState) {
@@ -131,7 +134,7 @@ void clearFileFolder(const std::string& folderPath) {
 	return;
 }
 
-void resetFileFolder(const std::string& folderPath, const UID& logId) {
+void resetFileFolder(const std::string& folderPath) {
 	clearFileFolder(abspath(folderPath));
 	platform::createDirectory(abspath(folderPath));
 	return;
@@ -162,7 +165,7 @@ BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
 	BulkDumpFileFullPathSet localFiles(localFileSetConfig);
 
 	// Step 1: Clean up local folder
-	resetFileFolder((abspath(localFiles.folder)), logId);
+	resetFileFolder((abspath(localFiles.folder)));
 
 	// Step 2: Dump data to file
 	bool containDataFile = false;
@@ -236,7 +239,7 @@ void bulkDumpTransportCP_impl(BulkDumpFileSet sourceFileSet,
 	BulkDumpFileFullPathSet remoteFiles(destinationFileSet);
 
 	// Clear remote existing folder
-	resetFileFolder(abspath(remoteFiles.folder), logId);
+	resetFileFolder(abspath(remoteFiles.folder));
 	// Copy bulk dump files to the remote folder
 	bulkDumpFileCopy(abspath(localFiles.manifestFilePath), abspath(remoteFiles.manifestFilePath), fileBytesMax, logId);
 	if (sourceFileSet.dataFileName.size() > 0) {
@@ -271,39 +274,6 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod
 	}
 	bulkDumpTransportCP_impl(sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
 	return Void();
-}
-
-void generateBulkDumpJobManifestFile(const std::string& workFolder,
-                                     const std::string& localJobManifestFilePath,
-                                     const std::string& content,
-                                     const UID& logId) {
-	resetFileFolder(workFolder, logId);
-	writeStringToFile(localJobManifestFilePath, content);
-	TraceEvent(SevInfo, "UploadBulkDumpJobManifestWriteLocal", logId)
-	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-	    .detail("Content", content);
-	return;
-}
-
-void uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
-                                   const std::string& localJobManifestFilePath,
-                                   const std::string& remoteJobManifestFilePath,
-                                   UID logId) {
-	if (transportMethod != BulkDumpTransportMethod::CP) {
-		TraceEvent(SevWarnAlways, "UploadBulkDumpJobManifestFileError", logId)
-		    .detail("Reason", "Transport method is not implemented")
-		    .detail("TransportMethod", transportMethod);
-		ASSERT_WE_THINK(false);
-		throw bulkdump_task_failed();
-	}
-	TraceEvent(SevWarn, "UploadBulkDumpJobManifestWriteLocal", logId)
-	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
-	bulkDumpFileCopy(abspath(localJobManifestFilePath),
-	                 abspath(remoteJobManifestFilePath),
-	                 SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX,
-	                 logId);
-	// TODO(BulkDump): check uploaded file exist
-	return;
 }
 
 ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState) {
@@ -355,6 +325,40 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 	return Void();
 }
 
+// Functions for restore
+void generateBulkDumpJobManifestFile(const std::string& workFolder,
+                                     const std::string& localJobManifestFilePath,
+                                     const std::string& content,
+                                     const UID& logId) {
+	resetFileFolder(workFolder);
+	writeStringToFile(localJobManifestFilePath, content);
+	TraceEvent(SevInfo, "UploadBulkDumpJobManifestWriteLocal", logId)
+	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+	    .detail("Content", content);
+	return;
+}
+
+void uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
+                                   const std::string& localJobManifestFilePath,
+                                   const std::string& remoteJobManifestFilePath,
+                                   UID logId) {
+	if (transportMethod != BulkDumpTransportMethod::CP) {
+		TraceEvent(SevWarnAlways, "UploadBulkDumpJobManifestFileError", logId)
+		    .detail("Reason", "Transport method is not implemented")
+		    .detail("TransportMethod", transportMethod);
+		ASSERT_WE_THINK(false);
+		throw bulkdump_task_failed();
+	}
+	TraceEvent(SevWarn, "UploadBulkDumpJobManifestWriteLocal", logId)
+	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
+	bulkDumpFileCopy(abspath(localJobManifestFilePath),
+	                 abspath(remoteJobManifestFilePath),
+	                 SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX,
+	                 logId);
+	// TODO(BulkDump): check uploaded file exist
+	return;
+}
+
 std::string generateJobManifestFileContent(const std::map<Key, BulkDumpManifest>& manifests) {
 	std::string root = "";
 	std::string manifestList;
@@ -370,4 +374,88 @@ std::string generateJobManifestFileContent(const std::map<Key, BulkDumpManifest>
 	}
 	std::string head = "Manifest count: " + std::to_string(manifests.size()) + ", Root: " + root + "\n";
 	return head + manifestList;
+}
+
+ACTOR Future<Void> downloadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
+                                                   std::string localJobManifestFilePath,
+                                                   std::string remoteJobManifestFilePath,
+                                                   UID logId) {
+	if (transportMethod != BulkDumpTransportMethod::CP) {
+		TraceEvent(SevWarnAlways, "DownloadBulkDumpJobManifestFileError", logId)
+		    .detail("Reason", "Transport method is not implemented")
+		    .detail("TransportMethod", transportMethod);
+		ASSERT_WE_THINK(false);
+		throw bulkdump_task_failed();
+	}
+	TraceEvent(SevWarn, "DownloadBulkDumpJobManifestWriteLocal", logId)
+	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
+	bulkDumpFileCopy(abspath(remoteJobManifestFilePath),
+	                 abspath(localJobManifestFilePath),
+	                 SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX,
+	                 logId);
+	wait(delay(0.1));
+	// TODO(BulkDump): check downloaded file exist
+	return Void();
+}
+
+ACTOR Future<Void> downloadBulkDumpDataBatchManifestFile(BulkDumpTransportMethod transportMethod,
+                                                         std::string localManifestFilePath,
+                                                         std::string remoteManifestFilePath,
+                                                         UID logId) {
+	if (transportMethod != BulkDumpTransportMethod::CP) {
+		TraceEvent(SevWarnAlways, "DownloadBulkDumpDataBatchManifestFileError", logId)
+		    .detail("Reason", "Transport method is not implemented")
+		    .detail("TransportMethod", transportMethod);
+		ASSERT_WE_THINK(false);
+		throw bulkdump_task_failed();
+	}
+	TraceEvent(SevWarn, "DownloadBulkDumpDataBatchManifestFileLocal", logId)
+	    .detail("LocalJobManifestFilePath", localManifestFilePath)
+	    .detail("RemoteJobManifestFilePath", remoteManifestFilePath);
+	bulkDumpFileCopy(
+	    abspath(remoteManifestFilePath), abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
+	wait(delay(0.1));
+	// TODO(BulkDump): check downloaded file exist
+	return Void();
+}
+
+ACTOR Future<std::vector<BulkDumpManifest>> extractBulkDumpJobManifests(std::string localJobManifestFilePath,
+                                                                        KeyRange range,
+                                                                        std::string localFolder,
+                                                                        BulkDumpTransportMethod transportMethod,
+                                                                        UID logId) {
+	ASSERT(fileExists(abspath(localJobManifestFilePath)));
+	state std::vector<BulkDumpManifest> res;
+	const std::string jobManifestRawString =
+	    readFileBytes(abspath(localJobManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
+	state std::vector<std::string> lines = splitString(jobManifestRawString, "\n");
+	state BulkDumpJobManifestHeader header(lines[0]);
+	state size_t lineIdx = 1; // skip the first line which is the header
+	state std::string localWorkingFolder = joinPath(localFolder, "manifest-batch-tmp");
+	while (lineIdx < lines.size()) {
+		if (lines[lineIdx].empty()) {
+			ASSERT(lineIdx == lines.size() - 1);
+			break;
+		}
+		BulkDumpJobManifestEntry manifestEntry(lines[lineIdx]);
+		KeyRange overlapping = manifestEntry.getRange() & range;
+		if (overlapping.empty()) {
+			lineIdx = lineIdx + 1;
+			continue;
+		}
+		state std::string remoteManifestFilePath = joinPath(header.rootFolder, manifestEntry.relativePath);
+		resetFileFolder(localWorkingFolder);
+		state std::string localManifestFilePath = joinPath(localWorkingFolder, basename(remoteManifestFilePath));
+		wait(downloadBulkDumpDataBatchManifestFile(
+		    transportMethod, localManifestFilePath, remoteManifestFilePath, logId));
+		const std::string manifestRawString =
+		    readFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
+		BulkDumpManifest manifest(manifestRawString);
+		res.push_back(manifest);
+		wait(delay(1.0));
+		lineIdx = lineIdx + 1;
+	}
+	clearFileFolder(localWorkingFolder);
+	return res;
 }

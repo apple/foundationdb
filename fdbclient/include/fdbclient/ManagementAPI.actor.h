@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "fdbclient/BulkDumping.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_MANAGEMENT_API_ACTOR_G_H)
 #define FDBCLIENT_MANAGEMENT_API_ACTOR_G_H
 #include "fdbclient/ManagementAPI.actor.g.h"
@@ -216,6 +217,19 @@ ACTOR Future<Optional<UID>> existAnyBulkDumpTask(Transaction* tr);
 
 // Get total number of completed tasks within the input range
 ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);
+
+// Decide if a bulkDumpRestore job alive
+ACTOR Future<bool> isBulkDumpRestoreAlive(Transaction* tr, Optional<UID> jobId);
+
+// Submit a bulkDumpRestore job: retore dumped data from a remote folder using bulkloading mechanism
+// There is at most one bulkDumpRestore job at a time
+ACTOR Future<Void> submitBulkDumpRestore(Database cx, BulkDumpRestoreState jobState);
+
+// Cancel or clear a bulkDumpRestore job
+ACTOR Future<Void> clearBulkDumpRestore(Database cx);
+
+// Get ongoing bulkDumpRestore job Id
+ACTOR Future<Optional<BulkDumpRestoreState>> getOngoingBulkDumpRestoreJob(Database cx);
 
 // Persist a rangeLock owner to database metadata
 // A range can only be locked by a registered owner

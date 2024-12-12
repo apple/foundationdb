@@ -370,7 +370,8 @@ struct BulkLoading : TestWorkload {
 		std::string bytesSampleFilePath = joinPath(folderPath, generateRandomBulkLoadBytesSampleFileName());
 		KeyRange rangeToLoad = range.present() ? range.get() : self->getRandomRange(self, normalKeys);
 		BulkLoadTaskTestUnit taskUnit;
-		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(rangeToLoad, folderPath, dataFilePath, bytesSampleFilePath);
+		taskUnit.bulkLoadTask =
+		    newBulkLoadTaskLocalSST(UID(), rangeToLoad, folderPath, dataFilePath, bytesSampleFilePath);
 		taskUnit.data = self->generateOrderedKVS(self, rangeToLoad, dataSize);
 		self->generateSSTFiles(self, taskUnit);
 		return taskUnit;

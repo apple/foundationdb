@@ -20,11 +20,15 @@
 
 #ifndef FDBCLIENT_BULKDUMPING_H
 #define FDBCLIENT_BULKDUMPING_H
-#include "flow/Trace.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "flow/TDMetric.actor.h"
+
+std::string stringRemovePrefix(std::string str, const std::string& prefix);
+
+Key getKeyFromHexString(const std::string& rawString);
 
 // Define the configuration of bytes sampling
 // Use for setting manifest file
@@ -141,6 +145,7 @@ struct BulkDumpManifest {
 
 	BulkDumpManifest() = default;
 
+	// For dumping
 	BulkDumpManifest(const BulkDumpFileSet& fileSet,
 	                 const Key& beginKey,
 	                 const Key& endKey,
@@ -151,6 +156,29 @@ struct BulkDumpManifest {
 	  : fileSet(fileSet), beginKey(beginKey), endKey(endKey), version(version), checksum(checksum), bytes(bytes),
 	    byteSampleSetting(byteSampleSetting) {
 		ASSERT(isValid());
+	}
+
+	// For restoring dumped data
+	BulkDumpManifest(const std::string& rawString) {
+		std::vector<std::string> parts = splitString(rawString, ", ");
+		ASSERT(parts.size() == 15);
+		std::string rootPath = stringRemovePrefix(parts[0], "[RootPath]: ");
+		std::string relativePath = stringRemovePrefix(parts[1], "[RelativePath]: ");
+		std::string manifestFileName = stringRemovePrefix(parts[2], "[ManifestFileName]: ");
+		std::string dataFileName = stringRemovePrefix(parts[3], "[DataFileName]: ");
+		std::string byteSampleFileName = stringRemovePrefix(parts[4], "[ByteSampleFileName]: ");
+		fileSet = BulkDumpFileSet(rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName);
+		beginKey = getKeyFromHexString(stringRemovePrefix(parts[5], "[BeginKey]: "));
+		endKey = getKeyFromHexString(stringRemovePrefix(parts[6], "[EndKey]: "));
+		version = std::stoll(stringRemovePrefix(parts[7], "[Version]: "));
+		checksum = stringRemovePrefix(parts[8], "[Checksum]: ");
+		bytes = std::stoull(stringRemovePrefix(parts[9], "[Bytes]: "));
+		int version = std::stoi(stringRemovePrefix(parts[10], "[ByteSampleVersion]: "));
+		std::string method = stringRemovePrefix(parts[11], "[ByteSampleMethod]: ");
+		int factor = std::stoi(stringRemovePrefix(parts[12], "[ByteSampleFactor]: "));
+		int overhead = std::stoi(stringRemovePrefix(parts[13], "[ByteSampleOverhead]: "));
+		double minimalProbability = std::stod(stringRemovePrefix(parts[14], "[ByteSampleMinimalProbability]: "));
+		byteSampleSetting = ByteSampleSetting(version, method, factor, overhead, minimalProbability);
 	}
 
 	bool isValid() const {
@@ -165,6 +193,8 @@ struct BulkDumpManifest {
 		}
 		return true;
 	}
+
+	KeyRange getRange() const { return Standalone(KeyRangeRef(beginKey, endKey)); }
 
 	std::string getBeginKeyString() const { return beginKey.toFullHexStringPlain(); }
 
@@ -219,7 +249,7 @@ struct BulkDumpState {
 	BulkDumpState() = default;
 
 	// The only public interface to create a valid task
-	// This constructor is call when users submitting a task, e.g. by newBulkDumpTaskLocalSST()
+	// This constructor is call when users submitting a task, e.g. by newBulkDumpJobLocalSST()
 	BulkDumpState(KeyRange range,
 	              BulkDumpFileType fileType,
 	              BulkDumpTransportMethod transportMethod,
@@ -365,10 +395,86 @@ private:
 	Optional<BulkDumpManifest> bulkDumpManifest; // Resulting remote bulkDumpManifest after the dumping task completes
 };
 
-// User API to create bulkDump task metadata
+// User API to create bulkDump job metadata
 // The dumped data is within the input range
 // The data is dumped to the input remoteRoot
 // The remoteRoot can be either a local root or a remote blobstore root string
-BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& remoteRoot);
+BulkDumpState newBulkDumpJobLocalSST(const KeyRange& range, const std::string& remoteRoot);
+
+enum class BulkDumpRestorePhase : uint8_t {
+	Invalid = 0,
+	Submitted = 1,
+	Triggered = 2,
+	Complete = 3,
+};
+
+struct BulkDumpRestoreState {
+	constexpr static FileIdentifier file_identifier = 1384496;
+
+	BulkDumpRestoreState() = default;
+	BulkDumpRestoreState(const UID& jobId,
+	                     const std::string& remoteRoot,
+	                     const KeyRange& range,
+	                     BulkDumpTransportMethod transportMethod)
+	  : jobId(jobId), remoteRoot(remoteRoot), range(range), phase(BulkDumpRestorePhase::Submitted),
+	    transportMethod(transportMethod) {}
+
+	std::string toString() const {
+		return "[BulkDumpRestoreState]: [JobId]: " + jobId.toString() + ", [RemoteRoot]: " + remoteRoot +
+		       ", [Range]: " + range.toString() + ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) +
+		       ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod)) +
+		       ", [ManifestPath]: " + manifestPath + ", [DataPath]: " + dataPath +
+		       ", [ByteSamplePath]: " + byteSamplePath;
+	}
+
+	std::string getRemoteRoot() const { return remoteRoot; }
+
+	BulkDumpTransportMethod getTransportMethod() const { return transportMethod; }
+
+	UID getJobId() const { return jobId; }
+
+	BulkDumpRestorePhase getPhase() const { return phase; }
+
+	KeyRange getRange() const { return range; }
+
+	BulkDumpRestoreState getTaskToTrigger(const BulkDumpManifest& manifest) const {
+		BulkDumpRestoreState res = *this;
+		const std::string relativePath = joinPath(manifest.fileSet.rootPath, manifest.fileSet.relativePath);
+		res.manifestPath = joinPath(relativePath, manifest.fileSet.manifestFileName);
+		res.dataPath = joinPath(relativePath, manifest.fileSet.dataFileName);
+		res.byteSamplePath = joinPath(relativePath, manifest.fileSet.byteSampleFileName);
+		res.range = manifest.getRange();
+		res.phase = BulkDumpRestorePhase::Triggered;
+		return res;
+	}
+
+	std::string getDataFilePath() const { return dataPath; }
+
+	std::string getBytesSampleFilePath() const { return byteSamplePath; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, jobId, range, transportMethod, remoteRoot, phase, manifestPath, dataPath, byteSamplePath);
+	}
+
+private:
+	UID jobId;
+	KeyRange range;
+	BulkDumpTransportMethod transportMethod = BulkDumpTransportMethod::Invalid;
+	std::string remoteRoot;
+	BulkDumpRestorePhase phase;
+	std::string manifestPath;
+	std::string dataPath;
+	std::string byteSamplePath;
+};
+
+// User API to create bulkDumpRestore job metadata
+// The restore data is within the input range from the remoteRoot
+// The remoteRoot can be either a local folder or a remote blobstore folder string
+// JobId is the job ID of the bulkdump job
+// All data of the bulkdump job is uploaded to the folder <remoteRoot>/<jobId>
+BulkDumpRestoreState newBulkDumpRestoreJobLocalSST(const UID& jobId,
+                                                   const KeyRange& range,
+                                                   const std::string& remoteRoot);
 
 #endif

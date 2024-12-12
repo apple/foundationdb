@@ -65,15 +65,16 @@ struct BulkLoadState {
 	              BulkLoadInjectMethod injectMethod,
 	              std::string folder,
 	              std::unordered_set<std::string> dataFiles,
-	              Optional<std::string> bytesSampleFile)
+	              Optional<std::string> bytesSampleFile,
+	              UID jobId)
 	  : taskId(deterministicRandom()->randomUniqueID()), range(range), loadType(loadType),
 	    transportMethod(transportMethod), injectMethod(injectMethod), folder(folder), dataFiles(dataFiles),
-	    bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Submitted) {
+	    bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Submitted), jobId(jobId) {
 		ASSERT(isValid());
 	}
 
 	bool operator==(const BulkLoadState& rhs) const {
-		return taskId == rhs.taskId && range == rhs.range && dataFiles == rhs.dataFiles;
+		return taskId == rhs.taskId && range == rhs.range && dataFiles == rhs.dataFiles && jobId == rhs.jobId;
 	}
 
 	std::string toString() const {
@@ -92,6 +93,7 @@ struct BulkLoadState {
 		if (dataMoveId.present()) {
 			res = res + ", [DataMoveId]: " + dataMoveId.get().toString();
 		}
+		res = res + ", [JobId]: " + jobId.toString();
 		res = res + ", [TaskId]: " + taskId.toString();
 		return res;
 	}
@@ -99,6 +101,8 @@ struct BulkLoadState {
 	KeyRange getRange() const { return range; }
 
 	UID getTaskId() const { return taskId; }
+
+	UID getJobId() const { return jobId; }
 
 	std::string getFolder() const { return folder; }
 
@@ -160,6 +164,7 @@ struct BulkLoadState {
 				return false;
 			}
 		}
+		// JobId can be UID() indicating no job is specified and the job is the default job
 		// TODO(BulkLoad): do some validation between methods and files
 
 		return true;
@@ -182,7 +187,8 @@ struct BulkLoadState {
 		           triggerTime,
 		           startTime,
 		           completeTime,
-		           restartCount);
+		           restartCount,
+		           jobId);
 	}
 
 	// Updated by DD
@@ -195,6 +201,7 @@ struct BulkLoadState {
 
 private:
 	// Set by user
+	UID jobId; // Unique ID of the job. A job can spawn multiple tasks.
 	UID taskId; // Unique ID of the task
 	KeyRange range; // Load the key-value within this range "[begin, end)" from data file
 	// File inject config
@@ -214,7 +221,8 @@ private:
 	Optional<UID> dataMoveId;
 };
 
-BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,
+BulkLoadState newBulkLoadTaskLocalSST(UID jobId,
+                                      KeyRange range,
                                       std::string folder,
                                       std::string dataFile,
                                       std::string bytesSampleFile);

@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "flow/Trace.h"
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BULKDUMPUTIL_ACTOR_G_H)
@@ -29,6 +31,7 @@
 
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 struct SSBulkDumpTask {
@@ -126,6 +129,73 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod
 
 // Erase file folder
 void clearFileFolder(const std::string& folderPath);
+
+// Define the bulkdump job manifest header
+struct BulkDumpJobManifestHeader {
+	BulkDumpJobManifestHeader() = default;
+
+	BulkDumpJobManifestHeader(const std::string& rawString) {
+		std::vector<std::string> parts = splitString(rawString, ", ");
+		if (parts.size() != 2) {
+			TraceEvent(SevError, "ParseBulkDumpJobManifestHeaderError").detail("RawString", rawString);
+			ASSERT(false);
+		}
+		manifestCount = std::stoull(stringRemovePrefix(parts[0], "Manifest count: "));
+		rootFolder = stringRemovePrefix(parts[1], "Root: ");
+		ASSERT(!rootFolder.empty());
+	}
+
+	std::string toString() {
+		return "[BulkDumpJobManifestHeader]: [ManifestCount]: " + std::to_string(manifestCount) +
+		       ", [RootFolder]: " + rootFolder;
+	}
+
+	size_t manifestCount = 0;
+	std::string rootFolder = "";
+};
+
+// Define the bulkdump job manifest entry per range
+struct BulkDumpJobManifestEntry {
+	BulkDumpJobManifestEntry(const std::string& rawString) {
+		std::vector<std::string> parts = splitString(rawString, ", ");
+		if (parts.size() != 5) {
+			TraceEvent(SevError, "ParseBulkDumpJobManifestEntryError").detail("RawString", rawString);
+			ASSERT(false);
+		}
+		beginKey = getKeyFromHexString(parts[0]);
+		endKey = getKeyFromHexString(parts[1]);
+		version = std::stoll(parts[2]);
+		bytes = std::stoull(parts[3]);
+		relativePath = parts[4];
+	}
+
+	KeyRange getRange() const { return Standalone(KeyRangeRef(beginKey, endKey)); }
+
+	std::string toString() const {
+		return "[BulkDumpJobManifestEntry]: [BeginKey]: " + beginKey.toFullHexStringPlain() +
+		       ", [EndKey]: " + endKey.toFullHexStringPlain() + ", [RelativePath]: " + relativePath +
+		       ", [Version]: " + std::to_string(version) + ", [Bytes]: " + std::to_string(bytes);
+	}
+
+	Key beginKey;
+	Key endKey;
+	std::string relativePath;
+	Version version;
+	size_t bytes;
+};
+
+// Download bulkdump job manifest file which is generated when dumping the data
+ACTOR Future<Void> downloadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
+                                                   std::string localJobManifestFilePath,
+                                                   std::string remoteJobManifestFilePath,
+                                                   UID logId);
+
+// Extract manifests from files
+ACTOR Future<std::vector<BulkDumpManifest>> extractBulkDumpJobManifests(std::string localJobManifestFilePath,
+                                                                        KeyRange range,
+                                                                        std::string localFolder,
+                                                                        BulkDumpTransportMethod transportMethod,
+                                                                        UID logId);
 
 class ParallelismLimitor {
 public:

@@ -20,7 +20,8 @@
 
 #include "fdbclient/BulkLoading.h"
 
-BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,
+BulkLoadState newBulkLoadTaskLocalSST(UID jobID,
+                                      KeyRange range,
                                       std::string folder,
                                       std::string dataFile,
                                       std::string bytesSampleFile) {
@@ -32,5 +33,6 @@ BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,
 	                     BulkLoadInjectMethod::File,
 	                     folder,
 	                     dataFiles,
-	                     bytesSampleFile);
+	                     bytesSampleFile,
+	                     jobID);
 }

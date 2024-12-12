@@ -535,6 +535,11 @@ extern const KeyRef bulkDumpPrefix;
 const Value bulkDumpStateValue(const BulkDumpState& bulkDumpState);
 BulkDumpState decodeBulkDumpState(const ValueRef& value);
 
+extern const KeyRangeRef bulkDumpRestoreKeys;
+extern const KeyRef bulkDumpRestorePrefix;
+const Value bulkDumpRestoreValue(const BulkDumpRestoreState& bulkDumpRestoreState);
+BulkDumpRestoreState decodeBulkDumpRestoreState(const ValueRef& value);
+
 extern const std::string rangeLockNameForBulkLoad;
 extern const KeyRangeRef rangeLockKeys;
 extern const KeyRef rangeLockPrefix;

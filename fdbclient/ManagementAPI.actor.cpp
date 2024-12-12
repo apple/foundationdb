@@ -3215,6 +3215,91 @@ ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToR
 	return completeTaskCount;
 }
 
+ACTOR Future<Optional<BulkDumpRestoreState>> getOngoingBulkDumpRestoreJob(Database cx) {
+	state RangeResult rangeResult;
+	state Transaction tr(cx);
+	loop {
+		try {
+			// At most one job at a time, so looking at the first returned range is sufficient
+			wait(store(rangeResult,
+			           krmGetRanges(&tr,
+			                        bulkDumpRestorePrefix,
+			                        normalKeys,
+			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+			for (int i = 0; i < rangeResult.size() - 1; i++) {
+				if (rangeResult[i].value.empty()) {
+					continue;
+				}
+				BulkDumpRestoreState job = decodeBulkDumpRestoreState(rangeResult[i].value);
+				KeyRange jobRange = job.getRange();
+				ASSERT(!jobRange.empty() && jobRange.begin == rangeResult[i].key &&
+				       jobRange.end == rangeResult[i + 1].key);
+				return job;
+			}
+			return Optional<BulkDumpRestoreState>();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<bool> isBulkDumpRestoreAlive(Transaction* tr, Optional<UID> jobId = Optional<UID>()) {
+	state RangeResult rangeResult;
+	// At most one job at a time, so looking at the first returned range is sufficient
+	wait(store(rangeResult,
+	           krmGetRanges(tr,
+	                        bulkDumpRestorePrefix,
+	                        normalKeys,
+	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+	for (int i = 0; i < rangeResult.size() - 1; i++) {
+		if (rangeResult[i].value.empty()) {
+			continue;
+		}
+		BulkDumpRestoreState job = decodeBulkDumpRestoreState(rangeResult[i].value);
+		KeyRange jobRange = job.getRange();
+		ASSERT(!jobRange.empty() && jobRange.begin == rangeResult[i].key && jobRange.end == rangeResult[i + 1].key);
+		if (jobId.present() && job.getJobId() != jobId.get()) {
+			continue;
+		}
+		return true;
+	}
+	return false;
+}
+
+ACTOR Future<Void> submitBulkDumpRestore(Database cx, BulkDumpRestoreState jobState) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			bool existAny = wait(isBulkDumpRestoreAlive(&tr));
+			if (existAny) {
+				return Void(); // early exit
+			}
+			wait(krmSetRange(&tr, bulkDumpRestorePrefix, jobState.getRange(), bulkDumpRestoreValue(jobState)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> clearBulkDumpRestore(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.clear(bulkDumpRestoreKeys);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
 // Persist a new owner if input uniqueId is not existing; Update description if input uniqueId exists
 ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description) {
 	if (uniqueId.empty() || description.empty()) {

@@ -108,7 +108,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		std::string remoteRoot = tokens[4].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		state BulkDumpState bulkDumpJob = newBulkDumpTaskLocalSST(range, remoteRoot);
+		state BulkDumpState bulkDumpJob = newBulkDumpJobLocalSST(range, remoteRoot);
 		wait(submitBulkDumpJob(cx, bulkDumpJob));
 		return bulkDumpJob.getJobId();
 

@@ -24,6 +24,7 @@
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
@@ -62,6 +63,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static const std::string ddServerBulkDumpFolder = "ddBulkDumpFiles";
+static const std::string ddServerBulkDumpRestoreFolder = "ddBulkDumpRestoreFiles";
 
 DataMoveType getDataMoveTypeFromDataMoveId(const UID& dataMoveId) {
 	bool assigned, emptyRange;
@@ -432,8 +434,10 @@ public:
 	bool bulkDumpEnabled = false;
 	KeyRangeActorMap ongoingBulkDumpActors;
 	ParallelismLimitor bulkDumpParallelismLimitor;
+	ActorCollection bulkDumpRestoreActors;
 	std::string folder;
 	std::string bulkDumpFolder;
+	std::string bulkDumpRestoreFolder;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db,
 	                UID id,
@@ -448,9 +452,10 @@ public:
 	    auditStorageReplicaLaunchingLock(1), auditStorageLocationMetadataLaunchingLock(1),
 	    auditStorageSsShardLaunchingLock(1), auditStorageInitStarted(false), bulkLoadActors(false),
 	    bulkLoadEnabled(false), bulkDumpEnabled(false),
-	    bulkDumpParallelismLimitor(SERVER_KNOBS->DD_BULKDUMP_PARALLELISM), folder(folder) {
+	    bulkDumpParallelismLimitor(SERVER_KNOBS->DD_BULKDUMP_PARALLELISM), bulkDumpRestoreActors(true), folder(folder) {
 		if (!folder.empty()) {
 			bulkDumpFolder = abspath(joinPath(folder, ddServerBulkDumpFolder));
+			bulkDumpRestoreFolder = abspath(joinPath(folder, ddServerBulkDumpRestoreFolder));
 			// TODO(BulkDump): clear this folder in the presence of crash
 		}
 	}
@@ -1341,7 +1346,7 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 	loop {
 		try {
 			self->bulkLoadActors.add(bulkLoadTaskScheduler(self));
-			wait(self->bulkLoadActors.getResult());
+			wait(self->bulkLoadActors.getResult()); // TODO(BulkLoad): fix
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
@@ -1640,6 +1645,81 @@ ACTOR Future<Void> bulkDumpingCore(Reference<DataDistributor> self, Future<Void>
 	}
 }
 
+ACTOR Future<Void> doBulkDumpRestoreTask(Reference<DataDistributor> self, BulkDumpRestoreState restoreTask) {
+	BulkLoadState bulkLoadTask(restoreTask.getRange(),
+	                           BulkLoadType::SST,
+	                           restoreTask.getTransportMethod() ==
+	                                   BulkDumpTransportMethod::CP // TODO(BulkDump): support S3
+	                               ? BulkLoadTransportMethod::CP
+	                               : BulkLoadTransportMethod::Invalid,
+	                           BulkLoadInjectMethod::File,
+	                           restoreTask.getRemoteRoot(),
+	                           { restoreTask.getDataFilePath() },
+	                           restoreTask.getBytesSampleFilePath(),
+	                           restoreTask.getJobId());
+	TraceEvent(SevInfo, "DDDoBulkDumpRestoreTask")
+	    .setMaxEventLength(-1)
+	    .setMaxFieldLength(-1)
+	    .detail("Task", bulkLoadTask.toString())
+	    .detail("RestoreTask", restoreTask.toString());
+	// Persist bulkload metadata
+	// Monitor the bulkload completion and acknowledge bulkload tasks
+	return Void();
+}
+
+ACTOR Future<Void> bulkDumpingRestoreJobDispatch(Reference<DataDistributor> self, BulkDumpRestoreState job) {
+	TraceEvent("DDBulkDumpingRestoreJobScheduler", self->ddId)
+	    .detail("Folder", self->folder)
+	    .detail("BulkDumpRestoreFolder", self->bulkDumpRestoreFolder)
+	    .detail("Job", job.toString());
+	state UID jobId = job.getJobId();
+	state std::string remoteRoot = job.getRemoteRoot();
+	state BulkDumpTransportMethod transportMethod = job.getTransportMethod();
+	state KeyRange range = job.getRange();
+	state std::string localFolder = getBulkDumpJobRoot(self->bulkDumpRestoreFolder, jobId);
+	std::string remoteFolder = getBulkDumpJobRoot(remoteRoot, jobId);
+	std::string jobManifestFileName = getJobManifestFileName(jobId);
+	state std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
+	std::string remoteJobManifestFilePath = joinPath(remoteFolder, jobManifestFileName);
+	// TODO(BulkDump): check if the local path has the file and the file is complete
+	if (!directoryExists(abspath(localFolder))) {
+		ASSERT(platform::createDirectory(abspath(localFolder)));
+	}
+	if (!fileExists(abspath(localJobManifestFilePath))) {
+		// TODO(BulkDump): check if the file complete
+		wait(downloadBulkDumpJobManifestFile(
+		    transportMethod, localJobManifestFilePath, remoteJobManifestFilePath, self->ddId));
+	}
+	state std::vector<BulkDumpManifest> manifests =
+	    wait(extractBulkDumpJobManifests(localJobManifestFilePath, range, localFolder, transportMethod, self->ddId));
+	state size_t i = 0;
+	for (; i < manifests.size(); i++) {
+		BulkDumpRestoreState restoreTask = job.getTaskToTrigger(manifests[i]);
+		self->bulkDumpRestoreActors.add(doBulkDumpRestoreTask(self, restoreTask));
+		// TODO(BulkDump): limit parallelism
+	}
+	wait(self->bulkDumpRestoreActors.getResult());
+	return Void();
+}
+
+ACTOR Future<Void> bulkDumpingRestoreCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
+	wait(readyToStart);
+	state Database cx = self->txnProcessor->context();
+	loop {
+		try {
+			Optional<BulkDumpRestoreState> job = wait(getOngoingBulkDumpRestoreJob(cx));
+			if (job.present()) {
+				wait(bulkDumpingRestoreJobDispatch(self, job.get()));
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+		}
+		wait(delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC));
+	}
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -1889,8 +1969,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				if (self->configuration.usableRegions > 1) {
 					actors.push_back(
 					    bulkDumpingCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+					actors.push_back(
+					    bulkDumpingRestoreCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
 				} else {
 					actors.push_back(bulkDumpingCore(self, self->initialized.getFuture()));
+					actors.push_back(bulkDumpingRestoreCore(self, self->initialized.getFuture()));
 				}
 			}
 
