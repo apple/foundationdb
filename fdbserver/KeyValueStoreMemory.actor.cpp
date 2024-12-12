@@ -30,6 +30,7 @@
 #include "fdbserver/IKeyValueContainer.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/RadixTree.h"
+#include "fdbserver/TransactionStoreMutationTracking.h"
 #include "flow/ActorCollection.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
@@ -533,7 +534,9 @@ private:
 			log->push(headerRefStr);
 			log->push(cipherText);
 		}
-		return log->push("\x01"_sr); // Changes here should be reflected in OP_DISK_OVERHEAD
+		IDiskQueue::location loc = log->push("\x01"_sr); // Changes here should be reflected in OP_DISK_OVERHEAD
+		DEBUG_TRANSACTION_STATE_STORE("LogOpTransactionStoreMutation", loc, v1, id);
+		return loc;
 	}
 
 	// In case the op data is not encrypted, simply read the operands and the zero fill flag.
@@ -672,6 +675,8 @@ private:
 					if (!isZeroFilled) {
 						StringRef p1 = data.substr(0, h.len1);
 						StringRef p2 = data.substr(h.len1, h.len2);
+
+						DEBUG_TRANSACTION_STATE_STORE("RecoverTransactionStoreMutation", self->log->getNextReadLocation(), p1, self->id);
 
 						if (h.op == OpSnapshotItem || h.op == OpSnapshotItemDelta) { // snapshot data item
 							/*if (p1 < uncommittedNextKey) {
