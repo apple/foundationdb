@@ -518,9 +518,12 @@ public:
 	int expectedSize() const { return size(); }
 
 	int compare(StringRef const& other) const {
-		auto minSize = static_cast<int>(std::min(size(), other.size()));
+		int minSize = static_cast<int>(std::min(size(), other.size()));
 		if (minSize != 0) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overread"
 			int c = memcmp(begin(), other.begin(), minSize);
+#pragma GCC diagnostic pop
 			if (c != 0)
 				return c;
 		}
