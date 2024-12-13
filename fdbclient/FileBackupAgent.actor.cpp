@@ -5460,7 +5460,14 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// do we need this files.results.size() == 0 at all?
 		// if (files.results.size() == 0 && beginVersion >= restoreVersion) {
 		// fmt::print(stderr, "CheckBegin and restore, begin={}, restore={}, applyLag={}\n", beginVersion, restoreVersion, applyLag);
-		if (beginVersion >= restoreVersion) {
+		if (beginVersion > restoreVersion) {
+			TraceEvent("FlowGuruDispatchTaskFuncFinish")
+				.detail("LogFiles", printFiles(logFiles.results))
+				.detail("RnageFiles", printFiles(rangeFiles.results))
+				.detail("Begin", beginVersion)
+				.detail("End", endVersion)
+				.detail("Lag", applyLag)
+				.log();
 			// fmt::print(stderr, "Reaching end, beginVersion={}, restoreVersion={}, ApplyLag={}\n", beginVersion, restoreVersion, applyLag);
 			if (applyLag == 0) {
 				// i am the last batch
