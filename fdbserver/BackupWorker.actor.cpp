@@ -686,10 +686,10 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	// the first byte is not 0xFF (should always be 0x00).
 	BinaryWriter wr(Unversioned());
 	wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) << bigEndian32(mutation.size());
-	TraceEvent("FlowGuruAddMutation")
-		.detail("Version",  message.version.version)
-		.detail("SubVersion", message.version.sub)
-		.log();
+	// TraceEvent("FlowGuruAddMutation")
+	// 	.detail("Version",  message.version.version)
+	// 	.detail("SubVersion", message.version.sub)
+	// 	.log();
 	state Standalone<StringRef> header = wr.toValue();
 
 	// Start a new block if needed
@@ -727,13 +727,13 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 
 	wait(logFile->append((void*)header.begin(), header.size()));
 	wait(logFile->append(mutation.begin(), mutation.size()));
-	TraceEvent("FlowGuruAddMutationFinish")
-		.detail("Version",  message.version.version)
-		.detail("SubVersion", message.version.sub)
-		.detail("HeaderSize", header.size())
-		.detail("Filename", logFile->getFileName())
-		.detail("Size", mutation.size())
-		.log();
+	// TraceEvent("FlowGuruAddMutationFinish")
+	// 	.detail("Version",  message.version.version)
+	// 	.detail("SubVersion", message.version.sub)
+	// 	.detail("HeaderSize", header.size())
+	// 	.detail("Filename", logFile->getFileName())
+	// 	.detail("Size", mutation.size())
+	// 	.log();
 	return Void();
 }
 
