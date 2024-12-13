@@ -151,6 +151,9 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatab
                                                                 bool waitForAllExcluded) {
 	state std::set<NetworkAddress> inProgressExclusion;
 	state Reference<ITransaction> tr = db->createTransaction();
+	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 	loop {
 		inProgressExclusion.clear();
 		try {
