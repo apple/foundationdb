@@ -904,7 +904,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 						.detail("Param2", mutation.param2)
 						.detail("Num2", testKeyToDouble(mutation.param2))
 						.log();
-					req.transaction.encryptedMutations.push_back_deep(req.arena,
+					// req.transaction.encryptedMutations.push_back_deep(req.arena,
 					                                                  curReq.transaction.encryptedMutations[i]);
 				}
 				mutationSize += curBatchMutationSize;

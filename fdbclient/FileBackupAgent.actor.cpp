@@ -802,17 +802,17 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			vm.version = version;
 			vm.subsequence = subsequence;
 			vm.mutation = mutation;
-			// TraceEvent("FlowGuruRestoreMutation")
-			// 	.detail("Version", version)
-			// 	.detail("Sub", subsequence)
-			// 	.detail("Offset", self->bufferOffset)
-			// 	.detail("Files", printFiles(self->files))
-			// 	.detail("Mutation", mutation.toString())
-			// 	.detail("Param1", mutation.param1)
-			// 	.detail("Num1", testKeyToDouble(mutation.param1))
-			// 	.detail("Param2", mutation.param2)
-			// 	.detail("Num2", testKeyToDouble(mutation.param2))
-			// 	.log();
+			TraceEvent("FlowGuruRestoreMutation")
+				.detail("Version", version)
+				.detail("Sub", subsequence)
+				.detail("Offset", self->bufferOffset)
+				.detail("Files", printFiles(self->files))
+				.detail("Mutation", mutation.toString())
+				.detail("Param1", mutation.param1)
+				.detail("Num1", testKeyToDouble(mutation.param1))
+				.detail("Param2", mutation.param2)
+				.detail("Num2", testKeyToDouble(mutation.param2))
+				.log();
 			mutations.push_back_deep(mutations.arena(), vm);
 			// Move the bufferOffset to include this mutation
 			self->bufferOffset += mutationTotalSize;
@@ -5085,7 +5085,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state int versionRestored = 0;
 
 		// TODO: set this to false
-		// now it stuck here
+		state bool first = true;
 		while (atLeastOneIteratorHasNext) {
 			atLeastOneIteratorHasNext = false;
 			minVersion = std::numeric_limits<int64_t>::max();
@@ -5134,11 +5134,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				if (minVersion < begin) {
 					// skip generating mutations, because this is not within desired range
 					// this is already handled by the previous taskfunc
-					TraceEvent("FlowGuruFindEarlierVersion")
-						.detail("BeginVersion", begin)
-						.detail("EndVersion", end)
-						.detail("MinVersion", minVersion)
-						.log();
+					
 					continue;
 				} else if (minVersion >= end) {
 					// all valid data has been consumed
@@ -5149,6 +5145,15 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 						.log();
 					break;
 				}
+				if (first) {
+					first = false;
+					TraceEvent("FlowGuruFirstValidVersion")
+						.detail("BeginVersion", begin)
+						.detail("EndVersion", end)
+						.detail("MinVersion", minVersion)
+						.log();
+				}
+				
 				// transform from new format to old format(param1, param2)
 				// in the current implementation, each version will trigger a mutation
 				// if each version data is too small, we might want to combine multiple versions
@@ -5227,11 +5232,11 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			// fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
 			mutationsSingleVersion.clear();
 		}
-		// TraceEvent("FlowGuruQuitLoop")
-		// 	.detail("Begin", begin)
-		// 	.detail("End", end)
-		// 	.detail("VersionRestored", versionRestored)
-		// 	.log();
+		TraceEvent("FlowGuruQuitLoop")
+			.detail("Begin", begin)
+			.detail("End", end)
+			.detail("VersionRestored", versionRestored)
+			.log();
 		// fmt::print(stderr, "QuitLoop: begin={}, end={}, versionRestored={}\n", begin, end, versionRestored);
 		return Void();
 	}
@@ -5437,11 +5442,11 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			// the getRange might get out-of-bound range file because log files need them to work
 			if (f.version >= beginVersion && f.version < endVersion) {
 				ranges.push_back(f);
-				// TraceEvent("FlowGuruRangeFile")
-				// 		.detail("Begin", beginVersion)
-				// 		.detail("End", endVersion)
-				// 		.detail("File", f.fileName)
-				// 		.log();
+				TraceEvent("FlowGuruRangeFile")
+						.detail("Begin", beginVersion)
+						.detail("End", endVersion)
+						.detail("File", f.fileName)
+						.log();
 			}
 		}
 		// allPartsDone will be set once all block tasks in the current batch are finished.

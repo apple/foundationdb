@@ -203,7 +203,7 @@ struct ResolutionRequestBuilder {
 		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
 
 		bool isTXNStateTransaction = false;
-		TraceEvent("AddTransaction", self->dbgid).detail("TenantMode", (int)self->getTenantMode()).log();
+		// TraceEvent("AddTransaction", self->dbgid).detail("TenantMode", (int)self->getTenantMode()).log();
 		bool needParseTenantId = !trRequest.tenantInfo.hasTenant() && self->getTenantMode() == TenantMode::REQUIRED;
 		VectorRef<int64_t> tenantIds;
 		for (auto& m : trIn.mutations) {
