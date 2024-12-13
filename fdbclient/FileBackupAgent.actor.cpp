@@ -4890,28 +4890,29 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	// TraceEvent("FlowGuruGenerateNewVersion")
 	// 	.detail("CommitVersion", commitVersion)
 	// 	.log();
-	for (auto& vec : newFormatMutations) {
+	for (auto& eachTagMutations : newFormatMutations) {
 		// fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
-		for (auto& p : vec) {
-			uint32_t sub = p.subsequence;
-			MutationRef mutation = p.mutation;
-			// TraceEvent("FlowGuruAddEachSubVersion")
-			// 	.detail("CommitVersion", commitVersion)
-			// 	.detail("Sub", sub)
-			// 	.detail("Mutation", mutation.toString())
-			// 	.detail("Param1", mutation.param1)
-			// 	.detail("Num1", testKeyToDouble(mutation.param1))
-			// 	.detail("Param2", mutation.param2)
-			// 	.detail("Num2", testKeyToDouble(mutation.param2))
-			// 	.log();
+		for (auto& vm : eachTagMutations) {
+			uint32_t sub = vm.subsequence;
+			MutationRef mutation = vm.mutation;
+			TraceEvent("FlowGuruAddEachSubVersion")
+				.detail("CommitVersion", commitVersion)
+				.detail("Version", vm.version)
+				.detail("Sub", sub)
+				.detail("Mutation", mutation.toString())
+				.detail("Param1", mutation.param1)
+				.detail("Num1", testKeyToDouble(mutation.param1))
+				.detail("Param2", mutation.param2)
+				.detail("Num2", testKeyToDouble(mutation.param2))
+				.log();
 			// fmt::print(stderr, "Transform inner mutationList[{}], mutation[{}], subsequence={}\n", i, j, sub);
 			// fmt::print(stderr, "before transform each mutation\n");
-			// fmt::print(stderr, "Transform each mutation, mutation={}\n", p.mutation.toString());
+			// fmt::print(stderr, "Transform each mutation, mutation={}\n", vm.mutation.toString());
 			// transform the mutation format and add to each subversion
 			// where is mutation written in new format
-			Standalone<StringRef> mutationOldFormat = transformMutationToOldFormat(p.mutation);
+			Standalone<StringRef> mutationOldFormat = transformMutationToOldFormat(vm.mutation);
 			mutationsBySub[sub].push_back(mutationOldFormat);
-			tmpMap[sub].push_back(p.mutation);
+			tmpMap[sub].push_back(vm.mutation);
 			totalBytes += mutationOldFormat.size();
 		}
 	}
