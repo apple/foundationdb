@@ -189,7 +189,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						Optional<Value> v3 = wait(tr.get(self->key(r3)));
 						if (!v3.present())
 							self->badRead("KeyR3", r3, tr);
-						int r4 = self->fromValue(v3.get());
+						state int r4 = self->fromValue(v3.get());
 
 						tr.clear(self->key(r)); //< Shouldn't have an effect, but will break with wrong ordering
 						tr.set(self->key(r), self->value(r3));
@@ -200,7 +200,12 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						// TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString()).log();
 
 						wait(tr.commit());
-						TraceEvent("CyclicTestCommit").log();
+						TraceEvent("CyclicTestCommit")
+							.detail("R1", r)
+							.detail("R2", r2)
+							.detail("R3", r3)
+							.detail("R4", r4)
+							.log();
 						break;
 					} catch (Error& e) {
 						TraceEvent("CyclicTestError").detail("ErrorCode", e.code()).log();

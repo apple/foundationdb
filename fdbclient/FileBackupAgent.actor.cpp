@@ -674,6 +674,296 @@ void TwoBuffers::fillBufferIfAbsent(int index) {
 	return;
 }
 
+
+bool endOfBlock(char* start, int offset) {
+	unsigned char paddingChar = '\xff';
+	return (unsigned char)*(start + offset) == paddingChar;
+}
+
+class PartitionedLogIteratorSimple : public PartitionedLogIterator {
+public:
+	const int BATCH_READ_BLOCK_COUNT = 1;
+	const int BLOCK_SIZE = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	const int mutationHeaderBytes = sizeof(int64_t) + sizeof(int32_t) + sizeof(int32_t);
+	Reference<IBackupContainer> bc;
+	size_t bufferCapacity;
+	int tag;
+	std::vector<RestoreConfig::RestoreFile> files;
+	bool hasMoreData; // Flag indicating if more data is available
+	size_t bufferOffset; // Current read offset
+	int bufferSize;
+	int fileOffset;
+	int fileIndex;
+	char * buffer;
+
+	PartitionedLogIteratorSimple(Reference<IBackupContainer> _bc,
+	                                 int _tag,
+	                                 std::vector<RestoreConfig::RestoreFile> _files);
+
+	~PartitionedLogIteratorSimple(); 
+	bool hasNext();
+	Future<Void> loadNextBlock();
+	ACTOR static Future<Void> loadNextBlock(Reference<PartitionedLogIteratorSimple> self);
+	void removeBlockHeader();
+
+	Standalone<VectorRef<VersionedMutation>> consumeData(Version firstVersion);
+
+	// find the next version without advanding the iterator
+	Future<Version> peekNextVersion();
+	ACTOR static Future<Version> peekNextVersion(Reference<PartitionedLogIteratorSimple> iterator);
+
+	// get all the mutations of next version and advance the iterator
+	// this might issue multiple consumeData() if the data of a version cross buffer boundary
+	Future<Standalone<VectorRef<VersionedMutation>>> getNext();
+	ACTOR static Future<Standalone<VectorRef<VersionedMutation>>> getNext(
+	    Reference<PartitionedLogIteratorSimple> iterator);
+};
+
+PartitionedLogIteratorSimple::PartitionedLogIteratorSimple(Reference<IBackupContainer> _bc,
+                                                                   int _tag,
+                                                                   std::vector<RestoreConfig::RestoreFile> _files)
+  : bc(_bc), tag(_tag), files(std::move(_files)), bufferOffset(0) {
+	bufferCapacity = BATCH_READ_BLOCK_COUNT * BLOCK_SIZE;
+	buffer = new char[bufferCapacity];
+	fileOffset = 0;
+	fileIndex = 0;
+	bufferSize = 0;
+}
+
+PartitionedLogIteratorSimple::~PartitionedLogIteratorSimple() {
+	delete [] buffer;
+}
+
+bool PartitionedLogIteratorSimple::hasNext() {
+	if (bufferOffset < bufferSize) {
+		return true;
+	}
+	while (fileIndex < files.size() && fileOffset >= files[fileIndex].fileSize) {
+		fileOffset = 0;
+		fileIndex++;
+	}
+	return fileIndex < files.size() && fileOffset < files[fileIndex].fileSize;
+}
+
+void PartitionedLogIteratorSimple::removeBlockHeader() {
+	// wait(logFile->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION)));
+	if (bufferOffset % BLOCK_SIZE == 0) {
+		bufferOffset += sizeof(uint32_t);
+	}
+}
+
+Standalone<VectorRef<VersionedMutation>> PartitionedLogIteratorSimple::consumeData(Version firstVersion) {
+	state Standalone<VectorRef<VersionedMutation>> mutations = Standalone<VectorRef<VersionedMutation>>();
+	// fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
+	char* start = self->buffer;
+	bool foundNewVersion = false;
+	// TraceEvent("FlowGuruConsumeData")
+	// 	.detail("FirstVersion", firstVersion)
+	// 	.detail("Offset", self->bufferOffset)
+	// 	.detail("Size", size)
+	// 	.log();
+	while (self->bufferOffset < self->bufferSize) {
+		while (self->bufferOffset < self->bufferSize && !endOfBlock(start, self->bufferOffset)) {
+			// for each block
+			self->removeBlockHeader();
+
+			// encoding is:
+			// wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) << bigEndian32(mutation.size());
+			Version version;
+			std::memcpy(&version, start + self->bufferOffset, sizeof(Version));
+			version = bigEndian64(version);
+			if (version != firstVersion) {
+				foundNewVersion = true;
+				// TraceEvent("FlowGuruBreakVersion")
+				// 	.detail("CurrentVersion", version)
+				// 	.detail("FirstVersion", firstVersion)
+				// 	.detail("Offset", self->bufferOffset)
+				// 	.log();
+				break; // Different version, stop here
+			}
+
+			int32_t subsequence;
+			std::memcpy(&subsequence, start + self->bufferOffset + sizeof(Version), sizeof(int32_t));
+			subsequence = bigEndian32(subsequence);
+
+			int32_t mutationSize;
+			std::memcpy(
+			    &mutationSize, start + self->bufferOffset + sizeof(Version) + sizeof(int32_t), sizeof(int32_t));
+			mutationSize = bigEndian32(mutationSize);
+
+			// assumption: the entire mutation is within the buffer
+			size_t mutationTotalSize = self->mutationHeaderBytes + mutationSize;
+			ASSERT(self->bufferOffset + mutationTotalSize <= self->bufferSize);
+
+			// this is reported wrong
+			// fmt::print(stderr, "ConsumeData:: size={}\n", mutationSize);
+			Standalone<StringRef> mutationData = makeString(mutationSize);
+			std::memcpy(
+			    mutateString(mutationData), start + self->bufferOffset + self->mutationHeaderBytes, mutationSize);
+			// BinaryWriter bw(Unversioned());
+			// // todo: transform from stringref to mutationref here
+			// bw.serializeBytes(mutationData);
+			// GuruTODO: make sure this mutationRef deserialize is good
+			ArenaReader reader(mutationData.arena(), mutationData, AssumeVersion(g_network->protocolVersion()));
+			MutationRef mutation;
+			reader >> mutation;
+			// fmt::print(stderr, "MutationDataSize:: len1={}, len2={} \n", mutation.param1.size(), mutation.param2.size());
+
+			VersionedMutation vm;
+			vm.version = version;
+			vm.subsequence = subsequence;
+			vm.mutation = mutation;
+			// TraceEvent("FlowGuruRestoreMutation")
+			// 	.detail("Version", version)
+			// 	.detail("Sub", subsequence)
+			// 	.detail("Offset", self->bufferOffset)
+			// 	.detail("Size", mutationTotalSize)
+			// 	.detail("Files", printFiles(self->files))
+			// 	.detail("Mutation", mutation.toString())
+			// 	.detail("Param1", mutation.param1)
+			// 	.detail("Num1", testKeyToDouble(mutation.param1))
+			// 	.detail("Param2", mutation.param2)
+			// 	.detail("Num2", testKeyToDouble(mutation.param2))
+			// 	.log();
+			mutations.push_back_deep(mutations.arena(), vm);
+			// Move the bufferOffset to include this mutation
+			self->bufferOffset += mutationTotalSize;
+			// fmt::print(stderr, "ConsumeData NewOffset={}, size={}, end={}\n", self->bufferOffset, size, endOfBlock(start, self->bufferOffset));
+		}
+		// need to see if this is printed
+		// fmt::print(stderr, "ConsumeData: Finish while loop NewOffset={}, size={}, end={}\n", self->bufferOffset, size, endOfBlock(start, self->bufferOffset));
+
+		if (self->bufferOffset < self->bufferSize && endOfBlock(start, self->bufferOffset)) {
+			// there are paddings	
+			int remain = self->BLOCK_SIZE - (self->bufferOffset % self->BLOCK_SIZE);
+			self->bufferOffset += remain;
+			// fmt::print(stderr, "SkipPadding newOffset={}\n", self->bufferOffset);
+		}
+		if (foundNewVersion) {
+			break;
+		}
+	}
+
+	// TraceEvent("FlowGuruConsumeDataFinish")
+	// 	.detail("FirstVersion", firstVersion)
+	// 	.detail("Offset", self->bufferOffset)
+	// 	.detail("Size", self->bufferSize)
+	// 	.log();
+	return mutations;
+}
+
+
+Future<Void> PartitionedLogIteratorSimple::loadNextBlock() {
+	return loadNextBlock(Reference<PartitionedLogIteratorSimple>::addRef(this));
+}
+
+ACTOR Future<Void> PartitionedLogIteratorSimple::loadNextBlock(Reference<PartitionedLogIteratorSimple> self) {
+	if (!self->hasNext()) {
+		return Void();
+	}
+	if (self->bufferOffset < self->bufferSize) {
+		// do nothing
+		return Void();
+	}
+	
+	state Reference<IAsyncFile> asyncFile;
+	// fmt::print(stderr,
+	//            "readNextBlock::beforeReadFile, name={}, size={}\n",
+	//            self->files[self->currentFileIndex].fileName,
+	//            self->files[self->currentFileIndex].fileSize);
+	Reference<IAsyncFile> asyncFileTmp = wait(self->bc->readFile(self->files[self->fileIndex].fileName));
+	asyncFile = asyncFileTmp;
+	state size_t fileSize = self->files[self->fileIndex].fileSize;
+	size_t remaining = fileSize - self->fileOffset;
+	state size_t bytesToRead = std::min(self->bufferCapacity, remaining);
+	// fmt::print(stderr,
+	//            "readNextBlock::beforeActualRead, name={}, position={}, size={}, bytesToRead={}\n",
+	//            self->files[self->fileIndex].fileName,
+	// 		   self->fileOffset,
+	//            fileSize,
+	//            bytesToRead);
+	state int bytesRead =
+	    wait(asyncFile->read(static_cast<void*>(self->buffer), bytesToRead, self->fileOffset));
+	// fmt::print(stderr,
+	//            "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
+	//            self->files[self->fileIndex].fileName,
+	//            bytesRead);
+	// fmt::print(stderr,
+	//            "readNextBlock::Index={}", self->fileIndex);
+	if (bytesRead != bytesToRead)
+		throw restore_bad_read();
+	self->bufferSize = bytesRead; // Set to actual bytes read
+	// self->bufferOffset[index] = 0; // Reset bufferOffset for the new data
+	self->fileOffset += bytesRead;
+	return Void();
+}
+
+Future<Version> PartitionedLogIteratorSimple::peekNextVersion() {
+	return peekNextVersion(Reference<PartitionedLogIteratorSimple>::addRef(this));
+}
+
+ACTOR Future<Version> PartitionedLogIteratorSimple::peekNextVersion(
+    Reference<PartitionedLogIteratorSimple> self) {
+	// Read the first mutation's version
+	if (!self->hasNext()) {
+		return Version(0);
+	}
+	wait(self->loadNextBlock());
+	self->removeBlockHeader();
+	Version version;
+	std::memcpy(&version, self->buffer + self->bufferOffset, sizeof(Version));
+	version = bigEndian64(version);
+	return version;
+}
+
+ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorSimple::getNext(
+    Reference<PartitionedLogIteratorSimple> self) {
+	state Standalone<VectorRef<VersionedMutation>> mutations;
+	if (!self->hasNext()) {
+		TraceEvent(SevWarn, "SimpleIteratorExhausted").log();
+		return mutations;
+	}
+	state Version firstVersion = wait(self->peekNextVersion());
+	// TraceEvent("FlowGuruGetNextFirst")
+	// 	.detail("Tag", self->tag)
+	// 	.detail("FirstVersion", firstVersion)
+	// 	.detail("Offset", self->bufferOffset)
+	// 	.log();
+	Standalone<VectorRef<VersionedMutation>> firstBatch = self->consumeData(firstVersion);
+	mutations = firstBatch;
+	// If the current buffer is fully consumed, then we need to check the next buffer in case
+	// the version is sliced across this buffer boundary
+	// fmt::print(stderr, "GetNextBeforeWhile\n");
+
+	while (self->bufferOffset >= self->bufferSize) {
+		// fmt::print(stderr, "getNext: offset={}, size={}\n", self->bufferOffset, self->twobuffer->getBufferSize());
+		// data for one version cannot exceed single buffer size
+		// if hitting the end of a batch, check the next batch in case version is
+		if (self->hasNext()) {
+			// now this is run for each block, but it is not necessary if it is the last block of a file
+			// cannot check hasMoreData here because other buffer might have the last piece
+			// TraceEvent("FlowGuruGetNextFollow")
+			// 	.detail("FirstVersion", firstVersion)
+			// 	.detail("Offset", self->bufferOffset)
+			// 	.log();
+			wait(self->loadNextBlock());
+			Standalone<VectorRef<VersionedMutation>> batch = self->consumeData(firstVersion);
+			for (const VersionedMutation& vm : batch) {
+				mutations.push_back_deep(mutations.arena(), vm);
+			}
+		} else {
+			break;
+		}
+	}
+	return mutations;
+}
+
+Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorSimple::getNext() {
+	// fmt::print(stderr, "getNext, k={}, offset={}\n", tag, bufferOffset);
+	return getNext(Reference<PartitionedLogIteratorSimple>::addRef(this));
+}
+
+
 class PartitionedLogIteratorTwoBuffers : public PartitionedLogIterator {
 private:
 	Reference<TwoBuffers> twobuffer;
@@ -725,12 +1015,6 @@ public:
 Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffers::consumeData(Version firstVersion) {
 	return consumeData(Reference<PartitionedLogIteratorTwoBuffers>::addRef(this), firstVersion);
 }
-
-bool endOfBlock(char* start, int offset) {
-	unsigned char paddingChar = '\xff';
-	return (unsigned char)*(start + offset) == paddingChar;
-}
-
 
 static double testKeyToDouble(const KeyRef& p) {
 	uint64_t x = 0;
