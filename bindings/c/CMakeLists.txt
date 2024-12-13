@@ -425,8 +425,19 @@ target_link_libraries(cpp_workloads PUBLIC fdb_c)
 target_include_directories(c_workloads PUBLIC ${CMAKE_SOURCE_DIR}/bindings/c)
 
 if(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
-  target_link_options(cpp_workloads PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map,-z,nodelete")
-  target_link_options(c_workloads PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map,-z,nodelete")
+  # Add the -Wl,--undefined-version flag to the linker command to allow
+  # undefined symbols in version scripts. Clang 19 doesn't allow this and would
+  # complain with "symbol not defined" errors.
+  target_link_options(cpp_workloads PRIVATE
+    "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map"
+    "LINKER:-z,nodelete"
+    "LINKER:--undefined-version"
+  )
+  target_link_options(c_workloads PRIVATE
+    "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map"
+    "LINKER:-z,nodelete"
+    "LINKER:--undefined-version"
+  )
 endif()
 
 # Generate shim library in Linux builds

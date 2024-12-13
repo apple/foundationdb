@@ -54,7 +54,6 @@ static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSD
                ROCKSDB_PATCH == FDB_ROCKSDB_PATCH),
               "Unsupported rocksdb version.");
 
-const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
 const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this culoumn family.
 const std::string manifestFilePrefix = "MANIFEST-";
