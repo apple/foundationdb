@@ -702,13 +702,11 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 		wait(logFile->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION)));
 	}
 
-	BinaryReader reader(mutation, AssumeVersion(g_network->protocolVersion()));
-	MutationRef m2;
-	reader >> m2;
-	double d1 = testKeyToDouble(m2.param1);
-	double d2 = testKeyToDouble(m2.param2);
-	// fmt::print(stderr, "FlowGuruAddM2::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m2.toString(), m2.expectedSize(), m2.type, m2.param1, m2.param1.size(), m2.param2, m2.param2.size());
-	// fmt::print(stderr, "FlowGuruAddM2:: key={}, value={} \n", d1, d2);
+	// BinaryReader reader(mutation, AssumeVersion(g_network->protocolVersion()));
+	// MutationRef m2;
+	// reader >> m2;
+	// double d1 = testKeyToDouble(m2.param1);
+	// double d2 = testKeyToDouble(m2.param2);
 	// TraceEvent("FlowGuruAddM2")
 	// 	.detail("Version", message.version.version)
 	// 	.detail("Sub", message.version.sub)
@@ -720,6 +718,8 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	// 	.detail("Param2", m2.param2)
 	// 	.detail("Num2", d2)
 	// 	.log();
+	// fmt::print(stderr, "FlowGuruAddM2::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m2.toString(), m2.expectedSize(), m2.type, m2.param1, m2.param1.size(), m2.param2, m2.param2.size());
+	// fmt::print(stderr, "FlowGuruAddM2:: key={}, value={} \n", d1, d2);
 
 	wait(logFile->append((void*)header.begin(), header.size()));
 	wait(logFile->append(mutation.begin(), mutation.size()));

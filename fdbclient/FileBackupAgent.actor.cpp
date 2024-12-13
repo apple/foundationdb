@@ -635,18 +635,18 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	state size_t fileSize = self->files[self->currentFileIndex].fileSize;
 	size_t remaining = fileSize - self->currentFilePosition;
 	state size_t bytesToRead = std::min(self->bufferCapacity, remaining);
-	fmt::print(stderr,
-	           "readNextBlock::beforeActualRead, name={}, position={}, size={}, bytesToRead={}\n",
-	           self->files[self->currentFileIndex].fileName,
-			   self->currentFilePosition,
-	           fileSize,
-	           bytesToRead);
+	// fmt::print(stderr,
+	//            "readNextBlock::beforeActualRead, name={}, position={}, size={}, bytesToRead={}\n",
+	//            self->files[self->currentFileIndex].fileName,
+	// 		   self->currentFilePosition,
+	//            fileSize,
+	//            bytesToRead);
 	state int bytesRead =
 	    wait(asyncFile->read(static_cast<void*>(self->buffers[index]->data.get()), bytesToRead, self->currentFilePosition));
-	fmt::print(stderr,
-	           "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
-	           self->files[self->currentFileIndex].fileName,
-	           bytesRead);
+	// fmt::print(stderr,
+	//            "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
+	//            self->files[self->currentFileIndex].fileName,
+	//            bytesRead);
 	// fmt::print(stderr,
 	//            "readNextBlock::Index={}", self->currentFileIndex);
 	if (bytesRead != bytesToRead)
@@ -5134,7 +5134,6 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				if (minVersion < begin) {
 					// skip generating mutations, because this is not within desired range
 					// this is already handled by the previous taskfunc
-					
 					continue;
 				} else if (minVersion >= end) {
 					// all valid data has been consumed
@@ -5310,6 +5309,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 	static struct {
 		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> firstVersion() { return __FUNCTION__sr; }
 		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
 	} Params;
 
@@ -5320,6 +5320,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state RestoreConfig restore(task);
 
 		state Version beginVersion = Params.beginVersion().get(task);
+		state Version firstVerison = Params.beginVersion().get(task);
 		state Version endVersion = Params.endVersion().get(task);
 		Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
 		state Reference<IBackupContainer> bc = getBackupContainerWithProxy(_bc);
@@ -5338,7 +5339,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// update the apply mutations end version so the mutations from the
 		// previous batch can be applied.
 		// Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
-		if (beginVersion > 0) {
+		if (beginVersion > firstVerison) {
 			// hfu5 : unblock apply alog to normal key space
 			// if the last file is [80, 100] and the restoreVersion is 90, we should use 90 here
 			// this call an additional call after last file
@@ -5388,26 +5389,26 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// greaterThanOrEqual(end + 1) instead of greaterThan(end)
 		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result in a end+1
 		state Optional<RestoreConfig::RestoreFile> endLogExclude = wait(restore.logFileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({endVersion + 1, "", false })));
-		TraceEvent("FlowGuruGetAllFiles")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("BeginFilePresent", beginLogInclude.present())
-					.detail("EndFilePresent", endLogExclude.present())
-					.log();
-		if (beginLogInclude.present()) {
-			TraceEvent("FlowGuruBeginFile")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("BeginFile", beginLogInclude.get().fileName)
-					.log();
-		}
-		if (endLogExclude.present()) {
-			TraceEvent("FlowGuruEndFile")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("EndFile", endLogExclude.get().fileName)
-					.log();
-		}
+		// TraceEvent("FlowGuruGetAllFiles")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("BeginFilePresent", beginLogInclude.present())
+		// 			.detail("EndFilePresent", endLogExclude.present())
+		// 			.log();
+		// if (beginLogInclude.present()) {
+		// 	TraceEvent("FlowGuruBeginFile")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("BeginFile", beginLogInclude.get().fileName)
+		// 			.log();
+		// }
+		// if (endLogExclude.present()) {
+		// 	TraceEvent("FlowGuruEndFile")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("EndFile", endLogExclude.get().fileName)
+		// 			.log();
+		// }
 		state RestoreConfig::FileSetT::RangeResultType logFiles =
 		    wait(restore.logFileSet().getRange(tr,
 		                                    beginLogInclude,
@@ -5442,11 +5443,11 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			// the getRange might get out-of-bound range file because log files need them to work
 			if (f.version >= beginVersion && f.version < endVersion) {
 				ranges.push_back(f);
-				TraceEvent("FlowGuruRangeFile")
-						.detail("Begin", beginVersion)
-						.detail("End", endVersion)
-						.detail("File", f.fileName)
-						.log();
+				// TraceEvent("FlowGuruRangeFile")
+				// 		.detail("Begin", beginVersion)
+				// 		.detail("End", endVersion)
+				// 		.detail("File", f.fileName)
+				// 		.log();
 			}
 		}
 		// allPartsDone will be set once all block tasks in the current batch are finished.
@@ -5522,7 +5523,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			}
 		}
 		bool is_set = wait(allPartsDone->isSet(tr));
-		fmt::print(stderr, "Before add new task begin={}, end={}, nextEnd={}, isSet={} \n", beginVersion, endVersion, nextEndVersion, is_set);
+		// fmt::print(stderr, "Before add new task begin={}, end={}, nextEnd={}, isSet={} \n", beginVersion, endVersion, nextEndVersion, is_set);
 		// aggregate logs by tag id
 		addTaskFutures.push_back(RestoreLogDataPartitionedTaskFunc::addTask(tr,
 																			taskBucket,
@@ -5533,7 +5534,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 																			endVersion,
 																			TaskCompletionKey::joinWith(allPartsDone)));
 		// even if file exsists, but they are empty, in this case just start the next batch
-		fmt::print(stderr, "After add new task begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
+		// fmt::print(stderr, "After add new task begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
 
 		addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(
 		    tr, taskBucket, task, endVersion, nextEndVersion, TaskCompletionKey::noSignal(), allPartsDone));
@@ -5573,6 +5574,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// Create a config from the parent task and bind it to the new task
 		wait(RestoreConfig(parentTask).toTask(tr, task));
 		Params.beginVersion().set(task, beginVersion);
+		Params.firstVersion().set(task, beginVersion);
 		Params.endVersion().set(task, endVersion);
 
 		if (!waitFor) {
@@ -6408,10 +6410,10 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			fmt::print(stderr,
 			           "FlowGuru Start Initial task, firstVersion={}, begin={}, endVersion={}\n",
 			           firstVersion,
-			           0,
+			           firstVersion,
 			           restoreVersion);
 			Version endVersion = std::min(firstVersion + step, restoreVersion);
-			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, 0, endVersion)));
+			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, firstVersion, endVersion)));
 		} else {
 			wait(success(RestoreDispatchTaskFunc::addTask(
 			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
