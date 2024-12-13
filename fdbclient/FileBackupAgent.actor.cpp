@@ -4942,29 +4942,30 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 	}
 
-	// for (auto& mutationsForSub : tmpMap) {
-	// 	// TraceEvent("FlowGuruPrintNewSubVersion")
-	// 	// 	.detail("CommitVersion", commitVersion)
-	// 	// 	.detail("Sub", mutationsForSub.first)
-	// 	// 	.detail("Size", mutationsForSub.second.size())
-	// 	// 	.log();
-	// 	for (auto& mutation : mutationsForSub.second) {
-	// 		// TraceEvent("FlowGuruPrintBySubVersion")
-	// 		// 	.detail("CommitVersion", commitVersion)
-	// 		// 	.detail("Sub", mutationsForSub.first)
-	// 		// 	.detail("Mutation", mutation.toString())
-	// 		// 	.detail("Param1", mutation.param1)
-	// 		// 	.detail("Num1", testKeyToDouble(mutation.param1))
-	// 		// 	.detail("Param2", mutation.param2)
-	// 		// 	.detail("Num2", testKeyToDouble(mutation.param2))
-	// 		// 	.log();
-	// 	}
-	// 	// TraceEvent("FlowGuruPrintNewSubVersionFinish")
-	// 	// 	.detail("CommitVersion", commitVersion)
-	// 	// 	.detail("Sub", mutationsForSub.first)
-	// 	// 	.detail("Size", mutationsForSub.second.size())
-	// 	// 	.log();
-	// }
+	for (auto& mutationsForSub : tmpMap) {
+		// TraceEvent("FlowGuruPrintNewSubVersion")
+		// 	.detail("CommitVersion", commitVersion)
+		// 	.detail("Sub", mutationsForSub.first)
+		// 	.detail("Size", mutationsForSub.second.size())
+		// 	.log();
+		for (auto& mutation : mutationsForSub.second) {
+			TraceEvent("FlowGuruPrintBySubVersion")
+				.detail("CommitVersion", commitVersion)
+				.detail("Sub", mutationsForSub.first)
+				.detail("Mutation", mutation.toString())
+				.detail("Param1", mutation.param1)
+				.detail("Num1", testKeyToDouble(mutation.param1))
+				.detail("RawNum1", std::round(testKeyToDouble(mutation.param1) * 3000))
+				.detail("Param2", mutation.param2)
+				.detail("Num2", testKeyToDouble(mutation.param2))
+				.log();
+		}
+		// TraceEvent("FlowGuruPrintNewSubVersionFinish")
+		// 	.detail("CommitVersion", commitVersion)
+		// 	.detail("Sub", mutationsForSub.first)
+		// 	.detail("Size", mutationsForSub.second.size())
+		// 	.log();
+	}
 	// the list of param2 needs to have the first 64 bites as 0x0FDB00A200090001
 	BinaryWriter param2Writer(IncludeVersion(ProtocolVersion::withBackupMutations()));
 	param2Writer << totalBytes;
