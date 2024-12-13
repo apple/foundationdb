@@ -5200,12 +5200,12 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 							txBytes += k.expectedSize();
 							txBytes += v.expectedSize();
 							// succeed after retry, but this mutation is never saw from the other side! how?!
-							// TraceEvent("FlowGuruCommitAddedTransaction")
-							// 	.detail("Version", minVersion)
-							// 	.detail("Index", mutationIndex + txnCount)
-							// 	.detail("Key", k.toString())
-							// 	.detail("Value", v.toString())
-							// 	.log();
+							TraceEvent("FlowGuruCommitAddedTransaction")
+								.detail("Version", minVersion)
+								.detail("Index", mutationIndex + txnCount)
+								.detail("Key", k.toString())
+								.detail("Value", v.toString())
+								.log();
 							++txnCount;
 						}
 						wait(tr->commit());
@@ -5320,7 +5320,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state RestoreConfig restore(task);
 
 		state Version beginVersion = Params.beginVersion().get(task);
-		state Version firstVerison = Params.beginVersion().get(task);
+		state Version firstVersion = Params.firstVersion().get(task);
 		state Version endVersion = Params.endVersion().get(task);
 		Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
 		state Reference<IBackupContainer> bc = getBackupContainerWithProxy(_bc);
@@ -5339,7 +5339,13 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// update the apply mutations end version so the mutations from the
 		// previous batch can be applied.
 		// Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
-		if (beginVersion > firstVerison) {
+		TraceEvent("FlowGuruNewDispatch")
+			.detail("Begin", beginVersion)
+			.detail("First", firstVersion)
+			.detail("End", endVersion)
+			.detail("Restore", restoreVersion)
+			.log();
+		if (beginVersion > firstVersion) {
 			// hfu5 : unblock apply alog to normal key space
 			// if the last file is [80, 100] and the restoreVersion is 90, we should use 90 here
 			// this call an additional call after last file
@@ -5363,7 +5369,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		if (applyLag > (BUGGIFY ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 			// Wait a small amount of time and then re-add this same task.
 			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, beginVersion, endVersion)));
+			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, firstVersion, beginVersion, endVersion)));
 
 			TraceEvent("RestorePartitionDispatch")
 			    .detail("RestoreUID", restore.getUid())
@@ -5508,7 +5514,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				// this is only to create a dummy one wait for it to finish
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				wait(success(
-				    RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, beginVersion, endVersion)));
+				    RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, firstVersion, beginVersion, endVersion)));
 
 				TraceEvent("RestorePartitionDispatch")
 				    .detail("RestoreUID", restore.getUid())
@@ -5564,7 +5570,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// fmt::print(stderr, "After add new task begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
 
 		addTaskFutures.push_back(RestoreDispatchPartitionedTaskFunc::addTask(
-		    tr, taskBucket, task, endVersion, nextEndVersion, TaskCompletionKey::noSignal(), allPartsDone));
+		    tr, taskBucket, task, firstVersion, endVersion, nextEndVersion, TaskCompletionKey::noSignal(), allPartsDone));
 
 		wait(waitForAll(addTaskFutures));
 		// fmt::print(stderr, "before wait finish begin={}, end={}, nextEnd={} \n", beginVersion, endVersion, nextEndVersion);
@@ -5587,6 +5593,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 	ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
 	                                 Reference<TaskBucket> taskBucket,
 	                                 Reference<Task> parentTask,
+									 Version firstVersion,
 	                                 Version beginVersion,
 	                                 Version endVersion,
 	                                 TaskCompletionKey completionKey = TaskCompletionKey::noSignal(),
@@ -5600,8 +5607,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 
 		// Create a config from the parent task and bind it to the new task
 		wait(RestoreConfig(parentTask).toTask(tr, task));
+		Params.firstVersion().set(task, firstVersion);
 		Params.beginVersion().set(task, beginVersion);
-		Params.firstVersion().set(task, beginVersion);
 		Params.endVersion().set(task, endVersion);
 
 		if (!waitFor) {
@@ -6440,7 +6447,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			           firstVersion,
 			           restoreVersion);
 			Version endVersion = std::min(firstVersion + step, restoreVersion);
-			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, firstVersion, endVersion)));
+			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(tr, taskBucket, task, firstVersion, firstVersion, endVersion)));
 		} else {
 			wait(success(RestoreDispatchTaskFunc::addTask(
 			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
