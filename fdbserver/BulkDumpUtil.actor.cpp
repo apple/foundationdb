@@ -420,8 +420,18 @@ ACTOR Future<Void> downloadBulkDumpDataBatchManifestFile(BulkDumpTransportMethod
 	return Void();
 }
 
+bool rangeHasOverlapping(const std::vector<KeyRange>& ranges, const KeyRange& inputRange) {
+	for (const auto& range : ranges) {
+		KeyRange overlapping = range & inputRange;
+		if (!overlapping.empty()) {
+			return true;
+		}
+	}
+	return false;
+}
+
 ACTOR Future<std::vector<BulkDumpManifest>> extractBulkDumpJobManifests(std::string localJobManifestFilePath,
-                                                                        KeyRange range,
+                                                                        std::vector<KeyRange> ranges,
                                                                         std::string localFolder,
                                                                         BulkDumpTransportMethod transportMethod,
                                                                         UID logId) {
@@ -439,8 +449,7 @@ ACTOR Future<std::vector<BulkDumpManifest>> extractBulkDumpJobManifests(std::str
 			break;
 		}
 		BulkDumpJobManifestEntry manifestEntry(lines[lineIdx]);
-		KeyRange overlapping = manifestEntry.getRange() & range;
-		if (overlapping.empty()) {
+		if (!rangeHasOverlapping(ranges, manifestEntry.getRange())) {
 			lineIdx = lineIdx + 1;
 			continue;
 		}

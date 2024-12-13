@@ -192,7 +192,7 @@ ACTOR Future<Void> downloadBulkDumpJobManifestFile(BulkDumpTransportMethod trans
 
 // Extract manifests from files
 ACTOR Future<std::vector<BulkDumpManifest>> extractBulkDumpJobManifests(std::string localJobManifestFilePath,
-                                                                        KeyRange range,
+                                                                        std::vector<KeyRange> ranges,
                                                                         std::string localFolder,
                                                                         BulkDumpTransportMethod transportMethod,
                                                                         UID logId);

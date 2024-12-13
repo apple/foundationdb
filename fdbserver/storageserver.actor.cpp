@@ -6016,7 +6016,9 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 			ASSERT(res.second);
 			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(kv.key, kv.value));
 			if (sampleInfo.inSample) {
-				auto resSample = sample.insert({ kv.key, kv.value });
+				Key sampleKey = kv.key;
+				Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
+				auto resSample = sample.insert({ sampleKey, sampleValue });
 				ASSERT(resSample.second);
 			}
 			currentExpectedBytes = currentExpectedBytes + kv.expectedSize() + kv.expectedSize();

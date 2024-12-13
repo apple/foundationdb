@@ -175,16 +175,25 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
 
 // Get valid bulk load task state within the input range
-ACTOR Future<std::vector<BulkLoadState>> getValidBulkLoadTasksWithinRange(Database cx,
-                                                                          KeyRange rangeToRead,
-                                                                          size_t limit,
-                                                                          Optional<BulkLoadPhase> phase);
+ACTOR Future<std::vector<BulkLoadState>> getValidBulkLoadTasksWithinRange(
+    Database cx,
+    KeyRange rangeToRead,
+    size_t limit = 10,
+    Optional<BulkLoadPhase> phase = Optional<BulkLoadPhase>());
 
-// Submit a bulk load task
+// Submit a bulkload task
 ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask);
+
+// Create a bulkload task submission transaction without commit
+// Used by ManagementAPI and bulkdumpRestore at DD
+ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadState bulkLoadTask);
 
 // Acknowledge a bulk load task if it has been completed
 ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId);
+
+// Create an bulkload task acknowledge transaction without commit
+// Used by ManagementAPI and bulkdumpRestore at DD
+ACTOR Future<Void> setBulkLoadAcknowledgeTransaction(Transaction* tr, KeyRange range, UID taskId);
 
 // Get bulk load task for the input range and taskId
 ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
@@ -218,14 +227,15 @@ ACTOR Future<Optional<UID>> existAnyBulkDumpTask(Transaction* tr);
 // Get total number of completed tasks within the input range
 ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);
 
-// Decide if a bulkDumpRestore job alive
-ACTOR Future<bool> isBulkDumpRestoreAlive(Transaction* tr, Optional<UID> jobId);
-
 // Submit a bulkDumpRestore job: retore dumped data from a remote folder using bulkloading mechanism
 // There is at most one bulkDumpRestore job at a time
-ACTOR Future<Void> submitBulkDumpRestore(Database cx, BulkDumpRestoreState jobState);
+ACTOR Future<bool> submitBulkDumpRestore(Database cx, BulkDumpRestoreState jobState);
 
-// Cancel or clear a bulkDumpRestore job
+// Create a transaction for updating bulkdump restore metadata
+// Return true if did the update, otherwise, return false
+ACTOR Future<bool> updateBulkDumpRestoreMetadata(Transaction* tr, BulkDumpRestoreState jobState);
+
+// TODO(BulkDump): Cancel or clear a bulkDumpRestore job
 ACTOR Future<Void> clearBulkDumpRestore(Database cx);
 
 // Get ongoing bulkDumpRestore job Id

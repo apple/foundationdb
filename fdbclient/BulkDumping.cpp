@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BulkDumping.h"
+#include "flow/Trace.h"
 
 std::string stringRemovePrefix(std::string str, const std::string& prefix) {
 	if (str.compare(0, prefix.length(), prefix) == 0) {

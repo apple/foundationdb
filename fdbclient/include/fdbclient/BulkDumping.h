@@ -194,6 +194,8 @@ struct BulkDumpManifest {
 		return true;
 	}
 
+	bool isEmptyRange() const { return bytes == 0; }
+
 	KeyRange getRange() const { return Standalone(KeyRangeRef(beginKey, endKey)); }
 
 	std::string getBeginKeyString() const { return beginKey.toFullHexStringPlain(); }
@@ -417,7 +419,9 @@ struct BulkDumpRestoreState {
 	                     const KeyRange& range,
 	                     BulkDumpTransportMethod transportMethod)
 	  : jobId(jobId), remoteRoot(remoteRoot), range(range), phase(BulkDumpRestorePhase::Submitted),
-	    transportMethod(transportMethod) {}
+	    transportMethod(transportMethod) {
+		ASSERT(isValid());
+	}
 
 	std::string toString() const {
 		return "[BulkDumpRestoreState]: [JobId]: " + jobId.toString() + ", [RemoteRoot]: " + remoteRoot +
@@ -437,14 +441,64 @@ struct BulkDumpRestoreState {
 
 	KeyRange getRange() const { return range; }
 
+	void markComplete() {
+		ASSERT(phase == BulkDumpRestorePhase::Triggered || phase == BulkDumpRestorePhase::Complete);
+		phase = BulkDumpRestorePhase::Complete;
+		return;
+	}
+
+	bool isValid() const {
+		if (!jobId.isValid()) {
+			return false;
+		}
+		if (range.empty()) {
+			return false;
+		}
+		if (transportMethod == BulkDumpTransportMethod::Invalid) {
+			return false;
+		}
+		if (remoteRoot.empty()) {
+			return false;
+		}
+		return true;
+	}
+
+	bool isValidTask() const {
+		if (!isValid()) {
+			return false;
+		}
+		if (phase == BulkDumpRestorePhase::Invalid) {
+			return false;
+		}
+		if (manifestPath.empty()) {
+			return false;
+		}
+		return true;
+	}
+
 	BulkDumpRestoreState getTaskToTrigger(const BulkDumpManifest& manifest) const {
 		BulkDumpRestoreState res = *this;
 		const std::string relativePath = joinPath(manifest.fileSet.rootPath, manifest.fileSet.relativePath);
 		res.manifestPath = joinPath(relativePath, manifest.fileSet.manifestFileName);
+		ASSERT(!manifest.fileSet.dataFileName.empty());
 		res.dataPath = joinPath(relativePath, manifest.fileSet.dataFileName);
-		res.byteSamplePath = joinPath(relativePath, manifest.fileSet.byteSampleFileName);
+		if (!manifest.fileSet.byteSampleFileName.empty()) { // TODO(Bulkdump): check if the bytesampling setting
+			res.byteSamplePath = joinPath(relativePath, manifest.fileSet.byteSampleFileName);
+		}
 		res.range = manifest.getRange();
 		res.phase = BulkDumpRestorePhase::Triggered;
+		ASSERT(res.isValidTask());
+		return res;
+	}
+
+	BulkDumpRestoreState getEmptyTaskToComplete(const BulkDumpManifest& manifest) const {
+		BulkDumpRestoreState res = *this;
+		const std::string relativePath = joinPath(manifest.fileSet.rootPath, manifest.fileSet.relativePath);
+		res.manifestPath = joinPath(relativePath, manifest.fileSet.manifestFileName);
+		ASSERT(manifest.fileSet.dataFileName.empty());
+		res.range = manifest.getRange();
+		res.phase = BulkDumpRestorePhase::Complete;
+		ASSERT(res.isValidTask());
 		return res;
 	}
 
