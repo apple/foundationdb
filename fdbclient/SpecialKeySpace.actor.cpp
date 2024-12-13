@@ -1086,8 +1086,21 @@ ACTOR Future<bool> checkExclusion(Database db,
 		return true;
 	}
 
-	double finalFreeRatio = 1 - (totalKvStoreUsedBytes / (totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytes));
-	if (ssExcludedCount == ssTotalCount || finalFreeRatio <= 0.1) {
+	// Calculate the total used and free space for the non excluded processes. If we are not doing this and in the rare
+	// case that someone would exclude all SS processes, this would cause otherwise a division through 0 and therefore
+	// cause the fdbcli to crash, so we calculate the total free and used non excluded KV bytes before calculating the
+	// ratio.
+	double totalKvUsedAndFreeNonExcluded =
+	    totalKvStoreUsedBytesNonExcluded +
+	    totalKvStoreFreeBytes if (ssExcludedCount == ssTotalCount || totalKvUsedAndFreeNonExcluded == 0.0) {
+		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
+		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
+		                   "checking free space.\n";
+		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
+		return false;
+	}
+
+	if (1 - (totalKvStoreUsedBytes / totalKvUsedAndFreeNonExcluded) <= 0.1) {
 		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
 		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
 		                   "checking free space.\n";
