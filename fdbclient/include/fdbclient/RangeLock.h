@@ -54,8 +54,7 @@ public:
 
 	std::string toString() const {
 		return "RangeLockOwner: [UniqueId]: " + uniqueId + ", [Description]: " + description +
-		           ", [LogId]: " + logId.toString(),
-		       ", [CreationTime]: " + std::to_string(creationTime);
+		       ", [LogId]: " + logId.toString() + ", [CreationTime]: " + std::to_string(creationTime);
 	}
 
 	bool operator==(RangeLockOwner const& r) const { return uniqueId == r.uniqueId; }

@@ -482,6 +482,9 @@ else()
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
+    # Needed for gcc 13
+    #add_compile_options($<${is_cxx_compile}:-Wno-missing-template-keyword>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-template-keyword>)
   endif()
   add_compile_options(
     $<${is_cxx_compile}:-Wno-error=format>
