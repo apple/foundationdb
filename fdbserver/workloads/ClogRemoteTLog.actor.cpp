@@ -251,7 +251,8 @@ struct ClogRemoteTLog : TestWorkload {
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
 				for (auto& [ssi, p] : results) {
-					if (ssi.locality.dcId().present() && ssi.locality.dcId().get() == g_simulator->remoteDcId) {
+					if (ssi.locality.dcId().present() && g_simulator->remoteDcId.present() &&
+					    ssi.locality.dcId().get() == g_simulator->remoteDcId.get()) {
 						ret.push_back(ssi.address().ip);
 					}
 				}
