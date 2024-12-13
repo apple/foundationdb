@@ -895,16 +895,19 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				for (i = 0; i < curReq.transaction.mutations.size(); i++) {
 					MutationRef mutation = curReq.transaction.mutations[i];
 					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
-					TraceEvent("FlowGuruBeforeSendRequest")
-						.detail("GroupKey", group.groupKey)
-						.detail("Version", group.version)
-						.detail("Mutation", mutation.toString())
-						.detail("Param1", mutation.param1)
-						.detail("Num1", testKeyToDouble(mutation.param1))
-						.detail("RawNum1", std::round(testKeyToDouble(mutation.param1) * 3000))
-						.detail("Param2", mutation.param2)
-						.detail("Num2", testKeyToDouble(mutation.param2))
-						.log();
+					if (mutation.param1 == "3f45d867c3ece2a5"_sr || mutation.param1 == "3f689374bc6a7efa"_sr 
+						|| mutation.param1 == "3f65d867c3ece2a5"_sr){
+							TraceEvent("FlowGuruBeforeSendRequest")
+								.detail("GroupKey", group.groupKey)
+								.detail("Version", group.version)
+								.detail("Mutation", mutation.toString())
+								.detail("Param1", mutation.param1)
+								.detail("Num1", testKeyToDouble(mutation.param1))
+								.detail("RawNum1", std::round(testKeyToDouble(mutation.param1) * 3000))
+								.detail("Param2", mutation.param2)
+								.detail("Num2", testKeyToDouble(mutation.param2))
+								.log();
+						}
 					req.transaction.encryptedMutations.push_back_deep(req.arena,
 					                                                  curReq.transaction.encryptedMutations[i]);
 				}
