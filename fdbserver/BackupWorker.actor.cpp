@@ -687,8 +687,8 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	BinaryWriter wr(Unversioned());
 	wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) << bigEndian32(mutation.size());
 	TraceEvent("FlowGuruAddMutation")
-		.detail("Version",  bigEndian64(message.version.version))
-		.detail("SubVersion", bigEndian32(message.version.sub))
+		.detail("Version",  message.version.version)
+		.detail("SubVersion", message.version.sub)
 		.log();
 	state Standalone<StringRef> header = wr.toValue();
 
