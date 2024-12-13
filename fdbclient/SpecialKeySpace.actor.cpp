@@ -958,8 +958,6 @@ ACTOR Future<bool> checkExclusion(Database db,
 	state int64_t totalKvStoreFreeBytes = 0;
 	state int64_t totalKvStoreUsedBytes = 0;
 	state int64_t totalKvStoreUsedBytesNonExcluded = 0;
-	// Keep track if we exclude any storage process with the provided adddresses
-	state bool excludedAddressesContainsStorageRole = false;
 	state std::map<std::string, std::vector<std::string>> parsedLocalities;
 	// Convert the passed localities into a map of vectors to make it easier to check if a process
 	// is excluded by locality.
@@ -1043,7 +1041,6 @@ ACTOR Future<bool> checkExclusion(Database db,
 				// capacity if we are excluding at least one process that serves the storage role.
 				if (excluded) {
 					ssExcludedCount++;
-					excludedAddressesContainsStorageRole = true;
 				}
 
 				int64_t used_bytes;
@@ -1082,29 +1079,27 @@ ACTOR Future<bool> checkExclusion(Database db,
 
 	// If the exclusion command only contains processes that serve a non storage role we can skip the free capacity
 	// check in order to not block those exclusions.
-	if (!excludedAddressesContainsStorageRole) {
-		return true;
-	}
+	if (ssExcludedCount > 0) {
+		// Calculate the total used and free space for the non excluded processes. If we are not doing this and in the
+		// rare case that someone would exclude all SS processes, this would cause otherwise a division through 0 and
+		// therefore cause the fdbcli to crash, so we calculate the total free and used non excluded KV bytes before
+		// calculating the ratio.
+		double totalKvUsedAndFreeNonExcluded = totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytes;
+		if (ssExcludedCount == ssTotalCount || totalKvUsedAndFreeNonExcluded == 0.0) {
+			std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
+			                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
+			                   "checking free space.\n";
+			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
+			return false;
+		}
 
-	// Calculate the total used and free space for the non excluded processes. If we are not doing this and in the rare
-	// case that someone would exclude all SS processes, this would cause otherwise a division through 0 and therefore
-	// cause the fdbcli to crash, so we calculate the total free and used non excluded KV bytes before calculating the
-	// ratio.
-	double totalKvUsedAndFreeNonExcluded = totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytes;
-	if (ssExcludedCount == ssTotalCount || totalKvUsedAndFreeNonExcluded == 0.0) {
-		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
-		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
-		                   "checking free space.\n";
-		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
-		return false;
-	}
-
-	if (1 - (totalKvStoreUsedBytes / totalKvUsedAndFreeNonExcluded) <= 0.1) {
-		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
-		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
-		                   "checking free space.\n";
-		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
-		return false;
+		if (1 - (totalKvStoreUsedBytes / totalKvUsedAndFreeNonExcluded) <= 0.1) {
+			std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
+			                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
+			                   "checking free space.\n";
+			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
+			return false;
+		}
 	}
 
 	// This check was moved below to let the addresses vector being updated in cases of locality based exclusions.
