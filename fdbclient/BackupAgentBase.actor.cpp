@@ -839,13 +839,13 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				for (int i = 0; i < group.items.size(); ++i) {
 					// hfu5 : each value should be a partition
 					bw.serializeBytes(group.items[i].value);
-					// TraceEvent("FlowGuruCheckOldFormat")
-					// 	.detail("GroupKey", group.groupKey)
-					// 	.detail("Version", group.version)
-					// 	.detail("Index", i)
-					// 	.detail("KeySize", group.items[i].key.size())
-					// 	.detail("ValueSize", group.items[i].value.size())
-					// 	.log();
+					TraceEvent("FlowGuruCheckOldFormat")
+						.detail("GroupKey", group.groupKey)
+						.detail("Version", group.version)
+						.detail("Index", i)
+						.detail("KeySize", group.items[i].key.size())
+						.detail("ValueSize", group.items[i].value.size())
+						.log();
 				}
 				// Parse a single transaction from the backup mutation log
 				Standalone<StringRef> value = bw.toValue();
@@ -1041,10 +1041,10 @@ ACTOR Future<Void> applyMutations(Database cx,
 			// ranges each represent a partition of version, e.g. [100, 200], [201, 300], [301, 400]
 			// (64, 200) -> [(64, 128), (128, 192), (192, 200)] assuming block size is 64
 			state Standalone<VectorRef<KeyRangeRef>> ranges = getApplyRanges(beginVersion, newEndVersion, uid);
-			// TraceEvent("FlowGuruGetApplyChanges")
-			// 	.detail("Begin", beginVersion)
-			// 	.detail("End", newEndVersion)
-			// 	.log();
+			TraceEvent("FlowGuruGetApplyChanges")
+				.detail("Begin", beginVersion)
+				.detail("End", newEndVersion)
+				.log();
 			// fmt::print(stderr, "BackupAgentBaseApplyMutationRangeSize={}\n", ranges.size());
 			//	ranges have format: applyLogKeys.begin/uid/hash(uint8)/version(64bites)/part
 			state size_t idx;
@@ -1056,6 +1056,10 @@ ACTOR Future<Void> applyMutations(Database cx,
 			// one range might have multiple versions
 			for (int i = 0; i < ranges.size(); ++i) {
 				// fmt::print(stderr, "BackupAgentBaseApplyMutationRangeRecord begin={}, end={}\n", ranges[i].begin, ranges[i].end);
+				TraceEvent("FlowGuruReadEachRange")
+					.detail("Begin", ranges[i].begin)
+					.detail("End", ranges[i].end)
+					.log();
 				results.push_back(PromiseStream<RCGroup>());
 				locks.push_back(makeReference<FlowLock>(
 				    std::max(CLIENT_KNOBS->APPLY_MAX_LOCK_BYTES / ranges.size(), CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES)));

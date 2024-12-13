@@ -742,7 +742,7 @@ std::string printFiles(std::vector<RestoreConfig::RestoreFile>& files) {
 	std::string str = "";
 	for (auto& file : files) {
 		str += file.fileName;
-		str += ",";
+		str += ",|";
 	}
 	return str;
 }
@@ -4987,13 +4987,13 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		// TraceEvent("FlowGuruWriteOldFormat")
-		// 	.detail("CommitVersion", commitVersion)
-		// 	.detail("Part", part)
-		// 	.detail("KeySize", backupKV.key.size())
-		// 	.detail("ValueSize", backupKV.value.size())
-		// 	.detail("TotalBytes", totalBytes)
-		// 	.log();
+		TraceEvent("FlowGuruWriteOldFormat")
+			.detail("CommitVersion", commitVersion)
+			.detail("Part", part)
+			.detail("KeySize", backupKV.key.size())
+			.detail("ValueSize", backupKV.value.size())
+			.detail("TotalBytes", totalBytes)
+			.log();
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 	}
 	return results;
@@ -5210,14 +5210,14 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 						}
 						wait(tr->commit());
 						mutationIndex += txnCount; // update mutationIndex after commit 
-						// TraceEvent("FlowGuruCommitSucceed")
-						// 	.detail("Version", minVersion)
-						// 	.log();
+						TraceEvent("FlowGuruCommitSucceed")
+							.detail("Version", minVersion)
+							.log();
 					} catch (Error& e) {
-						// TraceEvent("FlowGuruCommitError")
-						// 	.detail("Version", minVersion)
-						// 	.detail("Error", e.code())
-						// 	.log();
+						TraceEvent("FlowGuruCommitError")
+							.detail("Version", minVersion)
+							.detail("Error", e.code())
+							.log();
 						// fmt::print(stderr, "CommitError={}, mutationIndex={}, total={}\n", e.code(), mutationIndex, totalMutation);
 						if (e.code() == error_code_transaction_too_large) {
 							txBytesLimit /= 2;
@@ -5415,11 +5415,31 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		                                    endLogExclude, 
 		                                    fileLimit));
 
-		state Optional<RestoreConfig::RestoreFile> beginRangeInclude = wait(restore.rangeFileSet().seekLessOrEqual(tr, RestoreConfig::RestoreFile({beginVersion, "", true })));
+		state Optional<RestoreConfig::RestoreFile> beginRangeInclude = wait(restore.rangeFileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({beginVersion, "", true })));
 		// greaterThanOrEqual(end + 1) instead of greaterThan(end)
 		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result in a end+1
 		state Optional<RestoreConfig::RestoreFile> endRangeExclude = wait(restore.rangeFileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({endVersion + 1, "", true })));
 		
+		TraceEvent("FlowGuruGetAllRangeFiles")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("BeginFilePresent", beginRangeInclude.present())
+					.detail("EndFilePresent", endRangeExclude.present())
+					.log();
+		if (beginRangeInclude.present()) {
+			TraceEvent("FlowGuruBeginRangeFile")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("BeginFile", beginLogInclude.get().fileName)
+					.log();
+		}
+		if (endRangeExclude.present()) {
+			TraceEvent("FlowGuruEndRangeFile")
+					.detail("Begin", beginVersion)
+					.detail("End", endVersion)
+					.detail("EndFile", endRangeExclude.get().fileName)
+					.log();
+		}
 		state RestoreConfig::FileSetT::RangeResultType rangeFiles =
 		    wait(restore.rangeFileSet().getRange(tr,
 		                                    beginRangeInclude,
