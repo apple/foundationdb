@@ -133,7 +133,7 @@ endif()
 # Manual find jemalloc by hand
 find_path(
   jemalloc_INCLUDE_DIRS
-  NAMES jemalloc.h
+  NAMES jemalloc/jemalloc.h
   PATH_SUFFIXES jemalloc jemalloc/include
   HINTS ${jemalloc_ROOT})
 if(NOT jemalloc_INCLUDE_DIRS)
