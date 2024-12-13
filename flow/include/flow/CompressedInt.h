@@ -124,9 +124,13 @@ struct CompressedInt {
 				buf[ih] |= b;
 				b >>= 1;
 			}
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
 			if (neg) // If negative, bit flip the entire encoded thing
 				for (int i = iStart; i < sizeof(buf); ++i)
 					buf[i] = ~buf[i];
+#pragma GCC diagnostic pop
 
 			ar.serializeBytes(buf + iStart, encodedLen);
 		}
