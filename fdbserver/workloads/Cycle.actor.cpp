@@ -242,6 +242,12 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			    .detail("After", data.size())
 			    .detail("Version", v)
 			    .detail("KeyPrefix", keyPrefix.printable());
+			for (auto& kv : data) {
+				TraceEvent("FlowGuruNodeCountChanged")
+					.detail("Key", testKeyToDouble(kv.key))
+					.detail("Value", kv.value)
+					.log();
+			}
 			TraceEvent(SevError, "TestFailureInfo")
 			    .detail("DataSize", data.size())
 			    .detail("NodeCount", nodeCount)
