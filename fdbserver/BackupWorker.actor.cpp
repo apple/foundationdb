@@ -727,6 +727,13 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 
 	wait(logFile->append((void*)header.begin(), header.size()));
 	wait(logFile->append(mutation.begin(), mutation.size()));
+	TraceEvent("FlowGuruAddMutationFinish")
+		.detail("Version",  message.version.version)
+		.detail("SubVersion", message.version.sub)
+		.detail("HeaderSize", header.size())
+		.detail("Filename", logFile->getFileName())
+		.detail("Size", mutation.size())
+		.log();
 	return Void();
 }
 
