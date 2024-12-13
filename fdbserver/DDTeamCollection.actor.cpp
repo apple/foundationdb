@@ -2234,25 +2234,28 @@ public:
 			takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
 			           self->machine_info.size() < self->configuration.storageTeamSize || imbalance;
 
-			if (SERVER_KNOBS->PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET) {
+			if (SERVER_KNOBS->PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET &&
+			    self->configuration.storageMigrationType == StorageMigrationType::DEFAULT) {
 				takeRest = takeRest || (self->getTargetTSSInDC() > 0 && self->reachTSSPairTarget());
 			}
 
 			// log the extra delay and change the wiggler state
 			if (takeRest) {
 				self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
-				if (self->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
-					TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", self->distributorId)
-					    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
-					    .detail("ImbalanceFactor",
-					            SERVER_KNOBS->PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO ? numSSToBeLoadBytesBalanced
-					                                                                     : ratio)
-					    .detail("ServerSize", self->server_info.size())
-					    .detail("MachineSize", self->machine_info.size())
-					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
-					    .detail("TargetTSSInDC", self->getTargetTSSInDC())
-					    .detail("ReachTSSPairTarget", self->reachTSSPairTarget());
-				}
+				Severity sev =
+				    self->configuration.storageMigrationType == StorageMigrationType::GRADUAL ? SevWarn : SevInfo;
+				TraceEvent(sev, "PerpetualStorageWiggleSleep", self->distributorId)
+				    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+				    .detail("Primary", self->primary)
+				    .detail("ImbalanceFactor",
+				            SERVER_KNOBS->PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO ? numSSToBeLoadBytesBalanced
+				                                                                     : ratio)
+				    .detail("ServerSize", self->server_info.size())
+				    .detail("MachineSize", self->machine_info.size())
+				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
+				    .detail("TargetTSSInDC", self->getTargetTSSInDC())
+				    .detail("ReachTSSPairTarget", self->reachTSSPairTarget())
+				    .detail("MigrationType", self->configuration.storageMigrationType.toString());
 			}
 		}
 		return Void();
