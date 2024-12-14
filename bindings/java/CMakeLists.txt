@@ -161,6 +161,10 @@ endif()
 
 if(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
   target_link_options(java_workloads PRIVATE "LINKER:--version-script=${CMAKE_SOURCE_DIR}/bindings/c/external_workload.map,-z,nodelete")
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19.0.0")
+    # Needed because symbol "workloadCFactory" is not defined
+    target_link_options(java_workloads PRIVATE "LINKER:--undefined-version")
+  endif()
 endif()
 
 target_include_directories(fdb_java PRIVATE ${JNI_INCLUDE_DIRS})
