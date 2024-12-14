@@ -1196,18 +1196,31 @@ const UID dataDistributionModeLock = UID(6345, 3425);
 
 // Bulk loading keys
 const KeyRef bulkLoadModeKey = "\xff/bulkLoadMode"_sr;
-const KeyRangeRef bulkLoadKeys = KeyRangeRef("\xff/bulkLoad/"_sr, "\xff/bulkLoad0"_sr);
-const KeyRef bulkLoadPrefix = bulkLoadKeys.begin;
+const KeyRangeRef bulkLoadTaskKeys = KeyRangeRef("\xff/bulkLoadTask/"_sr, "\xff/bulkLoadTask0"_sr);
+const KeyRef bulkLoadTaskPrefix = bulkLoadTaskKeys.begin;
+const KeyRangeRef bulkLoadJobKeys = KeyRangeRef("\xff/bulkLoadJob/"_sr, "\xff/bulkLoadJob0"_sr);
+const KeyRef bulkLoadJobPrefix = bulkLoadJobKeys.begin;
 
-const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState) {
-	return ObjectWriter::toValue(bulkLoadState, IncludeVersion());
+const Value bulkLoadTaskStateValue(const BulkLoadTaskState& bulkLoadTaskState) {
+	return ObjectWriter::toValue(bulkLoadTaskState, IncludeVersion());
 }
 
-BulkLoadState decodeBulkLoadState(const ValueRef& value) {
-	BulkLoadState bulkLoadState;
+BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value) {
+	BulkLoadTaskState bulkLoadTaskState;
 	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(bulkLoadState);
-	return bulkLoadState;
+	reader.deserialize(bulkLoadTaskState);
+	return bulkLoadTaskState;
+}
+
+const Value bulkLoadJobValue(const BulkLoadJobState& bulkLoadJobState) {
+	return ObjectWriter::toValue(bulkLoadJobState, IncludeVersion());
+}
+
+BulkLoadJobState decodeBulkLoadJobState(const ValueRef& value) {
+	BulkLoadJobState bulkLoadJobState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(bulkLoadJobState);
+	return bulkLoadJobState;
 }
 
 // Bulk dumping keys
@@ -1224,21 +1237,6 @@ BulkDumpState decodeBulkDumpState(const ValueRef& value) {
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(bulkDumpState);
 	return bulkDumpState;
-}
-
-// Bulk dumping retore keys
-const KeyRangeRef bulkDumpRestoreKeys = KeyRangeRef("\xff/bulkDumpRestore/"_sr, "\xff/bulkDumpRestore0"_sr);
-const KeyRef bulkDumpRestorePrefix = bulkDumpRestoreKeys.begin;
-
-const Value bulkDumpRestoreValue(const BulkDumpRestoreState& bulkDumpRestoreState) {
-	return ObjectWriter::toValue(bulkDumpRestoreState, IncludeVersion());
-}
-
-BulkDumpRestoreState decodeBulkDumpRestoreState(const ValueRef& value) {
-	BulkDumpRestoreState bulkDumpRestoreState;
-	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(bulkDumpRestoreState);
-	return bulkDumpRestoreState;
 }
 
 // Range Lock

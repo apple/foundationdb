@@ -1013,7 +1013,8 @@ DataMoveType newDataMoveType(bool doBulkLoading) {
 bool runPendingBulkLoadTaskWithRelocateData(DDQueue* self, RelocateData& rd) {
 	bool doBulkLoading = false;
 	Optional<DDBulkLoadTask> task = self->bulkLoadTaskCollection->getTaskByRange(rd.keys);
-	if (task.present() && task.get().coreState.onAnyPhase({ BulkLoadPhase::Triggered, BulkLoadPhase::Running })) {
+	if (task.present() &&
+	    task.get().coreState.onAnyPhase({ BulkLoadTaskPhase::Triggered, BulkLoadTaskPhase::Running })) {
 		rd.bulkLoadTask = task.get();
 		doBulkLoading = true;
 	}
@@ -1405,11 +1406,11 @@ static int nonOverlappedServerCount(const std::vector<UID>& srcIds, const std::v
 }
 
 void validateBulkLoadRelocateData(const RelocateData& rd, const std::vector<UID>& destIds, UID logId) {
-	BulkLoadState bulkLoadState = rd.bulkLoadTask.get().coreState;
-	if (rd.keys != bulkLoadState.getRange()) {
+	BulkLoadTaskState bulkLoadTaskState = rd.bulkLoadTask.get().coreState;
+	if (rd.keys != bulkLoadTaskState.getRange()) {
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DDBulkLoadTaskLaunchFailed", logId)
 		    .detail("Reason", "Wrong data move range")
-		    .detail("BulkLoadTask", bulkLoadState.toString())
+		    .detail("BulkLoadTask", bulkLoadTaskState.toString())
 		    .detail("DataMovePriority", rd.priority)
 		    .detail("DataMoveId", rd.dataMoveId)
 		    .detail("RelocatorRange", rd.keys);
@@ -1422,7 +1423,7 @@ void validateBulkLoadRelocateData(const RelocateData& rd, const std::vector<UID>
 			// This is not expected
 			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DDBulkLoadTaskLaunchFailed", logId)
 			    .detail("Reason", "Conflict src and destd due to remote recovery")
-			    .detail("BulkLoadTask", bulkLoadState.toString())
+			    .detail("BulkLoadTask", bulkLoadTaskState.toString())
 			    .detail("DataMovePriority", rd.priority)
 			    .detail("DataMoveId", rd.dataMoveId)
 			    .detail("RelocatorRange", rd.keys);
@@ -1994,7 +1995,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          ddEnabledState,
 				                                          CancelConflictingDataMoves::False,
 				                                          rd.bulkLoadTask.present() ? rd.bulkLoadTask.get().coreState
-				                                                                    : Optional<BulkLoadState>());
+				                                                                    : Optional<BulkLoadTaskState>());
 			} else {
 				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 				                                          rd.keys,
@@ -2009,7 +2010,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          ddEnabledState,
 				                                          CancelConflictingDataMoves::False,
 				                                          rd.bulkLoadTask.present() ? rd.bulkLoadTask.get().coreState
-				                                                                    : Optional<BulkLoadState>());
+				                                                                    : Optional<BulkLoadTaskState>());
 			}
 			state Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
 			state Future<Void> pollHealth =
@@ -2040,7 +2041,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 									                                          CancelConflictingDataMoves::False,
 									                                          rd.bulkLoadTask.present()
 									                                              ? rd.bulkLoadTask.get().coreState
-									                                              : Optional<BulkLoadState>());
+									                                              : Optional<BulkLoadTaskState>());
 								} else {
 									params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 									                                          rd.keys,
@@ -2056,7 +2057,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 									                                          CancelConflictingDataMoves::False,
 									                                          rd.bulkLoadTask.present()
 									                                              ? rd.bulkLoadTask.get().coreState
-									                                              : Optional<BulkLoadState>());
+									                                              : Optional<BulkLoadTaskState>());
 								}
 								doMoveKeys = self->txnProcessor->moveKeys(*params);
 							} else {

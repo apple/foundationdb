@@ -35,29 +35,29 @@
 
 namespace fdb_cli {
 
-ACTOR Future<Void> getBulkLoadStateByRange(Database cx,
-                                           KeyRange rangeToRead,
-                                           size_t countLimit,
-                                           Optional<BulkLoadPhase> phase) {
+ACTOR Future<Void> getBulkLoadTaskStateByRange(Database cx,
+                                               KeyRange rangeToRead,
+                                               size_t countLimit,
+                                               Optional<BulkLoadTaskPhase> phase) {
 	try {
-		std::vector<BulkLoadState> res = wait(getValidBulkLoadTasksWithinRange(cx, rangeToRead, countLimit, phase));
+		std::vector<BulkLoadTaskState> res = wait(getValidBulkLoadTasksWithinRange(cx, rangeToRead, countLimit, phase));
 		int64_t finishCount = 0;
 		int64_t unfinishedCount = 0;
-		for (const auto& bulkLoadState : res) {
-			if (bulkLoadState.phase == BulkLoadPhase::Complete) {
-				fmt::println("[Complete]: {}", bulkLoadState.toString());
+		for (const auto& bulkLoadTaskState : res) {
+			if (bulkLoadTaskState.phase == BulkLoadTaskPhase::Complete) {
+				fmt::println("[Complete]: {}", bulkLoadTaskState.toString());
 				++finishCount;
-			} else if (bulkLoadState.phase == BulkLoadPhase::Running) {
-				fmt::println("[Running]: {}", bulkLoadState.toString());
+			} else if (bulkLoadTaskState.phase == BulkLoadTaskPhase::Running) {
+				fmt::println("[Running]: {}", bulkLoadTaskState.toString());
 				++unfinishedCount;
-			} else if (bulkLoadState.phase == BulkLoadPhase::Triggered) {
-				fmt::println("[Triggered]: {}", bulkLoadState.toString());
+			} else if (bulkLoadTaskState.phase == BulkLoadTaskPhase::Triggered) {
+				fmt::println("[Triggered]: {}", bulkLoadTaskState.toString());
 				++unfinishedCount;
-			} else if (bulkLoadState.phase == BulkLoadPhase::Submitted) {
-				fmt::println("[Submitted] {}", bulkLoadState.toString());
+			} else if (bulkLoadTaskState.phase == BulkLoadTaskPhase::Submitted) {
+				fmt::println("[Submitted] {}", bulkLoadTaskState.toString());
 				++unfinishedCount;
-			} else if (bulkLoadState.phase == BulkLoadPhase::Acknowledged) {
-				fmt::println("[Acknowledge] {}", bulkLoadState.toString());
+			} else if (bulkLoadTaskState.phase == BulkLoadTaskPhase::Acknowledged) {
+				fmt::println("[Acknowledge] {}", bulkLoadTaskState.toString());
 				++finishCount;
 			} else {
 				UNREACHABLE();
@@ -129,7 +129,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		std::string byteSampleFile = tokens[6].toString(); // TODO(BulkLoad): reject if the input bytes sampling file is
 		                                                   // not same as the configuration as FDB cluster
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		state BulkLoadState bulkLoadTask = newBulkLoadTaskLocalSST(UID(), range, folder, dataFile, byteSampleFile);
+		state BulkLoadTaskState bulkLoadTask = newBulkLoadTaskLocalSST(UID(), range, folder, dataFile, byteSampleFile);
 		wait(submitBulkLoadTask(cx, bulkLoadTask));
 		return bulkLoadTask.getTaskId();
 
@@ -149,25 +149,25 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
 		std::string inputPhase = tokens[4].toString();
-		Optional<BulkLoadPhase> phase;
+		Optional<BulkLoadTaskPhase> phase;
 		if (inputPhase == "all") {
-			phase = Optional<BulkLoadPhase>();
+			phase = Optional<BulkLoadTaskPhase>();
 		} else if (inputPhase == "submitted") {
-			phase = BulkLoadPhase::Submitted;
+			phase = BulkLoadTaskPhase::Submitted;
 		} else if (inputPhase == "triggered") {
-			phase = BulkLoadPhase::Triggered;
+			phase = BulkLoadTaskPhase::Triggered;
 		} else if (inputPhase == "running") {
-			phase = BulkLoadPhase::Running;
+			phase = BulkLoadTaskPhase::Running;
 		} else if (inputPhase == "complete") {
-			phase = BulkLoadPhase::Complete;
+			phase = BulkLoadTaskPhase::Complete;
 		} else if (inputPhase == "acknowledged") {
-			phase = BulkLoadPhase::Acknowledged;
+			phase = BulkLoadTaskPhase::Acknowledged;
 		} else {
 			printUsage(tokens[0]);
 			return UID();
 		}
 		int countLimit = std::stoi(tokens[5].toString());
-		wait(getBulkLoadStateByRange(cx, range, countLimit, phase));
+		wait(getBulkLoadTaskStateByRange(cx, range, countLimit, phase));
 		return UID();
 
 	} else {

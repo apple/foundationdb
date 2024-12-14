@@ -141,9 +141,11 @@ struct BulkDumping : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.clear(normalKeys);
 				tr.clear(bulkDumpKeys);
-				tr.clear(bulkLoadKeys);
+				tr.clear(bulkLoadTaskKeys);
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
@@ -167,7 +169,7 @@ struct BulkDumping : TestWorkload {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					wait(store(rangeResult,
 					           krmGetRanges(&tr,
-					                        bulkDumpRestorePrefix,
+					                        bulkLoadJobPrefix,
 					                        KeyRangeRef(readBegin, readEnd),
 					                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
 					                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
@@ -175,8 +177,8 @@ struct BulkDumping : TestWorkload {
 						if (rangeResult[i].value.empty()) {
 							continue;
 						}
-						BulkDumpRestoreState task = decodeBulkDumpRestoreState(rangeResult[i].value);
-						if (task.getPhase() != BulkDumpRestorePhase::Complete) {
+						BulkLoadJobState task = decodeBulkLoadJobState(rangeResult[i].value);
+						if (task.getPhase() != BulkLoadJobPhase::Complete) {
 							complete = false;
 							break;
 						}
@@ -225,12 +227,19 @@ struct BulkDumping : TestWorkload {
 			return Void();
 		}
 
+		if (g_network->isSimulated()) {
+			// Network partition between CC and DD can cause DD no longer existing,
+			// which results in the bulk loading task cannot complete
+			// So, this workload disable the network partition
+			disableConnectionFailures("BulkDumping");
+		}
+
 		state std::map<Key, Value> kvs = self->generateOrderedKVS(self, normalKeys, 1000);
 		wait(self->setKeys(cx, kvs));
 
 		// Submit a bulk dump job
 		state int oldBulkDumpMode = 0;
-		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDumping
+		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
 		state BulkDumpState newJob = newBulkDumpJobLocalSST(normalKeys, simulationBulkDumpFolder);
 		wait(submitBulkDumpJob(cx, newJob));
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Submitted").detail("Job", newJob.toString());
@@ -245,11 +254,11 @@ struct BulkDumping : TestWorkload {
 
 		// Submit a bulk load job
 		state int oldBulkLoadMode = 0;
-		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoading
-		state BulkDumpRestoreState restoreTask =
-		    newBulkDumpRestoreJobLocalSST(newJob.getJobId(), newJob.getRange(), newJob.getRemoteRoot());
+		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoad
+		state BulkLoadJobState bulkLoadJobTask =
+		    newBulkLoadJobLocalSST(newJob.getJobId(), newJob.getRange(), newJob.getRemoteRoot());
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
-		bool succeed = wait(submitBulkDumpRestore(cx, restoreTask));
+		bool succeed = wait(submitBulkLoadJob(cx, bulkLoadJobTask));
 		ASSERT(succeed);
 
 		// Wait until the load job complete

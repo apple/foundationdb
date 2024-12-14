@@ -60,7 +60,7 @@ SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<Storage
 	return SSBulkDumpTask(targetServer, checksumServers, bulkDumpState);
 }
 
-std::string generateBulkDumpManifestFileName(Version version) {
+std::string generateBulkLoadManifestFileName(Version version) {
 	return std::to_string(version) + "-manifest.txt";
 }
 
@@ -84,16 +84,16 @@ std::string getBulkDumpJobRoot(const std::string& root, const UID& jobId) {
 	return joinPath(root, jobId.toString());
 }
 
-std::pair<BulkDumpFileSet, BulkDumpFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,
+std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,
                                                                          const std::string& relativeFolder,
                                                                          const std::string& rootLocal,
                                                                          const std::string& rootRemote) {
 	// Generate file names based on data version
-	const std::string manifestFileName = generateBulkDumpManifestFileName(dumpVersion);
+	const std::string manifestFileName = generateBulkLoadManifestFileName(dumpVersion);
 	const std::string dataFileName = generateBulkDumpDataFileName(dumpVersion);
 	const std::string byteSampleFileName = generateBulkDumpByteSampleFileName(dumpVersion);
-	BulkDumpFileSet fileSetLocal(rootLocal, relativeFolder, manifestFileName, dataFileName, byteSampleFileName);
-	BulkDumpFileSet fileSetRemote(rootRemote, relativeFolder, manifestFileName, dataFileName, byteSampleFileName);
+	BulkLoadFileSet fileSetLocal(rootLocal, relativeFolder, manifestFileName, dataFileName, byteSampleFileName);
+	BulkLoadFileSet fileSetRemote(rootRemote, relativeFolder, manifestFileName, dataFileName, byteSampleFileName);
 	return std::make_pair(fileSetLocal, fileSetRemote);
 }
 
@@ -151,14 +151,14 @@ void bulkDumpFileCopy(std::string fromFile, std::string toFile, size_t fileBytes
 }
 
 // Generate key-value data, byte sampling data, and manifest file given a range at a version with a certain bytes
-// Return BulkDumpManifest metadata (equivalent to content of the manifest file)
+// Return BulkLoadManifest metadata (equivalent to content of the manifest file)
 // TODO(BulkDump): can cause slow tasks, do the task in a separate thread in the future.
-BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
+BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
                                               const std::map<Key, Value>& sortedData,
                                               const std::map<Key, Value>& sortedSample,
-                                              const BulkDumpFileSet& localFileSetConfig,
-                                              const BulkDumpFileSet& remoteFileSetConfig,
-                                              const ByteSampleSetting& byteSampleSetting,
+                                              const BulkLoadFileSet& localFileSetConfig,
+                                              const BulkLoadFileSet& remoteFileSetConfig,
+                                              const BulkLoadByteSampleSetting& byteSampleSetting,
                                               Version dumpVersion,
                                               const KeyRange& dumpRange,
                                               int64_t dumpBytes) {
@@ -195,19 +195,19 @@ BulkDumpManifest dumpDataFileToLocalDirectory(UID logId,
 		ASSERT_WE_THINK(false);
 		throw retry();
 	}
-	BulkDumpFileSet fileSetRemote(remoteFileSetConfig.rootPath,
+	BulkLoadFileSet fileSetRemote(remoteFileSetConfig.rootPath,
 	                              remoteFileSetConfig.relativePath,
 	                              remoteFileSetConfig.manifestFileName,
 	                              containDataFile ? remoteFileSetConfig.dataFileName : "",
 	                              containByteSampleFile ? remoteFileSetConfig.byteSampleFileName : "");
-	BulkDumpManifest manifest(
+	BulkLoadManifest manifest(
 	    fileSetRemote, dumpRange.begin, dumpRange.end, dumpVersion, "", dumpBytes, byteSampleSetting);
 	writeStringToFile(abspath(localFiles.manifestFilePath), manifest.toString());
 	return manifest;
 }
 
 // Validate the invariant of filenames. Source is the file stored locally. Destination is the file going to move to.
-bool validateSourceDestinationFileSets(const BulkDumpFileSet& source, const BulkDumpFileSet& destination) {
+bool validateSourceDestinationFileSets(const BulkLoadFileSet& source, const BulkLoadFileSet& destination) {
 	// Manifest file must be present
 	if (source.manifestFileName.empty() || destination.manifestFileName.empty()) {
 		return false;
@@ -231,8 +231,8 @@ bool validateSourceDestinationFileSets(const BulkDumpFileSet& source, const Bulk
 }
 
 // Copy files between local file folders, used to mock blobstore in the test.
-void bulkDumpTransportCP_impl(BulkDumpFileSet sourceFileSet,
-                              BulkDumpFileSet destinationFileSet,
+void bulkDumpTransportCP_impl(BulkLoadFileSet sourceFileSet,
+                              BulkLoadFileSet destinationFileSet,
                               size_t fileBytesMax,
                               UID logId) {
 	BulkDumpFileFullPathSet localFiles(sourceFileSet);
@@ -253,12 +253,12 @@ void bulkDumpTransportCP_impl(BulkDumpFileSet sourceFileSet,
 	return;
 }
 
-ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod,
-                                         BulkDumpFileSet sourceFileSet,
-                                         BulkDumpFileSet destinationFileSet,
+ACTOR Future<Void> uploadBulkLoadFileSet(BulkLoadTransportMethod transportMethod,
+                                         BulkLoadFileSet sourceFileSet,
+                                         BulkLoadFileSet destinationFileSet,
                                          UID logId) {
 	// Upload to blobstore or mock file copy
-	if (transportMethod != BulkDumpTransportMethod::CP) {
+	if (transportMethod != BulkLoadTransportMethod::CP) {
 		TraceEvent(SevWarnAlways, "SSBulkDumpUploadFilesError", logId)
 		    .detail("Reason", "Transport method is not implemented")
 		    .detail("TransportMethod", transportMethod);
@@ -338,11 +338,11 @@ void generateBulkDumpJobManifestFile(const std::string& workFolder,
 	return;
 }
 
-void uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
+void uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transportMethod,
                                    const std::string& localJobManifestFilePath,
                                    const std::string& remoteJobManifestFilePath,
                                    UID logId) {
-	if (transportMethod != BulkDumpTransportMethod::CP) {
+	if (transportMethod != BulkLoadTransportMethod::CP) {
 		TraceEvent(SevWarnAlways, "UploadBulkDumpJobManifestFileError", logId)
 		    .detail("Reason", "Transport method is not implemented")
 		    .detail("TransportMethod", transportMethod);
@@ -359,7 +359,7 @@ void uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
 	return;
 }
 
-std::string generateJobManifestFileContent(const std::map<Key, BulkDumpManifest>& manifests) {
+std::string generateJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests) {
 	std::string root = "";
 	std::string manifestList;
 	for (const auto& [beginKey, manifest] : manifests) {
@@ -376,11 +376,11 @@ std::string generateJobManifestFileContent(const std::map<Key, BulkDumpManifest>
 	return head + manifestList;
 }
 
-ACTOR Future<Void> downloadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
+ACTOR Future<Void> downloadBulkDumpJobManifestFile(BulkLoadTransportMethod transportMethod,
                                                    std::string localJobManifestFilePath,
                                                    std::string remoteJobManifestFilePath,
                                                    UID logId) {
-	if (transportMethod != BulkDumpTransportMethod::CP) {
+	if (transportMethod != BulkLoadTransportMethod::CP) {
 		TraceEvent(SevWarnAlways, "DownloadBulkDumpJobManifestFileError", logId)
 		    .detail("Reason", "Transport method is not implemented")
 		    .detail("TransportMethod", transportMethod);
@@ -399,11 +399,11 @@ ACTOR Future<Void> downloadBulkDumpJobManifestFile(BulkDumpTransportMethod trans
 	return Void();
 }
 
-ACTOR Future<Void> downloadBulkDumpDataBatchManifestFile(BulkDumpTransportMethod transportMethod,
+ACTOR Future<Void> downloadBulkDumpDataBatchManifestFile(BulkLoadTransportMethod transportMethod,
                                                          std::string localManifestFilePath,
                                                          std::string remoteManifestFilePath,
                                                          UID logId) {
-	if (transportMethod != BulkDumpTransportMethod::CP) {
+	if (transportMethod != BulkLoadTransportMethod::CP) {
 		TraceEvent(SevWarnAlways, "DownloadBulkDumpDataBatchManifestFileError", logId)
 		    .detail("Reason", "Transport method is not implemented")
 		    .detail("TransportMethod", transportMethod);
@@ -430,13 +430,13 @@ bool rangeHasOverlapping(const std::vector<KeyRange>& ranges, const KeyRange& in
 	return false;
 }
 
-ACTOR Future<std::vector<BulkDumpManifest>> extractBulkDumpJobManifests(std::string localJobManifestFilePath,
+ACTOR Future<std::vector<BulkLoadManifest>> extractBulkDumpJobManifests(std::string localJobManifestFilePath,
                                                                         std::vector<KeyRange> ranges,
                                                                         std::string localFolder,
-                                                                        BulkDumpTransportMethod transportMethod,
+                                                                        BulkLoadTransportMethod transportMethod,
                                                                         UID logId) {
 	ASSERT(fileExists(abspath(localJobManifestFilePath)));
-	state std::vector<BulkDumpManifest> res;
+	state std::vector<BulkLoadManifest> res;
 	const std::string jobManifestRawString =
 	    readFileBytes(abspath(localJobManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
 	state std::vector<std::string> lines = splitString(jobManifestRawString, "\n");
@@ -460,7 +460,7 @@ ACTOR Future<std::vector<BulkDumpManifest>> extractBulkDumpJobManifests(std::str
 		    transportMethod, localManifestFilePath, remoteManifestFilePath, logId));
 		const std::string manifestRawString =
 		    readFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
-		BulkDumpManifest manifest(manifestRawString);
+		BulkLoadManifest manifest(manifestRawString);
 		res.push_back(manifest);
 		wait(delay(1.0));
 		lineIdx = lineIdx + 1;

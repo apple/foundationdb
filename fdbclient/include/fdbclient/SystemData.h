@@ -524,21 +524,20 @@ extern const KeyRef dataDistributionModeKey;
 extern const UID dataDistributionModeLock;
 
 extern const KeyRef bulkLoadModeKey;
-extern const KeyRangeRef bulkLoadKeys;
-extern const KeyRef bulkLoadPrefix;
-const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState);
-BulkLoadState decodeBulkLoadState(const ValueRef& value);
+extern const KeyRangeRef bulkLoadTaskKeys;
+extern const KeyRef bulkLoadTaskPrefix;
+extern const KeyRangeRef bulkLoadJobKeys;
+extern const KeyRef bulkLoadJobPrefix;
+const Value bulkLoadTaskStateValue(const BulkLoadTaskState& bulkLoadTaskState);
+BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value);
+const Value bulkLoadJobValue(const BulkLoadJobState& bulkLoadJobState);
+BulkLoadJobState decodeBulkLoadJobState(const ValueRef& value);
 
 extern const KeyRef bulkDumpModeKey;
 extern const KeyRangeRef bulkDumpKeys;
 extern const KeyRef bulkDumpPrefix;
 const Value bulkDumpStateValue(const BulkDumpState& bulkDumpState);
 BulkDumpState decodeBulkDumpState(const ValueRef& value);
-
-extern const KeyRangeRef bulkDumpRestoreKeys;
-extern const KeyRef bulkDumpRestorePrefix;
-const Value bulkDumpRestoreValue(const BulkDumpRestoreState& bulkDumpRestoreState);
-BulkDumpRestoreState decodeBulkDumpRestoreState(const ValueRef& value);
 
 extern const std::string rangeLockNameForBulkLoad;
 extern const KeyRangeRef rangeLockKeys;

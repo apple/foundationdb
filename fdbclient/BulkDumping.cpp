@@ -21,37 +21,6 @@
 #include "fdbclient/BulkDumping.h"
 #include "flow/Trace.h"
 
-std::string stringRemovePrefix(std::string str, const std::string& prefix) {
-	if (str.compare(0, prefix.length(), prefix) == 0) {
-		str.erase(0, prefix.length());
-	} else {
-		return "";
-	}
-	return str;
-}
-
-Key getKeyFromHexString(const std::string& rawString) {
-	if (rawString.empty()) {
-		return Key();
-	}
-	std::vector<uint8_t> byteList;
-	ASSERT((rawString.size() + 1) % 3 == 0);
-	for (size_t i = 0; i < rawString.size(); i += 3) {
-		std::string byteString = rawString.substr(i, 2);
-		uint8_t byte = static_cast<uint8_t>(std::stoul(byteString, nullptr, 16));
-		byteList.push_back(byte);
-		ASSERT(i + 2 >= rawString.size() || rawString[i + 2] == ' ');
-	}
-	return Standalone(StringRef(byteList.data(), byteList.size()));
-}
-
 BulkDumpState newBulkDumpJobLocalSST(const KeyRange& range, const std::string& remoteRoot) {
-	return BulkDumpState(
-	    range, BulkDumpFileType::SST, BulkDumpTransportMethod::CP, BulkDumpExportMethod::File, remoteRoot);
-}
-
-BulkDumpRestoreState newBulkDumpRestoreJobLocalSST(const UID& jobId,
-                                                   const KeyRange& range,
-                                                   const std::string& remoteRoot) {
-	return BulkDumpRestoreState(jobId, remoteRoot, range, BulkDumpTransportMethod::CP);
+	return BulkDumpState(range, BulkLoadFileType::SST, BulkLoadTransportMethod::CP, remoteRoot);
 }
