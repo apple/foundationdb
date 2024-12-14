@@ -17,7 +17,7 @@ struct VersionedMutation {
 
 class PartitionedLogIterator : public ReferenceCounted<PartitionedLogIterator> {
 public:
-	virtual bool hasNext() const = 0;
+	virtual bool hasNext() = 0;
 
 	virtual Future<Version> peekNextVersion() = 0;
 
