@@ -5215,7 +5215,7 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		// fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
 		for (auto& vm : eachTagMutations) {
 			uint32_t sub = vm.subsequence;
-			MutationRef mutation = vm.mutation;
+			// MutationRef mutation = vm.mutation;
 			// TraceEvent("FlowGuruAddEachSubVersion")
 			// 	.detail("CommitVersion", commitVersion)
 			// 	.detail("Version", vm.version)

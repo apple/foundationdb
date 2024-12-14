@@ -22,5 +22,7 @@ public:
 	virtual Future<Version> peekNextVersion() = 0;
 
 	virtual Future<Standalone<VectorRef<VersionedMutation>>> getNext() = 0;
+
+	virtual ~PartitionedLogIterator() = default;
 };
 #endif
