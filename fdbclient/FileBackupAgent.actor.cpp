@@ -1056,11 +1056,11 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			version = bigEndian64(version);
 			if (version != firstVersion) {
 				foundNewVersion = true;
-				TraceEvent("FlowGuruBreakVersion")
-					.detail("CurrentVersion", version)
-					.detail("FirstVersion", firstVersion)
-					.detail("Offset", self->bufferOffset)
-					.log();
+				// TraceEvent("FlowGuruBreakVersion")
+				// 	.detail("CurrentVersion", version)
+				// 	.detail("FirstVersion", firstVersion)
+				// 	.detail("Offset", self->bufferOffset)
+				// 	.log();
 				break; // Different version, stop here
 			}
 
@@ -1095,19 +1095,19 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 			vm.version = version;
 			vm.subsequence = subsequence;
 			vm.mutation = mutation;
-			TraceEvent("FlowGuruRestoreMutation")
-				.detail("Version", version)
-				.detail("Sub", subsequence)
-				.detail("Offset", self->bufferOffset)
-				.detail("BufferSize", size)
-				.detail("MutationSize", mutationTotalSize)
-				.detail("Files", printFiles(self->files))
-				.detail("Mutation", mutation.toString())
-				.detail("Param1", mutation.param1)
-				.detail("Num1", testKeyToDouble(mutation.param1))
-				.detail("Param2", mutation.param2)
-				.detail("Num2", testKeyToDouble(mutation.param2))
-				.log();
+			// TraceEvent("FlowGuruRestoreMutation")
+			// 	.detail("Version", version)
+			// 	.detail("Sub", subsequence)
+			// 	.detail("Offset", self->bufferOffset)
+			// 	.detail("BufferSize", size)
+			// 	.detail("MutationSize", mutationTotalSize)
+			// 	.detail("Files", printFiles(self->files))
+			// 	.detail("Mutation", mutation.toString())
+			// 	.detail("Param1", mutation.param1)
+			// 	.detail("Num1", testKeyToDouble(mutation.param1))
+			// 	.detail("Param2", mutation.param2)
+			// 	.detail("Num2", testKeyToDouble(mutation.param2))
+			// 	.log();
 			mutations.push_back_deep(mutations.arena(), vm);
 			// Move the bufferOffset to include this mutation
 			self->bufferOffset += mutationTotalSize;
@@ -1204,23 +1204,23 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 		return mutations;
 	}
 	state Version firstVersion = wait(self->peekNextVersion());
-	TraceEvent("FlowGuruGetNextFirst")
-		.detail("Tag", self->tag)
-		.detail("FirstVersion", firstVersion)
-		.detail("Offset", self->bufferOffset)
-		.log();
+	// TraceEvent("FlowGuruGetNextFirst")
+	// 	.detail("Tag", self->tag)
+	// 	.detail("FirstVersion", firstVersion)
+	// 	.detail("Offset", self->bufferOffset)
+	// 	.log();
 	Standalone<VectorRef<VersionedMutation>> firstBatch = wait(self->consumeData(firstVersion));
 	mutations = firstBatch;
 	// If the current buffer is fully consumed, then we need to check the next buffer in case
 	// the version is sliced across this buffer boundary
 	// fmt::print(stderr, "GetNextBeforeWhile\n");
 
-	TraceEvent("FlowGuruGetNextFirstFinish")
-		.detail("Tag", self->tag)
-		.detail("FirstVersion", firstVersion)
-		.detail("Offset", self->bufferOffset)
-		.detail("BufferSize", self->twobuffer->getBufferSize())
-		.log();
+	// TraceEvent("FlowGuruGetNextFirstFinish")
+	// 	.detail("Tag", self->tag)
+	// 	.detail("FirstVersion", firstVersion)
+	// 	.detail("Offset", self->bufferOffset)
+	// 	.detail("BufferSize", self->twobuffer->getBufferSize())
+	// 	.log();
 	while (self->bufferOffset >= self->twobuffer->getBufferSize()) {
 		// fmt::print(stderr, "getNext: offset={}, size={}\n", self->bufferOffset, self->twobuffer->getBufferSize());
 		self->twobuffer->discardAndSwap();
@@ -1230,11 +1230,11 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 		if (self->twobuffer->hasNext()) {
 			// now this is run for each block, but it is not necessary if it is the last block of a file
 			// cannot check hasMoreData here because other buffer might have the last piece
-			TraceEvent("FlowGuruGetNextFollow")
-				.detail("FirstVersion", firstVersion)
-				.detail("Offset", self->bufferOffset)
-				.detail("BufferSize", self->twobuffer->getBufferSize())
-				.log();
+			// TraceEvent("FlowGuruGetNextFollow")
+			// 	.detail("FirstVersion", firstVersion)
+			// 	.detail("Offset", self->bufferOffset)
+			// 	.detail("BufferSize", self->twobuffer->getBufferSize())
+			// 	.log();
 			Standalone<VectorRef<VersionedMutation>> batch = wait(self->consumeData(firstVersion));
 			for (const VersionedMutation& vm : batch) {
 				mutations.push_back_deep(mutations.arena(), vm);
@@ -5208,9 +5208,9 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	int32_t totalBytes = 0;
 	std::map<uint32_t, std::vector<Standalone<StringRef>>> mutationsBySub;
 	std::map<uint32_t, std::vector<Standalone<MutationRef>>> tmpMap;
-	TraceEvent("FlowGuruGenerateNewVersion")
-		.detail("CommitVersion", commitVersion)
-		.log();
+	// TraceEvent("FlowGuruGenerateNewVersion")
+	// 	.detail("CommitVersion", commitVersion)
+	// 	.log();
 	for (auto& eachTagMutations : newFormatMutations) {
 		// fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
 		for (auto& vm : eachTagMutations) {
@@ -5315,13 +5315,13 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		TraceEvent("FlowGuruWriteOldFormat")
-			.detail("CommitVersion", commitVersion)
-			.detail("Part", part)
-			.detail("KeySize", backupKV.key.size())
-			.detail("ValueSize", backupKV.value.size())
-			.detail("TotalBytes", totalBytes)
-			.log();
+		// TraceEvent("FlowGuruWriteOldFormat")
+		// 	.detail("CommitVersion", commitVersion)
+		// 	.detail("Part", part)
+		// 	.detail("KeySize", backupKV.key.size())
+		// 	.detail("ValueSize", backupKV.value.size())
+		// 	.detail("TotalBytes", totalBytes)
+		// 	.log();
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 	}
 	return results;
@@ -5361,10 +5361,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Reference<IBackupContainer> bc;
 		state std::vector<KeyRange> ranges; // this is the actual KV, not version
-		TraceEvent("FlowGuruStartRestoreLogDataPartitionedTaskFunc")
-					.detail("Begin", begin)
-					.detail("End", end)
-					.log();
+		// TraceEvent("FlowGuruStartRestoreLogDataPartitionedTaskFunc")
+		// 			.detail("Begin", begin)
+		// 			.detail("End", end)
+		// 			.log();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -5448,14 +5448,14 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 					minVersion = v;
 				}
 			}
-			TraceEvent("FlowGuruCheckMinVersion")
-				.detail("AtLeastOneIteratorHasNext", atLeastOneIteratorHasNext)
-				.detail("MinVersion", minVersion)
-				.detail("Vec", printVec(minVs))
-				.detail("Begin", begin)
-				.detail("End", end)
-				.detail("Size", mutationsSingleVersion.size())
-				.log();
+			// TraceEvent("FlowGuruCheckMinVersion")
+			// 	.detail("AtLeastOneIteratorHasNext", atLeastOneIteratorHasNext)
+			// 	.detail("MinVersion", minVersion)
+			// 	.detail("Vec", printVec(minVs))
+			// 	.detail("Begin", begin)
+			// 	.detail("End", end)
+			// 	.detail("Size", mutationsSingleVersion.size())
+			// 	.log();
 
 			// fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
 			if (atLeastOneIteratorHasNext) {
@@ -5564,18 +5564,18 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 						}
 						wait(tr->commit());
 						mutationIndex += txnCount; // update mutationIndex after commit 
-						TraceEvent("FlowGuruCommitSucceed")
-							.detail("Version", minVersion)
-							.detail("Begin", begin)
-							.detail("End", end)
-							.log();
+						// TraceEvent("FlowGuruCommitSucceed")
+						// 	.detail("Version", minVersion)
+						// 	.detail("Begin", begin)
+						// 	.detail("End", end)
+						// 	.log();
 					} catch (Error& e) {
-						TraceEvent("FlowGuruCommitError")
-							.detail("Version", minVersion)
-							.detail("Begin", begin)
-							.detail("End", end)
-							.detail("Error", e.code())
-							.log();
+						// TraceEvent("FlowGuruCommitError")
+						// 	.detail("Version", minVersion)
+						// 	.detail("Begin", begin)
+						// 	.detail("End", end)
+						// 	.detail("Error", e.code())
+						// 	.log();
 						// fmt::print(stderr, "CommitError={}, mutationIndex={}, total={}\n", e.code(), mutationIndex, totalMutation);
 						if (e.code() == error_code_transaction_too_large) {
 							txBytesLimit /= 2;
@@ -5589,11 +5589,11 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			// fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
 			mutationsSingleVersion.clear();
 		}
-		TraceEvent("FlowGuruQuitLoop")
-			.detail("Begin", begin)
-			.detail("End", end)
-			.detail("VersionRestored", versionRestored)
-			.log();
+		// TraceEvent("FlowGuruQuitLoop")
+		// 	.detail("Begin", begin)
+		// 	.detail("End", end)
+		// 	.detail("VersionRestored", versionRestored)
+		// 	.log();
 		// fmt::print(stderr, "QuitLoop: begin={}, end={}, versionRestored={}\n", begin, end, versionRestored);
 		return Void();
 	}
