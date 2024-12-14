@@ -5395,8 +5395,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state std::vector<Reference<PartitionedLogIterator>> iterators(maxTagID + 1);
 		// for each tag, create an iterator
 		for (int k = 0; k < filesByTag.size(); k++) {
-			// iterators[k] = makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k]);
-			iterators[k] = makeReference<PartitionedLogIteratorSimple>(bc, k, filesByTag[k]);
+			iterators[k] = makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k]);
+			// iterators[k] = makeReference<PartitionedLogIteratorSimple>(bc, k, filesByTag[k]);
 		}
 
 		// mergeSort all iterator until all are exhausted
