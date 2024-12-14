@@ -1,5 +1,5 @@
 /*
- * BulkDumping.actor.cpp
+ * BulkDumpAndLoad.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -30,10 +30,10 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkdump");
+const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkDumpAndLoad");
 
-struct BulkDumping : TestWorkload {
-	static constexpr auto NAME = "BulkDumpingWorkload";
+struct BulkDumpAndLoad : TestWorkload {
+	static constexpr auto NAME = "BulkDumpAndLoadWorkload";
 	const bool enabled;
 	bool pass;
 
@@ -49,10 +49,10 @@ struct BulkDumping : TestWorkload {
 		             "StorageServerCheckpointRestoreTest",
 		             "ValidateStorage",
 		             "RandomRangeLock",
-		             "BulkLoading" });
+		             "BulkLoadTask" });
 	}
 
-	BulkDumping(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
+	BulkDumpAndLoad(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -69,7 +69,7 @@ struct BulkDumping : TestWorkload {
 		return stringBuffer;
 	}
 
-	KeyRange getRandomRange(BulkDumping* self, KeyRange scope) const {
+	KeyRange getRandomRange(BulkDumpAndLoad* self, KeyRange scope) const {
 		loop {
 			Standalone<StringRef> keyA = self->getRandomStringRef();
 			Standalone<StringRef> keyB = self->getRandomStringRef();
@@ -85,7 +85,7 @@ struct BulkDumping : TestWorkload {
 		}
 	}
 
-	std::map<Key, Value> generateOrderedKVS(BulkDumping* self, KeyRange range, size_t count) {
+	std::map<Key, Value> generateOrderedKVS(BulkDumpAndLoad* self, KeyRange range, size_t count) {
 		std::map<Key, Value> kvs; // ordered
 		while (kvs.size() < count) {
 			Standalone<StringRef> str = self->getRandomStringRef();
@@ -222,7 +222,7 @@ struct BulkDumping : TestWorkload {
 		return kvs;
 	}
 
-	ACTOR Future<Void> _start(BulkDumping* self, Database cx) {
+	ACTOR Future<Void> _start(BulkDumpAndLoad* self, Database cx) {
 		if (self->clientId != 0) {
 			return Void();
 		}
@@ -231,7 +231,7 @@ struct BulkDumping : TestWorkload {
 			// Network partition between CC and DD can cause DD no longer existing,
 			// which results in the bulk loading task cannot complete
 			// So, this workload disable the network partition
-			disableConnectionFailures("BulkDumping");
+			disableConnectionFailures("BulkDumpAndLoad");
 		}
 
 		state std::map<Key, Value> kvs = self->generateOrderedKVS(self, normalKeys, 1000);
@@ -242,28 +242,28 @@ struct BulkDumping : TestWorkload {
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
 		state BulkDumpState newJob = newBulkDumpJobLocalSST(normalKeys, simulationBulkDumpFolder);
 		wait(submitBulkDumpJob(cx, newJob));
-		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Submitted").detail("Job", newJob.toString());
+		TraceEvent("BulkDumpAndLoadWorkLoad").detail("Phase", "Dump Job Submitted").detail("Job", newJob.toString());
 
 		// Wait until the dump job completes
 		wait(self->waitUntilTaskComplete(cx, newJob));
-		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Complete").detail("Job", newJob.toString());
+		TraceEvent("BulkDumpAndLoadWorkLoad").detail("Phase", "Dump Job Complete").detail("Job", newJob.toString());
 
 		// Clear database
 		wait(self->clearDatabase(cx));
-		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Clear DB").detail("Job", newJob.toString());
+		TraceEvent("BulkDumpAndLoadWorkLoad").detail("Phase", "Clear DB").detail("Job", newJob.toString());
 
 		// Submit a bulk load job
 		state int oldBulkLoadMode = 0;
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoad
 		state BulkLoadJobState bulkLoadJobTask =
 		    newBulkLoadJobLocalSST(newJob.getJobId(), newJob.getRange(), newJob.getRemoteRoot());
-		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
+		TraceEvent("BulkDumpAndLoadWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
 		bool succeed = wait(submitBulkLoadJob(cx, bulkLoadJobTask));
 		ASSERT(succeed);
 
 		// Wait until the load job complete
 		wait(self->waitUntilLoadJobComplete(cx, newJob.getRange()));
-		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Complete").detail("Job", newJob.toString());
+		TraceEvent("BulkDumpAndLoadWorkLoad").detail("Phase", "Load Job Complete").detail("Job", newJob.toString());
 
 		// Check the loaded data in DB is same as the data in DB before dumping
 		std::map<Key, Value> newKvs = wait(self->getAllKVSFromDB(cx));
@@ -272,4 +272,4 @@ struct BulkDumping : TestWorkload {
 	}
 };
 
-WorkloadFactory<BulkDumping> BulkDumpingFactory;
+WorkloadFactory<BulkDumpAndLoad> BulkDumpAndLoadFactory;

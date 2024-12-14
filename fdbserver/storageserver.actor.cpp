@@ -10618,7 +10618,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	    .detail("NowAssigned", nowAssigned)
 	    .detail("Version", version)
 	    .detail("PhysicalShardMove", static_cast<bool>(enablePSM))
-	    .detail("BulkLoading", static_cast<bool>(conductBulkLoad))
+	    .detail("ConductBulkLoad", static_cast<bool>(conductBulkLoad))
 	    .detail("IsTSS", data->isTss())
 	    .detail("Context", changeServerKeysContextName(context));
 

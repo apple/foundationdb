@@ -13,7 +13,7 @@ encryptModes = ['disabled'] # Do not support encryption
 # The purpose of setting the knob to true was to enable the shard rocksdb storage engine
 # The shard rocksdb storage engine is set up before this knob is overridden
 # The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check
-# so for this BulkLoading test, the shard RocksDB storage engine is always turned on.
+# so for this test, the shard RocksDB storage engine is always turned on.
 shard_encode_location_metadata = true
 
 # BulkLoad relies on RangeLock
@@ -25,8 +25,8 @@ enable_version_vector_tlog_unicast = false
 min_byte_sampling_probability = 0.5
 
 [[test]]
-testTitle = 'BulkDumpingWorkload'
+testTitle = 'BulkLoadTaskWorkload'
 useDB = true
 
     [[test.workload]]
-    testName = 'BulkDumpingWorkload'
+    testName = 'BulkLoadTaskWorkload'
