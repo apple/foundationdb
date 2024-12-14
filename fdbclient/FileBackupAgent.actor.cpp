@@ -5672,7 +5672,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		     checkTaskVersion(tr->getDatabase(), task, name, version));
 
 		// if current is [40, 50] and restore version is 50, we need another [50, 51] task to process data at version 50
-		state int nextEndVersion =
+		state Version nextEndVersion =
 		    std::min(restoreVersion + 1, endVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE);
 		// fmt::print(stderr, "Very begin Begin={}, End={}, nextEnd={}, restoreVersion={}\n", beginVersion, endVersion, nextEndVersion, restoreVersion);		
 		// update the apply mutations end version so the mutations from the
