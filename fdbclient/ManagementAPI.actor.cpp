@@ -3038,7 +3038,7 @@ ACTOR Future<bool> anyBulkLoadJobAlive(Transaction* tr) {
 
 // Define the rule of updating the bulkdump restore phase
 // Return true if inputJob should update according to the phase, otherwise, return false
-// Throw bulkdumprestore_task_outdated error if the input job is outdated
+// Throw bulkload_task_outdated error if the input job is outdated
 ACTOR Future<bool> bulkLoadJobMetadataUpdateCheck(Transaction* tr, BulkLoadJobState inputJob) {
 	state RangeResult rangeResult;
 	wait(store(rangeResult,
@@ -3049,13 +3049,13 @@ ACTOR Future<bool> bulkLoadJobMetadataUpdateCheck(Transaction* tr, BulkLoadJobSt
 	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
 	ASSERT(rangeResult.size() >= 2);
 	if (rangeResult.size() > 2) {
-		throw bulkdumprestore_task_outdated();
+		throw bulkload_task_outdated();
 	}
 	if (rangeResult[0].value.empty()) {
 		if (inputJob.getPhase() == BulkLoadJobPhase::Submitted) {
 			return true;
 		} else {
-			throw bulkdumprestore_task_outdated();
+			throw bulkload_task_outdated();
 		}
 	}
 	BulkLoadJobState currentJob = decodeBulkLoadJobState(rangeResult[0].value);
@@ -3064,9 +3064,9 @@ ACTOR Future<bool> bulkLoadJobMetadataUpdateCheck(Transaction* tr, BulkLoadJobSt
 	       currentJob.getRange() == KeyRangeRef(rangeResult[0].key, rangeResult[1].key));
 	// TODO(BulkDump): has restore jobId, clear new jobId at each time
 	if (currentJob.getJobId() != inputJob.getJobId()) {
-		throw bulkdumprestore_task_outdated();
+		throw bulkload_task_outdated();
 	} else if (currentJob.getRange() != inputJob.getRange() && currentJob.getPhase() != BulkLoadJobPhase::Submitted) {
-		throw bulkdumprestore_task_outdated();
+		throw bulkload_task_outdated();
 	}
 	if (currentJob.getPhase() == BulkLoadJobPhase::Complete) {
 		return false;
