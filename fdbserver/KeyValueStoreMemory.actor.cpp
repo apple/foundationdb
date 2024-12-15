@@ -535,7 +535,7 @@ private:
 			log->push(cipherText);
 		}
 		IDiskQueue::location loc = log->push("\x01"_sr); // Changes here should be reflected in OP_DISK_OVERHEAD
-		DEBUG_TRANSACTION_STATE_STORE("LogOpTransactionStoreMutation", loc, v1, id);
+		DEBUG_TRANSACTION_STATE_STORE("LogOp", v1, id, loc);
 		return loc;
 	}
 
@@ -676,7 +676,7 @@ private:
 						StringRef p1 = data.substr(0, h.len1);
 						StringRef p2 = data.substr(h.len1, h.len2);
 
-						DEBUG_TRANSACTION_STATE_STORE("RecoverTransactionStoreMutation", self->log->getNextReadLocation(), p1, self->id);
+						DEBUG_TRANSACTION_STATE_STORE("Recover", p1, self->id);
 
 						if (h.op == OpSnapshotItem || h.op == OpSnapshotItemDelta) { // snapshot data item
 							/*if (p1 < uncommittedNextKey) {
@@ -830,6 +830,7 @@ private:
 		int64_t snapshotSize = 0;
 		for (auto kv = snapshotData.begin(); kv != snapshotData.end(); ++kv) {
 			StringRef tempKey = kv.getKey(reserved_buffer);
+			DEBUG_TRANSACTION_STATE_STORE("FullSnapshot", tempKey, id);
 			log_op(OpSnapshotItem, tempKey, kv.getValue());
 			snapshotSize += tempKey.size() + kv.getValue().size() + OP_DISK_OVERHEAD;
 			++count;
@@ -946,6 +947,8 @@ private:
 					// to be a proper KeyRef of the key. This intentionally leaves the Arena alone and doesn't copy
 					// anything into it.
 					destKey.contents() = KeyRef(destKey.begin(), tempKey.size());
+
+					DEBUG_TRANSACTION_STATE_STORE("SnapshotItem", destKey.toString(), self->id);
 
 					// Get the common prefix between this key and the previous one, or 0 if there was no previous one.
 					int commonPrefix;
