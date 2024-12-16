@@ -526,6 +526,10 @@ public:
 			size = 0;
 		}
 		bool is_valid() { return fetchingData.has_value(); }
+		void reset() {
+			size = 0;
+			fetchingData.reset();
+		}
 	};
 	TwoBuffers(int capacity, Reference<IBackupContainer> _bc, std::vector<RestoreConfig::RestoreFile>& _files);
 	// ready need to be called first before calling peek
@@ -541,7 +545,12 @@ public:
 	// std::shared_ptr<char[]> peek();
 	std::shared_ptr<char[]> peek();
 
+	int getFileIndex();
+	void setFileIndex(int);
+
 	bool hasNext();
+
+	void reset();
 
 	// discard the current buffer and swap to the next one
 	void discardAndSwap();
@@ -605,14 +614,57 @@ ACTOR Future<Void> TwoBuffers::ready(Reference<TwoBuffers> self) {
 	return Void();
 }
 
+
+std::string printFiles(std::vector<RestoreConfig::RestoreFile>& files) {
+	std::string str = "";
+	for (auto& file : files) {
+		str += file.fileName;
+		str += ",|";
+	}
+	return str;
+}
+
+std::string printVersions(std::vector<Version>& versions) {
+	std::string str = "";
+	for (auto& v : versions) {
+		str += std::to_string(v);
+		str += ",|";
+	}
+	return str;
+}
+
 std::shared_ptr<char[]> TwoBuffers::peek() {
 	return buffers[cur]->data;
+}
+
+int TwoBuffers::getFileIndex() {
+	return currentFileIndex;
+}
+
+void TwoBuffers::setFileIndex(int newIndex) {
+	if (newIndex < 0 || newIndex >= files.size()) {
+		TraceEvent(SevError, "FlowGuruTwoBuffersFileIndexOutOfBound")
+			.detail("Files", printFiles(files))
+			.detail("FilesSize", files.size())
+			.detail("NewIndex", newIndex)
+			.log();
+	}
+	currentFileIndex = newIndex;
 }
 
 void TwoBuffers::discardAndSwap() {
 	// invalidate cur and change cur to next
 	buffers[cur]->fetchingData.reset();
 	cur = 1 - cur;
+}
+
+void TwoBuffers::reset() {
+	// invalidate cur and change cur to next
+	buffers[0]->reset();
+	buffers[1]->reset();
+	cur = 0;
+	currentFileIndex = 0;
+	currentFilePosition = 0;
 }
 
 size_t TwoBuffers::getBufferSize() {
@@ -988,6 +1040,7 @@ public:
 	Reference<IBackupContainer> bc;
 	int tag;
 	std::vector<RestoreConfig::RestoreFile> files;
+	std::vector<Version> endVersions;
 	bool hasMoreData; // Flag indicating if more data is available
 	size_t bufferOffset; // Current read offset
 	// empty means no data, future is valid but not ready means being fetched
@@ -995,7 +1048,8 @@ public:
 
 	PartitionedLogIteratorTwoBuffers(Reference<IBackupContainer> _bc,
 	                                 int _tag,
-	                                 std::vector<RestoreConfig::RestoreFile> _files);
+	                                 std::vector<RestoreConfig::RestoreFile> _files,
+									 std::vector<Version> _endVersions);
 
 	// whether there are more contents for this tag in all files specified
 	bool hasNext();
@@ -1019,15 +1073,6 @@ static double testKeyToDouble(const KeyRef& p) {
 	uint64_t x = 0;
 	sscanf(p.toString().c_str(), "%" SCNx64, &x);
 	return *(double*)&x;
-}
-
-std::string printFiles(std::vector<RestoreConfig::RestoreFile>& files) {
-	std::string str = "";
-	for (auto& file : files) {
-		str += file.fileName;
-		str += ",|";
-	}
-	return str;
 }
 
 ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwoBuffers::consumeData(
@@ -1149,8 +1194,9 @@ void PartitionedLogIteratorTwoBuffers::removeBlockHeader() {
 
 PartitionedLogIteratorTwoBuffers::PartitionedLogIteratorTwoBuffers(Reference<IBackupContainer> _bc,
                                                                    int _tag,
-                                                                   std::vector<RestoreConfig::RestoreFile> _files)
-  : bc(_bc), tag(_tag), files(std::move(_files)), bufferOffset(0) {
+                                                                   std::vector<RestoreConfig::RestoreFile> _files,
+																   std::vector<Version> _endVersions)
+  : bc(_bc), tag(_tag), files(std::move(_files)), endVersions(_endVersions), bufferOffset(0) {
 	int bufferCapacity = BATCH_READ_BLOCK_COUNT * BLOCK_SIZE;
 	twobuffer = makeReference<TwoBuffers>(bufferCapacity, _bc, files);
 }
@@ -1172,13 +1218,16 @@ Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion() {
 ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
     Reference<PartitionedLogIteratorTwoBuffers> self) {
 	// Read the first mutation's version
+	state std::shared_ptr<char[]> start;
+	state Version version;
+	state int fileIndex;
 	if (!self->hasNext()) {
 		return Version(0);
 	}
 	// fmt::print(stderr, "peekNextVersion::BeforeReady, tag={} \n", self->tag);
 	wait(self->twobuffer->ready());
 	// fmt::print(stderr, "peekNextVersion::AfterReady, tag={} \n", self->tag);
-	std::shared_ptr<char[]> start = self->twobuffer->peek();
+	start = self->twobuffer->peek();
 	// fmt::print(stderr,
 	//            "peekNextVersion::afterPeek, tag={} , startNull={}, offset={}, bufferSize={}\n",
 	//            self->tag,
@@ -1187,9 +1236,36 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	//            self->twobuffer->getBufferSize());
 	self->removeBlockHeader();
 	// fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
-	Version version;
 	std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
+	fileIndex = self->twobuffer->getFileIndex();
+	while (self->twobuffer->hasNext() && fileIndex < self->endVersions.size() && version >= self->endVersions[fileIndex]) {
+		TraceEvent("FlowGuruFindOverlapAndSkip")
+			.detail("Version", version)
+			.detail("FileIndex", fileIndex)
+			.detail("Files", printFiles(self->files))
+			.detail("Versions", printVersions(self->endVersions))
+			.log();
+		// need to read from next file in the case of overlap range versions between log files
+		self->twobuffer->reset();
+		self->twobuffer->setFileIndex(fileIndex + 1);
+		wait(self->twobuffer->ready());
+		// fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
+		start = self->twobuffer->peek();
+		self->removeBlockHeader();
+		// fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
+		std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
+		version = bigEndian64(version);
+		fileIndex = self->twobuffer->getFileIndex();
+	}
+	if (!self->twobuffer->hasNext()) {
+		// we should always have next version because we already see this version in the current file
+		// we just want to advance the file index to deal with overlap.
+		TraceEvent(SevError, "FlowGuruErrorUnexpectedFinishWithoutNewVersion")
+			.detail("Version", version)
+			.detail("Files", printFiles(self->files))
+			.log();
+	}
 	// now i have peekNextVersion::afterMemcpy, tag=0, version=-1
 	// seeing version = -1, means there are 8 0xff
 	// fmt::print(stderr, "peekNextVersion::afterMemcpy, tag={}, version={}\n", self->tag, version);
@@ -5361,10 +5437,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Reference<IBackupContainer> bc;
 		state std::vector<KeyRange> ranges; // this is the actual KV, not version
-		// TraceEvent("FlowGuruStartRestoreLogDataPartitionedTaskFunc")
-		// 			.detail("Begin", begin)
-		// 			.detail("End", end)
-		// 			.log();
+		TraceEvent("FlowGuruStartRestoreLogDataPartitionedTaskFunc")
+					.detail("Begin", begin)
+					.detail("End", end)
+					.log();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -5385,6 +5461,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		}
 
 		std::vector<std::vector<RestoreConfig::RestoreFile>> filesByTag(maxTagID + 1);
+		std::vector<std::vector<Version>> fileEndVersionByTag(maxTagID + 1);
+
 		for (RestoreConfig::RestoreFile& f : logs) {
 			// find the tag, aggregate files by tags
 			// fmt::print(stderr, "LogFile name={}, tag={}, size={}\n", f.fileName, f.tagId, f.fileSize);
@@ -5404,11 +5482,36 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// 	.log();
 			}
 		}
+		for (int i = 0; i < maxTagID + 1; i++) {
+			std::vector<RestoreConfig::RestoreFile>& files = filesByTag[i];
+			int cnt = files.size();
+			fileEndVersionByTag[i].resize(cnt);
+			for (int j = 0; j < cnt; j++) {
+				// [10, 20), [18, 30) -> endVersion is (18, 30) for 2 files so we hve [10, 18) and [18, 30)
+				// greedy, because sorted by beginVersion
+				if (j != cnt - 1 && files[j].endVersion < files[j + 1].version) {
+					// there is a gap
+					TraceEvent(SevError, "FlowGuruNonContinuousLog")
+						.detail("Tag", i)
+						.detail("Index", j)
+						.detail("Files", printFiles(files))
+						.log();
+				}
+				fileEndVersionByTag[i][j] = (j == cnt - 1? end : files[j + 1].version);
+			}
+			TraceEvent("FlowGuruDebugFileEndVersion")
+				.detail("Tag", i)
+				.detail("Begin", begin)
+				.detail("End", end)
+				.detail("Files", printFiles(files))
+				.detail("Versions", printVersions(fileEndVersionByTag[i]))
+				.log();
+		}
 
 		state std::vector<Reference<PartitionedLogIterator>> iterators(maxTagID + 1);
 		// for each tag, create an iterator
 		for (int k = 0; k < filesByTag.size(); k++) {
-			iterators[k] = makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k]);
+			iterators[k] = makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k], fileEndVersionByTag[k]);
 			// iterators[k] = makeReference<PartitionedLogIteratorSimple>(bc, k, filesByTag[k]);
 		}
 
@@ -5589,11 +5692,11 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			// fmt::print(stderr, "VeryEndOfLoop:, versionRestored={}, atLeastOneIteratorHasNext={}\n", versionRestored, atLeastOneIteratorHasNext);
 			mutationsSingleVersion.clear();
 		}
-		// TraceEvent("FlowGuruQuitLoop")
-		// 	.detail("Begin", begin)
-		// 	.detail("End", end)
-		// 	.detail("VersionRestored", versionRestored)
-		// 	.log();
+		TraceEvent("FlowGuruQuitLoop")
+			.detail("Begin", begin)
+			.detail("End", end)
+			.detail("VersionRestored", versionRestored)
+			.log();
 		// fmt::print(stderr, "QuitLoop: begin={}, end={}, versionRestored={}\n", begin, end, versionRestored);
 		return Void();
 	}
@@ -5697,12 +5800,12 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// update the apply mutations end version so the mutations from the
 		// previous batch can be applied.
 		// Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
-		// TraceEvent("FlowGuruNewDispatch")
-		// 	.detail("Begin", beginVersion)
-		// 	.detail("First", firstVersion)
-		// 	.detail("End", endVersion)
-		// 	.detail("Restore", restoreVersion)
-		// 	.log();
+		TraceEvent("FlowGuruNewDispatch")
+			.detail("Begin", beginVersion)
+			.detail("First", firstVersion)
+			.detail("End", endVersion)
+			.detail("Restore", restoreVersion)
+			.log();
 		if (beginVersion > firstVersion) {
 			// hfu5 : unblock apply alog to normal key space
 			// if the last file is [80, 100] and the restoreVersion is 90, we should use 90 here
@@ -5714,13 +5817,13 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
 
 		// fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
-		// TraceEvent("FlowGuruBegin")
-		// 	.detail("Begin", beginVersion)
-		// 	.detail("End", endVersion)
-		// 	.detail("NextEndVersion", nextEndVersion)
-		// 	.detail("RestoreVersion", restoreVersion)
-		// 	.detail("Lag", applyLag)
-		// 	.log();
+		TraceEvent("FlowGuruBegin")
+			.detail("Begin", beginVersion)
+			.detail("End", endVersion)
+			.detail("NextEndVersion", nextEndVersion)
+			.detail("RestoreVersion", restoreVersion)
+			.detail("Lag", applyLag)
+			.log();
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
@@ -5828,7 +5931,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// 	.detail("End", endVersion)
 		// 	.log();
 		for (auto f : logFiles.results) {
-			if (f.endVersion >= beginVersion) {
+			if (f.endVersion > beginVersion) {
 				logs.push_back(f);
 				maxTagID = std::max(maxTagID, f.tagId);
 			}
@@ -5855,13 +5958,13 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// if (files.results.size() == 0 && beginVersion >= restoreVersion) {
 		// fmt::print(stderr, "CheckBegin and restore, begin={}, restore={}, applyLag={}\n", beginVersion, restoreVersion, applyLag);
 		if (beginVersion > restoreVersion) {
-			// TraceEvent("FlowGuruDispatchTaskFuncFinish")
-			// 	.detail("LogFiles", printFiles(logFiles.results))
-			// 	.detail("RnageFiles", printFiles(rangeFiles.results))
-			// 	.detail("Begin", beginVersion)
-			// 	.detail("End", endVersion)
-			// 	.detail("Lag", applyLag)
-			// 	.log();
+			TraceEvent("FlowGuruDispatchTaskFuncFinish")
+				.detail("LogFiles", printFiles(logFiles.results))
+				.detail("RnageFiles", printFiles(rangeFiles.results))
+				.detail("Begin", beginVersion)
+				.detail("End", endVersion)
+				.detail("Lag", applyLag)
+				.log();
 			// fmt::print(stderr, "Reaching end, beginVersion={}, restoreVersion={}, ApplyLag={}\n", beginVersion, restoreVersion, applyLag);
 			if (applyLag == 0) {
 				// i am the last batch
