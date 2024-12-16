@@ -291,7 +291,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		if (fp->empty()) {
 			self->fileProgress.erase(self->fileProgress.begin());
 		} else {
-			// Keep fileProgress sorted
+			// Keep fileProgress sorted because only the first one can be chagned,so this is enough
 			for (int i = 1; i < self->fileProgress.size(); i++) {
 				if (*self->fileProgress[i - 1] <= *self->fileProgress[i]) {
 					break;
@@ -488,6 +488,9 @@ ACTOR Future<Void> convert(ConvertParams params) {
 			list = MutationList();
 			arena = Arena();
 		}
+
+		// keep getting data until a new version is encounter, then flush all data buffered and start to buffer for a
+		// new version.
 
 		ArenaReader rd(data.arena, data.message, AssumeVersion(g_network->protocolVersion()));
 		MutationRef m;

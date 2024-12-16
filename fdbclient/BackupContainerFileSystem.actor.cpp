@@ -259,12 +259,16 @@ public:
 		for (int idx : indices) {
 			const LogFile& file = files[idx];
 			if (lastEnd == invalidVersion) {
-				if (file.beginVersion > begin)
+				if (file.beginVersion > begin) {
+					// flowguru: the first version of the first file must be smaller or equal to the desired
+					// beginVersion
 					return false;
+				}
 				if (file.endVersion > begin) {
 					lastBegin = begin;
 					lastTags = file.totalTags;
 				} else {
+					// if endVerison of file is smaller than desired beginVersion, then do not include this file
 					continue;
 				}
 			} else if (lastEnd < file.beginVersion) {
@@ -904,7 +908,15 @@ public:
 	// If "keyRangesFilter" is empty, the file set will cover all key ranges present in the backup.
 	// It's generally a good idea to specify "keyRangesFilter" to reduce the number of files for
 	// restore times.
-	//
+	// hfu5:1. it first reads and parse snapshot file, each snapshot file can map to a list of range files
+	// 		including ranges/ and kvranges/, then it collects range files who has intersecting keys
+	//		2. not sure why restorable.targetVersion < maxKeyRangeVersion it would continue
+	//		3. then it has a minKeyRangeVersion representing min version of all range files
+	//		4. then it read all log files with start smaller than targetVersion and end larget than minKeyRangeVersion
+	// 		4. if the first log file start version is smaller than minKeyRangeVersion, then we do not know the value,
+	// give up.
+	//			otherwise return both range and log files.
+	//		5. LogFile object is created in BackupContainerFileSystem::listLogFiles, and tagID are populated for plog
 	// If "logsOnly" is true, then only log files are returned and "keyRangesFilter" is ignored,
 	// because the log can contain mutations of the whole key space, unlike range files that each
 	// is limited to a smaller key range.
@@ -943,6 +955,7 @@ public:
 			state Version minKeyRangeVersion = MAX_VERSION;
 			state Version maxKeyRangeVersion = -1;
 
+			// iterate each listed file, why still return a vector
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    wait(bc->readKeyspaceSnapshot(snapshots[i]));
 
@@ -955,6 +968,7 @@ public:
 				maxKeyRangeVersion = snapshots[i].endVersion;
 			} else {
 				for (const auto& rangeFile : results.first) {
+					// each file is a version on a [begin, end] key range
 					const auto& keyRange = results.second.at(rangeFile.fileName);
 					if (keyRange.intersects(keyRangesFilter)) {
 						restorable.ranges.push_back(rangeFile);
@@ -971,9 +985,20 @@ public:
 			// 'latestVersion' represents using the minimum restorable version in a snapshot.
 			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
 			// Any version < maxKeyRangeVersion is not restorable.
+			// hfu5 question: why? what if target version is 8500, and this snapshot has [8000, 8200, 8800]
+			// do we give up directly? why it is not restorable?
+			// not give up, try to find the next smaller one
+			// if max is 1000, target is 500, then try to find a smaller max
+			// if max is 300, target is 500, then do the restore
+			// as a result, find the first snapshot, whose max version is smaller than targetVersion,
+			// [1, 100], [101, 200], [201, 300], [301, 400], if i want to restore to 230,
+			// then continue on [201, 300] and [301, 400], and return on [101, 200]
+			// later will list all log files from [101, 230]
 			if (restorable.targetVersion < maxKeyRangeVersion)
 				continue;
 
+			// restorable.snapshot.beginVersion is set to the smallest(oldest) snapshot's beginVersion
+			// question: should i always find a smaller log file that is smaller than this range's version?
 			restorable.snapshot = snapshots[i];
 
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
@@ -993,6 +1018,7 @@ public:
 			     store(plogs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, true)));
 
 			if (plogs.size() > 0) {
+				// hfu5 : this is how files are decided
 				logs.swap(plogs);
 				// sort by tag ID so that filterDuplicates works.
 				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
@@ -1005,6 +1031,8 @@ public:
 				restorable.logs.swap(filtered);
 				// sort by version order again for continuous analysis
 				std::sort(restorable.logs.begin(), restorable.logs.end());
+				// sort by version, but isPartitionedLogsContinuous will sort each tag separately
+				// need to refactor.
 				if (isPartitionedLogsContinuous(restorable.logs, minKeyRangeVersion, restorable.targetVersion)) {
 					restorable.continuousBeginVersion = minKeyRangeVersion;
 					restorable.continuousEndVersion = restorable.targetVersion + 1; // not inclusive

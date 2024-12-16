@@ -199,10 +199,12 @@ ACTOR Future<Void> krmSetRange(Transaction* tr, Key mapPrefix, KeyRange range, V
 }
 
 ACTOR Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapPrefix, KeyRange range, Value value) {
+	// keyVersionMap, (a, b), v1
 	state KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + range.begin.toString(), mapPrefix.toString() + range.end.toString());
 	RangeResult old =
 	    wait(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end), 1, Snapshot::True));
+	// fetch [keyVersionMap/end, keyVersionMap/inc(end)]
 
 	Value oldValue;
 	bool hasResult = old.size() > 0 && old[0].key.startsWith(mapPrefix);
@@ -213,8 +215,10 @@ ACTOR Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapP
 	if (!conflictRange.empty())
 		tr->addReadConflictRange(conflictRange);
 
-	tr->clear(withPrefix);
-	tr->set(withPrefix.begin, value);
+	tr->clear(withPrefix); // clear [keyVersionMap/a, keyVersionMap/b)
+	tr->set(withPrefix.begin, value); // set [keyVersionMap/a, v1)
+	// set [keyVersionMap/b, preveiousVersion], because end is exclusive here,
+	// but starting from end it might be covered by another range file, so set it to old value
 	tr->set(withPrefix.end, oldValue);
 
 	return Void();

@@ -45,6 +45,7 @@ FDB_BOOLEAN_PARAM(ForceAction);
 FDB_BOOLEAN_PARAM(Terminator);
 FDB_BOOLEAN_PARAM(IncrementalBackupOnly);
 FDB_BOOLEAN_PARAM(UsePartitionedLog);
+FDB_BOOLEAN_PARAM(TransformPartitionedLog);
 FDB_BOOLEAN_PARAM(OnlyApplyMutationLogs);
 FDB_BOOLEAN_PARAM(SnapshotBackupUseTenantCache);
 FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
@@ -203,42 +204,47 @@ public:
 	                        UnlockDB = UnlockDB::True,
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {},
+	                        TransformPartitionedLog transformPartitionedLog = TransformPartitionedLog::True);
 
-	Future<Version> restore(Database cx,
-	                        Optional<Database> cxOrig,
-	                        Key tagName,
-	                        Key url,
-	                        Optional<std::string> proxy,
-	                        WaitForComplete = WaitForComplete::True,
-	                        Version targetVersion = ::invalidVersion,
-	                        Verbose = Verbose::True,
-	                        KeyRange range = KeyRange(),
-	                        Key addPrefix = Key(),
-	                        Key removePrefix = Key(),
-	                        LockDB = LockDB::True,
-	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
-	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
-	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	// this method will construct range and version vectors and then call restore()
+	Future<Version> restoreKeyRange(Database cx,
+	                                Optional<Database> cxOrig,
+	                                Key tagName,
+	                                Key url,
+	                                Optional<std::string> proxy,
+	                                WaitForComplete = WaitForComplete::True,
+	                                Version targetVersion = ::invalidVersion,
+	                                Verbose = Verbose::True,
+	                                KeyRange range = KeyRange(),
+	                                Key addPrefix = Key(),
+	                                Key removePrefix = Key(),
+	                                LockDB = LockDB::True,
+	                                OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
+	                                InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
+	                                Version beginVersion = ::invalidVersion,
+	                                Optional<std::string> const& encryptionKeyFileName = {});
 
-	Future<Version> restore(Database cx,
-	                        Optional<Database> cxOrig,
-	                        Key tagName,
-	                        Key url,
-	                        Optional<std::string> proxy,
-	                        Standalone<VectorRef<KeyRangeRef>> ranges,
-	                        WaitForComplete waitForComplete = WaitForComplete::True,
-	                        Version targetVersion = ::invalidVersion,
-	                        Verbose verbose = Verbose::True,
-	                        Key addPrefix = Key(),
-	                        Key removePrefix = Key(),
-	                        LockDB lockDB = LockDB::True,
-	                        UnlockDB unlockDB = UnlockDB::True,
-	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
-	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
-	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	// create a version vector of size ranges.size(), all elements are the same, i.e. beginVersion
+	Future<Version> restoreConstructVersion(
+	    Database cx,
+	    Optional<Database> cxOrig,
+	    Key tagName,
+	    Key url,
+	    Optional<std::string> proxy,
+	    Standalone<VectorRef<KeyRangeRef>> ranges,
+	    WaitForComplete waitForComplete = WaitForComplete::True,
+	    Version targetVersion = ::invalidVersion,
+	    Verbose verbose = Verbose::True,
+	    Key addPrefix = Key(),
+	    Key removePrefix = Key(),
+	    LockDB lockDB = LockDB::True,
+	    UnlockDB unlockDB = UnlockDB::True,
+	    OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
+	    InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
+	    Version beginVersion = ::invalidVersion,
+	    Optional<std::string> const& encryptionKeyFileName = {},
+	    TransformPartitionedLog transformPartitionedLog = TransformPartitionedLog::False);
 
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
@@ -522,8 +528,8 @@ using RangeResultWithVersion = std::pair<RangeResult, Version>;
 
 struct RCGroup {
 	RangeResult items;
-	Version version;
-	uint64_t groupKey;
+	Version version; // this is read version for this group
+	uint64_t groupKey; // this is the original version for this group
 
 	RCGroup() : version(-1), groupKey(ULLONG_MAX){};
 
@@ -676,6 +682,7 @@ public:
 	                    Reference<Task> task,
 	                    SetValidation setValidation = SetValidation::True) {
 		// Set the uid task parameter
+		// task's uid is set to my uid
 		TaskParams.uid().set(task, uid);
 
 		if (!setValidation) {

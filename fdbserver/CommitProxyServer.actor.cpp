@@ -496,6 +496,7 @@ bool isWhitelisted(const std::vector<Standalone<StringRef>>& binPathVec, StringR
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
+// hfu5 question is logRangeMutations Key version or actual key
 ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
                                       const std::map<Key, MutationListRef>* logRangeMutations,
                                       LogPushData* toCommit,
@@ -512,6 +513,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 	// Serialize the log range mutations within the map
 	for (; logRangeMutation != logRangeMutations->cend(); ++logRangeMutation) {
 		// FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
+		// this is 0x0FDB00A200090001
 		valueWriter = BinaryWriter(IncludeVersion(ProtocolVersion::withBackupMutations()));
 		valueWriter << logRangeMutation->second.totalSize();
 
@@ -532,7 +534,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 
 		Key val = valueWriter.toValue();
 
-		BinaryWriter wr(Unversioned());
+		BinaryWriter wr(Unversioned()); // backupName/hash/commitVersion/part, so wr is param1
 
 		// Serialize the log destination
 		wr.serializeBytes(logRangeMutation->first);

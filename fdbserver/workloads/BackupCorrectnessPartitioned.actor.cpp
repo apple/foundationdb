@@ -33,8 +33,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A workload which test the correctness of backup and restore process
-struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
-	static constexpr auto NAME = "BackupAndRestoreCorrectness";
+struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "BackupAndRestorePartitionedCorrectness";
 	double backupAfter, restoreAfter, abortAndRestartAfter;
 	double minBackupAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
@@ -52,7 +52,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	bool defaultBackup;
 	Optional<std::string> encryptionKeyFileName;
 
-	BackupAndRestoreCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	BackupAndRestorePartitionedCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
 		double minBackupAfter = getOption(options, "minBackupAfter"_sr, backupAfter);
@@ -179,7 +179,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		return _setup(cx, this);
 	}
 
-	ACTOR Future<Void> _setup(Database cx, BackupAndRestoreCorrectnessWorkload* self) {
+	ACTOR Future<Void> _setup(Database cx, BackupAndRestorePartitionedCorrectnessWorkload* self) {
 		state bool adjusted = false;
 		state TenantMapEntry entry;
 
@@ -253,7 +253,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			return _check(cx, this);
 	}
 
-	ACTOR static Future<bool> _check(Database cx, BackupAndRestoreCorrectnessWorkload* self) {
+	ACTOR static Future<bool> _check(Database cx, BackupAndRestorePartitionedCorrectnessWorkload* self) {
 		state Transaction tr(cx);
 		loop {
 			try {
@@ -299,7 +299,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> doBackup(BackupAndRestoreCorrectnessWorkload* self,
+	ACTOR static Future<Void> doBackup(BackupAndRestorePartitionedCorrectnessWorkload* self,
 	                                   double startDelay,
 	                                   FileBackupAgent* backupAgent,
 	                                   Database cx,
@@ -343,7 +343,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               backupRanges,
 			                               true,
 			                               StopWhenDone{ !stopDifferentialDelay },
-			                               UsePartitionedLog::False,
+			                               UsePartitionedLog::True, // enable partitioned log here
 			                               IncrementalBackupOnly::False,
 			                               self->encryptionKeyFileName));
 		} catch (Error& e) {
@@ -469,55 +469,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	/**
-	    This actor attempts to restore the database without clearing the keyspace.
-	 */
-	ACTOR static Future<Void> attemptDirtyRestore(BackupAndRestoreCorrectnessWorkload* self,
-	                                              Database cx,
-	                                              FileBackupAgent* backupAgent,
-	                                              Standalone<StringRef> lastBackupContainer,
-	                                              UID randomID) {
-		state Transaction tr(cx);
-		state int rowCount = 0;
-		loop {
-			try {
-				RangeResult existingRows = wait(tr.getRange(normalKeys, 1));
-				rowCount = existingRows.size();
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-
-		// Try doing a restore without clearing the keys
-		if (rowCount > 0) {
-			try {
-				wait(success(backupAgent->restoreKeyRange(cx,
-				                                          cx,
-				                                          self->backupTag,
-				                                          KeyRef(lastBackupContainer),
-				                                          {},
-				                                          WaitForComplete::True,
-				                                          ::invalidVersion,
-				                                          Verbose::True,
-				                                          normalKeys,
-				                                          Key(),
-				                                          Key(),
-				                                          self->locked)));
-				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID).log();
-				ASSERT(false);
-			} catch (Error& e) {
-				if (e.code() != error_code_restore_destination_not_empty) {
-					throw;
-				}
-			}
-		}
-
-		return Void();
-	}
-
 	ACTOR static Future<Void> clearAndRestoreSystemKeys(Database cx,
-	                                                    BackupAndRestoreCorrectnessWorkload* self,
+	                                                    BackupAndRestorePartitionedCorrectnessWorkload* self,
 	                                                    FileBackupAgent* backupAgent,
 	                                                    Version targetVersion,
 	                                                    Reference<IBackupContainer> lastBackupContainer,
@@ -547,14 +500,14 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		                                                  OnlyApplyMutationLogs::False,
 		                                                  InconsistentSnapshotOnly::False,
 		                                                  ::invalidVersion,
-		                                                  self->encryptionKeyFileName)));
+		                                                  self->encryptionKeyFileName,
+		                                                  TransformPartitionedLog::True)));
 		printf("BackupCorrectness, backupAgent.restore finished for tag:%s\n", restoreTag.toString().c_str());
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start(Database cx, BackupAndRestoreCorrectnessWorkload* self) {
+	ACTOR static Future<Void> _start(Database cx, BackupAndRestorePartitionedCorrectnessWorkload* self) {
 		state FileBackupAgent backupAgent;
-		state Future<Void> extraBackup;
 		state bool extraTasks = false;
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		TraceEvent("BARW_Arguments")
@@ -572,7 +525,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		// Increment the backup agent requests
 		if (self->agentRequest) {
-			BackupAndRestoreCorrectnessWorkload::backupAgentRequests++;
+			BackupAndRestorePartitionedCorrectnessWorkload::backupAgentRequests++;
 		}
 
 		if (self->encryptionKeyFileName.present()) {
@@ -628,36 +581,12 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			state Reference<IBackupContainer> lastBackupContainer =
 			    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
 
-			// Occasionally start yet another backup that might still be running when we restore
-			if (!self->locked && BUGGIFY) {
-				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
-				try {
-					extraBackup = backupAgent.submitBackup(cx,
-					                                       "file://simfdb/backups/"_sr,
-					                                       {},
-					                                       deterministicRandom()->randomInt(0, 60),
-					                                       deterministicRandom()->randomInt(0, 100),
-					                                       self->backupTag.toString(),
-					                                       self->backupRanges,
-					                                       true,
-					                                       StopWhenDone::True);
-				} catch (Error& e) {
-					TraceEvent("BARW_SubmitBackup2Exception", randomID)
-					    .error(e)
-					    .detail("BackupTag", printable(self->backupTag));
-					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
-						throw;
-				}
-			}
+
 
 			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
 			wait(startRestore);
 
 			if (lastBackupContainer && self->performRestore) {
-				if (deterministicRandom()->random01() < 0.5) {
-					wait(attemptDirtyRestore(
-					    self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
-				}
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					for (auto& kvrange : self->backupRanges)
@@ -720,156 +649,36 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					wait(clearAndRestoreSystemKeys(
 					    cx, self, &backupAgent, targetVersion, lastBackupContainer, systemRestoreRanges));
 				}
-				if (deterministicRandom()->random01() < 0.5) {
-					for (restoreIndex = 0; restoreIndex < self->restoreRanges.size(); restoreIndex++) {
-						auto range = self->restoreRanges[restoreIndex];
-						Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" +
-						                                 std::to_string(restoreIndex));
-						restoreTags.push_back(restoreTag);
-						printf("BackupCorrectness, restore for each range: backupAgent.restore is called for "
-						       "restoreIndex:%d tag:%s ranges:%s\n",
-						       restoreIndex,
-						       range.toString().c_str(),
-						       restoreTag.toString().c_str());
-						restores.push_back(backupAgent.restoreKeyRange(cx,
-						                                               cx,
-						                                               restoreTag,
-						                                               KeyRef(lastBackupContainer->getURL()),
-						                                               lastBackupContainer->getProxy(),
-						                                               WaitForComplete::True,
-						                                               targetVersion,
-						                                               Verbose::True,
-						                                               range,
-						                                               Key(),
-						                                               Key(),
-						                                               self->locked,
-						                                               OnlyApplyMutationLogs::False,
-						                                               InconsistentSnapshotOnly::False,
-						                                               ::invalidVersion,
-						                                               self->encryptionKeyFileName));
-					}
-				} else {
-					multipleRangesInOneTag = true;
-					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
-					restoreTags.push_back(restoreTag);
-					printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
-					       restoreIndex,
-					       restoreTag.toString().c_str());
-					restores.push_back(backupAgent.restoreConstructVersion(cx,
-					                                                       cx,
-					                                                       restoreTag,
-					                                                       KeyRef(lastBackupContainer->getURL()),
-					                                                       lastBackupContainer->getProxy(),
-					                                                       self->restoreRanges,
-					                                                       WaitForComplete::True,
-					                                                       targetVersion,
-					                                                       Verbose::True,
-					                                                       Key(),
-					                                                       Key(),
-					                                                       self->locked,
-					                                                       UnlockDB::True,
-					                                                       OnlyApplyMutationLogs::False,
-					                                                       InconsistentSnapshotOnly::False,
-					                                                       ::invalidVersion,
-					                                                       self->encryptionKeyFileName));
-				}
 
-				// Sometimes kill and restart the restore
-				if (BUGGIFY) {
-					wait(delay(deterministicRandom()->randomInt(0, 10)));
-					if (multipleRangesInOneTag) {
-						FileBackupAgent::ERestoreState rs = wait(backupAgent.abortRestore(cx, restoreTags[0]));
-						// The restore may have already completed, or the abort may have been done before the restore
-						// was even able to start.  Only run a new restore if the previous one was actually aborted.
-						if (rs == FileBackupAgent::ERestoreState::ABORTED) {
-							wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-								tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-								for (auto& range : self->restoreRanges)
-									tr->clear(range);
-								return Void();
-							}));
-							restores[restoreIndex] =
-							    backupAgent.restoreConstructVersion(cx,
-							                                        cx,
-							                                        restoreTags[restoreIndex],
-							                                        KeyRef(lastBackupContainer->getURL()),
-							                                        lastBackupContainer->getProxy(),
-							                                        self->restoreRanges,
-							                                        WaitForComplete::True,
-							                                        ::invalidVersion,
-							                                        Verbose::True,
-							                                        Key(),
-							                                        Key(),
-							                                        self->locked,
-							                                        UnlockDB::True,
-							                                        OnlyApplyMutationLogs::False,
-							                                        InconsistentSnapshotOnly::False,
-							                                        ::invalidVersion,
-							                                        self->encryptionKeyFileName);
-						}
-					} else {
-						for (restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {
-							FileBackupAgent::ERestoreState rs =
-							    wait(backupAgent.abortRestore(cx, restoreTags[restoreIndex]));
-							// The restore may have already completed, or the abort may have been done before the
-							// restore was even able to start.  Only run a new restore if the previous one was actually
-							// aborted.
-							if (rs == FileBackupAgent::ERestoreState::ABORTED) {
-								wait(
-								    runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-									    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-									    tr->clear(self->restoreRanges[restoreIndex]);
-									    return Void();
-								    }));
-								restores[restoreIndex] =
-								    backupAgent.restoreKeyRange(cx,
-								                                cx,
-								                                restoreTags[restoreIndex],
-								                                KeyRef(lastBackupContainer->getURL()),
-								                                lastBackupContainer->getProxy(),
-								                                WaitForComplete::True,
-								                                ::invalidVersion,
-								                                Verbose::True,
-								                                self->restoreRanges[restoreIndex],
-								                                Key(),
-								                                Key(),
-								                                self->locked,
-								                                OnlyApplyMutationLogs::False,
-								                                InconsistentSnapshotOnly::False,
-								                                ::invalidVersion,
-								                                self->encryptionKeyFileName);
-							}
-						}
-					}
-				}
+				multipleRangesInOneTag = true;
+				Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
+				restoreTags.push_back(restoreTag);
+				printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
+				       restoreIndex,
+				       restoreTag.toString().c_str());
+				restores.push_back(backupAgent.restoreConstructVersion(cx,
+				                                                       cx,
+				                                                       restoreTag,
+				                                                       KeyRef(lastBackupContainer->getURL()),
+				                                                       lastBackupContainer->getProxy(),
+				                                                       self->restoreRanges,
+				                                                       WaitForComplete::True,
+				                                                       targetVersion,
+				                                                       Verbose::True,
+				                                                       Key(),
+				                                                       Key(),
+				                                                       self->locked,
+				                                                       UnlockDB::True,
+				                                                       OnlyApplyMutationLogs::False,
+				                                                       InconsistentSnapshotOnly::False,
+				                                                       ::invalidVersion,
+				                                                       self->encryptionKeyFileName,
+				                                                       TransformPartitionedLog::True));
 
 				wait(waitForAll(restores));
 
 				for (auto& restore : restores) {
 					ASSERT(!restore.isError());
-				}
-			}
-
-			if (extraBackup.isValid()) {
-				TraceEvent("BARW_WaitExtraBackup", randomID).detail("BackupTag", printable(self->backupTag));
-				extraTasks = true;
-				try {
-					wait(extraBackup);
-				} catch (Error& e) {
-					TraceEvent("BARW_ExtraBackupException", randomID)
-					    .error(e)
-					    .detail("BackupTag", printable(self->backupTag));
-					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
-						throw;
-				}
-
-				TraceEvent("BARW_AbortBackupExtra", randomID).detail("BackupTag", printable(self->backupTag));
-				try {
-					wait(backupAgent.abortBackup(cx, self->backupTag.toString()));
-				} catch (Error& e) {
-					TraceEvent("BARW_AbortBackupExtraException", randomID).error(e);
-					if (e.code() != error_code_backup_unneeded)
-						throw;
 				}
 			}
 
@@ -992,26 +801,26 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 			// Decrement the backup agent requets
 			if (self->agentRequest) {
-				BackupAndRestoreCorrectnessWorkload::backupAgentRequests--;
+				BackupAndRestorePartitionedCorrectnessWorkload::backupAgentRequests--;
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
 			if ((g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
-			    (!BackupAndRestoreCorrectnessWorkload::backupAgentRequests)) {
+			    (!BackupAndRestorePartitionedCorrectnessWorkload::backupAgentRequests)) {
 				g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
-			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e).GetLastError();
+			TraceEvent(SevError, "BackupAndRestorePartitionedCorrectness").error(e).GetLastError();
 			throw;
 		}
 		return Void();
 	}
 };
 
-int BackupAndRestoreCorrectnessWorkload::backupAgentRequests = 0;
+int BackupAndRestorePartitionedCorrectnessWorkload::backupAgentRequests = 0;
 
-std::string getTestEncryptionFileName() {
-	return "test_encryption_key_file";
-}
+// std::string getTestEncryptionFileName() {
+// 	return "test_encryption_key_file";
+// }
 
-WorkloadFactory<BackupAndRestoreCorrectnessWorkload> BackupAndRestoreCorrectnessWorkloadFactory;
+WorkloadFactory<BackupAndRestorePartitionedCorrectnessWorkload> BackupAndRestorePartitionedCorrectnessWorkloadFactory;
