@@ -1239,7 +1239,16 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
 	fileIndex = self->twobuffer->getFileIndex();
-	while (self->twobuffer->hasNext() && fileIndex < self->endVersions.size() && version >= self->endVersions[fileIndex]) {
+	if (version == 462625367) {
+		TraceEvent("FlowGuruPeekNextVersion")
+			.detail("Tag", self->tag)
+			.detail("Version", version)
+			.detail("FileIndex", fileIndex)
+			.detail("Files", printFiles(self->files))
+			.detail("Versions", printVersions(self->endVersions))
+			.log();
+	}
+	while (fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[fileIndex]) {
 		TraceEvent("FlowGuruFindOverlapAndSkip")
 			.detail("Version", version)
 			.detail("FileIndex", fileIndex)
@@ -1257,14 +1266,6 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 		std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
 		version = bigEndian64(version);
 		fileIndex = self->twobuffer->getFileIndex();
-	}
-	if (!self->twobuffer->hasNext()) {
-		// we should always have next version because we already see this version in the current file
-		// we just want to advance the file index to deal with overlap.
-		TraceEvent(SevError, "FlowGuruErrorUnexpectedFinishWithoutNewVersion")
-			.detail("Version", version)
-			.detail("Files", printFiles(self->files))
-			.log();
 	}
 	// now i have peekNextVersion::afterMemcpy, tag=0, version=-1
 	// seeing version = -1, means there are 8 0xff
@@ -5284,9 +5285,9 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	int32_t totalBytes = 0;
 	std::map<uint32_t, std::vector<Standalone<StringRef>>> mutationsBySub;
 	std::map<uint32_t, std::vector<Standalone<MutationRef>>> tmpMap;
-	// TraceEvent("FlowGuruGenerateNewVersion")
-	// 	.detail("CommitVersion", commitVersion)
-	// 	.log();
+	TraceEvent("FlowGuruGenerateNewVersion")
+		.detail("CommitVersion", commitVersion)
+		.log();
 	for (auto& eachTagMutations : newFormatMutations) {
 		// fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
 		for (auto& vm : eachTagMutations) {
@@ -5391,13 +5392,13 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		// TraceEvent("FlowGuruWriteOldFormat")
-		// 	.detail("CommitVersion", commitVersion)
-		// 	.detail("Part", part)
-		// 	.detail("KeySize", backupKV.key.size())
-		// 	.detail("ValueSize", backupKV.value.size())
-		// 	.detail("TotalBytes", totalBytes)
-		// 	.log();
+		TraceEvent("FlowGuruWriteOldFormat")
+			.detail("CommitVersion", commitVersion)
+			.detail("Part", part)
+			.detail("KeySize", backupKV.key.size())
+			.detail("ValueSize", backupKV.value.size())
+			.detail("TotalBytes", totalBytes)
+			.log();
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 	}
 	return results;
@@ -5551,14 +5552,14 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 					minVersion = v;
 				}
 			}
-			// TraceEvent("FlowGuruCheckMinVersion")
-			// 	.detail("AtLeastOneIteratorHasNext", atLeastOneIteratorHasNext)
-			// 	.detail("MinVersion", minVersion)
-			// 	.detail("Vec", printVec(minVs))
-			// 	.detail("Begin", begin)
-			// 	.detail("End", end)
-			// 	.detail("Size", mutationsSingleVersion.size())
-			// 	.log();
+			TraceEvent("FlowGuruCheckMinVersion")
+				.detail("AtLeastOneIteratorHasNext", atLeastOneIteratorHasNext)
+				.detail("MinVersion", minVersion)
+				.detail("Vec", printVec(minVs))
+				.detail("Begin", begin)
+				.detail("End", end)
+				.detail("Size", mutationsSingleVersion.size())
+				.log();
 
 			// fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
 			if (atLeastOneIteratorHasNext) {
