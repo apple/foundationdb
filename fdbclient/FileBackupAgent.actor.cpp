@@ -531,7 +531,7 @@ public:
 			fetchingData.reset();
 		}
 	};
-	TwoBuffers(int capacity, Reference<IBackupContainer> _bc, std::vector<RestoreConfig::RestoreFile>& _files);
+	TwoBuffers(int capacity, Reference<IBackupContainer> _bc, std::vector<RestoreConfig::RestoreFile>& _files, int tag);
 	// ready need to be called first before calling peek
 	// because a shared_ptr cannot be wrapped by a Future
 	// this method ensures the current buffer has available data
@@ -566,17 +566,19 @@ private:
 	size_t bufferCapacity; // Size of each buffer in bytes
 	Reference<IBackupContainer> bc;
 	std::vector<RestoreConfig::RestoreFile> files;
+	int tag;
 
 	int cur; // Index of the current active buffer (0 or 1)
 	size_t currentFileIndex; // Index of the current file being read
 	size_t currentFilePosition; // Current read position in the current file
 };
 
-TwoBuffers::TwoBuffers(int capacity, Reference<IBackupContainer> _bc, std::vector<RestoreConfig::RestoreFile>& _files)
+TwoBuffers::TwoBuffers(int capacity, Reference<IBackupContainer> _bc, std::vector<RestoreConfig::RestoreFile>& _files, int _tag)
   : currentFileIndex(0), currentFilePosition(0), cur(0) {
 	bufferCapacity = capacity;
 	files = _files;
 	bc = _bc;
+	tag = _tag;
 	buffers[0] = makeReference<IteratorBuffer>(capacity);
 	buffers[1] = makeReference<IteratorBuffer>(capacity);
 }
@@ -678,6 +680,15 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 		self->buffers[index]->size = 0;
 		return Void();
 	}
+	TraceEvent("FlowGuruReadNextFileBegin")
+		.detail("FileIndex", self->currentFileIndex)
+		.detail("Tag", self->tag)
+		.detail("position", self->currentFilePosition)
+		.detail("Files", printFiles(self->files))
+		.detail("FileSize", self->files[self->currentFileIndex].fileSize)
+		.detail("FilesCount", self->files.size())
+		.log();
+
 	// fmt::print(stderr,
 	//            "readNextBlock::beforeReadFile, name={}, size={}\n",
 	//            self->files[self->currentFileIndex].fileName,
@@ -706,10 +717,20 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	self->buffers[index]->size = bytesRead; // Set to actual bytes read
 	// self->bufferOffset[index] = 0; // Reset bufferOffset for the new data
 	self->currentFilePosition += bytesRead;
+	TraceEvent("FlowGuruReadNextFileFinish")
+		.detail("FileIndex", self->currentFileIndex)
+		.detail("Tag", self->tag)
+		.detail("position", self->currentFilePosition)
+		.detail("Files", printFiles(self->files))
+		.detail("FileSize", self->files[self->currentFileIndex].fileSize)
+		.detail("FilesCount", self->files.size())
+		.log();
+
 	if (self->currentFilePosition >= fileSize) {
 		TraceEvent("FlowGuruReadNextFile")
-			.detail("Files", printFiles(files))
-			.detail("FilesSize", files.size())
+			.detail("Files", printFiles(self->files))
+			.detail("Tag", self->tag)
+			.detail("FilesCount", self->files.size())
 			.detail("NewIndex", self->currentFileIndex + 1)
 			.log();
 		self->currentFileIndex++;
@@ -814,11 +835,11 @@ Standalone<VectorRef<VersionedMutation>> PartitionedLogIteratorSimple::consumeDa
 	// fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
 	char* start = buffer;
 	bool foundNewVersion = false;
-	// TraceEvent("FlowGuruConsumeData")
-	// 	.detail("FirstVersion", firstVersion)
-	// 	.detail("Offset", bufferOffset)
-	// 	.detail("Size", size)
-	// 	.log();
+	TraceEvent("FlowGuruConsumeData")
+		.detail("FirstVersion", firstVersion)
+		.detail("Offset", bufferOffset)
+		.detail("BufferSize", bufferSize)
+		.log();
 	while (bufferOffset < bufferSize) {
 		while (bufferOffset < bufferSize && !endOfBlock(start, bufferOffset)) {
 			// for each block
@@ -1203,7 +1224,7 @@ PartitionedLogIteratorTwoBuffers::PartitionedLogIteratorTwoBuffers(Reference<IBa
 																   std::vector<Version> _endVersions)
   : bc(_bc), tag(_tag), files(std::move(_files)), endVersions(_endVersions), bufferOffset(0) {
 	int bufferCapacity = BATCH_READ_BLOCK_COUNT * BLOCK_SIZE;
-	twobuffer = makeReference<TwoBuffers>(bufferCapacity, _bc, files);
+	twobuffer = makeReference<TwoBuffers>(bufferCapacity, _bc, files, tag);
 }
 
 bool PartitionedLogIteratorTwoBuffers::hasNext() {
@@ -1244,15 +1265,17 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	std::memcpy(&version, start.get() + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
 	fileIndex = self->twobuffer->getFileIndex();
-	if (version == 462625367) {
+	// if (version == 462625367) {
 		TraceEvent("FlowGuruPeekNextVersion")
 			.detail("Tag", self->tag)
+			.detail("BufferOffset", self->bufferOffset)
+			.detail("BufferSize", self->twobuffer->getBufferSize())
 			.detail("Version", version)
 			.detail("FileIndex", fileIndex)
 			.detail("Files", printFiles(self->files))
 			.detail("Versions", printVersions(self->endVersions))
 			.log();
-	}
+	// }
 	while (fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[fileIndex]) {
 		TraceEvent("FlowGuruFindOverlapAndSkip")
 			.detail("Version", version)
