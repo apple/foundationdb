@@ -707,6 +707,11 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	// self->bufferOffset[index] = 0; // Reset bufferOffset for the new data
 	self->currentFilePosition += bytesRead;
 	if (self->currentFilePosition >= fileSize) {
+		TraceEvent("FlowGuruReadNextFile")
+			.detail("Files", printFiles(files))
+			.detail("FilesSize", files.size())
+			.detail("NewIndex", self->currentFileIndex + 1)
+			.log();
 		self->currentFileIndex++;
 		self->currentFilePosition = 0;
 	}
