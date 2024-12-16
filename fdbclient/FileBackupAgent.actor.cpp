@@ -516,6 +516,7 @@ public:
 		// is_valid means data is being fetched, is_ready means data is ready
 		std::optional<Future<Void>> fetchingData;
 		size_t size;
+		int index;
 		int capacity;
 		IteratorBuffer(int _capacity) {
 			capacity = _capacity;
@@ -528,6 +529,7 @@ public:
 		bool is_valid() { return fetchingData.has_value(); }
 		void reset() {
 			size = 0;
+			index = 0;
 			fetchingData.reset();
 		}
 	};
@@ -640,7 +642,7 @@ std::shared_ptr<char[]> TwoBuffers::peek() {
 }
 
 int TwoBuffers::getFileIndex() {
-	return currentFileIndex;
+	return buffers[cur]->index;
 }
 
 void TwoBuffers::setFileIndex(int newIndex) {
@@ -683,7 +685,7 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	TraceEvent("FlowGuruReadNextFileBegin")
 		.detail("FileIndex", self->currentFileIndex)
 		.detail("Tag", self->tag)
-		.detail("position", self->currentFilePosition)
+		.detail("Position", self->currentFilePosition)
 		.detail("Files", printFiles(self->files))
 		.detail("FileSize", self->files[self->currentFileIndex].fileSize)
 		.detail("FilesCount", self->files.size())
@@ -714,13 +716,14 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	//            "readNextBlock::Index={}", self->currentFileIndex);
 	if (bytesRead != bytesToRead)
 		throw restore_bad_read();
+	self->buffers[index]->index = self->currentFileIndex;
 	self->buffers[index]->size = bytesRead; // Set to actual bytes read
 	// self->bufferOffset[index] = 0; // Reset bufferOffset for the new data
 	self->currentFilePosition += bytesRead;
 	TraceEvent("FlowGuruReadNextFileFinish")
 		.detail("FileIndex", self->currentFileIndex)
 		.detail("Tag", self->tag)
-		.detail("position", self->currentFilePosition)
+		.detail("Position", self->currentFilePosition)
 		.detail("Files", printFiles(self->files))
 		.detail("FileSize", self->files[self->currentFileIndex].fileSize)
 		.detail("FilesCount", self->files.size())
@@ -1285,6 +1288,7 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 			.log();
 		// need to read from next file in the case of overlap range versions between log files
 		self->twobuffer->reset();
+		self->bufferOffset = 0;
 		self->twobuffer->setFileIndex(fileIndex + 1);
 		wait(self->twobuffer->ready());
 		// fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
