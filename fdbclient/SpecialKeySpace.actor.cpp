@@ -925,9 +925,9 @@ bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR Future<bool> checkExclusion(Database db,
-                                  std::vector<AddressExclusion>* addresses,
-                                  std::set<AddressExclusion>* exclusions,
-                                  std::unordered_set<std::string>* localities,
+                                  const std::vector<AddressExclusion>* addresses,
+                                  const std::set<AddressExclusion>* exclusions,
+                                  const std::unordered_set<std::string>* localities,
                                   bool markFailed,
                                   Optional<std::string>* msg) {
 	StatusObject status = wait(StatusClient::statusFetcher(db));
@@ -970,6 +970,19 @@ ACTOR Future<bool> checkExclusion(Database db,
 		parsedLocalities[locality_key_value.first].push_back(locality_key_value.second);
 	}
 
+	// If the exclusion marks the excluded processes as failed and the provided addresses are not empty,
+	// we will copy the input addresses into a new vector to not modify the input vector when additional
+	// addresses are added. We do this to get the excluded addresses when locality based exclusions are used
+	// with the failed flag, in this case the checkSafeExclusions will be called with the excluded addresses
+	// to verify if the exclusion can be done. In case of locality based exclusions the addresses should
+	// be empty and if the addresses are not empty, we are not using the locality based exclusion. So this
+	// step is a safeguard for future changes where the provided addresses are not empty and locality based
+	// exclusions are used.
+	state std::vector<AddressExclusion> excludedAddresses;
+	if (markFailed && !addresses->empty()) {
+		excludedAddresses = *addresses;
+	}
+
 	try {
 		for (auto proc : processesMap.obj()) {
 			StatusObjectReader process(proc.second);
@@ -1003,7 +1016,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 							continue;
 						}
 
-						std::vector<std::string> localityVec = it->second;
+						const std::vector<std::string> localityVec = it->second;
 						// When the process has a matching locality field, add it to the exclusion list.
 						if (std::find(localityVec.begin(), localityVec.end(), localityValue) != localityVec.end()) {
 							excluded = true;
@@ -1012,9 +1025,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 							// information.
 							if (markFailed) {
 								auto addrExclusion = AddressExclusion(addr.ip, addr.port);
-								if (std::find(addresses->begin(), addresses->end(), addrExclusion) !=
-								    addresses->end()) {
-									addresses->push_back(addrExclusion);
+								if (std::find(excludedAddresses.begin(), excludedAddresses.end(), addrExclusion) !=
+								    excludedAddresses.end()) {
+									excludedAddresses.push_back(addrExclusion);
 								}
 							}
 
@@ -1106,7 +1119,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 	if (markFailed) {
 		state bool safe;
 		try {
-			bool _safe = wait(checkSafeExclusions(db, *addresses));
+			bool _safe = wait(checkSafeExclusions(db, excludedAddresses));
 			safe = _safe;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
