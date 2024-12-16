@@ -19,7 +19,6 @@
  */
 
 #pragma once
-#include "fdbclient/BulkDumping.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_MANAGEMENT_API_ACTOR_G_H)
 #define FDBCLIENT_MANAGEMENT_API_ACTOR_G_H
 #include "fdbclient/ManagementAPI.actor.g.h"
@@ -35,6 +34,7 @@ standard API and some knowledge of the contents of the system key space.
 
 #include <string>
 #include <map>
+#include "fdbclient/BulkDumping.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/RangeLock.h"
@@ -195,21 +195,21 @@ ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID task
 // Used by ManagementAPI and bulkdumpRestore at DD
 ACTOR Future<Void> setBulkLoadAcknowledgeTransaction(Transaction* tr, KeyRange range, UID taskId);
 
-// Get bulk load task for the input range and taskId
+// Get bulkload task for the input range and taskId
 ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
                                                 KeyRange range,
                                                 UID taskId,
                                                 std::vector<BulkLoadTaskPhase> phases);
 
-// Submit a bulkLoadJob job: retore dumped data from a remote folder using bulkloading mechanism
+// Submit a bulkLoadJob job: bulkload job data from a remote folder using bulkloading mechanism
 // There is at most one bulkLoadJob job at a time
 ACTOR Future<bool> submitBulkLoadJob(Database cx, BulkLoadJobState jobState);
 
-// Create a transaction for updating bulkdump restore metadata
+// Create a transaction for updating bulkload metadata
 // Return true if did the update, otherwise, return false
 ACTOR Future<bool> updateBulkLoadJobMetadata(Transaction* tr, BulkLoadJobState jobState);
 
-// TODO(BulkDump): Cancel or clear a bulkLoadJob job
+// TODO(BulkLoad): Cancel or clear a bulkLoadJob job
 ACTOR Future<Void> clearBulkLoadJob(Database cx);
 
 // Get ongoing bulkLoadJob job Id
