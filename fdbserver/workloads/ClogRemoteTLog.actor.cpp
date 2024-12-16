@@ -10,6 +10,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/IPAddress.h"
 #include "flow/IRandom.h"
@@ -104,7 +105,7 @@ struct ClogRemoteTLog : TestWorkload {
 			return ret;
 		};
 		TraceEvent("ClogRemoteTLogCheck").detail("ActualStatePath", print(actualStatePath)).detail("DoCheck", doCheck);
-		if (!doCheck) {
+		if (!doCheck || isGeneralBuggifyEnabled()) {
 			return true;
 		}
 

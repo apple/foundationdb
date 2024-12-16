@@ -5,7 +5,6 @@ generateFearless = true
 minimumRegions = 2
 remoteDesiredTLogCount = 4
 statelessProcessClassesPerDC = 2
-buggify = false
 
 [[knobs]]
 enable_worker_health_monitor = true
