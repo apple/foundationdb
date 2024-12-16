@@ -121,34 +121,34 @@ struct RestoreBackupWorkload : TestWorkload {
 
 		if (config.tenantMode == TenantMode::REQUIRED) {
 			// restore system keys
-			wait(success(self->backupAgent.restore(cx,
-			                                       cx,
-			                                       "system_restore"_sr,
-			                                       Key(self->backupContainer->getURL()),
-			                                       self->backupContainer->getProxy(),
-			                                       getSystemBackupRanges(),
-			                                       WaitForComplete::True,
-			                                       ::invalidVersion,
-			                                       Verbose::True)));
+			wait(success(self->backupAgent.restoreWithBeginVersion(cx,
+			                                                       cx,
+			                                                       "system_restore"_sr,
+			                                                       Key(self->backupContainer->getURL()),
+			                                                       self->backupContainer->getProxy(),
+			                                                       getSystemBackupRanges(),
+			                                                       WaitForComplete::True,
+			                                                       ::invalidVersion,
+			                                                       Verbose::True)));
 			// restore user data
-			wait(success(self->backupAgent.restore(cx,
-			                                       cx,
-			                                       self->tag,
-			                                       Key(self->backupContainer->getURL()),
-			                                       self->backupContainer->getProxy(),
-			                                       WaitForComplete::True,
-			                                       ::invalidVersion,
-			                                       Verbose::True,
-			                                       normalKeys)));
+			wait(success(self->backupAgent.restoreKeyRange(cx,
+			                                               cx,
+			                                               self->tag,
+			                                               Key(self->backupContainer->getURL()),
+			                                               self->backupContainer->getProxy(),
+			                                               WaitForComplete::True,
+			                                               ::invalidVersion,
+			                                               Verbose::True,
+			                                               normalKeys)));
 		} else {
-			wait(success(self->backupAgent.restore(cx,
-			                                       cx,
-			                                       self->tag,
-			                                       Key(self->backupContainer->getURL()),
-			                                       self->backupContainer->getProxy(),
-			                                       WaitForComplete::True,
-			                                       ::invalidVersion,
-			                                       Verbose::True)));
+			wait(success(self->backupAgent.restoreKeyRange(cx,
+			                                               cx,
+			                                               self->tag,
+			                                               Key(self->backupContainer->getURL()),
+			                                               self->backupContainer->getProxy(),
+			                                               WaitForComplete::True,
+			                                               ::invalidVersion,
+			                                               Verbose::True)));
 		}
 
 		return Void();
