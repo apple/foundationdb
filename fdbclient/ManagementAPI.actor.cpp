@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-#include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoadAndDump.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/RangeLock.h"
 #include "flow/Error.h"

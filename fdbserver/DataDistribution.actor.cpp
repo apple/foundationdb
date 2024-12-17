@@ -23,8 +23,7 @@
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.actor.h"
-#include "fdbclient/BulkDumping.h"
-#include "fdbclient/BulkLoading.h"
+#include "fdbclient/BulkLoadAndDump.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
@@ -35,8 +34,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/Replication.h"
-#include "fdbserver/BulkDumpUtil.actor.h"
-#include "fdbserver/BulkLoadUtil.actor.h"
+#include "fdbserver/BulkLoadAndDumpUtil.actor.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/DataDistribution.actor.h"
@@ -58,6 +56,7 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
+#include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -450,8 +449,8 @@ public:
 	    teamCollection(nullptr), bulkLoadTaskCollection(nullptr), auditStorageHaLaunchingLock(1),
 	    auditStorageReplicaLaunchingLock(1), auditStorageLocationMetadataLaunchingLock(1),
 	    auditStorageSsShardLaunchingLock(1), auditStorageInitStarted(false), bulkLoadEnabled(false),
-	    bulkDumpEnabled(false), bulkDumpParallelismLimitor(SERVER_KNOBS->DD_BULKDUMP_PARALLELISM),
-	    bulkLoadParallelismLimitor(SERVER_KNOBS->DD_BULKLOAD_PARALLELISM), folder(folder) {
+	    bulkDumpEnabled(false), bulkDumpParallelismLimitor(SERVER_KNOBS->DD_BULKDUMP_PARALLELISM, "BulkDump"),
+	    bulkLoadParallelismLimitor(SERVER_KNOBS->DD_BULKLOAD_PARALLELISM, "BulkLoad"), folder(folder) {
 		if (!folder.empty()) {
 			bulkDumpFolder = abspath(joinPath(folder, ddServerBulkDumpFolder));
 			// TODO(BulkDump): clear this folder in the presence of crash
@@ -1295,7 +1294,7 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 	    .setMaxEventLength(-1)
 	    .setMaxFieldLength(-1)
 	    .detail("ExistBulkLoadTask", existBulkLoadTask)
-	    .detail("RestoreTask", bulkLoadJobTask.toString());
+	    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 
 	try {
 		// Step 1: Trigger bulkload
@@ -1327,7 +1326,7 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 						    .setMaxFieldLength(-1)
 						    .detail("Location", "Trigger bulkload")
 						    .detail("Task", bulkLoadTask.toString())
-						    .detail("RestoreTask", bulkLoadJobTask.toString());
+						    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 						self->bulkLoadParallelismLimitor.decrementTaskCounter();
 						return Void(); // sliently exit
 					}
@@ -1339,7 +1338,7 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("Task", bulkLoadTask.toString())
-			    .detail("RestoreTask", bulkLoadJobTask.toString());
+			    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 		} else {
 			std::vector<BulkLoadTaskState> existTasks =
 			    wait(getValidBulkLoadTasksWithinRange(cx, bulkLoadJobTask.getRange()));
@@ -1350,7 +1349,7 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 				    .setMaxFieldLength(-1)
 				    .detail("Location", "Read bulkload")
 				    .detail("Task", bulkLoadTask.toString())
-				    .detail("RestoreTask", bulkLoadJobTask.toString());
+				    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 				self->bulkLoadParallelismLimitor.decrementTaskCounter();
 				return Void(); // sliently exit
 			}
@@ -1359,7 +1358,7 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("Task", bulkLoadTask.toString())
-			    .detail("RestoreTask", bulkLoadJobTask.toString());
+			    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 		}
 
 		// Step 2: Monitor the bulkload completion
@@ -1379,6 +1378,11 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 				    bulkLoadTask.phase == BulkLoadTaskPhase::Acknowledged) {
 					break;
 				}
+				TraceEvent(SevDebug, "DDBulkLoadJobRunOnTaskLoadRunning", self->ddId)
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Task", bulkLoadTask.toString())
+				    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) {
 					throw e;
@@ -1389,7 +1393,7 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 					    .setMaxFieldLength(-1)
 					    .detail("Location", "Monitor bulkload")
 					    .detail("Task", bulkLoadTask.toString())
-					    .detail("RestoreTask", bulkLoadJobTask.toString());
+					    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 					self->bulkLoadParallelismLimitor.decrementTaskCounter();
 					return Void(); // sliently exit
 				}
@@ -1402,7 +1406,7 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("Task", bulkLoadTask.toString())
-		    .detail("RestoreTask", bulkLoadJobTask.toString());
+		    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 
 		// Step 3: Acknowledge completed bulkload task
 		loop {
@@ -1422,7 +1426,7 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 					    .setMaxFieldLength(-1)
 					    .detail("Location", "Acknowledge bulkload")
 					    .detail("Task", bulkLoadTask.toString())
-					    .detail("RestoreTask", bulkLoadJobTask.toString());
+					    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 					self->bulkLoadParallelismLimitor.decrementTaskCounter();
 					return Void(); // sliently exit
 				}
@@ -1434,7 +1438,7 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("Task", bulkLoadTask.toString())
-		    .detail("RestoreTask", bulkLoadJobTask.toString());
+		    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
@@ -1444,11 +1448,10 @@ ACTOR Future<Void> bulkLoadJobRunOnTask(Reference<DataDistributor> self,
 		    .setMaxFieldLength(-1)
 		    .errorUnsuppressed(e)
 		    .detail("Task", bulkLoadTask.toString())
-		    .detail("RestoreTask", bulkLoadJobTask.toString());
+		    .detail("BulkLoadJobTask", bulkLoadJobTask.toString());
 		// sliently exit
 	}
 	self->bulkLoadParallelismLimitor.decrementTaskCounter();
-
 	return Void();
 }
 
@@ -1481,9 +1484,9 @@ ACTOR Future<Void> bulkLoadJobExecutor(Reference<DataDistributor> self, BulkLoad
 
 	state UID jobId = job.getJobId();
 	state std::string remoteRoot = job.getRemoteRoot();
-	std::string remoteFolder = getBulkDumpJobRoot(remoteRoot, jobId);
-	std::string jobManifestFileName = getJobManifestFileName(jobId);
-	state std::string localFolder = getBulkDumpJobRoot(self->bulkLoadFolder, jobId);
+	std::string remoteFolder = generateBulkLoadJobRoot(remoteRoot, jobId);
+	std::string jobManifestFileName = generateBulkLoadJobManifestFileName(jobId);
+	state std::string localFolder = generateBulkLoadJobRoot(self->bulkLoadFolder, jobId);
 	state std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
 	state std::string remoteJobManifestFilePath = joinPath(remoteFolder, jobManifestFileName);
 	state std::vector<BulkLoadManifest> manifests;
@@ -1496,6 +1499,7 @@ ACTOR Future<Void> bulkLoadJobExecutor(Reference<DataDistributor> self, BulkLoad
 	state RangeResult bulkLoadJobResult;
 	state int index = 0;
 	state BulkLoadJobState existTask;
+	state std::string manifestLocalTempFolder = joinPath(localFolder, "manifest-batch-tmp");
 	while (beginKey < endKey) {
 		try {
 			bulkLoadJobResult.clear();
@@ -1530,17 +1534,18 @@ ACTOR Future<Void> bulkLoadJobExecutor(Reference<DataDistributor> self, BulkLoad
 						TraceEvent(SevDebug, "BulkLoadJobExecutorManifestDownload", self->ddId)
 						    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
 						    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
-						wait(downloadBulkDumpJobManifestFile(
+						wait(downloadBulkLoadJobManifestFile(
 						    transportMethod, localJobManifestFilePath, remoteJobManifestFilePath, self->ddId));
 						TraceEvent(SevDebug, "BulkLoadJobExecutorManifestDownloaded", self->ddId);
 					}
 					manifests.clear();
 					wait(store(manifests,
-					           extractBulkDumpJobManifests(localJobManifestFilePath,
-					                                       { existTask.getRange() },
-					                                       localFolder,
-					                                       transportMethod,
-					                                       self->ddId)));
+					           getBulkLoadManifestMetadataFromFiles(localJobManifestFilePath,
+					                                                existTask.getRange(),
+					                                                manifestLocalTempFolder,
+					                                                transportMethod,
+					                                                self->ddId)));
+					// TODO(BulkLoad): avoid repeatedly call getBulkLoadManifestMetadataFromFiles which is heavy
 					TraceEvent(SevDebug, "BulkLoadJobExecutorManifestGot", self->ddId)
 					    .detail("ManifestCount", manifests.size());
 
@@ -1569,6 +1574,13 @@ ACTOR Future<Void> bulkLoadJobExecutor(Reference<DataDistributor> self, BulkLoad
 						}
 					}
 				} else {
+					// Limit parallelism
+					loop {
+						if (self->bulkLoadParallelismLimitor.tryIncrementTaskCounter()) {
+							break;
+						}
+						wait(self->bulkLoadParallelismLimitor.waitUntilCounterChanged());
+					}
 					TraceEvent(SevDebug, "BulkLoadJobExecutorMonitorTask", self->ddId)
 					    .detail("Task", existTask.toString());
 					bulkLoadJobActors.push_back(bulkLoadJobRunOnTask(self, existTask, true));
@@ -1597,7 +1609,7 @@ ACTOR Future<Void> bulkLoadCore(Reference<DataDistributor> self, Future<Void> re
 		try {
 			Optional<BulkLoadJobState> job = wait(getOngoingBulkLoadJob(cx));
 			if (job.present()) {
-				TraceEvent(SevInfo, "BulkLoadingCoreFoundJob", self->ddId).detail("Job", job.get().toString());
+				TraceEvent(SevInfo, "BulkLoadCoreFoundJob", self->ddId).detail("Job", job.get().toString());
 				wait(bulkLoadJobExecutor(self, job.get()));
 				// TODO(BulkLoad): finalize restore job and clear range
 			}
@@ -1729,28 +1741,6 @@ ACTOR Future<bool> bulkDumpTaskScheduler(Reference<DataDistributor> self) {
 	return allComplete && hasJob;
 }
 
-void bulkDumpUploadJobManifestFile(Reference<DataDistributor> self,
-                                   BulkLoadTransportMethod transportMethod,
-                                   const std::map<Key, BulkLoadManifest>& manifests,
-                                   const std::string& remoteRoot,
-                                   const UID& jobId) {
-	if (self->folder.empty()) {
-		return;
-	}
-	// Upload job manifest file
-	std::string content = generateJobManifestFileContent(manifests);
-	ASSERT(!content.empty() && !self->bulkDumpFolder.empty());
-	std::string localFolder = getBulkDumpJobRoot(self->bulkDumpFolder, jobId);
-	std::string remoteFolder = getBulkDumpJobRoot(remoteRoot, jobId);
-	std::string jobManifestFileName = getJobManifestFileName(jobId);
-	std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
-	std::string remoteJobManifestFilePath = joinPath(remoteFolder, jobManifestFileName);
-	generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, content, self->ddId);
-	uploadBulkDumpJobManifestFile(transportMethod, localJobManifestFilePath, remoteJobManifestFilePath, self->ddId);
-	clearFileFolder(localFolder);
-	return;
-}
-
 ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
 	// Collect necessary info to generate job manifest file by scan the entire bulkDump key space
 	state std::map<Key, BulkLoadManifest> manifests;
@@ -1829,13 +1819,23 @@ ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
 	// Finally all bulkdump metadata.
 	// Any failure during this process will retry by DD.
 	try {
-		ASSERT(jobId.present() && remoteRoot.present() && transportMethod.present());
+		ASSERT(jobId.present() && remoteRoot.present() && transportMethod.present() && !self->folder.empty() &&
+		       !self->bulkDumpFolder.empty());
 		// Generate the file at a local folder at first and then upload the file to the remote
 		// The local file path:
 		//	<self->bulkDumpFolder>/<jobId>/<jobId>-job-manifest.txt
 		// The remote file path:
 		//	<self->rootRemote>/<jobId>/<jobId>-job-manifest.txt
-		bulkDumpUploadJobManifestFile(self, transportMethod.get(), manifests, remoteRoot.get(), jobId.get());
+		state std::string localFolder = generateBulkLoadJobRoot(self->bulkDumpFolder, jobId.get());
+		std::string remoteFolder = generateBulkLoadJobRoot(remoteRoot.get(), jobId.get());
+		std::string jobManifestFileName = generateBulkLoadJobManifestFileName(jobId.get());
+		std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
+		std::string remoteJobManifestFilePath = joinPath(remoteFolder, jobManifestFileName);
+		platform::eraseDirectoryRecursive(abspath(localFolder));
+		platform::createDirectory(abspath(localFolder));
+		wait(uploadBulkLoadJobManifestFile(
+		    transportMethod.get(), localJobManifestFilePath, remoteJobManifestFilePath, manifests, self->ddId));
+		platform::eraseDirectoryRecursive(abspath(localFolder));
 		TraceEvent(SevInfo, "DDBulkDumpJobFinalizeUploadManifest", self->ddId);
 
 		// clear all bulkdump metadata

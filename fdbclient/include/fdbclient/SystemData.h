@@ -25,8 +25,7 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/AccumulativeChecksum.h"
-#include "fdbclient/BulkLoading.h"
-#include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoadAndDump.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this dependency
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RangeLock.h"

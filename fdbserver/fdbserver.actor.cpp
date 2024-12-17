@@ -2227,8 +2227,8 @@ int main(int argc, char* argv[]) {
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
 			const std::set<std::string> allowedDirectories = {
-				".", "..", "backups", "unittests", "fdbblob", "bulkdump"
-			};
+				".", "..", "backups", "unittests", "fdbblob", "bulkDumpAndLoad"
+			}; // bulkDumpAndLoad is used for BulkDumpAndLoad simulation test
 
 			for (const auto& dir : directories) {
 				if (dir.size() != 32 && !allowedDirectories.contains(dir) && dir.find("snap") == std::string::npos) {

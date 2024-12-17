@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BulkLoading.h"
+#include "fdbclient/BulkLoadAndDump.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/BulkLoadUtil.actor.h"
+#include "fdbserver/BulkLoadAndDumpUtil.actor.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -66,6 +66,14 @@ struct BulkLoadTask : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	std::string generateRandomBulkLoadDataFileName() {
+		return deterministicRandom()->randomUniqueID().toString() + "-data.sst";
+	}
+
+	std::string generateRandomBulkLoadBytesSampleFileName() {
+		return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
+	}
 
 	ACTOR Future<Void> submitBulkLoadTasks(BulkLoadTask* self, Database cx, std::vector<BulkLoadTaskState> tasks) {
 		state int i = 0;
@@ -368,8 +376,8 @@ struct BulkLoadTask : TestWorkload {
 	                                              std::string folderPath,
 	                                              int dataSize,
 	                                              Optional<KeyRange> range = Optional<KeyRange>()) {
-		std::string dataFilePath = joinPath(folderPath, generateRandomBulkLoadDataFileName());
-		std::string bytesSampleFilePath = joinPath(folderPath, generateRandomBulkLoadBytesSampleFileName());
+		std::string dataFilePath = joinPath(folderPath, self->generateRandomBulkLoadDataFileName());
+		std::string bytesSampleFilePath = joinPath(folderPath, self->generateRandomBulkLoadBytesSampleFileName());
 		KeyRange rangeToLoad = range.present() ? range.get() : self->getRandomRange(self, normalKeys);
 		BulkLoadTaskTestUnit taskUnit;
 		taskUnit.bulkLoadTask =

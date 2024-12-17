@@ -1,5 +1,5 @@
 /*
- * BulkLoading.h
+ * BulkLoadAndDump.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_BULKLOADING_H
-#define FDBCLIENT_BULKLOADING_H
+#ifndef FDBCLIENT_BULKLOADANDDUMP_H
+#define FDBCLIENT_BULKLOADANDDUMP_H
+#include "flow/Arena.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -95,27 +96,20 @@ struct BulkLoadFileSet {
 	                const std::string& byteSampleFileName)
 	  : rootPath(rootPath), relativePath(relativePath), manifestFileName(manifestFileName), dataFileName(dataFileName),
 	    byteSampleFileName(byteSampleFileName) {
-		if (!isValid()) {
-			TraceEvent(SevError, "BulkLoadFileSetInvalid").detail("Content", toString());
-			ASSERT(false);
-		}
+		ASSERT(isValid());
 	}
 
 	bool isValid() const {
 		if (rootPath.empty()) {
-			ASSERT(false);
 			return false;
 		}
 		if (relativePath.empty()) {
-			ASSERT(false);
 			return false;
 		}
 		if (manifestFileName.empty()) {
-			ASSERT(false);
 			return false;
 		}
 		if (dataFileName.empty() && !byteSampleFileName.empty()) {
-			ASSERT(false);
 			return false;
 		}
 		return true;
@@ -137,6 +131,19 @@ struct BulkLoadFileSet {
 	std::string manifestFileName = "";
 	std::string dataFileName = "";
 	std::string byteSampleFileName = "";
+};
+
+struct BulkDumpFileFullPathSet {
+	BulkDumpFileFullPathSet(const BulkLoadFileSet& fileSet) {
+		folder = joinPath(fileSet.rootPath, fileSet.relativePath);
+		manifestFilePath = joinPath(folder, fileSet.manifestFileName);
+		dataFilePath = joinPath(folder, fileSet.dataFileName);
+		byteSampleFilePath = joinPath(folder, fileSet.byteSampleFileName);
+	}
+	std::string folder = "";
+	std::string manifestFilePath = "";
+	std::string dataFilePath = "";
+	std::string byteSampleFilePath = "";
 };
 
 // Define the metadata of bulkload manifest file
@@ -199,15 +206,16 @@ struct BulkLoadManifest {
 
 	KeyRange getRange() const { return Standalone(KeyRangeRef(beginKey, endKey)); }
 
-	std::string getBeginKeyString() const { return beginKey.toFullHexStringPlain(); }
+	Key getBeginKey() const { return beginKey; }
 
-	std::string getEndKeyString() const { return endKey.toFullHexStringPlain(); }
+	Key getEndKey() const { return endKey; }
 
 	// Generating human readable string to stored in the manifest file
 	std::string toString() const {
-		return fileSet.toString() + ", [BeginKey]: " + getBeginKeyString() + ", [EndKey]: " + getEndKeyString() +
-		       ", [Version]: " + std::to_string(version) + ", [Checksum]: " + checksum +
-		       ", [Bytes]: " + std::to_string(bytes) + ", " + byteSampleSetting.toString();
+		return fileSet.toString() + ", [BeginKey]: " + beginKey.toFullHexStringPlain() +
+		       ", [EndKey]: " + endKey.toFullHexStringPlain() + ", [Version]: " + std::to_string(version) +
+		       ", [Checksum]: " + checksum + ", [Bytes]: " + std::to_string(bytes) + ", " +
+		       byteSampleSetting.toString();
 	}
 
 	template <class Ar>
@@ -234,6 +242,7 @@ enum class BulkLoadTaskPhase : uint8_t {
 };
 
 struct BulkLoadTaskState {
+public:
 	constexpr static FileIdentifier file_identifier = 1384499;
 
 	BulkLoadTaskState() = default;
@@ -395,11 +404,91 @@ private:
 	Optional<UID> dataMoveId;
 };
 
-BulkLoadTaskState newBulkLoadTaskLocalSST(UID jobId,
-                                          KeyRange range,
-                                          std::string folder,
-                                          std::string dataFile,
-                                          std::string bytesSampleFile);
+// Define the bulkdump job manifest header
+struct BulkDumpJobManifestHeader {
+public:
+	BulkDumpJobManifestHeader() = default;
+
+	// Used when loading
+	BulkDumpJobManifestHeader(size_t manifestCount, const std::string& rootFolder)
+	  : manifestCount(manifestCount), rootFolder(rootFolder) {
+		ASSERT(isValid());
+	}
+
+	// Used when dumping
+	BulkDumpJobManifestHeader(const std::string& rawString) {
+		std::vector<std::string> parts = splitString(rawString, ", ");
+		if (parts.size() != 2) {
+			TraceEvent(SevError, "ParseBulkDumpJobManifestHeaderError").detail("RawString", rawString);
+			ASSERT(false);
+		}
+		manifestCount = std::stoull(stringRemovePrefix(parts[0], "[ManifestCount]: "));
+		rootFolder = stringRemovePrefix(parts[1], "[RootFolder]: ");
+		ASSERT(isValid());
+	}
+
+	bool isValid() const { return manifestCount > 0 && !rootFolder.empty(); }
+
+	std::string toString() {
+		ASSERT(isValid());
+		return "[ManifestCount]: " + std::to_string(manifestCount) + ", [RootFolder]: " + rootFolder;
+	}
+
+	std::string getRootFolder() const { return rootFolder; }
+
+private:
+	size_t manifestCount = 0;
+	std::string rootFolder = "";
+};
+
+// Define the bulkdump job manifest entry per range
+struct BulkDumpJobManifestEntry {
+public:
+	// Used when loading
+	BulkDumpJobManifestEntry(const std::string& rawString) {
+		std::vector<std::string> parts = splitString(rawString, ", ");
+		if (parts.size() != 5) {
+			TraceEvent(SevError, "ParseBulkDumpJobManifestEntryError").detail("RawString", rawString);
+			ASSERT(false);
+		}
+		beginKey = getKeyFromHexString(stringRemovePrefix(parts[0], "[BeginKey]: "));
+		endKey = getKeyFromHexString(stringRemovePrefix(parts[1], "[EndKey]: "));
+		relativePath = stringRemovePrefix(parts[2], "[RelativePath]: ");
+		version = std::stoll(stringRemovePrefix(parts[3], "[Version]: "));
+		bytes = std::stoull(stringRemovePrefix(parts[4], "[Bytes]: "));
+		ASSERT(isValid());
+	}
+
+	// Used when dumping
+	BulkDumpJobManifestEntry(const Key& beginKey,
+	                         const Key& endKey,
+	                         const std::string& relativePath,
+	                         Version version,
+	                         size_t bytes)
+	  : beginKey(beginKey), endKey(endKey), relativePath(relativePath), version(version), bytes(bytes) {
+		ASSERT(isValid());
+	}
+
+	std::string toString() const {
+		ASSERT(isValid());
+		return "[BeginKey]: " + beginKey.toFullHexStringPlain() + ", [EndKey]: " + endKey.toFullHexStringPlain() +
+		       ", [RelativePath]: " + relativePath + ", [Version]: " + std::to_string(version) +
+		       ", [Bytes]: " + std::to_string(bytes);
+	}
+
+	KeyRange getRange() const { return Standalone(KeyRangeRef(beginKey, endKey)); }
+
+	std::string getRelativePath() const { return relativePath; }
+
+	bool isValid() const { return beginKey < endKey && version != invalidVersion; }
+
+private:
+	Key beginKey;
+	Key endKey;
+	std::string relativePath;
+	Version version;
+	size_t bytes;
+};
 
 enum class BulkLoadJobPhase : uint8_t {
 	Invalid = 0,
@@ -409,6 +498,7 @@ enum class BulkLoadJobPhase : uint8_t {
 };
 
 struct BulkLoadJobState {
+public:
 	constexpr static FileIdentifier file_identifier = 1384496;
 
 	BulkLoadJobState() = default;
@@ -520,11 +610,191 @@ private:
 	std::string byteSamplePath;
 };
 
+enum class BulkDumpPhase : uint8_t {
+	Invalid = 0,
+	Submitted = 1,
+	Complete = 2,
+};
+
+// Definition of bulkdump metadata
+struct BulkDumpState {
+	constexpr static FileIdentifier file_identifier = 1384498;
+
+	BulkDumpState() = default;
+
+	// The only public interface to create a valid task
+	// This constructor is call when users submitting a task, e.g. by newBulkDumpJobLocalSST()
+	BulkDumpState(const KeyRange& range,
+	              BulkLoadFileType fileType,
+	              BulkLoadTransportMethod transportMethod,
+	              const std::string& remoteRoot)
+	  : jobId(deterministicRandom()->randomUniqueID()), range(range), fileType(fileType),
+	    transportMethod(transportMethod), remoteRoot(remoteRoot), phase(BulkDumpPhase::Submitted) {
+		ASSERT(isValid());
+	}
+
+	bool operator==(const BulkDumpState& rhs) const {
+		return jobId == rhs.jobId && taskId == rhs.taskId && range == rhs.range && remoteRoot == rhs.remoteRoot;
+	}
+
+	std::string toString() const {
+		std::string res = "BulkDumpState: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		                  ", [FileType]: " + std::to_string(static_cast<uint8_t>(fileType)) +
+		                  ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod)) +
+		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) +
+		                  ", [RemoteRoot]: " + remoteRoot + ", [JobId]: " + jobId.toString();
+		if (taskId.present()) {
+			res = res + ", [TaskId]: " + taskId.get().toString();
+		}
+		if (version.present()) {
+			res = res + ", [Version]: " + std::to_string(version.get());
+		}
+		if (manifest.present()) {
+			res = res + ", [BulkLoadManifest]: " + manifest.get().toString();
+		}
+		return res;
+	}
+
+	KeyRange getRange() const { return range; }
+
+	UID getJobId() const { return jobId; }
+
+	Optional<UID> getTaskId() const { return taskId; }
+
+	std::string getRemoteRoot() const { return remoteRoot; }
+
+	BulkDumpPhase getPhase() const { return phase; }
+
+	BulkLoadTransportMethod getTransportMethod() const { return transportMethod; }
+
+	bool isValid() const {
+		if (!jobId.isValid()) {
+			return false;
+		}
+		if (taskId.present() && !taskId.get().isValid()) {
+			return false;
+		}
+		if (range.empty()) {
+			return false;
+		}
+		if (transportMethod == BulkLoadTransportMethod::Invalid) {
+			return false;
+		} else if (transportMethod != BulkLoadTransportMethod::CP) {
+			ASSERT(false);
+		}
+		if (remoteRoot.empty()) {
+			return false;
+		}
+		return true;
+	}
+
+	// The user job spawns a series of ranges tasks based on shard boundary to cover the user task range.
+	// Those spawned tasks are executed by SSes.
+	// Return metadata of the task.
+	BulkDumpState getRangeTaskState(const KeyRange& taskRange) {
+		ASSERT(range.contains(taskRange));
+		BulkDumpState res = *this; // the task inherits configuration from the job
+		UID newTaskId;
+		// Guarantee to have a brand new taskId for the new spawned task
+		int retryCount = 0;
+		while (true) {
+			newTaskId = deterministicRandom()->randomUniqueID();
+			if (!res.taskId.present() || res.taskId.get() != newTaskId) {
+				break;
+			}
+			retryCount++;
+			if (retryCount > 50) {
+				TraceEvent(SevError, "GetRangeTaskStateRetryTooManyTimes").detail("TaskRange", taskRange);
+				throw bulkdump_task_failed();
+			}
+		}
+		res.taskId = newTaskId;
+		res.range = taskRange;
+		return res;
+	}
+
+	// Generate a metadata with Complete state.
+	BulkDumpState getRangeCompleteState(const KeyRange& completeRange, const BulkLoadManifest& manifest) {
+		ASSERT(range.contains(completeRange));
+		ASSERT(manifest.isValid());
+		ASSERT(taskId.present() && taskId.get().isValid());
+		BulkDumpState res = *this;
+		res.phase = BulkDumpPhase::Complete;
+		res.manifest = manifest;
+		res.range = completeRange;
+		return res;
+	}
+
+	Optional<BulkLoadManifest> getManifest() const { return manifest; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, jobId, range, fileType, transportMethod, remoteRoot, phase, taskId, version, manifest);
+	}
+
+private:
+	UID jobId; // The unique identifier of a job. Set by user. Any task spawned by the job shares the same jobId and
+	           // configuration.
+
+	// File dump config:
+	KeyRange range; // Dump the key-value within this range "[begin, end)" from data file
+	BulkLoadFileType fileType = BulkLoadFileType::Invalid;
+	BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
+	std::string remoteRoot; // remoteRoot is the root string to where the data is set to be uploaded
+
+	// Task dynamics:
+	BulkDumpPhase phase = BulkDumpPhase::Invalid;
+	Optional<UID> taskId; // The unique identifier of a task. Any SS can do a task. If a task is failed, this remaining
+	                      // part of the task can be picked up by any SS with a changed taskId.
+	Optional<Version> version;
+	Optional<BulkLoadManifest> manifest; // Resulting remote manifest after the dumping task completes
+};
+
+// Return two file settings: first: LocalFilePaths; Second: RemoteFilePaths.
+// The local file path:
+//	<rootLocal>/<relativeFolder>/<dumpVersion>-manifest.txt (must have)
+//	<rootLocal>/<relativeFolder>/<dumpVersion>-data.sst (omitted for empty range)
+//	<rootLocal>/<relativeFolder>/<dumpVersion>-sample.sst (omitted if data size is too small to have a sample)
+// The remote file path:
+//	<rootRemote>/<relativeFolder>/<dumpVersion>-manifest.txt (must have)
+//	<rootRemote>/<relativeFolder>/<dumpVersion>-data.sst (omitted for empty range)
+//	<rootRemote>/<relativeFolder>/<dumpVersion>-sample.sst (omitted if data size is too small to have a sample)
+std::pair<BulkLoadFileSet, BulkLoadFileSet> generateBulkLoadFileSetting(Version dumpVersion,
+                                                                        const std::string& relativeFolder,
+                                                                        const std::string& rootLocal,
+                                                                        const std::string& rootRemote);
+
+// Define bulkload job root folder
+std::string generateBulkLoadJobRoot(const std::string& root, const UID& jobId);
+
+// Define bulkload job manifest file name
+std::string generateBulkLoadJobManifestFileName(const UID& jobId);
+
+// Define bulkload job manifest file content based on job's all BulkLoadManifest.
+// Each row is a range sorted by the beginKey. Any two ranges do not have overlapping.
+// Col: beginKey, endKey, dataVersion, dataBytes, manifestPath.
+// dataVersion should be always valid. dataBytes can be 0 in case of an empty range.
+std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
+
+// User API to create bulkLoad task metadata
+// This is used for testing
+BulkLoadTaskState newBulkLoadTaskLocalSST(UID jobId,
+                                          KeyRange range,
+                                          std::string folder,
+                                          std::string dataFile,
+                                          std::string bytesSampleFile);
+
 // User API to create bulkLoadJob job metadata
 // The restore data is within the input range from the remoteRoot
 // The remoteRoot can be either a local folder or a remote blobstore folder string
 // JobId is the job ID of the bulkdump job
 // All data of the bulkdump job is uploaded to the folder <remoteRoot>/<jobId>
 BulkLoadJobState newBulkLoadJobLocalSST(const UID& jobId, const KeyRange& range, const std::string& remoteRoot);
+
+// User API to create bulkDump job metadata
+// The dumped data is within the input range
+// The data is dumped to the input remoteRoot
+// The remoteRoot can be either a local root or a remote blobstore root string
+BulkDumpState newBulkDumpJobLocalSST(const KeyRange& range, const std::string& remoteRoot);
 
 #endif

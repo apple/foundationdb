@@ -22,7 +22,7 @@
 #define FDBCLIENT_STORAGCHECKPOINT_H
 #pragma once
 
-#include "fdbclient/BulkLoading.h"
+#include "fdbclient/BulkLoadAndDump.h"
 #include "fdbclient/FDBTypes.h"
 
 const std::string checkpointBytesSampleFileName = "metadata_bytes.sst";

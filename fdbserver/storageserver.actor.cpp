@@ -74,8 +74,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
-#include "fdbserver/BulkDumpUtil.actor.h"
-#include "fdbserver/BulkLoadUtil.actor.h"
+#include "fdbserver/BulkLoadAndDumpUtil.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
@@ -6077,19 +6076,19 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	state uint64_t batchNum = 0;
 	state Version versionToDump;
 	state RangeDumpData rangeDumpData;
-	state std::string rootFolderLocal = getBulkDumpJobRoot(data->bulkDumpFolder, req.bulkDumpState.getJobId());
+	state std::string rootFolderLocal = generateBulkLoadJobRoot(data->bulkDumpFolder, req.bulkDumpState.getJobId());
 	state std::string rootFolderRemote =
-	    getBulkDumpJobRoot(req.bulkDumpState.getRemoteRoot(), req.bulkDumpState.getJobId());
+	    generateBulkLoadJobRoot(req.bulkDumpState.getRemoteRoot(), req.bulkDumpState.getJobId());
 	// Use jobId and taskId as the folder to store the data of the task range
 	ASSERT(req.bulkDumpState.getTaskId().present());
-	state std::string taskFolder = getBulkDumpTaskFolder(req.bulkDumpState.getTaskId().get());
+	state std::string taskFolder = req.bulkDumpState.getTaskId().get().toString();
 	state BulkLoadFileSet destinationFileSets;
 	state Transaction tr(data->cx);
 
 	loop {
 		try {
 			// Clear local files
-			clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
+			platform::eraseDirectoryRecursive(abspath(joinPath(rootFolderLocal, taskFolder)));
 
 			// Dump data of rangeToDump in a relativeFolder
 			state KeyRange rangeToDump = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
@@ -6111,10 +6110,10 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// the local files are uploaded to the remote folder
 			// Local files and remotes files have the same relative path but different root
 			state std::pair<BulkLoadFileSet, BulkLoadFileSet> resFileSets =
-			    getLocalRemoteFileSetSetting(versionToDump,
-			                                 relativeFolder,
-			                                 /*rootLocal=*/rootFolderLocal,
-			                                 /*rootRemote=*/rootFolderRemote);
+			    generateBulkLoadFileSetting(versionToDump,
+			                                relativeFolder,
+			                                /*rootLocal=*/rootFolderLocal,
+			                                /*rootRemote=*/rootFolderRemote);
 
 			// The remote file path:
 			state BulkLoadFileSet localFileSetSetting = resFileSets.first;
@@ -6131,15 +6130,15 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			state KeyRange dataRange =
 			    rangeToDump & Standalone(KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey)));
 			state BulkLoadManifest manifest =
-			    dumpDataFileToLocalDirectory(data->thisServerID,
-			                                 rangeDumpData.kvs,
-			                                 rangeDumpData.sampled,
-			                                 localFileSetSetting,
-			                                 remoteFileSetSetting,
-			                                 byteSampleSetting,
-			                                 versionToDump,
-			                                 dataRange, // the actual range of the rangeDumpData.kvs
-			                                 rangeDumpData.kvsBytes);
+			    dumpDataFileToLocal(data->thisServerID,
+			                        rangeDumpData.kvs,
+			                        rangeDumpData.sampled,
+			                        localFileSetSetting,
+			                        remoteFileSetSetting,
+			                        byteSampleSetting,
+			                        versionToDump,
+			                        dataRange, // the actual range of the rangeDumpData.kvs
+			                        rangeDumpData.kvsBytes);
 			readBytes = readBytes + rangeDumpData.kvsBytes;
 			TraceEvent(SevInfo, "SSBulkDump", data->thisServerID)
 			    .detail("Task", req.bulkDumpState.toString())
@@ -6202,7 +6201,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 		wait(delay(1.0));
 	}
 	try {
-		clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
+		platform::eraseDirectoryRecursive(abspath(joinPath(rootFolderLocal, taskFolder)));
 	} catch (Error& e) {
 		// exit
 	}
@@ -9402,15 +9401,13 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	state double fetchStartTime = now();
 
 	// Step 1: Fetch data to dir
-	state SSBulkLoadFileSet fileSetToLoad;
 	ASSERT(bulkLoadTaskState.getTransportMethod() != BulkLoadTransportMethod::Invalid);
-	if (bulkLoadTaskState.getTransportMethod() == BulkLoadTransportMethod::CP) {
-		wait(store(fileSetToLoad,
-		           bulkLoadTransportCP_impl(
-		               dir, bulkLoadTaskState, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, data->thisServerID)));
-	} else {
-		throw not_implemented();
-	}
+	state SSBulkLoadFileSet fileSetToLoad = wait(downloadBulkLoadFileSet(bulkLoadTaskState.getTransportMethod(),
+	                                                                     dir,
+	                                                                     bulkLoadTaskState,
+	                                                                     SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX,
+	                                                                     data->thisServerID));
+
 	// At this point, all necessary data for bulk loading locate at fileSetToLoad
 	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileFetched", data->thisServerID)
 	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
@@ -9422,7 +9419,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	// TODO(BulkLoad): Validate all files specified in fileSetToLoad exist
 	// TODO(BulkLoad): Check file checksum
 	// TODO(BulkLoad): Check file data all in the moveInShard range
-	// TODO(BulkLoad): checkContent(fileSetToLoad.dataFileList, data->thisServerID);
+	// TODO(BulkLoad): checkContent
 	if (!fileSetToLoad.bytesSampleFile.present()) {
 		TraceEvent(SevWarn, "SSBulkLoadTaskFetchSSTFileByteSampleNotFound", data->thisServerID)
 		    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())

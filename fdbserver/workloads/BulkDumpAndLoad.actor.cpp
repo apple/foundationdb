@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoadAndDump.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/BulkDumpUtil.actor.h"
+#include "fdbserver/BulkLoadAndDumpUtil.actor.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"

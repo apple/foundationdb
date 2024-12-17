@@ -25,7 +25,7 @@
 #include "fdbclient/IClientApi.h"
 
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/BulkLoading.h"
+#include "fdbclient/BulkLoadAndDump.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"

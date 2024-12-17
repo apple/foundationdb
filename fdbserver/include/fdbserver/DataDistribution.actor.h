@@ -24,7 +24,7 @@
 #elif !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
-#include "fdbclient/BulkLoading.h"
+#include "fdbclient/BulkLoadAndDump.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TenantCache.h"

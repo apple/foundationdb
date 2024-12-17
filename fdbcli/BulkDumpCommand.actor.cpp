@@ -21,7 +21,7 @@
 #include <cstddef>
 #include <fmt/core.h>
 #include "fdbcli/fdbcli.actor.h"
-#include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoadAndDump.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/Arena.h"
