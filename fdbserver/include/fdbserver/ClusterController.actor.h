@@ -3208,7 +3208,8 @@ public:
 		// For degraded server that are complained by more than SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE, we
 		// don't know if it is a hot server, or the network is bad. We remove from the returned degraded server list.
 		for (const auto& badServer : currentDegradedServers) {
-			if (degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
+			if (degradedLinkDst2Src[badServer].size() >= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE_MIN &&
+			    degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
 				currentDegradationInfo.degradedServers.insert(badServer);
 			}
 		}
