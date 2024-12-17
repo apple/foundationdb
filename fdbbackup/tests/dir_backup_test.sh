@@ -135,9 +135,9 @@ if ! cwd=$( cd -P "$( dirname "${path}" )" >/dev/null 2>&1 && pwd ); then
   err "Failed dirname on ${path}"
   exit 1
 fi
-# Source in the fdb cluster and backup_common fixtures.
+# Source in the fdb cluster and tests_common fixtures.
 # shellcheck source=/dev/null
-if ! source "${cwd}/fdb_cluster_fixture.sh"; then
+if ! source "${cwd}/../../fdbclient/tests/fdb_cluster_fixture.sh"; then
   err "Failed to source fdb_cluster_fixture.sh"
   exit 1
 fi
@@ -145,8 +145,8 @@ fi
 # So we read less keys.
 export FDB_DATA_KEYCOUNT=10
 # shellcheck source=/dev/null
-if ! source "${cwd}/backup_common.sh"; then
-  err "Failed to source fdb_cluster_fixture.sh"
+if ! source "${cwd}/../../fdbclient/tests/tests_common.sh"; then
+  err "Failed to source tests_common.sh"
   exit 1
 fi
 
