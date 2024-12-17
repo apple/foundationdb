@@ -587,9 +587,14 @@ TwoBuffers::TwoBuffers(int capacity, Reference<IBackupContainer> _bc, std::vecto
 
 bool TwoBuffers::hasNext() {
 	// if it is being load (valid but not ready, what would be the size?)
-	if ((buffers[0]->is_valid() && buffers[0]->size > 0) || (buffers[1]->is_valid() && buffers[1]->size > 0)) {
+	if (buffers[0]->is_valid() && buffers[0]->size == 0 || buffers[1]->is_valid() && buffers[1]->size == 0) {
+		TraceEvent("FlowGuruIsValidButZero")
+			.log();
+	}
+	if (buffers[0]->is_valid() || buffers[1]->is_valid()) {
 		return true;
 	}
+	
 	while (currentFileIndex < files.size() && files[currentFileIndex].fileSize == 0) {
 		// skip empty files
 		++currentFileIndex;
@@ -775,10 +780,12 @@ public:
 	int fileOffset;
 	int fileIndex;
 	char * buffer;
+	std::vector<Version> endVersions;
 
 	PartitionedLogIteratorSimple(Reference<IBackupContainer> _bc,
 	                                 int _tag,
-	                                 std::vector<RestoreConfig::RestoreFile> _files);
+	                                 std::vector<RestoreConfig::RestoreFile> _files,
+									 std::vector<Version> _endVersions);
 
 	~PartitionedLogIteratorSimple(); 
 	bool hasNext();
@@ -801,8 +808,9 @@ public:
 
 PartitionedLogIteratorSimple::PartitionedLogIteratorSimple(Reference<IBackupContainer> _bc,
                                                                    int _tag,
-                                                                   std::vector<RestoreConfig::RestoreFile> _files)
-  : bc(_bc), tag(_tag), files(std::move(_files)), bufferOffset(0) {
+                                                                   std::vector<RestoreConfig::RestoreFile> _files,
+																   std::vector<Version> _endVersions)
+  : bc(_bc), tag(_tag), endVersions(_endVersions), files(std::move(_files)), bufferOffset(0) {
 	bufferCapacity = BATCH_READ_BLOCK_COUNT * BLOCK_SIZE;
 	buffer = new char[bufferCapacity];
 	fileOffset = 0;
@@ -990,9 +998,19 @@ ACTOR Future<Version> PartitionedLogIteratorSimple::peekNextVersion(
 	}
 	wait(self->loadNextBlock());
 	self->removeBlockHeader();
-	Version version;
+	state Version version;
 	std::memcpy(&version, self->buffer + self->bufferOffset, sizeof(Version));
-	version = bigEndian64(version);
+	while (self->fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[self->fileIndex]) {
+		self->bufferOffset = 0;
+		self->bufferSize = 0;
+		self->fileIndex += 1;
+		wait(self->loadNextBlock());
+		// fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
+		self->removeBlockHeader();
+		// fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
+		std::memcpy(&version, self->buffer + self->bufferOffset, sizeof(Version));
+		version = bigEndian64(version);
+	}
 	return version;
 }
 
@@ -5544,8 +5562,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state std::vector<Reference<PartitionedLogIterator>> iterators(maxTagID + 1);
 		// for each tag, create an iterator
 		for (int k = 0; k < filesByTag.size(); k++) {
-			iterators[k] = makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k], fileEndVersionByTag[k]);
-			// iterators[k] = makeReference<PartitionedLogIteratorSimple>(bc, k, filesByTag[k]);
+			// iterators[k] = makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k], fileEndVersionByTag[k]);
+			iterators[k] = makeReference<PartitionedLogIteratorSimple>(bc, k, filesByTag[k], fileEndVersionByTag[k]);
 		}
 
 		// mergeSort all iterator until all are exhausted
