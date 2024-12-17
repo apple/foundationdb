@@ -787,7 +787,6 @@ public:
 	                                 std::vector<RestoreConfig::RestoreFile> _files,
 									 std::vector<Version> _endVersions);
 
-	~PartitionedLogIteratorSimple(); 
 	bool hasNext();
 	Future<Void> loadNextBlock();
 	ACTOR static Future<Void> loadNextBlock(Reference<PartitionedLogIteratorSimple> self);
@@ -842,11 +841,11 @@ Standalone<VectorRef<VersionedMutation>> PartitionedLogIteratorSimple::consumeDa
 	// fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
 	char* start = buffer.get();
 	bool foundNewVersion = false;
-	TraceEvent("FlowGuruConsumeData")
-		.detail("FirstVersion", firstVersion)
-		.detail("Offset", bufferOffset)
-		.detail("BufferSize", bufferSize)
-		.log();
+	// TraceEvent("FlowGuruConsumeData")
+	// 	.detail("FirstVersion", firstVersion)
+	// 	.detail("Offset", bufferOffset)
+	// 	.detail("BufferSize", bufferSize)
+	// 	.log();
 	while (bufferOffset < bufferSize) {
 		while (bufferOffset < bufferSize && !endOfBlock(start, bufferOffset)) {
 			// for each block
@@ -951,34 +950,19 @@ ACTOR Future<Void> PartitionedLogIteratorSimple::loadNextBlock(Reference<Partiti
 		return Void();
 	}
 	state Reference<IAsyncFile> asyncFile;
-	// fmt::print(stderr,
-	//            "readNextBlock::beforeReadFile, name={}, size={}\n",
-	//            self->files[self->currentFileIndex].fileName,
-	//            self->files[self->currentFileIndex].fileSize);
 	Reference<IAsyncFile> asyncFileTmp = wait(self->bc->readFile(self->files[self->fileIndex].fileName));
 	asyncFile = asyncFileTmp;
 	state size_t fileSize = self->files[self->fileIndex].fileSize;
 	size_t remaining = fileSize - self->fileOffset;
 	state size_t bytesToRead = std::min(self->bufferCapacity, remaining);
-	// fmt::print(stderr,
-	//            "readNextBlock::beforeActualRead, name={}, position={}, size={}, bytesToRead={}\n",
-	//            self->files[self->fileIndex].fileName,
-	// 		   self->fileOffset,
-	//            fileSize,
-	//            bytesToRead);
 	state int bytesRead =
 	    wait(asyncFile->read(static_cast<void*>((self->buffer.get())), bytesToRead, self->fileOffset));
-	// fmt::print(stderr,
-	//            "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
-	//            self->files[self->fileIndex].fileName,
-	//            bytesRead);
-	// fmt::print(stderr,
-	//            "readNextBlock::Index={}", self->fileIndex);
 	if (bytesRead != bytesToRead)
 		throw restore_bad_read();
 	self->bufferSize = bytesRead; // Set to actual bytes read
-	// self->bufferOffset[index] = 0; // Reset bufferOffset for the new data
+	self->bufferOffset = 0; // Reset bufferOffset for the new data
 	self->fileOffset += bytesRead;
+	fmt::print(stderr, "LoadNextBlock: bufferSize={}, fileOffset={}\n", self->bufferSize, self->fileOffset);
 	return Void();
 }
 
@@ -990,12 +974,27 @@ ACTOR Future<Version> PartitionedLogIteratorSimple::peekNextVersion(
     Reference<PartitionedLogIteratorSimple> self) {
 	// Read the first mutation's version
 	if (!self->hasNext()) {
+		TraceEvent("FlowGuruNoNext")
+			.detail("Tag", self->tag)
+			.log();
 		return Version(0);
 	}
 	wait(self->loadNextBlock());
 	self->removeBlockHeader();
 	state Version version;
 	std::memcpy(&version, self->buffer.get() + self->bufferOffset, sizeof(Version));
+	version = bigEndian64(version);
+	// TraceEvent("FlowGuruPeekNext")
+	// 	.detail("Version", version)
+	// 	.detail("FileIndex", self->fileIndex)
+	// 	.detail("EndVersionsSize", self->endVersions.size())
+	// 	.detail("EndVersions", printVersions(self->endVersions))
+	// 	.detail("Files", printFiles(self->files))
+	// 	.log();
+	// fmt::print(stderr, "FlowGuruPeekNext, version={}, offset={}, fileIndex={}, endVersions={}, files={}\n",
+	// 	 version, self->bufferOffset, self->fileIndex, printVersions(self->endVersions), printFiles(self->files));
+
+
 	while (self->fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[self->fileIndex]) {
 		self->bufferOffset = 0;
 		self->bufferSize = 0;
@@ -5462,7 +5461,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		static TaskParam<std::vector<RestoreConfig::RestoreFile>> logs() { return __FUNCTION__sr; }
 	} Params;
 
-	static std::string printVec(std::vector<int> & vec) {
+	static std::string printVec(std::vector<Version> & vec) {
 		std::string str = "";
 		for (int i : vec) {
 			str += std::to_string(i);
@@ -5567,13 +5566,13 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		// it stores all mutations for the next min version, in new format
 		state std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion;
 		state bool atLeastOneIteratorHasNext = true;
-		state int64_t minVersion;
+		state Version minVersion;
 		state int k;
 		state int versionRestored = 0;
 
 		// TODO: set this to false
 		state bool first = true;
-		state std::vector<int> minVs(totalItereators, -1);
+		state std::vector<Version> minVs(totalItereators, -1);
 		while (atLeastOneIteratorHasNext) {
 			atLeastOneIteratorHasNext = false;
 			minVersion = std::numeric_limits<int64_t>::max();
@@ -5589,15 +5588,21 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				atLeastOneIteratorHasNext = true;
 				Version v = wait(iterators[k]->peekNextVersion());
 				minVs[k] = v;
-				// TraceEvent("FlowguruCheckEachVersion")
-				// 	.detail("K", k)
-				// 	.detail("Version", v)
-				// 	.log();
+				TraceEvent("FlowguruSimpleCheckEachVersion")
+					.detail("K", k)
+					.detail("Version", v)
+					.log();
 
 				if (v <= minVersion) {
 					minVersion = v;
 				}
 			}
+			// fmt::print(stderr, "AtLeastOneIteratorHasNext={}\n", atLeastOneIteratorHasNext);
+			// fmt::print(stderr, "MinVersion={}\n", minVersion);
+			// fmt::print(stderr, "Vec={}\n", printVec(minVs));
+			// fmt::print(stderr, "Begin={}\n", begin);
+			// fmt::print(stderr, "End={}\n", end);
+			// fmt::print(stderr, "Size={}\n", mutationsSingleVersion.size());
 			TraceEvent("FlowGuruCheckMinVersion")
 				.detail("AtLeastOneIteratorHasNext", atLeastOneIteratorHasNext)
 				.detail("MinVersion", minVersion)
