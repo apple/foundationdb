@@ -831,6 +831,16 @@ bool PartitionedLogIteratorSimple::hasNext() {
 	while (fileIndex < files.size() && fileOffset >= files[fileIndex].fileSize) {
 		fileOffset = 0;
 		fileIndex++;
+		TraceEvent("FlowGuruEmptyFile")
+			.detail("BufferOffset", bufferOffset)
+			.detail("BufferSize", bufferSize)
+			.detail("FileOffset", fileOffset)
+			.detail("FileSize", files[fileIndex].fileSize)
+			.detail("FileName", files[fileIndex].fileName)
+			.detail("Tag", tag)
+			.detail("Files", printFiles(files))
+			.detail("Index", fileIndex)
+			.log();
 	}
 	return fileIndex < files.size() && fileOffset < files[fileIndex].fileSize;
 }
@@ -957,6 +967,11 @@ ACTOR Future<Void> PartitionedLogIteratorSimple::loadNextBlock(Reference<Partiti
 	if (!self->hasNext()) {
 		return Void();
 	}
+	TraceEvent("FLowGuruLoadNextBlock")
+		.detail("FileIndex", self->fileIndex)
+		.detail("Files", printFiles(self->files))
+		.detail("Versions", printVersions(self->endVersions))
+		.log();
 	state Reference<IAsyncFile> asyncFile;
 	Reference<IAsyncFile> asyncFileTmp = wait(self->bc->readFile(self->files[self->fileIndex].fileName));
 	asyncFile = asyncFileTmp;
@@ -5544,12 +5559,13 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				    .log();
 			} else {
 				filesByTag[f.tagId].push_back(f);
-				// TraceEvent("FlowguruAddFile")
-				// 	.detail("Begin", begin)
-				// 	.detail("End", end)
-				// 	.detail("TagID", f.tagId)
-				// 	.detail("File", f.fileName)
-				// 	.log();
+				TraceEvent("FlowguruAddFile")
+					.detail("Begin", begin)
+					.detail("End", end)
+					.detail("TagID", f.tagId)
+					.detail("File", f.fileName)
+					.detail("Size", f.fileSize)
+					.log();
 			}
 		}
 		for (int i = 0; i < maxTagID + 1; i++) {
@@ -5596,8 +5612,9 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 
 		// TODO: set this to false
 		state bool first = true;
-		state std::vector<Version> minVs(totalItereators, -1);
+		state std::vector<Version> minVs(totalItereators, 0);
 		while (atLeastOneIteratorHasNext) {
+			minVs.resize(totalItereators, 0);
 			atLeastOneIteratorHasNext = false;
 			minVersion = std::numeric_limits<int64_t>::max();
 			k = 0;
@@ -6010,6 +6027,12 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			if (f.endVersion > beginVersion) {
 				logs.push_back(f);
 				maxTagID = std::max(maxTagID, f.tagId);
+				TraceEvent("FlowGuruLogFile")
+						.detail("Begin", beginVersion)
+						.detail("End", endVersion)
+						.detail("File", f.fileName)
+						.detail("Size", f.fileSize)
+						.log();
 			}
 		}
 		for (auto f : rangeFiles.results) {
