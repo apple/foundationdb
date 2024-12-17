@@ -5366,35 +5366,35 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 	}
 
-	// for (auto& mutationsForSub : tmpMap) {
+	for (auto& mutationsForSub : tmpMap) {
 		// TraceEvent("FlowGuruPrintNewSubVersion")
 		// 	.detail("CommitVersion", commitVersion)
 		// 	.detail("Sub", mutationsForSub.first)
 		// 	.detail("Size", mutationsForSub.second.size())
 		// 	.log();
-		// for (auto& mutation : mutationsForSub.second) {
+		for (auto& mutation : mutationsForSub.second) {
 		// 	if (mutation.param1 == "3f45d867c3ece2a5"_sr || mutation.param1 == "3f689374bc6a7efa"_sr 
 		// 		|| mutation.param1 == "3f65d867c3ece2a5"_sr 
 		// 		|| commitVersion == 108983912
 		// 		|| commitVersion == 109071701) {
-		// 			TraceEvent("FlowGuruPrintBySubVersion")
-		// 				.detail("CommitVersion", commitVersion)
-		// 				.detail("Sub", mutationsForSub.first)
-		// 				.detail("Mutation", mutation.toString())
-		// 				.detail("Param1", mutation.param1)
-		// 				.detail("Num1", testKeyToDouble(mutation.param1))
-		// 				.detail("RawNum1", std::round(testKeyToDouble(mutation.param1) * 3000))
-		// 				.detail("Param2", mutation.param2)
-		// 				.detail("Num2", testKeyToDouble(mutation.param2))
-		// 				.log();
+					TraceEvent("FlowGuruPrintBySubVersion")
+						.detail("CommitVersion", commitVersion)
+						.detail("Sub", mutationsForSub.first)
+						.detail("Mutation", mutation.toString())
+						.detail("Param1", mutation.param1)
+						.detail("Num1", testKeyToDouble(mutation.param1))
+						.detail("RawNum1", std::round(testKeyToDouble(mutation.param1) * 3000))
+						.detail("Param2", mutation.param2)
+						.detail("Num2", testKeyToDouble(mutation.param2))
+						.log();
 		// 		}
-		// }
+		}
 		// TraceEvent("FlowGuruPrintNewSubVersionFinish")
 		// 	.detail("CommitVersion", commitVersion)
 		// 	.detail("Sub", mutationsForSub.first)
 		// 	.detail("Size", mutationsForSub.second.size())
 		// 	.log();
-	// }
+	}
 	// the list of param2 needs to have the first 64 bites as 0x0FDB00A200090001
 	BinaryWriter param2Writer(IncludeVersion(ProtocolVersion::withBackupMutations()));
 	param2Writer << totalBytes;
