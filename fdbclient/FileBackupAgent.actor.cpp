@@ -992,13 +992,13 @@ ACTOR Future<Version> PartitionedLogIteratorSimple::peekNextVersion(
 	state Version version;
 	std::memcpy(&version, self->buffer.get() + self->bufferOffset, sizeof(Version));
 	version = bigEndian64(version);
-	// TraceEvent("FlowGuruPeekNext")
-	// 	.detail("Version", version)
-	// 	.detail("FileIndex", self->fileIndex)
-	// 	.detail("EndVersionsSize", self->endVersions.size())
-	// 	.detail("EndVersions", printVersions(self->endVersions))
-	// 	.detail("Files", printFiles(self->files))
-	// 	.log();
+	TraceEvent("FlowGuruPeekNext")
+		.detail("Version", version)
+		.detail("FileIndex", self->fileIndex)
+		.detail("EndVersionsSize", self->endVersions.size())
+		.detail("EndVersions", printVersions(self->endVersions))
+		.detail("Files", printFiles(self->files))
+		.log();
 	// fmt::print(stderr, "FlowGuruPeekNext, version={}, offset={}, fileIndex={}, endVersions={}, files={}\n",
 	// 	 version, self->bufferOffset, self->fileIndex, printVersions(self->endVersions), printFiles(self->files));
 
@@ -1019,6 +1019,12 @@ ACTOR Future<Version> PartitionedLogIteratorSimple::peekNextVersion(
 		// fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
 		std::memcpy(&version, self->buffer.get() + self->bufferOffset, sizeof(Version));
 		version = bigEndian64(version);
+		TraceEvent("FlowGuruSimpleFindOverlapAndSkipAfter")
+			.detail("Version", version)
+			.detail("FileIndex", self->fileIndex)
+			.detail("Files", printFiles(self->files))
+			.detail("Versions", printVersions(self->endVersions))
+			.log();
 	}
 	return version;
 }
