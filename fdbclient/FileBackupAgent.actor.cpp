@@ -962,7 +962,7 @@ ACTOR Future<Void> PartitionedLogIteratorSimple::loadNextBlock(Reference<Partiti
 	self->bufferSize = bytesRead; // Set to actual bytes read
 	self->bufferOffset = 0; // Reset bufferOffset for the new data
 	self->fileOffset += bytesRead;
-	fmt::print(stderr, "LoadNextBlock: bufferSize={}, fileOffset={}\n", self->bufferSize, self->fileOffset);
+	// fmt::print(stderr, "LoadNextBlock: bufferSize={}, fileOffset={}\n", self->bufferSize, self->fileOffset);
 	return Void();
 }
 
@@ -996,6 +996,12 @@ ACTOR Future<Version> PartitionedLogIteratorSimple::peekNextVersion(
 
 
 	while (self->fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[self->fileIndex]) {
+		TraceEvent("FlowGuruSimpleFindOverlapAndSkip")
+			.detail("Version", version)
+			.detail("FileIndex", self->fileIndex)
+			.detail("Files", printFiles(self->files))
+			.detail("Versions", printVersions(self->endVersions))
+			.log();
 		self->bufferOffset = 0;
 		self->bufferSize = 0;
 		self->fileIndex += 1;
@@ -1282,15 +1288,15 @@ ACTOR Future<Version> PartitionedLogIteratorTwoBuffers::peekNextVersion(
 	version = bigEndian64(version);
 	fileIndex = self->twobuffer->getFileIndex();
 	// if (version == 462625367) {
-		TraceEvent("FlowGuruPeekNextVersion")
-			.detail("Tag", self->tag)
-			.detail("BufferOffset", self->bufferOffset)
-			.detail("BufferSize", self->twobuffer->getBufferSize())
-			.detail("Version", version)
-			.detail("FileIndex", fileIndex)
-			.detail("Files", printFiles(self->files))
-			.detail("Versions", printVersions(self->endVersions))
-			.log();
+		// TraceEvent("FlowGuruPeekNextVersion")
+		// 	.detail("Tag", self->tag)
+		// 	.detail("BufferOffset", self->bufferOffset)
+		// 	.detail("BufferSize", self->twobuffer->getBufferSize())
+		// 	.detail("Version", version)
+		// 	.detail("FileIndex", fileIndex)
+		// 	.detail("Files", printFiles(self->files))
+		// 	.detail("Versions", printVersions(self->endVersions))
+		// 	.log();
 	// }
 	while (fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[fileIndex]) {
 		TraceEvent("FlowGuruFindOverlapAndSkip")
@@ -5330,9 +5336,9 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	int32_t totalBytes = 0;
 	std::map<uint32_t, std::vector<Standalone<StringRef>>> mutationsBySub;
 	std::map<uint32_t, std::vector<Standalone<MutationRef>>> tmpMap;
-	TraceEvent("FlowGuruGenerateNewVersion")
-		.detail("CommitVersion", commitVersion)
-		.log();
+	// TraceEvent("FlowGuruGenerateNewVersion")
+	// 	.detail("CommitVersion", commitVersion)
+	// 	.log();
 	for (auto& eachTagMutations : newFormatMutations) {
 		// fmt::print(stderr, "Transform mutationList[{}], size={}\n", i, vec.size());
 		for (auto& vm : eachTagMutations) {
@@ -5437,13 +5443,13 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		}
 		backupKV.key = wrParam1.toValue();
 		results.push_back_deep(results.arena(), backupKV);		
-		TraceEvent("FlowGuruWriteOldFormat")
-			.detail("CommitVersion", commitVersion)
-			.detail("Part", part)
-			.detail("KeySize", backupKV.key.size())
-			.detail("ValueSize", backupKV.value.size())
-			.detail("TotalBytes", totalBytes)
-			.log();
+		// TraceEvent("FlowGuruWriteOldFormat")
+		// 	.detail("CommitVersion", commitVersion)
+		// 	.detail("Part", part)
+		// 	.detail("KeySize", backupKV.key.size())
+		// 	.detail("ValueSize", backupKV.value.size())
+		// 	.detail("TotalBytes", totalBytes)
+		// 	.log();
 		// fmt::print(stderr, "Pushed mutation, length={}, blockSize={}\n", wrParam1.getLength(), CLIENT_KNOBS->MUTATION_BLOCK_SIZE);
 	}
 	return results;
@@ -5588,10 +5594,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				atLeastOneIteratorHasNext = true;
 				Version v = wait(iterators[k]->peekNextVersion());
 				minVs[k] = v;
-				TraceEvent("FlowguruSimpleCheckEachVersion")
-					.detail("K", k)
-					.detail("Version", v)
-					.log();
+				// TraceEvent("FlowguruSimpleCheckEachVersion")
+				// 	.detail("K", k)
+				// 	.detail("Version", v)
+				// 	.log();
 
 				if (v <= minVersion) {
 					minVersion = v;
@@ -5603,14 +5609,14 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			// fmt::print(stderr, "Begin={}\n", begin);
 			// fmt::print(stderr, "End={}\n", end);
 			// fmt::print(stderr, "Size={}\n", mutationsSingleVersion.size());
-			TraceEvent("FlowGuruCheckMinVersion")
-				.detail("AtLeastOneIteratorHasNext", atLeastOneIteratorHasNext)
-				.detail("MinVersion", minVersion)
-				.detail("Vec", printVec(minVs))
-				.detail("Begin", begin)
-				.detail("End", end)
-				.detail("Size", mutationsSingleVersion.size())
-				.log();
+			// TraceEvent("FlowGuruCheckMinVersion")
+			// 	.detail("AtLeastOneIteratorHasNext", atLeastOneIteratorHasNext)
+			// 	.detail("MinVersion", minVersion)
+			// 	.detail("Vec", printVec(minVs))
+			// 	.detail("Begin", begin)
+			// 	.detail("End", end)
+			// 	.detail("Size", mutationsSingleVersion.size())
+			// 	.log();
 
 			// fmt::print(stderr, "after iteration k={}, atLeastOneIteratorHasNext={}\n", k, atLeastOneIteratorHasNext);
 			if (atLeastOneIteratorHasNext) {
