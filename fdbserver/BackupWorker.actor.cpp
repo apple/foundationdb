@@ -706,39 +706,39 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 		wait(logFile->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION)));
 	}
 
-	BinaryReader reader(mutation, AssumeVersion(g_network->protocolVersion()));
-	state MutationRef m2;
-	reader >> m2;
-	state double d1 = testKeyToDouble(m2.param1);
-	state double d2 = testKeyToDouble(m2.param2);
-	TraceEvent("FlowGuruAddM2")
-		.detail("Version", message.version.version)
-		.detail("Sub", message.version.sub)
-		.detail("Str", m2.toString())
-		.detail("Len1", m2.param1.size())
-		.detail("Param1", m2.param1)
-		.detail("Num1", d1)
-		.detail("Len2", m2.param2.size())
-		.detail("Param2", m2.param2)
-		.detail("Num2", d2)
-		.log();
+	// BinaryReader reader(mutation, AssumeVersion(g_network->protocolVersion()));
+	// state MutationRef m2;
+	// reader >> m2;
+	// state double d1 = testKeyToDouble(m2.param1);
+	// state double d2 = testKeyToDouble(m2.param2);
+	// TraceEvent("FlowGuruAddM2")
+	// 	.detail("Version", message.version.version)
+	// 	.detail("Sub", message.version.sub)
+	// 	.detail("Str", m2.toString())
+	// 	.detail("Len1", m2.param1.size())
+	// 	.detail("Param1", m2.param1)
+	// 	.detail("Num1", d1)
+	// 	.detail("Len2", m2.param2.size())
+	// 	.detail("Param2", m2.param2)
+	// 	.detail("Num2", d2)
+	// 	.log();
 	// fmt::print(stderr, "FlowGuruAddM2::mutation={}, size={}, type={}, key={}, len1={}, value={}, len2={} \n", m2.toString(), m2.expectedSize(), m2.type, m2.param1, m2.param1.size(), m2.param2, m2.param2.size());
 	// fmt::print(stderr, "FlowGuruAddM2:: key={}, value={} \n", d1, d2);
 
 	wait(logFile->append((void*)header.begin(), header.size()));
 	wait(logFile->append(mutation.begin(), mutation.size()));
-	TraceEvent("FlowGuruAddMutationFinish")
-		.detail("FileName", logFile->getFileName())
-		.detail("Version", message.version.version)
-		.detail("Sub", message.version.sub)
-		.detail("Str", m2.toString())
-		.detail("Len1", m2.param1.size())
-		.detail("Param1", m2.param1)
-		.detail("Num1", d1)
-		.detail("Len2", m2.param2.size())
-		.detail("Param2", m2.param2)
-		.detail("Num2", d2)
-		.log();
+	// TraceEvent("FlowGuruAddMutationFinish")
+	// 	.detail("FileName", logFile->getFileName())
+	// 	.detail("Version", message.version.version)
+	// 	.detail("Sub", message.version.sub)
+	// 	.detail("Str", m2.toString())
+	// 	.detail("Len1", m2.param1.size())
+	// 	.detail("Param1", m2.param1)
+	// 	.detail("Num1", d1)
+	// 	.detail("Len2", m2.param2.size())
+	// 	.detail("Param2", m2.param2)
+	// 	.detail("Num2", d2)
+	// 	.log();
 	return Void();
 }
 
