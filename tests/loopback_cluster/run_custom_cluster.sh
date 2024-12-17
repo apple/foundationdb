@@ -115,7 +115,7 @@ BUILD=$1
 shift;
 
 while [[ $# -gt 0 ]]; do
-	case "$1" in
+	case "${1}" in
     --dump_pids)
       DUMP_PIDS="${2}"
       ;;
@@ -148,6 +148,10 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--logrouter_count)
 			LOGROUTER_COUNT=$2
+			;;
+		*)
+      echo "ERROR: unknown input $1"
+			usage
 			;;
 	esac
 	shift; shift

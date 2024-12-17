@@ -21,6 +21,7 @@
 #include "fdbclient/S3BlobStore.h"
 
 #include "flow/IConnection.h"
+#include "flow/Trace.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
@@ -1033,6 +1034,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			connectionEstablished = true;
 			connID = rconn.conn->getDebugID();
 			reqStartTimer = g_network->timer();
+			TraceEvent(SevDebug, "S3BlobStoreEndpointConnected")
+			    .suppressFor(60)
+			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
+			    .detail("Reusing", reusingConn)
+			    .detail("ConnID", connID)
+			    .detail("Verb", req->verb)
+			    .detail("Resource", resource)
+			    .detail("Proxy", bstore->proxyHost.orDefault(""));
 
 			try {
 				if (s3TokenError && isWriteRequest(req->verb) && CLIENT_KNOBS->BACKUP_ALLOW_DRYRUN) {
@@ -1102,8 +1111,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 
 			Future<Reference<HTTP::IncomingResponse>> reqF =
 			    HTTP::doRequest(rconn.conn, req, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
-			// if we reused a connection from the pool, and immediately got an error, retry immediately discarding the
-			// connection
+			// if we reused a connection from the pool, and immediately got an error, retry immediately discarding
+			// the connection
 			if (reqF.isReady() && reusingConn) {
 				fastRetry = true;
 			}
@@ -1124,9 +1133,11 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 				++bstore->blobStats->expiredConnections;
 			}
 			rconn.conn.clear();
-
 		} catch (Error& e) {
-			TraceEvent("S3BlobStoreDoRequestError").errorUnsuppressed(e);
+			TraceEvent("S3BlobStoreDoRequestError")
+			    .errorUnsuppressed(e)
+			    .detail("Verb", verb)
+			    .detail("Resource", resource);
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 			// TODO: should this also do rconn.conn.clear()? (would need to extend lifetime outside of try block)

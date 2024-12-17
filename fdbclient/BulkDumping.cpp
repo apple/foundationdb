@@ -25,7 +25,7 @@ BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& 
 	    range, BulkDumpFileType::SST, BulkDumpTransportMethod::CP, BulkDumpExportMethod::File, remoteRoot);
 }
 
-BulkDumpState newBulkDumpTaskS3SST(const KeyRange& range, const std::string& remoteRoot) {
+BulkDumpState newBulkDumpTaskBlobstoreSST(const KeyRange& range, const std::string& remoteRoot) {
 	return BulkDumpState(
-	    range, BulkDumpFileType::SST, BulkDumpTransportMethod::S3, BulkDumpExportMethod::File, remoteRoot);
+	    range, BulkDumpFileType::SST, BulkDumpTransportMethod::BLOBSTORE, BulkDumpExportMethod::File, remoteRoot);
 }

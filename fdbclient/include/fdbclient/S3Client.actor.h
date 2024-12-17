@@ -27,6 +27,7 @@
 #define FDBCLIENT_S3CLIENT_ACTOR_H
 
 #include "fdbclient/S3BlobStore.h"
+#include "fdbclient/BulkDumping.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // FDB S3 Client. Includes copying files and directories to and from s3.
@@ -52,6 +53,11 @@ ACTOR Future<Void> copyDownFile(std::string s3url, std::string filepath);
 
 // Copy down the directory content from s3 to the local filesystem.
 ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath);
+
+// Upload the source file set after clearing any existing files at the destination.
+ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
+                                         BulkDumpFileFullPathSet sourceFileSet,
+                                         BulkDumpFileSet destinationFileSet);
 
 #include "flow/unactorcompiler.h"
 #endif

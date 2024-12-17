@@ -28,12 +28,19 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include "flow/Buggify.h"
 #include "flow/Error.h"
+#include "flow/IRandom.h"
 #include "flow/Optional.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h" // has to be last include
+#include "fdbclient/S3Client.actor.h" // include the header for S3Client
 #include "flow/flow.h"
+#include <stdexcept>
 #include <string>
+#include <boost/url/url.hpp>
+#include <boost/url/parse.hpp>
+#include <boost/url/error_types.hpp>
+#include <boost/url/string_view.hpp>
+#include "flow/actorcompiler.h" // has to be last include
 
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
                                  const BulkDumpState& bulkDumpState) {
@@ -77,8 +84,25 @@ std::string getBulkDumpTaskFolder(const UID& taskId) {
 	return taskId.toString();
 }
 
+// Append a string to a path.
+// 'path' is a filesystem path or an URL.
+std::string appendToPath(const std::string& path, const std::string& append) {
+	boost::system::result<boost::urls::url_view> parse_result = boost::urls::parse_uri(path);
+	if (!parse_result.has_value()) {
+		// Failed to parse 'path' as an URL. Do the default path join.
+		return joinPath(path, append);
+	}
+	// boost::urls::url thinks its an URL.
+	boost::urls::url url = parse_result.value();
+	if (url.scheme() != "blobstore") {
+		// For now, until we add support for other urls like file:///.
+		throw std::invalid_argument("Invalid url scheme");
+	}
+	return std::string(url.set_path(joinPath(url.path(), append)).buffer());
+}
+
 std::string getBulkDumpJobRoot(const std::string& root, const UID& jobId) {
-	return joinPath(root, jobId.toString());
+	return appendToPath(root, jobId.toString());
 }
 
 std::pair<BulkDumpFileSet, BulkDumpFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,
@@ -250,6 +274,17 @@ void bulkDumpTransportCP_impl(BulkDumpFileSet sourceFileSet,
 	return;
 }
 
+// Dump files between to blobstore.
+ACTOR Future<Void> bulkDumpTransportBlobstore_impl(BulkDumpFileSet sourceFileSet,
+                                                   BulkDumpFileSet destinationFileSet,
+                                                   size_t fileBytesMax,
+                                                   UID logId) {
+	// TODO: Make use of fileBytesMax
+	BulkDumpFileFullPathSet sourceFileFullPathSet(sourceFileSet);
+	wait(copyUpBulkDumpFileSet(destinationFileSet.rootPath, sourceFileFullPathSet, destinationFileSet));
+	return Void();
+}
+
 ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod,
                                          BulkDumpFileSet sourceFileSet,
                                          BulkDumpFileSet destinationFileSet,
@@ -263,9 +298,9 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod
 		throw bulkdump_task_failed();
 	}
 	// Upload to blobstore or mock file copy
-	if (transportMethod == BulkDumpTransportMethod::S3) {
-		// TODO: add S3 uploading, please check bulkDumpTransportCP_impl accordingly
-
+	if (transportMethod == BulkDumpTransportMethod::BLOBSTORE) {
+		wait(bulkDumpTransportBlobstore_impl(
+		    sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
 	} else if (transportMethod != BulkDumpTransportMethod::CP) {
 		bulkDumpTransportCP_impl(sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
 	} else {
@@ -284,31 +319,36 @@ void generateBulkDumpJobManifestFile(const std::string& workFolder,
                                      const UID& logId) {
 	resetFileFolder(workFolder, logId);
 	writeStringToFile(localJobManifestFilePath, content);
-	TraceEvent(SevInfo, "UploadBulkDumpJobManifestWriteLocal", logId)
+	TraceEvent(SevInfo, "GenerateBulkDumpJobManifestWriteLocal", logId)
 	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
 	    .detail("Content", content);
 	return;
 }
 
-void uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
-                                   const std::string& localJobManifestFilePath,
-                                   const std::string& remoteJobManifestFilePath,
-                                   UID logId) {
-	if (transportMethod != BulkDumpTransportMethod::CP) {
-		TraceEvent(SevWarnAlways, "UploadBulkDumpJobManifestFileError", logId)
+ACTOR Future<Void> uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
+                                                 std::string localJobManifestFilePath,
+                                                 std::string remoteFolder,
+                                                 std::string remoteJobManifestFileName,
+                                                 UID logId) {
+	auto remoteJobManifestFilePath = appendToPath(remoteFolder, remoteJobManifestFileName);
+	TraceEvent(SevInfo, "UploadBulkDumpJobManifest", logId)
+	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
+	if (transportMethod == BulkDumpTransportMethod::BLOBSTORE) {
+		wait(copyUpFile(localJobManifestFilePath, remoteJobManifestFilePath));
+	} else if (transportMethod == BulkDumpTransportMethod::CP) {
+		bulkDumpFileCopy(abspath(localJobManifestFilePath),
+		                 abspath(remoteJobManifestFilePath),
+		                 SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX,
+		                 logId);
+	} else {
+		TraceEvent(SevError, "UploadBulkDumpJobManifestFileError", logId)
 		    .detail("Reason", "Transport method is not implemented")
 		    .detail("TransportMethod", transportMethod);
 		ASSERT_WE_THINK(false);
 		throw bulkdump_task_failed();
 	}
-	TraceEvent(SevWarn, "UploadBulkDumpJobManifestWriteLocal", logId)
-	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
-	bulkDumpFileCopy(abspath(localJobManifestFilePath),
-	                 abspath(remoteJobManifestFilePath),
-	                 SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX,
-	                 logId);
 	// TODO(BulkDump): check uploaded file exist
-	return;
+	return Void();
 }
 
 ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState) {

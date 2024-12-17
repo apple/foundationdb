@@ -1474,26 +1474,26 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 	return allComplete && hasJob;
 }
 
-void bulkDumpUploadJobManifestFile(Reference<DataDistributor> self,
-                                   BulkDumpTransportMethod transportMethod,
-                                   const std::map<Key, BulkDumpManifest>& manifests,
-                                   const std::string& remoteRoot,
-                                   const UID& jobId) {
+ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self,
+                                                 BulkDumpTransportMethod transportMethod,
+                                                 std::map<Key, BulkDumpManifest> manifests,
+                                                 std::string remoteRoot,
+                                                 UID jobId) {
 	if (self->folder.empty()) {
-		return;
+		return Void();
 	}
 	// Upload job manifest file
 	std::string content = generateJobManifestFileContent(manifests);
 	ASSERT(!content.empty() && !self->bulkDumpFolder.empty());
-	std::string localFolder = getBulkDumpJobRoot(self->bulkDumpFolder, jobId);
+	state std::string localFolder = getBulkDumpJobRoot(self->bulkDumpFolder, jobId);
 	std::string remoteFolder = getBulkDumpJobRoot(remoteRoot, jobId);
 	std::string jobManifestFileName = getJobManifestFileName(jobId);
 	std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
-	std::string remoteJobManifestFilePath = joinPath(remoteFolder, jobManifestFileName);
 	generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, content, self->ddId);
-	uploadBulkDumpJobManifestFile(transportMethod, localJobManifestFilePath, remoteJobManifestFilePath, self->ddId);
+	wait(uploadBulkDumpJobManifestFile(
+	    transportMethod, localJobManifestFilePath, remoteFolder, jobManifestFileName, self->ddId));
 	clearFileFolder(localFolder);
-	return;
+	return Void();
 }
 
 ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
@@ -1580,7 +1580,7 @@ ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
 		//	<self->bulkDumpFolder>/<jobId>/<jobId>-job-manifest.txt
 		// The remote file path:
 		//	<self->rootRemote>/<jobId>/<jobId>-job-manifest.txt
-		bulkDumpUploadJobManifestFile(self, transportMethod.get(), manifests, remoteRoot.get(), jobId.get());
+		wait(bulkDumpUploadJobManifestFile(self, transportMethod.get(), manifests, remoteRoot.get(), jobId.get()));
 		TraceEvent(SevInfo, "DDBulkDumpJobFinalizeUploadManifest", self->ddId);
 
 		// clear all bulkdump metadata
