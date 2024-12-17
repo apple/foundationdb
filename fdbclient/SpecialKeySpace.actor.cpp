@@ -925,9 +925,9 @@ bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR Future<bool> checkExclusion(Database db,
-                                  const std::vector<AddressExclusion>* addresses,
-                                  const std::set<AddressExclusion>* exclusions,
-                                  const std::unordered_set<std::string>* localities,
+                                  std::vector<AddressExclusion> addresses,
+                                  std::set<AddressExclusion> exclusions,
+                                  std::unordered_set<std::string> localities,
                                   bool markFailed,
                                   Optional<std::string>* msg) {
 	StatusObject status = wait(StatusClient::statusFetcher(db));
@@ -961,7 +961,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 	state std::map<std::string, std::vector<std::string>> parsedLocalities;
 	// Convert the passed localities into a map of vectors to make it easier to check if a process
 	// is excluded by locality.
-	for (const auto& locality : *localities) {
+	for (const auto& locality : localities) {
 		std::pair<std::string, std::string> locality_key_value = decodeLocality(locality);
 		if (locality_key_value.first == "") {
 			continue;
@@ -979,8 +979,8 @@ ACTOR Future<bool> checkExclusion(Database db,
 	// step is a safeguard for future changes where the provided addresses are not empty and locality based
 	// exclusions are used.
 	state std::vector<AddressExclusion> excludedAddresses;
-	if (markFailed && !addresses->empty()) {
-		excludedAddresses = *addresses;
+	if (markFailed && !addresses.empty()) {
+		excludedAddresses = addresses;
 	}
 
 	try {
@@ -1001,7 +1001,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 					return false;
 				}
 				NetworkAddress addr = NetworkAddress::parse(addrStr);
-				excluded = addressExcluded(*exclusions, addr);
+				excluded = addressExcluded(exclusions, addr);
 
 				// If the process is not already excluded and the parsed localites have at least one entry,
 				// check if the process is excluded by localities.
@@ -1016,7 +1016,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 							continue;
 						}
 
-						const std::vector<std::string> localityVec = it->second;
+						const std::vector<std::string>& localityVec = it->second;
 						// When the process has a matching locality field, add it to the exclusion list.
 						if (std::find(localityVec.begin(), localityVec.end(), localityValue) != localityVec.end()) {
 							excluded = true;
@@ -1193,7 +1193,7 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 	    failed ? "failed" : "excluded", "force")];
 	// Only do safety check when we have servers to be excluded and the force option key is not set
 	if (addresses.size() && !(force.first && force.second.present())) {
-		bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, &localities, failed, &result));
+		bool safe = wait(checkExclusion(ryw->getDatabase(), addresses, exclusions, localities, failed, &result));
 		if (!safe)
 			return result;
 	}
@@ -2803,7 +2803,7 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 	    failed ? "failed_locality" : "excluded_locality", "force")];
 	// only do safety check when we have localities to be excluded and the force option key is not set
 	if (localities.size() && !(force.first && force.second.present())) {
-		bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, &localities, failed, &result));
+		bool safe = wait(checkExclusion(ryw->getDatabase(), addresses, exclusions, localities, failed, &result));
 		if (!safe)
 			return result;
 	}
