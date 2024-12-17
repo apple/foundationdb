@@ -779,7 +779,7 @@ public:
 	int bufferSize;
 	int fileOffset;
 	int fileIndex;
-	char * buffer;
+	std::shared_ptr<char[]> buffer;
 	std::vector<Version> endVersions;
 
 	PartitionedLogIteratorSimple(Reference<IBackupContainer> _bc,
@@ -812,14 +812,10 @@ PartitionedLogIteratorSimple::PartitionedLogIteratorSimple(Reference<IBackupCont
 																   std::vector<Version> _endVersions)
   : bc(_bc), tag(_tag), endVersions(_endVersions), files(std::move(_files)), bufferOffset(0) {
 	bufferCapacity = BATCH_READ_BLOCK_COUNT * BLOCK_SIZE;
-	buffer = new char[bufferCapacity];
+	buffer = std::shared_ptr<char[]>(new char[bufferCapacity]());
 	fileOffset = 0;
 	fileIndex = 0;
 	bufferSize = 0;
-}
-
-PartitionedLogIteratorSimple::~PartitionedLogIteratorSimple() {
-	delete [] buffer;
 }
 
 // it will set fileOffset and fileIndex
@@ -844,7 +840,7 @@ void PartitionedLogIteratorSimple::removeBlockHeader() {
 Standalone<VectorRef<VersionedMutation>> PartitionedLogIteratorSimple::consumeData(Version firstVersion) {
 	Standalone<VectorRef<VersionedMutation>> mutations = Standalone<VectorRef<VersionedMutation>>();
 	// fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
-	char* start = buffer;
+	char* start = buffer.get();
 	bool foundNewVersion = false;
 	TraceEvent("FlowGuruConsumeData")
 		.detail("FirstVersion", firstVersion)
@@ -971,7 +967,7 @@ ACTOR Future<Void> PartitionedLogIteratorSimple::loadNextBlock(Reference<Partiti
 	//            fileSize,
 	//            bytesToRead);
 	state int bytesRead =
-	    wait(asyncFile->read(static_cast<void*>(self->buffer), bytesToRead, self->fileOffset));
+	    wait(asyncFile->read(static_cast<void*>((self->buffer.get())), bytesToRead, self->fileOffset));
 	// fmt::print(stderr,
 	//            "readNextBlock::AfterActualRead, name={}, bytesRead={}\n",
 	//            self->files[self->fileIndex].fileName,
@@ -999,7 +995,7 @@ ACTOR Future<Version> PartitionedLogIteratorSimple::peekNextVersion(
 	wait(self->loadNextBlock());
 	self->removeBlockHeader();
 	state Version version;
-	std::memcpy(&version, self->buffer + self->bufferOffset, sizeof(Version));
+	std::memcpy(&version, self->buffer.get() + self->bufferOffset, sizeof(Version));
 	while (self->fileIndex < self->endVersions.size() - 1 && version >= self->endVersions[self->fileIndex]) {
 		self->bufferOffset = 0;
 		self->bufferSize = 0;
@@ -1008,7 +1004,7 @@ ACTOR Future<Version> PartitionedLogIteratorSimple::peekNextVersion(
 		// fmt::print(stderr, "ConsumeData version={}\n", firstVersion);
 		self->removeBlockHeader();
 		// fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
-		std::memcpy(&version, self->buffer + self->bufferOffset, sizeof(Version));
+		std::memcpy(&version, self->buffer.get() + self->bufferOffset, sizeof(Version));
 		version = bigEndian64(version);
 	}
 	return version;
