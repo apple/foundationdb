@@ -25,15 +25,9 @@
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include <fmt/format.h>
+#include "flow/IRandom.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // has to be last include
-
-std::string generateRandomBulkLoadDataFileName() {
-	return deterministicRandom()->randomUniqueID().toString() + "-data.sst";
-}
-
-std::string generateRandomBulkLoadBytesSampleFileName() {
-	return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
-}
 
 ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx, UID dataMoveId, UID logId) {
 	loop {
@@ -80,7 +74,7 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 			// Move bulk load files to loading folder
 			for (const auto& filePath : bulkLoadTaskState.getDataFiles()) {
 				fromFile = abspath(filePath);
-				toFile = abspath(joinPath(fileSet.folder, generateRandomBulkLoadDataFileName()));
+				toFile = abspath(joinPath(fileSet.folder, basename(fromFile)));
 				if (fileSet.dataFileList.find(toFile) != fileSet.dataFileList.end()) {
 					ASSERT_WE_THINK(false);
 					throw retry();
@@ -95,7 +89,7 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 			if (bulkLoadTaskState.getBytesSampleFile().present()) {
 				fromFile = abspath(bulkLoadTaskState.getBytesSampleFile().get());
 				if (fileExists(fromFile)) {
-					toFile = abspath(joinPath(fileSet.folder, generateRandomBulkLoadBytesSampleFileName()));
+					toFile = abspath(joinPath(fileSet.folder, basename(fromFile)));
 					bulkLoadFileCopy(fromFile, toFile, fileBytesMax);
 					fileSet.bytesSampleFile = toFile;
 					TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
@@ -125,8 +119,8 @@ ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string fol
                                                                  UID logId) {
 	loop {
 		try {
-			std::string bytesSampleFile =
-			    abspath(joinPath(folderToGenerate, generateRandomBulkLoadBytesSampleFileName()));
+			std::string bytesSampleFile = abspath(
+			    joinPath(folderToGenerate, deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst"));
 			std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 			sstWriter->open(bytesSampleFile);
 			bool anySampled = false;
@@ -159,16 +153,4 @@ ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string fol
 			wait(delay(5.0));
 		}
 	}
-}
-
-void checkContent(std::unordered_set<std::string> dataFiles, UID logId) {
-	for (const auto& filePath : dataFiles) {
-		std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
-		reader->open(filePath);
-		while (reader->hasNext()) {
-			KeyValue kv = reader->next();
-			TraceEvent("CheckContent", logId).detail("Key", kv.key).detail("Value", kv.value);
-		}
-	}
-	return;
 }

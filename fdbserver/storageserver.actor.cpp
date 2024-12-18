@@ -6081,7 +6081,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	// Use jobId and taskId as the folder to store the data of the task range
 	ASSERT(req.bulkDumpState.getTaskId().present());
 	state std::string taskFolder = getBulkDumpTaskFolder(req.bulkDumpState.getTaskId().get());
-	state BulkDumpFileSet destinationFileSets;
+	state BulkLoadFileSet destinationFileSets;
 	state Transaction tr(data->cx);
 
 	loop {
@@ -6108,27 +6108,27 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// The data in KVStore is dumped to the local folder at first and then
 			// the local files are uploaded to the remote folder
 			// Local files and remotes files have the same relative path but different root
-			state std::pair<BulkDumpFileSet, BulkDumpFileSet> resFileSets =
+			state std::pair<BulkLoadFileSet, BulkLoadFileSet> resFileSets =
 			    getLocalRemoteFileSetSetting(versionToDump,
 			                                 relativeFolder,
 			                                 /*rootLocal=*/rootFolderLocal,
 			                                 /*rootRemote=*/rootFolderRemote);
 
 			// The remote file path:
-			state BulkDumpFileSet localFileSetSetting = resFileSets.first;
-			state BulkDumpFileSet remoteFileSetSetting = resFileSets.second;
+			state BulkLoadFileSet localFileSetSetting = resFileSets.first;
+			state BulkLoadFileSet remoteFileSetSetting = resFileSets.second;
 
 			// Generate byte sampling setting
-			ByteSampleSetting byteSampleSetting(0,
-			                                    "hashlittle2", // use function name to represent the method
-			                                    SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
-			                                    SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
-			                                    SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
+			BulkLoadByteSampleSetting byteSampleSetting(0,
+			                                            "hashlittle2", // use function name to represent the method
+			                                            SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
+			                                            SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
+			                                            SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
 
 			// Write to SST file
 			state KeyRange dataRange =
 			    rangeToDump & Standalone(KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey)));
-			state BulkDumpManifest manifest =
+			state BulkLoadManifest manifest =
 			    dumpDataFileToLocalDirectory(data->thisServerID,
 			                                 rangeDumpData.kvs,
 			                                 rangeDumpData.sampled,
@@ -6151,7 +6151,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			    .detail("BatchNum", batchNum);
 
 			// Upload Files
-			state BulkDumpFileSet localFileSet = localFileSetSetting;
+			state BulkLoadFileSet localFileSet = localFileSetSetting;
 			if (manifest.fileSet.dataFileName.empty()) {
 				localFileSet.dataFileName = "";
 			}
@@ -9420,7 +9420,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	// TODO(BulkLoad): Validate all files specified in fileSetToLoad exist
 	// TODO(BulkLoad): Check file checksum
 	// TODO(BulkLoad): Check file data all in the moveInShard range
-	// TODO(BulkLoad): checkContent(fileSetToLoad.dataFileList, data->thisServerID);
+	// TODO(BulkLoad): checkContent()
 	if (!fileSetToLoad.bytesSampleFile.present()) {
 		TraceEvent(SevWarn, "SSBulkLoadTaskFetchSSTFileByteSampleNotFound", data->thisServerID)
 		    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())

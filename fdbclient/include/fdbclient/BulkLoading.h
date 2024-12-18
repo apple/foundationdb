@@ -25,15 +25,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
-enum class BulkLoadPhase : uint8_t {
-	Invalid = 0, // Used to distinguish if a BulkLoadTaskState is a valid task
-	Submitted = 1, // Set by users
-	Triggered = 2, // Update when DD trigger a data move for the task
-	Running = 3, // Update atomically with updating KeyServer dest servers in startMoveKey
-	Complete = 4, // Update atomically with updating KeyServer src servers in finishMoveKey
-	Acknowledged = 5, // Updated by users; DD automatically clear metadata with this phase
-};
-
 enum class BulkLoadType : uint8_t {
 	Invalid = 0,
 	SST = 1,
@@ -43,11 +34,190 @@ enum class BulkLoadTransportMethod : uint8_t {
 	Invalid = 0,
 	CP = 1, // Local file copy. Used when the data file is in the local file system for any storage server. Used for
 	        // simulation test and local cluster test.
+	BLOBSTORE = 2,
 };
 
-enum class BulkLoadInjectMethod : uint8_t {
-	Invalid = 0,
-	File = 1,
+// Define the configuration of bytes sampling
+// Use for setting manifest file
+struct BulkLoadByteSampleSetting {
+	constexpr static FileIdentifier file_identifier = 1384500;
+
+	BulkLoadByteSampleSetting() = default;
+
+	BulkLoadByteSampleSetting(int version,
+	                          const std::string& method,
+	                          int factor,
+	                          int overhead,
+	                          double minimalProbability)
+	  : version(version), method(method), factor(factor), overhead(overhead), minimalProbability(minimalProbability) {
+		ASSERT(isValid());
+	}
+
+	bool isValid() const {
+		if (method.size() == 0) {
+			return false;
+		}
+		return true;
+	}
+
+	std::string toString() const {
+		return "[ByteSampleVersion]: " + std::to_string(version) + ", [ByteSampleMethod]: " + method +
+		       ", [ByteSampleFactor]: " + std::to_string(factor) +
+		       ", [ByteSampleOverhead]: " + std::to_string(overhead) +
+		       ", [ByteSampleMinimalProbability]: " + std::to_string(minimalProbability);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, method, factor, overhead, minimalProbability);
+	}
+
+	int version = 0;
+	std::string method = "";
+	int factor = 0;
+	int overhead = 0;
+	double minimalProbability = 0.0;
+};
+
+// Definition of bulkload/dump files metadata
+struct BulkLoadFileSet {
+	constexpr static FileIdentifier file_identifier = 1384501;
+
+	BulkLoadFileSet() = default;
+
+	BulkLoadFileSet(const std::string& rootPath,
+	                const std::string& relativePath,
+	                const std::string& manifestFileName,
+	                const std::string& dataFileName,
+	                const std::string& byteSampleFileName)
+	  : rootPath(rootPath), relativePath(relativePath), manifestFileName(manifestFileName), dataFileName(dataFileName),
+	    byteSampleFileName(byteSampleFileName) {
+		if (!isValid()) {
+			TraceEvent(SevError, "BulkDumpFileSetInvalid").detail("Content", toString());
+			ASSERT(false);
+		}
+	}
+
+	bool isValid() const {
+		if (rootPath.empty()) {
+			ASSERT(false);
+			return false;
+		}
+		if (relativePath.empty()) {
+			ASSERT(false);
+			return false;
+		}
+		if (manifestFileName.empty()) {
+			ASSERT(false);
+			return false;
+		}
+		if (dataFileName.empty() && !byteSampleFileName.empty()) {
+			ASSERT(false);
+			return false;
+		}
+		return true;
+	}
+
+	std::string toString() const {
+		return "[RootPath]: " + rootPath + ", [RelativePath]: " + relativePath +
+		       ", [ManifestFileName]: " + manifestFileName + ", [DataFileName]: " + dataFileName +
+		       ", [ByteSampleFileName]: " + byteSampleFileName;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName);
+	}
+
+	std::string rootPath = "";
+	std::string relativePath = "";
+	std::string manifestFileName = "";
+	std::string dataFileName = "";
+	std::string byteSampleFileName = "";
+};
+
+struct BulkDumpFileFullPathSet {
+	BulkDumpFileFullPathSet(const BulkLoadFileSet& fileSet) {
+		folder = joinPath(fileSet.rootPath, fileSet.relativePath);
+		dataFilePath = joinPath(folder, fileSet.dataFileName);
+		byteSampleFilePath = joinPath(folder, fileSet.byteSampleFileName);
+		manifestFilePath = joinPath(folder, fileSet.manifestFileName);
+	}
+	std::string folder = "";
+	std::string dataFilePath = "";
+	std::string byteSampleFilePath = "";
+	std::string manifestFilePath = "";
+
+	std::string toString() const {
+		return "[Folder]: " + folder + ", [ManifestFilePath]: " + manifestFilePath +
+		       ", [DataFilePath]: " + dataFilePath + ", [ByteSampleFilePath]: " + byteSampleFilePath;
+	}
+};
+
+// Define the metadata of bulkdump manifest file
+// The file is uploaded along with the data files
+struct BulkLoadManifest {
+	constexpr static FileIdentifier file_identifier = 1384502;
+
+	BulkLoadManifest() = default;
+
+	BulkLoadManifest(const BulkLoadFileSet& fileSet,
+	                 const Key& beginKey,
+	                 const Key& endKey,
+	                 const Version& version,
+	                 const std::string& checksum,
+	                 int64_t bytes,
+	                 const BulkLoadByteSampleSetting& byteSampleSetting)
+	  : fileSet(fileSet), beginKey(beginKey), endKey(endKey), version(version), checksum(checksum), bytes(bytes),
+	    byteSampleSetting(byteSampleSetting) {
+		ASSERT(isValid());
+	}
+
+	bool isValid() const {
+		if (beginKey >= endKey) {
+			return false;
+		}
+		if (!fileSet.isValid()) {
+			return false;
+		}
+		if (!byteSampleSetting.isValid()) {
+			return false;
+		}
+		return true;
+	}
+
+	std::string getBeginKeyString() const { return beginKey.toFullHexStringPlain(); }
+
+	std::string getEndKeyString() const { return endKey.toFullHexStringPlain(); }
+
+	// Generating human readable string to stored in the manifest file
+	std::string toString() const {
+		return fileSet.toString() + ", [BeginKey]: " + getBeginKeyString() + ", [EndKey]: " + getEndKeyString() +
+		       ", [Version]: " + std::to_string(version) + ", [Checksum]: " + checksum +
+		       ", [Bytes]: " + std::to_string(bytes) + ", " + byteSampleSetting.toString();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, fileSet, beginKey, endKey, version, checksum, bytes, byteSampleSetting);
+	}
+
+	BulkLoadFileSet fileSet;
+	Key beginKey;
+	Key endKey;
+	Version version;
+	std::string checksum;
+	int64_t bytes;
+	BulkLoadByteSampleSetting byteSampleSetting;
+};
+
+enum class BulkLoadPhase : uint8_t {
+	Invalid = 0, // Used to distinguish if a BulkLoadTaskState is a valid task
+	Submitted = 1, // Set by users
+	Triggered = 2, // Update when DD trigger a data move for the task
+	Running = 3, // Update atomically with updating KeyServer dest servers in startMoveKey
+	Complete = 4, // Update atomically with updating KeyServer src servers in finishMoveKey
+	Acknowledged = 5, // Updated by users; DD automatically clear metadata with this phase
 };
 
 struct BulkLoadTaskState {
@@ -62,13 +232,12 @@ struct BulkLoadTaskState {
 	BulkLoadTaskState(KeyRange range,
 	                  BulkLoadType loadType,
 	                  BulkLoadTransportMethod transportMethod,
-	                  BulkLoadInjectMethod injectMethod,
 	                  std::string folder,
 	                  std::unordered_set<std::string> dataFiles,
 	                  Optional<std::string> bytesSampleFile)
 	  : taskId(deterministicRandom()->randomUniqueID()), range(range), loadType(loadType),
-	    transportMethod(transportMethod), injectMethod(injectMethod), folder(folder), dataFiles(dataFiles),
-	    bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Submitted) {
+	    transportMethod(transportMethod), folder(folder), dataFiles(dataFiles), bytesSampleFile(bytesSampleFile),
+	    phase(BulkLoadPhase::Submitted) {
 		ASSERT(isValid());
 	}
 
@@ -81,7 +250,6 @@ struct BulkLoadTaskState {
 		    "BulkLoadTaskState: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
 		    ", [Type]: " + std::to_string(static_cast<uint8_t>(loadType)) +
 		    ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod)) +
-		    ", [InjectMethod]: " + std::to_string(static_cast<uint8_t>(injectMethod)) +
 		    ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) + ", [Folder]: " + folder +
 		    ", [DataFiles]: " + describe(dataFiles) + ", [SubmitTime]: " + std::to_string(submitTime) +
 		    ", [TriggerTime]: " + std::to_string(triggerTime) + ", [StartTime]: " + std::to_string(startTime) +
@@ -140,12 +308,7 @@ struct BulkLoadTaskState {
 		if (transportMethod == BulkLoadTransportMethod::Invalid) {
 			return false;
 		} else if (transportMethod != BulkLoadTransportMethod::CP) {
-			throw not_implemented();
-		}
-		if (injectMethod == BulkLoadInjectMethod::Invalid) {
-			return false;
-		} else if (injectMethod != BulkLoadInjectMethod::File) {
-			throw not_implemented();
+			ASSERT(false);
 		}
 		if (dataFiles.empty()) {
 			return false;
@@ -171,7 +334,6 @@ struct BulkLoadTaskState {
 		           range,
 		           loadType,
 		           transportMethod,
-		           injectMethod,
 		           phase,
 		           folder,
 		           dataFiles,
@@ -200,7 +362,6 @@ private:
 	// File inject config
 	BulkLoadType loadType = BulkLoadType::Invalid;
 	BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
-	BulkLoadInjectMethod injectMethod = BulkLoadInjectMethod::Invalid;
 	// Folder includes all files to be injected
 	std::string folder;
 	// Files to inject

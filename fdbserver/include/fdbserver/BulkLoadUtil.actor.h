@@ -43,13 +43,7 @@ struct SSBulkLoadFileSet {
 	}
 };
 
-std::string generateRandomBulkLoadDataFileName();
-
-std::string generateRandomBulkLoadBytesSampleFileName();
-
 ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx, UID dataMoveId, UID logId);
-
-void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax);
 
 ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
                                                          BulkLoadTaskState bulkLoadTaskState,
@@ -59,8 +53,6 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string folderToGenerate,
                                                                  std::unordered_set<std::string> dataFiles,
                                                                  UID logId);
-
-void checkContent(std::unordered_set<std::string> dataFiles, UID logId);
 
 #include "flow/unactorcompiler.h"
 #endif

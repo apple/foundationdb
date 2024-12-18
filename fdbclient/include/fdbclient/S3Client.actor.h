@@ -57,7 +57,7 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath);
 // Upload the source file set after clearing any existing files at the destination.
 ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
                                          BulkDumpFileFullPathSet sourceFileSet,
-                                         BulkDumpFileSet destinationFileSet);
+                                         BulkLoadFileSet destinationFileSet);
 
 #include "flow/unactorcompiler.h"
 #endif

@@ -23,199 +23,14 @@
 #include "flow/Trace.h"
 #pragma once
 
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
-
-// Define the configuration of bytes sampling
-// Use for setting manifest file
-struct ByteSampleSetting {
-	constexpr static FileIdentifier file_identifier = 1384500;
-
-	ByteSampleSetting() = default;
-
-	ByteSampleSetting(int version, const std::string& method, int factor, int overhead, double minimalProbability)
-	  : version(version), method(method), factor(factor), overhead(overhead), minimalProbability(minimalProbability) {
-		ASSERT(isValid());
-	}
-
-	bool isValid() const {
-		if (method.size() == 0) {
-			return false;
-		}
-		return true;
-	}
-
-	std::string toString() const {
-		return "[ByteSampleVersion]: " + std::to_string(version) + ", [ByteSampleMethod]: " + method +
-		       ", [ByteSampleFactor]: " + std::to_string(factor) +
-		       ", [ByteSampleOverhead]: " + std::to_string(overhead) +
-		       ", [ByteSampleMinimalProbability]: " + std::to_string(minimalProbability);
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, version, method, factor, overhead, minimalProbability);
-	}
-
-	int version = 0;
-	std::string method = "";
-	int factor = 0;
-	int overhead = 0;
-	double minimalProbability = 0.0;
-};
-
-// Definition of bulkdump files metadata
-struct BulkDumpFileSet {
-	constexpr static FileIdentifier file_identifier = 1384501;
-
-	BulkDumpFileSet() = default;
-
-	BulkDumpFileSet(const std::string& rootPath,
-	                const std::string& relativePath,
-	                const std::string& manifestFileName,
-	                const std::string& dataFileName,
-	                const std::string& byteSampleFileName)
-	  : rootPath(rootPath), relativePath(relativePath), manifestFileName(manifestFileName), dataFileName(dataFileName),
-	    byteSampleFileName(byteSampleFileName) {
-		if (!isValid()) {
-			TraceEvent(SevError, "BulkDumpFileSetInvalid").detail("Content", toString());
-			ASSERT(false);
-		}
-	}
-
-	bool isValid() const {
-		if (rootPath.empty()) {
-			ASSERT(false);
-			return false;
-		}
-		if (relativePath.empty()) {
-			ASSERT(false);
-			return false;
-		}
-		if (manifestFileName.empty()) {
-			ASSERT(false);
-			return false;
-		}
-		if (dataFileName.empty() && !byteSampleFileName.empty()) {
-			ASSERT(false);
-			return false;
-		}
-		return true;
-	}
-
-	std::string toString() const {
-		return "[RootPath]: " + rootPath + ", [RelativePath]: " + relativePath +
-		       ", [ManifestFileName]: " + manifestFileName + ", [DataFileName]: " + dataFileName +
-		       ", [ByteSampleFileName]: " + byteSampleFileName;
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName);
-	}
-
-	std::string rootPath = "";
-	std::string relativePath = "";
-	std::string manifestFileName = "";
-	std::string dataFileName = "";
-	std::string byteSampleFileName = "";
-};
-
-struct BulkDumpFileFullPathSet {
-	BulkDumpFileFullPathSet(const BulkDumpFileSet& fileSet) {
-		folder = joinPath(fileSet.rootPath, fileSet.relativePath);
-		dataFilePath = joinPath(folder, fileSet.dataFileName);
-		byteSampleFilePath = joinPath(folder, fileSet.byteSampleFileName);
-		manifestFilePath = joinPath(folder, fileSet.manifestFileName);
-	}
-	std::string folder = "";
-	std::string dataFilePath = "";
-	std::string byteSampleFilePath = "";
-	std::string manifestFilePath = "";
-
-	std::string toString() const {
-		return "[Folder]: " + folder + ", [ManifestFilePath]: " + manifestFilePath +
-		       ", [DataFilePath]: " + dataFilePath + ", [ByteSampleFilePath]: " + byteSampleFilePath;
-	}
-};
-
-// Define the metadata of bulkdump manifest file
-// The file is uploaded along with the data files
-struct BulkDumpManifest {
-	constexpr static FileIdentifier file_identifier = 1384502;
-
-	BulkDumpManifest() = default;
-
-	BulkDumpManifest(const BulkDumpFileSet& fileSet,
-	                 const Key& beginKey,
-	                 const Key& endKey,
-	                 const Version& version,
-	                 const std::string& checksum,
-	                 int64_t bytes,
-	                 const ByteSampleSetting& byteSampleSetting)
-	  : fileSet(fileSet), beginKey(beginKey), endKey(endKey), version(version), checksum(checksum), bytes(bytes),
-	    byteSampleSetting(byteSampleSetting) {
-		ASSERT(isValid());
-	}
-
-	bool isValid() const {
-		if (beginKey >= endKey) {
-			return false;
-		}
-		if (!fileSet.isValid()) {
-			return false;
-		}
-		if (!byteSampleSetting.isValid()) {
-			return false;
-		}
-		return true;
-	}
-
-	std::string getBeginKeyString() const { return beginKey.toFullHexStringPlain(); }
-
-	std::string getEndKeyString() const { return endKey.toFullHexStringPlain(); }
-
-	// Generating human readable string to stored in the manifest file
-	std::string toString() const {
-		return fileSet.toString() + ", [BeginKey]: " + getBeginKeyString() + ", [EndKey]: " + getEndKeyString() +
-		       ", [Version]: " + std::to_string(version) + ", [Checksum]: " + checksum +
-		       ", [Bytes]: " + std::to_string(bytes) + ", " + byteSampleSetting.toString();
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, fileSet, beginKey, endKey, version, checksum, bytes, byteSampleSetting);
-	}
-
-	BulkDumpFileSet fileSet;
-	Key beginKey;
-	Key endKey;
-	Version version;
-	std::string checksum;
-	int64_t bytes;
-	ByteSampleSetting byteSampleSetting;
-};
 
 enum class BulkDumpPhase : uint8_t {
 	Invalid = 0,
 	Submitted = 1,
 	Complete = 2,
-};
-
-enum class BulkDumpFileType : uint8_t {
-	Invalid = 0,
-	SST = 1,
-};
-
-enum class BulkDumpTransportMethod : uint8_t {
-	Invalid = 0,
-	CP = 1,
-	BLOBSTORE = 2,
-};
-
-enum class BulkDumpExportMethod : uint8_t {
-	Invalid = 0,
-	File = 1,
 };
 
 // Definition of bulkdump metadata
@@ -227,13 +42,11 @@ struct BulkDumpState {
 	// The only public interface to create a valid task
 	// This constructor is call when users submitting a task, e.g. by newBulkDumpJobLocalSST()
 	BulkDumpState(KeyRange range,
-	              BulkDumpFileType fileType,
-	              BulkDumpTransportMethod transportMethod,
-	              BulkDumpExportMethod exportMethod,
+	              BulkLoadType loadType,
+	              BulkLoadTransportMethod transportMethod,
 	              std::string remoteRoot)
-	  : jobId(deterministicRandom()->randomUniqueID()), range(range), fileType(fileType),
-	    transportMethod(transportMethod), exportMethod(exportMethod), remoteRoot(remoteRoot),
-	    phase(BulkDumpPhase::Submitted) {
+	  : jobId(deterministicRandom()->randomUniqueID()), range(range), loadType(loadType),
+	    transportMethod(transportMethod), remoteRoot(remoteRoot), phase(BulkDumpPhase::Submitted) {
 		ASSERT(isValid());
 	}
 
@@ -243,9 +56,8 @@ struct BulkDumpState {
 
 	std::string toString() const {
 		std::string res = "BulkDumpState: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
-		                  ", [FileType]: " + std::to_string(static_cast<uint8_t>(fileType)) +
+		                  ", [loadType]: " + std::to_string(static_cast<uint8_t>(loadType)) +
 		                  ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod)) +
-		                  ", [ExportMethod]: " + std::to_string(static_cast<uint8_t>(exportMethod)) +
 		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) +
 		                  ", [RemoteRoot]: " + remoteRoot + ", [JobId]: " + jobId.toString();
 		if (taskId.present()) {
@@ -254,8 +66,8 @@ struct BulkDumpState {
 		if (version.present()) {
 			res = res + ", [Version]: " + std::to_string(version.get());
 		}
-		if (bulkDumpManifest.present()) {
-			res = res + ", [BulkDumpManifest]: " + bulkDumpManifest.get().toString();
+		if (bulkLoadManifest.present()) {
+			res = res + ", [BulkLoadManifest]: " + bulkLoadManifest.get().toString();
 		}
 		return res;
 	}
@@ -270,7 +82,7 @@ struct BulkDumpState {
 
 	BulkDumpPhase getPhase() const { return phase; }
 
-	BulkDumpTransportMethod getTransportMethod() const { return transportMethod; }
+	BulkLoadTransportMethod getTransportMethod() const { return transportMethod; }
 
 	bool isValid() const {
 		if (!jobId.isValid()) {
@@ -282,15 +94,10 @@ struct BulkDumpState {
 		if (range.empty()) {
 			return false;
 		}
-		if (transportMethod == BulkDumpTransportMethod::Invalid) {
+		if (transportMethod == BulkLoadTransportMethod::Invalid) {
 			return false;
-		} else if (transportMethod != BulkDumpTransportMethod::CP &&
-		           transportMethod != BulkDumpTransportMethod::BLOBSTORE) {
-			ASSERT(false);
-		}
-		if (exportMethod == BulkDumpExportMethod::Invalid) {
-			return false;
-		} else if (exportMethod != BulkDumpExportMethod::File) {
+		} else if (transportMethod != BulkLoadTransportMethod::CP &&
+		           transportMethod != BulkLoadTransportMethod::BLOBSTORE) {
 			ASSERT(false);
 		}
 		if (remoteRoot.empty()) {
@@ -325,32 +132,22 @@ struct BulkDumpState {
 	}
 
 	// Generate a metadata with Complete state.
-	BulkDumpState getRangeCompleteState(const KeyRange& completeRange, const BulkDumpManifest& bulkDumpManifest) {
+	BulkDumpState getRangeCompleteState(const KeyRange& completeRange, const BulkLoadManifest& bulkLoadManifest) {
 		ASSERT(range.contains(completeRange));
-		ASSERT(bulkDumpManifest.isValid());
+		ASSERT(bulkLoadManifest.isValid());
 		ASSERT(taskId.present() && taskId.get().isValid());
 		BulkDumpState res = *this;
 		res.phase = BulkDumpPhase::Complete;
-		res.bulkDumpManifest = bulkDumpManifest;
+		res.bulkLoadManifest = bulkLoadManifest;
 		res.range = completeRange;
 		return res;
 	}
 
-	Optional<BulkDumpManifest> getManifest() const { return bulkDumpManifest; }
+	Optional<BulkLoadManifest> getManifest() const { return bulkLoadManifest; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           jobId,
-		           range,
-		           fileType,
-		           transportMethod,
-		           exportMethod,
-		           remoteRoot,
-		           phase,
-		           taskId,
-		           version,
-		           bulkDumpManifest);
+		serializer(ar, jobId, range, loadType, transportMethod, remoteRoot, phase, taskId, version, bulkLoadManifest);
 	}
 
 private:
@@ -359,9 +156,8 @@ private:
 
 	// File dump config:
 	KeyRange range; // Dump the key-value within this range "[begin, end)" from data file
-	BulkDumpFileType fileType = BulkDumpFileType::Invalid;
-	BulkDumpTransportMethod transportMethod = BulkDumpTransportMethod::Invalid;
-	BulkDumpExportMethod exportMethod = BulkDumpExportMethod::Invalid;
+	BulkLoadType loadType = BulkLoadType::Invalid;
+	BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
 	std::string remoteRoot; // remoteRoot is the root string to where the data is set to be uploaded
 
 	// Task dynamics:
@@ -369,7 +165,9 @@ private:
 	Optional<UID> taskId; // The unique identifier of a task. Any SS can do a task. If a task is failed, this remaining
 	                      // part of the task can be picked up by any SS with a changed taskId.
 	Optional<Version> version;
-	Optional<BulkDumpManifest> bulkDumpManifest; // Resulting remote bulkDumpManifest after the dumping task completes
+
+	// Resulting remote bulkLoadManifest after the dumping task completes
+	Optional<BulkLoadManifest> bulkLoadManifest;
 };
 
 // User API to create bulkDump task metadata

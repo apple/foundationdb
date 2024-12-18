@@ -26,11 +26,5 @@ BulkLoadTaskState newBulkLoadTaskLocalSST(KeyRange range,
                                           std::string bytesSampleFile) {
 	std::unordered_set<std::string> dataFiles;
 	dataFiles.insert(dataFile);
-	return BulkLoadTaskState(range,
-	                         BulkLoadType::SST,
-	                         BulkLoadTransportMethod::CP,
-	                         BulkLoadInjectMethod::File,
-	                         folder,
-	                         dataFiles,
-	                         bytesSampleFile);
+	return BulkLoadTaskState(range, BulkLoadType::SST, BulkLoadTransportMethod::CP, folder, dataFiles, bytesSampleFile);
 }

@@ -66,6 +66,14 @@ struct BulkLoading : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
+	std::string generateRandomBulkLoadDataFileName() {
+		return deterministicRandom()->randomUniqueID().toString() + "-data.sst";
+	}
+
+	std::string generateRandomBulkLoadBytesSampleFileName() {
+		return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
+	}
+
 	ACTOR Future<Void> submitBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadTaskState> tasks) {
 		state int i = 0;
 		for (; i < tasks.size(); i++) {
@@ -367,8 +375,8 @@ struct BulkLoading : TestWorkload {
 	                                              std::string folderPath,
 	                                              int dataSize,
 	                                              Optional<KeyRange> range = Optional<KeyRange>()) {
-		std::string dataFilePath = joinPath(folderPath, generateRandomBulkLoadDataFileName());
-		std::string bytesSampleFilePath = joinPath(folderPath, generateRandomBulkLoadBytesSampleFileName());
+		std::string dataFilePath = joinPath(folderPath, self->generateRandomBulkLoadDataFileName());
+		std::string bytesSampleFilePath = joinPath(folderPath, self->generateRandomBulkLoadBytesSampleFileName());
 		KeyRange rangeToLoad = range.present() ? range.get() : self->getRandomRange(self, normalKeys);
 		BulkLoadTaskTestUnit taskUnit;
 		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(rangeToLoad, folderPath, dataFilePath, bytesSampleFilePath);

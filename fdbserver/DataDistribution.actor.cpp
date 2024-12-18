@@ -1479,8 +1479,8 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 }
 
 ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self,
-                                                 BulkDumpTransportMethod transportMethod,
-                                                 std::map<Key, BulkDumpManifest> manifests,
+                                                 BulkLoadTransportMethod transportMethod,
+                                                 std::map<Key, BulkLoadManifest> manifests,
                                                  std::string remoteRoot,
                                                  UID jobId) {
 	if (self->folder.empty()) {
@@ -1502,10 +1502,10 @@ ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self
 
 ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
 	// Collect necessary info to generate job manifest file by scan the entire bulkDump key space
-	state std::map<Key, BulkDumpManifest> manifests;
+	state std::map<Key, BulkLoadManifest> manifests;
 	state Optional<UID> jobId;
 	state Optional<std::string> remoteRoot;
-	state Optional<BulkDumpTransportMethod> transportMethod;
+	state Optional<BulkLoadTransportMethod> transportMethod;
 
 	TraceEvent(SevInfo, "DDBulkDumpJobFinalizeStart", self->ddId);
 	state Database cx = self->txnProcessor->context();

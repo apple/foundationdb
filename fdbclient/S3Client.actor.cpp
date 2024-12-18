@@ -127,7 +127,7 @@ ACTOR Future<Void> copyUpDirectory(std::string dirpath, std::string s3url) {
 
 ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
                                          BulkDumpFileFullPathSet sourceFileFullPathSet,
-                                         BulkDumpFileSet destinationFileSet) {
+                                         BulkLoadFileSet destinationFileSet) {
 	state std::string resource;
 	S3BlobStoreEndpoint::ParametersT parameters;
 	state Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
