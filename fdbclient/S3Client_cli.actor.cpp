@@ -108,13 +108,12 @@ static void printUsage(std::string const& programName) {
 	             "                 If SOURCE is an s3 bucket URL, TARGET must be a directory and vice versa.\n"
 	             "                 See 'Backup URLs' in https://apple.github.io/foundationdb/backups.html for\n"
 	             "                 the fdb s3 'blobstore://' url format.\n"
-	             " TARGET          Where to place the copy.\n" TLS_HELP
-	             "Examples:\n"
+	             " TARGET          Where to place the copy.\n" TLS_HELP "Examples:\n"
 	             " "
-	          << programName
-	          << " --knob_http_verbose_level=10 --log   --knob_blobstore_encryption_type=aws:kms "
+	          << programName << " --knob_http_verbose_level=10 --log   --knob_blobstore_encryption_type=aws:kms "
 	          << " --tls-ca-file /etc/ssl/cert.pem --tls-certificate-file /tmp/cert.pem  --tls-key-file /tmp/key.pem "
-	             "'blobstore://AWS_ACCESS_KEY_ID:AWS_SECRET_ACCESS_KEY:AWS_SESSION_TOKEN@localhost:8333/x?bucket=backup&region=us' dir3\n";
+	             "'blobstore://AWS_ACCESS_KEY_ID:AWS_SECRET_ACCESS_KEY:AWS_SESSION_TOKEN@localhost:8333/"
+	             "x?bucket=backup&region=us' dir3\n";
 	return;
 }
 
