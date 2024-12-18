@@ -199,7 +199,7 @@ public:
 	// Random selection for load balance
 	ACTOR static Future<Void> getTeamForBulkLoad(DDTeamCollection* self, GetTeamRequest req) {
 		try {
-			TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamReqReceived", self->distributorId)
+			TraceEvent(SevInfo, "DDBulkLoadEngineTaskGetTeamReqReceived", self->distributorId)
 			    .detail("TCReady", self->readyToStart.isReady())
 			    .detail("TeamBuilderValid", self->teamBuilder.isValid())
 			    .detail("TeamBuilderReady", self->teamBuilder.isValid() ? self->teamBuilder.isReady() : false)
@@ -208,7 +208,7 @@ public:
 			    .detail("TeamSize", self->teams.size());
 			wait(self->checkBuildTeams());
 
-			TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamCheckBuildTeamDone", self->distributorId)
+			TraceEvent(SevInfo, "DDBulkLoadEngineTaskGetTeamCheckBuildTeamDone", self->distributorId)
 			    .detail("TCReady", self->readyToStart.isReady())
 			    .detail("TeamBuilderValid", self->teamBuilder.isValid())
 			    .detail("TeamBuilderReady", self->teamBuilder.isValid() ? self->teamBuilder.isReady() : false)
@@ -221,7 +221,7 @@ public:
 				// a data movement to that team can't be completed and such a move
 				// may block the primary DC from reaching "storage_recovered".
 				auto team = self->findTeamFromServers(req.completeSources, /*wantHealthy=*/false);
-				TraceEvent(SevWarn, "DDBulkLoadTaskGetTeamRemoteDCNotReady", self->distributorId)
+				TraceEvent(SevWarn, "DDBulkLoadEngineTaskGetTeamRemoteDCNotReady", self->distributorId)
 				    .suppressFor(1.0)
 				    .detail("Primary", self->primary)
 				    .detail("Team", team.present() ? describe(team.get()->getServerIDs()) : "");
@@ -268,7 +268,7 @@ public:
 			Optional<Reference<IDataDistributionTeam>> res;
 			if (candidateTeams.size() >= 1) {
 				res = deterministicRandom()->randomChoice(candidateTeams);
-				TraceEvent(SevInfo, "DDBulkLoadTaskGetTeamReply", self->distributorId)
+				TraceEvent(SevInfo, "DDBulkLoadEngineTaskGetTeamReply", self->distributorId)
 				    .detail("TCReady", self->readyToStart.isReady())
 				    .detail("SrcIds", describe(req.src))
 				    .detail("Primary", self->isPrimary())
@@ -280,7 +280,7 @@ public:
 				    .detail("DestIds", describe(res.get()->getServerIDs()))
 				    .detail("DestTeam", res.get()->getTeamID());
 			} else {
-				TraceEvent(SevWarnAlways, "DDBulkLoadTaskGetTeamFailedToFindValidTeam", self->distributorId)
+				TraceEvent(SevWarnAlways, "DDBulkLoadEngineTaskGetTeamFailedToFindValidTeam", self->distributorId)
 				    .detail("TCReady", self->readyToStart.isReady())
 				    .detail("SrcIds", describe(req.src))
 				    .detail("Primary", self->isPrimary())

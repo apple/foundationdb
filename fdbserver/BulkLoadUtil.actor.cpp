@@ -35,17 +35,17 @@ std::string generateRandomBulkLoadBytesSampleFileName() {
 	return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
 }
 
-ACTOR Future<Optional<BulkLoadState>> getBulkLoadStateFromDataMove(Database cx, UID dataMoveId, UID logId) {
+ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx, UID dataMoveId, UID logId) {
 	loop {
 		state Transaction tr(cx);
 		try {
 			Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 			if (!val.present()) {
 				TraceEvent(SevWarn, "SSBulkLoadDataMoveIdNotExist", logId).detail("DataMoveID", dataMoveId);
-				return Optional<BulkLoadState>();
+				return Optional<BulkLoadTaskState>();
 			}
 			DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
-			return dataMoveMetaData.bulkLoadState;
+			return dataMoveMetaData.bulkLoadTaskState;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -60,16 +60,16 @@ void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytes
 }
 
 ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
-                                                         BulkLoadState bulkLoadState,
+                                                         BulkLoadTaskState bulkLoadTaskState,
                                                          size_t fileBytesMax,
                                                          UID logId) {
-	ASSERT(bulkLoadState.getTransportMethod() == BulkLoadTransportMethod::CP);
+	ASSERT(bulkLoadTaskState.getTransportMethod() == BulkLoadTransportMethod::CP);
 	loop {
 		state std::string toFile;
 		state std::string fromFile;
 		state SSBulkLoadFileSet fileSet;
 		try {
-			fileSet.folder = abspath(joinPath(dir, bulkLoadState.getFolder()));
+			fileSet.folder = abspath(joinPath(dir, bulkLoadTaskState.getFolder()));
 
 			// Clear existing folder
 			platform::eraseDirectoryRecursive(fileSet.folder);
@@ -78,7 +78,7 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 			}
 
 			// Move bulk load files to loading folder
-			for (const auto& filePath : bulkLoadState.getDataFiles()) {
+			for (const auto& filePath : bulkLoadTaskState.getDataFiles()) {
 				fromFile = abspath(filePath);
 				toFile = abspath(joinPath(fileSet.folder, generateRandomBulkLoadDataFileName()));
 				if (fileSet.dataFileList.find(toFile) != fileSet.dataFileList.end()) {
@@ -88,18 +88,18 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 				bulkLoadFileCopy(fromFile, toFile, fileBytesMax);
 				fileSet.dataFileList.insert(toFile);
 				TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
-				    .detail("BulkLoadTask", bulkLoadState.toString())
+				    .detail("BulkLoadTask", bulkLoadTaskState.toString())
 				    .detail("FromFile", fromFile)
 				    .detail("ToFile", toFile);
 			}
-			if (bulkLoadState.getBytesSampleFile().present()) {
-				fromFile = abspath(bulkLoadState.getBytesSampleFile().get());
+			if (bulkLoadTaskState.getBytesSampleFile().present()) {
+				fromFile = abspath(bulkLoadTaskState.getBytesSampleFile().get());
 				if (fileExists(fromFile)) {
 					toFile = abspath(joinPath(fileSet.folder, generateRandomBulkLoadBytesSampleFileName()));
 					bulkLoadFileCopy(fromFile, toFile, fileBytesMax);
 					fileSet.bytesSampleFile = toFile;
 					TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
-					    .detail("BulkLoadTask", bulkLoadState.toString())
+					    .detail("BulkLoadTask", bulkLoadTaskState.toString())
 					    .detail("FromFile", fromFile)
 					    .detail("ToFile", toFile);
 				}
@@ -112,7 +112,7 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 			}
 			TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileCopyError", logId)
 			    .errorUnsuppressed(e)
-			    .detail("BulkLoadTask", bulkLoadState.toString())
+			    .detail("BulkLoadTask", bulkLoadTaskState.toString())
 			    .detail("FromFile", fromFile)
 			    .detail("ToFile", toFile);
 			wait(delay(5.0));

@@ -1622,7 +1622,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
                                           std::map<UID, StorageServerInterface>* tssMapping,
                                           const DDEnabledState* ddEnabledState,
                                           CancelConflictingDataMoves cancelConflictingDataMoves,
-                                          Optional<BulkLoadState> bulkLoadState) {
+                                          Optional<BulkLoadTaskState> bulkLoadTaskState) {
 	state Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
 
 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
@@ -1634,7 +1634,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 	TraceEvent(SevInfo, "StartMoveShardsBegin", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("TargetRange", describe(ranges))
-	    .detail("BulkLoadState", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
+	    .detail("BulkLoadTaskState", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
 
 	// TODO: make startMoveShards work with multiple ranges.
 	ASSERT(ranges.size() == 1);
@@ -1752,13 +1752,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						    .detail("DestID", destId)
 						    .detail("ReadVersion", tr.getReadVersion().get());
 
-						if (bulkLoadState.present()) {
+						if (bulkLoadTaskState.present()) {
 							state std::vector<UID> owners(src.size() + dest.size());
 							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), owners.begin());
 							for (const auto& ssid : servers) {
 								if (std::find(owners.begin(), owners.end(), ssid) != owners.end()) {
-									TraceEvent(SevWarn, "DDBulkLoadTaskStartMoveShardsMoveInConflict")
-									    .detail("BulkLoadState", bulkLoadState.get().toString())
+									TraceEvent(SevWarn, "DDBulkLoadEngineTaskStartMoveShardsMoveInConflict")
+									    .detail("BulkLoadTaskState", bulkLoadTaskState.get().toString())
 									    .detail("DestServerId", ssid)
 									    .detail("OwnerIds", describe(owners))
 									    .detail("DataMove", dataMove.toString());
@@ -1830,7 +1830,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						dataMove.src.insert(src.begin(), src.end());
 
 						// If this is a bulk load data move, need not create checkpoint on the source servers
-						if (shouldCreateCheckpoint(dataMoveId) && !bulkLoadState.present()) {
+						if (shouldCreateCheckpoint(dataMoveId) && !bulkLoadTaskState.present()) {
 							const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
 							CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
 							                              DataMoveRocksCF,
@@ -1865,17 +1865,17 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				}
 
 				if (currentKeys.end == keys.end) {
-					if (bulkLoadState.present()) {
-						state BulkLoadState newBulkLoadState;
+					if (bulkLoadTaskState.present()) {
+						state BulkLoadTaskState newBulkLoadTaskState;
 						try {
-							wait(store(newBulkLoadState,
+							wait(store(newBulkLoadTaskState,
 							           getBulkLoadTask(&tr,
-							                           bulkLoadState.get().getRange(),
-							                           bulkLoadState.get().getTaskId(),
+							                           bulkLoadTaskState.get().getRange(),
+							                           bulkLoadTaskState.get().getTaskId(),
 							                           { BulkLoadPhase::Triggered, BulkLoadPhase::Running })));
 							// It is possible that the previous data move is cancelled but has updated the
 							// task phase as running. In this case, we update the phase from Running to Running
-							newBulkLoadState.phase = BulkLoadPhase::Running;
+							newBulkLoadTaskState.phase = BulkLoadPhase::Running;
 						} catch (Error& e) {
 							if (e.code() == error_code_bulkload_task_outdated) {
 								cancelDataMove = true;
@@ -1883,19 +1883,22 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							}
 							throw e;
 						}
-						newBulkLoadState.setDataMoveId(dataMoveId);
-						newBulkLoadState.startTime = now();
-						wait(krmSetRange(
-						    &tr, bulkLoadPrefix, newBulkLoadState.getRange(), bulkLoadStateValue(newBulkLoadState)));
-						TraceEvent(SevInfo, "DDBulkLoadTaskRunningPersist", relocationIntervalId)
-						    .detail("BulkLoadState", newBulkLoadState.toString());
-						dataMove.bulkLoadState = newBulkLoadState;
+						newBulkLoadTaskState.setDataMoveId(dataMoveId);
+						newBulkLoadTaskState.startTime = now();
+						wait(krmSetRange(&tr,
+						                 bulkLoadTaskPrefix,
+						                 newBulkLoadTaskState.getRange(),
+						                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
+						TraceEvent(SevInfo, "DDBulkLoadEngineTaskRunningPersist", relocationIntervalId)
+						    .detail("BulkLoadTaskState", newBulkLoadTaskState.toString());
+						dataMove.bulkLoadTaskState = newBulkLoadTaskState;
 					}
 					dataMove.setPhase(DataMoveMetaData::Running);
 					TraceEvent(sevDm, "StartMoveShardsDataMoveComplete", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString())
-					    .detail("BulkLoadState", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
+					    .detail("BulkLoadTaskState",
+					            bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
 				} else {
 					dataMove.setPhase(DataMoveMetaData::Prepare);
 					TraceEvent(sevDm, "StartMoveShardsDataMovePartial", relocationIntervalId)
@@ -1918,7 +1921,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				    .detail("DeltaRange", currentKeys.toString())
 				    .detail("Range", describe(dataMove.ranges))
 				    .detail("DataMove", dataMove.toString())
-				    .detail("BulkLoadState", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
+				    .detail("BulkLoadTaskState", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
 
 				// Post validate consistency of update of keyServers and serverKeys
 				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
@@ -2038,7 +2041,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
                                            UID relocationIntervalId,
                                            std::map<UID, StorageServerInterface> tssMapping,
                                            const DDEnabledState* ddEnabledState,
-                                           Optional<BulkLoadState> bulkLoadState) {
+                                           Optional<BulkLoadTaskState> bulkLoadTaskState) {
 	// TODO: make startMoveShards work with multiple ranges.
 	ASSERT(targetRanges.size() == 1);
 	state KeyRange keys = targetRanges[0];
@@ -2304,15 +2307,15 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					wait(waitForAll(actors));
 
 					if (range.end == dataMove.ranges.front().end) {
-						if (bulkLoadState.present()) {
-							state BulkLoadState newBulkLoadState;
+						if (bulkLoadTaskState.present()) {
+							state BulkLoadTaskState newBulkLoadTaskState;
 							try {
-								wait(store(newBulkLoadState,
+								wait(store(newBulkLoadTaskState,
 								           getBulkLoadTask(&tr,
-								                           bulkLoadState.get().getRange(),
-								                           bulkLoadState.get().getTaskId(),
+								                           bulkLoadTaskState.get().getRange(),
+								                           bulkLoadTaskState.get().getTaskId(),
 								                           { BulkLoadPhase::Running, BulkLoadPhase::Complete })));
-								newBulkLoadState.phase = BulkLoadPhase::Complete;
+								newBulkLoadTaskState.phase = BulkLoadPhase::Complete;
 							} catch (Error& e) {
 								if (e.code() == error_code_bulkload_task_outdated) {
 									cancelDataMove = true;
@@ -2320,22 +2323,22 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 								}
 								throw e;
 							}
-							ASSERT(newBulkLoadState.getDataMoveId().present() &&
-							       newBulkLoadState.getDataMoveId().get() == dataMoveId);
-							newBulkLoadState.completeTime = now();
+							ASSERT(newBulkLoadTaskState.getDataMoveId().present() &&
+							       newBulkLoadTaskState.getDataMoveId().get() == dataMoveId);
+							newBulkLoadTaskState.completeTime = now();
 							wait(krmSetRange(&tr,
-							                 bulkLoadPrefix,
-							                 newBulkLoadState.getRange(),
-							                 bulkLoadStateValue(newBulkLoadState)));
-							TraceEvent(SevInfo, "DDBulkLoadTaskCompletePersist", relocationIntervalId)
-							    .detail("BulkLoadState", newBulkLoadState.toString());
-							dataMove.bulkLoadState = newBulkLoadState;
+							                 bulkLoadTaskPrefix,
+							                 newBulkLoadTaskState.getRange(),
+							                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
+							TraceEvent(SevInfo, "DDBulkLoadEngineTaskCompletePersist", relocationIntervalId)
+							    .detail("BulkLoadTaskState", newBulkLoadTaskState.toString());
+							dataMove.bulkLoadTaskState = newBulkLoadTaskState;
 						}
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", relocationIntervalId)
 						    .detail("DataMove", dataMove.toString());
-					} else if (!bulkLoadState.present()) {
+					} else if (!bulkLoadTaskState.present()) {
 						// Bulk Loading data move does not allow partial complete
 						TraceEvent(SevInfo, "FinishMoveShardsPartialComplete", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
@@ -2394,7 +2397,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 	TraceEvent(SevInfo, "FinishMoveShardsEnd", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
-	    .detail("BulkLoadState", bulkLoadState.present() ? bulkLoadState.get().toString() : "")
+	    .detail("BulkLoadTaskState", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "")
 	    .detail("DataMove", dataMove.toString());
 	return Void();
 }
@@ -3224,7 +3227,7 @@ Future<Void> rawStartMovement(Database occ,
 		                       &tssMapping,
 		                       params.ddEnabledState,
 		                       params.cancelConflictingDataMoves,
-		                       params.bulkLoadState);
+		                       params.bulkLoadTaskState);
 	}
 	ASSERT(params.keys.present());
 	return startMoveKeys(std::move(occ),
@@ -3275,7 +3278,7 @@ Future<Void> rawFinishMovement(Database occ,
 		                        params.relocationIntervalId,
 		                        tssMapping,
 		                        params.ddEnabledState,
-		                        params.bulkLoadState);
+		                        params.bulkLoadTaskState);
 	}
 	ASSERT(params.keys.present());
 	return finishMoveKeys(std::move(occ),

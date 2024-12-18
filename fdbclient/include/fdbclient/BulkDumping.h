@@ -225,7 +225,7 @@ struct BulkDumpState {
 	BulkDumpState() = default;
 
 	// The only public interface to create a valid task
-	// This constructor is call when users submitting a task, e.g. by newBulkDumpTaskLocalSST()
+	// This constructor is call when users submitting a task, e.g. by newBulkDumpJobLocalSST()
 	BulkDumpState(KeyRange range,
 	              BulkDumpFileType fileType,
 	              BulkDumpTransportMethod transportMethod,
@@ -376,12 +376,12 @@ private:
 // The dumped data is within the input range
 // The data is dumped to the input remoteRoot
 // The remoteRoot is a local root string
-BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& remoteRoot);
+BulkDumpState newBulkDumpJobLocalSST(const KeyRange& range, const std::string& remoteRoot);
 
 // User API to create bulkDump task metadata
 // The dumped data is within the input range
 // The data is dumped to the input remoteRoot
 // The remoteRoot is a remote blobstore root string
-BulkDumpState newBulkDumpTaskBlobstoreSST(const KeyRange& range, const std::string& remoteRoot);
+BulkDumpState newBulkDumpJobBlobstoreSST(const KeyRange& range, const std::string& remoteRoot);
 
 #endif

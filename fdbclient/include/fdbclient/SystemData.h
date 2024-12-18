@@ -524,10 +524,10 @@ extern const KeyRef dataDistributionModeKey;
 extern const UID dataDistributionModeLock;
 
 extern const KeyRef bulkLoadModeKey;
-extern const KeyRangeRef bulkLoadKeys;
-extern const KeyRef bulkLoadPrefix;
-const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState);
-BulkLoadState decodeBulkLoadState(const ValueRef& value);
+extern const KeyRangeRef bulkLoadTaskKeys;
+extern const KeyRef bulkLoadTaskPrefix;
+const Value bulkLoadTaskStateValue(const BulkLoadTaskState& bulkLoadTaskState);
+BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value);
 
 extern const KeyRef bulkDumpModeKey;
 extern const KeyRangeRef bulkDumpKeys;

@@ -305,7 +305,7 @@ class DDTxnProcessorImpl {
 					BinaryReader rd(bulkLoadMode.get(), Unversioned());
 					rd >> result->bulkLoadMode;
 				}
-				TraceEvent(SevInfo, "DDBulkLoadInitMode").detail("Mode", result->bulkLoadMode);
+				TraceEvent(SevInfo, "DDBulkLoadEngineInitMode").detail("Mode", result->bulkLoadMode);
 
 				result->bulkDumpMode = 0;
 				Optional<Value> bulkDumpMode = wait(tr.get(bulkDumpModeKey));

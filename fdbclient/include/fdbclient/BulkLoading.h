@@ -26,7 +26,7 @@
 #include "fdbrpc/fdbrpc.h"
 
 enum class BulkLoadPhase : uint8_t {
-	Invalid = 0, // Used to distinguish if a BulkLoadState is a valid task
+	Invalid = 0, // Used to distinguish if a BulkLoadTaskState is a valid task
 	Submitted = 1, // Set by users
 	Triggered = 2, // Update when DD trigger a data move for the task
 	Running = 3, // Update atomically with updating KeyServer dest servers in startMoveKey
@@ -50,35 +50,35 @@ enum class BulkLoadInjectMethod : uint8_t {
 	File = 1,
 };
 
-struct BulkLoadState {
+struct BulkLoadTaskState {
 	constexpr static FileIdentifier file_identifier = 1384499;
 
-	BulkLoadState() = default;
+	BulkLoadTaskState() = default;
 
 	// for acknowledging a completed task, where only taskId and range are used
-	BulkLoadState(UID taskId, KeyRange range) : taskId(taskId), range(range), phase(BulkLoadPhase::Invalid) {}
+	BulkLoadTaskState(UID taskId, KeyRange range) : taskId(taskId), range(range), phase(BulkLoadPhase::Invalid) {}
 
 	// for submitting a task
-	BulkLoadState(KeyRange range,
-	              BulkLoadType loadType,
-	              BulkLoadTransportMethod transportMethod,
-	              BulkLoadInjectMethod injectMethod,
-	              std::string folder,
-	              std::unordered_set<std::string> dataFiles,
-	              Optional<std::string> bytesSampleFile)
+	BulkLoadTaskState(KeyRange range,
+	                  BulkLoadType loadType,
+	                  BulkLoadTransportMethod transportMethod,
+	                  BulkLoadInjectMethod injectMethod,
+	                  std::string folder,
+	                  std::unordered_set<std::string> dataFiles,
+	                  Optional<std::string> bytesSampleFile)
 	  : taskId(deterministicRandom()->randomUniqueID()), range(range), loadType(loadType),
 	    transportMethod(transportMethod), injectMethod(injectMethod), folder(folder), dataFiles(dataFiles),
 	    bytesSampleFile(bytesSampleFile), phase(BulkLoadPhase::Submitted) {
 		ASSERT(isValid());
 	}
 
-	bool operator==(const BulkLoadState& rhs) const {
+	bool operator==(const BulkLoadTaskState& rhs) const {
 		return taskId == rhs.taskId && range == rhs.range && dataFiles == rhs.dataFiles;
 	}
 
 	std::string toString() const {
 		std::string res =
-		    "BulkLoadState: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		    "BulkLoadTaskState: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
 		    ", [Type]: " + std::to_string(static_cast<uint8_t>(loadType)) +
 		    ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod)) +
 		    ", [InjectMethod]: " + std::to_string(static_cast<uint8_t>(injectMethod)) +
@@ -119,7 +119,7 @@ struct BulkLoadState {
 
 	void setDataMoveId(UID id) {
 		if (dataMoveId.present() && dataMoveId.get() != id) {
-			TraceEvent(SevWarn, "DDBulkLoadTaskUpdateDataMoveId")
+			TraceEvent(SevWarn, "DDBulkLoadEngineTaskUpdateDataMoveId")
 			    .detail("NewId", id)
 			    .detail("BulkLoadTask", this->toString());
 		}
@@ -214,9 +214,9 @@ private:
 	Optional<UID> dataMoveId;
 };
 
-BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,
-                                      std::string folder,
-                                      std::string dataFile,
-                                      std::string bytesSampleFile);
+BulkLoadTaskState newBulkLoadTaskLocalSST(KeyRange range,
+                                          std::string folder,
+                                          std::string dataFile,
+                                          std::string bytesSampleFile);
 
 #endif

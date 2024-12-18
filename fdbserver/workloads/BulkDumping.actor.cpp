@@ -134,7 +134,7 @@ struct BulkDumping : TestWorkload {
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1)));
 		TraceEvent("BulkDumpingSetMode").detail("OldMode", oldBulkDumpMode).detail("NewMode", 1);
 
-		state BulkDumpState newTask = newBulkDumpTaskLocalSST(normalKeys, simulationBulkDumpFolder);
+		state BulkDumpState newTask = newBulkDumpJobLocalSST(normalKeys, simulationBulkDumpFolder);
 		TraceEvent("BulkDumpingTaskNew").detail("Task", newTask.toString());
 		wait(submitBulkDumpJob(cx, newTask));
 		std::vector<BulkDumpState> res = wait(getBulkDumpTasksWithinRange(cx, normalKeys, 100));
