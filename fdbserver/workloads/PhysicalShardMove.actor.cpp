@@ -617,7 +617,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				                             deterministicRandom()->randomUniqueID(), // for logging only
 				                             &ddEnabledState,
 				                             CancelConflictingDataMoves::False,
-				                             Optional<BulkLoadState>())));
+				                             Optional<BulkLoadTaskState>())));
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_movekeys_conflict) {

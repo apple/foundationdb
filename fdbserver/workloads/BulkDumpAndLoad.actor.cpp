@@ -1,0 +1,275 @@
+/*
+ * BulkDumpAndLoad.actor.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "fdbclient/BulkLoadAndDump.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/SystemData.h"
+#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/BulkLoadAndDumpUtil.actor.h"
+#include "flow/Error.h"
+#include "flow/Platform.h"
+#include "flow/Trace.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
+
+const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkDumpAndLoad");
+
+struct BulkDumpAndLoad : TestWorkload {
+	static constexpr auto NAME = "BulkDumpAndLoadWorkload";
+	const bool enabled;
+	bool pass;
+
+	// This workload is not compatible with following workload because they will race in changing the DD mode
+	// This workload is not compatible with RandomRangeLock for the conflict in range lock
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomMoveKeys",
+		             "DataLossRecovery",
+		             "IDDTxnProcessorApiCorrectness",
+		             "PerpetualWiggleStatsWorkload",
+		             "PhysicalShardMove",
+		             "StorageCorruption",
+		             "StorageServerCheckpointRestoreTest",
+		             "ValidateStorage",
+		             "RandomRangeLock",
+		             "BulkLoadTask" });
+	}
+
+	BulkDumpAndLoad(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
+
+	Future<Void> setup(Database const& cx) override { return Void(); }
+
+	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+
+	Future<bool> check(Database const& cx) override { return true; }
+
+	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	Standalone<StringRef> getRandomStringRef() const {
+		int stringLength = deterministicRandom()->randomInt(1, 10);
+		Standalone<StringRef> stringBuffer = makeString(stringLength);
+		deterministicRandom()->randomBytes(mutateString(stringBuffer), stringLength);
+		return stringBuffer;
+	}
+
+	KeyRange getRandomRange(BulkDumpAndLoad* self, KeyRange scope) const {
+		loop {
+			Standalone<StringRef> keyA = self->getRandomStringRef();
+			Standalone<StringRef> keyB = self->getRandomStringRef();
+			if (!scope.contains(keyA) || !scope.contains(keyB)) {
+				continue;
+			} else if (keyA < keyB) {
+				return Standalone(KeyRangeRef(keyA, keyB));
+			} else if (keyA > keyB) {
+				return Standalone(KeyRangeRef(keyB, keyA));
+			} else {
+				continue;
+			}
+		}
+	}
+
+	std::map<Key, Value> generateOrderedKVS(BulkDumpAndLoad* self, KeyRange range, size_t count) {
+		std::map<Key, Value> kvs; // ordered
+		while (kvs.size() < count) {
+			Standalone<StringRef> str = self->getRandomStringRef();
+			Key key = range.begin.withSuffix(str);
+			Value val = self->getRandomStringRef();
+			if (!range.contains(key)) {
+				continue;
+			}
+			auto res = kvs.insert({ key, val });
+			if (!res.second) {
+				continue;
+			}
+		}
+		return kvs; // ordered
+	}
+
+	ACTOR Future<Void> setKeys(Database cx, std::map<Key, Value> kvs) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				for (const auto& [key, value] : kvs) {
+					tr.set(key, value);
+				}
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR Future<Void> waitUntilTaskComplete(Database cx, BulkDumpState newTask) {
+		state std::vector<BulkDumpState> res;
+		loop {
+			try {
+				res.clear();
+				wait(store(res, getBulkDumpTasksWithinRange(cx, normalKeys)));
+				// When complete, the job metadata is cleared
+				if (res.empty()) {
+					break;
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+			}
+			wait(delay(30.0));
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> clearDatabase(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.clear(normalKeys);
+				tr.clear(bulkDumpKeys);
+				tr.clear(bulkLoadTaskKeys);
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> waitUntilLoadJobComplete(Database cx, KeyRange range) {
+		loop {
+			state bool complete = true;
+			state Transaction tr(cx);
+			state Key readBegin = range.begin;
+			state Key readEnd = range.end;
+			state RangeResult rangeResult;
+			while (readBegin < readEnd) {
+				try {
+					rangeResult.clear();
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					wait(store(rangeResult,
+					           krmGetRanges(&tr,
+					                        bulkLoadJobPrefix,
+					                        KeyRangeRef(readBegin, readEnd),
+					                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+					                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+					for (int i = 0; i < rangeResult.size() - 1; i++) {
+						if (rangeResult[i].value.empty()) {
+							continue;
+						}
+						BulkLoadJobState task = decodeBulkLoadJobState(rangeResult[i].value);
+						if (task.getPhase() != BulkLoadJobPhase::Complete) {
+							complete = false;
+							break;
+						}
+					}
+					if (!complete) {
+						break;
+					}
+					readBegin = rangeResult.back().key;
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+					wait(tr.onError(e));
+				}
+			}
+			if (complete) {
+				break;
+			}
+			wait(delay(30.0));
+		}
+		return Void();
+	}
+
+	ACTOR Future<std::map<Key, Value>> getAllKVSFromDB(Database cx) {
+		state Transaction tr(cx);
+		state std::map<Key, Value> kvs;
+		loop {
+			try {
+				RangeResult kvsRes = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!kvsRes.more);
+				kvs.clear();
+				for (auto& kv : kvsRes) {
+					auto res = kvs.insert({ kv.key, kv.value });
+					ASSERT(res.second);
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return kvs;
+	}
+
+	ACTOR Future<Void> _start(BulkDumpAndLoad* self, Database cx) {
+		if (self->clientId != 0) {
+			return Void();
+		}
+
+		if (g_network->isSimulated()) {
+			// Network partition between CC and DD can cause DD no longer existing,
+			// which results in the bulk loading task cannot complete
+			// So, this workload disable the network partition
+			disableConnectionFailures("BulkDumpAndLoad");
+		}
+
+		state std::map<Key, Value> kvs = self->generateOrderedKVS(self, normalKeys, 1000);
+		wait(self->setKeys(cx, kvs));
+
+		// Submit a bulk dump job
+		state int oldBulkDumpMode = 0;
+		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
+		state BulkDumpState newJob = newBulkDumpJobLocalSST(normalKeys, simulationBulkDumpFolder);
+		wait(submitBulkDumpJob(cx, newJob));
+		TraceEvent("BulkDumpAndLoadWorkLoad").detail("Phase", "Dump Job Submitted").detail("Job", newJob.toString());
+
+		// Wait until the dump job completes
+		wait(self->waitUntilTaskComplete(cx, newJob));
+		TraceEvent("BulkDumpAndLoadWorkLoad").detail("Phase", "Dump Job Complete").detail("Job", newJob.toString());
+
+		// Clear database
+		wait(self->clearDatabase(cx));
+		TraceEvent("BulkDumpAndLoadWorkLoad").detail("Phase", "Clear DB").detail("Job", newJob.toString());
+
+		// Submit a bulk load job
+		state int oldBulkLoadMode = 0;
+		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoad
+		state BulkLoadJobState bulkLoadJobTask =
+		    newBulkLoadJobLocalSST(newJob.getJobId(), newJob.getRange(), newJob.getRemoteRoot());
+		TraceEvent("BulkDumpAndLoadWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
+		bool succeed = wait(submitBulkLoadJob(cx, bulkLoadJobTask));
+		ASSERT(succeed);
+
+		// Wait until the load job complete
+		wait(self->waitUntilLoadJobComplete(cx, newJob.getRange()));
+		TraceEvent("BulkDumpAndLoadWorkLoad").detail("Phase", "Load Job Complete").detail("Job", newJob.toString());
+
+		// Check the loaded data in DB is same as the data in DB before dumping
+		std::map<Key, Value> newKvs = wait(self->getAllKVSFromDB(cx));
+		ASSERT(kvs == newKvs);
+		return Void();
+	}
+};
+
+WorkloadFactory<BulkDumpAndLoad> BulkDumpAndLoadFactory;

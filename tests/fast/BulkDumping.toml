@@ -1,6 +1,0 @@
-[[test]]
-testTitle = 'BulkDumpingWorkload'
-useDB = true
-
-    [[test.workload]]
-    testName = 'BulkDumpingWorkload'

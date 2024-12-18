@@ -74,8 +74,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
-#include "fdbserver/BulkDumpUtil.actor.h"
-#include "fdbserver/BulkLoadUtil.actor.h"
+#include "fdbserver/BulkLoadAndDumpUtil.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
@@ -6016,7 +6015,9 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 			ASSERT(res.second);
 			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(kv.key, kv.value));
 			if (sampleInfo.inSample) {
-				auto resSample = sample.insert({ kv.key, kv.value });
+				Key sampleKey = kv.key;
+				Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
+				auto resSample = sample.insert({ sampleKey, sampleValue });
 				ASSERT(resSample.second);
 			}
 			currentExpectedBytes = currentExpectedBytes + kv.expectedSize() + kv.expectedSize();
@@ -6075,19 +6076,19 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	state uint64_t batchNum = 0;
 	state Version versionToDump;
 	state RangeDumpData rangeDumpData;
-	state std::string rootFolderLocal = getBulkDumpJobRoot(data->bulkDumpFolder, req.bulkDumpState.getJobId());
+	state std::string rootFolderLocal = generateBulkLoadJobRoot(data->bulkDumpFolder, req.bulkDumpState.getJobId());
 	state std::string rootFolderRemote =
-	    getBulkDumpJobRoot(req.bulkDumpState.getRemoteRoot(), req.bulkDumpState.getJobId());
+	    generateBulkLoadJobRoot(req.bulkDumpState.getRemoteRoot(), req.bulkDumpState.getJobId());
 	// Use jobId and taskId as the folder to store the data of the task range
 	ASSERT(req.bulkDumpState.getTaskId().present());
-	state std::string taskFolder = getBulkDumpTaskFolder(req.bulkDumpState.getTaskId().get());
-	state BulkDumpFileSet destinationFileSets;
+	state std::string taskFolder = req.bulkDumpState.getTaskId().get().toString();
+	state BulkLoadFileSet destinationFileSets;
 	state Transaction tr(data->cx);
 
 	loop {
 		try {
 			// Clear local files
-			clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
+			platform::eraseDirectoryRecursive(abspath(joinPath(rootFolderLocal, taskFolder)));
 
 			// Dump data of rangeToDump in a relativeFolder
 			state KeyRange rangeToDump = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
@@ -6108,36 +6109,36 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// The data in KVStore is dumped to the local folder at first and then
 			// the local files are uploaded to the remote folder
 			// Local files and remotes files have the same relative path but different root
-			state std::pair<BulkDumpFileSet, BulkDumpFileSet> resFileSets =
-			    getLocalRemoteFileSetSetting(versionToDump,
-			                                 relativeFolder,
-			                                 /*rootLocal=*/rootFolderLocal,
-			                                 /*rootRemote=*/rootFolderRemote);
+			state std::pair<BulkLoadFileSet, BulkLoadFileSet> resFileSets =
+			    generateBulkLoadFileSetting(versionToDump,
+			                                relativeFolder,
+			                                /*rootLocal=*/rootFolderLocal,
+			                                /*rootRemote=*/rootFolderRemote);
 
 			// The remote file path:
-			state BulkDumpFileSet localFileSetSetting = resFileSets.first;
-			state BulkDumpFileSet remoteFileSetSetting = resFileSets.second;
+			state BulkLoadFileSet localFileSetSetting = resFileSets.first;
+			state BulkLoadFileSet remoteFileSetSetting = resFileSets.second;
 
 			// Generate byte sampling setting
-			ByteSampleSetting byteSampleSetting(0,
-			                                    "hashlittle2", // use function name to represent the method
-			                                    SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
-			                                    SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
-			                                    SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
+			BulkLoadByteSampleSetting byteSampleSetting(0,
+			                                            "hashlittle2", // use function name to represent the method
+			                                            SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
+			                                            SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
+			                                            SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
 
 			// Write to SST file
 			state KeyRange dataRange =
 			    rangeToDump & Standalone(KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey)));
-			state BulkDumpManifest manifest =
-			    dumpDataFileToLocalDirectory(data->thisServerID,
-			                                 rangeDumpData.kvs,
-			                                 rangeDumpData.sampled,
-			                                 localFileSetSetting,
-			                                 remoteFileSetSetting,
-			                                 byteSampleSetting,
-			                                 versionToDump,
-			                                 dataRange, // the actual range of the rangeDumpData.kvs
-			                                 rangeDumpData.kvsBytes);
+			state BulkLoadManifest manifest =
+			    dumpDataFileToLocal(data->thisServerID,
+			                        rangeDumpData.kvs,
+			                        rangeDumpData.sampled,
+			                        localFileSetSetting,
+			                        remoteFileSetSetting,
+			                        byteSampleSetting,
+			                        versionToDump,
+			                        dataRange, // the actual range of the rangeDumpData.kvs
+			                        rangeDumpData.kvsBytes);
 			readBytes = readBytes + rangeDumpData.kvsBytes;
 			TraceEvent(SevInfo, "SSBulkDump", data->thisServerID)
 			    .detail("Task", req.bulkDumpState.toString())
@@ -6151,14 +6152,14 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			    .detail("BatchNum", batchNum);
 
 			// Upload Files
-			state BulkDumpFileSet localFileSet = localFileSetSetting;
+			state BulkLoadFileSet localFileSet = localFileSetSetting;
 			if (manifest.fileSet.dataFileName.empty()) {
 				localFileSet.dataFileName = "";
 			}
 			if (manifest.fileSet.byteSampleFileName.empty()) {
 				localFileSet.byteSampleFileName = "";
 			}
-			wait(uploadBulkDumpFileSet(
+			wait(uploadBulkLoadFileSet(
 			    req.bulkDumpState.getTransportMethod(), localFileSet, manifest.fileSet, data->thisServerID));
 
 			// Progressively set metadata of the data range as complete phase
@@ -6200,7 +6201,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 		wait(delay(1.0));
 	}
 	try {
-		clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
+		platform::eraseDirectoryRecursive(abspath(joinPath(rootFolderLocal, taskFolder)));
 	} catch (Error& e) {
 		// exit
 	}
@@ -9391,27 +9392,25 @@ ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveI
 ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
                                                    MoveInShard* moveInShard,
                                                    std::string dir,
-                                                   BulkLoadState bulkLoadState) {
+                                                   BulkLoadTaskState bulkLoadTaskState) {
 	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFile", data->thisServerID)
-	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("Folder", abspath(dir));
 
 	state double fetchStartTime = now();
 
 	// Step 1: Fetch data to dir
-	state SSBulkLoadFileSet fileSetToLoad;
-	ASSERT(bulkLoadState.getTransportMethod() != BulkLoadTransportMethod::Invalid);
-	if (bulkLoadState.getTransportMethod() == BulkLoadTransportMethod::CP) {
-		wait(store(
-		    fileSetToLoad,
-		    bulkLoadTransportCP_impl(dir, bulkLoadState, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, data->thisServerID)));
-	} else {
-		throw not_implemented();
-	}
+	ASSERT(bulkLoadTaskState.getTransportMethod() != BulkLoadTransportMethod::Invalid);
+	state SSBulkLoadFileSet fileSetToLoad = wait(downloadBulkLoadFileSet(bulkLoadTaskState.getTransportMethod(),
+	                                                                     dir,
+	                                                                     bulkLoadTaskState,
+	                                                                     SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX,
+	                                                                     data->thisServerID));
+
 	// At this point, all necessary data for bulk loading locate at fileSetToLoad
 	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileFetched", data->thisServerID)
-	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("Dir", dir)
 	    .detail("FileSetToLoad", fileSetToLoad.toString());
@@ -9420,17 +9419,17 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	// TODO(BulkLoad): Validate all files specified in fileSetToLoad exist
 	// TODO(BulkLoad): Check file checksum
 	// TODO(BulkLoad): Check file data all in the moveInShard range
-	// TODO(BulkLoad): checkContent(fileSetToLoad.dataFileList, data->thisServerID);
+	// TODO(BulkLoad): checkContent
 	if (!fileSetToLoad.bytesSampleFile.present()) {
 		TraceEvent(SevWarn, "SSBulkLoadTaskFetchSSTFileByteSampleNotFound", data->thisServerID)
-		    .detail("BulkLoadState", bulkLoadState.toString())
+		    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())
 		    .detail("FileSetToLoad", fileSetToLoad.toString());
 		Optional<std::string> bytesSampleFile_ =
 		    wait(getBytesSamplingFromSSTFiles(fileSetToLoad.folder, fileSetToLoad.dataFileList, data->thisServerID));
 		fileSetToLoad.bytesSampleFile = bytesSampleFile_;
 	}
 	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileValidated", data->thisServerID)
-	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("Folder", abspath(dir))
 	    .detail("FileSetToLoad", fileSetToLoad.toString());
@@ -9440,16 +9439,16 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	localRecord.checkpointID = UID();
 	localRecord.dir = abspath(fileSetToLoad.folder);
 	for (const auto& range : moveInShard->ranges()) {
-		ASSERT(bulkLoadState.getRange().contains(range));
+		ASSERT(bulkLoadTaskState.getRange().contains(range));
 	}
 	localRecord.ranges = moveInShard->ranges();
-	RocksDBCheckpointKeyValues rcp({ bulkLoadState.getRange() });
+	RocksDBCheckpointKeyValues rcp({ bulkLoadTaskState.getRange() });
 	for (const auto& filePath : fileSetToLoad.dataFileList) {
 		std::vector<KeyRange> coalesceRanges = coalesceRangeList(moveInShard->ranges());
 		if (coalesceRanges.size() != 1) {
 			TraceEvent(SevError, "SSBulkLoadTaskFetchSSTFileError", data->thisServerID)
 			    .detail("Reason", "MoveInShard ranges unexpected")
-			    .detail("BulkLoadState", bulkLoadState.toString())
+			    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())
 			    .detail("MoveInShard", moveInShard->toString())
 			    .detail("FileSetToLoad", fileSetToLoad.toString());
 		}
@@ -9466,7 +9465,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	const double duration = now() - fetchStartTime;
 	const int64_t totalBytes = getTotalFetchedBytes(moveInShard->meta->checkpoints);
 	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileBuildMetadata", data->thisServerID)
-	    .detail("BulkLoadTask", bulkLoadState.toString())
+	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("Folder", abspath(dir))
 	    .detail("FileSetToLoad", fileSetToLoad.toString())
@@ -9574,10 +9573,10 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 
 ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
                                               MoveInShard* moveInShard,
-                                              Optional<BulkLoadState> bulkLoadState) {
+                                              Optional<BulkLoadTaskState> bulkLoadTaskState) {
 	TraceEvent(SevInfo, "FetchShardIngestCheckpointBegin", data->thisServerID)
 	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
-	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
+	    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
 	ASSERT(moveInShard->getPhase() == MoveInPhase::Ingesting);
 	state double startTime = now();
 
@@ -9590,7 +9589,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 		    .errorUnsuppressed(e)
 		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("Checkpoints", describe(moveInShard->checkpoints()))
-		    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
+		    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
 		if (e.code() == error_code_failed_to_restore_checkpoint && !moveInShard->failed()) {
 			moveInShard->setPhase(MoveInPhase::Fetching);
 			updateMoveInShardMetaData(data, moveInShard);
@@ -9602,7 +9601,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 	TraceEvent(SevInfo, "FetchShardIngestedCheckpoint", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
-	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
+	    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
 
 	if (moveInShard->failed()) {
 		return Void();
@@ -9629,14 +9628,14 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 				    .detail("Checkpoint", checkpoint.toString())
 				    .detail("SampleKey", key)
 				    .detail("Size", size)
-				    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
+				    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
 				continue;
 			}
 			TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySample", data->thisServerID)
 			    .detail("Checkpoint", checkpoint.checkpointID.toString())
 			    .detail("SampleKey", key)
 			    .detail("Size", size)
-			    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
+			    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
 			data->metrics.byteSample.sample.insert(key, size);
 			data->metrics.notifyBytes(key, size);
 			data->addMutationToMutationLogOrStorage(
@@ -9657,7 +9656,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 	    .detail("Bytes", totalBytes)
 	    .detail("Duration", duration)
 	    .detail("Rate", static_cast<double>(totalBytes) / duration)
-	    .detail("BulkLoadTask", bulkLoadState.present() ? bulkLoadState.get().toString() : "");
+	    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
 
 	return Void();
 }
@@ -9868,21 +9867,21 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 
-	state Optional<BulkLoadState> bulkLoadState;
+	state Optional<BulkLoadTaskState> bulkLoadTaskState;
 	if (moveInShard->meta->conductBulkLoad) {
-		wait(store(bulkLoadState,
-		           getBulkLoadStateFromDataMove(data->cx, moveInShard->dataMoveId(), data->thisServerID)));
+		wait(store(bulkLoadTaskState,
+		           getBulkLoadTaskStateFromDataMove(data->cx, moveInShard->dataMoveId(), data->thisServerID)));
 	}
 	// It is possible that the data move id is generated by an old binary which does not
 	// encode the data move type. In this case, it is possible that the data move id indicates
 	// this is an bulk load data move but it is not. To tolerate this issue, here we check
-	// whether the bulkLoadState metadata is persisted in the data move metadata. If yes,
+	// whether the bulkLoadTaskState metadata is persisted in the data move metadata. If yes,
 	// this SS conducts bulk loading. If no, the SS conducts a normal data move.
-	if (bulkLoadState.present()) {
-		ASSERT(bulkLoadState.get().getDataMoveId() == moveInShard->dataMoveId());
+	if (bulkLoadTaskState.present()) {
+		ASSERT(bulkLoadTaskState.get().getDataMoveId() == moveInShard->dataMoveId());
 		TraceEvent(SevInfo, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)
 		    .detail("MoveInShard", moveInShard->toString())
-		    .detail("BulkLoadTask", bulkLoadState.get().toString());
+		    .detail("BulkLoadTask", bulkLoadTaskState.get().toString());
 	}
 
 	loop {
@@ -9892,13 +9891,13 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 		try {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
 			if (phase == MoveInPhase::Fetching) {
-				if (bulkLoadState.present()) {
-					wait(fetchShardFetchBulkLoadSSTFiles(data, moveInShard, dir, bulkLoadState.get()));
+				if (bulkLoadTaskState.present()) {
+					wait(fetchShardFetchBulkLoadSSTFiles(data, moveInShard, dir, bulkLoadTaskState.get()));
 				} else {
 					wait(fetchShardCheckpoint(data, moveInShard, dir));
 				}
 			} else if (phase == MoveInPhase::Ingesting) {
-				wait(fetchShardIngestCheckpoint(data, moveInShard, bulkLoadState));
+				wait(fetchShardIngestCheckpoint(data, moveInShard, bulkLoadTaskState));
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
 				wait(fetchShardApplyUpdates(data, moveInShard, moveInUpdates));
 			} else if (phase == MoveInPhase::Complete) {
@@ -10616,7 +10615,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	    .detail("NowAssigned", nowAssigned)
 	    .detail("Version", version)
 	    .detail("PhysicalShardMove", static_cast<bool>(enablePSM))
-	    .detail("BulkLoading", static_cast<bool>(conductBulkLoad))
+	    .detail("ConductBulkLoad", static_cast<bool>(conductBulkLoad))
 	    .detail("IsTSS", data->isTss())
 	    .detail("Context", changeServerKeysContextName(context));
 
