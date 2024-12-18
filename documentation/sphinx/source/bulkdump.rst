@@ -12,14 +12,14 @@ Overview
 In a FoundationDB (FDB) key-value cluster, every key-value pair is replicated across multiple storage servers. 
 The BulkDump tool is developed to dump all key-value pairs within the input range to files.
 Note that when the input range is large, the range splits into smaller ranges.
-Each subrange data is dumped to a file at a version. All data within a file is at the same version. However, different file versions can be different.
+Each subrange of data is dumped to a file at a version. All data within a file is at the same version. However, file versions can differ.
 
 Input and output
 ----------------
-When a user wants to start a bulkdump job, the user provides the range to dump and the path root to dump the data. 
+When a user wants to start a bulkdump job, the user provides the range to dump and the path root of where to dump the data.
 The range can be any subrange within the user key space (i.e. " " ~ "\\xff").
 Dumping the data of the system key space and special key space (i.e. "\\xff" ~ "\\xff\\xff\\xff") is not allowed.
-The path root can be either a blobstore url (TBD) or a path of a file system.
+The path root can be either a blobstore url or a path of a file system.
 Given the input range, if the range is large, the range splits into smaller ranges.
 Each subrange is dumped at a version to a folder. In particular, the folder is organized as following:
 
@@ -60,7 +60,7 @@ Clearing a job is achieved by erasing the entire user range space of the bulkdum
 
 FDBCLI provides following interfaces to do the operations:
 
-1. Submit a job: bulkdump local (BeginKey) (EndKey) (RootFolder) // "local" indicates to dump the data to a local folder. Will support dumping to a blob storage.
+1. Submit a job: bulkdump local|blobstore (BeginKey) (EndKey) (RootFolder) // Supply 'local' or 'blobstore' -- "local" indicates dump the data to a local folder. Will support dumping to a blob storage.
 2. Clear a job: bulkdump clear
 3. Enable the feature: bulkdump mode on \| off // "bulkdump mode" command prints the current value (on or off) of the mode.
 

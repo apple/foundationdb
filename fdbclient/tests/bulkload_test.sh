@@ -1,20 +1,18 @@
 #!/bin/bash
 #
-# Test backup and restore from s3 where we use seaweedfs
+# Test bulkload via s3 where we use seaweedfs
 # (https://github.com/seaweedfs/seaweedfs) as substitute for
 # AWS S3.
 #
 # In the below we start a small FDB cluster, populate it with
 # some data and then start up a seaweedfs instance. We then run
-# a backup to 'S3' and then a restores. We verify
+# a bulkdump to 'S3' and then a restore. We verify
 # the restore is the same as the original.
 #
-# Debugging, run this script w/ the -x flag: e.g. bash -x s3_backup_test.sh...
+# Debugging, run this script w/ the -x flag: e.g. bash -x bulkdump_test.sh...
 # You can also disable the cleanup. This will leave processes up
 # so you can manually rerun commands or peruse logs and data
 # under SCRATCH_DIR.
-#
-# See https://apple.github.io/foundationdb/backups.html
 
 # set -o xtrace   # a.k.a set -x  # Set this one when debugging (or 'bash -x THIS_SCRIPT').
 set -o errexit  # a.k.a. set -e
@@ -28,15 +26,8 @@ SCRATCH_DIR=
 # we need more seaweed volumes which can be an issue when
 # little diskspace
 readonly BUCKET="${S3_BUCKET:-testbucket}"
-readonly TAG="test_backup"
-S3_RESOURCE="backup-$(date -Iseconds | sed -e 's/[[:punct:]]/-/g')"
+S3_RESOURCE="bulkdump-$(date -Iseconds | sed -e 's/[[:punct:]]/-/g')"
 readonly S3_RESOURCE
-readonly HTTP_VERBOSE_LEVEL=2
-# Clear these environment variables. fdbbackup goes looking for them
-# and if EITHER is set, it will go via a proxy instead of to where we.
-# want it to go.
-unset HTTP_PROXY
-unset HTTPS_PROXY
 
 # Install signal traps. Depends on globals being set.
 # Calls the cleanup function.
@@ -65,57 +56,68 @@ function resolve_to_absolute_path {
   realpath "${p}"
 }
 
-# Run the fdbbackup command.
+# Run the bulkdump command.
 # $1 The build directory
 # $2 The scratch directory
 # $3 The weed port s3 is listening on.
-function backup {
+function bulkdump {
   local local_build_dir="${1}"
   local scratch_dir="${2}"
   local weed_s3_port="${3}"
-  # Backup to s3. Without the -k argument in the below, the backup gets
-  # 'No restore target version given, will use maximum restorable version from backup description.'
-  # TODO: Why is -k needed?
-  if ! "${local_build_dir}"/bin/fdbbackup start \
+  # Bulkdump to s3. Set bulkdump mode to on
+  # Then start a bulkdump and wait till its done.
+  if ! "${local_build_dir}"/bin/fdbcli \
     -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
-    -t "${TAG}" -w \
-    -d "blobstore://localhost:${weed_s3_port}/${S3_RESOURCE}?bucket=${BUCKET}&secure_connection=0&region=us" \
-    -k '"" \xff' \
-    --log --logdir="${scratch_dir}" \
-    --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-    --knob_http_request_aws_v4_header=true
+    --exec "bulkdump mode on"
   then
-    err "Start fdbbackup failed"
+    err "Bulkdump mode on failed"
+    return 1
+  fi
+  if ! "${local_build_dir}"/bin/fdbcli \
+    -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+    --exec "bulkdump blobstore \"\" \xff \"blobstore://localhost:${weed_s3_port}/${S3_RESOURCE}?bucket=${BUCKET}&secure_connection=0&region=us\""
+  then
+    err "Bulkdump start failed"
+    return 1
+  fi
+  while true; do
+    if ! output=$( "${local_build_dir}"/bin/fdbcli \
+      -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+      --exec "bulkdump status \"\" \xff " )
+    then
+      err "Bulkdump status 1 failed"
+      return 1
+    fi
+    if ! echo "${output}" | grep "Running bulk dumping job"; then
+      break
+    fi
+    sleep 5
+  done
+  while true; do
+    if ! output=$( "${local_build_dir}"/bin/fdbcli \
+      -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+      --exec "bulkdump status \"\" \xff " )
+    then
+      err "Bulkdump status 2 failed"
+      return 1
+    fi
+    if echo "${output}" | grep "No bulk dumping job is running"; then
+      return 0
+    fi
+    sleep 5
+  done
+  # Verify the job-manifest.txt made it into the bulkdump.
+  if ! curl -s "http://localhost:${weed_s3_port}/${BUCKET}" | grep job-manifest.txt> /dev/null; then
+    echo "ERROR: Failed to curl job-manifest.txt" >&2
     return 1
   fi
 }
 
-# Run the fdbrestore command.
-# $1 The build directory
-# $2 The scratch directory
-# $3 The weed port s3 is listening on.
-function restore {
-  local local_build_dir="${1}"
-  local scratch_dir="${2}"
-  local weed_s3_port="${3}"
-  if ! "${local_build_dir}"/bin/fdbrestore start \
-    --dest-cluster-file "${scratch_dir}/loopback_cluster/fdb.cluster" \
-    -t "${TAG}" -w \
-    -r "blobstore://localhost:${weed_s3_port}/${S3_RESOURCE}?bucket=${BUCKET}&secure_connection=0&region=us" \
-    --log --logdir="${scratch_dir}" \
-    --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" -t first_backup  \
-    --knob_http_request_aws_v4_header=true
-  then
-    err "Start fdbrestore failed"
-    return 1
-  fi
-}
-
-# Run a backup to s3 and then a restore.
+# Run a basic bulkdump to s3 and then after a bulkload.
 # $1 build directory
 # $2 the scratch directory
 # $3 the s3_port to go against.
-function test_s3_backup_and_restore {
+function test_basic_bulkdump_and_bulkload {
   local local_build_dir="${1}"
   local scratch_dir="${2}"
   local local_s3_port="${3}"
@@ -124,24 +126,9 @@ function test_s3_backup_and_restore {
     err "Failed loading data into fdb"
     return 1
   fi
-  log "Run s3 backup"
-  if ! backup "${local_build_dir}" "${scratch_dir}" "${local_s3_port}"; then
-    err "Failed backup"
-    return 1
-  fi
-  log "Clear fdb data"
-  if ! clear_data "${local_build_dir}" "${scratch_dir}"; then
-    err "Failed clear data in fdb"
-    return 1
-  fi
-  log "Restore from s3"
-  if ! restore "${local_build_dir}" "${scratch_dir}" "${local_s3_port}"; then
-    err "Failed restore"
-    return 1
-  fi
-  log "Verify restore"
-  if ! verify_data "${local_build_dir}" "${scratch_dir}"; then
-    err "Failed verification of data in fdb"
+  log "Run bulkdump"
+  if ! bulkdump "${local_build_dir}" "${scratch_dir}" "${local_s3_port}"; then
+    err "Failed bulkdump"
     return 1
   fi
   log "Check for Severity=40 errors"
@@ -174,19 +161,19 @@ if ! cwd=$( cd -P "$( dirname "${path}" )" >/dev/null 2>&1 && pwd ); then
   exit 1
 fi
 readonly cwd
-# Source in the fdb cluster, backup common, and seaweedfs fixtures.
+# Source in the fdb cluster, tests_common, and seaweedfs fixtures.
 # shellcheck source=/dev/null
-if ! source "${cwd}/../../fdbclient/tests/seaweedfs_fixture.sh"; then
+if ! source "${cwd}/seaweedfs_fixture.sh"; then
   err "Failed to source seaweedfs_fixture.sh"
   exit 1
 fi
 # shellcheck source=/dev/null
-if ! source "${cwd}/../../fdbclient/tests/fdb_cluster_fixture.sh"; then
+if ! source "${cwd}/fdb_cluster_fixture.sh"; then
   err "Failed to source fdb_cluster_fixture.sh"
   exit 1
 fi
 # shellcheck source=/dev/null
-if ! source "${cwd}/../../fdbclient/tests/tests_common.sh"; then
+if ! source "${cwd}/tests_common.sh"; then
   err "Failed to source tests_common.sh"
   exit 1
 fi
@@ -196,10 +183,10 @@ if (( $# < 2 )) || (( $# > 3 )); then
     echo "ERROR: ${0} requires the fdb src and build directories --"
     echo "CMAKE_SOURCE_DIR and CMAKE_BINARY_DIR -- and then, optionally,"
     echo "a directory into which we write scratch test data and logs"
-    echo "(otherwise we will write to subdirs under $TMPDIR). We will"
-    echo "leave the download of seaweed this directory for other"
-    echo "tests to find if they need it. Otherwise, we clean everything"
-    echo "else up on our way out."
+    echo "\(otherwise we will write to subdirs under $TMPDIR\). We will"
+    echo "leave the download of seaweed in this directory for other"
+    echo "tests to find if they need it (if we need to download it)."
+    echo "Otherwise, we clean everything else up on our way out."
     echo "Example: ${0} ./foundationdb ./build_output ./scratch_dir"
     exit 1
 fi
@@ -220,24 +207,19 @@ if (( $# == 3 )); then
 fi
 readonly base_scratch_dir
 # mktemp works differently on mac than on unix; the XXXX's are ignored on mac.
-if ! tmpdir=$(mktemp -p "${base_scratch_dir}" --directory -t s3backup.XXXX); then
+if ! tmpdir=$(mktemp -p "${base_scratch_dir}" --directory -t bulkload.XXXX); then
   err "Failed mktemp"
   exit 1
 fi
 SCRATCH_DIR=$(resolve_to_absolute_path "${tmpdir}")
 readonly SCRATCH_DIR
 
-# Startup fdb cluster and backup agent.
+# Startup fdb cluster.
 if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${SCRATCH_DIR}"; then
   err "Failed start FDB cluster"
   exit 1
 fi
 log "FDB cluster is up"
-if ! start_backup_agent "${build_dir}" "${SCRATCH_DIR}"; then
-  err "Failed start backup_agent"
-  exit 1
-fi
-log "Backup_agent is up"
 
 # Download seaweed.
 # Download to base_scratch_dir so its there for the next test.
@@ -259,5 +241,5 @@ readonly s3_port
 log "Seaweed server is up; s3.port=${s3_port}"
 
 # Run tests.
-test_s3_backup_and_restore "${build_dir}" "${SCRATCH_DIR}" "${s3_port}"
-log_test_result $? "test_s3_backup_and_restore"
+test_basic_bulkdump_and_bulkload "${build_dir}" "${SCRATCH_DIR}" "${s3_port}"
+log_test_result $? "test_basic_bulkdump_and_bulkload"

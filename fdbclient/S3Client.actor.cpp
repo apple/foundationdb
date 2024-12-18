@@ -43,15 +43,17 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
+#include <boost/url/url.hpp>
+#include <boost/url/parse.hpp>
 #include "flow/TLSConfig.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
 // Get the endpoint for the given s3url.
 // Populates parameters and resource with parse of s3url.
-static Reference<S3BlobStoreEndpoint> getEndpoint(std::string s3url,
-                                                  std::string& resource,
-                                                  S3BlobStoreEndpoint::ParametersT& parameters) {
+Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
+                                           std::string& resource,
+                                           S3BlobStoreEndpoint::ParametersT& parameters) {
 	std::string error;
 	Reference<S3BlobStoreEndpoint> endpoint =
 	    S3BlobStoreEndpoint::fromString(s3url, {}, &resource, &error, &parameters);
@@ -81,6 +83,11 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	// average. Streaming would require changing this s3blobstore interface.
 	// Make 32MB the max size for now even though its arbitrary and way to big.
 	state std::string content = readFileBytes(filepath, 1024 * 1024 * 32);
+	TraceEvent("S3ClientUploadStart")
+	    .detail("filepath", filepath)
+	    .detail("bucket", bucket)
+	    .detail("resource", resource)
+	    .detail("size", content.size());
 	wait(endpoint->writeEntireFile(bucket, resource, content));
 	TraceEvent("S3ClientUpload")
 	    .detail("filepath", filepath)
@@ -115,6 +122,47 @@ ACTOR Future<Void> copyUpDirectory(std::string dirpath, std::string s3url) {
 		wait(copyUpFile(endpoint, bucket, s3path, filepath));
 	}
 	TraceEvent("S3ClientUploadDirEnd").detail("bucket", bucket).detail("resource", resource);
+	return Void();
+}
+
+ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
+                                         BulkDumpFileFullPathSet sourceFileFullPathSet,
+                                         BulkDumpFileSet destinationFileSet) {
+	state std::string resource;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	state Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
+	state std::string bucket = parameters["bucket"];
+	TraceEvent("S3ClientCopyUpBulkDumpFileSetStart")
+	    .detail("bucket", bucket)
+	    .detail("sourceFileSet", sourceFileFullPathSet.toString())
+	    .detail("destinationFileSet", destinationFileSet.toString());
+	state int pNumDeleted = 0;
+	state int64_t pBytesDeleted = 0;
+	// Throws error if s3url is invalid.
+	boost::urls::url url = boost::urls::parse_uri(s3url).value();
+	// Get path to the batch dir.
+	state std::string batch_dir = joinPath(url.path(), destinationFileSet.relativePath);
+	// Delete the batch dir if it exists already (need to check bucket exists else 404 and s3blobstore errors out).
+	bool exists = wait(endpoint->bucketExists(bucket));
+	if (exists) {
+		wait(endpoint->deleteRecursively(bucket, batch_dir, &pNumDeleted, &pBytesDeleted));
+	}
+	// Destination for manifest file.
+	auto destinationManifestPath = joinPath(batch_dir, destinationFileSet.manifestFileName);
+	wait(copyUpFile(endpoint, bucket, destinationManifestPath, sourceFileFullPathSet.manifestFilePath));
+	if (sourceFileFullPathSet.dataFilePath.size() > 0) {
+		auto destinationDataPath = joinPath(batch_dir, destinationFileSet.dataFileName);
+		wait(copyUpFile(endpoint, bucket, destinationDataPath, sourceFileFullPathSet.dataFilePath));
+	}
+	if (sourceFileFullPathSet.byteSampleFilePath.size() > 0) {
+		ASSERT(sourceFileFullPathSet.dataFilePath.size() > 0);
+		auto destinationByteSamplePath = joinPath(batch_dir, destinationFileSet.byteSampleFileName);
+		wait(copyUpFile(endpoint, bucket, destinationByteSamplePath, sourceFileFullPathSet.byteSampleFilePath));
+	}
+	TraceEvent("S3ClientCopyUpBulkDumpFileSetEnd")
+	    .detail("BatchDir", batch_dir)
+	    .detail("NumDeleted", pNumDeleted)
+	    .detail("BytesDeleted", pBytesDeleted);
 	return Void();
 }
 

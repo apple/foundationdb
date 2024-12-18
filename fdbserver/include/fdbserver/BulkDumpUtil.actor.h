@@ -109,14 +109,13 @@ void generateBulkDumpJobManifestFile(const std::string& workFolder,
 
 // Upload manifest file for bulkdump job
 // Each job has one manifest file including manifest paths of all tasks.
-// The local file path:
-//	<rootLocal>/<jobId>-manifest.txt
-// The remote file path:
-//	<rootRemote>/<jobId>-manifest.txt
-void uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
-                                   const std::string& localJobManifestFilePath,
-                                   const std::string& remoteJobManifestFilePath,
-                                   UID logId);
+// The local file path:	<localRootLocal>/<jobId>-manifest.txt
+// The remote file folder and the name of the file in the remote folder.
+ACTOR Future<Void> uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transportMethod,
+                                                 std::string localJobManifestFilePath,
+                                                 std::string remoteFolder,
+                                                 std::string jobManifestFileName,
+                                                 UID logId);
 
 // Upload file for each task. Each task is spawned by bulkdump job according to the shard boundary
 ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod,

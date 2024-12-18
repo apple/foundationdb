@@ -38,6 +38,11 @@ function download_weed {
   local tgz
   local os=
   local arch=
+  # See if weed is currently installed and use it if found.
+  # https://stackoverflow.com/questions/592620/how-can-i-check-if-a-program-exists-from-a-bash-script
+  if command -v weed; then
+    return 0
+  fi
   # Make sure we have curl installed.
   if ! command -v curl &> /dev/null; then
       echo "ERROR: 'curl' not found." >&2
@@ -176,4 +181,24 @@ function start_weed {
   echo "${weed_pid}" > "${WEED_DIR}/weed.pid"
   # Return two values.
   echo "${s3_port}"
+}
+
+# Run seaweed.
+# Source this script and then do `run_weed WEED_DIR`
+# User will have to shut it down.
+# $1 Dir to use
+function run_weed {
+  local local_scratch_dir="${1}"
+  if ! weed_binary_path="$(download_weed "${local_scratch_dir}")"; then
+    echo "ERROR: failed download of weed binary." >&2
+    return 1
+  fi
+  if ! create_weed_dir "${local_scratch_dir}"; then
+    echo "ERROR: failed create of the weed dir." >&2
+    return 1
+  fi
+  if ! s3_port=$(start_weed "${weed_binary_path}"); then
+    echo "ERROR: failed start of weed server." >&2
+    exit 1
+  fi
 }

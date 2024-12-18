@@ -132,6 +132,11 @@ struct BulkDumpFileFullPathSet {
 	std::string dataFilePath = "";
 	std::string byteSampleFilePath = "";
 	std::string manifestFilePath = "";
+
+	std::string toString() const {
+		return "[Folder]: " + folder + ", [ManifestFilePath]: " + manifestFilePath +
+		       ", [DataFilePath]: " + dataFilePath + ", [ByteSampleFilePath]: " + byteSampleFilePath;
+	}
 };
 
 // Define the metadata of bulkdump manifest file
@@ -205,6 +210,7 @@ enum class BulkDumpFileType : uint8_t {
 enum class BulkDumpTransportMethod : uint8_t {
 	Invalid = 0,
 	CP = 1,
+	BLOBSTORE = 2,
 };
 
 enum class BulkDumpExportMethod : uint8_t {
@@ -278,13 +284,14 @@ struct BulkDumpState {
 		}
 		if (transportMethod == BulkDumpTransportMethod::Invalid) {
 			return false;
-		} else if (transportMethod != BulkDumpTransportMethod::CP) {
-			throw not_implemented();
+		} else if (transportMethod != BulkDumpTransportMethod::CP &&
+		           transportMethod != BulkDumpTransportMethod::BLOBSTORE) {
+			ASSERT(false);
 		}
 		if (exportMethod == BulkDumpExportMethod::Invalid) {
 			return false;
 		} else if (exportMethod != BulkDumpExportMethod::File) {
-			throw not_implemented();
+			ASSERT(false);
 		}
 		if (remoteRoot.empty()) {
 			return false;
@@ -368,7 +375,13 @@ private:
 // User API to create bulkDump task metadata
 // The dumped data is within the input range
 // The data is dumped to the input remoteRoot
-// The remoteRoot can be either a local root or a remote blobstore root string
+// The remoteRoot is a local root string
 BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& remoteRoot);
+
+// User API to create bulkDump task metadata
+// The dumped data is within the input range
+// The data is dumped to the input remoteRoot
+// The remoteRoot is a remote blobstore root string
+BulkDumpState newBulkDumpTaskBlobstoreSST(const KeyRange& range, const std::string& remoteRoot);
 
 #endif
