@@ -3945,8 +3945,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                               const uint64_t liveDataSize,
 	                               const size_t fileCount) {
 		// Rocksdb metadata kEstimateLiveDataSize and cfMetadata.file_count is not deterministic so we don't
-		// use it in simulation. We still want to exercise the overload functionality for test coverage, so we return
-		// shouldCompactShard = true 25% of the time.
+		// use it in simulation. We still want to exercise the compact shard functionality for test coverage, so we
+		// return shouldCompactShard = true 25% of the time.
 		if (g_network->isSimulated()) {
 			return deterministicRandom()->randomInt(0, 100) < 25;
 		}

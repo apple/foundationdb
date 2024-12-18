@@ -2932,7 +2932,8 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	    // override will not take effect until the test starts. Here, we do an additional check
 	    // for this special simulation test.
 	    (std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos &&
-	     std::string_view(testFile).find("BulkLoading") == std::string_view::npos)) {
+	     std::string_view(testFile).find("BulkLoading") == std::string_view::npos &&
+	     std::string_view(testFile).find("ShardedRocksNondeterministicTest") == std::string_view::npos)) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
