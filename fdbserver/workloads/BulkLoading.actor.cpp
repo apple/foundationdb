@@ -27,7 +27,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const std::string simulationBulkLoadFolder = "bulkLoad";
+const std::string simulationBulkLoadFolder = joinPath("simfdb", "bulkload");
 
 struct BulkLoadTaskTestUnit {
 	BulkLoadTaskState bulkLoadTask;
