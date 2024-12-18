@@ -279,7 +279,7 @@ ACTOR Future<Void> bulkDumpTransportBlobstore_impl(BulkDumpFileSet sourceFileSet
                                                    BulkDumpFileSet destinationFileSet,
                                                    size_t fileBytesMax,
                                                    UID logId) {
-	// TODO: Make use of fileBytesMax
+	// TODO(BulkDump): Make use of fileBytesMax
 	BulkDumpFileFullPathSet sourceFileFullPathSet(sourceFileSet);
 	wait(copyUpBulkDumpFileSet(destinationFileSet.rootPath, sourceFileFullPathSet, destinationFileSet));
 	return Void();
@@ -301,14 +301,13 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkDumpTransportMethod transportMethod
 	if (transportMethod == BulkDumpTransportMethod::BLOBSTORE) {
 		wait(bulkDumpTransportBlobstore_impl(
 		    sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
-	} else if (transportMethod != BulkDumpTransportMethod::CP) {
+	} else if (transportMethod == BulkDumpTransportMethod::CP) {
 		bulkDumpTransportCP_impl(sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
 	} else {
-		TraceEvent(SevWarnAlways, "SSBulkDumpUploadFilesError", logId)
+		TraceEvent(SevError, "SSBulkDumpUploadFilesError", logId)
 		    .detail("Reason", "Transport method is not implemented")
 		    .detail("TransportMethod", transportMethod);
-		ASSERT_WE_THINK(false);
-		throw bulkdump_task_failed();
+		ASSERT(false);
 	}
 	return Void();
 }
@@ -344,8 +343,7 @@ ACTOR Future<Void> uploadBulkDumpJobManifestFile(BulkDumpTransportMethod transpo
 		TraceEvent(SevError, "UploadBulkDumpJobManifestFileError", logId)
 		    .detail("Reason", "Transport method is not implemented")
 		    .detail("TransportMethod", transportMethod);
-		ASSERT_WE_THINK(false);
-		throw bulkdump_task_failed();
+		ASSERT(false);
 	}
 	// TODO(BulkDump): check uploaded file exist
 	return Void();

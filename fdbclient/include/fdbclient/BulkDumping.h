@@ -375,12 +375,13 @@ private:
 // User API to create bulkDump task metadata
 // The dumped data is within the input range
 // The data is dumped to the input remoteRoot
-// The remoteRoot can be either a local root or a remote blobstore root string
+// The remoteRoot is a local root string
 BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& remoteRoot);
 
 // User API to create bulkDump task metadata
 // The dumped data is within the input range
 // The data is dumped to the input remoteRoot
+// The remoteRoot is a remote blobstore root string
 BulkDumpState newBulkDumpTaskBlobstoreSST(const KeyRange& range, const std::string& remoteRoot);
 
 #endif
