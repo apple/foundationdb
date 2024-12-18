@@ -274,7 +274,7 @@ void bulkDumpTransportCP_impl(BulkDumpFileSet sourceFileSet,
 	return;
 }
 
-// Dump files between to blobstore.
+// Dump files to blobstore.
 ACTOR Future<Void> bulkDumpTransportBlobstore_impl(BulkDumpFileSet sourceFileSet,
                                                    BulkDumpFileSet destinationFileSet,
                                                    size_t fileBytesMax,
