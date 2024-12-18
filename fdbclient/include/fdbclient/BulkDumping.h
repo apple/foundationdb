@@ -286,12 +286,12 @@ struct BulkDumpState {
 			return false;
 		} else if (transportMethod != BulkDumpTransportMethod::CP &&
 		           transportMethod != BulkDumpTransportMethod::BLOBSTORE) {
-			throw not_implemented();
+			ASSERT(false);
 		}
 		if (exportMethod == BulkDumpExportMethod::Invalid) {
 			return false;
 		} else if (exportMethod != BulkDumpExportMethod::File) {
-			throw not_implemented();
+			ASSERT(false);
 		}
 		if (remoteRoot.empty()) {
 			return false;
