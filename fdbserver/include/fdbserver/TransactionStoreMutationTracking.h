@@ -31,7 +31,7 @@
 	DEBUG_TRANSACTION_STATE_STORE_ENABLED&& transactionStoreDebugMutation(__VA_ARGS__)
 TraceEvent transactionStoreDebugMutation(const char* context,
                                          StringRef const& mutation,
-                                         UID id = UID(),
-                                         const std::string version = "-1");
+                                         const UID id,
+                                         const std::string loc = "");
 
 #endif
