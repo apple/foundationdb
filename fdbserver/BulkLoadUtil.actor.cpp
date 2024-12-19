@@ -49,7 +49,6 @@ ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Datab
 void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
 	std::string content = readFileBytes(fromFile, fileBytesMax);
 	writeFile(toFile, content);
-	// TODO(BulkLoad): Do file checksum for toFile
 	return;
 }
 
@@ -59,9 +58,9 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
                                                          UID logId) {
 	ASSERT(bulkLoadTaskState.getTransportMethod() == BulkLoadTransportMethod::CP);
 	loop {
-		state std::string toFile;
-		state std::string fromFile;
-		state SSBulkLoadFileSet fileSet;
+		state std::string fromDataFilePath;
+		state std::string toDataFilePath;
+		state SSBulkLoadFileSet fileSet; // TODO(BulkLoad): do not use SSBulkLoadFileSet, use BulkLoadFileSet instead
 		try {
 			fileSet.folder = abspath(joinPath(dir, bulkLoadTaskState.getFolder()));
 
@@ -72,31 +71,25 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 			}
 
 			// Move bulk load files to loading folder
-			for (const auto& filePath : bulkLoadTaskState.getDataFiles()) {
-				fromFile = abspath(filePath);
-				toFile = abspath(joinPath(fileSet.folder, basename(fromFile)));
-				if (fileSet.dataFileList.find(toFile) != fileSet.dataFileList.end()) {
-					ASSERT_WE_THINK(false);
-					throw retry();
-				}
-				bulkLoadFileCopy(fromFile, toFile, fileBytesMax);
-				fileSet.dataFileList.insert(toFile);
+			std::string fromDataFilePath = abspath(bulkLoadTaskState.getDataFileFullPath());
+			std::string toDataFilePath = abspath(joinPath(fileSet.folder, basename(fromDataFilePath)));
+
+			bulkLoadFileCopy(fromDataFilePath, toDataFilePath, fileBytesMax);
+			fileSet.dataFileList.insert(toDataFilePath);
+			TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
+			    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+			    .detail("FromFile", fromDataFilePath)
+			    .detail("ToFile", toDataFilePath);
+
+			std::string fromByteSampleFilePath = abspath(bulkLoadTaskState.getBytesSampleFileFullPath());
+			if (!fromByteSampleFilePath.empty() && fileExists(fromByteSampleFilePath)) {
+				std::string toByteSampleFilePath = abspath(joinPath(fileSet.folder, basename(fromByteSampleFilePath)));
+				bulkLoadFileCopy(fromByteSampleFilePath, toByteSampleFilePath, fileBytesMax);
+				fileSet.bytesSampleFile = toByteSampleFilePath;
 				TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
 				    .detail("BulkLoadTask", bulkLoadTaskState.toString())
-				    .detail("FromFile", fromFile)
-				    .detail("ToFile", toFile);
-			}
-			if (bulkLoadTaskState.getBytesSampleFile().present()) {
-				fromFile = abspath(bulkLoadTaskState.getBytesSampleFile().get());
-				if (fileExists(fromFile)) {
-					toFile = abspath(joinPath(fileSet.folder, basename(fromFile)));
-					bulkLoadFileCopy(fromFile, toFile, fileBytesMax);
-					fileSet.bytesSampleFile = toFile;
-					TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
-					    .detail("BulkLoadTask", bulkLoadTaskState.toString())
-					    .detail("FromFile", fromFile)
-					    .detail("ToFile", toFile);
-				}
+				    .detail("FromFile", fromByteSampleFilePath)
+				    .detail("ToFile", toByteSampleFilePath);
 			}
 			return fileSet;
 
@@ -107,8 +100,8 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 			TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileCopyError", logId)
 			    .errorUnsuppressed(e)
 			    .detail("BulkLoadTask", bulkLoadTaskState.toString())
-			    .detail("FromFile", fromFile)
-			    .detail("ToFile", toFile);
+			    .detail("FromFile", fromDataFilePath)
+			    .detail("ToFile", toDataFilePath);
 			wait(delay(5.0));
 		}
 	}
@@ -131,7 +124,7 @@ ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string fol
 					KeyValue kv = reader->next();
 					ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
 					if (sampleInfo.inSample) {
-						sstWriter->write(kv.key, kv.value); // TODO(BulkLoad): validate if kvs are sorted
+						sstWriter->write(kv.key, kv.value);
 						anySampled = true;
 					}
 				}

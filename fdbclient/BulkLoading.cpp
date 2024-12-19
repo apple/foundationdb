@@ -39,11 +39,27 @@ std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadM
 	return head + content;
 }
 
-BulkLoadTaskState newBulkLoadTaskLocalSST(KeyRange range,
-                                          std::string folder,
-                                          std::string dataFile,
-                                          std::string bytesSampleFile) {
-	std::unordered_set<std::string> dataFiles;
-	dataFiles.insert(dataFile);
-	return BulkLoadTaskState(range, BulkLoadType::SST, BulkLoadTransportMethod::CP, folder, dataFiles, bytesSampleFile);
+// For submitting a task manually (for testing)
+BulkLoadTaskState newBulkLoadTaskLocalSST(const UID& jobId,
+                                          const KeyRange& range,
+                                          const std::string& rootPath,
+                                          const std::string& relativePath,
+                                          const std::string& manifestFileName,
+                                          const std::string& dataFileName,
+                                          const std::string& byteSampleFileName,
+                                          const BulkLoadByteSampleSetting& byteSampleSetting,
+                                          Version snapshotVersion,
+                                          const std::string& checksum,
+                                          int64_t bytes) {
+	BulkLoadManifest manifest(
+	    BulkLoadFileSet(rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName),
+	    range.begin,
+	    range.end,
+	    snapshotVersion,
+	    checksum,
+	    bytes,
+	    byteSampleSetting,
+	    BulkLoadType::SST,
+	    BulkLoadTransportMethod::CP);
+	return BulkLoadTaskState(jobId, manifest);
 }

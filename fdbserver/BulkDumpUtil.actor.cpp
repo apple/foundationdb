@@ -83,6 +83,7 @@ std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId) {
 
 // Append a string to a path.
 // 'path' is a filesystem path or an URL.
+// TODO(BulkDump): use this everywhere
 std::string appendToPath(const std::string& path, const std::string& append) {
 	boost::system::result<boost::urls::url_view> parse_result = boost::urls::parse_uri(path);
 	if (!parse_result.has_value()) {

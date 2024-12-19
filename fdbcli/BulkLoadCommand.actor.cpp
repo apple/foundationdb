@@ -92,7 +92,6 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			printUsage(tokens[0]);
 			return UID();
 		}
-
 	} else if (tokencmp(tokens[1], "acknowledge")) {
 		// Acknowledge any completed bulk loading task and clear the corresponding metadata
 		if (tokens.size() != 5) {
@@ -111,7 +110,9 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		return taskId;
 
 	} else if (tokencmp(tokens[1], "local")) {
-		// Generate spec of bulk loading local files and submit the bulk loading task
+		// Generate spec of bulk loading local files and submit the bulk loading task.
+		// This is used for testing of bulkload task engine.
+		// Therefore, some information of manifest is ignored.
 		if (tokens.size() < 7) {
 			printUsage(tokens[0]);
 			return UID();
@@ -125,16 +126,25 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		std::string folder = tokens[4].toString();
 		std::string dataFile = tokens[5].toString();
-		std::string byteSampleFile = tokens[6].toString(); // TODO(BulkLoad): reject if the input bytes sampling file is
-		                                                   // not same as the configuration as FDB cluster
+		std::string byteSampleFile = tokens[6].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		state BulkLoadTaskState bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFile, byteSampleFile);
+		state BulkLoadTaskState bulkLoadTask =
+		    newBulkLoadTaskLocalSST(deterministicRandom()->randomUniqueID(),
+		                            range,
+		                            folder,
+		                            /*relativePath=*/"",
+		                            "manifest-temp-holder",
+		                            dataFile,
+		                            byteSampleFile,
+		                            BulkLoadByteSampleSetting(0, "hashlittle2", 0, 0, 0), // We fake it here
+		                            /*snapshotVersion=*/invalidVersion,
+		                            /*checksum=*/"",
+		                            /*bytes=*/-1);
 		wait(submitBulkLoadTask(cx, bulkLoadTask));
 		return bulkLoadTask.getTaskId();
 
 	} else if (tokencmp(tokens[1], "status")) {
 		// Get progress of existing bulk loading tasks intersecting the input range
-		// TODO(BulkLoad): check status by ID
 		if (tokens.size() < 6) {
 			printUsage(tokens[0]);
 			return UID();

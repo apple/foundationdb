@@ -9412,7 +9412,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 		           bulkLoadTransportCP_impl(
 		               dir, bulkLoadTaskState, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, data->thisServerID)));
 	} else {
-		throw not_implemented();
+		ASSERT(false);
 	}
 	// At this point, all necessary data for bulk loading locate at fileSetToLoad
 	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileFetched", data->thisServerID)
@@ -9427,6 +9427,7 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 	// TODO(BulkLoad): Check file data all in the moveInShard range
 	// TODO(BulkLoad): checkContent()
 	if (!fileSetToLoad.bytesSampleFile.present()) {
+		// TODO(BulkLoad): generate byteSample if setting does not match
 		TraceEvent(SevWarn, "SSBulkLoadTaskFetchSSTFileByteSampleNotFound", data->thisServerID)
 		    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())
 		    .detail("FileSetToLoad", fileSetToLoad.toString());
@@ -9453,13 +9454,12 @@ ACTOR Future<Void> fetchShardFetchBulkLoadSSTFiles(StorageServer* data,
 		std::vector<KeyRange> coalesceRanges = coalesceRangeList(moveInShard->ranges());
 		if (coalesceRanges.size() != 1) {
 			TraceEvent(SevError, "SSBulkLoadTaskFetchSSTFileError", data->thisServerID)
-			    .detail("Reason", "MoveInShard ranges unexpected")
+			    .detail("Reason", "MoveInShard ranges unexpected, resulting in partially injecting data")
 			    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())
 			    .detail("MoveInShard", moveInShard->toString())
 			    .detail("FileSetToLoad", fileSetToLoad.toString());
 		}
-		// TODO(BulkLoad): set loading file size --- logging purpose
-		rcp.fetchedFiles.emplace_back(abspath(filePath), coalesceRanges[0], 0);
+		rcp.fetchedFiles.emplace_back(abspath(filePath), coalesceRanges[0], bulkLoadTaskState.getTotalBytes());
 	}
 	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
 	localRecord.version = moveInShard->meta->createVersion;

@@ -3381,11 +3381,10 @@ ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange 
 				if (lock == RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad)) {
 					continue;
 				}
-				// TODO(BulkLoad): should cancel this task
 				TraceEvent(SevError, "DDBulkLoadEngineSeeUnexpectedRangeLock")
 				    .detail("Lock", lock.toString())
 				    .detail("Range", rangeToRead);
-				throw not_implemented();
+				ASSERT(false);
 			}
 		}
 		beginKey = res[res.size() - 1].key;
@@ -3421,9 +3420,9 @@ ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange r
 					TraceEvent(SevError, "DDBulkLoadEngineSeeUnexpectedRangeLock")
 					    .detail("Lock", lock.toString())
 					    .detail("Range", rangeToRead);
-					ASSERT_WE_THINK(false);
+					ASSERT(false);
 					// TODO(BulkLoad): make lock exclusive to other applications
-					// This is unexpected because others should see the exclusive lock of bulk load
+					// Therefore, this is unexpected because others should see the exclusive lock of bulk load
 					// and give up locking the range
 				}
 			}

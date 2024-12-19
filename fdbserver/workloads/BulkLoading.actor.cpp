@@ -156,7 +156,8 @@ struct BulkLoading : TestWorkload {
 				for (int i = 0; i < res.size() - 1; i++) {
 					if (!res[i].value.empty()) {
 						BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
-						ASSERT(bulkLoadTaskState.isValid());
+						ASSERT(bulkLoadTaskState.isValid(/*checkManifest=*/false));
+						// We do not check manifest because we are not fully setting manifest in this simulation test
 						if (bulkLoadTaskState.getRange() != KeyRangeRef(res[i].key, res[i + 1].key)) {
 							continue; // Ignore outdated task
 						}
@@ -314,8 +315,8 @@ struct BulkLoading : TestWorkload {
 		std::string folder = task.bulkLoadTask.getFolder();
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
-		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFile().get();
-		std::string dataFile = *(task.bulkLoadTask.getDataFiles().begin());
+		std::string dataFile = task.bulkLoadTask.getDataFileFullPath();
+		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFileFullPath();
 
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 		sstWriter->open(abspath(dataFile));
@@ -375,11 +376,24 @@ struct BulkLoading : TestWorkload {
 	                                              std::string folderPath,
 	                                              int dataSize,
 	                                              Optional<KeyRange> range = Optional<KeyRange>()) {
-		std::string dataFilePath = joinPath(folderPath, self->generateRandomBulkLoadDataFileName());
-		std::string bytesSampleFilePath = joinPath(folderPath, self->generateRandomBulkLoadBytesSampleFileName());
 		KeyRange rangeToLoad = range.present() ? range.get() : self->getRandomRange(self, normalKeys);
 		BulkLoadTaskTestUnit taskUnit;
-		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(rangeToLoad, folderPath, dataFilePath, bytesSampleFilePath);
+		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
+		    deterministicRandom()->randomUniqueID(),
+		    rangeToLoad,
+		    folderPath,
+		    /*relativePath=*/"",
+		    "manifest-temp-holder",
+		    self->generateRandomBulkLoadDataFileName(),
+		    self->generateRandomBulkLoadBytesSampleFileName(),
+		    BulkLoadByteSampleSetting(0,
+		                              "hashlittle2", // use function name to represent the method
+		                              SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
+		                              SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
+		                              SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY),
+		    /*snapshotVersion=*/invalidVersion,
+		    /*checksum=*/"",
+		    /*bytes=*/-1);
 		taskUnit.data = self->generateOrderedKVS(self, rangeToLoad, dataSize);
 		self->generateSSTFiles(self, taskUnit);
 		return taskUnit;
