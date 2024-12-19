@@ -378,6 +378,9 @@ public:
 	void OnFlushCompleted(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override { *lastFlushTime = now(); }
 
 private:
+	// lastFlushTime is used by two threads. One Thread is reading the value and the other thread is updating the value.
+	// If the reader thread gets a wrong value due to race, that will be still fine in this case(probably an extra flush
+	// or no flush). Considering the cost of atomic, avoided it here in this case.
 	std::shared_ptr<double> lastFlushTime;
 };
 
@@ -992,12 +995,20 @@ ACTOR Future<Void> manualFlush(UID id,
                                CF cf) {
 	if (SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL) {
 		state rocksdb::FlushOptions fOptions = sharedState->getFlushOptions();
+		state double waitTime = SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL;
+		state double currTime = 0;
+		state double timeElapsedAfterLastFlush = 0;
 		loop {
-			wait(delay(SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL));
+			wait(delay(waitTime));
 
-			if ((now() - *lastFlushTime) > SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL) {
+			currTime = now();
+			timeElapsedAfterLastFlush = currTime - *lastFlushTime;
+			if (timeElapsedAfterLastFlush >= SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL) {
 				db->Flush(fOptions, cf);
 				TraceEvent e("RocksDBManualFlush", id);
+				waitTime = SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL;
+			} else {
+				waitTime = SERVER_KNOBS->ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL - timeElapsedAfterLastFlush;
 			}
 		}
 	}
