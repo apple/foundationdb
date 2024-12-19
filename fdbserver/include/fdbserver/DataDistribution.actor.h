@@ -226,10 +226,10 @@ struct GetMetricsListRequest {
 };
 
 struct BulkLoadShardRequest {
-	BulkLoadState bulkLoadState;
+	BulkLoadTaskState bulkLoadTaskState;
 
 	BulkLoadShardRequest() {}
-	BulkLoadShardRequest(BulkLoadState const& bulkLoadState) : bulkLoadState(bulkLoadState) {}
+	BulkLoadShardRequest(BulkLoadTaskState const& bulkLoadTaskState) : bulkLoadTaskState(bulkLoadTaskState) {}
 };
 
 // PhysicalShardCollection maintains physical shard concepts in data distribution
@@ -534,18 +534,18 @@ struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
 
-struct DDBulkLoadTask {
-	BulkLoadState coreState;
+struct DDBulkLoadEngineTask {
+	BulkLoadTaskState coreState;
 	Version commitVersion = invalidVersion;
 	Promise<Void> completeAck; // satisfied when a data move for this task completes for the first time, where the task
 	                           // metadata phase has been complete
 
-	DDBulkLoadTask() = default;
+	DDBulkLoadEngineTask() = default;
 
-	DDBulkLoadTask(BulkLoadState coreState, Version commitVersion, Promise<Void> completeAck)
+	DDBulkLoadEngineTask(BulkLoadTaskState coreState, Version commitVersion, Promise<Void> completeAck)
 	  : coreState(coreState), commitVersion(commitVersion), completeAck(completeAck) {}
 
-	bool operator==(const DDBulkLoadTask& rhs) const {
+	bool operator==(const DDBulkLoadEngineTask& rhs) const {
 		return coreState == rhs.coreState && commitVersion == rhs.commitVersion;
 	}
 
@@ -566,7 +566,7 @@ class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
 public:
 	BulkLoadTaskCollection(UID ddId, int maxParallelism)
 	  : ddId(ddId), maxParallelism(maxParallelism), numRunningTasks(0) {
-		bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadTask>());
+		bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadEngineTask>());
 	}
 
 	// Return true if there exists a bulk load task
@@ -597,23 +597,23 @@ public:
 	// DDTracker stops any shard boundary change overlapping the task range
 	// DDQueue attaches the task to following data moves until the task has been completed
 	// If there are overlapped old tasks, make it outdated by sending a signal to completeAck
-	void publishTask(const BulkLoadState& bulkLoadState, Version commitVersion, Promise<Void> completeAck) {
-		if (overlappingTaskSince(bulkLoadState.getRange(), commitVersion)) {
+	void publishTask(const BulkLoadTaskState& bulkLoadTaskState, Version commitVersion, Promise<Void> completeAck) {
+		if (overlappingTaskSince(bulkLoadTaskState.getRange(), commitVersion)) {
 			throw bulkload_task_outdated();
 		}
-		DDBulkLoadTask task(bulkLoadState, commitVersion, completeAck);
-		TraceEvent(SevDebug, "DDBulkLoadCollectionPublishTask", ddId)
+		DDBulkLoadEngineTask task(bulkLoadTaskState, commitVersion, completeAck);
+		TraceEvent(SevDebug, "DDBulkLoadEngineCollectionPublishTask", ddId)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
-		    .detail("Range", bulkLoadState.getRange())
+		    .detail("Range", bulkLoadTaskState.getRange())
 		    .detail("Task", task.toString());
 		// For any overlapping task, make it outdated
-		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadTaskState.getRange())) {
 			if (!it->value().present()) {
 				continue;
 			}
-			if (it->value().get().coreState.getTaskId() == bulkLoadState.getTaskId()) {
-				ASSERT(it->value().get().coreState.getRange() == bulkLoadState.getRange());
+			if (it->value().get().coreState.getTaskId() == bulkLoadTaskState.getTaskId()) {
+				ASSERT(it->value().get().coreState.getRange() == bulkLoadTaskState.getRange());
 				// In case that the task has been already triggered
 				// Avoid repeatedly being triggered by throwing the error
 				// then the current doBulkLoadTask will sliently exit
@@ -621,27 +621,27 @@ public:
 			}
 			if (it->value().get().completeAck.canBeSet()) {
 				it->value().get().completeAck.sendError(bulkload_task_outdated());
-				TraceEvent(SevInfo, "DDBulkLoadCollectionPublishTaskOverwriteTask", ddId)
+				TraceEvent(SevInfo, "DDBulkLoadEngineCollectionPublishTaskOverwriteTask", ddId)
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
-				    .detail("NewRange", bulkLoadState.getRange())
+				    .detail("NewRange", bulkLoadTaskState.getRange())
 				    .detail("NewTask", task.toString())
 				    .detail("OldTaskRange", it->range())
 				    .detail("OldTask", it->value().get().toString());
 			}
 		}
-		bulkLoadTaskMap.insert(bulkLoadState.getRange(), task);
+		bulkLoadTaskMap.insert(bulkLoadTaskState.getRange(), task);
 		return;
 	}
 
 	// This method is called when there is a data move assigned to run the bulk load task
-	void startTask(const BulkLoadState& bulkLoadState) {
-		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
-			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadState.getTaskId()) {
+	void startTask(const BulkLoadTaskState& bulkLoadTaskState) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadTaskState.getRange())) {
+			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadTaskState.getTaskId()) {
 				throw bulkload_task_outdated();
 			}
-			TraceEvent(SevDebug, "DDBulkLoadCollectionStartTask", ddId)
-			    .detail("Range", bulkLoadState.getRange())
+			TraceEvent(SevDebug, "DDBulkLoadEngineCollectionStartTask", ddId)
+			    .detail("Range", bulkLoadTaskState.getRange())
 			    .detail("TaskRange", it->range())
 			    .detail("Task", it->value().get().toString());
 		}
@@ -649,16 +649,16 @@ public:
 	}
 
 	// Send complete signal to indicate this task has been completed
-	void terminateTask(const BulkLoadState& bulkLoadState) {
-		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
-			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadState.getTaskId()) {
+	void terminateTask(const BulkLoadTaskState& bulkLoadTaskState) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadTaskState.getRange())) {
+			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadTaskState.getTaskId()) {
 				throw bulkload_task_outdated();
 			}
 			// It is possible that the task has been completed by a past data move
 			if (it->value().get().completeAck.canBeSet()) {
 				it->value().get().completeAck.send(Void());
-				TraceEvent(SevDebug, "DDBulkLoadCollectionTerminateTask", ddId)
-				    .detail("Range", bulkLoadState.getRange())
+				TraceEvent(SevDebug, "DDBulkLoadEngineCollectionTerminateTask", ddId)
+				    .detail("Range", bulkLoadTaskState.getRange())
 				    .detail("TaskRange", it->range())
 				    .detail("Task", it->value().get().toString());
 			}
@@ -667,34 +667,34 @@ public:
 	}
 
 	// Erase any metadata on the map for the input bulkload task
-	void eraseTask(const BulkLoadState& bulkLoadState) {
+	void eraseTask(const BulkLoadTaskState& bulkLoadTaskState) {
 		std::vector<KeyRange> rangesToClear;
-		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadState.getRange())) {
-			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadState.getTaskId()) {
+		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadTaskState.getRange())) {
+			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadTaskState.getTaskId()) {
 				continue;
 			}
-			TraceEvent(SevDebug, "DDBulkLoadCollectionEraseTaskdata", ddId)
-			    .detail("Range", bulkLoadState.getRange())
+			TraceEvent(SevDebug, "DDBulkLoadEngineCollectionEraseTaskdata", ddId)
+			    .detail("Range", bulkLoadTaskState.getRange())
 			    .detail("TaskRange", it->range())
 			    .detail("Task", it->value().get().toString());
 			rangesToClear.push_back(it->range());
 		}
 		for (const auto& rangeToClear : rangesToClear) {
-			bulkLoadTaskMap.insert(rangeToClear, Optional<DDBulkLoadTask>());
+			bulkLoadTaskMap.insert(rangeToClear, Optional<DDBulkLoadEngineTask>());
 		}
 		bulkLoadTaskMap.coalesce(normalKeys);
 		return;
 	}
 
 	// Get the task which has exactly the same range as the input range
-	Optional<DDBulkLoadTask> getTaskByRange(KeyRange range) const {
-		Optional<DDBulkLoadTask> res;
+	Optional<DDBulkLoadEngineTask> getTaskByRange(KeyRange range) const {
+		Optional<DDBulkLoadEngineTask> res;
 		for (auto it : bulkLoadTaskMap.intersectingRanges(range)) {
 			if (!it->value().present()) {
 				continue;
 			}
-			DDBulkLoadTask bulkLoadTask = it->value().get();
-			TraceEvent(SevDebug, "DDBulkLoadCollectionGetPublishedTaskEach", ddId)
+			DDBulkLoadEngineTask bulkLoadTask = it->value().get();
+			TraceEvent(SevDebug, "DDBulkLoadEngineCollectionGetPublishedTaskEach", ddId)
 			    .detail("Range", range)
 			    .detail("TaskRange", it->range())
 			    .detail("Task", bulkLoadTask.toString());
@@ -703,7 +703,7 @@ public:
 				res = bulkLoadTask;
 			}
 		}
-		TraceEvent(SevDebug, "DDBulkLoadCollectionGetPublishedTask", ddId)
+		TraceEvent(SevDebug, "DDBulkLoadEngineCollectionGetPublishedTask", ddId)
 		    .detail("Range", range)
 		    .detail("Task", res.present() ? describe(res.get()) : "");
 		return res;
@@ -729,7 +729,7 @@ public:
 	inline Future<Void> waitUntilChanged() const { return numRunningTasks.onChange(); }
 
 private:
-	KeyRangeMap<Optional<DDBulkLoadTask>> bulkLoadTaskMap;
+	KeyRangeMap<Optional<DDBulkLoadEngineTask>> bulkLoadTaskMap;
 	UID ddId;
 	AsyncVar<int> numRunningTasks;
 	int maxParallelism;

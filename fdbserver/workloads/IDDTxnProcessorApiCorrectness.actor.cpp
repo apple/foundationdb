@@ -368,7 +368,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			                      UID(),
 			                      self->ddContext.ddEnabledState.get(),
 			                      CancelConflictingDataMoves::True,
-			                      Optional<BulkLoadState>());
+			                      Optional<BulkLoadTaskState>());
 		} else {
 			return MoveKeysParams(dataMoveId,
 			                      keys,
@@ -382,7 +382,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			                      UID(),
 			                      self->ddContext.ddEnabledState.get(),
 			                      CancelConflictingDataMoves::True,
-			                      Optional<BulkLoadState>());
+			                      Optional<BulkLoadTaskState>());
 		}
 	}
 
