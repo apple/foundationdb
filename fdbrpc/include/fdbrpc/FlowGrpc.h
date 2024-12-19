@@ -120,7 +120,7 @@ public:
 			if (status.ok()) {
 				promise->send(response);
 			} else {
-				std::cout << "Error: " << status.error_message() << std::endl;
+				// std::cout << "Error: " << status.error_message() << std::endl;
 				promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
 			}
 		});
@@ -140,7 +140,7 @@ public:
 			auto reader = (stub_.get()->*rpc)(&context, request);
 			while (reader->Read(&response)) {
 				if (promise->getFutureReferenceCount() == 0) {
-					std::cout << "Stream cancelled.\n";
+					// std::cout << "Stream cancelled.\n";
 					context.TryCancel();
 					return;
 				}
@@ -152,7 +152,7 @@ public:
 			if (status.ok()) {
 				promise->sendError(end_of_stream());
 			} else {
-				std::cout << "Error: " << status.error_message() << std::endl;
+				// std::cout << "Error: " << status.error_message() << std::endl;
 				promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
 			}
 		});
