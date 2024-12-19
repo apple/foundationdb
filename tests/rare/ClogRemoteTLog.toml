@@ -23,6 +23,7 @@ peer_latency_degradation_threshold = 1
 peer_latency_degradation_percentile = 0.5
 peer_latency_check_min_population = 10
 cc_max_exclusion_due_to_health = 3
+cc_degraded_peer_degree_to_exclude_min = 2
 
 [[test]]
 testTitle = "ClogRemoteTLog"
