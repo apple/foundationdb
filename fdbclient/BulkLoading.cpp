@@ -20,6 +20,25 @@
 
 #include "fdbclient/BulkLoading.h"
 
+std::string generateBulkLoadJobManifestFileName() {
+	return "job-manifest.txt";
+}
+
+std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests) {
+	std::string root = "";
+	std::string content;
+	for (const auto& [beginKey, manifest] : manifests) {
+		if (root.empty()) {
+			root = manifest.fileSet.rootPath;
+		} else {
+			ASSERT(manifest.fileSet.rootPath == root);
+		}
+		content = content + manifest.generateEntryInJobManifest() + "\n";
+	}
+	std::string head = "Manifest count: " + std::to_string(manifests.size()) + ", Root: " + root + "\n";
+	return head + content;
+}
+
 BulkLoadTaskState newBulkLoadTaskLocalSST(KeyRange range,
                                           std::string folder,
                                           std::string dataFile,

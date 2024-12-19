@@ -27,6 +27,7 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/Knobs.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
@@ -6070,17 +6071,19 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	state FlowLock::Releaser holder(data->serveBulkDumpParallelismLock); // A SS can handle one bulkDump task at a time
 	state Key rangeBegin = req.bulkDumpState.getRange().begin;
 	state Key rangeEnd = req.bulkDumpState.getRange().end;
+	state BulkLoadTransportMethod transportMethod = req.bulkDumpState.getTransportMethod();
+	state BulkLoadType dumpType = req.bulkDumpState.getType();
 	state int64_t readBytes = 0;
 	state int retryCount = 0;
 	state uint64_t batchNum = 0;
 	state Version versionToDump;
 	state RangeDumpData rangeDumpData;
-	state std::string rootFolderLocal = getBulkDumpJobRoot(data->bulkDumpFolder, req.bulkDumpState.getJobId());
-	state std::string rootFolderRemote =
-	    getBulkDumpJobRoot(req.bulkDumpState.getRemoteRoot(), req.bulkDumpState.getJobId());
+	state UID jobId = req.bulkDumpState.getJobId();
+	state std::string rootFolderLocal = data->bulkDumpFolder;
+	state std::string rootFolderRemote = req.bulkDumpState.getRemoteRoot();
 	// Use jobId and taskId as the folder to store the data of the task range
 	ASSERT(req.bulkDumpState.getTaskId().present());
-	state std::string taskFolder = getBulkDumpTaskFolder(req.bulkDumpState.getTaskId().get());
+	state std::string taskFolder = getBulkDumpJobTaskFolder(jobId, req.bulkDumpState.getTaskId().get());
 	state BulkLoadFileSet destinationFileSets;
 	state Transaction tr(data->cx);
 
@@ -6137,7 +6140,9 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			                                 byteSampleSetting,
 			                                 versionToDump,
 			                                 dataRange, // the actual range of the rangeDumpData.kvs
-			                                 rangeDumpData.kvsBytes);
+			                                 rangeDumpData.kvsBytes,
+			                                 dumpType,
+			                                 transportMethod);
 			readBytes = readBytes + rangeDumpData.kvsBytes;
 			TraceEvent(SevInfo, "SSBulkDump", data->thisServerID)
 			    .detail("Task", req.bulkDumpState.toString())
@@ -6167,7 +6172,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 				// The persisting range (dataRange) must be exactly same as the range presented in the manifest file
 				ASSERT(dataRange == KeyRangeRef(manifest.beginKey, manifest.endKey));
 				wait(persistCompleteBulkDumpRange(data->cx,
-				                                  req.bulkDumpState.getRangeCompleteState(dataRange, manifest)));
+				                                  req.bulkDumpState.generateBulkDumpMetadataToPersist(manifest)));
 			}
 
 			// Move to the next range

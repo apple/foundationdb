@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbrpc/FlowTransport.h"
@@ -76,12 +77,8 @@ std::string generateBulkDumpByteSampleFileName(Version version) {
 	return std::to_string(version) + "-sample.sst";
 }
 
-std::string getJobManifestFileName(const UID& jobId) {
-	return jobId.toString() + "-job-manifest.txt";
-}
-
-std::string getBulkDumpTaskFolder(const UID& taskId) {
-	return taskId.toString();
+std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId) {
+	return joinPath(jobId.toString(), taskId.toString());
 }
 
 // Append a string to a path.
@@ -182,7 +179,9 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
                                               const BulkLoadByteSampleSetting& byteSampleSetting,
                                               Version dumpVersion,
                                               const KeyRange& dumpRange,
-                                              int64_t dumpBytes) {
+                                              int64_t dumpBytes,
+                                              BulkLoadType dumpType,
+                                              BulkLoadTransportMethod transportMethod) {
 	BulkDumpFileFullPathSet localFiles(localFileSetConfig);
 
 	// Step 1: Clean up local folder
@@ -221,8 +220,15 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
 	                              remoteFileSetConfig.manifestFileName,
 	                              containDataFile ? remoteFileSetConfig.dataFileName : "",
 	                              containByteSampleFile ? remoteFileSetConfig.byteSampleFileName : "");
-	BulkLoadManifest manifest(
-	    fileSetRemote, dumpRange.begin, dumpRange.end, dumpVersion, "", dumpBytes, byteSampleSetting);
+	BulkLoadManifest manifest(fileSetRemote,
+	                          dumpRange.begin,
+	                          dumpRange.end,
+	                          dumpVersion,
+	                          "",
+	                          dumpBytes,
+	                          byteSampleSetting,
+	                          dumpType,
+	                          transportMethod);
 	writeStringToFile(abspath(localFiles.manifestFilePath), manifest.toString());
 	return manifest;
 }
@@ -351,6 +357,7 @@ ACTOR Future<Void> uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transpo
 
 ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState) {
 	state Transaction tr(cx);
+	ASSERT(bulkDumpState.isValid());
 	state Key beginKey = bulkDumpState.getRange().begin;
 	state Key endKey = bulkDumpState.getRange().end;
 	state KeyRange rangeToPersist;
@@ -396,21 +403,4 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 		}
 	}
 	return Void();
-}
-
-std::string generateJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests) {
-	std::string root = "";
-	std::string manifestList;
-	for (const auto& [beginKey, manifest] : manifests) {
-		if (root.empty()) {
-			root = manifest.fileSet.rootPath;
-		} else {
-			ASSERT(manifest.fileSet.rootPath == root);
-		}
-		manifestList = manifestList + manifest.getBeginKeyString() + ", " + manifest.getEndKeyString() + ", " +
-		               std::to_string(manifest.version) + ", " + std::to_string(manifest.bytes) + ", " +
-		               joinPath(manifest.fileSet.relativePath, manifest.fileSet.manifestFileName) + "\n";
-	}
-	std::string head = "Manifest count: " + std::to_string(manifests.size()) + ", Root: " + root + "\n";
-	return head + manifestList;
 }

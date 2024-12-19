@@ -32,9 +32,8 @@ enum class BulkLoadType : uint8_t {
 
 enum class BulkLoadTransportMethod : uint8_t {
 	Invalid = 0,
-	CP = 1, // Local file copy. Used when the data file is in the local file system for any storage server. Used for
-	        // simulation test and local cluster test.
-	BLOBSTORE = 2,
+	CP = 1, // Upload/download to local file system. Used by simulation test and local cluster test.
+	BLOBSTORE = 2, // Upload/download to remote blob store. Used by real clusters.
 };
 
 // Define the configuration of bytes sampling
@@ -80,6 +79,13 @@ struct BulkLoadByteSampleSetting {
 };
 
 // Definition of bulkload/dump files metadata
+// Each bulkload/dump task has exactly one range.
+// The range of the data is included in the Folder = RootPath + RelativePath.
+// The folder includes 1 manifest file which has all necessary metadata to load the range.
+// If the range is not empty, the folder includes 1 data file.
+// Otherwise, the dataFileName is empty.
+// If the data is sufficiently large, the folder includes 1 byteSample file.
+// Otherwise, the byteSampleFileName is empty.
 struct BulkLoadFileSet {
 	constexpr static FileIdentifier file_identifier = 1384501;
 
@@ -98,6 +104,8 @@ struct BulkLoadFileSet {
 		}
 	}
 
+	BulkLoadFileSet(const std::string& rootPath) : rootPath(rootPath) {}
+
 	bool isValid() const {
 		if (rootPath.empty()) {
 			ASSERT(false);
@@ -112,6 +120,7 @@ struct BulkLoadFileSet {
 			return false;
 		}
 		if (dataFileName.empty() && !byteSampleFileName.empty()) {
+			// If bytes sample file exists, the data file must exist.
 			ASSERT(false);
 			return false;
 		}
@@ -154,23 +163,34 @@ struct BulkDumpFileFullPathSet {
 	}
 };
 
-// Define the metadata of bulkdump manifest file
-// The file is uploaded along with the data files
+// Define the metadata of bulkload manifest file.
+// The manifest file stores the ground true of metadata of dumped data file, such as range and version.
+// The manifest file is uploaded along with the data file.
 struct BulkLoadManifest {
 	constexpr static FileIdentifier file_identifier = 1384502;
 
 	BulkLoadManifest() = default;
 
+	// Used when dumping to manifest file and persist to metadata.
+	// So, we need to make sure the content is valid.
 	BulkLoadManifest(const BulkLoadFileSet& fileSet,
 	                 const Key& beginKey,
 	                 const Key& endKey,
 	                 const Version& version,
 	                 const std::string& checksum,
 	                 int64_t bytes,
-	                 const BulkLoadByteSampleSetting& byteSampleSetting)
+	                 const BulkLoadByteSampleSetting& byteSampleSetting,
+	                 BulkLoadType loadType,
+	                 BulkLoadTransportMethod transportMethod)
 	  : fileSet(fileSet), beginKey(beginKey), endKey(endKey), version(version), checksum(checksum), bytes(bytes),
-	    byteSampleSetting(byteSampleSetting) {
+	    byteSampleSetting(byteSampleSetting), loadType(loadType), transportMethod(transportMethod) {
 		ASSERT(isValid());
+	}
+
+	// Used when initialize a bulk dump job. Information are partially filled at this time.
+	BulkLoadManifest(BulkLoadType loadType, BulkLoadTransportMethod transportMethod, const std::string& rootPath)
+	  : loadType(loadType), transportMethod(transportMethod) {
+		fileSet = BulkLoadFileSet(rootPath);
 	}
 
 	bool isValid() const {
@@ -183,23 +203,60 @@ struct BulkLoadManifest {
 		if (!byteSampleSetting.isValid()) {
 			return false;
 		}
+		if (transportMethod == BulkLoadTransportMethod::Invalid) {
+			return false;
+		} else if (transportMethod != BulkLoadTransportMethod::CP &&
+		           transportMethod != BulkLoadTransportMethod::BLOBSTORE) {
+			ASSERT(false);
+		}
+		if (loadType == BulkLoadType::Invalid) {
+			return false;
+		} else if (loadType != BulkLoadType::SST) {
+			ASSERT(false);
+		}
 		return true;
 	}
+
+	std::string getRootPath() const { return fileSet.rootPath; }
+
+	KeyRange getRange() const { return Standalone(KeyRangeRef(beginKey, endKey)); }
+
+	BulkLoadTransportMethod getTransportMethod() const { return transportMethod; }
+
+	BulkLoadType getLoadType() const { return loadType; }
 
 	std::string getBeginKeyString() const { return beginKey.toFullHexStringPlain(); }
 
 	std::string getEndKeyString() const { return endKey.toFullHexStringPlain(); }
 
+	void setRange(const KeyRange& range) {
+		ASSERT(!range.empty() && beginKey.empty() && endKey.empty());
+		beginKey = range.begin;
+		endKey = range.end;
+		return;
+	}
+
 	// Generating human readable string to stored in the manifest file
 	std::string toString() const {
 		return fileSet.toString() + ", [BeginKey]: " + getBeginKeyString() + ", [EndKey]: " + getEndKeyString() +
 		       ", [Version]: " + std::to_string(version) + ", [Checksum]: " + checksum +
-		       ", [Bytes]: " + std::to_string(bytes) + ", " + byteSampleSetting.toString();
+		       ", [Bytes]: " + std::to_string(bytes) + ", " + byteSampleSetting.toString() +
+		       ", [loadType]: " + std::to_string(static_cast<uint8_t>(loadType)) +
+		       ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod));
+	}
+
+	// Generate human readable string as an entry in the job manifest file.
+	// A job is partitioned into tasks by ranges.
+	// The job manifest includes all manifest files for all ranges within the job.
+	std::string generateEntryInJobManifest() const {
+		return getBeginKeyString() + ", " + getEndKeyString() + ", " + std::to_string(version) + ", " +
+		       std::to_string(bytes) + ", " + joinPath(fileSet.relativePath, fileSet.manifestFileName);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, fileSet, beginKey, endKey, version, checksum, bytes, byteSampleSetting);
+		serializer(
+		    ar, fileSet, beginKey, endKey, version, checksum, bytes, byteSampleSetting, loadType, transportMethod);
 	}
 
 	BulkLoadFileSet fileSet;
@@ -209,6 +266,8 @@ struct BulkLoadManifest {
 	std::string checksum;
 	int64_t bytes;
 	BulkLoadByteSampleSetting byteSampleSetting;
+	BulkLoadType loadType = BulkLoadType::Invalid;
+	BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
 };
 
 enum class BulkLoadPhase : uint8_t {
@@ -374,6 +433,14 @@ private:
 	// Set by DD
 	Optional<UID> dataMoveId;
 };
+
+// Define job manifest file name.
+std::string generateBulkLoadJobManifestFileName();
+
+// Define human readable BulkLoad job manifest content in the following format:
+// Head: Manifest count: <count>, Root: <root>
+// Rows: BeginKey, EndKey, Version, Bytes, ManifestPath
+std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
 
 BulkLoadTaskState newBulkLoadTaskLocalSST(KeyRange range,
                                           std::string folder,

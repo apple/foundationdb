@@ -3088,7 +3088,7 @@ ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpTask) {
 				    .detail("Task", bulkDumpTask.toString());
 				throw bulkdump_task_failed();
 			}
-			if (!normalKeys.contains(bulkDumpTask.getRange())) {
+			if (!normalKeys.contains(bulkDumpTask.getJobRange())) {
 				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
@@ -3096,7 +3096,7 @@ ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpTask) {
 				    .detail("Task", bulkDumpTask.toString());
 				throw bulkdump_task_failed();
 			}
-			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpTask.getRange(), bulkDumpStateValue(bulkDumpTask)));
+			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpTask.getJobRange(), bulkDumpStateValue(bulkDumpTask)));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -3157,8 +3157,8 @@ ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(Database cx
 			}
 			BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
 			KeyRange range = Standalone(KeyRangeRef(rangeResult[i].key, rangeResult[i + 1].key));
-			if (range != bulkDumpState.getRange()) {
-				ASSERT(bulkDumpState.getRange().contains(range));
+			if (bulkDumpState.getRange().empty()) {
+				ASSERT(bulkDumpState.getJobRange().contains(range));
 				continue;
 			}
 			if (!phase.present() || phase.get() == bulkDumpState.getPhase()) {

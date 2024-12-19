@@ -1457,7 +1457,7 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 						}
 						// In case no ongoing task on the same range
 						SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
-						                                        bulkDumpState.getRangeTaskState(taskRange));
+						                                        bulkDumpState.generateRangeTask(taskRange));
 						// Issue task
 						self->ongoingBulkDumpActors.insert(
 						    taskRange,
@@ -1487,11 +1487,11 @@ ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self
 		return Void();
 	}
 	// Upload job manifest file
-	std::string content = generateJobManifestFileContent(manifests);
+	std::string content = generateBulkLoadJobManifestFileContent(manifests);
 	ASSERT(!content.empty() && !self->bulkDumpFolder.empty());
 	state std::string localFolder = getBulkDumpJobRoot(self->bulkDumpFolder, jobId);
 	std::string remoteFolder = getBulkDumpJobRoot(remoteRoot, jobId);
-	std::string jobManifestFileName = getJobManifestFileName(jobId);
+	std::string jobManifestFileName = generateBulkLoadJobManifestFileName();
 	std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
 	generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, content, self->ddId);
 	wait(uploadBulkDumpJobManifestFile(

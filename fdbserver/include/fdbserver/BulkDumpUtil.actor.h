@@ -75,11 +75,8 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 // Define bulk dump job folder. Job is set by user. At most one job at a time globally.
 std::string generateBulkDumpJobFolder(const UID& jobId);
 
-// Define job manifest file name.
-std::string getJobManifestFileName(const UID& jobId);
-
 // Define task folder name.
-std::string getBulkDumpTaskFolder(const UID& taskId);
+std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId);
 
 // Define job root folder.
 std::string getBulkDumpJobRoot(const std::string& root, const UID& jobId);
@@ -88,7 +85,7 @@ std::string getBulkDumpJobRoot(const std::string& root, const UID& jobId);
 // Each row is a range sorted by the beginKey. Any two ranges do not have overlapping.
 // Col: beginKey, endKey, dataVersion, dataBytes, manifestPath.
 // dataVersion should be always valid. dataBytes can be 0 in case of an empty range.
-std::string generateJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
+std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
 
 // The size of sortedData is defined at the place of generating the data (getRangeDataToDump).
 // The size is configured by MOVE_SHARD_KRM_ROW_LIMIT.
@@ -100,7 +97,9 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
                                               const BulkLoadByteSampleSetting& byteSampleSetting,
                                               Version dumpVersion,
                                               const KeyRange& dumpRange,
-                                              int64_t dumpBytes);
+                                              int64_t dumpBytes,
+                                              BulkLoadType dumpType,
+                                              BulkLoadTransportMethod transportMethod);
 
 void generateBulkDumpJobManifestFile(const std::string& workFolder,
                                      const std::string& localJobManifestFilePath,
