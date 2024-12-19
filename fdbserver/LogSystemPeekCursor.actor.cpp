@@ -593,6 +593,9 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
 		logSet->updateLocalitySet(logSet->tLogLocalities);
 	}
 
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		bestServer = -1;
+	}
 	for (int i = 0; i < logServers.size(); i++) {
 		auto cursor = makeReference<ILogSystem::ServerPeekCursor>(
 		    logServers[i], tag, begin, end, bestServer >= 0, parallelGetMore);
@@ -612,6 +615,9 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem:
   : logSet(logSet), serverCursors(serverCursors), bestServer(bestServer), currentCursor(0), readQuorum(readQuorum),
     nextVersion(nextVersion), messageVersion(messageVersion), hasNextMessage(false),
     randomID(deterministicRandom()->randomUniqueID()), tLogReplicationFactor(tLogReplicationFactor) {
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		bestServer = -1;
+	}
 	sortedVersions.resize(serverCursors.size());
 	calcHasMessage();
 }
@@ -858,6 +864,9 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
     messageVersion(begin), hasNextMessage(false), useBestSet(true), randomID(deterministicRandom()->randomUniqueID()) {
 	serverCursors.resize(logSets.size());
 	int maxServers = 0;
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		bestServer = -1;
+	}
 	for (int i = 0; i < logSets.size(); i++) {
 		for (int j = 0; j < logSets[i]->logServers.size(); j++) {
 			auto cursor = makeReference<ILogSystem::ServerPeekCursor>(
@@ -880,6 +889,9 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
     currentCursor(0), nextVersion(nextVersion), messageVersion(messageVersion), hasNextMessage(false),
     useBestSet(useBestSet), randomID(deterministicRandom()->randomUniqueID()) {
 	int maxServers = 0;
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		bestServer = -1;
+	}
 	for (int i = 0; i < logSets.size(); i++) {
 		maxServers = std::max<int>(maxServers, serverCursors[i].size());
 	}
