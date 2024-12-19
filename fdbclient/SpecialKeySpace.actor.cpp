@@ -925,33 +925,11 @@ bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR Future<bool> checkExclusion(Database db,
-                                  std::vector<AddressExclusion>* addresses,
-                                  std::set<AddressExclusion>* exclusions,
+                                  std::vector<AddressExclusion> addresses,
+                                  std::set<AddressExclusion> exclusions,
+                                  std::unordered_set<std::string> localities,
                                   bool markFailed,
                                   Optional<std::string>* msg) {
-
-	if (markFailed) {
-		state bool safe;
-		try {
-			bool _safe = wait(checkSafeExclusions(db, *addresses));
-			safe = _safe;
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
-				throw;
-			TraceEvent("CheckSafeExclusionsError").error(e);
-			safe = false;
-		}
-		if (!safe) {
-			std::string temp = "ERROR: It is unsafe to exclude the specified servers at this time.\n"
-			                   "Please check that this exclusion does not bring down an entire storage team.\n"
-			                   "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
-			                   "You may add more storage processes or coordinators to make the operation safe.\n"
-			                   "Call set(\"0xff0xff/management/failed/<ADDRESS...>\", ...) to exclude without "
-			                   "performing safety checks.\n";
-			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
-			return false;
-		}
-	}
 	StatusObject status = wait(StatusClient::statusFetcher(db));
 	state std::string errorString =
 	    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
@@ -980,68 +958,129 @@ ACTOR Future<bool> checkExclusion(Database db,
 	state int64_t totalKvStoreFreeBytes = 0;
 	state int64_t totalKvStoreUsedBytes = 0;
 	state int64_t totalKvStoreUsedBytesNonExcluded = 0;
-	// Keep track if we exclude any storage process with the provided adddresses
-	state bool excludedAddressesContainsStorageRole = false;
+	state std::map<std::string, std::vector<std::string>> parsedLocalities;
+	// Convert the passed localities into a map of vectors to make it easier to check if a process
+	// is excluded by locality.
+	for (const auto& locality : localities) {
+		std::pair<std::string, std::string> locality_key_value = decodeLocality(locality);
+		if (locality_key_value.first == "") {
+			continue;
+		}
+
+		parsedLocalities[locality_key_value.first].push_back(locality_key_value.second);
+	}
+
+	// If the exclusion marks the excluded processes as failed and the provided addresses are not empty,
+	// we will copy the input addresses into a new vector to not modify the input vector when additional
+	// addresses are added. We do this to get the excluded addresses when locality based exclusions are used
+	// with the failed flag, in this case the checkSafeExclusions will be called with the excluded addresses
+	// to verify if the exclusion can be done. In case of locality based exclusions the addresses should
+	// be empty and if the addresses are not empty, we are not using the locality based exclusion. So this
+	// step is a safeguard for future changes where the provided addresses are not empty and locality based
+	// exclusions are used.
+	state std::vector<AddressExclusion> excludedAddresses;
+	if (markFailed && !addresses.empty()) {
+		excludedAddresses = addresses;
+	}
 
 	try {
 		for (auto proc : processesMap.obj()) {
 			StatusObjectReader process(proc.second);
-			std::string addrStr;
-			if (!process.get("address", addrStr)) {
-				*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
-				return false;
-			}
-			NetworkAddress addr = NetworkAddress::parse(addrStr);
-			bool includedInExclusion = addressExcluded(*exclusions, addr);
-			bool excluded = (process.has("excluded") && process.last().get_bool()) || includedInExclusion;
-
 			StatusObjectReader localityObj;
+			bool hasLocalities = process.get("locality", localityObj);
+
+			bool excluded = process.has("excluded") && process.last().get_bool();
+			// If the process is already excluded based on the process status, we don't have to check if the process is
+			// also excluded by address or locality.
+			if (!excluded) {
+				// First check if the process is excluded based on the exclusions.
+				std::string addrStr;
+				if (!process.get("address", addrStr)) {
+					*msg =
+					    ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
+					return false;
+				}
+				NetworkAddress addr = NetworkAddress::parse(addrStr);
+				excluded = addressExcluded(exclusions, addr);
+
+				// If the process is not already excluded and the parsed localites have at least one entry,
+				// check if the process is excluded by localities.
+				if (!excluded && hasLocalities && !parsedLocalities.empty()) {
+					// Iterate over all excluded localites and check if the process is excluded based on the locality.
+					for (std::map<std::string, std::vector<std::string>>::iterator it = parsedLocalities.begin();
+					     it != parsedLocalities.end();
+					     ++it) {
+						std::string localityValue;
+						if (!localityObj.get(it->first, localityValue)) {
+							// If the locality doesn't exist in the locality object skip over it.
+							continue;
+						}
+
+						const std::vector<std::string>& localityVec = it->second;
+						// When the process has a matching locality field, add it to the exclusion list.
+						if (std::find(localityVec.begin(), localityVec.end(), localityValue) != localityVec.end()) {
+							excluded = true;
+							// If the exclusion will exclude the processes as failed, we have to store the addresses of
+							// the excluded processes in this list, as the checkSafeExclusions check will work on this
+							// information.
+							if (markFailed) {
+								auto addrExclusion = AddressExclusion(addr.ip, addr.port);
+								if (std::find(excludedAddresses.begin(), excludedAddresses.end(), addrExclusion) !=
+								    excludedAddresses.end()) {
+									excludedAddresses.push_back(addrExclusion);
+								}
+							}
+
+							break;
+						}
+					}
+				}
+			}
+
 			std::string disk_id;
-			if (process.get("locality", localityObj)) {
+			if (hasLocalities) {
 				process.get("disk_id", disk_id); // its ok if we don't have this field
 			}
 
 			StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
 			for (StatusObjectReader role : rolesArray) {
-				if (role["role"].get_str() == "storage") {
-					ssTotalCount++;
-
-					// Check if we are excluding a process that serves the storage role. We only have to check the free
-					// capacity if we are excluding at least one process that serves the storage role.
-					if (!excludedAddressesContainsStorageRole && includedInExclusion) {
-						excludedAddressesContainsStorageRole = true;
-					}
-
-					int64_t used_bytes;
-					if (!role.get("kvstore_used_bytes", used_bytes)) {
-						*msg = ManagementAPIError::toJsonString(
-						    false, markFailed ? "exclude failed" : "exclude", errorString);
-						return false;
-					}
-
-					int64_t free_bytes;
-					if (!role.get("kvstore_free_bytes", free_bytes)) {
-						*msg = ManagementAPIError::toJsonString(
-						    false, markFailed ? "exclude failed" : "exclude", errorString);
-						return false;
-					}
-
-					totalKvStoreUsedBytes += used_bytes;
-
-					if (!excluded) {
-						totalKvStoreUsedBytesNonExcluded += used_bytes;
-
-						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
-							totalKvStoreFreeBytes += free_bytes;
-							if (!disk_id.empty()) {
-								diskLocalities.insert(disk_id);
-							}
-						}
-					}
+				if (role["role"].get_str() != "storage") {
+					continue;
 				}
 
+				ssTotalCount++;
+
+				// Check if we are excluding a process that serves the storage role. We only have to check the free
+				// capacity if we are excluding at least one process that serves the storage role.
 				if (excluded) {
 					ssExcludedCount++;
+				}
+
+				int64_t used_bytes;
+				if (!role.get("kvstore_used_bytes", used_bytes)) {
+					*msg =
+					    ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
+					return false;
+				}
+
+				int64_t free_bytes;
+				if (!role.get("kvstore_free_bytes", free_bytes)) {
+					*msg =
+					    ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
+					return false;
+				}
+
+				totalKvStoreUsedBytes += used_bytes;
+
+				if (!excluded) {
+					totalKvStoreUsedBytesNonExcluded += used_bytes;
+
+					if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
+						totalKvStoreFreeBytes += free_bytes;
+						if (!disk_id.empty()) {
+							diskLocalities.insert(disk_id);
+						}
+					}
 				}
 			}
 		}
@@ -1053,17 +1092,51 @@ ACTOR Future<bool> checkExclusion(Database db,
 
 	// If the exclusion command only contains processes that serve a non storage role we can skip the free capacity
 	// check in order to not block those exclusions.
-	if (!excludedAddressesContainsStorageRole) {
-		return true;
+	if (ssExcludedCount > 0) {
+		// Calculate the total used and free space for the non excluded processes. If we are not doing this and in the
+		// rare case that someone would exclude all SS processes, this would cause otherwise a division through 0 and
+		// therefore cause the fdbcli to crash, so we calculate the total free and used non excluded KV bytes before
+		// calculating the ratio.
+		double totalKvUsedAndFreeNonExcluded = totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytes;
+		if (ssExcludedCount == ssTotalCount || totalKvUsedAndFreeNonExcluded == 0.0) {
+			std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
+			                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
+			                   "checking free space.\n";
+			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
+			return false;
+		}
+
+		if (1 - (totalKvStoreUsedBytes / totalKvUsedAndFreeNonExcluded) <= 0.1) {
+			std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
+			                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
+			                   "checking free space.\n";
+			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
+			return false;
+		}
 	}
 
-	double finalFreeRatio = 1 - (totalKvStoreUsedBytes / (totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytes));
-	if (ssExcludedCount == ssTotalCount || finalFreeRatio <= 0.1) {
-		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
-		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
-		                   "checking free space.\n";
-		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
-		return false;
+	// This check was moved below to let the addresses vector being updated in cases of locality based exclusions.
+	if (markFailed) {
+		state bool safe;
+		try {
+			bool _safe = wait(checkSafeExclusions(db, excludedAddresses));
+			safe = _safe;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			TraceEvent("CheckSafeExclusionsError").error(e);
+			safe = false;
+		}
+		if (!safe) {
+			std::string temp = "ERROR: It is unsafe to exclude the specified servers at this time.\n"
+			                   "Please check that this exclusion does not bring down an entire storage team.\n"
+			                   "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
+			                   "You may add more storage processes or coordinators to make the operation safe.\n"
+			                   "Call set(\"0xff0xff/management/failed/<ADDRESS...>\", ...) to exclude without "
+			                   "performing safety checks.\n";
+			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
+			return false;
+		}
 	}
 
 	return true;
@@ -1111,14 +1184,16 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 	state Optional<std::string> result;
 	state std::vector<AddressExclusion> addresses;
 	state std::set<AddressExclusion> exclusions;
+	state std::unordered_set<std::string> localities;
+
 	if (!parseNetWorkAddrFromKeys(ryw, failed, addresses, exclusions, result))
 		return result;
 	// If force option is not set, we need to do safety check
 	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    failed ? "failed" : "excluded", "force")];
-	// only do safety check when we have servers to be excluded and the force option key is not set
+	// Only do safety check when we have servers to be excluded and the force option key is not set
 	if (addresses.size() && !(force.first && force.second.present())) {
-		bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, failed, &result));
+		bool safe = wait(checkExclusion(ryw->getDatabase(), addresses, exclusions, localities, failed, &result));
 		if (!safe)
 			return result;
 	}
@@ -2671,13 +2746,10 @@ void includeLocalities(ReadYourWritesTransaction* ryw) {
 }
 
 // Reads the excludedlocality and failed locality keys using management api,
-// parses them and returns the list.
+// Parses them and returns the list.
 bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
                              bool failed,
                              std::unordered_set<std::string>& localities,
-                             std::vector<AddressExclusion>& addresses,
-                             std::set<AddressExclusion>& exclusions,
-                             std::vector<ProcessData>& workers,
                              Optional<std::string>& msg) {
 	KeyRangeRef range = failed ? SpecialKeySpace::getManagementApiCommandRange("failedlocality")
 	                           : SpecialKeySpace::getManagementApiCommandRange("excludedlocality");
@@ -2694,12 +2766,6 @@ bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
 			Key locality = iter->begin().removePrefix(range.begin);
 			if (locality.startsWith(LocalityData::ExcludeLocalityPrefix) &&
 			    locality.toString().find(':') != std::string::npos) {
-				std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality.toString());
-				if (!localityAddresses.empty()) {
-					std::copy(localityAddresses.begin(), localityAddresses.end(), back_inserter(addresses));
-					exclusions.insert(localityAddresses.begin(), localityAddresses.end());
-				}
-
 				localities.insert(locality.toString());
 			} else {
 				std::string error = "ERROR: \'" + locality.toString() + "\' is not a valid locality\n";
@@ -2710,6 +2776,7 @@ bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
 		}
 		++iter;
 	}
+
 	return true;
 }
 
@@ -2722,16 +2789,21 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 	state std::set<AddressExclusion> exclusions;
 
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
+	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	ryw->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state std::vector<ProcessData> workers = wait(getWorkers(&ryw->getTransaction()));
-	if (!parseLocalitiesFromKeys(ryw, failed, localities, addresses, exclusions, workers, result))
+	// We are not parsing here over the worker list as the checkExclusion step will iterate over the status
+	// and the status will contain the same information for workers (actually a bit more information).
+	// If we fetch the workers here and in the status, we are bascially fetching the same information twice
+	// which is fine under normal circumstances, but there is no need to do that.
+	if (!parseLocalitiesFromKeys(ryw, failed, localities, result))
 		return result;
 	// If force option is not set, we need to do safety check
 	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    failed ? "failed_locality" : "excluded_locality", "force")];
 	// only do safety check when we have localities to be excluded and the force option key is not set
 	if (localities.size() && !(force.first && force.second.present())) {
-		bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, failed, &result));
+		bool safe = wait(checkExclusion(ryw->getDatabase(), addresses, exclusions, localities, failed, &result));
 		if (!safe)
 			return result;
 	}
