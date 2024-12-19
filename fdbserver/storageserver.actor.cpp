@@ -22,6 +22,7 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <type_traits>
 #include <unordered_map>
 
@@ -1524,9 +1525,9 @@ public:
 		LatencySample updateEncryptionLatencySample;
 
 		LatencyBands readLatencyBands;
-		LatencySample mappedRangeSample; // Samples getMappedRange latency
-		LatencySample mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
-		LatencySample mappedRangeLocalSample; // Samples getMappedRange local subquery latency
+		std::unique_ptr<LatencySample> mappedRangeSample; // Samples getMappedRange latency
+		std::unique_ptr<LatencySample> mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
+		std::unique_ptr<LatencySample> mappedRangeLocalSample; // Samples getMappedRange local subquery latency
 
 		explicit Counters(StorageServer* self)
 		  : CommonStorageCounters("StorageServer", self->thisServerID.toString(), &self->metrics),
@@ -1584,19 +1585,6 @@ public:
 		                        self->thisServerID,
 		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
-		    mappedRangeSample("GetMappedRangeMetrics",
-		                      self->thisServerID,
-		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    mappedRangeRemoteSample("GetMappedRangeRemoteMetrics",
-		                            self->thisServerID,
-		                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    mappedRangeLocalSample("GetMappedRangeLocalMetrics",
-		                           self->thisServerID,
-		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    kvReadRangeLatencySample("KVGetRangeMetrics",
 		                             self->thisServerID,
 		                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -1608,7 +1596,20 @@ public:
 		    updateEncryptionLatencySample("UpdateEncryptionLatencyMetrics",
 		                                  self->thisServerID,
 		                                  SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                  SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
+		                                  SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+		    mappedRangeSample(std::make_unique<LatencySample>("GetMappedRangeMetrics",
+		                                                      self->thisServerID,
+		                                                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
+		    mappedRangeRemoteSample(std::make_unique<LatencySample>("GetMappedRangeRemoteMetrics",
+		                                                            self->thisServerID,
+		                                                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
+		    mappedRangeLocalSample(std::make_unique<LatencySample>("GetMappedRangeLocalMetrics",
+		                                                           self->thisServerID,
+		                                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -4176,7 +4177,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 				++data->counters.quickGetValueHit;
 				copyOptionalValue(a, getValue, reply.value);
 				const double duration = g_network->timer() - getValueStart;
-				data->counters.mappedRangeLocalSample.addMeasurement(duration);
+				data->counters.mappedRangeLocalSample->addMeasurement(duration);
 				return getValue;
 			}
 			// Otherwise fallback.
@@ -4200,7 +4201,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 		Optional<Value> valueOption = wait(valueFuture);
 		copyOptionalValue(a, getValue, valueOption);
 		double duration = g_network->timer() - getValueStart;
-		data->counters.mappedRangeRemoteSample.addMeasurement(duration);
+		data->counters.mappedRangeRemoteSample->addMeasurement(duration);
 		return getValue;
 	} else {
 		throw quick_get_value_miss();
@@ -4923,7 +4924,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 			a->dependsOn(reply.arena);
 			getRange.result = RangeResultRef(reply.data, reply.more);
 			const double duration = g_network->timer() - getValuesStart;
-			data->counters.mappedRangeLocalSample.addMeasurement(duration);
+			data->counters.mappedRangeLocalSample->addMeasurement(duration);
 			if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 				g_traceBatch.addEvent("TransactionDebug",
 				                      pOriginalReq->options.get().debugID.get().first(),
@@ -4954,7 +4955,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		a->dependsOn(rangeResult.arena());
 		getRange.result = rangeResult;
 		const double duration = g_network->timer() - getValuesStart;
-		data->counters.mappedRangeRemoteSample.addMeasurement(duration);
+		data->counters.mappedRangeRemoteSample->addMeasurement(duration);
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 			g_traceBatch.addEvent("TransactionDebug",
 			                      pOriginalReq->options.get().debugID.get().first(),
@@ -6799,7 +6800,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
-	data->counters.mappedRangeSample.addMeasurement(duration);
+	data->counters.mappedRangeSample->addMeasurement(duration);
 	if (data->latencyBandConfig.present()) {
 		int maxReadBytes =
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
@@ -14745,6 +14746,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		self.setTssPair(ssi.tssPairID.get());
 		ASSERT(self.isTss());
 	}
+	static_assert(sizeof(self) < 16384, "FastAlloc doesn't allow allocations larger than 16KB");
 	TraceEvent("StorageServerInitProgress", ssi.id())
 	    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
 	    .detail("Step", "4.StartInit");
