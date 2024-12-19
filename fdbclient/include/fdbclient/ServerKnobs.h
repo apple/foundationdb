@@ -739,6 +739,8 @@ public:
 	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE; // The maximum number of degraded peers when excluding a server. When the
 	                                        // number of degraded peers is more than this value, we will not exclude
 	                                        // this server since it may because of server overload.
+	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE_MIN; // Similar to CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE which is an upper
+	                                            // bound, this is a lower bound.
 	int CC_MAX_EXCLUSION_DUE_TO_HEALTH; // The max number of degraded servers to exclude by Cluster Controller due to
 	                                    // degraded health.
 	bool CC_HEALTH_TRIGGER_RECOVERY; // If true, cluster controller will kill the master to trigger recovery when
