@@ -130,24 +130,24 @@ struct BlobRestoreWorkload : TestWorkload {
 		ranges.push_back(ranges.arena(), normalKeys);
 		addDefaultBackupRanges(ranges);
 
-		Version version = wait(self->backupAgent_.restore(self->extraDb_,
-		                                                  {},
-		                                                  "default"_sr,
-		                                                  KeyRef(mlogsUrl),
-		                                                  {},
-		                                                  ranges,
-		                                                  WaitForComplete::False,
-		                                                  self->restoreTargetVersion_,
-		                                                  Verbose::True,
-		                                                  ""_sr,
-		                                                  ""_sr,
-		                                                  LockDB::True,
-		                                                  UnlockDB::True,
-		                                                  OnlyApplyMutationLogs::False,
-		                                                  InconsistentSnapshotOnly::False,
-		                                                  invalidVersion,
-		                                                  {},
-		                                                  self->blobManifestUrl_.toString()));
+		Version version = wait(self->backupAgent_.restoreWithBeginVersion(self->extraDb_,
+		                                                                  {},
+		                                                                  "default"_sr,
+		                                                                  KeyRef(mlogsUrl),
+		                                                                  {},
+		                                                                  ranges,
+		                                                                  WaitForComplete::False,
+		                                                                  self->restoreTargetVersion_,
+		                                                                  Verbose::True,
+		                                                                  ""_sr,
+		                                                                  ""_sr,
+		                                                                  LockDB::True,
+		                                                                  UnlockDB::True,
+		                                                                  OnlyApplyMutationLogs::False,
+		                                                                  InconsistentSnapshotOnly::False,
+		                                                                  invalidVersion,
+		                                                                  {},
+		                                                                  self->blobManifestUrl_.toString()));
 		fmt::print("Submit blob restore to version {} \n", version);
 		return Void();
 	}
