@@ -311,6 +311,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				                                                SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
 				                                          : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
 				          db->forceMasterFailure.onTrigger())) {
+					cluster->recentHealthTriggeredRecoveryTime.push(now());
 					break;
 				}
 				when(wait(db->serverInfo->onChange())) {}
@@ -3061,7 +3062,6 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 				if (self->shouldTriggerRecoveryDueToDegradedServers()) {
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
 						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
-							self->recentHealthTriggeredRecoveryTime.push(now());
 							self->excludedDegradedServers.clear();
 							for (const auto& degradedServer : self->degradationInfo.degradedServers) {
 								self->excludedDegradedServers[degradedServer] = now();
