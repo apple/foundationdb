@@ -4,6 +4,15 @@
 Release Notes
 #############
 
+7.1.67
+======
+* Same as 7.1.66 release with AVX enabled.
+
+7.1.66
+======
+* Released with AVX disabled.
+* Refactor check exclusion logic to reduce work in locality-based exclusions `(PR #11835) <https://github.com/apple/foundationdb/pull/11835>`_
+
 7.1.61
 ======
 * Same as 7.1.60 release with AVX enabled.
