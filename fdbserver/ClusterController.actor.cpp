@@ -3962,10 +3962,6 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 	NetworkAddress worker3(IPAddress::parse("1.1.1.2").get(), 1);
 	NetworkAddress badPeer(IPAddress::parse("1.1.1.3").get(), 1);
 
-	if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY) {
-		addProcessesToSameDC(data, { worker1, worker2, worker3, badPeer });
-	}
-
 	ASSERT(data.workerHealth.empty());
 
 	// {worker1, worker2, worker3} complain about badPeer
