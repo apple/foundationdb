@@ -27,10 +27,10 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const std::string simulationBulkLoadFolder = "bulkLoad";
+const std::string simulationBulkLoadFolder = joinPath("simfdb", "bulkload");
 
 struct BulkLoadTaskTestUnit {
-	BulkLoadState bulkLoadTask;
+	BulkLoadTaskState bulkLoadTask;
 	std::vector<KeyValue> data;
 	BulkLoadTaskTestUnit() = default;
 };
@@ -66,7 +66,15 @@ struct BulkLoading : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR Future<Void> submitBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
+	std::string generateRandomBulkLoadDataFileName() {
+		return deterministicRandom()->randomUniqueID().toString() + "-data.sst";
+	}
+
+	std::string generateRandomBulkLoadBytesSampleFileName() {
+		return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
+	}
+
+	ACTOR Future<Void> submitBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadTaskState> tasks) {
 		state int i = 0;
 		for (; i < tasks.size(); i++) {
 			loop {
@@ -75,14 +83,14 @@ struct BulkLoading : TestWorkload {
 					TraceEvent("BulkLoadingSubmitBulkLoadTask")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
-					    .detail("BulkLoadState", tasks[i].toString());
+					    .detail("BulkLoadTaskState", tasks[i].toString());
 					break;
 				} catch (Error& e) {
 					TraceEvent("BulkLoadingSubmitBulkLoadTaskError")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .errorUnsuppressed(e)
-					    .detail("BulkLoadState", tasks[i].toString());
+					    .detail("BulkLoadTaskState", tasks[i].toString());
 					wait(delay(0.1));
 				}
 			}
@@ -90,7 +98,7 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> acknowledgeBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadState> tasks) {
+	ACTOR Future<Void> acknowledgeBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadTaskState> tasks) {
 		state int i = 0;
 		for (; i < tasks.size(); i++) {
 			loop {
@@ -99,14 +107,14 @@ struct BulkLoading : TestWorkload {
 					TraceEvent("BulkLoadingAcknowledgeBulkLoadTask")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
-					    .detail("BulkLoadState", tasks[i].toString());
+					    .detail("BulkLoadTaskState", tasks[i].toString());
 					break;
 				} catch (Error& e) {
 					TraceEvent("BulkLoadingAcknowledgeBulkLoadTaskError")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .errorUnsuppressed(e)
-					    .detail("BulkLoadState", tasks[i].toString());
+					    .detail("BulkLoadTaskState", tasks[i].toString());
 					if (e.code() == error_code_bulkload_task_outdated) {
 						break; // has been erased or overwritten by other tasks
 					}
@@ -143,19 +151,21 @@ struct BulkLoading : TestWorkload {
 		while (beginKey < endKey) {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				RangeResult res = wait(krmGetRanges(&tr, bulkLoadPrefix, Standalone(KeyRangeRef(beginKey, endKey))));
+				RangeResult res =
+				    wait(krmGetRanges(&tr, bulkLoadTaskPrefix, Standalone(KeyRangeRef(beginKey, endKey))));
 				for (int i = 0; i < res.size() - 1; i++) {
 					if (!res[i].value.empty()) {
-						BulkLoadState bulkLoadState = decodeBulkLoadState(res[i].value);
-						ASSERT(bulkLoadState.isValid());
-						if (bulkLoadState.getRange() != KeyRangeRef(res[i].key, res[i + 1].key)) {
+						BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
+						ASSERT(bulkLoadTaskState.isValid(/*checkManifest=*/false));
+						// We do not check manifest because we are not fully setting manifest in this simulation test
+						if (bulkLoadTaskState.getRange() != KeyRangeRef(res[i].key, res[i + 1].key)) {
 							continue; // Ignore outdated task
 						}
-						if (bulkLoadState.phase != BulkLoadPhase::Complete) {
+						if (bulkLoadTaskState.phase != BulkLoadPhase::Complete) {
 							TraceEvent("BulkLoadingWorkLoadIncompleteTasks")
 							    .setMaxEventLength(-1)
 							    .setMaxFieldLength(-1)
-							    .detail("Task", bulkLoadState.toString());
+							    .detail("Task", bulkLoadTaskState.toString());
 							return false;
 						}
 					}
@@ -188,22 +198,22 @@ struct BulkLoading : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-				RangeResult res = wait(krmGetRanges(&tr, bulkLoadPrefix, allKeys));
+				RangeResult res = wait(krmGetRanges(&tr, bulkLoadTaskPrefix, allKeys));
 				beginKey = res.back().key;
 				int emptyCount = 0;
 				int nonEmptyCount = 0;
 				for (int i = 0; i < res.size() - 1; i++) {
 					if (!res[i].value.empty()) {
-						BulkLoadState bulkLoadState = decodeBulkLoadState(res[i].value);
+						BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
 						KeyRange currentRange = Standalone(KeyRangeRef(res[i].key, res[i + 1].key));
-						if (bulkLoadState.getRange() == currentRange) {
+						if (bulkLoadTaskState.getRange() == currentRange) {
 							TraceEvent("BulkLoadingWorkLoadMetadataNotCleared")
 							    .setMaxEventLength(-1)
 							    .setMaxFieldLength(-1)
-							    .detail("BulkLoadTask", bulkLoadState.toString());
+							    .detail("BulkLoadTask", bulkLoadTaskState.toString());
 							return false;
 						} else {
-							ASSERT(bulkLoadState.getRange().contains(currentRange));
+							ASSERT(bulkLoadTaskState.getRange().contains(currentRange));
 						}
 						nonEmptyCount++;
 					} else {
@@ -305,8 +315,8 @@ struct BulkLoading : TestWorkload {
 		std::string folder = task.bulkLoadTask.getFolder();
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
-		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFile().get();
-		std::string dataFile = *(task.bulkLoadTask.getDataFiles().begin());
+		std::string dataFile = task.bulkLoadTask.getDataFileFullPath();
+		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFileFullPath();
 
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 		sstWriter->open(abspath(dataFile));
@@ -366,11 +376,24 @@ struct BulkLoading : TestWorkload {
 	                                              std::string folderPath,
 	                                              int dataSize,
 	                                              Optional<KeyRange> range = Optional<KeyRange>()) {
-		std::string dataFilePath = joinPath(folderPath, generateRandomBulkLoadDataFileName());
-		std::string bytesSampleFilePath = joinPath(folderPath, generateRandomBulkLoadBytesSampleFileName());
 		KeyRange rangeToLoad = range.present() ? range.get() : self->getRandomRange(self, normalKeys);
 		BulkLoadTaskTestUnit taskUnit;
-		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(rangeToLoad, folderPath, dataFilePath, bytesSampleFilePath);
+		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
+		    deterministicRandom()->randomUniqueID(),
+		    rangeToLoad,
+		    folderPath,
+		    /*relativePath=*/"",
+		    "manifest-temp-holder",
+		    self->generateRandomBulkLoadDataFileName(),
+		    self->generateRandomBulkLoadBytesSampleFileName(),
+		    BulkLoadByteSampleSetting(0,
+		                              "hashlittle2", // use function name to represent the method
+		                              SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
+		                              SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
+		                              SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY),
+		    /*snapshotVersion=*/invalidVersion,
+		    /*checksum=*/"",
+		    /*bytes=*/-1);
 		taskUnit.data = self->generateOrderedKVS(self, rangeToLoad, dataSize);
 		self->generateSSTFiles(self, taskUnit);
 		return taskUnit;
@@ -429,11 +452,11 @@ struct BulkLoading : TestWorkload {
 		TraceEvent("BulkLoadingWorkLoadSimpleTestBegin");
 		state int counter = 0;
 		state int oldBulkLoadMode = 0;
-		state std::vector<BulkLoadState> bulkLoadStates;
+		state std::vector<BulkLoadTaskState> bulkLoadTaskStates;
 		state std::vector<std::vector<KeyValue>> bulkLoadDataList;
 		state std::vector<KeyRange> completeRanges;
 		loop { // New tasks overwrite old tasks on the same range
-			bulkLoadStates.clear();
+			bulkLoadTaskStates.clear();
 			bulkLoadDataList.clear();
 			completeRanges.clear();
 			for (int i = 0; i < 2; i++) {
@@ -445,12 +468,12 @@ struct BulkLoading : TestWorkload {
 				int dataSize = deterministicRandom()->randomInt(2, 5);
 				BulkLoadTaskTestUnit taskUnit =
 				    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
-				bulkLoadStates.push_back(taskUnit.bulkLoadTask);
+				bulkLoadTaskStates.push_back(taskUnit.bulkLoadTask);
 				bulkLoadDataList.push_back(taskUnit.data);
 				completeRanges.push_back(taskUnit.bulkLoadTask.getRange());
 			}
 			// Issue above 3 tasks in the same transaction
-			wait(self->submitBulkLoadTasks(self, cx, bulkLoadStates));
+			wait(self->submitBulkLoadTasks(self, cx, bulkLoadTaskStates));
 			TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
 			wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
 			TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
@@ -475,7 +498,7 @@ struct BulkLoading : TestWorkload {
 		// Check bulk load metadata
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
-		wait(self->acknowledgeBulkLoadTasks(self, cx, bulkLoadStates));
+		wait(self->acknowledgeBulkLoadTasks(self, cx, bulkLoadTaskStates));
 		loop {
 			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
 			if (cleared) {
@@ -554,7 +577,7 @@ struct BulkLoading : TestWorkload {
 
 		// Check correctness
 		state std::vector<KeyValue> kvs;
-		state std::vector<BulkLoadState> bulkLoadStates;
+		state std::vector<BulkLoadTaskState> bulkLoadTaskStates;
 		state std::vector<KeyRange> incompleteRanges;
 		state std::vector<KeyRange> completeRanges;
 		for (auto& range : taskMap.ranges()) {
@@ -572,7 +595,7 @@ struct BulkLoading : TestWorkload {
 			completeRanges.push_back(range.range());
 			std::vector<KeyValue> kvsToCheck = range.value().get().data;
 			kvs.insert(std::end(kvs), std::begin(kvsToCheck), std::end(kvsToCheck));
-			bulkLoadStates.push_back(range.value().get().bulkLoadTask);
+			bulkLoadTaskStates.push_back(range.value().get().bulkLoadTask);
 		}
 		std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, incompleteRanges, completeRanges));
 		ASSERT(self->checkSame(self, kvs, dbkvs));
@@ -583,7 +606,7 @@ struct BulkLoading : TestWorkload {
 		// Clear metadata
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
 		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
-		wait(self->acknowledgeBulkLoadTasks(self, cx, bulkLoadStates));
+		wait(self->acknowledgeBulkLoadTasks(self, cx, bulkLoadTaskStates));
 		loop {
 			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
 			if (cleared) {

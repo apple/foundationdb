@@ -175,7 +175,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 				                                          relocateShardInterval.pairID,
 				                                          &ddEnabledState,
 				                                          CancelConflictingDataMoves::True,
-				                                          Optional<BulkLoadState>());
+				                                          Optional<BulkLoadTaskState>());
 			} else {
 				UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 				                               AssignEmptyRange(false),
@@ -194,7 +194,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 				                                          relocateShardInterval.pairID,
 				                                          &ddEnabledState,
 				                                          CancelConflictingDataMoves::True,
-				                                          Optional<BulkLoadState>());
+				                                          Optional<BulkLoadTaskState>());
 			}
 			wait(moveKeys(cx, *params));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");

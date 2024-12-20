@@ -25,27 +25,21 @@
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include <fmt/format.h>
+#include "flow/IRandom.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-std::string generateRandomBulkLoadDataFileName() {
-	return deterministicRandom()->randomUniqueID().toString() + "-data.sst";
-}
-
-std::string generateRandomBulkLoadBytesSampleFileName() {
-	return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
-}
-
-ACTOR Future<Optional<BulkLoadState>> getBulkLoadStateFromDataMove(Database cx, UID dataMoveId, UID logId) {
+ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx, UID dataMoveId, UID logId) {
 	loop {
 		state Transaction tr(cx);
 		try {
 			Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 			if (!val.present()) {
 				TraceEvent(SevWarn, "SSBulkLoadDataMoveIdNotExist", logId).detail("DataMoveID", dataMoveId);
-				return Optional<BulkLoadState>();
+				return Optional<BulkLoadTaskState>();
 			}
 			DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
-			return dataMoveMetaData.bulkLoadState;
+			return dataMoveMetaData.bulkLoadTaskState;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -55,21 +49,20 @@ ACTOR Future<Optional<BulkLoadState>> getBulkLoadStateFromDataMove(Database cx, 
 void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
 	std::string content = readFileBytes(fromFile, fileBytesMax);
 	writeFile(toFile, content);
-	// TODO(BulkLoad): Do file checksum for toFile
 	return;
 }
 
 ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
-                                                         BulkLoadState bulkLoadState,
+                                                         BulkLoadTaskState bulkLoadTaskState,
                                                          size_t fileBytesMax,
                                                          UID logId) {
-	ASSERT(bulkLoadState.getTransportMethod() == BulkLoadTransportMethod::CP);
+	ASSERT(bulkLoadTaskState.getTransportMethod() == BulkLoadTransportMethod::CP);
 	loop {
-		state std::string toFile;
-		state std::string fromFile;
-		state SSBulkLoadFileSet fileSet;
+		state std::string fromDataFilePath;
+		state std::string toDataFilePath;
+		state SSBulkLoadFileSet fileSet; // TODO(BulkLoad): do not use SSBulkLoadFileSet, use BulkLoadFileSet instead
 		try {
-			fileSet.folder = abspath(joinPath(dir, bulkLoadState.getFolder()));
+			fileSet.folder = abspath(joinPath(dir, bulkLoadTaskState.getFolder()));
 
 			// Clear existing folder
 			platform::eraseDirectoryRecursive(fileSet.folder);
@@ -78,31 +71,25 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 			}
 
 			// Move bulk load files to loading folder
-			for (const auto& filePath : bulkLoadState.getDataFiles()) {
-				fromFile = abspath(filePath);
-				toFile = abspath(joinPath(fileSet.folder, generateRandomBulkLoadDataFileName()));
-				if (fileSet.dataFileList.find(toFile) != fileSet.dataFileList.end()) {
-					ASSERT_WE_THINK(false);
-					throw retry();
-				}
-				bulkLoadFileCopy(fromFile, toFile, fileBytesMax);
-				fileSet.dataFileList.insert(toFile);
+			std::string fromDataFilePath = abspath(bulkLoadTaskState.getDataFileFullPath());
+			std::string toDataFilePath = abspath(joinPath(fileSet.folder, basename(fromDataFilePath)));
+
+			bulkLoadFileCopy(fromDataFilePath, toDataFilePath, fileBytesMax);
+			fileSet.dataFileList.insert(toDataFilePath);
+			TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
+			    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+			    .detail("FromFile", fromDataFilePath)
+			    .detail("ToFile", toDataFilePath);
+
+			std::string fromByteSampleFilePath = abspath(bulkLoadTaskState.getBytesSampleFileFullPath());
+			if (!fromByteSampleFilePath.empty() && fileExists(fromByteSampleFilePath)) {
+				std::string toByteSampleFilePath = abspath(joinPath(fileSet.folder, basename(fromByteSampleFilePath)));
+				bulkLoadFileCopy(fromByteSampleFilePath, toByteSampleFilePath, fileBytesMax);
+				fileSet.bytesSampleFile = toByteSampleFilePath;
 				TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
-				    .detail("BulkLoadTask", bulkLoadState.toString())
-				    .detail("FromFile", fromFile)
-				    .detail("ToFile", toFile);
-			}
-			if (bulkLoadState.getBytesSampleFile().present()) {
-				fromFile = abspath(bulkLoadState.getBytesSampleFile().get());
-				if (fileExists(fromFile)) {
-					toFile = abspath(joinPath(fileSet.folder, generateRandomBulkLoadBytesSampleFileName()));
-					bulkLoadFileCopy(fromFile, toFile, fileBytesMax);
-					fileSet.bytesSampleFile = toFile;
-					TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
-					    .detail("BulkLoadTask", bulkLoadState.toString())
-					    .detail("FromFile", fromFile)
-					    .detail("ToFile", toFile);
-				}
+				    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+				    .detail("FromFile", fromByteSampleFilePath)
+				    .detail("ToFile", toByteSampleFilePath);
 			}
 			return fileSet;
 
@@ -112,9 +99,9 @@ ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
 			}
 			TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileCopyError", logId)
 			    .errorUnsuppressed(e)
-			    .detail("BulkLoadTask", bulkLoadState.toString())
-			    .detail("FromFile", fromFile)
-			    .detail("ToFile", toFile);
+			    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+			    .detail("FromFile", fromDataFilePath)
+			    .detail("ToFile", toDataFilePath);
 			wait(delay(5.0));
 		}
 	}
@@ -125,8 +112,8 @@ ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string fol
                                                                  UID logId) {
 	loop {
 		try {
-			std::string bytesSampleFile =
-			    abspath(joinPath(folderToGenerate, generateRandomBulkLoadBytesSampleFileName()));
+			std::string bytesSampleFile = abspath(
+			    joinPath(folderToGenerate, deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst"));
 			std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 			sstWriter->open(bytesSampleFile);
 			bool anySampled = false;
@@ -137,7 +124,7 @@ ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string fol
 					KeyValue kv = reader->next();
 					ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
 					if (sampleInfo.inSample) {
-						sstWriter->write(kv.key, kv.value); // TODO(BulkLoad): validate if kvs are sorted
+						sstWriter->write(kv.key, kv.value);
 						anySampled = true;
 					}
 				}
@@ -159,16 +146,4 @@ ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string fol
 			wait(delay(5.0));
 		}
 	}
-}
-
-void checkContent(std::unordered_set<std::string> dataFiles, UID logId) {
-	for (const auto& filePath : dataFiles) {
-		std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
-		reader->open(filePath);
-		while (reader->hasNext()) {
-			KeyValue kv = reader->next();
-			TraceEvent("CheckContent", logId).detail("Key", kv.key).detail("Value", kv.value);
-		}
-	}
-	return;
 }

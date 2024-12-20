@@ -20,17 +20,46 @@
 
 #include "fdbclient/BulkLoading.h"
 
-BulkLoadState newBulkLoadTaskLocalSST(KeyRange range,
-                                      std::string folder,
-                                      std::string dataFile,
-                                      std::string bytesSampleFile) {
-	std::unordered_set<std::string> dataFiles;
-	dataFiles.insert(dataFile);
-	return BulkLoadState(range,
-	                     BulkLoadType::SST,
-	                     BulkLoadTransportMethod::CP,
-	                     BulkLoadInjectMethod::File,
-	                     folder,
-	                     dataFiles,
-	                     bytesSampleFile);
+std::string generateBulkLoadJobManifestFileName() {
+	return "job-manifest.txt";
+}
+
+std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests) {
+	std::string root = "";
+	std::string content;
+	for (const auto& [beginKey, manifest] : manifests) {
+		if (root.empty()) {
+			root = manifest.fileSet.rootPath;
+		} else {
+			ASSERT(manifest.fileSet.rootPath == root);
+		}
+		content = content + manifest.generateEntryInJobManifest() + "\n";
+	}
+	std::string head = "Manifest count: " + std::to_string(manifests.size()) + ", Root: " + root + "\n";
+	return head + content;
+}
+
+// For submitting a task manually (for testing)
+BulkLoadTaskState newBulkLoadTaskLocalSST(const UID& jobId,
+                                          const KeyRange& range,
+                                          const std::string& rootPath,
+                                          const std::string& relativePath,
+                                          const std::string& manifestFileName,
+                                          const std::string& dataFileName,
+                                          const std::string& byteSampleFileName,
+                                          const BulkLoadByteSampleSetting& byteSampleSetting,
+                                          Version snapshotVersion,
+                                          const std::string& checksum,
+                                          int64_t bytes) {
+	BulkLoadManifest manifest(
+	    BulkLoadFileSet(rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName),
+	    range.begin,
+	    range.end,
+	    snapshotVersion,
+	    checksum,
+	    bytes,
+	    byteSampleSetting,
+	    BulkLoadType::SST,
+	    BulkLoadTransportMethod::CP);
+	return BulkLoadTaskState(jobId, manifest);
 }
