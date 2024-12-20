@@ -1029,16 +1029,13 @@ ACTOR Future<bool> checkExclusion(Database db,
 				// check if the process is excluded by localities.
 				if (!excluded && hasLocalities && !parsedLocalities.empty()) {
 					// Iterate over all excluded localites and check if the process is excluded based on the locality.
-					for (std::map<std::string, std::vector<std::string>>::iterator it = parsedLocalities.begin();
-					     it != parsedLocalities.end();
-					     ++it) {
+					for (const auto& [localityKey, localityVec] : parsedLocalities) {
 						std::string localityValue;
-						if (!localityObj.get(it->first, localityValue)) {
+						if (!localityObj.get(localityKey, localityValue)) {
 							// If the locality doesn't exist in the locality object skip over it.
 							continue;
 						}
 
-						const std::vector<std::string>& localityVec = it->second;
 						// When the process has a matching locality field, add it to the exclusion list.
 						if (std::find(localityVec.begin(), localityVec.end(), localityValue) != localityVec.end()) {
 							excluded = true;
