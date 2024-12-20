@@ -433,8 +433,8 @@ std::string constructResourcePath(Reference<S3BlobStoreEndpoint> b,
 ACTOR Future<bool> bucketExists_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket) {
 	wait(b->requestRateRead->getAllowance(1));
 
-	std::string resource = constructResourcePath(b, bucket, "");
-	HTTP::Headers headers;
+	state std::string resource = constructResourcePath(b, bucket, "");
+	state HTTP::Headers headers;
 
 	Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
 	return r->code == 200;
@@ -447,8 +447,8 @@ Future<bool> S3BlobStoreEndpoint::bucketExists(std::string const& bucket) {
 ACTOR Future<bool> objectExists_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateRead->getAllowance(1));
 
-	std::string resource = constructResourcePath(b, bucket, object);
-	HTTP::Headers headers;
+	state std::string resource = constructResourcePath(b, bucket, object);
+	state HTTP::Headers headers;
 
 	Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
 	return r->code == 200;
@@ -461,8 +461,8 @@ Future<bool> S3BlobStoreEndpoint::objectExists(std::string const& bucket, std::s
 ACTOR Future<Void> deleteObject_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateDelete->getAllowance(1));
 
-	std::string resource = constructResourcePath(b, bucket, object);
-	HTTP::Headers headers;
+	state std::string resource = constructResourcePath(b, bucket, object);
+	state HTTP::Headers headers;
 	// 200 or 204 means object successfully deleted, 404 means it already doesn't exist, so any of those are considered
 	// successful
 	Reference<HTTP::IncomingResponse> r =
@@ -550,19 +550,19 @@ Future<Void> S3BlobStoreEndpoint::deleteRecursively(std::string const& bucket,
 }
 
 ACTOR Future<Void> createBucket_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket) {
+	state UnsentPacketQueue packets;
 	wait(b->requestRateWrite->getAllowance(1));
 
 	bool exists = wait(b->bucketExists(bucket));
 	if (!exists) {
-		std::string resource = constructResourcePath(b, bucket, "");
-		HTTP::Headers headers;
+		state std::string resource = constructResourcePath(b, bucket, "");
+		state HTTP::Headers headers;
 
 		std::string region = b->getRegion();
 		if (region.empty()) {
 			Reference<HTTP::IncomingResponse> r =
 			    wait(b->doRequest("PUT", resource, headers, nullptr, 0, { 200, 409 }));
 		} else {
-			UnsentPacketQueue packets;
 			Standalone<StringRef> body(
 			    format("<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
 			           "  <LocationConstraint>%s</LocationConstraint>"
@@ -585,8 +585,8 @@ Future<Void> S3BlobStoreEndpoint::createBucket(std::string const& bucket) {
 ACTOR Future<int64_t> objectSize_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateRead->getAllowance(1));
 
-	std::string resource = constructResourcePath(b, bucket, object);
-	HTTP::Headers headers;
+	state std::string resource = constructResourcePath(b, bucket, object);
+	state HTTP::Headers headers;
 
 	Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
 	if (r->code == 404)
@@ -1326,7 +1326,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		wait(bstore->concurrentLists.take());
 		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
 
-		HTTP::Headers headers;
+		state HTTP::Headers headers;
 		state std::string fullResource = resource + lastFile;
 		lastFile.clear();
 		Reference<HTTP::IncomingResponse> r =
@@ -1507,7 +1507,7 @@ ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEnd
 		wait(bstore->concurrentLists.take());
 		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
 
-		HTTP::Headers headers;
+		state HTTP::Headers headers;
 		state std::string fullResource = resource + lastName;
 		Reference<HTTP::IncomingResponse> r =
 		    wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200 }));
@@ -1788,8 +1788,8 @@ ACTOR Future<std::string> readEntireFile_impl(Reference<S3BlobStoreEndpoint> bst
                                               std::string object) {
 	wait(bstore->requestRateRead->getAllowance(1));
 
-	std::string resource = constructResourcePath(bstore, bucket, object);
-	HTTP::Headers headers;
+	state std::string resource = constructResourcePath(bstore, bucket, object);
+	state HTTP::Headers headers;
 	Reference<HTTP::IncomingResponse> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 404 }));
 	if (r->code == 404)
 		throw file_not_found();
@@ -1813,13 +1813,13 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint>
 	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
-	std::string resource = constructResourcePath(bstore, bucket, object);
-	HTTP::Headers headers;
+	state std::string resource = constructResourcePath(bstore, bucket, object);
+	state HTTP::Headers headers;
 	// Send MD5 sum for content so blobstore can verify it
 	headers["Content-MD5"] = contentMD5;
 	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
 		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
-	state Reference<HTTP::IncomingResponse> r =
+	Reference<HTTP::IncomingResponse> r =
 	    wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen, { 200 }));
 
 	// For uploads, Blobstore returns an MD5 sum of uploaded content so check it.
@@ -1884,8 +1884,8 @@ ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore,
 		return 0;
 	wait(bstore->requestRateRead->getAllowance(1));
 
-	std::string resource = constructResourcePath(bstore, bucket, object);
-	HTTP::Headers headers;
+	state std::string resource = constructResourcePath(bstore, bucket, object);
+	state HTTP::Headers headers;
 	headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
 	Reference<HTTP::IncomingResponse> r =
 	    wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
@@ -1912,9 +1912,9 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStore
                                                            std::string object) {
 	wait(bstore->requestRateWrite->getAllowance(1));
 
-	std::string resource = constructResourcePath(bstore, bucket, object);
+	state std::string resource = constructResourcePath(bstore, bucket, object);
 	resource += "?uploads";
-	HTTP::Headers headers;
+	state HTTP::Headers headers;
 	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
 		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
 	Reference<HTTP::IncomingResponse> r = wait(bstore->doRequest("POST", resource, headers, nullptr, 0, { 200 }));
@@ -1955,9 +1955,9 @@ ACTOR Future<std::string> uploadPart_impl(Reference<S3BlobStoreEndpoint> bstore,
 	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
-	std::string resource = constructResourcePath(bstore, bucket, object);
+	state std::string resource = constructResourcePath(bstore, bucket, object);
 	resource += format("?partNumber=%d&uploadId=%s", partNumber, uploadID.c_str());
-	HTTP::Headers headers;
+	state HTTP::Headers headers;
 	// Send MD5 sum for content so blobstore can verify it
 	headers["Content-MD5"] = contentMD5;
 	state Reference<HTTP::IncomingResponse> r =
@@ -2008,9 +2008,9 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 		manifest += format("<Part><PartNumber>%d</PartNumber><ETag>%s</ETag></Part>\n", p.first, p.second.c_str());
 	manifest += "</CompleteMultipartUpload>";
 
-	std::string resource = constructResourcePath(bstore, bucket, object);
+	state std::string resource = constructResourcePath(bstore, bucket, object);
 	resource += format("?uploadId=%s", uploadID.c_str());
-	HTTP::Headers headers;
+	state HTTP::Headers headers;
 	PacketWriter pw(part_list.getWriteBuffer(manifest.size()), nullptr, Unversioned());
 	pw.serializeBytes(manifest);
 	Reference<HTTP::IncomingResponse> r =
