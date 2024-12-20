@@ -61,6 +61,8 @@ By default, the FoundationDB packages are configured to start a single ``backup_
 
 If instead you want to perform a backup to the local disk of a particular machine or machines which are not network accessible to the FoundationDB servers, then you should disable the backup agents on the FoundationDB servers. This is accomplished by commenting out all of the ``[backup_agent.<ID>]`` sections in :ref:`foundationdb.conf <foundationdb-conf>`. Do not comment out the global ``[backup_agent]`` section. Next, start backup agents on the destination machine or machines. Now, when you start a backup, you can specify the destination directory (as a Backup URL) using a local path on the destination machines. The backup agents will fetch data from the database and store it locally on the destination machines.
 
+.. _backup-urls:
+
 Backup URLs
 ===========
 
@@ -101,8 +103,8 @@ If <secret> is not specified on the URL, it will be looked up in :ref:`blob cred
 
 An example blob store Backup URL would be ``blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400?bucket=backups``.
 If S3 is the target blobstore, the URL would look like: ``blobstore://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}:${AWS_SESSION_TOKEN}@backup-12345-us-west-2.s3.amazonaws.com/dailies?bucket=backup-12345-us-west-2&region=us-west-2``
-The <secret> and <security_token> may be ommitted from the URL and instead picked up from ref:`blob credential sources<blob-credential-files>`: ``blobstore://${AWS_ACCESS_KEY_ID}@backup-12345-us-west-2.s3.amazonaws.com/dailies?bucket=backup-12345-us-west-2&region=us-west-2``
-To pickup the <api_key>, <secret>, and <security_token> from ref:`blob credential sources<blob-credential-files>`, write the blob backup URL as: ``blobstore://@backup-12345-us-west-2.s3.amazonaws.com/dailies?bucket=backup-12345-us-west-2&region=us-west-2`` (Notice the '@' in front of the hostname).
+The <secret> and <security_token> may be ommitted from the URL and instead picked up from :ref:`blob credential sources<blob-credential-files>`: ``blobstore://${AWS_ACCESS_KEY_ID}@backup-12345-us-west-2.s3.amazonaws.com/dailies?bucket=backup-12345-us-west-2&region=us-west-2``
+To pickup the <api_key>, <secret>, and <security_token> from :ref:`blob credentials file<blob-credential-files>`, write the blob backup URL as: ``blobstore://@backup-12345-us-west-2.s3.amazonaws.com/dailies?bucket=backup-12345-us-west-2&region=us-west-2`` (Notice the '@' in front of the hostname).
 
 Blob store Backup URLs can have optional parameters at the end which set various limits or options used when communicating with the store.  All values must be positive decimal integers unless otherwise specified.  The speed related default values are not very restrictive. A parameter is applied individually on each ``backup_agent``, meaning that a global restriction should be calculated based on the number of agent running. The most likely parameter a user would want to change is ``max_send_bytes_per_second`` (or ``sbps`` for short) which determines the upload speed to the blob service. 
 
@@ -180,7 +182,7 @@ Blob Credential Files
 In order to help safeguard blob store credentials, the <secret> can optionally be omitted from ``blobstore://`` URLs on the command line.
 Omitted secrets will be resolved at connect time using 1 or more Blob Credential files
 (In fact, the <api_key>, <secret>, and <security_token> may all be omitted from the backup URL and instead read from the credential file;
-for how to write the backup URL in this case see ref:`backup URLs<backup-urls>`).
+for how to write the backup URL in this case see :ref:`backup URLs<backup-urls>`).
 
 Blob Credential files can be specified on the command line (via ``--blob-credentials <FILE>``) or via the environment variable ``FDB_BLOB_CREDENTIALS`` which can be set to a colon-separated list of files.  The command line takes priority over the environment variable however all files from both sources will be used.
 
