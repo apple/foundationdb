@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "fdbclient/SystemData.h"
+
 #include "fdbserver/TransactionStoreMutationTracking.h"
 #if defined(FDB_CLEAN_BUILD) && DEBUG_TRANSACTION_STATE_STORE_ENABLED
 #error "You cannot use transaction store mutation tracking in a clean/release build."
@@ -28,23 +30,30 @@
 // Each entry is a pair of (label, keyOrRange) and the Label will be attached to the
 // TransactionStoreMutationTracking TraceEvent for easier searching/recognition.
 
-static std::vector<std::pair<const char*, KeyRef>> debugKeys = { { "SomeKey",
-	                                                               "\xff/serverList/\x09I\x8c\xc7\xdd"_sr } };
+static const struct DebugKeyInfo {
+	const char* label;
+	const char* prefix;
+	UID uid;
+} DEBUG_KEY = { "SomeKey", "\xff/serverList/", UID(0x4c3fd4099192a3e0, 0x3733d810ae0a6e13) };
+
 static std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = {
 	{ "SomeRange", { "\xff/serverList/\x09I\x8c\xc7\xdd"_sr, "\xff/serverList/\x09I\x8c\xc7\xdd\xff"_sr } }
 };
 
 TraceEvent transactionStoreDebugMutationEnabled(const char* context,
-                                                const std::string version,
                                                 StringRef const& mutation,
-                                                UID id) {
+                                                const UID id,
+                                                const std::string loc) {
 	const char* label = nullptr;
+	BinaryWriter writer(Unversioned());
 
-	for (auto& labelKey : debugKeys) {
-		if (mutation == labelKey.second) {
-			label = labelKey.first;
-			break;
-		}
+	// Build the expected value
+	writer.serializeBytes(KeyRef(DEBUG_KEY.prefix));
+	writer << DEBUG_KEY.uid;
+
+	// Check if mutation matches expected value
+	if (mutation == writer.toValue()) {
+		label = DEBUG_KEY.label;
 	}
 
 	for (auto& labelRange : debugRanges) {
@@ -56,7 +65,10 @@ TraceEvent transactionStoreDebugMutationEnabled(const char* context,
 
 	if (label != nullptr) {
 		TraceEvent event("TransactionStoreMutationTracking", id);
-		event.detail("Label", label).detail("At", context).detail("Version", version).detail("Mutation", mutation);
+		event.detail("Label", label).detail("At", context).detail("Mutation", mutation);
+		if (!loc.empty()) {
+			event.detail("Location", loc);
+		}
 		return event;
 	}
 
@@ -65,13 +77,16 @@ TraceEvent transactionStoreDebugMutationEnabled(const char* context,
 
 #if DEBUG_TRANSACTION_STATE_STORE_ENABLED
 TraceEvent transactionStoreDebugMutation(const char* context,
-                                         const std::string version,
                                          StringRef const& mutation,
-                                         UID id) {
-	return transactionStoreDebugMutationEnabled(context, version, mutation, id);
+                                         const UID id,
+                                         const std::string loc) {
+	return transactionStoreDebugMutationEnabled(context, mutation, id, loc);
 }
 #else
-TraceEvent transactionStoreDebugMutation(const char* context, Version version, StringRef const& mutation, UID id) {
+TraceEvent transactionStoreDebugMutation(const char* context,
+                                         StringRef const& mutation,
+                                         const UID id,
+                                         const std::string loc) {
 	return TraceEvent();
 }
 #endif
