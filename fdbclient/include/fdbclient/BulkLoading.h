@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_BULKLOADING_H
 #define FDBCLIENT_BULKLOADING_H
+#include "flow/Trace.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -66,6 +67,11 @@ struct BulkLoadByteSampleSetting {
 		       ", [ByteSampleMinimalProbability]: " + std::to_string(minimalProbability);
 	}
 
+	bool operator==(const BulkLoadByteSampleSetting& rhs) const {
+		return version == rhs.version && method == rhs.method && factor == rhs.factor && overhead == rhs.overhead &&
+		       minimalProbability == rhs.minimalProbability;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version, method, factor, overhead, minimalProbability);
@@ -87,6 +93,7 @@ struct BulkLoadByteSampleSetting {
 // If the data is sufficiently large, the folder includes 1 byteSample file.
 // Otherwise, the byteSampleFileName is empty.
 struct BulkLoadFileSet {
+public:
 	constexpr static FileIdentifier file_identifier = 1384501;
 
 	BulkLoadFileSet() = default;
@@ -104,18 +111,32 @@ struct BulkLoadFileSet {
 		}
 	}
 
-	BulkLoadFileSet(const std::string& rootPath) : rootPath(rootPath) {}
+	BulkLoadFileSet(const std::string& rootPath) : rootPath(rootPath) {
+		if (rootPath.empty()) {
+			TraceEvent(SevError, "BulkLoadFileSetProvideInvalidPath")
+			    .suppressFor(10.0)
+			    .detail("Reason", "InitBulkLoadFileSet")
+			    .detail("FileSet", toString());
+			throw bulkload_fileset_invalid_filepath();
+		}
+	}
+
+	bool hasManifestFile() const { return !manifestFileName.empty(); }
+
+	bool hasDataFile() const { return !dataFileName.empty(); }
+
+	bool hasByteSampleFile() const { return !byteSampleFileName.empty(); }
 
 	bool isValid() const {
 		if (rootPath.empty()) {
 			ASSERT(false);
 			return false;
 		}
-		if (manifestFileName.empty()) {
+		if (!hasManifestFile()) {
 			ASSERT(false);
 			return false;
 		}
-		if (dataFileName.empty() && !byteSampleFileName.empty()) {
+		if (!hasDataFile() && hasByteSampleFile()) {
 			// If bytes sample file exists, the data file must exist.
 			ASSERT(false);
 			return false;
@@ -123,8 +144,46 @@ struct BulkLoadFileSet {
 		return true;
 	}
 
+	std::string getRootPath() const {
+		if (rootPath.empty()) {
+			TraceEvent(SevError, "BulkLoadSetByteSampleFileNameError")
+			    .suppressFor(10.0)
+			    .detail("Reason", "GetRootPath")
+			    .detail("FileSet", toString());
+		}
+		return rootPath;
+	}
+
+	std::string getRelativePath() const { return relativePath; }
+
+	std::string getManifestFileName() const { return manifestFileName; }
+
+	std::string getDataFileName() const { return dataFileName; }
+
+	std::string getByteSampleFileName() const { return byteSampleFileName; }
+
+	void setByteSampleFileName(const std::string& inputFileName) {
+		if (hasByteSampleFile() || inputFileName.empty()) {
+			TraceEvent(SevError, "BulkLoadSetByteSampleFileNameError")
+			    .suppressFor(10.0)
+			    .detail("InputFileName", inputFileName)
+			    .detail("FileSet", toString());
+		}
+		byteSampleFileName = inputFileName;
+	}
+
+	void removeDataFile() { dataFileName = ""; }
+
+	void removeByteSampleFile() { byteSampleFileName = ""; }
+
 	std::string getFolder() const {
-		if (relativePath.empty()) {
+		if (rootPath.empty()) {
+			TraceEvent(SevError, "BulkLoadFileSetProvideInvalidPath")
+			    .suppressFor(10.0)
+			    .detail("Reason", "GetFolder")
+			    .detail("FileSet", toString());
+			throw bulkload_fileset_invalid_filepath();
+		} else if (relativePath.empty()) {
 			return rootPath;
 		} else {
 			return joinPath(rootPath, relativePath);
@@ -132,24 +191,36 @@ struct BulkLoadFileSet {
 	}
 
 	std::string getManifestFileFullPath() const {
-		if (manifestFileName.empty()) {
-			return "";
+		if (!hasManifestFile()) {
+			TraceEvent(SevError, "BulkLoadFileSetProvideInvalidPath")
+			    .suppressFor(10.0)
+			    .detail("Reason", "GetManifestFileFullPath")
+			    .detail("FileSet", toString());
+			throw bulkload_fileset_invalid_filepath();
 		} else {
 			return joinPath(getFolder(), manifestFileName);
 		}
 	}
 
 	std::string getDataFileFullPath() const {
-		if (dataFileName.empty()) {
-			return "";
+		if (!hasDataFile()) {
+			TraceEvent(SevError, "BulkLoadFileSetProvideInvalidPath")
+			    .suppressFor(10.0)
+			    .detail("Reason", "GetDataFileFullPath")
+			    .detail("FileSet", toString());
+			throw bulkload_fileset_invalid_filepath();
 		} else {
 			return joinPath(getFolder(), dataFileName);
 		}
 	}
 
 	std::string getBytesSampleFileFullPath() const {
-		if (byteSampleFileName.empty()) {
-			return "";
+		if (!hasByteSampleFile()) {
+			TraceEvent(SevError, "BulkLoadFileSetProvideInvalidPath")
+			    .suppressFor(10.0)
+			    .detail("Reason", "GetBytesSampleFileFullPath")
+			    .detail("FileSet", toString());
+			throw bulkload_fileset_invalid_filepath();
 		} else {
 			return joinPath(getFolder(), byteSampleFileName);
 		}
@@ -166,6 +237,7 @@ struct BulkLoadFileSet {
 		serializer(ar, rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName);
 	}
 
+private:
 	std::string rootPath = "";
 	std::string relativePath = "";
 	std::string manifestFileName = "";
@@ -175,10 +247,22 @@ struct BulkLoadFileSet {
 
 struct BulkDumpFileFullPathSet {
 	BulkDumpFileFullPathSet(const BulkLoadFileSet& fileSet) {
-		folder = joinPath(fileSet.rootPath, fileSet.relativePath);
-		dataFilePath = joinPath(folder, fileSet.dataFileName);
-		byteSampleFilePath = joinPath(folder, fileSet.byteSampleFileName);
-		manifestFilePath = joinPath(folder, fileSet.manifestFileName);
+		folder = fileSet.getFolder();
+		if (fileSet.hasManifestFile()) {
+			manifestFilePath = fileSet.getManifestFileName();
+		} else {
+			manifestFilePath = "";
+		}
+		if (fileSet.hasDataFile()) {
+			dataFilePath = fileSet.getDataFileFullPath();
+		} else {
+			dataFilePath = "";
+		}
+		if (fileSet.hasByteSampleFile()) {
+			byteSampleFilePath = fileSet.getBytesSampleFileFullPath();
+		} else {
+			byteSampleFilePath = "";
+		}
 	}
 	std::string folder = "";
 	std::string dataFilePath = "";
@@ -245,7 +329,7 @@ struct BulkLoadManifest {
 		return true;
 	}
 
-	std::string getRootPath() const { return fileSet.rootPath; }
+	std::string getRootPath() const { return fileSet.getRootPath(); }
 
 	KeyRange getRange() const { return Standalone(KeyRangeRef(beginKey, endKey)); }
 
@@ -261,9 +345,13 @@ struct BulkLoadManifest {
 
 	std::string getBytesSampleFileFullPath() const { return fileSet.getBytesSampleFileFullPath(); }
 
+	BulkLoadByteSampleSetting getByteSampleSetting() const { return byteSampleSetting; }
+
 	std::string getFolder() const { return fileSet.getFolder(); }
 
 	int64_t getTotalBytes() const { return bytes; }
+
+	BulkLoadFileSet getFileSet() const { return fileSet; }
 
 	void setRange(const KeyRange& range) {
 		ASSERT(!range.empty() && beginKey.empty() && endKey.empty());
@@ -286,7 +374,7 @@ struct BulkLoadManifest {
 	// The job manifest includes all manifest files for all ranges within the job.
 	std::string generateEntryInJobManifest() const {
 		return getBeginKeyString() + ", " + getEndKeyString() + ", " + std::to_string(version) + ", " +
-		       std::to_string(bytes) + ", " + joinPath(fileSet.relativePath, fileSet.manifestFileName);
+		       std::to_string(bytes) + ", " + joinPath(fileSet.getRelativePath(), fileSet.getManifestFileName());
 	}
 
 	template <class Ar>
@@ -355,6 +443,12 @@ struct BulkLoadTaskState {
 	std::string getFolder() const { return manifest.getFolder(); }
 
 	int64_t getTotalBytes() const { return manifest.getTotalBytes(); }
+
+	BulkLoadFileSet getFileSet() const { return manifest.getFileSet(); }
+
+	BulkLoadByteSampleSetting getByteSampleSetting() const { return manifest.getByteSampleSetting(); }
+
+	BulkLoadType getLoadType() const { return manifest.getLoadType(); }
 
 	bool onAnyPhase(const std::vector<BulkLoadPhase>& inputPhases) const {
 		for (const auto& inputPhase : inputPhases) {
@@ -427,6 +521,18 @@ private:
 // Define job manifest file name.
 std::string generateBulkLoadJobManifestFileName();
 
+// Return a random byte sample filename. Used when a SS load a range but the range does not have a valid byte
+// sampling file. In this case, the SS generates a byte sampling file with the default name locally. This generated
+// file temporarily stored locally and the file is used to inject the byte sampling metadata to SS. After the
+// injection, the file is removed.
+std::string generateRandomBulkLoadBytesSampleFileName();
+
+std::string generateRandomBulkLoadDataFileName();
+
+// Return a manifest filename as a place holder when testing bulkload feature, where we issue bulkload tasks without
+// providing a manifest file. So, this manifest file is never read in this scenario.
+std::string generateEmptyManifestFileName();
+
 // Define human readable BulkLoad job manifest content in the following format:
 // Head: Manifest count: <count>, Root: <root>
 // Rows: BeginKey, EndKey, Version, Bytes, ManifestPath
@@ -435,11 +541,7 @@ std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadM
 // For submitting a task manually (for testing)
 BulkLoadTaskState newBulkLoadTaskLocalSST(const UID& jobId,
                                           const KeyRange& range,
-                                          const std::string& rootPath,
-                                          const std::string& relativePath,
-                                          const std::string& manifestFileName,
-                                          const std::string& dataFileName,
-                                          const std::string& byteSampleFileName,
+                                          const BulkLoadFileSet& fileSet,
                                           const BulkLoadByteSampleSetting& byteSampleSetting,
                                           Version snapshotVersion,
                                           const std::string& checksum,

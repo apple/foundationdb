@@ -24,14 +24,26 @@ std::string generateBulkLoadJobManifestFileName() {
 	return "job-manifest.txt";
 }
 
+std::string generateRandomBulkLoadDataFileName() {
+	return deterministicRandom()->randomUniqueID().toString() + "-data.sst";
+}
+
+std::string generateRandomBulkLoadBytesSampleFileName() {
+	return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
+}
+
+std::string generateEmptyManifestFileName() {
+	return "manifest-empty.sst";
+}
+
 std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests) {
 	std::string root = "";
 	std::string content;
 	for (const auto& [beginKey, manifest] : manifests) {
 		if (root.empty()) {
-			root = manifest.fileSet.rootPath;
+			root = manifest.getRootPath();
 		} else {
-			ASSERT(manifest.fileSet.rootPath == root);
+			ASSERT(manifest.getRootPath() == root);
 		}
 		content = content + manifest.generateEntryInJobManifest() + "\n";
 	}
@@ -42,24 +54,19 @@ std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadM
 // For submitting a task manually (for testing)
 BulkLoadTaskState newBulkLoadTaskLocalSST(const UID& jobId,
                                           const KeyRange& range,
-                                          const std::string& rootPath,
-                                          const std::string& relativePath,
-                                          const std::string& manifestFileName,
-                                          const std::string& dataFileName,
-                                          const std::string& byteSampleFileName,
+                                          const BulkLoadFileSet& fileSet,
                                           const BulkLoadByteSampleSetting& byteSampleSetting,
                                           Version snapshotVersion,
                                           const std::string& checksum,
                                           int64_t bytes) {
-	BulkLoadManifest manifest(
-	    BulkLoadFileSet(rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName),
-	    range.begin,
-	    range.end,
-	    snapshotVersion,
-	    checksum,
-	    bytes,
-	    byteSampleSetting,
-	    BulkLoadType::SST,
-	    BulkLoadTransportMethod::CP);
+	BulkLoadManifest manifest(fileSet,
+	                          range.begin,
+	                          range.end,
+	                          snapshotVersion,
+	                          checksum,
+	                          bytes,
+	                          byteSampleSetting,
+	                          BulkLoadType::SST,
+	                          BulkLoadTransportMethod::CP);
 	return BulkLoadTaskState(jobId, manifest);
 }

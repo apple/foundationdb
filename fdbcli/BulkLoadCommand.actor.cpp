@@ -128,14 +128,12 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		std::string dataFile = tokens[5].toString();
 		std::string byteSampleFile = tokens[6].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+		BulkLoadFileSet fileSet =
+		    BulkLoadFileSet(folder, "", generateEmptyManifestFileName(), dataFile, byteSampleFile);
 		state BulkLoadTaskState bulkLoadTask =
 		    newBulkLoadTaskLocalSST(deterministicRandom()->randomUniqueID(),
 		                            range,
-		                            folder,
-		                            /*relativePath=*/"",
-		                            "manifest-temp-holder",
-		                            dataFile,
-		                            byteSampleFile,
+		                            fileSet,
 		                            BulkLoadByteSampleSetting(0, "hashlittle2", 0, 0, 0), // We fake it here
 		                            /*snapshotVersion=*/invalidVersion,
 		                            /*checksum=*/"",

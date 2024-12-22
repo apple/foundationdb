@@ -28,31 +28,16 @@
 #include "fdbclient/BulkLoading.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-struct SSBulkLoadFileSet {
-	std::unordered_set<std::string> dataFileList;
-	Optional<std::string> bytesSampleFile;
-	std::string folder;
-	SSBulkLoadFileSet() = default;
-	std::string toString() {
-		std::string res = "SSBulkLoadFileSet: [DataFiles]: " + describe(dataFileList);
-		if (bytesSampleFile.present()) {
-			res = res + ", [BytesSampleFile]: " + bytesSampleFile.get();
-		}
-		res = res + ", [Folder]: " + folder;
-		return res;
-	}
-};
-
 ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx, UID dataMoveId, UID logId);
 
-ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
-                                                         BulkLoadTaskState bulkLoadTaskState,
-                                                         size_t fileBytesMax,
-                                                         UID logId);
+ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMethod transportMethod,
+                                                          BulkLoadFileSet fromRemoteFileSet,
+                                                          std::string toLocalRoot,
+                                                          UID logId);
 
-ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string folderToGenerate,
-                                                                 std::unordered_set<std::string> dataFiles,
-                                                                 UID logId);
+ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath,
+                                             std::string byteSampleFileFullPath,
+                                             UID logId);
 
 #include "flow/unactorcompiler.h"
 #endif

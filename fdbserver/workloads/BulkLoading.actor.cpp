@@ -66,14 +66,6 @@ struct BulkLoading : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	std::string generateRandomBulkLoadDataFileName() {
-		return deterministicRandom()->randomUniqueID().toString() + "-data.sst";
-	}
-
-	std::string generateRandomBulkLoadBytesSampleFileName() {
-		return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
-	}
-
 	ACTOR Future<Void> submitBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadTaskState> tasks) {
 		state int i = 0;
 		for (; i < tasks.size(); i++) {
@@ -311,13 +303,12 @@ struct BulkLoading : TestWorkload {
 		return res; // ordered
 	}
 
-	void generateSSTFiles(BulkLoading* self, BulkLoadTaskTestUnit task) {
-		std::string folder = task.bulkLoadTask.getFolder();
+	BulkLoadFileSet generateSSTFiles(BulkLoading* self, std::string rootPath, BulkLoadTaskTestUnit task) {
+		BulkLoadFileSet res(rootPath, "", generateEmptyManifestFileName(), generateRandomBulkLoadDataFileName(), "");
+		std::string folder = res.getFolder();
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
-		std::string dataFile = task.bulkLoadTask.getDataFileFullPath();
-		std::string bytesSampleFile = task.bulkLoadTask.getBytesSampleFileFullPath();
-
+		std::string dataFile = res.getDataFileFullPath();
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 		sstWriter->open(abspath(dataFile));
 		std::vector<KeyValue> bytesSample;
@@ -335,8 +326,7 @@ struct BulkLoading : TestWorkload {
 		    .detail("LoadKeyCount", task.data.size())
 		    .detail("BytesSampleSize", bytesSample.size())
 		    .detail("Folder", folder)
-		    .detail("DataFile", dataFile)
-		    .detail("BytesSampleFile", bytesSampleFile);
+		    .detail("DataFile", dataFile);
 
 		if (self->debugging) {
 			TraceEvent e("DebugBulkLoadDataProducedKVS");
@@ -351,9 +341,10 @@ struct BulkLoading : TestWorkload {
 				counter++;
 			}
 		}
-
 		ASSERT(sstWriter->finish());
 
+		res.setByteSampleFileName(generateRandomBulkLoadBytesSampleFileName());
+		std::string bytesSampleFile = res.getBytesSampleFileFullPath();
 		if (bytesSample.size() > 0) {
 			sstWriter->open(abspath(bytesSampleFile));
 			for (const auto& kv : bytesSample) {
@@ -367,9 +358,11 @@ struct BulkLoading : TestWorkload {
 			    .detail("DataFile", dataFile)
 			    .detail("BytesSampleFile", bytesSampleFile);
 			ASSERT(sstWriter->finish());
+		} else {
+			res.removeByteSampleFile();
 		}
 		TraceEvent("BulkLoadingProduceDataToLoad").detail("Folder", folder).detail("LoadKeyCount", task.data.size());
-		return;
+		return res;
 	}
 
 	BulkLoadTaskTestUnit generateBulkLoadTaskUnit(BulkLoading* self,
@@ -378,14 +371,12 @@ struct BulkLoading : TestWorkload {
 	                                              Optional<KeyRange> range = Optional<KeyRange>()) {
 		KeyRange rangeToLoad = range.present() ? range.get() : self->getRandomRange(self, normalKeys);
 		BulkLoadTaskTestUnit taskUnit;
+		taskUnit.data = self->generateOrderedKVS(self, rangeToLoad, dataSize);
+		BulkLoadFileSet fileSet = self->generateSSTFiles(self, folderPath, taskUnit);
 		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
 		    deterministicRandom()->randomUniqueID(),
 		    rangeToLoad,
-		    folderPath,
-		    /*relativePath=*/"",
-		    "manifest-temp-holder",
-		    self->generateRandomBulkLoadDataFileName(),
-		    self->generateRandomBulkLoadBytesSampleFileName(),
+		    fileSet,
 		    BulkLoadByteSampleSetting(0,
 		                              "hashlittle2", // use function name to represent the method
 		                              SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
@@ -394,8 +385,6 @@ struct BulkLoading : TestWorkload {
 		    /*snapshotVersion=*/invalidVersion,
 		    /*checksum=*/"",
 		    /*bytes=*/-1);
-		taskUnit.data = self->generateOrderedKVS(self, rangeToLoad, dataSize);
-		self->generateSSTFiles(self, taskUnit);
 		return taskUnit;
 	}
 

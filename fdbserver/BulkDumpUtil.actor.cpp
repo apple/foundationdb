@@ -183,15 +183,13 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
                                               int64_t dumpBytes,
                                               BulkLoadType dumpType,
                                               BulkLoadTransportMethod transportMethod) {
-	BulkDumpFileFullPathSet localFiles(localFileSetConfig);
-
 	// Step 1: Clean up local folder
-	resetFileFolder((abspath(localFiles.folder)), logId);
+	resetFileFolder((abspath(localFileSetConfig.getFolder())), logId);
 
 	// Step 2: Dump data to file
 	bool containDataFile = false;
 	if (sortedData.size() > 0) {
-		writeKVSToSSTFile(abspath(localFiles.dataFilePath), sortedData, logId);
+		writeKVSToSSTFile(abspath(localFileSetConfig.getDataFileFullPath()), sortedData, logId);
 		containDataFile = true;
 	} else {
 		ASSERT(sortedSample.empty());
@@ -201,7 +199,7 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
 	// Step 3: Dump sample to file
 	bool containByteSampleFile = false;
 	if (sortedSample.size() > 0) {
-		writeKVSToSSTFile(abspath(localFiles.byteSampleFilePath), sortedSample, logId);
+		writeKVSToSSTFile(abspath(localFileSetConfig.getBytesSampleFileFullPath()), sortedSample, logId);
 		ASSERT(containDataFile);
 		containByteSampleFile = true;
 	} else {
@@ -209,18 +207,18 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
 	}
 
 	// Step 4: Generate manifest file
-	if (fileExists(abspath(localFiles.manifestFilePath))) {
+	if (fileExists(abspath(localFileSetConfig.getManifestFileFullPath()))) {
 		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
 		    .detail("Reason", "exist old manifestFile")
-		    .detail("ManifestFilePathLocal", abspath(localFiles.manifestFilePath));
+		    .detail("ManifestFilePathLocal", abspath(localFileSetConfig.getManifestFileFullPath()));
 		ASSERT_WE_THINK(false);
 		throw retry();
 	}
-	BulkLoadFileSet fileSetRemote(remoteFileSetConfig.rootPath,
-	                              remoteFileSetConfig.relativePath,
-	                              remoteFileSetConfig.manifestFileName,
-	                              containDataFile ? remoteFileSetConfig.dataFileName : "",
-	                              containByteSampleFile ? remoteFileSetConfig.byteSampleFileName : "");
+	BulkLoadFileSet fileSetRemote(remoteFileSetConfig.getRootPath(),
+	                              remoteFileSetConfig.getRelativePath(),
+	                              remoteFileSetConfig.getManifestFileName(),
+	                              containDataFile ? remoteFileSetConfig.getDataFileName() : "",
+	                              containByteSampleFile ? remoteFileSetConfig.getByteSampleFileName() : "");
 	BulkLoadManifest manifest(fileSetRemote,
 	                          dumpRange.begin,
 	                          dumpRange.end,
@@ -230,53 +228,60 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
 	                          byteSampleSetting,
 	                          dumpType,
 	                          transportMethod);
-	writeStringToFile(abspath(localFiles.manifestFilePath), manifest.toString());
+	writeStringToFile(abspath(localFileSetConfig.getManifestFileFullPath()), manifest.toString());
 	return manifest;
 }
 
 // Validate the invariant of filenames. Source is the file stored locally. Destination is the file going to move to.
 bool validateSourceDestinationFileSets(const BulkLoadFileSet& source, const BulkLoadFileSet& destination) {
 	// Manifest file must be present
-	if (source.manifestFileName.empty() || destination.manifestFileName.empty()) {
+	if (!source.hasManifestFile() || !destination.hasManifestFile()) {
 		return false;
 	}
 	// Source data file and destination data file must present at same time
 	// If data file not present, byte sampling file must not present
-	if (source.dataFileName.empty() && (!destination.dataFileName.empty() || !source.byteSampleFileName.empty())) {
+	if (!source.hasDataFile() && (destination.hasDataFile() || source.hasByteSampleFile())) {
 		return false;
 	}
-	if (destination.dataFileName.empty() && (!source.dataFileName.empty() || !source.byteSampleFileName.empty())) {
+	if (!destination.hasDataFile() && (source.hasDataFile() || destination.hasByteSampleFile())) {
 		return false;
 	}
 	// Data file path and byte sampling file path must have the same basename between source and destination
-	if (!source.dataFileName.empty() && source.dataFileName != destination.dataFileName) {
+	if (source.hasDataFile() && source.getDataFileName() != destination.getDataFileName()) {
 		return false;
 	}
-	if (!source.byteSampleFileName.empty() && source.byteSampleFileName != destination.byteSampleFileName) {
+	if (source.hasByteSampleFile() && source.getByteSampleFileName() != destination.getByteSampleFileName()) {
 		return false;
 	}
 	return true;
 }
 
 // Copy files between local file folders, used to mock blobstore in the test.
-void bulkDumpTransportCP_impl(BulkLoadFileSet sourceFileSet,
-                              BulkLoadFileSet destinationFileSet,
+void bulkDumpTransportCP_impl(const BulkLoadFileSet& sourceFileSet,
+                              const BulkLoadFileSet& destinationFileSet,
                               size_t fileBytesMax,
                               UID logId) {
-	BulkDumpFileFullPathSet localFiles(sourceFileSet);
-	BulkDumpFileFullPathSet remoteFiles(destinationFileSet);
-
 	// Clear remote existing folder
-	resetFileFolder(abspath(remoteFiles.folder), logId);
+	resetFileFolder(abspath(destinationFileSet.getFolder()), logId);
 	// Copy bulk dump files to the remote folder
-	bulkDumpFileCopy(abspath(localFiles.manifestFilePath), abspath(remoteFiles.manifestFilePath), fileBytesMax, logId);
-	if (sourceFileSet.dataFileName.size() > 0) {
-		bulkDumpFileCopy(abspath(localFiles.dataFilePath), abspath(remoteFiles.dataFilePath), fileBytesMax, logId);
+	ASSERT(sourceFileSet.hasManifestFile() && destinationFileSet.hasManifestFile());
+	bulkDumpFileCopy(abspath(sourceFileSet.getManifestFileFullPath()),
+	                 abspath(destinationFileSet.getManifestFileFullPath()),
+	                 fileBytesMax,
+	                 logId);
+	if (sourceFileSet.hasDataFile()) {
+		ASSERT(destinationFileSet.hasDataFile());
+		bulkDumpFileCopy(abspath(sourceFileSet.getDataFileFullPath()),
+		                 abspath(destinationFileSet.getDataFileFullPath()),
+		                 fileBytesMax,
+		                 logId);
 	}
-	if (sourceFileSet.byteSampleFileName.size() > 0) {
-		ASSERT(sourceFileSet.dataFileName.size() > 0);
-		bulkDumpFileCopy(
-		    abspath(localFiles.byteSampleFilePath), abspath(remoteFiles.byteSampleFilePath), fileBytesMax, logId);
+	if (sourceFileSet.hasByteSampleFile()) {
+		ASSERT(sourceFileSet.hasDataFile() && destinationFileSet.hasByteSampleFile());
+		bulkDumpFileCopy(abspath(sourceFileSet.getBytesSampleFileFullPath()),
+		                 abspath(destinationFileSet.getBytesSampleFileFullPath()),
+		                 fileBytesMax,
+		                 logId);
 	}
 	return;
 }
@@ -287,8 +292,7 @@ ACTOR Future<Void> bulkDumpTransportBlobstore_impl(BulkLoadFileSet sourceFileSet
                                                    size_t fileBytesMax,
                                                    UID logId) {
 	// TODO(BulkDump): Make use of fileBytesMax
-	BulkDumpFileFullPathSet sourceFileFullPathSet(sourceFileSet);
-	wait(copyUpBulkDumpFileSet(destinationFileSet.rootPath, sourceFileFullPathSet, destinationFileSet));
+	wait(copyUpBulkDumpFileSet(destinationFileSet.getRootPath(), sourceFileSet, destinationFileSet));
 	return Void();
 }
 
