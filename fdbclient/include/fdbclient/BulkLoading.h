@@ -245,36 +245,6 @@ private:
 	std::string byteSampleFileName = "";
 };
 
-struct BulkDumpFileFullPathSet {
-	BulkDumpFileFullPathSet(const BulkLoadFileSet& fileSet) {
-		folder = fileSet.getFolder();
-		if (fileSet.hasManifestFile()) {
-			manifestFilePath = fileSet.getManifestFileName();
-		} else {
-			manifestFilePath = "";
-		}
-		if (fileSet.hasDataFile()) {
-			dataFilePath = fileSet.getDataFileFullPath();
-		} else {
-			dataFilePath = "";
-		}
-		if (fileSet.hasByteSampleFile()) {
-			byteSampleFilePath = fileSet.getBytesSampleFileFullPath();
-		} else {
-			byteSampleFilePath = "";
-		}
-	}
-	std::string folder = "";
-	std::string dataFilePath = "";
-	std::string byteSampleFilePath = "";
-	std::string manifestFilePath = "";
-
-	std::string toString() const {
-		return "[Folder]: " + folder + ", [ManifestFilePath]: " + manifestFilePath +
-		       ", [DataFilePath]: " + dataFilePath + ", [ByteSampleFilePath]: " + byteSampleFilePath;
-	}
-};
-
 // Define the metadata of bulkload manifest file.
 // The manifest file stores the ground true of metadata of dumped data file, such as range and version.
 // The manifest file is uploaded along with the data file.
