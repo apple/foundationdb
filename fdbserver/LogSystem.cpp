@@ -299,7 +299,7 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 	if (!usePreviousLocations) {
 		prev_tags.clear();
 		if (logSystem->hasRemoteLogs()) {
-			prev_tags.push_back(logSystem->getRandomRouterTag());
+			prev_tags.push_back(chooseRouterTag());
 		}
 		for (auto& tag : next_message_tags) {
 			prev_tags.push_back(tag);
