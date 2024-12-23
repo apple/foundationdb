@@ -20,6 +20,8 @@
 
 #include "fdbclient/BulkLoading.h"
 
+const int bulkLoadJobManifestFileFormatVersion = 1;
+
 std::string generateBulkLoadJobManifestFileName() {
 	return "job-manifest.txt";
 }
@@ -36,6 +38,17 @@ std::string generateEmptyManifestFileName() {
 	return "manifest-empty.sst";
 }
 
+// Generate the bulkload job manifest file. Here is an example:
+// Row 0: [FormatVersion]: 1, [ManifestCount]: 3, [RootPath]: "/tmp";
+// Row 1: "", "01", 100, 9000, "range1", "manifest1.txt"
+// Row 2: "01", "02 ff", 200, 0, "range2", "manifest2.txt"
+// Row 3: "02 ff", "ff", 300, 8100, "range3", "manifest3.txt"
+// In this example, the job manifest file is in the format of version 1.
+// The file contains three ranges: "" ~ "\x01", "\x01" ~ "\x02\xff", and "\x02\xff" ~ "\xff".
+// For the first range, the data version is at 100, the data size is 9KB, the manifest file path is
+// "/tmp/range1/manifest1.txt". For the second range, the data version is at 200, the data size is 0 indicating this is
+// an empty range. The manifest file path is "/tmp/range2/manifest2.txt". For the third range, the data version is at
+// 300, the data size is 8.1KB, the manifest file path is "/tmp/range1/manifest3.txt".
 std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests) {
 	std::string root = "";
 	std::string content;
@@ -47,7 +60,8 @@ std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadM
 		}
 		content = content + manifest.generateEntryInJobManifest() + "\n";
 	}
-	std::string head = "Manifest count: " + std::to_string(manifests.size()) + ", Root: " + root + "\n";
+	std::string head = "[FormatVersion]: " + std::to_string(bulkLoadJobManifestFileFormatVersion) +
+	                   ", [ManifestCount]: " + std::to_string(manifests.size()) + ", [RootPath]: " + root + "\n";
 	return head + content;
 }
 
