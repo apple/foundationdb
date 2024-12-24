@@ -1196,18 +1196,18 @@ const UID dataDistributionModeLock = UID(6345, 3425);
 
 // Bulk loading keys
 const KeyRef bulkLoadModeKey = "\xff/bulkLoadMode"_sr;
-const KeyRangeRef bulkLoadKeys = KeyRangeRef("\xff/bulkLoad/"_sr, "\xff/bulkLoad0"_sr);
-const KeyRef bulkLoadPrefix = bulkLoadKeys.begin;
+const KeyRangeRef bulkLoadTaskKeys = KeyRangeRef("\xff/bulkLoadTask/"_sr, "\xff/bulkLoadTask0"_sr);
+const KeyRef bulkLoadTaskPrefix = bulkLoadTaskKeys.begin;
 
-const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState) {
-	return ObjectWriter::toValue(bulkLoadState, IncludeVersion());
+const Value bulkLoadTaskStateValue(const BulkLoadTaskState& bulkLoadTaskState) {
+	return ObjectWriter::toValue(bulkLoadTaskState, IncludeVersion());
 }
 
-BulkLoadState decodeBulkLoadState(const ValueRef& value) {
-	BulkLoadState bulkLoadState;
+BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value) {
+	BulkLoadTaskState bulkLoadTaskState;
 	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(bulkLoadState);
-	return bulkLoadState;
+	reader.deserialize(bulkLoadTaskState);
+	return bulkLoadTaskState;
 }
 
 // Bulk dumping keys

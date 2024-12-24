@@ -88,7 +88,7 @@ struct MoveKeysParams {
 	const DDEnabledState* ddEnabledState = nullptr;
 	CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False;
 
-	Optional<BulkLoadState> bulkLoadState;
+	Optional<BulkLoadTaskState> bulkLoadTaskState;
 
 	MoveKeysParams() {}
 
@@ -104,13 +104,13 @@ struct MoveKeysParams {
 	               UID relocationIntervalId,
 	               const DDEnabledState* ddEnabledState,
 	               CancelConflictingDataMoves cancelConflictingDataMoves,
-	               Optional<BulkLoadState> bulkLoadState)
+	               Optional<BulkLoadTaskState> bulkLoadTaskState)
 	  : dataMoveId(dataMoveId), keys(keys), destinationTeam(destinationTeam), healthyDestinations(healthyDestinations),
 	    lock(lock), dataMovementComplete(dataMovementComplete),
 	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
 	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
 	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
-	    cancelConflictingDataMoves(cancelConflictingDataMoves), bulkLoadState(bulkLoadState) {}
+	    cancelConflictingDataMoves(cancelConflictingDataMoves), bulkLoadTaskState(bulkLoadTaskState) {}
 
 	MoveKeysParams(UID dataMoveId,
 	               const std::vector<KeyRange>& ranges,
@@ -124,13 +124,13 @@ struct MoveKeysParams {
 	               UID relocationIntervalId,
 	               const DDEnabledState* ddEnabledState,
 	               CancelConflictingDataMoves cancelConflictingDataMoves,
-	               Optional<BulkLoadState> bulkLoadState)
+	               Optional<BulkLoadTaskState> bulkLoadTaskState)
 	  : dataMoveId(dataMoveId), ranges(ranges), destinationTeam(destinationTeam),
 	    healthyDestinations(healthyDestinations), lock(lock), dataMovementComplete(dataMovementComplete),
 	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
 	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
 	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
-	    cancelConflictingDataMoves(cancelConflictingDataMoves), bulkLoadState(bulkLoadState) {}
+	    cancelConflictingDataMoves(cancelConflictingDataMoves), bulkLoadTaskState(bulkLoadTaskState) {}
 };
 
 // read the lock value in system keyspace but do not change anything

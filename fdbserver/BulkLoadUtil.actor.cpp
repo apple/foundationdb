@@ -18,34 +18,33 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ClientKnobs.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
+#include <cstddef>
 #include <fmt/format.h>
+#include "flow/Error.h"
+#include "flow/IRandom.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include "flow/flow.h"
 
-std::string generateRandomBulkLoadDataFileName() {
-	return deterministicRandom()->randomUniqueID().toString() + "-data.sst";
-}
-
-std::string generateRandomBulkLoadBytesSampleFileName() {
-	return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
-}
-
-ACTOR Future<Optional<BulkLoadState>> getBulkLoadStateFromDataMove(Database cx, UID dataMoveId, UID logId) {
+ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx, UID dataMoveId, UID logId) {
 	loop {
 		state Transaction tr(cx);
 		try {
 			Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 			if (!val.present()) {
 				TraceEvent(SevWarn, "SSBulkLoadDataMoveIdNotExist", logId).detail("DataMoveID", dataMoveId);
-				return Optional<BulkLoadState>();
+				return Optional<BulkLoadTaskState>();
 			}
 			DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
-			return dataMoveMetaData.bulkLoadState;
+			return dataMoveMetaData.bulkLoadTaskState;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -53,92 +52,91 @@ ACTOR Future<Optional<BulkLoadState>> getBulkLoadStateFromDataMove(Database cx, 
 }
 
 void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
-	std::string content = readFileBytes(fromFile, fileBytesMax);
-	writeFile(toFile, content);
-	// TODO(BulkLoad): Do file checksum for toFile
+	std::string content = readFileBytes(abspath(fromFile), fileBytesMax);
+	writeFile(abspath(toFile), content);
 	return;
 }
 
-ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
-                                                         BulkLoadState bulkLoadState,
-                                                         size_t fileBytesMax,
-                                                         UID logId) {
-	ASSERT(bulkLoadState.getTransportMethod() == BulkLoadTransportMethod::CP);
+void bulkLoadTransportCP_impl(BulkLoadFileSet fromRemoteFileSet,
+                              BulkLoadFileSet toLocalFileSet,
+                              size_t fileBytesMax,
+                              UID logId) {
+	// Clear existing local folder
+	platform::eraseDirectoryRecursive(abspath(toLocalFileSet.getFolder()));
+	ASSERT(platform::createDirectory(abspath(toLocalFileSet.getFolder())));
+	// Copy data file
+	bulkLoadFileCopy(
+	    abspath(fromRemoteFileSet.getDataFileFullPath()), abspath(toLocalFileSet.getDataFileFullPath()), fileBytesMax);
+	// Copy byte sample file if exists
+	if (fromRemoteFileSet.hasByteSampleFile()) {
+		bulkLoadFileCopy(abspath(fromRemoteFileSet.getBytesSampleFileFullPath()),
+		                 abspath(toLocalFileSet.getBytesSampleFileFullPath()),
+		                 fileBytesMax);
+	}
+	// TODO(BulkLoad): Throw error if the date/bytesample file does not exist while the filename is not empty
+	return;
+}
+
+ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMethod transportMethod,
+                                                          BulkLoadFileSet fromRemoteFileSet,
+                                                          std::string toLocalRoot,
+                                                          UID logId) {
+	ASSERT(transportMethod != BulkLoadTransportMethod::Invalid);
 	loop {
-		state std::string toFile;
-		state std::string fromFile;
-		state SSBulkLoadFileSet fileSet;
 		try {
-			fileSet.folder = abspath(joinPath(dir, bulkLoadState.getFolder()));
+			// Step 1: Generate local file set based on remote file set by replacing the remote root to the local root.
+			state BulkLoadFileSet toLocalFileSet(toLocalRoot,
+			                                     fromRemoteFileSet.getRelativePath(),
+			                                     fromRemoteFileSet.getManifestFileName(),
+			                                     fromRemoteFileSet.getDataFileName(),
+			                                     fromRemoteFileSet.getByteSampleFileName());
 
-			// Clear existing folder
-			platform::eraseDirectoryRecursive(fileSet.folder);
-			if (!platform::createDirectory(fileSet.folder)) {
-				throw retry();
+			// Step 2: Download remote file set to local folder
+			if (transportMethod == BulkLoadTransportMethod::CP) {
+				ASSERT(fromRemoteFileSet.hasDataFile());
+				// Copy the data file and the sample file from remote folder to a local folder specified by
+				// fromRemoteFileSet.
+				bulkLoadTransportCP_impl(
+				    fromRemoteFileSet, toLocalFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
+			} else {
+				ASSERT(false);
 			}
+			// TODO(BulkLoad): Check file checksum
 
-			// Move bulk load files to loading folder
-			for (const auto& filePath : bulkLoadState.getDataFiles()) {
-				fromFile = abspath(filePath);
-				toFile = abspath(joinPath(fileSet.folder, generateRandomBulkLoadDataFileName()));
-				if (fileSet.dataFileList.find(toFile) != fileSet.dataFileList.end()) {
-					ASSERT_WE_THINK(false);
-					throw retry();
-				}
-				bulkLoadFileCopy(fromFile, toFile, fileBytesMax);
-				fileSet.dataFileList.insert(toFile);
-				TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
-				    .detail("BulkLoadTask", bulkLoadState.toString())
-				    .detail("FromFile", fromFile)
-				    .detail("ToFile", toFile);
-			}
-			if (bulkLoadState.getBytesSampleFile().present()) {
-				fromFile = abspath(bulkLoadState.getBytesSampleFile().get());
-				if (fileExists(fromFile)) {
-					toFile = abspath(joinPath(fileSet.folder, generateRandomBulkLoadBytesSampleFileName()));
-					bulkLoadFileCopy(fromFile, toFile, fileBytesMax);
-					fileSet.bytesSampleFile = toFile;
-					TraceEvent(SevInfo, "SSBulkLoadSSTFileCopied", logId)
-					    .detail("BulkLoadTask", bulkLoadState.toString())
-					    .detail("FromFile", fromFile)
-					    .detail("ToFile", toFile);
-				}
-			}
-			return fileSet;
+			return toLocalFileSet;
 
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileCopyError", logId)
-			    .errorUnsuppressed(e)
-			    .detail("BulkLoadTask", bulkLoadState.toString())
-			    .detail("FromFile", fromFile)
-			    .detail("ToFile", toFile);
+			TraceEvent(SevWarn, "SSBulkLoadDownloadTaskFileSetError", logId).errorUnsuppressed(e);
 			wait(delay(5.0));
 		}
 	}
 }
 
-ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string folderToGenerate,
-                                                                 std::unordered_set<std::string> dataFiles,
-                                                                 UID logId) {
+// Return true if generated the byte sampling file. Otherwise, return false.
+ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // input file
+                                             std::string byteSampleFileFullPath, // output file
+                                             UID logId) {
+	state int counter = 0;
 	loop {
 		try {
-			std::string bytesSampleFile =
-			    abspath(joinPath(folderToGenerate, generateRandomBulkLoadBytesSampleFileName()));
-			std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
-			sstWriter->open(bytesSampleFile);
-			bool anySampled = false;
-			for (const auto& filePath : dataFiles) {
-				std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
-				reader->open(filePath);
-				while (reader->hasNext()) {
-					KeyValue kv = reader->next();
-					ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
-					if (sampleInfo.inSample) {
-						sstWriter->write(kv.key, kv.value); // TODO(BulkLoad): validate if kvs are sorted
-						anySampled = true;
+			state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+			sstWriter->open(abspath(byteSampleFileFullPath));
+			state bool anySampled = false;
+			state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
+			reader->open(abspath(dataFileFullPath));
+			while (reader->hasNext()) {
+				KeyValue kv = reader->next();
+				ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
+				if (sampleInfo.inSample) {
+					sstWriter->write(kv.key, BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned()));
+					anySampled = true;
+					counter++;
+					if (counter > SERVER_KNOBS->BULKLOAD_BYTE_SAMPLE_BATCH_KEY_COUNT) {
+						wait(yield());
+						counter = 0;
 					}
 				}
 			}
@@ -147,9 +145,11 @@ ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string fol
 			// In this case, no SST sample byte file is generated
 			if (anySampled) {
 				ASSERT(sstWriter->finish());
-				return bytesSampleFile;
+				return true;
 			} else {
-				return Optional<std::string>();
+				ASSERT(!sstWriter->finish());
+				deleteFile(abspath(byteSampleFileFullPath));
+				return false;
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -157,18 +157,7 @@ ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string fol
 			}
 			TraceEvent(SevWarn, "SSBulkLoadTaskSamplingError", logId).errorUnsuppressed(e);
 			wait(delay(5.0));
+			deleteFile(abspath(byteSampleFileFullPath));
 		}
 	}
-}
-
-void checkContent(std::unordered_set<std::string> dataFiles, UID logId) {
-	for (const auto& filePath : dataFiles) {
-		std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
-		reader->open(filePath);
-		while (reader->hasNext()) {
-			KeyValue kv = reader->next();
-			TraceEvent("CheckContent", logId).detail("Key", kv.key).detail("Value", kv.value);
-		}
-	}
-	return;
 }
