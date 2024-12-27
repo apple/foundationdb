@@ -36,7 +36,10 @@ import com.apple.foundationdb.Transaction;
  *
  */
 public class ByteArrayUtil extends FastByteComparisons {
-	private static final byte[] EMPTY_BYTES = new byte[0];
+	/**
+	 * A zero-length byte array.
+	 */
+	public static final byte[] EMPTY_BYTES = new byte[0];
 
 	/**
 	 * Joins a set of byte arrays into a larger array. The {@code interlude} is placed
