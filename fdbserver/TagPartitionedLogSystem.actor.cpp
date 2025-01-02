@@ -2170,7 +2170,9 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 	//
 	// @todo modify code to use "minDV" as the default (starting) recovery version.
 	Version RV = maxKCV; // recovery version
-	std::vector<Version> RVs(maxTLogLocId + 1, maxKCV); // recovery versions of various tLogs
+	// @note we currently don't use "RVs", but we may use this information later (maybe for
+	// doing error checking). Commenting out the RVs related code for now.
+	// std::vector<Version> RVs(maxTLogLocId + 1, maxKCV); // recovery versions of various tLogs
 	Version prevVersion = maxKCV;
 	for (auto const& [version, tLogs] : versionAllTLogs) {
 		if (!(prevVersion == maxKCV || prevVersion == prevVersionMap[version])) {
@@ -2185,17 +2187,21 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 		}
 		// If the commit proxy sent this version to "N" log servers then at least
 		// (N - replicationFactor + 1) log servers must be available.
-		if (!(versionAvailableTLogs[version].size() >= tLogs.size() - replicationFactor + 1)) {
+		if (!(versionAvailableTLogs[version].count() >= tLogs.count() - replicationFactor + 1)) {
 			break;
 		}
 		// Update RV.
 		RV = version;
+		/*
+		// @note We currently don't use "RVs", but we may use this information later (maybe for doing
+		// error checking). Commenting out this code for now.
 		// Update recovery version vector.
 		for (boost::dynamic_bitset<>::size_type id = 0; id < versionAvailableTLogs[version].size(); id++) {
-			if (versionAvailableTLogs[version][id]) {
-				RVs[id] = version;
-			}
+		    if (versionAvailableTLogs[version][id]) {
+		        RVs[id] = version;
+		    }
 		}
+		*/
 		// Update prevVersion.
 		prevVersion = version;
 	}
