@@ -173,6 +173,21 @@ struct TraceableString<char*> {
 	static std::string toString(char* value) { return std::string(value); }
 };
 
+template <>
+struct TraceableString<std::filesystem::path> {
+	static auto begin(const std::filesystem::path& value) {
+		static std::string pathString = value.string();
+		return pathString.begin();
+	}
+
+	static bool atEnd(const std::filesystem::path& value, std::string::iterator iter) {
+		static std::string pathString = value.string();
+		return iter == pathString.end();
+	}
+
+	static std::string toString(const std::filesystem::path& value) { return value.string(); }
+};
+
 template <class T>
 struct TraceableStringImpl : std::true_type {
 	static constexpr bool isPrintable(char c) { return 32 <= c && c <= 126; }
@@ -239,6 +254,8 @@ template <size_t S>
 struct Traceable<char[S]> : TraceableStringImpl<char[S]> {};
 template <>
 struct Traceable<std::string> : TraceableStringImpl<std::string> {};
+template <>
+struct Traceable<std::filesystem::path> : TraceableString<std::filesystem::path> {};
 template <>
 struct Traceable<std::string_view> : TraceableStringImpl<std::string_view> {};
 
