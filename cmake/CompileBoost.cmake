@@ -71,7 +71,7 @@ function(compile_boost)
   # Build boost
   include(ExternalProject)
 
-  set(BOOST_SRC_URL https://boostorg.jfrog.io/artifactory/main/release/1.86.0/source/boost_1_86_0.tar.bz2)
+  set(BOOST_SRC_URL https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2)
   set(BOOST_SRC_SHA SHA256=1bed88e40401b2cb7a1f76d4bab499e352fa4d0c5f31c0dbae64e24d34d7513b)
 
   if(USE_ASAN)
