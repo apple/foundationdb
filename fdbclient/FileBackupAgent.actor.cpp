@@ -587,8 +587,6 @@ TwoBuffers::TwoBuffers(int capacity, Reference<IBackupContainer> _bc, std::vecto
 
 bool TwoBuffers::hasNext() {
 	// if it is being load (valid but not ready, what would be the size?)
-	if (buffers[0]->is_valid() && buffers[0]->size == 0 || buffers[1]->is_valid() && buffers[1]->size == 0) {
-	}
 	if (buffers[0]->is_valid() || buffers[1]->is_valid()) {
 		return true;
 	}
