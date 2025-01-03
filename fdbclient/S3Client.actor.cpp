@@ -126,38 +126,38 @@ ACTOR Future<Void> copyUpDirectory(std::string dirpath, std::string s3url) {
 }
 
 ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
-                                         BulkDumpFileFullPathSet sourceFileFullPathSet,
-                                         BulkDumpFileSet destinationFileSet) {
+                                         BulkLoadFileSet sourceFileSet,
+                                         BulkLoadFileSet destinationFileSet) {
 	state std::string resource;
 	S3BlobStoreEndpoint::ParametersT parameters;
 	state Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
 	state std::string bucket = parameters["bucket"];
 	TraceEvent("S3ClientCopyUpBulkDumpFileSetStart")
 	    .detail("bucket", bucket)
-	    .detail("sourceFileSet", sourceFileFullPathSet.toString())
+	    .detail("sourceFileSet", sourceFileSet.toString())
 	    .detail("destinationFileSet", destinationFileSet.toString());
 	state int pNumDeleted = 0;
 	state int64_t pBytesDeleted = 0;
 	// Throws error if s3url is invalid.
 	boost::urls::url url = boost::urls::parse_uri(s3url).value();
 	// Get path to the batch dir.
-	state std::string batch_dir = joinPath(url.path(), destinationFileSet.relativePath);
+	state std::string batch_dir = joinPath(url.path(), destinationFileSet.getRelativePath());
 	// Delete the batch dir if it exists already (need to check bucket exists else 404 and s3blobstore errors out).
 	bool exists = wait(endpoint->bucketExists(bucket));
 	if (exists) {
 		wait(endpoint->deleteRecursively(bucket, batch_dir, &pNumDeleted, &pBytesDeleted));
 	}
 	// Destination for manifest file.
-	auto destinationManifestPath = joinPath(batch_dir, destinationFileSet.manifestFileName);
-	wait(copyUpFile(endpoint, bucket, destinationManifestPath, sourceFileFullPathSet.manifestFilePath));
-	if (sourceFileFullPathSet.dataFilePath.size() > 0) {
-		auto destinationDataPath = joinPath(batch_dir, destinationFileSet.dataFileName);
-		wait(copyUpFile(endpoint, bucket, destinationDataPath, sourceFileFullPathSet.dataFilePath));
+	auto destinationManifestPath = joinPath(batch_dir, destinationFileSet.getManifestFileName());
+	wait(copyUpFile(endpoint, bucket, destinationManifestPath, sourceFileSet.getManifestFileFullPath()));
+	if (sourceFileSet.hasDataFile()) {
+		auto destinationDataPath = joinPath(batch_dir, destinationFileSet.getDataFileName());
+		wait(copyUpFile(endpoint, bucket, destinationDataPath, sourceFileSet.getDataFileFullPath()));
 	}
-	if (sourceFileFullPathSet.byteSampleFilePath.size() > 0) {
-		ASSERT(sourceFileFullPathSet.dataFilePath.size() > 0);
-		auto destinationByteSamplePath = joinPath(batch_dir, destinationFileSet.byteSampleFileName);
-		wait(copyUpFile(endpoint, bucket, destinationByteSamplePath, sourceFileFullPathSet.byteSampleFilePath));
+	if (sourceFileSet.hasByteSampleFile()) {
+		ASSERT(sourceFileSet.hasDataFile());
+		auto destinationByteSamplePath = joinPath(batch_dir, destinationFileSet.getByteSampleFileName());
+		wait(copyUpFile(endpoint, bucket, destinationByteSamplePath, sourceFileSet.getBytesSampleFileFullPath()));
 	}
 	TraceEvent("S3ClientCopyUpBulkDumpFileSetEnd")
 	    .detail("BatchDir", batch_dir)

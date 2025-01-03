@@ -174,7 +174,7 @@ struct DataMoveMetaData {
 	std::set<UID> checkpoints;
 	int16_t phase; // DataMoveMetaData::Phase.
 	int8_t mode;
-	Optional<BulkLoadState> bulkLoadState; // set if the data move is a bulk load data move
+	Optional<BulkLoadTaskState> bulkLoadTaskState; // set if the data move is a bulk load data move
 
 	DataMoveMetaData() = default;
 	DataMoveMetaData(UID id, Version version, KeyRange range) : id(id), version(version), priority(0), mode(0) {
@@ -194,15 +194,15 @@ struct DataMoveMetaData {
 		                  ", [Phase]: " + std::to_string(static_cast<int>(phase)) +
 		                  ", [Source Servers]: " + describe(src) + ", [Destination Servers]: " + describe(dest) +
 		                  ", [Checkpoints]: " + describe(checkpoints);
-		if (bulkLoadState.present()) {
-			res = res + ", [BulkLoadState]: " + bulkLoadState.get().toString();
+		if (bulkLoadTaskState.present()) {
+			res = res + ", [BulkLoadTaskState]: " + bulkLoadTaskState.get().toString();
 		}
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode, bulkLoadState);
+		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode, bulkLoadTaskState);
 	}
 };
 

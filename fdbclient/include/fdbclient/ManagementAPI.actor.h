@@ -174,22 +174,22 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
 
 // Get valid bulk load task state within the input range
-ACTOR Future<std::vector<BulkLoadState>> getValidBulkLoadTasksWithinRange(Database cx,
-                                                                          KeyRange rangeToRead,
-                                                                          size_t limit,
-                                                                          Optional<BulkLoadPhase> phase);
+ACTOR Future<std::vector<BulkLoadTaskState>> getValidBulkLoadTasksWithinRange(Database cx,
+                                                                              KeyRange rangeToRead,
+                                                                              size_t limit,
+                                                                              Optional<BulkLoadPhase> phase);
 
 // Submit a bulk load task
-ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask);
+ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadTaskState bulkLoadTask);
 
 // Acknowledge a bulk load task if it has been completed
 ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId);
 
 // Get bulk load task for the input range and taskId
-ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
-                                            KeyRange range,
-                                            UID taskId,
-                                            std::vector<BulkLoadPhase> phases);
+ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
+                                                KeyRange range,
+                                                UID taskId,
+                                                std::vector<BulkLoadPhase> phases);
 
 // Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
 // the metadata.

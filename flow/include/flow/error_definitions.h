@@ -162,6 +162,7 @@ ERROR( range_lock_failed, 1241, "Lock range failed" )
 ERROR( transaction_rejected_range_locked, 1242, "Transaction rejected due to range lock" )
 ERROR( bulkdump_task_failed, 1243, "Bulk dumping task failed" )
 ERROR( bulkdump_task_outdated, 1244, "Bulk dumping task outdated" )
+ERROR( bulkload_fileset_invalid_filepath, 1245, "Bulkload fileset provides invalid filepath" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

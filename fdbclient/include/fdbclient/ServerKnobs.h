@@ -395,6 +395,7 @@ public:
 	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
 	                                    // under replicated shards
 	int BULKLOAD_FILE_BYTES_MAX; // the maximum bytes of files to inject by bulk loading
+	int BULKLOAD_BYTE_SAMPLE_BATCH_KEY_COUNT; // the maximum key count that can be successively sampled when bulkload
 	double DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC; // seconds to delay shard boundary change when blocked by bulk
 	                                                    // loading
 	int DD_BULKLOAD_TASK_METADATA_READ_SIZE; // the number of bulk load tasks read from metadata at a time
