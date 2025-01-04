@@ -200,15 +200,15 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						// TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString()).log();
 
 						wait(tr.commit());
-						TraceEvent("CyclicTestCommit")
-							.detail("R1", r)
-							.detail("R2", r2)
-							.detail("R3", r3)
-							.detail("R4", r4)
-							.log();
+						// TraceEvent("CyclicTestCommit")
+						// 	.detail("R1", r)
+						// 	.detail("R2", r2)
+						// 	.detail("R3", r3)
+						// 	.detail("R4", r4)
+						// 	.log();
 						break;
 					} catch (Error& e) {
-						TraceEvent("CyclicTestError").detail("ErrorCode", e.code()).log();
+						// TraceEvent("CyclicTestError").detail("ErrorCode", e.code()).log();
 						if (e.code() == error_code_transaction_too_old)
 							++self->tooOldRetries;
 						else if (e.code() == error_code_not_committed)

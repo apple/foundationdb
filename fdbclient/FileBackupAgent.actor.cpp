@@ -597,12 +597,12 @@ std::string printFiles(std::vector<RestoreConfig::RestoreFile>& files) {
 bool TwoBuffers::hasNext() {
 	// if it is being load (valid but not ready, what would be the size?)
 	while (currentFileIndex < files.size() && currentFilePosition >= files[currentFileIndex].fileSize) {
-		TraceEvent("FlowGuruReadNextFile")
-			.detail("Files", printFiles(files))
-			.detail("Tag", tag)
-			.detail("FilesCount", files.size())
-			.detail("NewIndex", currentFileIndex + 1)
-			.log();
+		// TraceEvent("FlowGuruReadNextFile")
+		// 	.detail("Files", printFiles(files))
+		// 	.detail("Tag", tag)
+		// 	.detail("FilesCount", files.size())
+		// 	.detail("NewIndex", currentFileIndex + 1)
+		// 	.log();
 		currentFileIndex++;
 		currentFilePosition = 0;
 	}	
@@ -722,18 +722,18 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	state size_t fileSize = self->files[self->currentFileIndex].fileSize;
 	size_t remaining = fileSize - self->currentFilePosition;
 	state size_t bytesToRead = std::min(self->bufferCapacity, remaining);
-	TraceEvent("FlowGuruBeforeActualRead")
-		.detail("FileName", self->files[self->currentFileIndex].fileName)
-		.detail("CurrentFilePos", self->currentFilePosition)
-		.detail("FileSize", fileSize)
-		.detail("BytesToRead", bytesToRead)
-		.log();
+	// TraceEvent("FlowGuruBeforeActualRead")
+	// 	.detail("FileName", self->files[self->currentFileIndex].fileName)
+	// 	.detail("CurrentFilePos", self->currentFilePosition)
+	// 	.detail("FileSize", fileSize)
+	// 	.detail("BytesToRead", bytesToRead)
+	// 	.log();
 	state int bytesRead =
 	    wait(asyncFile->read(static_cast<void*>(self->buffers[index]->data.get()), bytesToRead, self->currentFilePosition));
-	TraceEvent("FlowGuruAfterActualRead")
-		.detail("FileName", self->files[self->currentFileIndex].fileName)
-		.detail("BytesToRead", bytesToRead)
-		.log();
+	// TraceEvent("FlowGuruAfterActualRead")
+	// 	.detail("FileName", self->files[self->currentFileIndex].fileName)
+	// 	.detail("BytesToRead", bytesToRead)
+	// 	.log();
 	// fmt::print(stderr,
 	//            "readNextBlock::Index={}", self->currentFileIndex);
 	if (bytesRead != bytesToRead)
@@ -742,14 +742,14 @@ ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int ind
 	self->buffers[index]->size = bytesRead; // Set to actual bytes read
 	// self->bufferOffset[index] = 0; // Reset bufferOffset for the new data
 	self->currentFilePosition += bytesRead;
-	TraceEvent("FlowGuruReadNextFileFinish")
-		.detail("FileIndex", self->currentFileIndex)
-		.detail("Tag", self->tag)
-		.detail("Position", self->currentFilePosition)
-		.detail("Files", printFiles(self->files))
-		.detail("FileSize", self->files[self->currentFileIndex].fileSize)
-		.detail("FilesCount", self->files.size())
-		.log();
+	// TraceEvent("FlowGuruReadNextFileFinish")
+	// 	.detail("FileIndex", self->currentFileIndex)
+	// 	.detail("Tag", self->tag)
+	// 	.detail("Position", self->currentFilePosition)
+	// 	.detail("Files", printFiles(self->files))
+	// 	.detail("FileSize", self->files[self->currentFileIndex].fileSize)
+	// 	.detail("FilesCount", self->files.size())
+	// 	.log();
 
 	// TODO: move this to hasNext()
 	return Void();
@@ -1045,12 +1045,12 @@ ACTOR Future<Version> PartitionedLogIteratorSimple::peekNextVersion(
 		// fmt::print(stderr, "peekNextVersion::afterRemoveBlockHeader, tag={}, offset={} \n", self->tag, self->bufferOffset);
 		std::memcpy(&version, self->buffer.get() + self->bufferOffset, sizeof(Version));
 		version = bigEndian64(version);
-		TraceEvent("FlowGuruSimpleFindOverlapAndSkipAfter")
-			.detail("Version", version)
-			.detail("FileIndex", self->fileIndex)
-			.detail("Files", printFiles(self->files))
-			.detail("Versions", printVersions(self->endVersions))
-			.log();
+		// TraceEvent("FlowGuruSimpleFindOverlapAndSkipAfter")
+		// 	.detail("Version", version)
+		// 	.detail("FileIndex", self->fileIndex)
+		// 	.detail("Files", printFiles(self->files))
+		// 	.detail("Versions", printVersions(self->endVersions))
+		// 	.log();
 	}
 	return version;
 }
@@ -1271,11 +1271,11 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 		}
 	}
 
-	TraceEvent("FlowGuruConsumeDataFinish")
-		.detail("FirstVersion", firstVersion)
-		.detail("Offset", self->bufferOffset)
-		.detail("Size", size)
-		.log();
+	// TraceEvent("FlowGuruConsumeDataFinish")
+	// 	.detail("FirstVersion", firstVersion)
+	// 	.detail("Offset", self->bufferOffset)
+	// 	.detail("Size", size)
+	// 	.log();
 	return mutations;
 }
 
@@ -5713,11 +5713,11 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				}
 				if (first) {
 					first = false;
-					TraceEvent("FlowGuruFirstValidVersion")
-						.detail("BeginVersion", begin)
-						.detail("EndVersion", end)
-						.detail("MinVersion", minVersion)
-						.log();
+					// TraceEvent("FlowGuruFirstValidVersion")
+					// 	.detail("BeginVersion", begin)
+					// 	.detail("EndVersion", end)
+					// 	.detail("MinVersion", minVersion)
+					// 	.log();
 				}
 				
 				// transform from new format to old format(param1, param2)
@@ -5906,16 +5906,16 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// if current is [40, 50] and restore version is 50, we need another [50, 51] task to process data at version 50
 		state Version nextEndVersion =
 		    std::min(restoreVersion + 1, endVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE);
-		fmt::print(stderr, "Very begin Begin={}, End={}, nextEnd={}, restoreVersion={}\n", beginVersion, endVersion, nextEndVersion, restoreVersion);		
+		// fmt::print(stderr, "Very begin Begin={}, End={}, nextEnd={}, restoreVersion={}\n", beginVersion, endVersion, nextEndVersion, restoreVersion);		
 		// update the apply mutations end version so the mutations from the
 		// previous batch can be applied.
 		// Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
-		TraceEvent("FlowGuruNewDispatch")
-			.detail("Begin", beginVersion)
-			.detail("First", firstVersion)
-			.detail("End", endVersion)
-			.detail("Restore", restoreVersion)
-			.log();
+		// TraceEvent("FlowGuruNewDispatch")
+		// 	.detail("Begin", beginVersion)
+		// 	.detail("First", firstVersion)
+		// 	.detail("End", endVersion)
+		// 	.detail("Restore", restoreVersion)
+		// 	.log();
 		if (beginVersion > firstVersion) {
 			// hfu5 : unblock apply alog to normal key space
 			// if the last file is [80, 100] and the restoreVersion is 90, we should use 90 here
@@ -5926,14 +5926,14 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// The applyLag must be retrieved AFTER potentially updating the apply end version.
 		state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
 
-		fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
-		TraceEvent("FlowGuruBegin")
-			.detail("Begin", beginVersion)
-			.detail("End", endVersion)
-			.detail("NextEndVersion", nextEndVersion)
-			.detail("RestoreVersion", restoreVersion)
-			.detail("Lag", applyLag)
-			.log();
+		// fmt::print(stderr, "at begin, ApplyLag={}\n", applyLag);
+		// TraceEvent("FlowGuruBegin")
+		// 	.detail("Begin", beginVersion)
+		// 	.detail("End", endVersion)
+		// 	.detail("NextEndVersion", nextEndVersion)
+		// 	.detail("RestoreVersion", restoreVersion)
+		// 	.detail("Lag", applyLag)
+		// 	.log();
 		// this is to guarantee commit proxy is catching up doing apply alog -> normal key
 		// with this  backupFile -> alog process
 		// If starting a new batch and the apply lag is too large then re-queue and wait
@@ -5967,26 +5967,26 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// greaterThanOrEqual(end + 1) instead of greaterThan(end)
 		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result in a end+1
 		state Optional<RestoreConfig::RestoreFile> endLogExclude = wait(restore.logFileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({endVersion + 1, "", false})));
-		TraceEvent("FlowGuruGetAllLogFiles")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("BeginFilePresent", beginLogInclude.present())
-					.detail("EndFilePresent", endLogExclude.present())
-					.log();
-		if (beginLogInclude.present()) {
-			TraceEvent("FlowGuruBeginLogFile")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("BeginFile", beginLogInclude.get().fileName)
-					.log();
-		}
-		if (endLogExclude.present()) {
-			TraceEvent("FlowGuruEndLogFile")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("EndFile", endLogExclude.get().fileName)
-					.log();
-		}
+		// TraceEvent("FlowGuruGetAllLogFiles")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("BeginFilePresent", beginLogInclude.present())
+		// 			.detail("EndFilePresent", endLogExclude.present())
+		// 			.log();
+		// if (beginLogInclude.present()) {
+		// 	TraceEvent("FlowGuruBeginLogFile")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("BeginFile", beginLogInclude.get().fileName)
+		// 			.log();
+		// }
+		// if (endLogExclude.present()) {
+		// 	TraceEvent("FlowGuruEndLogFile")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("EndFile", endLogExclude.get().fileName)
+		// 			.log();
+		// }
 		state RestoreConfig::FileSetT::RangeResultType logFiles =
 		    wait(restore.logFileSet().getRange(tr,
 		                                    beginLogInclude,
@@ -6004,26 +6004,26 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		// because RestoreFile::pack has the version at the most significant position, and keyAfter(end) does not result in a end+1
 		state Optional<RestoreConfig::RestoreFile> endRangeExclude = wait(restore.rangeFileSet().seekGreaterOrEqual(tr, RestoreConfig::RestoreFile({endVersion + 1, "", true })));
 		
-		TraceEvent("FlowGuruGetAllRangeFiles")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("BeginFilePresent", beginRangeInclude.present())
-					.detail("EndFilePresent", endRangeExclude.present())
-					.log();
-		if (beginRangeInclude.present()) {
-			TraceEvent("FlowGuruBeginRangeFile")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("BeginFile", beginRangeInclude.get().fileName)
-					.log();
-		}
-		if (endRangeExclude.present()) {
-			TraceEvent("FlowGuruEndRangeFile")
-					.detail("Begin", beginVersion)
-					.detail("End", endVersion)
-					.detail("EndFile", endRangeExclude.get().fileName)
-					.log();
-		}
+		// TraceEvent("FlowGuruGetAllRangeFiles")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("BeginFilePresent", beginRangeInclude.present())
+		// 			.detail("EndFilePresent", endRangeExclude.present())
+		// 			.log();
+		// if (beginRangeInclude.present()) {
+		// 	TraceEvent("FlowGuruBeginRangeFile")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("BeginFile", beginRangeInclude.get().fileName)
+		// 			.log();
+		// }
+		// if (endRangeExclude.present()) {
+		// 	TraceEvent("FlowGuruEndRangeFile")
+		// 			.detail("Begin", beginVersion)
+		// 			.detail("End", endVersion)
+		// 			.detail("EndFile", endRangeExclude.get().fileName)
+		// 			.log();
+		// }
 		state RestoreConfig::FileSetT::RangeResultType rangeFiles =
 		    wait(restore.rangeFileSet().getRange(tr,
 		                                    beginRangeInclude,
