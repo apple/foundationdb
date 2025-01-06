@@ -9440,7 +9440,8 @@ ACTOR Future<Void> bulkLoadFetchSSTFilesToLoad(StorageServer* data,
 		    .setMaxFieldLength(-1)
 		    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())
 		    .detail("LocalFileSet", toLocalFileSet.toString());
-		state std::string byteSampleFileName = generateRandomBulkLoadBytesSampleFileName();
+		state std::string byteSampleFileName =
+		    generateBulkLoadBytesSampleFileNameFromDataFileName(toLocalFileSet.getDataFileName());
 		std::string byteSampleFilePathLocal = abspath(joinPath(toLocalFileSet.getFolder(), byteSampleFileName));
 		bool bytesSampleFileGenerated = wait(doBytesSamplingOnDataFile(
 		    toLocalFileSet.getDataFileFullPath(), byteSampleFilePathLocal, data->thisServerID));

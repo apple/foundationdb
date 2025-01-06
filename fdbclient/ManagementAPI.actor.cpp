@@ -3381,7 +3381,7 @@ ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange 
 				if (lock == RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad)) {
 					continue;
 				}
-				TraceEvent(SevError, "DDBulkLoadEngineSeeUnexpectedRangeLock")
+				TraceEvent(SevError, "DDBulkLoadEngineUnexpectedRangeLock")
 				    .detail("Lock", lock.toString())
 				    .detail("Range", rangeToRead);
 				ASSERT(false);
@@ -3417,7 +3417,7 @@ ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange r
 			ASSERT(rangeLockStateSet.isValid());
 			for (const auto& [lockId, lock] : rangeLockStateSet.getLocks()) {
 				if (lock != RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad)) {
-					TraceEvent(SevError, "DDBulkLoadEngineSeeUnexpectedRangeLock")
+					TraceEvent(SevError, "DDBulkLoadEngineUnexpectedRangeLock")
 					    .detail("Lock", lock.toString())
 					    .detail("Range", rangeToRead);
 					ASSERT(false);

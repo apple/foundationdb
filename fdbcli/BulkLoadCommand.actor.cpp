@@ -131,13 +131,15 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		BulkLoadFileSet fileSet =
 		    BulkLoadFileSet(folder, "", generateEmptyManifestFileName(), dataFile, byteSampleFile);
 		state BulkLoadTaskState bulkLoadTask =
-		    newBulkLoadTaskLocalSST(deterministicRandom()->randomUniqueID(),
-		                            range,
-		                            fileSet,
-		                            BulkLoadByteSampleSetting(0, "hashlittle2", 0, 0, 0), // We fake it here
-		                            /*snapshotVersion=*/invalidVersion,
-		                            /*checksum=*/"",
-		                            /*bytes=*/-1);
+		    createNewBulkLoadTask(deterministicRandom()->randomUniqueID(),
+		                          range,
+		                          fileSet,
+		                          BulkLoadByteSampleSetting(0, "hashlittle2", 0, 0, 0), // We fake it here
+		                          /*snapshotVersion=*/invalidVersion,
+		                          /*checksum=*/"",
+		                          /*bytes=*/-1,
+		                          BulkLoadType::SST,
+		                          BulkLoadTransportMethod::CP);
 		wait(submitBulkLoadTask(cx, bulkLoadTask));
 		return bulkLoadTask.getTaskId();
 

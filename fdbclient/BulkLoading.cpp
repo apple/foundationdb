@@ -26,12 +26,8 @@ std::string generateBulkLoadJobManifestFileName() {
 	return "job-manifest.txt";
 }
 
-std::string generateRandomBulkLoadDataFileName() {
-	return deterministicRandom()->randomUniqueID().toString() + "-data.sst";
-}
-
-std::string generateRandomBulkLoadBytesSampleFileName() {
-	return deterministicRandom()->randomUniqueID().toString() + "-bytesample.sst";
+std::string generateBulkLoadBytesSampleFileNameFromDataFileName(const std::string& dataFileName) {
+	return dataFileName + "-sample.sst";
 }
 
 std::string generateEmptyManifestFileName() {
@@ -66,21 +62,16 @@ std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadM
 }
 
 // For submitting a task manually (for testing)
-BulkLoadTaskState newBulkLoadTaskLocalSST(const UID& jobId,
-                                          const KeyRange& range,
-                                          const BulkLoadFileSet& fileSet,
-                                          const BulkLoadByteSampleSetting& byteSampleSetting,
-                                          Version snapshotVersion,
-                                          const std::string& checksum,
-                                          int64_t bytes) {
-	BulkLoadManifest manifest(fileSet,
-	                          range.begin,
-	                          range.end,
-	                          snapshotVersion,
-	                          checksum,
-	                          bytes,
-	                          byteSampleSetting,
-	                          BulkLoadType::SST,
-	                          BulkLoadTransportMethod::CP);
+BulkLoadTaskState createNewBulkLoadTask(const UID& jobId,
+                                        const KeyRange& range,
+                                        const BulkLoadFileSet& fileSet,
+                                        const BulkLoadByteSampleSetting& byteSampleSetting,
+                                        const Version& snapshotVersion,
+                                        const std::string& checksum,
+                                        const int64_t& bytes,
+                                        const BulkLoadType& type,
+                                        const BulkLoadTransportMethod& transportMethod) {
+	BulkLoadManifest manifest(
+	    fileSet, range.begin, range.end, snapshotVersion, checksum, bytes, byteSampleSetting, type, transportMethod);
 	return BulkLoadTaskState(jobId, manifest);
 }

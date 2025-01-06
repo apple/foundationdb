@@ -491,13 +491,11 @@ private:
 // Define job manifest file name.
 std::string generateBulkLoadJobManifestFileName();
 
-// Return a random byte sample filename. Used when a SS load a range but the range does not have a valid byte
-// sampling file. In this case, the SS generates a byte sampling file with the default name locally. This generated
-// file temporarily stored locally and the file is used to inject the byte sampling metadata to SS. After the
+// Used when a SS load a range but the range does not have a valid byte
+// sampling file. In this case, the SS generates a byte sampling file with a name tight to the data filename. This
+// generated file temporarily stored locally and the file is used to inject the byte sampling metadata to SS. After the
 // injection, the file is removed.
-std::string generateRandomBulkLoadBytesSampleFileName();
-
-std::string generateRandomBulkLoadDataFileName();
+std::string generateBulkLoadBytesSampleFileNameFromDataFileName(const std::string& dataFileName);
 
 // Return a manifest filename as a place holder when testing bulkload feature, where we issue bulkload tasks without
 // providing a manifest file. So, this manifest file is never read in this scenario.
@@ -509,12 +507,14 @@ std::string generateEmptyManifestFileName();
 std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
 
 // For submitting a task manually (for testing)
-BulkLoadTaskState newBulkLoadTaskLocalSST(const UID& jobId,
-                                          const KeyRange& range,
-                                          const BulkLoadFileSet& fileSet,
-                                          const BulkLoadByteSampleSetting& byteSampleSetting,
-                                          Version snapshotVersion,
-                                          const std::string& checksum,
-                                          int64_t bytes);
+BulkLoadTaskState createNewBulkLoadTask(const UID& jobId,
+                                        const KeyRange& range,
+                                        const BulkLoadFileSet& fileSet,
+                                        const BulkLoadByteSampleSetting& byteSampleSetting,
+                                        const Version& snapshotVersion,
+                                        const std::string& checksum,
+                                        const int64_t& bytes,
+                                        const BulkLoadType& type,
+                                        const BulkLoadTransportMethod& transportMethod);
 
 #endif

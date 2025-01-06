@@ -304,7 +304,10 @@ struct BulkLoading : TestWorkload {
 	}
 
 	BulkLoadFileSet generateSSTFiles(BulkLoading* self, std::string rootPath, BulkLoadTaskTestUnit task) {
-		BulkLoadFileSet res(rootPath, "", generateEmptyManifestFileName(), generateRandomBulkLoadDataFileName(), "");
+		const std::string dataFileNameBase = deterministicRandom()->randomUniqueID().toString();
+		const std::string dataFileName = dataFileNameBase + "-data.sst";
+		const std::string sampleFileName = dataFileNameBase + "-sample.sst";
+		BulkLoadFileSet res(rootPath, "", generateEmptyManifestFileName(), dataFileName, "");
 		std::string folder = res.getFolder();
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
@@ -343,7 +346,7 @@ struct BulkLoading : TestWorkload {
 		}
 		ASSERT(sstWriter->finish());
 
-		res.setByteSampleFileName(generateRandomBulkLoadBytesSampleFileName());
+		res.setByteSampleFileName(sampleFileName);
 		std::string bytesSampleFile = res.getBytesSampleFileFullPath();
 		if (bytesSample.size() > 0) {
 			sstWriter->open(abspath(bytesSampleFile));
@@ -373,18 +376,20 @@ struct BulkLoading : TestWorkload {
 		BulkLoadTaskTestUnit taskUnit;
 		taskUnit.data = self->generateOrderedKVS(self, rangeToLoad, dataSize);
 		BulkLoadFileSet fileSet = self->generateSSTFiles(self, folderPath, taskUnit);
-		taskUnit.bulkLoadTask = newBulkLoadTaskLocalSST(
-		    deterministicRandom()->randomUniqueID(),
-		    rangeToLoad,
-		    fileSet,
-		    BulkLoadByteSampleSetting(0,
-		                              "hashlittle2", // use function name to represent the method
-		                              SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
-		                              SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
-		                              SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY),
-		    /*snapshotVersion=*/invalidVersion,
-		    /*checksum=*/"",
-		    /*bytes=*/-1);
+		taskUnit.bulkLoadTask =
+		    createNewBulkLoadTask(deterministicRandom()->randomUniqueID(),
+		                          rangeToLoad,
+		                          fileSet,
+		                          BulkLoadByteSampleSetting(0,
+		                                                    "hashlittle2", // use function name to represent the method
+		                                                    SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
+		                                                    SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
+		                                                    SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY),
+		                          /*snapshotVersion=*/invalidVersion,
+		                          /*checksum=*/"",
+		                          /*bytes=*/-1,
+		                          BulkLoadType::SST,
+		                          BulkLoadTransportMethod::CP);
 		return taskUnit;
 	}
 
