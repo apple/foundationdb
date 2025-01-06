@@ -20,12 +20,9 @@
 
 #include "fdbclient/BulkDumping.h"
 
-BulkDumpState newBulkDumpTaskLocalSST(const KeyRange& range, const std::string& remoteRoot) {
-	return BulkDumpState(
-	    range, BulkDumpFileType::SST, BulkDumpTransportMethod::CP, BulkDumpExportMethod::File, remoteRoot);
-}
-
-BulkDumpState newBulkDumpTaskBlobstoreSST(const KeyRange& range, const std::string& remoteRoot) {
-	return BulkDumpState(
-	    range, BulkDumpFileType::SST, BulkDumpTransportMethod::BLOBSTORE, BulkDumpExportMethod::File, remoteRoot);
+BulkDumpState createNewBulkDumpJob(const KeyRange& range,
+                                   const std::string& remoteRoot,
+                                   const BulkLoadType& type,
+                                   const BulkLoadTransportMethod& transportMethod) {
+	return BulkDumpState(range, type, transportMethod, remoteRoot);
 }

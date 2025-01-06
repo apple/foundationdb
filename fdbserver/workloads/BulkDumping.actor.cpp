@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -134,7 +135,8 @@ struct BulkDumping : TestWorkload {
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1)));
 		TraceEvent("BulkDumpingSetMode").detail("OldMode", oldBulkDumpMode).detail("NewMode", 1);
 
-		state BulkDumpState newTask = newBulkDumpTaskLocalSST(normalKeys, simulationBulkDumpFolder);
+		state BulkDumpState newTask =
+		    createNewBulkDumpJob(normalKeys, simulationBulkDumpFolder, BulkLoadType::SST, BulkLoadTransportMethod::CP);
 		TraceEvent("BulkDumpingTaskNew").detail("Task", newTask.toString());
 		wait(submitBulkDumpJob(cx, newTask));
 		std::vector<BulkDumpState> res = wait(getBulkDumpTasksWithinRange(cx, normalKeys, 100));

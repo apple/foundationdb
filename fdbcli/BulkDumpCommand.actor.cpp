@@ -22,6 +22,7 @@
 #include <fmt/core.h>
 #include "fdbcli/fdbcli.actor.h"
 #include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/Arena.h"
@@ -109,7 +110,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		std::string remoteRoot = tokens[4].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		bulkDumpJob = newBulkDumpTaskLocalSST(range, remoteRoot);
+		bulkDumpJob = createNewBulkDumpJob(range, remoteRoot, BulkLoadType::SST, BulkLoadTransportMethod::CP);
 		wait(submitBulkDumpJob(cx, bulkDumpJob));
 		return bulkDumpJob.getJobId();
 
@@ -127,7 +128,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		std::string remoteRoot = tokens[4].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		bulkDumpJob = newBulkDumpTaskBlobstoreSST(range, remoteRoot);
+		bulkDumpJob = createNewBulkDumpJob(range, remoteRoot, BulkLoadType::SST, BulkLoadTransportMethod::BLOBSTORE);
 		wait(submitBulkDumpJob(cx, bulkDumpJob));
 		return bulkDumpJob.getJobId();
 

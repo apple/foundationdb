@@ -34,29 +34,29 @@
 
 namespace fdb_cli {
 
-ACTOR Future<Void> getBulkLoadStateByRange(Database cx,
-                                           KeyRange rangeToRead,
-                                           size_t countLimit,
-                                           Optional<BulkLoadPhase> phase) {
+ACTOR Future<Void> getBulkLoadTaskStateByRange(Database cx,
+                                               KeyRange rangeToRead,
+                                               size_t countLimit,
+                                               Optional<BulkLoadPhase> phase) {
 	try {
-		std::vector<BulkLoadState> res = wait(getValidBulkLoadTasksWithinRange(cx, rangeToRead, countLimit, phase));
+		std::vector<BulkLoadTaskState> res = wait(getValidBulkLoadTasksWithinRange(cx, rangeToRead, countLimit, phase));
 		int64_t finishCount = 0;
 		int64_t unfinishedCount = 0;
-		for (const auto& bulkLoadState : res) {
-			if (bulkLoadState.phase == BulkLoadPhase::Complete) {
-				fmt::println("[Complete]: {}", bulkLoadState.toString());
+		for (const auto& bulkLoadTaskState : res) {
+			if (bulkLoadTaskState.phase == BulkLoadPhase::Complete) {
+				fmt::println("[Complete]: {}", bulkLoadTaskState.toString());
 				++finishCount;
-			} else if (bulkLoadState.phase == BulkLoadPhase::Running) {
-				fmt::println("[Running]: {}", bulkLoadState.toString());
+			} else if (bulkLoadTaskState.phase == BulkLoadPhase::Running) {
+				fmt::println("[Running]: {}", bulkLoadTaskState.toString());
 				++unfinishedCount;
-			} else if (bulkLoadState.phase == BulkLoadPhase::Triggered) {
-				fmt::println("[Triggered]: {}", bulkLoadState.toString());
+			} else if (bulkLoadTaskState.phase == BulkLoadPhase::Triggered) {
+				fmt::println("[Triggered]: {}", bulkLoadTaskState.toString());
 				++unfinishedCount;
-			} else if (bulkLoadState.phase == BulkLoadPhase::Submitted) {
-				fmt::println("[Submitted] {}", bulkLoadState.toString());
+			} else if (bulkLoadTaskState.phase == BulkLoadPhase::Submitted) {
+				fmt::println("[Submitted] {}", bulkLoadTaskState.toString());
 				++unfinishedCount;
-			} else if (bulkLoadState.phase == BulkLoadPhase::Acknowledged) {
-				fmt::println("[Acknowledge] {}", bulkLoadState.toString());
+			} else if (bulkLoadTaskState.phase == BulkLoadPhase::Acknowledged) {
+				fmt::println("[Acknowledge] {}", bulkLoadTaskState.toString());
 				++finishCount;
 			} else {
 				UNREACHABLE();
@@ -92,7 +92,6 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			printUsage(tokens[0]);
 			return UID();
 		}
-
 	} else if (tokencmp(tokens[1], "acknowledge")) {
 		// Acknowledge any completed bulk loading task and clear the corresponding metadata
 		if (tokens.size() != 5) {
@@ -111,7 +110,9 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		return taskId;
 
 	} else if (tokencmp(tokens[1], "local")) {
-		// Generate spec of bulk loading local files and submit the bulk loading task
+		// Generate spec of bulk loading local files and submit the bulk loading task.
+		// This is used for testing of bulkload task engine.
+		// Therefore, some information of manifest is ignored.
 		if (tokens.size() < 7) {
 			printUsage(tokens[0]);
 			return UID();
@@ -125,16 +126,25 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		std::string folder = tokens[4].toString();
 		std::string dataFile = tokens[5].toString();
-		std::string byteSampleFile = tokens[6].toString(); // TODO(BulkLoad): reject if the input bytes sampling file is
-		                                                   // not same as the configuration as FDB cluster
+		std::string byteSampleFile = tokens[6].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		state BulkLoadState bulkLoadTask = newBulkLoadTaskLocalSST(range, folder, dataFile, byteSampleFile);
+		BulkLoadFileSet fileSet =
+		    BulkLoadFileSet(folder, "", generateEmptyManifestFileName(), dataFile, byteSampleFile);
+		state BulkLoadTaskState bulkLoadTask =
+		    createNewBulkLoadTask(deterministicRandom()->randomUniqueID(),
+		                          range,
+		                          fileSet,
+		                          BulkLoadByteSampleSetting(0, "hashlittle2", 0, 0, 0), // We fake it here
+		                          /*snapshotVersion=*/invalidVersion,
+		                          /*checksum=*/"",
+		                          /*bytes=*/-1,
+		                          BulkLoadType::SST,
+		                          BulkLoadTransportMethod::CP);
 		wait(submitBulkLoadTask(cx, bulkLoadTask));
 		return bulkLoadTask.getTaskId();
 
 	} else if (tokencmp(tokens[1], "status")) {
 		// Get progress of existing bulk loading tasks intersecting the input range
-		// TODO(BulkLoad): check status by ID
 		if (tokens.size() < 6) {
 			printUsage(tokens[0]);
 			return UID();
@@ -166,7 +176,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			return UID();
 		}
 		int countLimit = std::stoi(tokens[5].toString());
-		wait(getBulkLoadStateByRange(cx, range, countLimit, phase));
+		wait(getBulkLoadTaskStateByRange(cx, range, countLimit, phase));
 		return UID();
 
 	} else {
