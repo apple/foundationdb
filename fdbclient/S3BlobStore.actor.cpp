@@ -34,6 +34,8 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string.hpp>
+#include <boost/algorithm/hex.hpp>
 #include "flow/IAsyncFile.h"
 #include "flow/Hostname.h"
 #include "flow/UnitTest.h"
@@ -99,6 +101,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	max_delay_retryable_error = CLIENT_KNOBS->BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR;
 	max_delay_connection_failed = CLIENT_KNOBS->BLOBSTORE_MAX_DELAY_CONNECTION_FAILED;
 	sdk_auth = false;
+	enable_etag_on_get = CLIENT_KNOBS->BLOBSTORE_ENABLE_ETAG_ON_GET;
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
 }
 
@@ -140,6 +143,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(max_delay_retryable_error, dre);
 	TRY_PARAM(max_delay_connection_failed, dcf);
 	TRY_PARAM(sdk_auth, sa);
+	TRY_PARAM(enable_etag_on_get, ceog);
 	TRY_PARAM(global_connection_pool, gcp);
 #undef TRY_PARAM
 	return false;
@@ -179,6 +183,7 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(max_send_bytes_per_second, sbps);
 	_CHECK_PARAM(max_recv_bytes_per_second, rbps);
 	_CHECK_PARAM(sdk_auth, sa);
+	_CHECK_PARAM(enable_etag_on_get, ceog);
 	_CHECK_PARAM(global_connection_pool, gcp);
 	_CHECK_PARAM(max_delay_retryable_error, dre);
 	_CHECK_PARAM(max_delay_connection_failed, dcf);
@@ -1793,6 +1798,27 @@ ACTOR Future<std::string> readEntireFile_impl(Reference<S3BlobStoreEndpoint> bst
 	Reference<HTTP::IncomingResponse> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 404 }));
 	if (r->code == 404)
 		throw file_not_found();
+	if (bstore->knobs.enable_etag_on_get) {
+		// Verify the content. Etag is the md5 of the content hex encoded.
+		// https://stackoverflow.com/questions/36540234/what-is-the-difference-getcontentmd5-and-getetag-of-aws-s3-putobjectresult
+		std::string etag = r->data.headers["ETag"];
+		if (etag.empty()) {
+			// This is what is thrown elsewhere when no expected etag.
+			throw http_bad_response();
+		}
+		boost::algorithm::trim_if(etag, boost::is_any_of("\""));
+		std::string etagDecoded;
+		boost::algorithm::unhex(etag, std::back_inserter(etagDecoded));
+		// Base64 decode the decoded etag for the below compare.
+		// base64 encoded blocks end in \n so remove it.
+		auto etagBase64d = base64::encoder::from_string(etagDecoded);
+		etagBase64d.resize(etagBase64d.size() - 1);
+		// The return from computeMD5Sum comes back base64 encoded.
+		std::string contentMD5d = HTTP::computeMD5Sum(r->data.content);
+		if (etagBase64d != contentMD5d) {
+			throw checksum_failed();
+		}
+	}
 	return r->data.content;
 }
 

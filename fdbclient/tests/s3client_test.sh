@@ -65,8 +65,10 @@ function test_file_upload_and_download {
   local testfiledown="${dir}/testfile.down"
   date -Iseconds &> "${testfileup}"
   local blobstoreurl="blobstore://localhost:${port}/x/y/z?bucket=${BUCKET}&region=us&secure_connection=0"
-  "${s3client}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testfileup}" "${blobstoreurl}"
-  "${s3client}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testfiledown}"
+  "${s3client}" rm --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}"
+  "${s3client}" cp --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testfileup}" "${blobstoreurl}"
+  "${s3client}" cp --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testfiledown}"
+  "${s3client}" rm --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}"
   if ! diff "${testfileup}" "${testfiledown}"; then
     echo "ERROR: Test $0 failed; upload and download are not the same." >&2
     return 1
@@ -93,8 +95,10 @@ function test_dir_upload_and_download {
   mkdir "${testdirup}/subdir"
   date -Iseconds  &> "${testdirup}/subdir/three"
   local blobstoreurl="blobstore://localhost:${port}/dir1/dir2?bucket=${BUCKET}&region=us&secure_connection=0"
-  "${s3client}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testdirup}" "${blobstoreurl}"
-  "${s3client}" --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testdirdown}"
+  "${s3client}" rm --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}"
+  "${s3client}" cp --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${testdirup}" "${blobstoreurl}"
+  "${s3client}" cp --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}" "${testdirdown}"
+  "${s3client}" rm --knob_http_verbose_level=10 --log --logdir="${logsdir}" "${blobstoreurl}"
   if ! diff "${testdirup}" "${testdirdown}"; then
     echo "ERROR: Test $0 failed; upload and download are not the same." >&2
     return 1
