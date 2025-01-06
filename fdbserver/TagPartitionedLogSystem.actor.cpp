@@ -2107,7 +2107,7 @@ void populateBitset(boost::dynamic_bitset<>& bs, const std::vector<uint16_t>& id
 // This function finds the highest recoverable version for each tLog group over all log groups.
 // All prior versions to the chosen RV must also be recoverable.
 // TODO: unit tests to stress UNICAST
-Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
+std::tuple<Version, Version> getRecoverVersionUnicast(
     const std::vector<Reference<LogSet>>& logServers,
     const std::tuple<int, std::vector<TLogLockResult>>& logGroupResults,
     Version minDV) {
@@ -2168,8 +2168,7 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 	// "min(KCV)" till the correct recovery version, in "unknownCommittedVersions" and
 	// this may cause the recovery algorithm to not find the correct recovery version.
 	//
-	// @todo modify code to use "minDV" as the default (starting) recovery version.
-	Version RV = maxKCV; // recovery version
+	Version RV = minDV; // recovery version
 	// @note we currently don't use "RVs", but we may use this information later (maybe for
 	// doing error checking). Commenting out the RVs related code for now.
 	// std::vector<Version> RVs(maxTLogLocId + 1, maxKCV); // recovery versions of various tLogs
@@ -2486,9 +2485,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 					minEnd = std::min(minEnd, std::get<1>(versions.get()));
 				} else {
 					auto unicastVersions = getRecoverVersionUnicast(logServers, logGroupResults.back(), minDV);
-					knownCommittedVersion = std::max(knownCommittedVersion, std::get<0>(unicastVersions.get()));
-					maxEnd = std::max(maxEnd, std::get<1>(unicastVersions.get()));
-					minEnd = std::min(minEnd, std::get<1>(unicastVersions.get()));
+					knownCommittedVersion = std::max(knownCommittedVersion, std::get<0>(unicastVersions));
+					maxEnd = std::max(maxEnd, std::get<1>(unicastVersions));
+					minEnd = std::min(minEnd, std::get<1>(unicastVersions));
 				}
 			}
 			changes.push_back(TagPartitionedLogSystem::getDurableVersionChanged(lockResults[log], logFailed[log]));
