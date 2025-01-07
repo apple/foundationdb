@@ -256,7 +256,10 @@ public:
 	double BLOBSTORE_LATENCY_LOGGING_ACCURACY;
 	int BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR;
 	int BLOBSTORE_MAX_DELAY_CONNECTION_FAILED;
-
+	bool BLOBSTORE_ENABLE_ETAG_ON_GET; // On download, compare the md5 of the downloaded object with the ETag of the
+	                                   // object in the cloud (etag is md5 of content). If they don't match, throw an
+	                                   // error. On upload, we do this always. It is optional for download because it
+	                                   // new behavior.
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX; // Available in both normal and urgent mode
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME; // Available in normal mode
 	int CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME; // Available in urgent mode

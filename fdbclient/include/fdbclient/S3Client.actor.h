@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <string>
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_S3CLIENT_ACTOR_G_H)
 #define FDBCLIENT_S3CLIENT_ACTOR_G_H
 #include "fdbclient/S3Client.actor.g.h"
@@ -58,6 +59,9 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath);
 ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
                                          BulkLoadFileSet sourceFileSet,
                                          BulkLoadFileSet destinationFileSet);
+
+// Delete the file or directory at s3url -- recursively.
+ACTOR Future<Void> deleteResource(std::string s3url);
 
 #include "flow/unactorcompiler.h"
 #endif

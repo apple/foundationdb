@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClientKnobCollection.h"
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -32,6 +35,7 @@
 #include <io.h>
 #endif
 
+#include <boost/algorithm/hex.hpp>
 #include "fdbclient/BuildFlags.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #import "fdbclient/BackupTLSConfig.h"
@@ -83,9 +87,18 @@ CSimpleOpt::SOption Options[] = { { OPT_TRACE, "--log", SO_NONE },
 
 static void printUsage(std::string const& programName) {
 	std::cout << "Usage: " << programName
-	          << " [OPTIONS] SOURCE TARGET\n"
-	             "Copy files to and from S3.\n"
-	             "Options:\n"
+	          << " [OPTIONS] COMMAND SOURCE [TARGET]\n"
+	             "Run basic s3 operations from the command-line (using the S3BlobStore engine).\n"
+	             "Use https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html\n"
+	             "if you need finesse -- listing resources, etc.\n"
+	             "COMMAND:\n"
+	             "  cp             Copy SOURCE to TARGET. SOURCE is file, directory, or s3/blobstore\n"
+	             "                 'Backup URL' to copy from. If SOURCE is a Backup URL,\n"
+	             "                 TARGET must be a local directory and vice versa. See 'Backup URLs'\n"
+	             "                 in https://apple.github.io/foundationdb/backups.html for\n"
+	             "                 more on the fdb s3 'blobstore://' URL format.\n"
+	             "  rm             Delete SOURCE. Must be a s3/blobstore 'Backup URL'.\n"
+	             "OPTIONS:\n"
 	             "  --log          Enables trace file logging for the CLI session.\n"
 	             "  --logdir PATH  Specifies the output directory for trace files. If\n"
 	             "                 unspecified, defaults to the current directory. Has\n"
@@ -102,20 +115,14 @@ static void printUsage(std::string const& programName) {
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --knob-KNOBNAME KNOBVALUE\n"
 	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
-	             "Arguments:\n"
-	             " SOURCE          File, directory, or s3 bucket URL to copy from.\n"
-	             "                 If SOURCE is an s3 bucket URL, TARGET must be a directory and vice versa.\n"
-	             "                 See 'Backup URLs' in https://apple.github.io/foundationdb/backups.html for\n"
-	             "                 the fdb s3 'blobstore://' url format.\n"
-	             " TARGET          Where to place the copy.\n"
-	             "Examples:\n"
+	             "EXAMPLES:\n"
 	             " "
 	          << programName
-	          << " --blob-credentials /path/to/credentials.json /path/to/source /path/to/target\n"
+	          << " --blob-credentials /path/to/credentials.json cp /path/to/source /path/to/target\n"
 	             " "
 	          << programName
 	          << " --knob_http_verbose_level=10 --log  "
-	             "'blobstore://localhost:8333/x?bucket=backup&region=us&secure_connection=0' dir3\n";
+	             "cp 'blobstore://localhost:8333/x?bucket=backup&region=us&secure_connection=0' dir3\n";
 	return;
 }
 
@@ -131,7 +138,9 @@ struct Params : public ReferenceCounted<Params> {
 	std::vector<std::pair<std::string, std::string>> knobs;
 	std::string src;
 	std::string tgt;
+	std::string command;
 	int whichIsBlobstoreURL = -1;
+	const std::string blobstore_enable_etag_on_get = "blobstore_enable_etag_on_get";
 
 	std::string toString() {
 		std::string s;
@@ -159,6 +168,17 @@ struct Params : public ReferenceCounted<Params> {
 	}
 
 	void updateKnobs() {
+		// Set default to 'true' for blobstore_enable_etag_on_get if not explicitly set
+		bool blobstore_enable_etag_on_get_set = false;
+		for (const auto& [knob, value] : knobs) {
+			if (knob == blobstore_enable_etag_on_get) {
+				blobstore_enable_etag_on_get_set = true;
+				break;
+			}
+		}
+		if (!blobstore_enable_etag_on_get_set) {
+			knobs.push_back(std::pair(blobstore_enable_etag_on_get, "true"));
+		}
 		IKnobCollection::setupKnobs(knobs);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
@@ -186,15 +206,12 @@ static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
 		switch (optId) {
 		case OPT_HELP:
 			return FDB_EXIT_ERROR;
-
 		case OPT_TRACE:
 			param->log_enabled = true;
 			break;
-
 		case OPT_TRACE_DIR:
 			param->log_dir = args->OptionArg();
 			break;
-
 		case OPT_TRACE_FORMAT:
 			if (!selectTraceFormatter(args->OptionArg())) {
 				std::cerr << "ERROR: Unrecognized trace format " << args->OptionArg() << "\n";
@@ -202,15 +219,12 @@ static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
 			}
 			param->trace_format = args->OptionArg();
 			break;
-
 		case OPT_TRACE_LOG_GROUP:
 			param->trace_log_group = args->OptionArg();
 			break;
-
 		case OPT_BLOB_CREDENTIALS:
 			param->tlsConfig.blobCredentials.push_back(args->OptionArg());
 			break;
-
 		case OPT_KNOB: {
 			Optional<std::string> knobName = extractPrefixedArgument("--knob", args->OptionSyntax());
 			if (!knobName.present()) {
@@ -220,49 +234,65 @@ static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
 			param->knobs.emplace_back(knobName.get(), args->OptionArg());
 			break;
 		}
-
 		case TLSConfig::OPT_TLS_PLUGIN:
 			args->OptionArg();
 			break;
-
 		case TLSConfig::OPT_TLS_CERTIFICATES:
 			param->tlsConfig.tlsCertPath = args->OptionArg();
 			break;
-
 		case TLSConfig::OPT_TLS_PASSWORD:
 			param->tlsConfig.tlsPassword = args->OptionArg();
 			break;
-
 		case TLSConfig::OPT_TLS_CA_FILE:
 			param->tlsConfig.tlsCAPath = args->OptionArg();
 			break;
-
 		case TLSConfig::OPT_TLS_KEY:
 			param->tlsConfig.tlsKeyPath = args->OptionArg();
 			break;
-
 		case TLSConfig::OPT_TLS_VERIFY_PEERS:
 			param->tlsConfig.tlsVerifyPeers = args->OptionArg();
 			break;
-
 		case OPT_BUILD_FLAGS:
 			printBuildInformation();
 			return FDB_EXIT_ERROR;
 			break;
 		}
 	}
-	// Now read the src and tgt arguments.
-	if (args->FileCount() != 2) {
-		std::cerr << "ERROR: Not enough arguments; need a SOURCE and a TARGET" << std::endl;
+	if (args->FileCount() < 1) {
+		std::cerr << "ERROR: Not enough arguments; need a COMMAND" << std::endl;
 		return FDB_EXIT_ERROR;
 	}
-	param->src = args->Files()[0];
-	param->tgt = args->Files()[1];
-	param->whichIsBlobstoreURL = isBlobStoreURL(param->src) ? 0 : isBlobStoreURL(param->tgt) ? 1 : -1;
-	if (param->whichIsBlobstoreURL < 0) {
-		std::cerr << "ERROR: Either SOURCE or TARGET needs to be a blobstore URL "
-		          << "(e.g. blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400?bucket=backups)"
-		          << std::endl;
+	std::string command = args->Files()[0];
+	// Command are modelled on 'https://docs.aws.amazon.com/cli/latest/reference/s3/'.
+	param->command = command;
+	if (command == "cp") {
+		if (args->FileCount() != 3) {
+			std::cerr << "ERROR: cp command requires a SOURCE and a TARGET" << std::endl;
+			return FDB_EXIT_ERROR;
+		}
+		param->src = args->Files()[1];
+		param->tgt = args->Files()[2];
+		param->whichIsBlobstoreURL = isBlobStoreURL(param->src) ? 0 : isBlobStoreURL(param->tgt) ? 1 : -1;
+		if (param->whichIsBlobstoreURL < 0) {
+			std::cerr << "ERROR: Either SOURCE or TARGET needs to be a blobstore URL "
+			          << "(e.g. blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400?bucket=backups)"
+			          << std::endl;
+			return FDB_EXIT_ERROR;
+		}
+	} else if (command == "rm") {
+		if (args->FileCount() != 2) {
+			std::cerr << "ERROR: rm command requires a SOURCE" << std::endl;
+			return FDB_EXIT_ERROR;
+		}
+		param->src = args->Files()[1];
+		if (!isBlobStoreURL(param->src)) {
+			std::cerr << "ERROR: SOURCE must be a blobstore URL for rm command" << std::endl;
+			return FDB_EXIT_ERROR;
+		}
+		param->whichIsBlobstoreURL = 0;
+		param->tgt = "";
+	} else {
+		std::cerr << "ERROR: Invalid command: " << command << std::endl;
 		return FDB_EXIT_ERROR;
 	}
 	return FDB_EXIT_SUCCESS;
@@ -270,18 +300,22 @@ static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
 
 // Method called by main. Figures which of copy_up or copy_down to call.
 ACTOR Future<Void> run(Reference<Params> params) {
-	if (params->whichIsBlobstoreURL == 1) {
-		if (std::filesystem::is_directory(params->src)) {
-			wait(copyUpDirectory(params->src, params->tgt));
+	if (params->command == "cp") {
+		if (params->whichIsBlobstoreURL == 1) {
+			if (std::filesystem::is_directory(params->src)) {
+				wait(copyUpDirectory(params->src, params->tgt));
+			} else {
+				wait(copyUpFile(params->src, params->tgt));
+			}
 		} else {
-			wait(copyUpFile(params->src, params->tgt));
+			if (std::filesystem::is_directory(params->tgt)) {
+				wait(copyDownDirectory(params->src, params->tgt));
+			} else {
+				wait(copyDownFile(params->src, params->tgt));
+			}
 		}
-	} else {
-		if (std::filesystem::is_directory(params->tgt)) {
-			wait(copyDownDirectory(params->src, params->tgt));
-		} else {
-			wait(copyDownFile(params->src, params->tgt));
-		}
+	} else if (params->command == "rm") {
+		wait(deleteResource(params->src));
 	}
 	return Void();
 }
@@ -304,6 +338,7 @@ int main(int argc, char** argv) {
 		    new CSimpleOpt(argc, argv, s3client_cli::Options, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE | SO_O_NOERR));
 		auto param = makeReference<s3client_cli::Params>();
 		status = s3client_cli::parseCommandLine(param, args.get());
+		std::cout << "Command line: " << commandLine << " " << param->toString() << std::endl;
 		if (status != FDB_EXIT_SUCCESS) {
 			s3client_cli::printUsage(argv[0]);
 			return status;
@@ -323,7 +358,6 @@ int main(int argc, char** argv) {
 				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(param->trace_log_group));
 			}
 		}
-
 		if (!param->tlsConfig.setupTLS()) {
 			TraceEvent(SevError, "TLSError").log();
 			throw tls_error();
