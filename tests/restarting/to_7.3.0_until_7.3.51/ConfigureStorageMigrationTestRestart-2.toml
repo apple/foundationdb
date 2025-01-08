@@ -3,6 +3,10 @@ extraMachineCountDC = 2
 allowDefaultTenant = false
 tenantModes = ['disabled']
 
+[[knobs]]
+dd_physical_shard_move_probability = 0
+shard_encode_location_metadata = false
+
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'
 runSetup=false

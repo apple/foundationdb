@@ -11,6 +11,8 @@ bg_metadata_source = "tenant"
 bg_key_tuple_truncate_offset = 1
 enable_rest_kms_communication = true
 deterministic_blob_metadata = true
+dd_physical_shard_move_probability = 0
+shard_encode_location_metadata = false
 
 [[test]]
 testTitle = 'BlobGranuleCorrectness'
