@@ -20,8 +20,6 @@
 
 #include "fdbclient/BulkLoading.h"
 
-const int bulkLoadJobManifestFileFormatVersion = 1;
-
 std::string stringRemovePrefix(std::string str, const std::string& prefix) {
 	if (str.compare(0, prefix.length(), prefix) == 0) {
 		str.erase(0, prefix.length());
@@ -76,8 +74,7 @@ std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadM
 	for (const auto& [beginKey, manifest] : manifests) {
 		content = content + BulkLoadJobManifestFileManifestEntry(manifest).toString() + "\n";
 	}
-	std::string head =
-	    BulkLoadJobManifestFileHeader(bulkLoadJobManifestFileFormatVersion, manifests.size()).toString() + "\n";
+	std::string head = BulkLoadJobManifestFileHeader(bulkLoadManifestFormatVersion, manifests.size()).toString() + "\n";
 	return head + content;
 }
 
@@ -87,21 +84,12 @@ BulkLoadTaskState createNewBulkLoadTask(const UID& jobId,
                                         const BulkLoadFileSet& fileSet,
                                         const BulkLoadByteSampleSetting& byteSampleSetting,
                                         const Version& snapshotVersion,
-                                        const std::string& checksum,
                                         const int64_t& bytes,
                                         const int64_t& keyCount,
                                         const BulkLoadType& type,
                                         const BulkLoadTransportMethod& transportMethod) {
-	BulkLoadManifest manifest(fileSet,
-	                          range.begin,
-	                          range.end,
-	                          snapshotVersion,
-	                          checksum,
-	                          bytes,
-	                          keyCount,
-	                          byteSampleSetting,
-	                          type,
-	                          transportMethod);
+	BulkLoadManifest manifest(
+	    fileSet, range.begin, range.end, snapshotVersion, bytes, keyCount, byteSampleSetting, type, transportMethod);
 	return BulkLoadTaskState(jobId, manifest);
 }
 

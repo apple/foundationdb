@@ -307,7 +307,7 @@ struct BulkLoading : TestWorkload {
 		const std::string dataFileNameBase = deterministicRandom()->randomUniqueID().toString();
 		const std::string dataFileName = dataFileNameBase + "-data.sst";
 		const std::string sampleFileName = dataFileNameBase + "-sample.sst";
-		BulkLoadFileSet res(rootPath, "", generateEmptyManifestFileName(), dataFileName, "");
+		BulkLoadFileSet res(rootPath, "", generateEmptyManifestFileName(), dataFileName, "", BulkLoadChecksum());
 		std::string folder = res.getFolder();
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
@@ -386,7 +386,6 @@ struct BulkLoading : TestWorkload {
 		                                                    SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
 		                                                    SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY),
 		                          /*snapshotVersion=*/invalidVersion,
-		                          /*checksum=*/"",
 		                          /*bytes=*/-1,
 		                          /*keyCount=*/-1,
 		                          BulkLoadType::SST,

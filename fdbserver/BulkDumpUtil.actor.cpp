@@ -111,8 +111,10 @@ std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version
 	const std::string manifestFileName = generateBulkDumpManifestFileName(dumpVersion);
 	const std::string dataFileName = generateBulkDumpDataFileName(dumpVersion);
 	const std::string byteSampleFileName = generateBulkDumpByteSampleFileName(dumpVersion);
-	BulkLoadFileSet fileSetLocal(rootLocal, relativeFolder, manifestFileName, dataFileName, byteSampleFileName);
-	BulkLoadFileSet fileSetRemote(rootRemote, relativeFolder, manifestFileName, dataFileName, byteSampleFileName);
+	BulkLoadFileSet fileSetLocal(
+	    rootLocal, relativeFolder, manifestFileName, dataFileName, byteSampleFileName, BulkLoadChecksum());
+	BulkLoadFileSet fileSetRemote(
+	    rootRemote, relativeFolder, manifestFileName, dataFileName, byteSampleFileName, BulkLoadChecksum());
 	return std::make_pair(fileSetLocal, fileSetRemote);
 }
 
@@ -219,12 +221,12 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
 	                              remoteFileSetConfig.getRelativePath(),
 	                              remoteFileSetConfig.getManifestFileName(),
 	                              containDataFile ? remoteFileSetConfig.getDataFileName() : "",
-	                              containByteSampleFile ? remoteFileSetConfig.getByteSampleFileName() : "");
+	                              containByteSampleFile ? remoteFileSetConfig.getByteSampleFileName() : "",
+	                              BulkLoadChecksum());
 	BulkLoadManifest manifest(fileSetRemote,
 	                          dumpRange.begin,
 	                          dumpRange.end,
 	                          dumpVersion,
-	                          "",
 	                          dumpBytes,
 	                          dumpKeyCount,
 	                          byteSampleSetting,

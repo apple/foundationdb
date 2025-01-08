@@ -136,7 +136,8 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 			                                     fromRemoteFileSet.getRelativePath(),
 			                                     fromRemoteFileSet.getManifestFileName(),
 			                                     fromRemoteFileSet.getDataFileName(),
-			                                     fromRemoteFileSet.getByteSampleFileName());
+			                                     fromRemoteFileSet.getByteSampleFileName(),
+			                                     BulkLoadChecksum());
 
 			// Step 2: Download remote file set to local folder
 			if (transportMethod == BulkLoadTransportMethod::CP) {

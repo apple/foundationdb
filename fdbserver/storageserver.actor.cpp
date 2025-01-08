@@ -5988,6 +5988,7 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 	// Accumulate data read from local storage to kvsToDump and make sampling until any error presents
 	loop {
 		// Read data and stop for any error
+		state ErrorOr<GetKeyValuesReply> rep;
 		try {
 			state GetKeyValuesRequest localReq;
 			localReq.begin = firstGreaterOrEqual(beginKey);
@@ -5997,7 +5998,6 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 			localReq.limitBytes = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
 			localReq.tags = TagSet();
 			data->actors.add(getKeyValuesQ(data, localReq));
-			state ErrorOr<GetKeyValuesReply> rep;
 			wait(store(rep, errorOr(localReq.reply.getFuture())));
 			if (rep.isError()) {
 				throw rep.getError();

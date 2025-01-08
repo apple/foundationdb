@@ -1400,6 +1400,10 @@ ACTOR Future<BulkLoadTaskState> bulkLoadJobTriggerTask(Reference<DataDistributor
 			// At any time, there must be at most one bulkload job
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
 			bool doUpdate = wait(updateBulkLoadJobMetadata(&tr, bulkLoadJob));
+			if (!doUpdate) {
+				TraceEvent(SevVerbose, "BulkLoadJobTriggerTaskNotUpdate", self->ddId)
+				    .detail("BulkLoadJob", bulkLoadJob.toString());
+			}
 			wait(setBulkLoadSubmissionTransaction(&tr, bulkLoadTask));
 			// setBulkLoadSubmissionTransaction shuts down traffic to the range
 			wait(tr.commit());
@@ -1464,6 +1468,10 @@ ACTOR Future<Void> bulkLoadJobFinalizeBulkLoadTask(Reference<DataDistributor> se
 			// setBulkLoadSubmissionTransaction turns on traffic to the range
 			bulkLoadJob.markComplete();
 			bool doUpdate = wait(updateBulkLoadJobMetadata(&tr, bulkLoadJob));
+			if (!doUpdate) {
+				TraceEvent(SevVerbose, "BulkLoadJobFinalizeBulkLoadTaskNotUpdate", self->ddId)
+				    .detail("BulkLoadJob", bulkLoadJob.toString());
+			}
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {

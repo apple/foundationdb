@@ -24,6 +24,7 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include <cstdint>
+#include <string>
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -43,6 +44,10 @@ enum class BulkLoadTransportMethod : uint8_t {
 	CP = 1, // Upload/download to local file system. Used by simulation test and local cluster test.
 	BLOBSTORE = 2, // Upload/download to remote blob store. Used by real clusters.
 };
+
+// Specifying the format version of the bulkload job manifest metadata (the global manifest and range manifests).
+// The number should increase by 1 when we change the metadata in a release.
+const int bulkLoadManifestFormatVersion = 1;
 
 // Here are important metadata: (1) BulkLoadTaskState; (2) BulkDumpState; (3) BulkLoadManifest. BulkLoadTaskState is
 // only used for bulkload core engine which persists the metadata for each unit bulkload range (aka. task).
@@ -97,6 +102,32 @@ struct BulkLoadByteSampleSetting {
 	double minimalProbability = 0.0;
 };
 
+// Define the metadata of bulkload checksum.
+struct BulkLoadChecksum {
+public:
+	constexpr static FileIdentifier file_identifier = 1384503;
+
+	BulkLoadChecksum() = default;
+
+	BulkLoadChecksum(const std::string& checksumMethod, const std::string& checksumValue)
+	  : checksumMethod(checksumMethod), checksumValue(checksumValue) {}
+
+	std::string toString() const {
+		return "[ChecksumValue]: " + checksumValue + ", [ChecksumMethod]: " + checksumMethod;
+	}
+
+	bool hasSet() const { return !checksumMethod.empty() && !checksumValue.empty(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checksumMethod, checksumValue);
+	}
+
+private:
+	std::string checksumMethod = "";
+	std::string checksumValue = "";
+};
+
 // Definition of bulkload/dump files metadata
 // Each bulkload/dump task has exactly one range.
 // The range of the data is included in the Folder = RootPath + RelativePath.
@@ -115,9 +146,10 @@ public:
 	                const std::string& relativePath,
 	                const std::string& manifestFileName,
 	                const std::string& dataFileName,
-	                const std::string& byteSampleFileName)
+	                const std::string& byteSampleFileName,
+	                const BulkLoadChecksum& checksum)
 	  : rootPath(rootPath), relativePath(relativePath), manifestFileName(manifestFileName), dataFileName(dataFileName),
-	    byteSampleFileName(byteSampleFileName) {
+	    byteSampleFileName(byteSampleFileName), checksum(checksum) {
 		if (!isValid()) {
 			TraceEvent(SevError, "BulkDumpFileSetInvalid").detail("Content", toString());
 			ASSERT(false);
@@ -242,12 +274,12 @@ public:
 	std::string toString() const {
 		return "[RootPath]: " + rootPath + ", [RelativePath]: " + relativePath +
 		       ", [ManifestFileName]: " + manifestFileName + ", [DataFileName]: " + dataFileName +
-		       ", [ByteSampleFileName]: " + byteSampleFileName;
+		       ", [ByteSampleFileName]: " + byteSampleFileName + ", " + checksum.toString();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName);
+		serializer(ar, rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName, checksum);
 	}
 
 private:
@@ -256,6 +288,7 @@ private:
 	std::string manifestFileName = "";
 	std::string dataFileName = "";
 	std::string byteSampleFileName = "";
+	BulkLoadChecksum checksum;
 };
 
 // Define the metadata of bulkload manifest file.
@@ -272,27 +305,38 @@ struct BulkLoadManifest {
 	                 const Key& beginKey,
 	                 const Key& endKey,
 	                 const Version& version,
-	                 const std::string& checksum,
 	                 int64_t bytes,
 	                 int64_t keyCount,
 	                 const BulkLoadByteSampleSetting& byteSampleSetting,
 	                 BulkLoadType loadType,
 	                 BulkLoadTransportMethod transportMethod)
-	  : fileSet(fileSet), beginKey(beginKey), endKey(endKey), version(version), checksum(checksum), bytes(bytes),
-	    keyCount(keyCount), byteSampleSetting(byteSampleSetting), loadType(loadType), transportMethod(transportMethod) {
+	  : formatVersion(bulkLoadManifestFormatVersion), fileSet(fileSet), beginKey(beginKey), endKey(endKey),
+	    version(version), bytes(bytes), keyCount(keyCount), byteSampleSetting(byteSampleSetting), loadType(loadType),
+	    transportMethod(transportMethod) {
 		ASSERT(isValid());
 	}
 
 	// Used when initialize a bulk dump job. Information are partially filled at this time.
 	BulkLoadManifest(BulkLoadType loadType, BulkLoadTransportMethod transportMethod, const std::string& rootPath)
-	  : loadType(loadType), transportMethod(transportMethod) {
+	  : formatVersion(bulkLoadManifestFormatVersion), loadType(loadType), transportMethod(transportMethod) {
 		fileSet = BulkLoadFileSet(rootPath);
 	}
 
 	// Used when loading
 	BulkLoadManifest(const std::string& rawString) {
 		std::vector<std::string> parts = splitString(rawString, ", ");
-		if (parts.size() != 18) {
+		formatVersion = std::stoi(stringRemovePrefix(parts[0], "[FormatVersion]: "));
+		int currentFormatVersion = bulkLoadManifestFormatVersion;
+		if (formatVersion != currentFormatVersion) {
+			TraceEvent(SevError, "BulkLoadManifestFormatMismatch")
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("Parts", parts.size())
+			    .detail("CurrentVersion", currentFormatVersion)
+			    .detail("RawString", rawString);
+			ASSERT(false);
+		}
+		if (parts.size() != 20) {
 			TraceEvent(SevError, "BulkLoadManifestParseStringError")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
@@ -300,26 +344,28 @@ struct BulkLoadManifest {
 			    .detail("RawString", rawString);
 			ASSERT(false);
 		}
-		std::string rootPath = stringRemovePrefix(parts[0], "[RootPath]: ");
-		std::string relativePath = stringRemovePrefix(parts[1], "[RelativePath]: ");
-		std::string manifestFileName = stringRemovePrefix(parts[2], "[ManifestFileName]: ");
-		std::string dataFileName = stringRemovePrefix(parts[3], "[DataFileName]: ");
-		std::string byteSampleFileName = stringRemovePrefix(parts[4], "[ByteSampleFileName]: ");
-		fileSet = BulkLoadFileSet(rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName);
-		beginKey = getKeyFromHexString(stringRemovePrefix(parts[5], "[BeginKey]: "));
-		endKey = getKeyFromHexString(stringRemovePrefix(parts[6], "[EndKey]: "));
-		version = std::stoll(stringRemovePrefix(parts[7], "[Version]: "));
-		checksum = stringRemovePrefix(parts[8], "[Checksum]: ");
-		bytes = std::stoull(stringRemovePrefix(parts[9], "[Bytes]: "));
-		keyCount = std::stoull(stringRemovePrefix(parts[10], "[KeyCount]: "));
-		int version = std::stoi(stringRemovePrefix(parts[11], "[ByteSampleVersion]: "));
-		std::string method = stringRemovePrefix(parts[12], "[ByteSampleMethod]: ");
-		int factor = std::stoi(stringRemovePrefix(parts[13], "[ByteSampleFactor]: "));
-		int overhead = std::stoi(stringRemovePrefix(parts[14], "[ByteSampleOverhead]: "));
-		double minimalProbability = std::stod(stringRemovePrefix(parts[15], "[ByteSampleMinimalProbability]: "));
+		std::string rootPath = stringRemovePrefix(parts[1], "[RootPath]: ");
+		std::string relativePath = stringRemovePrefix(parts[2], "[RelativePath]: ");
+		std::string manifestFileName = stringRemovePrefix(parts[3], "[ManifestFileName]: ");
+		std::string dataFileName = stringRemovePrefix(parts[4], "[DataFileName]: ");
+		std::string byteSampleFileName = stringRemovePrefix(parts[5], "[ByteSampleFileName]: ");
+		std::string checksumValue = stringRemovePrefix(parts[6], "[ChecksumValue]: ");
+		std::string checksumMethod = stringRemovePrefix(parts[7], "[ChecksumMethod]: ");
+		BulkLoadChecksum checksum(checksumValue, checksumMethod);
+		fileSet = BulkLoadFileSet(rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName, checksum);
+		beginKey = getKeyFromHexString(stringRemovePrefix(parts[8], "[BeginKey]: "));
+		endKey = getKeyFromHexString(stringRemovePrefix(parts[9], "[EndKey]: "));
+		version = std::stoll(stringRemovePrefix(parts[10], "[Version]: "));
+		bytes = std::stoull(stringRemovePrefix(parts[11], "[Bytes]: "));
+		keyCount = std::stoull(stringRemovePrefix(parts[12], "[KeyCount]: "));
+		int version = std::stoi(stringRemovePrefix(parts[13], "[ByteSampleVersion]: "));
+		std::string method = stringRemovePrefix(parts[14], "[ByteSampleMethod]: ");
+		int factor = std::stoi(stringRemovePrefix(parts[15], "[ByteSampleFactor]: "));
+		int overhead = std::stoi(stringRemovePrefix(parts[16], "[ByteSampleOverhead]: "));
+		double minimalProbability = std::stod(stringRemovePrefix(parts[17], "[ByteSampleMinimalProbability]: "));
 		byteSampleSetting = BulkLoadByteSampleSetting(version, method, factor, overhead, minimalProbability);
-		int tmpLoadType = std::stoi(stringRemovePrefix(parts[16], "[loadType]: "));
-		int tmpTransportMethod = std::stoi(stringRemovePrefix(parts[17], "[TransportMethod]: "));
+		int tmpLoadType = std::stoi(stringRemovePrefix(parts[18], "[loadType]: "));
+		int tmpTransportMethod = std::stoi(stringRemovePrefix(parts[19], "[TransportMethod]: "));
 		ASSERT(tmpLoadType == 0 || tmpLoadType == 1);
 		ASSERT(tmpTransportMethod == 0 || tmpTransportMethod == 1 || tmpTransportMethod == 2);
 		loadType = static_cast<BulkLoadType>(tmpLoadType);
@@ -384,7 +430,14 @@ struct BulkLoadManifest {
 
 	BulkLoadFileSet getFileSet() const { return fileSet; }
 
-	bool isEmptyRange() const { return bytes == 0; }
+	bool isEmptyRange() const {
+		if (keyCount == 0) {
+			ASSERT(bytes == 0);
+		} else {
+			ASSERT(bytes != 0);
+		}
+		return keyCount == 0;
+	}
 
 	bool hasDataFile() const { return fileSet.hasDataFile(); }
 
@@ -397,9 +450,9 @@ struct BulkLoadManifest {
 
 	// Generating human readable string to stored in the manifest file
 	std::string toString() const {
-		return fileSet.toString() + ", [BeginKey]: " + beginKey.toFullHexStringPlain() +
-		       ", [EndKey]: " + endKey.toFullHexStringPlain() + ", [Version]: " + std::to_string(version) +
-		       ", [Checksum]: " + checksum + ", [Bytes]: " + std::to_string(bytes) +
+		return "[FormatVersion]: " + std::to_string(formatVersion) + ", " + fileSet.toString() +
+		       ", [BeginKey]: " + beginKey.toFullHexStringPlain() + ", [EndKey]: " + endKey.toFullHexStringPlain() +
+		       ", [Version]: " + std::to_string(version) + ", [Bytes]: " + std::to_string(bytes) +
 		       ", [KeyCount]: " + std::to_string(keyCount) + ", " + byteSampleSetting.toString() +
 		       ", [loadType]: " + std::to_string(static_cast<uint8_t>(loadType)) +
 		       ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod));
@@ -408,11 +461,11 @@ struct BulkLoadManifest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
+		           formatVersion,
 		           fileSet,
 		           beginKey,
 		           endKey,
 		           version,
-		           checksum,
 		           bytes,
 		           keyCount,
 		           byteSampleSetting,
@@ -420,11 +473,11 @@ struct BulkLoadManifest {
 		           transportMethod);
 	}
 
+	int formatVersion = -1;
 	BulkLoadFileSet fileSet;
 	Key beginKey;
 	Key endKey;
 	Version version = invalidVersion;
-	std::string checksum = "";
 	int64_t bytes = -1;
 	int64_t keyCount = -1;
 	BulkLoadByteSampleSetting byteSampleSetting;
@@ -796,7 +849,6 @@ BulkLoadTaskState createNewBulkLoadTask(const UID& jobId,
                                         const BulkLoadFileSet& fileSet,
                                         const BulkLoadByteSampleSetting& byteSampleSetting,
                                         const Version& snapshotVersion,
-                                        const std::string& checksum,
                                         const int64_t& bytes,
                                         const int64_t& keyCount,
                                         const BulkLoadType& type,
