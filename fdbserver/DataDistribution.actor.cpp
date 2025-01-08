@@ -1992,13 +1992,11 @@ ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
 				if (bulkDumpState.getPhase() != BulkDumpPhase::Complete) {
 					throw bulkdump_task_failed();
 				}
-				ASSERT(bulkDumpState.getManifest().present());
-				if (bulkDumpState.getManifest().get().beginKey != bulkDumpResult[bulkDumpResultIndex].key ||
-				    bulkDumpState.getManifest().get().endKey != bulkDumpResult[bulkDumpResultIndex + 1].key) {
+				if (bulkDumpState.getManifest().beginKey != bulkDumpResult[bulkDumpResultIndex].key ||
+				    bulkDumpState.getManifest().endKey != bulkDumpResult[bulkDumpResultIndex + 1].key) {
 					ASSERT(false);
 				}
-				auto res =
-				    manifests.insert({ bulkDumpState.getManifest().get().beginKey, bulkDumpState.getManifest().get() });
+				auto res = manifests.insert({ bulkDumpState.getManifest().beginKey, bulkDumpState.getManifest() });
 				ASSERT(res.second);
 			}
 			beginKey = bulkDumpResult.back().key;
