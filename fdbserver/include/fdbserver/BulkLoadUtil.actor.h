@@ -39,5 +39,20 @@ ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath,
                                              std::string byteSampleFileFullPath,
                                              UID logId);
 
+// Download job manifest file which is generated when dumping the data
+ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod transportMethod,
+                                                   std::string localJobManifestFilePath,
+                                                   std::string remoteJobManifestFilePath,
+                                                   UID logId);
+
+// Extract manifests from job manifest file with the input range
+ACTOR Future<std::unordered_map<Key, BulkLoadManifest>> getBulkLoadManifestMetadataFromFiles(
+    std::string localJobManifestFilePath,
+    KeyRange range,
+    std::string manifestLocalTempFolder,
+    BulkLoadTransportMethod transportMethod,
+    std::string remoteRoot,
+    UID logId);
+
 #include "flow/unactorcompiler.h"
 #endif

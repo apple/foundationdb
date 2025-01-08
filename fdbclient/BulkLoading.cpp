@@ -22,7 +22,32 @@
 
 const int bulkLoadJobManifestFileFormatVersion = 1;
 
-std::string generateBulkLoadJobManifestFileName() {
+std::string stringRemovePrefix(std::string str, const std::string& prefix) {
+	if (str.compare(0, prefix.length(), prefix) == 0) {
+		str.erase(0, prefix.length());
+	} else {
+		return "";
+	}
+	return str;
+}
+
+// A revert function of StringRef.toFullHexStringPlain()
+Key getKeyFromHexString(const std::string& rawString) {
+	if (rawString.empty()) {
+		return Key();
+	}
+	std::vector<uint8_t> byteList;
+	ASSERT((rawString.size() + 1) % 3 == 0);
+	for (size_t i = 0; i < rawString.size(); i += 3) {
+		std::string byteString = rawString.substr(i, 2);
+		uint8_t byte = static_cast<uint8_t>(std::stoul(byteString, nullptr, 16));
+		byteList.push_back(byte);
+		ASSERT(i + 2 >= rawString.size() || rawString[i + 2] == ' ');
+	}
+	return Standalone(StringRef(byteList.data(), byteList.size()));
+}
+
+std::string getBulkLoadJobManifestFileName() {
 	return "job-manifest.txt";
 }
 
@@ -49,10 +74,10 @@ std::string generateEmptyManifestFileName() {
 std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests) {
 	std::string content;
 	for (const auto& [beginKey, manifest] : manifests) {
-		content = content + manifest.generateEntryInJobManifest() + "\n";
+		content = content + BulkLoadJobManifestFileManifestEntry(manifest).toString() + "\n";
 	}
-	std::string head = "[FormatVersion]: " + std::to_string(bulkLoadJobManifestFileFormatVersion) +
-	                   ", [ManifestCount]: " + std::to_string(manifests.size()) + "\n";
+	std::string head =
+	    BulkLoadJobManifestFileHeader(bulkLoadJobManifestFileFormatVersion, manifests.size()).toString() + "\n";
 	return head + content;
 }
 
@@ -64,9 +89,25 @@ BulkLoadTaskState createNewBulkLoadTask(const UID& jobId,
                                         const Version& snapshotVersion,
                                         const std::string& checksum,
                                         const int64_t& bytes,
+                                        const int64_t& keyCount,
                                         const BulkLoadType& type,
                                         const BulkLoadTransportMethod& transportMethod) {
-	BulkLoadManifest manifest(
-	    fileSet, range.begin, range.end, snapshotVersion, checksum, bytes, byteSampleSetting, type, transportMethod);
+	BulkLoadManifest manifest(fileSet,
+	                          range.begin,
+	                          range.end,
+	                          snapshotVersion,
+	                          checksum,
+	                          bytes,
+	                          keyCount,
+	                          byteSampleSetting,
+	                          type,
+	                          transportMethod);
 	return BulkLoadTaskState(jobId, manifest);
+}
+
+BulkLoadJobState createNewBulkLoadJob(const UID& dumpJobIdToLoad,
+                                      const KeyRange& range,
+                                      const std::string& remoteRoot,
+                                      const BulkLoadTransportMethod& transportMethod) {
+	return BulkLoadJobState(dumpJobIdToLoad, remoteRoot, range, transportMethod);
 }

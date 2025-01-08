@@ -181,6 +181,7 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
                                               Version dumpVersion,
                                               const KeyRange& dumpRange,
                                               int64_t dumpBytes,
+                                              int64_t dumpKeyCount,
                                               BulkLoadType dumpType,
                                               BulkLoadTransportMethod transportMethod) {
 	// Step 1: Clean up local folder
@@ -225,6 +226,7 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
 	                          dumpVersion,
 	                          "",
 	                          dumpBytes,
+	                          dumpKeyCount,
 	                          byteSampleSetting,
 	                          dumpType,
 	                          transportMethod);

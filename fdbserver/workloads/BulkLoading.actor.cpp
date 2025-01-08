@@ -388,6 +388,7 @@ struct BulkLoading : TestWorkload {
 		                          /*snapshotVersion=*/invalidVersion,
 		                          /*checksum=*/"",
 		                          /*bytes=*/-1,
+		                          /*keyCount=*/-1,
 		                          BulkLoadType::SST,
 		                          BulkLoadTransportMethod::CP);
 		return taskUnit;

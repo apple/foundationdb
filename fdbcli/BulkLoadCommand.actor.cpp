@@ -138,6 +138,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		                          /*snapshotVersion=*/invalidVersion,
 		                          /*checksum=*/"",
 		                          /*bytes=*/-1,
+		                          /*keyCount=*/-1,
 		                          BulkLoadType::SST,
 		                          BulkLoadTransportMethod::CP);
 		wait(submitBulkLoadTask(cx, bulkLoadTask));

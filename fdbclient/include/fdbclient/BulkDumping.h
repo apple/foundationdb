@@ -158,7 +158,7 @@ private:
 	// be picked up by any SS with a changed taskId.
 	Optional<UID> taskId;
 	// The manifest metadata persist to system key space and manifest file when a dump task completes.
-	BulkLoadManifest manifest;
+	BulkLoadManifest manifest; // TODO(Zhe): make this optional
 };
 
 // User API to create bulkDump task metadata

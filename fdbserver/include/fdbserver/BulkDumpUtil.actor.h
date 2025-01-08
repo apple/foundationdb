@@ -98,6 +98,7 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
                                               Version dumpVersion,
                                               const KeyRange& dumpRange,
                                               int64_t dumpBytes,
+                                              int64_t dumpKeyCount,
                                               BulkLoadType dumpType,
                                               BulkLoadTransportMethod transportMethod);
 
