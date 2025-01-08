@@ -88,9 +88,6 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	    .detail("bucket", bucket)
 	    .detail("resource", resource)
 	    .detail("size", content.size());
-	// On checksumming: The below writeEntireFile will md5 the content we pass in here
-	// and after upload, it will compare to the etag returned by s3. If they don't match,
-	// we fail the upload.
 	wait(endpoint->writeEntireFile(bucket, resource, content));
 	TraceEvent("S3ClientUpload")
 	    .detail("filepath", filepath)
@@ -174,9 +171,6 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
                                        std::string bucket,
                                        std::string resource,
                                        std::string filepath) {
-	// On checksumming: The below readEntireFile will check the etag if the
-	// knob blobstore_enable_etag_on_get is set. The default for the s3client is to
-	// check the etag against content. For backup, the default is not to check etag.
 	std::string content = wait(endpoint->readEntireFile(bucket, resource));
 	auto parent = std::filesystem::path(filepath).parent_path();
 	if (parent != "" && !std::filesystem::exists(parent)) {

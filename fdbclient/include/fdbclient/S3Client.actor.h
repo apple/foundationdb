@@ -20,13 +20,13 @@
 
 #pragma once
 
-#include <string>
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_S3CLIENT_ACTOR_G_H)
 #define FDBCLIENT_S3CLIENT_ACTOR_G_H
 #include "fdbclient/S3Client.actor.g.h"
 #elif !defined(FDBCLIENT_S3CLIENT_ACTOR_H)
 #define FDBCLIENT_S3CLIENT_ACTOR_H
 
+#include <string>
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/BulkDumping.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

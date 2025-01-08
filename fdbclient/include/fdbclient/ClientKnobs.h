@@ -256,10 +256,17 @@ public:
 	double BLOBSTORE_LATENCY_LOGGING_ACCURACY;
 	int BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR;
 	int BLOBSTORE_MAX_DELAY_CONNECTION_FAILED;
-	bool BLOBSTORE_ENABLE_ETAG_ON_GET; // On download, compare the md5 of the downloaded object with the ETag of the
-	                                   // object in the cloud (etag is md5 of content). If they don't match, throw an
-	                                   // error. On upload, we do this always. It is optional for download because it
-	                                   // new behavior.
+	bool
+	    BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK; // Enable integrity check of download. When not set, on upload, we
+	                                             // we volunteer an md5 of the content and upload will fail if our
+	                                             // md5 doesn't match that calculated by the server. When this flag
+	                                             // is set, we hash the content using sha256 and have the server store
+	                                             // the hash in the object metadata. On download, if this flag is set
+	                                             // we will check the serverside proffered hash against that we
+	                                             // calculate on the received content.  If no match, throw an error. See
+	                                             // https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html
+	                                             // (We can't depend on etags in the download because they are not the
+	                                             // md5 of the content when the upload uses encryption such as aws:kms)
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX; // Available in both normal and urgent mode
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME; // Available in normal mode
 	int CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME; // Available in urgent mode

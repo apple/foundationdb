@@ -3,29 +3,25 @@
 # Functions to download and start https://github.com/seaweedfs/seaweedfs,
 # a blob store with an S3 API.
 #
-# To use it:
-#  PATH_TO_BINARY=download_weed DIR_TO_DOWNLOAD_TO
-#  create_weed_dir DIR_FOR_WEED_TO_STORE_DATA_IN
-#  (PID S3_PORT)=start_weed ${PATH_TO_BINARY} ${DIR_FOR_WEED_TO_STORE_DATA_IN}
-#
-# To shutdown, from a trap preferbly, call "shutdown_weed PID ${DIR_FOR_WEED_TO_STORE_DATA_IN}
-#
 
 # Globals.
-WEED_DIR=
+# Use same bucket always because seaweed makes volumes per bucket and
+# we may be resource constrained in test environment.
+# Export to make it plain its used by importers of this fixture.
+readonly SEAWEED_BUCKET="${WEED_BUCKET:-testbucket}"
+export SEAWEED_BUCKET
 
 # Cleanup the mess we've made. For calling from signal trap on exit.
-# $1 Weed PID to kill if running.
-# $2 The seasweed directory to clean up on exit.
 function shutdown_weed {
-  if [[ -f "${WEED_DIR}/weed.pid" ]]; then
+  local scratch_dir="${1}"
+  if [[ -f "${scratch_dir}/weed.pid" ]]; then
     # KILL! If we send SIGTERM, seaweedfs hangs out
     # ten seconds before shutting down (could config.
     # time but just kill it -- there is no state to save).
-    kill -9 $(cat "${WEED_DIR}/weed.pid")
+    kill -9 $(cat "${scratch_dir}/weed.pid")
   fi
-  if [[ -d "${WEED_DIR}" ]]; then
-    rm -rf "${WEED_DIR}"
+  if [[ -d "${scratch_dir}" ]]; then
+    rm -rf "${scratch_dir}"
   fi
 }
 
@@ -101,6 +97,7 @@ function download_weed {
 }
 
 # Create directory for weed to use.
+# Call shutdown_weed to clean up the directory created here for test.
 # $1 Directory where we want weed to write data and logs.
 # check $? error code on return.
 function create_weed_dir {
@@ -112,7 +109,7 @@ function create_weed_dir {
     echo "ERROR: Failed create of weed directory ${weed_dir}" >&2
     return 1
   fi
-  WEED_DIR="${weed_dir}"
+  echo "${weed_dir}"
 }
 
 # Start up the weed server. It can take 30 seconds to come up.
@@ -122,6 +119,7 @@ function create_weed_dir {
 # Caller should test return $? value.
 function start_weed {
   local binary="${1}"
+  local dir="${2}"
   local master_port=9333
   local s3_port=8333
   local volume_port_grpc=18080
@@ -138,7 +136,7 @@ function start_weed {
     ((volume_port_grpc=volume_port_grpc+1))
     ((filer_port=filer_port+1))
     # Start weed in background.
-    "${binary}" -logdir="${WEED_DIR}" server -dir="${WEED_DIR}" \
+    "${binary}" -logdir="${dir}" server -dir="${dir}" \
       -s3 -ip=localhost -master.port="${master_port}" -s3.port="${s3_port}" \
       -volume.port.grpc="${volume_port_grpc}" -volume.port="${volume_port}" \
       -filer.port="${filer_port}" &> /dev/null &
@@ -146,7 +144,7 @@ function start_weed {
     local weed_pid=$!
     # Loop while process is coming up. It can take 25 seconds.
     while  kill -0 ${weed_pid} &> /dev/null; do
-      if grep "Start Seaweed S3 API Server" "${WEED_DIR}/weed.INFO" &> /dev/null ; then
+      if grep "Start Seaweed S3 API Server" "${dir}/weed.INFO" &> /dev/null ; then
         # Its up and running. Breakout of this while loop and the wrapping 'for' loop
         # (hence the '2' in the below)
         break 2
@@ -154,15 +152,15 @@ function start_weed {
       sleep 5
     done
     # The process died. If it was because of port clash, go around again w/ new ports.
-    if grep "bind: address already in use" "${WEED_DIR}/weed.INFO" &> /dev/null ; then
+    if grep "bind: address already in use" "${dir}/weed.INFO" &> /dev/null ; then
       # Clashed w/ existing port. Go around again and get new ports.
       :
     else
       # Seaweed is not up and it is not because of port clash. Exit.
       # Dump out the tail of the weed log because its going to get cleaned up when
       # we exit this script. Give the user an idea of what went wrong.
-      if [[ -f "${WEED_DIR}/weed.INFO" ]]; then
-        tail -50 "${WEED_DIR}/weed.INFO" >&2
+      if [[ -f "${dir}/weed.INFO" ]]; then
+        tail -50 "${dir}/weed.INFO" >&2
       fi
       echo "ERROR: Failed to start weed" >&2
       return 1
@@ -178,7 +176,7 @@ function start_weed {
     return 1
   fi
   # Set the PID into the global.
-  echo "${weed_pid}" > "${WEED_DIR}/weed.pid"
+  echo "${weed_pid}" > "${dir}/weed.pid"
   # Return two values.
   echo "${s3_port}"
 }
@@ -193,12 +191,13 @@ function run_weed {
     echo "ERROR: failed download of weed binary." >&2
     return 1
   fi
-  if ! create_weed_dir "${local_scratch_dir}"; then
+  local dir
+  if ! dir=$(create_weed_dir "${local_scratch_dir}"); then
     echo "ERROR: failed create of the weed dir." >&2
     return 1
   fi
-  if ! s3_port=$(start_weed "${weed_binary_path}"); then
+  if ! s3_port=$(start_weed "${weed_binary_path}" "${dir}"); then
     echo "ERROR: failed start of weed server." >&2
-    exit 1
+    return 1
   fi
 }

@@ -138,19 +138,6 @@ function test_basic_bulkdump_and_bulkload {
   fi
 }
 
-# Log pass or fail.
-# $1 Test errcode
-# $2 Test name
-function log_test_result {
-  local test_errcode=$1
-  local test_name=$2
-  if (( "${test_errcode}" == 0 )); then
-    log "PASSED ${test_name}"
-  else
-    log "FAILED ${test_name}"
-  fi
-}
-
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
   err "Failed resolve_to_absolute_path"
@@ -161,6 +148,7 @@ if ! cwd=$( cd -P "$( dirname "${path}" )" >/dev/null 2>&1 && pwd ); then
   exit 1
 fi
 readonly cwd
+
 # Source in the fdb cluster, tests_common, and seaweedfs fixtures.
 # shellcheck source=/dev/null
 if ! source "${cwd}/seaweedfs_fixture.sh"; then
@@ -229,11 +217,11 @@ if ! weed_binary_path="$(download_weed "${base_scratch_dir}")"; then
   exit 1
 fi
 readonly weed_binary_path
-if ! create_weed_dir "${SCRATCH_DIR}"; then
+if ! weed_dir=$( create_weed_dir "${SCRATCH_DIR}" ); then
   err "Failed to create the weed dir."
   exit 1
 fi
-if ! s3_port=$(start_weed "${weed_binary_path}"); then
+if ! s3_port=$(start_weed "${weed_binary_path}" "${weed_dir}" ); then
   err "failed start of weed server."
   exit 1
 fi
