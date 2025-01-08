@@ -115,6 +115,7 @@
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "flow/genericactors.actor.h"
+#include "fdbserver/FDBRocksDBVersion.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -13817,6 +13818,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	    self->thisServerID.toString() + "/StorageMetrics",
 	    [self = self](TraceEvent& te) {
 		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
+		    te.detail("RocksDBVersion", format("%d.%d.%d", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH));
 		    te.detail("Tag", self->tag.toString());
 		    std::vector<int> rpr = self->readPriorityRanks;
 		    te.detail("ReadsTotalActive", self->ssLock->getRunnersCount());

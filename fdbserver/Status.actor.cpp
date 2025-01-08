@@ -544,6 +544,7 @@ struct RolesInfo {
 			obj.setKeyRawNumber("local_rate", storageMetrics.getValue("LocalRate"));
 			obj["fetched_versions"] = StatusCounter(storageMetrics.getValue("FetchedVersions")).getStatus();
 			obj["fetches_from_logs"] = StatusCounter(storageMetrics.getValue("FetchesFromLogs")).getStatus();
+			obj["rocksdb_version"] = storageMetrics.getValue("RocksDBVersion");
 
 			Version version = storageMetrics.getInt64("Version");
 			Version durableVersion = storageMetrics.getInt64("DurableVersion");
