@@ -247,11 +247,11 @@ if ! weed_binary_path="$(download_weed "${base_scratch_dir}")"; then
   exit 1
 fi
 readonly weed_binary_path
-if ! create_weed_dir "${SCRATCH_DIR}"; then
+if ! weed_dir=$( create_weed_dir "${SCRATCH_DIR}" ); then
   err "Failed to create the weed dir."
   exit 1
 fi
-if ! s3_port=$(start_weed "${weed_binary_path}"); then
+if ! s3_port=$(start_weed "${weed_binary_path}" "${weed_dir}" ); then
   err "failed start of weed server."
   exit 1
 fi

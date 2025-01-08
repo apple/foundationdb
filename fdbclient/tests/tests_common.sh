@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Globals.
-# Functions shared by backup tests.
+# Functions shared by ctests.
 #
 
 # Globals.

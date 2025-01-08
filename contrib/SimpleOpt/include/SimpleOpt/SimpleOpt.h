@@ -518,7 +518,9 @@ private:
 	}
 	bool IsEqual(SOCHAR a_cLeft, SOCHAR a_cRight, int a_nArgType) const;
 
-	inline void Copy(SOCHAR** ppDst, SOCHAR** ppSrc, int nCount) const {
+	// Disable ASAN in here. Its complaining memcpy-param-overlap when
+	// we shuffle the argv array by doing Copys in ShuffleArg.
+	__attribute__((no_sanitize("address"))) inline void Copy(SOCHAR** ppDst, SOCHAR** ppSrc, int nCount) const {
 #ifdef SO_MAX_ARGS
 		// keep our promise of no CLIB usage
 		while (nCount-- > 0)
