@@ -2,6 +2,7 @@
 maxTLogVersion = 7
 disableTss = true
 tenantModes = ['disabled']
+storageEngineExcludeTypes = [5] # ShardedRocks is not supported with shard_encode_location_metadata = false
 
 [[knobs]]
 # testing that restart with writing recover at version to CSTATE.

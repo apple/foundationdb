@@ -3,6 +3,7 @@ maxTLogVersion = 7
 disableTss = true
 disableHostname = true
 tenantModes = ['disabled']
+storageEngineExcludeTypes = [5] # ShardedRocks is not supported with shard_encode_location_metadata = false
 
 [[knobs]]
 # Mutation checksum and accumulative checksum is not compatible with release-7.3.(<41)

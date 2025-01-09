@@ -4,6 +4,7 @@ allowDefaultTenant = false
 tenantModes = ['disabled']
 injectTargetedSSRestart = true
 injectSSDelay = true
+storageEngineExcludeTypes = [5] # ShardedRocks is not supported with shard_encode_location_metadata = false
 
 [[knobs]]
 bg_metadata_source = "tenant"
