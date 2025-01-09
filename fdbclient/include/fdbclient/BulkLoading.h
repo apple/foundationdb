@@ -362,9 +362,9 @@ struct BulkLoadManifest {
 	BulkLoadFileSet fileSet;
 	Key beginKey;
 	Key endKey;
-	Version version;
-	std::string checksum;
-	int64_t bytes;
+	Version version = invalidVersion;
+	std::string checksum = "";
+	int64_t bytes = -1;
 	BulkLoadByteSampleSetting byteSampleSetting;
 	BulkLoadType loadType = BulkLoadType::Invalid;
 	BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
