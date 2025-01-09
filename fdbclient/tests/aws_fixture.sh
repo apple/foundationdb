@@ -6,9 +6,9 @@
 # Cleanup any mess we've made. For calling from signal trap on exit.
 # $1 The aws scratch directory to clean up on exit.
 function shutdown_aws {
-  local scratch_dir="${1}"
-  if [[ -d "${scratch_dir}" ]]; then
-    rm -rf "${scratch_dir}"
+  local local_scratch_dir="${1}"
+  if [[ -d "${local_scratch_dir}" ]]; then
+    rm -rf "${local_scratch_dir}"
   fi
 }
 
