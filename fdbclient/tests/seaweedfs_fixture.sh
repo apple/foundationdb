@@ -13,15 +13,15 @@ export SEAWEED_BUCKET
 
 # Cleanup the mess we've made. For calling from signal trap on exit.
 function shutdown_weed {
-  local scratch_dir="${1}"
-  if [[ -f "${scratch_dir}/weed.pid" ]]; then
+  local local_scratch_dir="${1}"
+  if [[ -f "${local_scratch_dir}/weed.pid" ]]; then
     # KILL! If we send SIGTERM, seaweedfs hangs out
     # ten seconds before shutting down (could config.
     # time but just kill it -- there is no state to save).
-    kill -9 $(cat "${scratch_dir}/weed.pid")
+    kill -9 $(cat "${local_scratch_dir}/weed.pid")
   fi
-  if [[ -d "${scratch_dir}" ]]; then
-    rm -rf "${scratch_dir}"
+  if [[ -d "${local_scratch_dir}" ]]; then
+    rm -rf "${local_scratch_dir}"
   fi
 }
 

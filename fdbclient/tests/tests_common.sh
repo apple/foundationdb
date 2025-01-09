@@ -34,9 +34,9 @@ function make_key {
 # $2 scratch directory where we can find fdb.cluster file
 function has_data {
   local local_build_dir="${1}"
-  local scratch_dir="${2}"
+  local local_scratch_dir="${2}"
   if ! result=$("${local_build_dir}/bin/fdbcli" \
-    -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     --exec "getrange \"\" \xff 1000" 2>&1 )
   then
     err "Failed to getrange"
@@ -54,9 +54,9 @@ function has_data {
 # $2 scratch directory so we can find fdb.cluster file.
 function has_nodata {
   local local_build_dir="${1}"
-  local scratch_dir="${2}"
+  local local_scratch_dir="${2}"
   if ! result=$("${local_build_dir}/bin/fdbcli" \
-    -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     --exec "getrange \"\" \xff 1000" 2>&1 )
   then
     err "Failed to getrange"
@@ -78,7 +78,7 @@ function has_nodata {
 # Sets the FDB_DATA Global array variable.
 function load_data {
   local local_build_dir="${1}"
-  local scratch_dir="${2}"
+  local local_scratch_dir="${2}"
   for (( i=0; i<"${FDB_DATA_KEYCOUNT}"; i++)); do
     FDB_DATA+=("${i}.$(date -Iseconds)")
   done
@@ -87,12 +87,12 @@ function load_data {
     load_str="${load_str} set $(make_key "${i}") ${FDB_DATA[i]};"
   done
   if ! echo "${load_str}" | \
-    "${local_build_dir}/bin/fdbcli" -C "${scratch_dir}/loopback_cluster/fdb.cluster" >&2
+    "${local_build_dir}/bin/fdbcli" -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" >&2
   then
     err "Failed to load data"
     return 1
   fi
-  if ! has_data "${local_build_dir}" "${scratch_dir}"; then
+  if ! has_data "${local_build_dir}" "${local_scratch_dir}"; then
     err "No data"
     return 1
   fi
@@ -103,15 +103,15 @@ function load_data {
 # $2 scratch directory
 function clear_data {
   local local_build_dir="${1}"
-  local scratch_dir="${2}"
+  local local_scratch_dir="${2}"
   if ! "${local_build_dir}/bin/fdbcli" \
-    -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     --exec "writemode on; clearrange \"\" \xff;"
   then
     err "Failed to clearrange"
     return 1
   fi
-  if ! has_nodata "${local_build_dir}" "${scratch_dir}"; then
+  if ! has_nodata "${local_build_dir}" "${local_scratch_dir}"; then
     err "Has data"
     return 1
   fi
@@ -124,11 +124,11 @@ function clear_data {
 # Returns an array of the values we loaded.
 function verify_data {
   local local_build_dir="${1}"
-  local scratch_dir="${2}"
+  local local_scratch_dir="${2}"
   local value
   for (( i=0; i<"${#FDB_DATA[@]}"; i++)); do
     value=$("${local_build_dir}/bin/fdbcli" \
-      -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+      -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
       --exec "get $(make_key "${i}")" | \
       sed -e "s/.*is [[:punct:]]//" | sed -e "s/[[:punct:]]*$//")
     if [[ "${FDB_DATA[i]}" != "${value}" ]]; then

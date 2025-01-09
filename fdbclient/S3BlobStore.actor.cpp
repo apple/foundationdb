@@ -1865,7 +1865,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint>
 		headers["x-amz-checksum-sha256"] = contentHash;
 		headers["x-amz-checksum-algorithm"] = "SHA256";
 	} else {
-		headers["Content-MD5"] = contentMD5;
+		headers["Content-MD5"] = contentHash;
 	}
 	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
 		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;

@@ -4,20 +4,6 @@
 # Seaweed server takes about 25 seconds to come up. Tests run for a few seconds after that.
 #
 
-# Globals
-
-# TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
-# It gets cleaned up on the way out of the test.
-TEST_SCRATCH_DIR=
-
-# Some copied from down the page on
-# https://stackoverflow.com/questions/192249/how-do-i-parse-command-line-arguments-in-bash
-# set -o xtrace   # a.k.a set -x
-set -o errexit  # a.k.a. set -e
-set -o nounset  # a.k.a. set -u
-set -o pipefail
-set -o noclobber
-
 # Make sure cleanup on script exit.
 trap "exit 1" HUP INT PIPE QUIT TERM
 trap cleanup  EXIT
@@ -28,7 +14,7 @@ function cleanup {
     shutdown_weed "${TEST_SCRATCH_DIR}"
   fi
   if type shutdown_aws &> /dev/null; then
-    : #shutdown_aws "${TEST_SCRATCH_DIR}"
+    shutdown_aws "${TEST_SCRATCH_DIR}"
   fi
 }
 
@@ -46,6 +32,92 @@ function resolve_to_absolute_path {
   realpath "${p}"
 }
 
+# Run the upload, then download, then cleanup.
+# $1 The url to go against
+# $2 test dir
+# $3 credentials file
+# $4 The s3client binary.
+# $5 What to upload
+# $6 Where to download to.
+# $7 Optionally override integrity_check.
+function upload_download {
+  local url="${1}"
+  local dir="${2}"
+  local credentials="${3}"
+  local s3client="${4}"
+  local object="${5}"
+  local downloaded_object="${6}"
+  local no_integrity_check="${7:-false}"
+  local logsdir="${dir}/logs"
+  if [[ ! -d "${logsdir}" ]]; then
+    mkdir "${logsdir}"
+  fi
+  # If on s3, enable integrity check. Otherwise leave it false.
+  # (seaweed doesn't support asking for hash in GET request so
+  # it fails the request as malformed).
+  local integrity_check=false
+  if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then
+    # Enable integrity checking unless an override.
+    if [[ "${no_integrity_check}" == false ]]; then
+      integrity_check=true
+    fi
+    # Run this rm only if s3. In seaweed, it would fail because
+    # bucket doesn't exist yet (they are lazily created).
+    if ! "${s3client}" \
+        --knob_http_verbose_level=10 \
+        --knob_blobstore_encryption_type=aws:kms \
+        --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
+        --tls-ca-file ${TLS_CA_FILE} \
+        --tls-certificate-file "${dir}/cert.pem" \
+        --tls-key-file "${dir}/key.pem" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${logsdir}" \
+        rm "${url}"; then
+      err "Failed rm of ${url}"
+      return 1
+    fi
+  fi
+  if ! "${s3client}" \
+      --knob_http_verbose_level=10 \
+      --knob_blobstore_encryption_type=aws:kms \
+      --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
+      --tls-ca-file ${TLS_CA_FILE} \
+      --tls-certificate-file "${dir}/cert.pem" \
+      --tls-key-file "${dir}/key.pem" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      cp "${object}" "${url}"; then
+    err "Failed cp of ${object} to ${url}"
+    return 1
+  fi
+  if ! "${s3client}" \
+      --knob_http_verbose_level=10 \
+      --knob_blobstore_encryption_type=aws:kms \
+      --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
+      --tls-ca-file ${TLS_CA_FILE} \
+      --tls-certificate-file "${dir}/cert.pem" \
+      --tls-key-file "${dir}/key.pem" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      cp "${url}" "${downloaded_object}"; then
+    err "Failed cp ${url} ${downloaded_object}"
+    return 1
+  fi
+  if ! "${s3client}" \
+      --knob_http_verbose_level=10 \
+      --knob_blobstore_encryption_type=aws:kms \
+      --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
+      --tls-ca-file ${TLS_CA_FILE} \
+      --tls-certificate-file "${dir}/cert.pem" \
+      --tls-key-file "${dir}/key.pem" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      rm "${url}"; then
+    err "Failed rm ${url}"
+    return 1
+  fi
+}
+
 # Test file upload and download
 # $1 The url to go against
 # $2 Directory I can write test files in.
@@ -56,63 +128,37 @@ function test_file_upload_and_download {
   local dir="${2}"
   local credentials="${3}"
   local s3client="${4}"
-  local logsdir="${dir}/logs"
-  if [[ ! -d "${logsdir}" ]]; then
-    mkdir "${logsdir}"
-  fi
   local testfileup="${dir}/testfile.up"
   local testfiledown="${dir}/testfile.down"
   date -Iseconds &> "${testfileup}"
-  if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file /etc/ssl/cert.pem \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      rm "${url}"; then
-    err "Failed rm of ${url}"
+  if ! upload_download "${url}" "${dir}" "${credentials}" "${s3client}" "${testfileup}" "${testfiledown}"; then
+    err "Failed upload_download"
     return 1
   fi
-  if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file /etc/ssl/cert.pem \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      cp "${testfileup}" "${url}"; then
-    err "Failed cp of ${testfileup} to ${url}"
+  if ! diff "${testfileup}" "${testfiledown}"; then
+    err "ERROR: Test $0 failed; upload and download are not the same." >&2
     return 1
   fi
-  if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file /etc/ssl/cert.pem \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      cp "${url}" "${testfiledown}"; then
-    err "Failed cp ${url} ${testfiledown}"
+}
+
+# Test file upload and download but w/o the integrity check.
+# Only makes sense on s3. Seaweed doesn't support integrity check.
+# $1 The url to go against
+# $2 Directory I can write test files in.
+# $3 credentials file
+# $4 The s3client binary.
+function test_file_upload_and_download_no_integrity_check {
+  local url="${1}"
+  local dir="${2}"
+  local credentials="${3}"
+  local s3client="${4}"
+  local testfileup="${dir}/testfile.up.no_integrity_check"
+  local testfiledown="${dir}/testfile.down.no_integrity_check"
+  date -Iseconds &> "${testfileup}"
+  if ! upload_download "${url}" "${dir}" "${credentials}" "${s3client}" "${testfileup}" "${testfiledown}" "true"; then
+    err "Failed upload_download"
     return 1
   fi
-  if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file /etc/ssl/cert.pem \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      rm "${url}"; then
-    err "Failed rm ${url}"
-    return 1
-  fi
-  cat "${testfileup}"
-  cat "${testfiledown}"
   if ! diff "${testfileup}" "${testfiledown}"; then
     err "ERROR: Test $0 failed; upload and download are not the same." >&2
     return 1
@@ -129,10 +175,6 @@ function test_dir_upload_and_download {
   local dir="${2}"
   local credentials="${3}"
   local s3client="${4}"
-  local logsdir="${2}/logs"
-  if [[ ! -d "${logsdir}" ]]; then
-    mkdir "${logsdir}"
-  fi
   local testdirup="${dir}/testdir.up"
   local testdirdown="${dir}/testdir.down"
   mkdir "${testdirup}" "${testdirdown}"
@@ -140,52 +182,8 @@ function test_dir_upload_and_download {
   date -Iseconds &> "${testdirup}/two"
   mkdir "${testdirup}/subdir"
   date -Iseconds  &> "${testdirup}/subdir/three"
-  if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file /etc/ssl/cert.pem \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      rm "${url}"; then
-    err "Failed rm ${url}"
-    return 1
-  fi
-  if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file /etc/ssl/cert.pem \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      cp "${testdirup}" "${url}"; then
-    err "Failed cp ${testdirup}"
-    return 1
-  fi
-  if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file /etc/ssl/cert.pem \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      cp "${url}" "${testdirdown}"; then
-    err "Failed cp ${url}"
-    return 1
-  fi
-  if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file /etc/ssl/cert.pem \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      rm "${url}"; then
-    err "Failed rm ${url}"
+  if ! upload_download "${url}" "${dir}" "${credentials}" "${s3client}" "${testdirup}" "${testdirdown}"; then
+    err "Failed upload_download"
     return 1
   fi
   if ! diff "${testdirup}" "${testdirdown}"; then
@@ -194,20 +192,35 @@ function test_dir_upload_and_download {
   fi
 }
 
+# Some copied from down the page on
+# https://stackoverflow.com/questions/192249/how-do-i-parse-command-line-arguments-in-bash
+# set -o xtrace   # a.k.a set -x
+set -o errexit  # a.k.a. set -e
+set -o nounset  # a.k.a. set -u
+set -o pipefail
+set -o noclobber
+
+# Globals
+
+# TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
+# It gets cleaned up on the way out of the test.
+TEST_SCRATCH_DIR=
+TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
+readonly TLS_CA_FILE
+
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
-  err "Failed resolve_to_absolute_path"
+  echo "ERROR: Failed resolve_to_absolute_path"
   exit 1
 fi
 if ! cwd=$( cd -P "$( dirname "${path}" )" >/dev/null 2>&1 && pwd ); then
-  err "Failed dirname on ${path}"
+  echo "ERROR: Failed dirname on ${path}"
   exit 1
 fi
 readonly cwd
-
 # shellcheck source=/dev/null
 if ! source "${cwd}/tests_common.sh"; then
-  err "Failed to source tests_common.sh"
+  echo "ERROR: Failed to source tests_common.sh"
   exit 1
 fi
 # Process command-line options.
@@ -227,6 +240,7 @@ scratch_dir="${TMPDIR:-/tmp}"
 if (( $# == 2 )); then
   scratch_dir="${2}"
 fi
+readonly scratch_dir
 
 # Set host, bucket, and blob_credentials_file whether seaweed or s3.
 host=
@@ -281,9 +295,9 @@ if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then
     exit 1
   fi
   readonly blob_credentials_file
-  # bulkload is where we can write to in apple dev
-  readonly path_prefix="bulkload/test"
+  # s3client_test is where we can write to in apple dev
   query_str="bucket=${bucket}&region=${region}"
+  path_prefix="bulkload/test/s3client"
 else
   # Now source in the seaweedfs fixture so we can use its methods in the below.
   # shellcheck source=/dev/null
@@ -316,6 +330,7 @@ else
   readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
   # Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
   query_str="bucket=${bucket}&region=${region}&secure_connection=0"
+  path_prefix="s3client"
 fi
 
 # Run tests.
@@ -323,6 +338,14 @@ test="test_file_upload_and_download"
 url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
 test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
 log_test_result $? "${test}"
+
+if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then
+  # Only run this on s3. It is checking that the old s3blobstore md5 checksum still works.
+  test="test_file_upload_and_download_no_integrity_check"
+  url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+  test_file_upload_and_download_no_integrity_check "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+  log_test_result $? "${test}"
+fi
 
 test="test_dir_upload_and_download"
 url="blobstore://${host}/${path_prefix}/${test}?${query_str}"

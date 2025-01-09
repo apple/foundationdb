@@ -25,8 +25,8 @@ function shutdown_fdb_cluster {
 function start_fdb_cluster {
   local local_source_dir="${1}"
   local local_build_dir="${2}"
-  local scratch_dir="${3}"
-  local output="${scratch_dir}/output.$$.txt"
+  local local_scratch_dir="${3}"
+  local output="${local_scratch_dir}/output.$$.txt"
   local port_prefix=1500
   while : ; do
     port_prefix="$(( port_prefix + 100 ))"
@@ -35,7 +35,7 @@ function start_fdb_cluster {
     # 'process substitution'; piping to tee hangs on success..
     set +o errexit  # a.k.a. set +e
     set +o noclobber
-    LOOPBACK_DIR="${scratch_dir}/loopback_cluster" PORT_PREFIX="${port_prefix}" \
+    LOOPBACK_DIR="${local_scratch_dir}/loopback_cluster" PORT_PREFIX="${port_prefix}" \
       "${local_source_dir}/tests/loopback_cluster/run_custom_cluster.sh" \
       "${local_build_dir}" \
       --knobs "--knob_shard_encode_location_metadata=true" \
@@ -51,7 +51,7 @@ function start_fdb_cluster {
     if (( status == 0 )); then
       # Give the db a second to come healthy.
       sleep 1
-      if ! "${local_build_dir}/bin/fdbcli" -C "${scratch_dir}/loopback_cluster/fdb.cluster" --exec status; then
+      if ! "${local_build_dir}/bin/fdbcli" -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" --exec status; then
         err "Client failed to obtain healthy status"
         return 1
       fi
@@ -72,10 +72,10 @@ function start_fdb_cluster {
 # $2 The scratch dir.
 function start_backup_agent {
   local local_build_dir="${1}"
-  local scratch_dir="${2}"
+  local local_scratch_dir="${2}"
   "${local_build_dir}/bin/backup_agent" \
-    -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
-    --log --logdir="${scratch_dir}" \
+    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
+    --log --logdir="${local_scratch_dir}" \
     --knob_http_verbose_level=10 &
   local pid=$!
   if ! ps -p "${pid}" &> /dev/null; then

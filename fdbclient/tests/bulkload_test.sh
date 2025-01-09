@@ -1,33 +1,17 @@
 #!/bin/bash
 #
-# Test bulkload via s3 where we use seaweedfs
-# (https://github.com/seaweedfs/seaweedfs) as substitute for
-# AWS S3.
+# Test bulkload. Uses seaweedfs:
+# (https://github.com/seaweedfs/seaweedfs) as substitute.
 #
 # In the below we start a small FDB cluster, populate it with
-# some data and then start up a seaweedfs instance. We then run
-# a bulkdump to 'S3' and then a restore. We verify
+# some data and then start up a seaweedfs instance. We
+# then run a bulkdump to 'S3' and then a restore. We verify
 # the restore is the same as the original.
 #
 # Debugging, run this script w/ the -x flag: e.g. bash -x bulkdump_test.sh...
 # You can also disable the cleanup. This will leave processes up
 # so you can manually rerun commands or peruse logs and data
 # under SCRATCH_DIR.
-
-# set -o xtrace   # a.k.a set -x  # Set this one when debugging (or 'bash -x THIS_SCRIPT').
-set -o errexit  # a.k.a. set -e
-set -o nounset  # a.k.a. set -u
-set -o pipefail
-set -o noclobber
-
-# Globals that get set below and are used when we cleanup.
-SCRATCH_DIR=
-# Use one bucket only for all tests. More buckets means
-# we need more seaweed volumes which can be an issue when
-# little diskspace
-readonly BUCKET="${S3_BUCKET:-testbucket}"
-S3_RESOURCE="bulkdump-$(date -Iseconds | sed -e 's/[[:punct:]]/-/g')"
-readonly S3_RESOURCE
 
 # Install signal traps. Depends on globals being set.
 # Calls the cleanup function.
@@ -36,10 +20,12 @@ trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
 function cleanup {
-  shutdown_weed
   shutdown_fdb_cluster
-  if [[ -d "${SCRATCH_DIR}" ]]; then
-    rm -rf "${SCRATCH_DIR}"
+  if type shutdown_weed &> /dev/null; then
+    shutdown_weed "${TEST_SCRATCH_DIR}"
+  fi
+  if type shutdown_aws &> /dev/null; then
+    shutdown_aws "${TEST_SCRATCH_DIR}"
   fi
 }
 
@@ -61,28 +47,29 @@ function resolve_to_absolute_path {
 # $2 The scratch directory
 # $3 The weed port s3 is listening on.
 function bulkdump {
-  local local_build_dir="${1}"
-  local scratch_dir="${2}"
-  local weed_s3_port="${3}"
+  local local_url="${1}"
+  local local_scratch_dir="${2}"
+  local credentials="${3}"
+  local local_build_dir="${4}"
   # Bulkdump to s3. Set bulkdump mode to on
   # Then start a bulkdump and wait till its done.
   if ! "${local_build_dir}"/bin/fdbcli \
-    -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     --exec "bulkdump mode on"
   then
     err "Bulkdump mode on failed"
     return 1
   fi
   if ! "${local_build_dir}"/bin/fdbcli \
-    -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
-    --exec "bulkdump blobstore \"\" \xff \"blobstore://localhost:${weed_s3_port}/${S3_RESOURCE}?bucket=${BUCKET}&secure_connection=0&region=us\""
+    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
+    --exec "bulkdump blobstore \"\" \xff \"${url}\""
   then
     err "Bulkdump start failed"
     return 1
   fi
   while true; do
     if ! output=$( "${local_build_dir}"/bin/fdbcli \
-      -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+      -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
       --exec "bulkdump status \"\" \xff " )
     then
       err "Bulkdump status 1 failed"
@@ -95,7 +82,7 @@ function bulkdump {
   done
   while true; do
     if ! output=$( "${local_build_dir}"/bin/fdbcli \
-      -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+      -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
       --exec "bulkdump status \"\" \xff " )
     then
       err "Bulkdump status 2 failed"
@@ -114,58 +101,63 @@ function bulkdump {
 }
 
 # Run a basic bulkdump to s3 and then after a bulkload.
-# $1 build directory
+# $1 url to bulk dump to.
 # $2 the scratch directory
-# $3 the s3_port to go against.
+# $3 credentials file
+# $4 the build dir
 function test_basic_bulkdump_and_bulkload {
-  local local_build_dir="${1}"
-  local scratch_dir="${2}"
-  local local_s3_port="${3}"
+  local local_url="${1}"
+  local local_scratch_dir="${2}"
+  local credentials="${3}"
+  local local_build_dir="${4}"
   log "Load data"
-  if ! load_data "${local_build_dir}" "${scratch_dir}"; then
+  if ! load_data "${local_build_dir}" "${local_scratch_dir}"; then
     err "Failed loading data into fdb"
     return 1
   fi
   log "Run bulkdump"
-  if ! bulkdump "${local_build_dir}" "${scratch_dir}" "${local_s3_port}"; then
+  if ! bulkdump "${local_url}" "${local_scratch_dir}" "${credentials}" "${local_build_dir}"; then
     err "Failed bulkdump"
     return 1
   fi
   log "Check for Severity=40 errors"
-  if ! grep_for_severity40 "${scratch_dir}"; then
+  if ! grep_for_severity40 "${local_scratch_dir}"; then
     err "Found Severity=40 errors in logs"
     return 1
   fi
 }
 
+# set -o xtrace   # a.k.a set -x  # Set this one when debugging (or 'bash -x THIS_SCRIPT').
+set -o errexit  # a.k.a. set -e
+set -o nounset  # a.k.a. set -u
+set -o pipefail
+set -o noclobber
+
+# Globals
+
+# TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
+# It gets cleaned up on the way out of the test.
+TEST_SCRATCH_DIR=
+TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
+readonly TLS_CA_FILE
+S3_RESOURCE="bulkdump-$(date -Iseconds | sed -e 's/[[:punct:]]/-/g')"
+readonly S3_RESOURCE
+
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
-  err "Failed resolve_to_absolute_path"
+  echo "ERROR: Failed resolve_to_absolute_path"
   exit 1
 fi
 if ! cwd=$( cd -P "$( dirname "${path}" )" >/dev/null 2>&1 && pwd ); then
-  err "Failed dirname on ${path}"
+  echo "ERROR: Failed dirname on ${path}"
   exit 1
 fi
 readonly cwd
-
-# Source in the fdb cluster, tests_common, and seaweedfs fixtures.
-# shellcheck source=/dev/null
-if ! source "${cwd}/seaweedfs_fixture.sh"; then
-  err "Failed to source seaweedfs_fixture.sh"
-  exit 1
-fi
-# shellcheck source=/dev/null
-if ! source "${cwd}/fdb_cluster_fixture.sh"; then
-  err "Failed to source fdb_cluster_fixture.sh"
-  exit 1
-fi
 # shellcheck source=/dev/null
 if ! source "${cwd}/tests_common.sh"; then
-  err "Failed to source tests_common.sh"
+  echo "ERROR: Failed to source tests_common.sh"
   exit 1
 fi
-
 # Process command-line options.
 if (( $# < 2 )) || (( $# > 3 )); then
     echo "ERROR: ${0} requires the fdb src and build directories --"
@@ -189,45 +181,60 @@ if [[ ! -d "${build_dir}" ]]; then
   exit 1
 fi
 # Set up scratch directory global.
-base_scratch_dir="${TMPDIR:-/tmp}"
+scratch_dir="${TMPDIR:-/tmp}"
 if (( $# == 3 )); then
-  base_scratch_dir="${3}"
+  scratch_dir="${3}"
 fi
-readonly base_scratch_dir
-# mktemp works differently on mac than on unix; the XXXX's are ignored on mac.
-if ! tmpdir=$(mktemp -p "${base_scratch_dir}" --directory -t bulkload.XXXX); then
-  err "Failed mktemp"
+readonly scratch_dir
+
+# Now source in the seaweedfs fixture so we can use its methods in the below.
+# shellcheck source=/dev/null
+if ! source "${cwd}/seaweedfs_fixture.sh"; then
+  err "Failed to source seaweedfs_fixture.sh"
   exit 1
 fi
-SCRATCH_DIR=$(resolve_to_absolute_path "${tmpdir}")
-readonly SCRATCH_DIR
+# Download seaweed.
+if ! weed_binary_path="$(download_weed "${scratch_dir}")"; then
+  err "failed download of weed binary." >&2
+  exit 1
+fi
+readonly weed_binary_path
+# Here we create a tmpdir to hold seaweed logs and data in global WEED_DIR hosted
+# by seaweedfs_fixture.sh which we sourced above. Call shutdown_weed to clean up.
+if ! TEST_SCRATCH_DIR=$( create_weed_dir "${scratch_dir}" ); then
+  err "failed create of the weed dir." >&2
+  exit 1
+fi
+readonly TEST_SCRATCH_DIR
+log "Starting seaweed..."
+if ! s3_port=$(start_weed "${weed_binary_path}" "${TEST_SCRATCH_DIR}"); then
+  err "failed start of weed server." >&2
+  exit 1
+fi
+readonly host="localhost:${s3_port}"
+readonly bucket="${SEAWEED_BUCKET}"
+readonly region="us"
+# Reference a non-existent blob file (its ignored by seaweed)
+readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
+# Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
+readonly query_str="bucket=${bucket}&region=${region}&secure_connection=0"
+readonly path_prefix="s3client"
 
+# Source in the fdb cluster.
+# shellcheck source=/dev/null
+if ! source "${cwd}/fdb_cluster_fixture.sh"; then
+  err "Failed to source fdb_cluster_fixture.sh"
+  exit 1
+fi
 # Startup fdb cluster.
-if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${SCRATCH_DIR}"; then
+if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR}"; then
   err "Failed start FDB cluster"
   exit 1
 fi
 log "FDB cluster is up"
 
-# Download seaweed.
-# Download to base_scratch_dir so its there for the next test.
-log "Fetching seaweedfs..."
-if ! weed_binary_path="$(download_weed "${base_scratch_dir}")"; then
-  err "Failed download of weed binary."
-  exit 1
-fi
-readonly weed_binary_path
-if ! weed_dir=$( create_weed_dir "${SCRATCH_DIR}" ); then
-  err "Failed to create the weed dir."
-  exit 1
-fi
-if ! s3_port=$(start_weed "${weed_binary_path}" "${weed_dir}" ); then
-  err "failed start of weed server."
-  exit 1
-fi
-readonly s3_port
-log "Seaweed server is up; s3.port=${s3_port}"
-
 # Run tests.
-test_basic_bulkdump_and_bulkload "${build_dir}" "${SCRATCH_DIR}" "${s3_port}"
-log_test_result $? "test_basic_bulkdump_and_bulkload"
+test="test_basic_bulkdump_and_bulkload"
+url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+test_basic_bulkdump_and_bulkload "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}"
+log_test_result $? "${test}"
