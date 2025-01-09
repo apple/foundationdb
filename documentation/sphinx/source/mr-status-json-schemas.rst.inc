@@ -187,6 +187,7 @@
                      "throttled_commits":12341234,
                      "write_stall_microseconds":12341234
                   },
+                  "rocksdb_version":"9.7.3",
                   "data_version":12341234,
                   "durable_version":12341234,
                   "data_lag": {
