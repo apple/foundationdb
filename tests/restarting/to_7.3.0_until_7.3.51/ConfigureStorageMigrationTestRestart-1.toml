@@ -3,11 +3,14 @@ extraMachineCountDC = 2
 maxTLogVersion=7
 disableHostname=true
 tenantModes = ['disabled']
+storageEngineExcludeTypes = [5] # ShardedRocks is not supported with shard_encode_location_metadata = false
 
 [[knobs]]
 # Mutation checksum and accumulative checksum is not compatible with release-7.3.(<41)
 enable_mutation_checksum = false
 enable_accumulative_checksum = false
+dd_physical_shard_move_probability = 0
+shard_encode_location_metadata = false
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'

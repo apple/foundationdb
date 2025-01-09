@@ -2,6 +2,11 @@
 extraMachineCountDC = 2
 allowDefaultTenant = false
 tenantModes = ['disabled']
+storageEngineExcludeTypes = [5] # ShardedRocks is not supported with shard_encode_location_metadata = false
+
+[[knobs]]
+dd_physical_shard_move_probability = 0
+shard_encode_location_metadata = false
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'

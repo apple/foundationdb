@@ -1,20 +1,24 @@
 [configuration]
 maxTLogVersion = 7
 disableTss = true
+disableHostname = true
 tenantModes = ['disabled']
+storageEngineExcludeTypes = [5] # ShardedRocks is not supported with shard_encode_location_metadata = false
 
 [[knobs]]
-# testing that restart with writing recover at version to CSTATE.
-record_recover_at_in_cstate = true
-track_tlog_recovery = true
+# Mutation checksum and accumulative checksum is not compatible with release-7.3.(<41)
+enable_mutation_checksum = false
+enable_accumulative_checksum = false
+dd_physical_shard_move_probability = 0
+shard_encode_location_metadata = false
 
 [[test]]
 testTitle = 'Clogged'
-runSetup = false
+clearAfterTest = false
 
     [[test.workload]]
     testName = 'Cycle'
-    transactionsPerSecond = 2500.0
+    transactionsPerSecond = 500.0
     nodeCount = 2500
     testDuration = 10.0
     expectedRate = 0
@@ -40,3 +44,9 @@ runSetup = false
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'SaveAndKill'
+    restartInfoLocation = 'simfdb/restartInfo.ini'
+    testDuration = 10.0
