@@ -976,7 +976,7 @@ public:
 			return Optional<ValueType>();
 		}
 
-		return self.unpackKey(kvs.front());
+		return self.unpackKey(kvs.front().key);
 	}
 
 	template <class Transaction>
