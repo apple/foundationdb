@@ -146,7 +146,7 @@ public:
 		    delete_requests_per_second, multipart_max_part_size, multipart_min_part_size, concurrent_requests,
 		    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file,
 		    enable_read_cache, read_block_size, read_ahead_blocks, read_cache_blocks_per_file,
-		    max_send_bytes_per_second, max_recv_bytes_per_second, sdk_auth, global_connection_pool,
+		    max_send_bytes_per_second, max_recv_bytes_per_second, sdk_auth, enable_etag_on_get, global_connection_pool,
 		    max_delay_retryable_error, max_delay_connection_failed;
 
 		bool set(StringRef name, int value);
@@ -187,6 +187,7 @@ public:
 				"failure.",
 				"sdk_auth (or sa)                      Use AWS SDK to resolve credentials. Only valid if "
 				"BUILD_AWS_BACKUP is enabled.",
+				"enable_etag_on_get (or ceog)          Enable checksum (etag) check on GET requests (Default: false).",
 				"global_connection_pool (or gcp)       Enable shared connection pool between all blobstore instances."
 			};
 		}

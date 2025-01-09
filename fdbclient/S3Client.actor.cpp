@@ -88,6 +88,9 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	    .detail("bucket", bucket)
 	    .detail("resource", resource)
 	    .detail("size", content.size());
+	// On checksumming: The below writeEntireFile will md5 the content we pass in here
+	// and after upload, it will compare to the etag returned by s3. If they don't match,
+	// we fail the upload.
 	wait(endpoint->writeEntireFile(bucket, resource, content));
 	TraceEvent("S3ClientUpload")
 	    .detail("filepath", filepath)
@@ -171,6 +174,9 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
                                        std::string bucket,
                                        std::string resource,
                                        std::string filepath) {
+	// On checksumming: The below readEntireFile will check the etag if the
+	// knob blobstore_enable_etag_on_get is set. The default for the s3client is to
+	// check the etag against content. For backup, the default is not to check etag.
 	std::string content = wait(endpoint->readEntireFile(bucket, resource));
 	auto parent = std::filesystem::path(filepath).parent_path();
 	if (parent != "" && !std::filesystem::exists(parent)) {
@@ -198,7 +204,7 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 	S3BlobStoreEndpoint::ParametersT parameters;
 	state Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
 	state std::string bucket = parameters["bucket"];
-	S3BlobStoreEndpoint::ListResult items = wait(endpoint->listObjects(parameters["bucket"], resource));
+	S3BlobStoreEndpoint::ListResult items = wait(endpoint->listObjects(bucket, resource));
 	state std::vector<S3BlobStoreEndpoint::ObjectInfo> objects = items.objects;
 	TraceEvent("S3ClientDownloadDirStart")
 	    .detail("filecount", objects.size())
@@ -210,5 +216,14 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 		wait(copyDownFile(endpoint, bucket, s3path, filepath));
 	}
 	TraceEvent("S3ClientDownloadDirEnd").detail("bucket", bucket).detail("resource", resource);
+	return Void();
+}
+
+ACTOR Future<Void> deleteResource(std::string s3url) {
+	state std::string resource;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
+	state std::string bucket = parameters["bucket"];
+	wait(endpoint->deleteRecursively(bucket, resource));
 	return Void();
 }
