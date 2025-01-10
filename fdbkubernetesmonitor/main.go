@@ -24,9 +24,11 @@ import (
 	"context"
 	"io"
 	"os"
+	"os/signal"
 	"path"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 
