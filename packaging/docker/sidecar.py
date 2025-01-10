@@ -552,35 +552,44 @@ class SidecarHandler(BaseHTTPRequestHandler):
         return json.dumps(self.config.substitutions)
 
     def check_hash(self, filename):
-        self.is_path_allowed(filename)
-        try:
-            with open(os.path.join(self.config.output_dir, filename), "rb") as contents:
-                m = hashlib.sha256()
-                m.update(contents.read())
-                return m.hexdigest()
-        except FileNotFoundError:
-            raise RequestException(
-                f"{filename} not found",
-                404,
-            )
+        return check_hash(self.config.output_dir, filename)
 
     def is_present(self, filename):
-        self.is_path_allowed(filename)
-        if os.path.exists(os.path.join(self.config.output_dir, filename)):
-            return True
+        return is_present(self.config.output_dir, filename)
+
+
+def is_path_allowed(output_dir, filename):
+    safe_base = os.path.abspath(output_dir)
+    requested_path = os.path.abspath(os.path.join(safe_base, filename))
+    if not requested_path.startswith(safe_base):
+        raise RequestException(
+            f"path {requested_path} is outside of the allowed directory {safe_base} and therefore denied",
+            403,
+        )
+
+
+def check_hash(output_dir, filename):
+    is_path_allowed(output_dir, filename)
+    try:
+        with open(os.path.join(output_dir, filename), "rb") as contents:
+            m = hashlib.sha256()
+            m.update(contents.read())
+            return m.hexdigest()
+    except FileNotFoundError:
         raise RequestException(
             f"{filename} not found",
             404,
         )
 
-    def is_path_allowed(self, filename):
-        safe_base = os.path.abspath(self.config.output_dir)
-        requested_path = os.path.abspath(os.path.join(safe_base, filename))
-        if not requested_path.startswith(safe_base):
-            raise RequestException(
-                f"path {requested_path} is outside of the allowed directory {safe_base} and therefore denied",
-                403,
-            )
+
+def is_present(output_dir, filename):
+    is_path_allowed(output_dir, filename)
+    if os.path.exists(os.path.join(output_dir, filename)):
+        return True
+    raise RequestException(
+        f"{filename} not found",
+        404,
+    )
 
 
 class CertificateEventHandler(FileSystemEventHandler):

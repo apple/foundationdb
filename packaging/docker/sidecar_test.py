@@ -31,7 +31,7 @@ from unittest.mock import MagicMock
 
 import requests
 
-from sidecar import SidecarHandler
+from sidecar import SidecarHandler, RequestException, check_hash, is_present
 
 
 # This test suite starts a real server with a mocked configuration and will do some requests against it.
@@ -106,6 +106,13 @@ class TestSidecar(unittest.TestCase):
             r.text, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
         )
 
+    def test_get_check_hash_outside(self):
+        with open(os.path.join(self.mock_config.output_dir, "foobar"), "w") as f:
+            f.write("hello world")
+
+        with self.assertRaises(RequestException):
+            check_hash(self.mock_config.output_dir, "../foobar")
+
     def test_get_is_present_no_found(self):
         r = requests.get(f"{self.server_url}/is_present/foobar")
         self.assertEqual(r.status_code, 404)
@@ -126,6 +133,13 @@ class TestSidecar(unittest.TestCase):
         r = requests.get(f"{self.server_url}/is_present/nested/foobar")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, "OK\n")
+
+    def test_get_check_is_present(self):
+        with open(os.path.join(self.mock_config.output_dir, "foobar"), "w") as f:
+            f.write("hello world")
+
+        with self.assertRaises(RequestException):
+            is_present(self.mock_config.output_dir, "../foobar")
 
     def test_get_not_found(self):
         r = requests.get(f"{self.server_url}/foobar")
