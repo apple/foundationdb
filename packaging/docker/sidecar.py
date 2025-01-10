@@ -485,21 +485,13 @@ class SidecarHandler(BaseHTTPRequestHandler):
             if not self.check_request_cert(self.path):
                 return
             if self.path.startswith("/check_hash/"):
-                file_path = os.path.relpath(self.path, "/check_hash")
-                try:
-                    self.send_text(
-                        self.check_hash(file_path),
-                        add_newline=False,
-                    )
-                except FileNotFoundError:
-                    self.send_error(404, f"{file_path} not found")
-                return
-            if self.path.startswith("/is_present/"):
-                file_path = os.path.relpath(self.path, "/is_present")
-                if self.is_present(file_path):
+                self.send_text(
+                    self.check_hash(os.path.relpath(self.path, "/check_hash")),
+                    add_newline=False,
+                )
+            elif self.path.startswith("/is_present/"):
+                if self.is_present(os.path.relpath(self.path, "/is_present")):
                     self.send_text("OK")
-                else:
-                    self.send_error(404, f"{file_path} not found")
             elif self.path == "/ready":
                 self.send_text("OK")
             elif self.path == "/substitutions":
@@ -507,7 +499,7 @@ class SidecarHandler(BaseHTTPRequestHandler):
             else:
                 self.send_error(404, f"Path {self.path} not found")
         except RequestException as e:
-            self.send_error(400, e.message)
+            self.send_error(e.error_code, e.message)
         except (ConnectionResetError, BrokenPipeError) as ex:
             log.error(f"connection was reset {ex}")
         except Exception as ex:
@@ -540,7 +532,7 @@ class SidecarHandler(BaseHTTPRequestHandler):
         except SystemExit as e:
             raise e
         except RequestException as e:
-            self.send_error(400, e.message)
+            self.send_error(e.error_code, e.message)
         except (ConnectionResetError, BrokenPipeError) as ex:
             log.error(f"connection was reset {ex}")
         except Exception as ex:
@@ -560,13 +552,35 @@ class SidecarHandler(BaseHTTPRequestHandler):
         return json.dumps(self.config.substitutions)
 
     def check_hash(self, filename):
-        with open(os.path.join(self.config.output_dir, filename), "rb") as contents:
-            m = hashlib.sha256()
-            m.update(contents.read())
-            return m.hexdigest()
+        self.is_path_allowed(filename)
+        try:
+            with open(os.path.join(self.config.output_dir, filename), "rb") as contents:
+                m = hashlib.sha256()
+                m.update(contents.read())
+                return m.hexdigest()
+        except FileNotFoundError:
+            raise RequestException(
+                f"{filename} not found",
+                404,
+            )
 
     def is_present(self, filename):
-        return os.path.exists(os.path.join(self.config.output_dir, filename))
+        self.is_path_allowed(filename)
+        if os.path.exists(os.path.join(self.config.output_dir, filename)):
+            return True
+        raise RequestException(
+            f"{filename} not found",
+            404,
+        )
+
+    def is_path_allowed(self, filename):
+        safe_base = os.path.abspath(self.config.output_dir)
+        requested_path = os.path.abspath(os.path.join(safe_base, filename))
+        if not requested_path.startswith(safe_base):
+            raise RequestException(
+                f"path {requested_path} is outside of the allowed directory {safe_base} and therefore denied",
+                403,
+            )
 
 
 class CertificateEventHandler(FileSystemEventHandler):
@@ -597,7 +611,7 @@ def copy_files(config):
         for filename in config.require_not_empty:
             path = os.path.join(config.input_dir, filename)
             if not os.path.isfile(path) or os.path.getsize(path) == 0:
-                raise Exception(f"No contents for file {path}")
+                raise RequestException(f"No contents for file {path}")
 
     for filename in config.copy_files:
         tmp_file = tempfile.NamedTemporaryFile(
@@ -673,9 +687,10 @@ def copy_monitor_conf(config):
 
 
 class RequestException(Exception):
-    def __init__(self, message):
+    def __init__(self, message, error_code=400):
         super().__init__(message)
         self.message = message
+        self.error_code = error_code
 
 
 def start_sidecar_server(config):

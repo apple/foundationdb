@@ -70,26 +70,26 @@ class TestSidecar(unittest.TestCase):
         self.test_server_port = port
 
     def test_get_ready(self):
-        r = requests.get(f"{self.server_url }/ready")
+        r = requests.get(f"{self.server_url}/ready")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, "OK\n")
 
     def test_get_substitutions(self):
         expected = {"key": "value"}
         self.mock_config.substitutions = expected
-        r = requests.get(f"{self.server_url }/substitutions")
+        r = requests.get(f"{self.server_url}/substitutions")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json(), expected)
 
     def test_get_check_hash_no_found(self):
-        r = requests.get(f"{self.server_url }/check_hash/foobar")
+        r = requests.get(f"{self.server_url}/check_hash/foobar")
         self.assertEqual(r.status_code, 404)
         self.assertRegex(r.text, "foobar not found")
 
     def test_get_check_hash(self):
         with open(os.path.join(self.mock_config.output_dir, "foobar"), "w") as f:
             f.write("hello world")
-        r = requests.get(f"{self.server_url }/check_hash/foobar")
+        r = requests.get(f"{self.server_url}/check_hash/foobar")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(
             r.text, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
@@ -100,21 +100,21 @@ class TestSidecar(unittest.TestCase):
         os.makedirs(os.path.dirname(test_path), exist_ok=True)
         with open(test_path, "w") as f:
             f.write("hello world")
-        r = requests.get(f"{self.server_url }/check_hash/nested/foobar")
+        r = requests.get(f"{self.server_url}/check_hash/nested/foobar")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(
             r.text, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
         )
 
     def test_get_is_present_no_found(self):
-        r = requests.get(f"{self.server_url }/is_present/foobar")
+        r = requests.get(f"{self.server_url}/is_present/foobar")
         self.assertEqual(r.status_code, 404)
         self.assertRegex(r.text, "foobar not found")
 
     def test_get_is_present(self):
         with open(os.path.join(self.mock_config.output_dir, "foobar"), "w") as f:
             f.write("hello world")
-        r = requests.get(f"{self.server_url }/is_present/foobar")
+        r = requests.get(f"{self.server_url}/is_present/foobar")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, "OK\n")
 
@@ -123,14 +123,14 @@ class TestSidecar(unittest.TestCase):
         os.makedirs(os.path.dirname(test_path), exist_ok=True)
         with open(test_path, "w") as f:
             f.write("hello world")
-        r = requests.get(f"{self.server_url }/is_present/nested/foobar")
+        r = requests.get(f"{self.server_url}/is_present/nested/foobar")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, "OK\n")
 
     def test_get_not_found(self):
-        r = requests.get(f"{self.server_url }/foobar")
+        r = requests.get(f"{self.server_url}/foobar")
         self.assertEqual(r.status_code, 404)
-        self.assertRegex(r.text, "Path not found")
+        self.assertRegex(r.text, "Path /foobar not found")
 
 
 # TODO(johscheuer): Add test cases for post requests.
