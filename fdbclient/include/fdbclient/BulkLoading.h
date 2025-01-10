@@ -136,6 +136,7 @@ private:
 // Otherwise, the dataFileName is empty.
 // If the data is sufficiently large, the folder includes 1 byteSample file.
 // Otherwise, the byteSampleFileName is empty.
+// TODO(BulkLoad): support a folder of column family
 struct BulkLoadFileSet {
 public:
 	constexpr static FileIdentifier file_identifier = 1384501;

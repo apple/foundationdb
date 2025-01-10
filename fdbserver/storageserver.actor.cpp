@@ -6016,7 +6016,7 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 		immediateError = false;
 
 		// Given the data, create KVS and sample. Stop if the accumulated data size is too large.
-		for (const auto& kv : rep.get().data) {
+		for (const auto& kv : rep.get().data) { // TODO(BulkDump): directly read from special key space.
 			lastKey = kv.key;
 			auto res = kvsToDump.insert({ kv.key, kv.value });
 			ASSERT(res.second);

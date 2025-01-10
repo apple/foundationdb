@@ -52,6 +52,7 @@ ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Datab
 }
 
 // Return true if generated the byte sampling file. Otherwise, return false.
+// TODO(BulkDump): directly read from special key space.
 ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // input file
                                              std::string byteSampleFileFullPath, // output file
                                              UID logId) {

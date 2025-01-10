@@ -1732,7 +1732,7 @@ ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self,
 
 			beginKey = bulkLoadJobResult.back().key;
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
+			if (e.code() == error_code_actor_cancelled || e.code() == error_code_movekeys_conflict) {
 				throw e;
 			}
 			TraceEvent(SevWarn, "DDBulkLoadJobExecutorError", self->ddId).errorUnsuppressed(e);
@@ -1798,6 +1798,9 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 				throw e;
 			}
 			TraceEvent(SevWarn, "DDBulkLoadingCoreError", self->ddId).errorUnsuppressed(e);
+			if (e.code() == error_code_movekeys_conflict) {
+				throw e;
+			}
 		}
 		wait(delay(SERVER_KNOBS->DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC));
 	}
@@ -2063,6 +2066,9 @@ ACTOR Future<Void> bulkDumpTaskScheduler(Reference<DataDistributor> self) {
 				throw e;
 			}
 			TraceEvent(SevInfo, "DDBulkDumpTaskSchedulerError", self->ddId).errorUnsuppressed(e);
+			if (e.code() == error_code_movekeys_conflict) {
+				throw e;
+			}
 		}
 		wait(delay(5.0));
 	}
