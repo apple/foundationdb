@@ -1,6 +1,8 @@
 [configuration]
 storageEngineType = 5
-extraStorageMachineCountPerDC = 5
+processesPerMachine = 2
+machineCount = 15
+extraStorageMachineCountPerDC = 8
 tenantModes = ['disabled'] # Do not support tenant
 encryptModes = ['disabled'] # Do not support encryption
 

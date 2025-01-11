@@ -19,30 +19,34 @@
  */
 
 #include "fdbclient/BulkLoading.h"
+#include "flow/Error.h"
 
 std::string stringRemovePrefix(std::string str, const std::string& prefix) {
 	if (str.compare(0, prefix.length(), prefix) == 0) {
 		str.erase(0, prefix.length());
 	} else {
-		return "";
+		throw bulkload_manifest_decode_error();
 	}
 	return str;
 }
 
-// A revert function of StringRef.toFullHexStringPlain()
-Key getKeyFromHexString(const std::string& rawString) {
-	if (rawString.empty()) {
+Key getKeyFromHexString(const std::string& hexRawString) {
+	if (hexRawString.empty()) {
 		return Key();
 	}
-	std::vector<uint8_t> byteList;
-	ASSERT((rawString.size() + 1) % 3 == 0);
-	for (size_t i = 0; i < rawString.size(); i += 3) {
-		std::string byteString = rawString.substr(i, 2);
+	// Here is an example of the input hexRawString:
+	// "01 02 03". This raw string should be convered to the Key: "\x01\x02\x03".
+	// Note that the space is not added for the last byte in the original string.
+	ASSERT((hexRawString.size() + 1) % 3 == 0);
+	std::string res;
+	res.resize((hexRawString.size() + 1) / 3);
+	for (size_t i = 0; i < hexRawString.size(); i += 3) {
+		std::string byteString = hexRawString.substr(i, 2);
 		uint8_t byte = static_cast<uint8_t>(std::stoul(byteString, nullptr, 16));
-		byteList.push_back(byte);
-		ASSERT(i + 2 >= rawString.size() || rawString[i + 2] == ' ');
+		res[i / 3] = byte;
+		ASSERT(i + 2 >= hexRawString.size() || hexRawString[i + 2] == ' ');
 	}
-	return Standalone(StringRef(byteList.data(), byteList.size()));
+	return Standalone(StringRef(res));
 }
 
 std::string getBulkLoadJobManifestFileName() {
@@ -70,32 +74,31 @@ std::string generateEmptyManifestFileName() {
 // an empty range. The manifest file path is "/tmp/range2/manifest2.txt". For the third range, the data version is at
 // 300, the data size is 8.1KB, the manifest file path is "/tmp/range1/manifest3.txt".
 std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests) {
-	std::string content;
+	std::string res = BulkLoadJobManifestFileHeader(bulkLoadManifestFormatVersion, manifests.size()).toString() + "\n";
 	for (const auto& [beginKey, manifest] : manifests) {
-		content = content + BulkLoadJobManifestFileManifestEntry(manifest).toString() + "\n";
+		res = res + BulkLoadJobFileManifestEntry(manifest).toString() + "\n";
 	}
-	std::string head = BulkLoadJobManifestFileHeader(bulkLoadManifestFormatVersion, manifests.size()).toString() + "\n";
-	return head + content;
+	return res;
 }
 
 // For submitting a task manually (for testing)
-BulkLoadTaskState createNewBulkLoadTask(const UID& jobId,
-                                        const KeyRange& range,
-                                        const BulkLoadFileSet& fileSet,
-                                        const BulkLoadByteSampleSetting& byteSampleSetting,
-                                        const Version& snapshotVersion,
-                                        const int64_t& bytes,
-                                        const int64_t& keyCount,
-                                        const BulkLoadType& type,
-                                        const BulkLoadTransportMethod& transportMethod) {
+BulkLoadTaskState createBulkLoadTask(const UID& jobId,
+                                     const KeyRange& range,
+                                     const BulkLoadFileSet& fileSet,
+                                     const BulkLoadByteSampleSetting& byteSampleSetting,
+                                     const Version& snapshotVersion,
+                                     const int64_t& bytes,
+                                     const int64_t& keyCount,
+                                     const BulkLoadType& type,
+                                     const BulkLoadTransportMethod& transportMethod) {
 	BulkLoadManifest manifest(
 	    fileSet, range.begin, range.end, snapshotVersion, bytes, keyCount, byteSampleSetting, type, transportMethod);
 	return BulkLoadTaskState(jobId, manifest);
 }
 
-BulkLoadJobState createNewBulkLoadJob(const UID& dumpJobIdToLoad,
-                                      const KeyRange& range,
-                                      const std::string& remoteRoot,
-                                      const BulkLoadTransportMethod& transportMethod) {
+BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
+                                   const KeyRange& range,
+                                   const std::string& remoteRoot,
+                                   const BulkLoadTransportMethod& transportMethod) {
 	return BulkLoadJobState(dumpJobIdToLoad, remoteRoot, range, transportMethod);
 }

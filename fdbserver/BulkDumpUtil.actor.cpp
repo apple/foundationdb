@@ -380,7 +380,7 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 			wait(store(result, krmGetRanges(&tr, bulkDumpPrefix, rangeToPersist)));
 			bool anyNew = false;
 			for (int i = 0; i < result.size() - 1; i++) {
-				if (result[i].value.empty()) {
+				if (result[i].value.empty()) { // has been cancelled
 					throw bulkdump_task_outdated();
 				}
 				BulkDumpState currentBulkDumpState = decodeBulkDumpState(result[i].value);

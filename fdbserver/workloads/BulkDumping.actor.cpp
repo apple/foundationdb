@@ -123,8 +123,8 @@ struct BulkDumping : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<UID> existAny = wait(existAnyBulkDumpTask(&tr));
-				if (!existAny.present()) {
+				Optional<UID> aliveJob = wait(getAliveBulkDumpJob(&tr));
+				if (!aliveJob.present()) {
 					break;
 				}
 			} catch (Error& e) {
@@ -157,47 +157,21 @@ struct BulkDumping : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> waitUntilLoadJobComplete(Database cx, KeyRange range) {
+	ACTOR Future<Void> waitUntilLoadJobComplete(Database cx) {
+		state Transaction tr(cx);
 		loop {
-			state bool complete = true;
-			state Transaction tr(cx);
-			state Key readBegin = range.begin;
-			state Key readEnd = range.end;
-			state RangeResult rangeResult;
-			while (readBegin < readEnd) {
-				try {
-					rangeResult.clear();
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					wait(store(rangeResult,
-					           krmGetRanges(&tr,
-					                        bulkLoadJobPrefix,
-					                        KeyRangeRef(readBegin, readEnd),
-					                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-					                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
-					for (int i = 0; i < rangeResult.size() - 1; i++) {
-						if (rangeResult[i].value.empty()) {
-							continue;
-						}
-						BulkLoadJobState task = decodeBulkLoadJobState(rangeResult[i].value);
-						if (task.getPhase() != BulkLoadJobPhase::Complete) {
-							complete = false;
-							break;
-						}
-					}
-					if (!complete) {
-						break;
-					}
-					readBegin = rangeResult.back().key;
-				} catch (Error& e) {
-					if (e.code() == error_code_actor_cancelled) {
-						throw e;
-					}
-					wait(tr.onError(e));
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<BulkLoadJobState> aliveJob = wait(getAliveBulkLoadJob(&tr));
+				if (!aliveJob.present()) {
+					break;
 				}
-			}
-			if (complete) {
-				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				wait(tr.onError(e));
 			}
 			wait(delay(30.0));
 		}
@@ -241,7 +215,7 @@ struct BulkDumping : TestWorkload {
 		state int oldBulkDumpMode = 0;
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
 		state BulkDumpState newJob =
-		    createNewBulkDumpJob(normalKeys, simulationBulkDumpFolder, BulkLoadType::SST, BulkLoadTransportMethod::CP);
+		    createBulkDumpJob(normalKeys, simulationBulkDumpFolder, BulkLoadType::SST, BulkLoadTransportMethod::CP);
 		wait(submitBulkDumpJob(cx, newJob));
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Submitted").detail("Job", newJob.toString());
 
@@ -256,14 +230,13 @@ struct BulkDumping : TestWorkload {
 		// Submit a bulk load job
 		state int oldBulkLoadMode = 0;
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoad
-		state BulkLoadJobState bulkLoadJob = createNewBulkLoadJob(
+		state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
 		    newJob.getJobId(), newJob.getJobRange(), newJob.getRemoteRoot(), BulkLoadTransportMethod::CP);
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
-		bool succeed = wait(submitBulkLoadJob(cx, bulkLoadJob));
-		ASSERT(succeed);
+		wait(submitBulkLoadJob(cx, bulkLoadJob));
 
 		// Wait until the load job complete
-		wait(self->waitUntilLoadJobComplete(cx, newJob.getJobRange()));
+		wait(self->waitUntilLoadJobComplete(cx));
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Complete").detail("Job", newJob.toString());
 
 		// Check the loaded data in DB is same as the data in DB before dumping

@@ -238,7 +238,7 @@ ACTOR Future<std::unordered_map<Key, BulkLoadManifest>> getBulkLoadManifestMetad
 			ASSERT(lineIdx == lines.size() - 1);
 			break;
 		}
-		BulkLoadJobManifestFileManifestEntry manifestEntry(lines[lineIdx]);
+		BulkLoadJobFileManifestEntry manifestEntry(lines[lineIdx]);
 		KeyRange overlappingRange = range & manifestEntry.getRange();
 		if (overlappingRange.empty()) {
 			// Ignore the manifest entry if no overlapping range
