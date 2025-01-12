@@ -224,7 +224,7 @@ ACTOR Future<std::unordered_map<Key, BulkLoadManifest>> getBulkLoadManifestMetad
     KeyRange range,
     std::string manifestLocalTempFolder,
     BulkLoadTransportMethod transportMethod,
-    std::string remoteRoot,
+    std::string jobRoot,
     UID logId) {
 	ASSERT(fileExists(abspath(localJobManifestFilePath)));
 	state std::unordered_map<Key, BulkLoadManifest> res;
@@ -245,7 +245,7 @@ ACTOR Future<std::unordered_map<Key, BulkLoadManifest>> getBulkLoadManifestMetad
 			lineIdx = lineIdx + 1;
 			continue;
 		}
-		state std::string remoteManifestFilePath = joinPath(remoteRoot, manifestEntry.getManifestRelativePath());
+		state std::string remoteManifestFilePath = joinPath(jobRoot, manifestEntry.getManifestRelativePath());
 		platform::eraseDirectoryRecursive(abspath(manifestLocalTempFolder));
 		ASSERT(platform::createDirectory(abspath(manifestLocalTempFolder)));
 		state std::string localManifestFilePath = joinPath(manifestLocalTempFolder, basename(remoteManifestFilePath));

@@ -37,10 +37,6 @@
 #include "flow/flow.h"
 #include <stdexcept>
 #include <string>
-#include <boost/url/url.hpp>
-#include <boost/url/parse.hpp>
-#include <boost/url/error_types.hpp>
-#include <boost/url/string_view.hpp>
 #include "flow/actorcompiler.h" // has to be last include
 
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
@@ -79,28 +75,6 @@ std::string generateBulkDumpByteSampleFileName(Version version) {
 
 std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId) {
 	return joinPath(jobId.toString(), taskId.toString());
-}
-
-// Append a string to a path.
-// 'path' is a filesystem path or an URL.
-// TODO(BulkDump): use this everywhere
-std::string appendToPath(const std::string& path, const std::string& append) {
-	boost::system::result<boost::urls::url_view> parse_result = boost::urls::parse_uri(path);
-	if (!parse_result.has_value()) {
-		// Failed to parse 'path' as an URL. Do the default path join.
-		return joinPath(path, append);
-	}
-	// boost::urls::url thinks its an URL.
-	boost::urls::url url = parse_result.value();
-	if (url.scheme() != "blobstore") {
-		// For now, until we add support for other urls like file:///.
-		throw std::invalid_argument("Invalid url scheme");
-	}
-	return std::string(url.set_path(joinPath(url.path(), append)).buffer());
-}
-
-std::string getBulkDumpJobRoot(const std::string& root, const UID& jobId) {
-	return appendToPath(root, jobId.toString());
 }
 
 std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,

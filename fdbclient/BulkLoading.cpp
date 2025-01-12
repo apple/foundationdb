@@ -21,6 +21,11 @@
 #include "fdbclient/BulkLoading.h"
 #include "flow/Error.h"
 
+#include <boost/url/url.hpp>
+#include <boost/url/parse.hpp>
+#include <boost/url/error_types.hpp>
+#include <boost/url/string_view.hpp>
+
 std::string stringRemovePrefix(std::string str, const std::string& prefix) {
 	if (str.compare(0, prefix.length(), prefix) == 0) {
 		str.erase(0, prefix.length());
@@ -81,6 +86,26 @@ std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadM
 	return res;
 }
 
+// TODO(BulkLoad): use this everywhere
+std::string appendToPath(const std::string& path, const std::string& append) {
+	boost::system::result<boost::urls::url_view> parse_result = boost::urls::parse_uri(path);
+	if (!parse_result.has_value()) {
+		// Failed to parse 'path' as an URL. Do the default path join.
+		return joinPath(path, append);
+	}
+	// boost::urls::url thinks its an URL.
+	boost::urls::url url = parse_result.value();
+	if (url.scheme() != "blobstore") {
+		// For now, until we add support for other urls like file:///.
+		throw std::invalid_argument("Invalid url scheme");
+	}
+	return std::string(url.set_path(joinPath(url.path(), append)).buffer());
+}
+
+std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId) {
+	return appendToPath(root, jobId.toString());
+}
+
 // For submitting a task manually (for testing)
 BulkLoadTaskState createBulkLoadTask(const UID& jobId,
                                      const KeyRange& range,
@@ -98,7 +123,7 @@ BulkLoadTaskState createBulkLoadTask(const UID& jobId,
 
 BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const KeyRange& range,
-                                   const std::string& remoteRoot,
+                                   const std::string& jobRoot,
                                    const BulkLoadTransportMethod& transportMethod) {
-	return BulkLoadJobState(dumpJobIdToLoad, remoteRoot, range, transportMethod);
+	return BulkLoadJobState(dumpJobIdToLoad, jobRoot, range, transportMethod);
 }

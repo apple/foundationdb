@@ -1560,7 +1560,7 @@ ACTOR Future<Void> bulkLoadJobMarkEmptyRangeComplete(Reference<DataDistributor> 
 }
 
 ACTOR Future<std::unordered_map<Key, BulkLoadManifest>> fetchBulkLoadTaskManifests(
-    std::string jobRemoteRoot,
+    std::string jobRoot,
     BulkLoadTransportMethod jobTransportMethod,
     std::string localFolder,
     std::string localJobManifestFilePath,
@@ -1577,14 +1577,14 @@ ACTOR Future<std::unordered_map<Key, BulkLoadManifest>> fetchBulkLoadTaskManifes
 	if (!fileExists(abspath(localJobManifestFilePath))) {
 		// TODO(BulkLoad): check if the file complete
 		TraceEvent(SevDebug, "DDBulkLoadJobExecutorDownloadJobManifest", logId)
-		    .detail("JobRemoteRoot", jobRemoteRoot)
+		    .detail("JobRoot", jobRoot)
 		    .detail("JobTransportMethod", jobTransportMethod)
 		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
 		    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
 		wait(downloadBulkLoadJobManifestFile(
 		    jobTransportMethod, localJobManifestFilePath, remoteJobManifestFilePath, logId));
 		TraceEvent(SevInfo, "DDBulkLoadJobExecutorManifestDownloaded", logId)
-		    .detail("JobRemoteRoot", jobRemoteRoot)
+		    .detail("JobRoot", jobRoot)
 		    .detail("JobTransportMethod", jobTransportMethod)
 		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
 		    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
@@ -1596,10 +1596,9 @@ ACTOR Future<std::unordered_map<Key, BulkLoadManifest>> fetchBulkLoadTaskManifes
 	// localJobManifestFilePath. When getting the range manifest filepath, it only reads within the range of
 	// jobRange. To get the manifest metadata, it downloads the range manifest file from the remote path
 	// and temporarily stores at manifestLocalTempFolder.
-	wait(store(
-	    manifests,
-	    getBulkLoadManifestMetadataFromFiles(
-	        localJobManifestFilePath, jobRange, manifestLocalTempFolder, jobTransportMethod, jobRemoteRoot, logId)));
+	wait(store(manifests,
+	           getBulkLoadManifestMetadataFromFiles(
+	               localJobManifestFilePath, jobRange, manifestLocalTempFolder, jobTransportMethod, jobRoot, logId)));
 	return manifests;
 }
 
@@ -1618,7 +1617,7 @@ ACTOR Future<Void> finalizeBulkLoadJobIfComplete(Reference<DataDistributor> self
 ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self,
                                          UID jobId,
                                          KeyRange jobRange,
-                                         std::string jobRemoteRoot,
+                                         std::string jobRoot,
                                          BulkLoadTransportMethod jobTransportMethod) {
 	state Database cx = self->txnProcessor->context();
 	state Transaction tr(cx);
@@ -1643,7 +1642,7 @@ ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self,
 					TraceEvent(SevWarn, "DDBulkLoadJobExecutorJobHasBeenCleared", self->ddId)
 					    .detail("JobId", jobId)
 					    .detail("JobRange", jobRange)
-					    .detail("JobRemoteRoot", jobRemoteRoot)
+					    .detail("JobRoot", jobRoot)
 					    .detail("JobTransportMethod", jobTransportMethod);
 					throw bulkload_task_outdated();
 				}
@@ -1658,7 +1657,7 @@ ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self,
 					    .setMaxFieldLength(-1)
 					    .detail("JobId", jobId)
 					    .detail("JobRange", jobRange)
-					    .detail("JobRemoteRoot", jobRemoteRoot)
+					    .detail("JobRoot", jobRoot)
 					    .detail("JobTransportMethod", jobTransportMethod)
 					    .detail("ExistJob", existJob.toString());
 					continue;
@@ -1668,7 +1667,7 @@ ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self,
 				    .setMaxFieldLength(-1)
 				    .detail("JobId", jobId)
 				    .detail("JobRange", jobRange)
-				    .detail("JobRemoteRoot", jobRemoteRoot)
+				    .detail("JobRoot", jobRoot)
 				    .detail("JobTransportMethod", jobTransportMethod)
 				    .detail("ExistJob", existJob.toString());
 
@@ -1710,21 +1709,13 @@ ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self,
 						}
 						ASSERT(self->bulkLoadJobManager.jobId == jobId);
 						if (manifest.isEmptyRange()) {
-							BulkLoadJobState bulkLoadJob(jobId,
-							                             jobRemoteRoot,
-							                             jobRange,
-							                             jobTransportMethod,
-							                             BulkLoadJobPhase::Complete,
-							                             manifest);
+							BulkLoadJobState bulkLoadJob(
+							    jobId, jobRoot, jobRange, jobTransportMethod, BulkLoadJobPhase::Complete, manifest);
 							self->bulkLoadJobManager.ongoingBulkLoadJobActors.insert(
 							    manifest.getRange(), bulkLoadJobMarkEmptyRangeComplete(self, bulkLoadJob));
 						} else {
-							BulkLoadJobState bulkLoadJob(jobId,
-							                             jobRemoteRoot,
-							                             jobRange,
-							                             jobTransportMethod,
-							                             BulkLoadJobPhase::Triggered,
-							                             manifest);
+							BulkLoadJobState bulkLoadJob(
+							    jobId, jobRoot, jobRange, jobTransportMethod, BulkLoadJobPhase::Triggered, manifest);
 							self->bulkLoadJobManager.ongoingBulkLoadJobActors.insert(
 							    manifest.getRange(), bulkLoadJobExecuteTask(self, bulkLoadJob, true));
 						}
@@ -1755,7 +1746,7 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 	state Database cx = self->txnProcessor->context();
 	state UID jobId;
 	state KeyRange jobRange;
-	state std::string jobRemoteRoot;
+	state std::string jobRoot;
 	state BulkLoadTransportMethod jobTransportMethod;
 	loop {
 		try {
@@ -1763,7 +1754,7 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 			if (job.present()) {
 				jobId = job.get().getJobId();
 				jobRange = job.get().getJobRange();
-				jobRemoteRoot = job.get().getRemoteRoot();
+				jobRoot = job.get().getJobRoot();
 				jobTransportMethod = job.get().getTransportMethod();
 				if (self->bulkLoadJobManager.isValid() && self->bulkLoadJobManager.jobId == jobId) {
 					wait(finalizeBulkLoadJobIfComplete(self, jobId));
@@ -1773,17 +1764,17 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 				TraceEvent(SevInfo, "DDBulkLoadCoreFoundNewJob", self->ddId)
 				    .detail("JobId", jobId)
 				    .detail("JobRange", jobRange)
-				    .detail("JobRemoteRoot", jobRemoteRoot)
+				    .detail("JobRoot", jobRoot)
 				    .detail("JobTransportMethod", jobTransportMethod);
 
-				std::string localFolder = getBulkDumpJobRoot(self->bulkLoadFolder, jobId);
+				std::string localFolder = getBulkLoadJobRoot(self->bulkLoadFolder, jobId);
 				std::string manifestLocalTempFolder = joinPath(localFolder, "manifest-batch-tmp");
-				std::string remoteFolder = getBulkDumpJobRoot(jobRemoteRoot, jobId);
+				std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
 				std::string jobManifestFileName = getBulkLoadJobManifestFileName();
 				std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
 				std::string remoteJobManifestFilePath = joinPath(remoteFolder, jobManifestFileName);
 				std::unordered_map<Key, BulkLoadManifest> manifests =
-				    wait(fetchBulkLoadTaskManifests(jobRemoteRoot,
+				    wait(fetchBulkLoadTaskManifests(jobRoot,
 				                                    jobTransportMethod,
 				                                    localFolder,
 				                                    localJobManifestFilePath,
@@ -1794,12 +1785,12 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 				TraceEvent(SevInfo, "DDBulkLoadJobExecutorGotManifests", self->ddId)
 				    .detail("JobId", jobId)
 				    .detail("JobRange", jobRange)
-				    .detail("JobRemoteRoot", jobRemoteRoot)
+				    .detail("JobRoot", jobRoot)
 				    .detail("JobTransportMethod", jobTransportMethod);
 				self->bulkLoadJobManager =
-				    DDBulkLoadJobManager(jobId, jobRange, jobRemoteRoot, jobTransportMethod, manifests);
+				    DDBulkLoadJobManager(jobId, jobRange, jobRoot, jobTransportMethod, manifests);
 				self->bulkLoadJobManager.dispatcher =
-				    bulkLoadJobDispatcher(self, jobId, jobRange, jobRemoteRoot, jobTransportMethod);
+				    bulkLoadJobDispatcher(self, jobId, jobRange, jobRoot, jobTransportMethod);
 				wait(self->bulkLoadJobManager.dispatcher);
 			}
 		} catch (Error& e) {
@@ -1945,8 +1936,8 @@ ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self
 	// Upload job manifest file
 	std::string content = generateBulkLoadJobManifestFileContent(manifests);
 	ASSERT(!content.empty() && !self->bulkDumpFolder.empty());
-	state std::string localFolder = getBulkDumpJobRoot(self->bulkDumpFolder, jobId);
-	std::string remoteFolder = getBulkDumpJobRoot(remoteRoot, jobId);
+	state std::string localFolder = getBulkLoadJobRoot(self->bulkDumpFolder, jobId);
+	std::string remoteFolder = getBulkLoadJobRoot(remoteRoot, jobId);
 	std::string jobManifestFileName = getBulkLoadJobManifestFileName();
 	std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
 	generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, content, self->ddId);
@@ -1960,7 +1951,7 @@ ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
 	// Collect necessary info to generate job manifest file by scan the entire bulkDump key space
 	state std::map<Key, BulkLoadManifest> manifests;
 	state Optional<UID> jobId;
-	state Optional<std::string> remoteRoot;
+	state Optional<std::string> jobRoot;
 	state Optional<BulkLoadTransportMethod> transportMethod;
 
 	TraceEvent(SevInfo, "DDBulkDumpJobFinalizeStart", self->ddId);
@@ -1990,9 +1981,9 @@ ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
 				} else if (jobId.get() != bulkDumpState.getJobId()) {
 					throw bulkdump_task_outdated();
 				}
-				if (!remoteRoot.present()) {
-					remoteRoot = bulkDumpState.getRemoteRoot();
-				} else if (remoteRoot.get() != bulkDumpState.getRemoteRoot()) {
+				if (!jobRoot.present()) {
+					jobRoot = bulkDumpState.getJobRoot();
+				} else if (jobRoot.get() != bulkDumpState.getJobRoot()) {
 					throw bulkdump_task_outdated();
 				}
 				if (!transportMethod.present()) {
@@ -2033,13 +2024,13 @@ ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
 	// Finally all bulkdump metadata.
 	// Any failure during this process will retry by DD.
 	try {
-		ASSERT(jobId.present() && remoteRoot.present() && transportMethod.present());
+		ASSERT(jobId.present() && jobRoot.present() && transportMethod.present());
 		// Generate the file at a local folder at first and then upload the file to the remote
 		// The local file path:
 		//	<self->bulkDumpFolder>/<jobId>/<jobId>-job-manifest.txt
 		// The remote file path:
-		//	<self->rootRemote>/<jobId>/<jobId>-job-manifest.txt
-		wait(bulkDumpUploadJobManifestFile(self, transportMethod.get(), manifests, remoteRoot.get(), jobId.get()));
+		//	<jobRoot>/<jobId>/<jobId>-job-manifest.txt
+		wait(bulkDumpUploadJobManifestFile(self, transportMethod.get(), manifests, jobRoot.get(), jobId.get()));
 		TraceEvent(SevInfo, "DDBulkDumpJobFinalizeUploadManifest", self->ddId);
 
 		// clear all bulkdump metadata

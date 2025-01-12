@@ -231,7 +231,7 @@ struct BulkDumping : TestWorkload {
 		state int oldBulkLoadMode = 0;
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoad
 		state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
-		    newJob.getJobId(), newJob.getJobRange(), newJob.getRemoteRoot(), BulkLoadTransportMethod::CP);
+		    newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), BulkLoadTransportMethod::CP);
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
 		wait(submitBulkLoadJob(cx, bulkLoadJob));
 

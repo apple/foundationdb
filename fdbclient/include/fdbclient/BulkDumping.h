@@ -43,14 +43,14 @@ struct BulkDumpState {
 	BulkDumpState(KeyRange jobRange,
 	              BulkLoadType loadType,
 	              BulkLoadTransportMethod transportMethod,
-	              std::string remoteRoot)
+	              std::string jobRoot)
 	  : jobId(deterministicRandom()->randomUniqueID()), jobRange(jobRange), phase(BulkDumpPhase::Submitted) {
-		manifest = BulkLoadManifest(loadType, transportMethod, remoteRoot);
+		manifest = BulkLoadManifest(loadType, transportMethod, jobRoot);
 	}
 
 	bool operator==(const BulkDumpState& rhs) const {
 		return jobId == rhs.jobId && jobRange == rhs.jobRange && taskId == rhs.taskId &&
-		       getRemoteRoot() == rhs.getRemoteRoot();
+		       getJobRoot() == rhs.getJobRoot();
 	}
 
 	std::string toString() const {
@@ -67,11 +67,11 @@ struct BulkDumpState {
 
 	UID getJobId() const { return jobId; }
 
+	std::string getJobRoot() const { return manifest.getRootPath(); }
+
 	Optional<UID> getTaskId() const { return taskId; }
 
 	KeyRange getRange() const { return manifest.getRange(); }
-
-	std::string getRemoteRoot() const { return manifest.getRootPath(); }
 
 	BulkDumpPhase getPhase() const { return phase; }
 
@@ -166,7 +166,7 @@ private:
 // The data is dumped to the input remoteRoot
 // The remoteRoot is a local root string or a remote blobstore root string
 BulkDumpState createBulkDumpJob(const KeyRange& range,
-                                const std::string& remoteRoot,
+                                const std::string& jobRoot,
                                 const BulkLoadType& type,
                                 const BulkLoadTransportMethod& transportMethod);
 

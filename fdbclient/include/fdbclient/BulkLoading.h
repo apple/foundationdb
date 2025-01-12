@@ -639,28 +639,28 @@ public:
 
 	// Used when submit a global job
 	BulkLoadJobState(const UID& jobId,
-	                 const std::string& remoteRoot,
+	                 const std::string& jobRoot,
 	                 const KeyRange& jobRange,
 	                 const BulkLoadTransportMethod& transportMethod)
-	  : jobId(jobId), remoteRoot(remoteRoot), jobRange(jobRange), phase(BulkLoadJobPhase::Submitted),
+	  : jobId(jobId), jobRoot(jobRoot), jobRange(jobRange), phase(BulkLoadJobPhase::Submitted),
 	    transportMethod(transportMethod) {
 		ASSERT(isValid());
 	}
 
 	// Used when trigger a task or mark a task as complete by bulkLoadJobExecutor
 	BulkLoadJobState(const UID& jobId,
-	                 const std::string& remoteRoot,
+	                 const std::string& jobRoot,
 	                 const KeyRange& jobRange,
 	                 const BulkLoadTransportMethod& transportMethod,
 	                 const BulkLoadJobPhase& phase,
 	                 const BulkLoadManifest& manifest)
-	  : jobId(jobId), remoteRoot(remoteRoot), jobRange(jobRange), transportMethod(transportMethod), phase(phase),
+	  : jobId(jobId), jobRoot(jobRoot), jobRange(jobRange), transportMethod(transportMethod), phase(phase),
 	    manifest(manifest) {
 		ASSERT(isValid());
 	}
 
 	std::string toString() const {
-		std::string res = "[BulkLoadJobState]: [JobId]: " + jobId.toString() + ", [RemoteRoot]: " + remoteRoot +
+		std::string res = "[BulkLoadJobState]: [JobId]: " + jobId.toString() + ", [JobRoot]: " + jobRoot +
 		                  ", [JobRange]: " + jobRange.toString() +
 		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) +
 		                  ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod));
@@ -670,15 +670,15 @@ public:
 		return res;
 	}
 
-	std::string getRemoteRoot() const { return remoteRoot; }
+	std::string getJobRoot() const { return jobRoot; }
 
 	BulkLoadTransportMethod getTransportMethod() const { return transportMethod; }
 
 	UID getJobId() const { return jobId; }
 
-	BulkLoadJobPhase getPhase() const { return phase; }
-
 	KeyRange getJobRange() const { return jobRange; }
+
+	BulkLoadJobPhase getPhase() const { return phase; }
 
 	bool hasManifest() const { return manifest.present(); }
 
@@ -708,7 +708,7 @@ public:
 		if (transportMethod == BulkLoadTransportMethod::Invalid) {
 			return false;
 		}
-		if (remoteRoot.empty()) {
+		if (jobRoot.empty()) {
 			return false;
 		}
 		return true;
@@ -744,14 +744,17 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, jobId, jobRange, transportMethod, remoteRoot, phase, manifest);
+		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase, manifest);
 	}
 
 private:
-	UID jobId;
+	UID jobId; // The jobId used by BulkDump when dumping the data.
 	KeyRange jobRange;
 	BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
-	std::string remoteRoot;
+	std::string jobRoot;
+	// jobRoot is the root path of data store used by bulkload/dump funcationality.
+	// Given the job manifest file is stored in the jobFolder, the
+	// jobFolder = getBulkLoadJobRoot(jobRoot, jobId).
 	BulkLoadJobPhase phase;
 	Optional<BulkLoadManifest> manifest;
 };
@@ -893,6 +896,12 @@ std::string generateEmptyManifestFileName();
 // Rows: BeginKey, EndKey, Version, Bytes, ManifestPath
 std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
 
+// Append a string to a path. 'path' is a filesystem path or an URL.
+std::string appendToPath(const std::string& path, const std::string& append);
+
+// Define bulkLoad/bulkDump job folder using the root path and the jobId.
+std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId);
+
 // For submitting a task manually (for testing)
 BulkLoadTaskState createBulkLoadTask(const UID& jobId,
                                      const KeyRange& range,
@@ -906,7 +915,7 @@ BulkLoadTaskState createBulkLoadTask(const UID& jobId,
 
 BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const KeyRange& range,
-                                   const std::string& remoteRoot,
+                                   const std::string& jobRoot,
                                    const BulkLoadTransportMethod& transportMethod);
 
 #endif

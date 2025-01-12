@@ -6094,7 +6094,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	state RangeDumpData rangeDumpData;
 	state UID jobId = req.bulkDumpState.getJobId();
 	state std::string rootFolderLocal = data->bulkDumpFolder;
-	state std::string rootFolderRemote = req.bulkDumpState.getRemoteRoot();
+	state std::string rootFolderRemote = req.bulkDumpState.getJobRoot();
 	// Use jobId and taskId as the folder to store the data of the task range
 	ASSERT(req.bulkDumpState.getTaskId().present());
 	state std::string taskFolder = getBulkDumpJobTaskFolder(jobId, req.bulkDumpState.getTaskId().get());
