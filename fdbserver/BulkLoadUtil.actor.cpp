@@ -250,6 +250,7 @@ ACTOR Future<std::unordered_map<Key, BulkLoadManifest>> getBulkLoadManifestMetad
 		ASSERT(platform::createDirectory(abspath(manifestLocalTempFolder)));
 		state std::string localManifestFilePath = joinPath(manifestLocalTempFolder, basename(remoteManifestFilePath));
 		// Download the manifest file
+		// TODO(BulkLoad): to maximize the throughput, we want to do downloadSingleFile() in parallel.
 		wait(downloadSingleFile(transportMethod, remoteManifestFilePath, localManifestFilePath, logId));
 		const std::string manifestRawString =
 		    readFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
