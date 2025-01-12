@@ -3091,6 +3091,9 @@ ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
 			}
 			Optional<BulkLoadJobState> aliveJob = wait(getAliveBulkLoadJob(&tr));
 			if (aliveJob.present()) {
+				if (aliveJob.get().getJobId() == jobState.getJobId()) {
+					return Void(); // The job has been submitted.
+				}
 				TraceEvent(SevInfo, "SubmitBulkLoadJobFailed")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
@@ -3267,11 +3270,14 @@ ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
 			}
 			Optional<UID> aliveJobId = wait(getAliveBulkDumpJob(&tr));
 			if (aliveJobId.present()) {
+				if (aliveJobId.get() == bulkDumpJob.getJobId()) {
+					return Void(); // The job has been persisted
+				}
 				TraceEvent(SevWarn, "SubmitBulkDumpJobFailed")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("Reason", "Conflict to a running BulkDump job")
-				    .detail("AliveJobId", aliveJobId.get())
+				    .detail("AliveJobId", aliveJobId.get().toString())
 				    .detail("NewJob", bulkDumpJob.toString());
 				throw bulkdump_task_failed();
 			}
