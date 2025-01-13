@@ -118,9 +118,11 @@ static void printUsage(std::string const& programName) {
 	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
 	             "EXAMPLES:\n"
 	             " "
-	          << programName << " --knob_http_verbose_level=10 --tls-ca-file /etc/ssl/cert.pem \\\n"
-               " --blob-credentials /tmp/s3.6GWo/blob_credentials.json --log --logdir /tmp/s3.6GWo/logs cp \\\n"
-               " 'blobstore://@backup-us-west-2.s3.amazonaws.com/dir/x.txt?bucket=backup-us-west-2&region=us-west-2' /tmp/x.txt\n";
+	          << programName
+	          << " --knob_http_verbose_level=10 --tls-ca-file /etc/ssl/cert.pem \\\n"
+	             " --blob-credentials /tmp/s3.6GWo/blob_credentials.json --log --logdir /tmp/s3.6GWo/logs cp \\\n"
+	             " 'blobstore://@backup-us-west-2.s3.amazonaws.com/dir/x.txt?bucket=backup-us-west-2&region=us-west-2' "
+	             "/tmp/x.txt\n";
 	return;
 }
 
