@@ -297,6 +297,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 			collection = actorCollection(db->recoveryData->addActor.getFuture());
 			recoveryCore = clusterRecoveryCore(db->recoveryData);
+			cluster->recentHealthTriggeredRecoveryTime.push(now());
 
 			// Master failure detection is pretty sensitive, but if we are in the middle of a very long recovery we
 			// really don't want to have to start over
@@ -3061,7 +3062,6 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 				if (self->shouldTriggerRecoveryDueToDegradedServers()) {
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
 						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
-							self->recentHealthTriggeredRecoveryTime.push(now());
 							self->excludedDegradedServers.clear();
 							for (const auto& degradedServer : self->degradationInfo.degradedServers) {
 								self->excludedDegradedServers[degradedServer] = now();
