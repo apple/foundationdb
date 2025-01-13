@@ -36,7 +36,7 @@ ACTOR Future<bool> getOngoingBulkDumpJob(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			Optional<UID> jobId = wait(existAnyBulkDumpTask(&tr));
+			Optional<UID> jobId = wait(getAliveBulkDumpJob(&tr));
 			if (jobId.present()) {
 				fmt::println("Running bulk dumping job: {}", jobId.get().toString());
 				return true;
@@ -110,7 +110,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		std::string remoteRoot = tokens[4].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		bulkDumpJob = createNewBulkDumpJob(range, remoteRoot, BulkLoadType::SST, BulkLoadTransportMethod::CP);
+		bulkDumpJob = createBulkDumpJob(range, remoteRoot, BulkLoadType::SST, BulkLoadTransportMethod::CP);
 		wait(submitBulkDumpJob(cx, bulkDumpJob));
 		return bulkDumpJob.getJobId();
 
@@ -128,17 +128,18 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
 		}
 		std::string remoteRoot = tokens[4].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		bulkDumpJob = createNewBulkDumpJob(range, remoteRoot, BulkLoadType::SST, BulkLoadTransportMethod::BLOBSTORE);
+		bulkDumpJob = createBulkDumpJob(range, remoteRoot, BulkLoadType::SST, BulkLoadTransportMethod::BLOBSTORE);
 		wait(submitBulkDumpJob(cx, bulkDumpJob));
 		return bulkDumpJob.getJobId();
 
 	} else if (tokencmp(tokens[1], "clear")) {
-		if (tokens.size() != 2) {
+		if (tokens.size() != 3) {
 			printUsage(tokens[0]);
 			return UID();
 		}
-		wait(clearBulkDumpJob(cx));
-		fmt::println("Metadata cleared. No task will be spawned.");
+		state UID jobId = UID::fromString(tokens[2].toString());
+		wait(clearBulkDumpJob(cx, jobId));
+		fmt::println("Job {} has been cleared. No task will be spawned.", jobId.toString());
 		return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
@@ -172,6 +173,6 @@ CommandFactory bulkDumpFactory(
                 "bulkdump commands",
                 "To set bulkdump mode: `bulkdump mode [on|off]'\n"
                 "To dump a range to SST files: `bulkdump [local|blobstore] <BeginKey> <EndKey> dumpFolder`\n"
-                "To clear current bulkdump job: `bulkdump clear`\n"
+                "To clear current bulkdump job: `bulkdump clear <JobID>`\n"
                 "To get completed bulkdump ranges: `bulkdump status <BeginKey> <EndKey>`\n"));
 } // namespace fdb_cli

@@ -39,18 +39,18 @@ struct BulkDumpState {
 	BulkDumpState() = default;
 
 	// The only public interface to create a valid job
-	// This constructor is call when users submitting a job, e.g. by createNewBulkDumpJob()
+	// This constructor is call when users submitting a job, e.g. by createBulkDumpJob()
 	BulkDumpState(KeyRange jobRange,
 	              BulkLoadType loadType,
 	              BulkLoadTransportMethod transportMethod,
-	              std::string remoteRoot)
+	              std::string jobRoot)
 	  : jobId(deterministicRandom()->randomUniqueID()), jobRange(jobRange), phase(BulkDumpPhase::Submitted) {
-		manifest = BulkLoadManifest(loadType, transportMethod, remoteRoot);
+		manifest = BulkLoadManifest(loadType, transportMethod, jobRoot);
 	}
 
 	bool operator==(const BulkDumpState& rhs) const {
 		return jobId == rhs.jobId && jobRange == rhs.jobRange && taskId == rhs.taskId &&
-		       getRemoteRoot() == rhs.getRemoteRoot();
+		       getJobRoot() == rhs.getJobRoot();
 	}
 
 	std::string toString() const {
@@ -67,11 +67,11 @@ struct BulkDumpState {
 
 	UID getJobId() const { return jobId; }
 
+	std::string getJobRoot() const { return manifest.getRootPath(); }
+
 	Optional<UID> getTaskId() const { return taskId; }
 
 	KeyRange getRange() const { return manifest.getRange(); }
-
-	std::string getRemoteRoot() const { return manifest.getRootPath(); }
 
 	BulkDumpPhase getPhase() const { return phase; }
 
@@ -135,7 +135,7 @@ struct BulkDumpState {
 		return res;
 	}
 
-	Optional<BulkLoadManifest> getManifest() const { return manifest; }
+	BulkLoadManifest getManifest() const { return manifest; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -165,9 +165,9 @@ private:
 // The dumped data is within the input range
 // The data is dumped to the input remoteRoot
 // The remoteRoot is a local root string or a remote blobstore root string
-BulkDumpState createNewBulkDumpJob(const KeyRange& range,
-                                   const std::string& remoteRoot,
-                                   const BulkLoadType& type,
-                                   const BulkLoadTransportMethod& transportMethod);
+BulkDumpState createBulkDumpJob(const KeyRange& range,
+                                const std::string& jobRoot,
+                                const BulkLoadType& type,
+                                const BulkLoadTransportMethod& transportMethod);
 
 #endif

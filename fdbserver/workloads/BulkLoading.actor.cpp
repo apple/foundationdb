@@ -90,12 +90,12 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> acknowledgeBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadTaskState> tasks) {
+	ACTOR Future<Void> finalizeBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadTaskState> tasks) {
 		state int i = 0;
 		for (; i < tasks.size(); i++) {
 			loop {
 				try {
-					wait(acknowledgeBulkLoadTask(cx, tasks[i].getRange(), tasks[i].getTaskId()));
+					wait(finalizeBulkLoadTask(cx, tasks[i].getRange(), tasks[i].getTaskId()));
 					TraceEvent("BulkLoadingAcknowledgeBulkLoadTask")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
@@ -307,7 +307,7 @@ struct BulkLoading : TestWorkload {
 		const std::string dataFileNameBase = deterministicRandom()->randomUniqueID().toString();
 		const std::string dataFileName = dataFileNameBase + "-data.sst";
 		const std::string sampleFileName = dataFileNameBase + "-sample.sst";
-		BulkLoadFileSet res(rootPath, "", generateEmptyManifestFileName(), dataFileName, "");
+		BulkLoadFileSet res(rootPath, "", generateEmptyManifestFileName(), dataFileName, "", BulkLoadChecksum());
 		std::string folder = res.getFolder();
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
@@ -377,19 +377,19 @@ struct BulkLoading : TestWorkload {
 		taskUnit.data = self->generateOrderedKVS(self, rangeToLoad, dataSize);
 		BulkLoadFileSet fileSet = self->generateSSTFiles(self, folderPath, taskUnit);
 		taskUnit.bulkLoadTask =
-		    createNewBulkLoadTask(deterministicRandom()->randomUniqueID(),
-		                          rangeToLoad,
-		                          fileSet,
-		                          BulkLoadByteSampleSetting(0,
-		                                                    "hashlittle2", // use function name to represent the method
-		                                                    SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
-		                                                    SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
-		                                                    SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY),
-		                          /*snapshotVersion=*/invalidVersion,
-		                          /*checksum=*/"",
-		                          /*bytes=*/-1,
-		                          BulkLoadType::SST,
-		                          BulkLoadTransportMethod::CP);
+		    createBulkLoadTask(deterministicRandom()->randomUniqueID(),
+		                       rangeToLoad,
+		                       fileSet,
+		                       BulkLoadByteSampleSetting(0,
+		                                                 "hashlittle2", // use function name to represent the method
+		                                                 SERVER_KNOBS->BYTE_SAMPLING_FACTOR,
+		                                                 SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
+		                                                 SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY),
+		                       /*snapshotVersion=*/invalidVersion,
+		                       /*bytes=*/-1,
+		                       /*keyCount=*/-1,
+		                       BulkLoadType::SST,
+		                       BulkLoadTransportMethod::CP);
 		return taskUnit;
 	}
 
@@ -492,7 +492,7 @@ struct BulkLoading : TestWorkload {
 		// Check bulk load metadata
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
-		wait(self->acknowledgeBulkLoadTasks(self, cx, bulkLoadTaskStates));
+		wait(self->finalizeBulkLoadTasks(self, cx, bulkLoadTaskStates));
 		loop {
 			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
 			if (cleared) {
@@ -600,7 +600,7 @@ struct BulkLoading : TestWorkload {
 		// Clear metadata
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
 		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
-		wait(self->acknowledgeBulkLoadTasks(self, cx, bulkLoadTaskStates));
+		wait(self->finalizeBulkLoadTasks(self, cx, bulkLoadTaskStates));
 		loop {
 			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
 			if (cleared) {

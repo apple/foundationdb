@@ -529,6 +529,11 @@ extern const KeyRef bulkLoadTaskPrefix;
 const Value bulkLoadTaskStateValue(const BulkLoadTaskState& bulkLoadTaskState);
 BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value);
 
+extern const KeyRangeRef bulkLoadJobKeys;
+extern const KeyRef bulkLoadJobPrefix;
+const Value bulkLoadJobValue(const BulkLoadJobState& bulkLoadJobState);
+BulkLoadJobState decodeBulkLoadJobState(const ValueRef& value);
+
 extern const KeyRef bulkDumpModeKey;
 extern const KeyRangeRef bulkDumpKeys;
 extern const KeyRef bulkDumpPrefix;

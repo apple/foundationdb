@@ -24,7 +24,9 @@
 #include <vector>
 
 #include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RangeLock.h"
 #include "flow/Error.h"
 #include "fmt/format.h"
@@ -2829,11 +2831,10 @@ ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
 	}
 }
 
-ACTOR Future<std::vector<BulkLoadTaskState>> getValidBulkLoadTasksWithinRange(
-    Database cx,
-    KeyRange rangeToRead,
-    size_t limit = 10,
-    Optional<BulkLoadPhase> phase = Optional<BulkLoadPhase>()) {
+ACTOR Future<std::vector<BulkLoadTaskState>> getBulkLoadTasksWithinRange(Database cx,
+                                                                         KeyRange rangeToRead,
+                                                                         size_t limit,
+                                                                         Optional<BulkLoadPhase> phase) {
 	state Transaction tr(cx);
 	state Key readBegin = rangeToRead.begin;
 	state Key readEnd = rangeToRead.end;
@@ -2884,32 +2885,37 @@ ACTOR Future<std::vector<BulkLoadTaskState>> getValidBulkLoadTasksWithinRange(
 	return res;
 }
 
+ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask) {
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	if (bulkLoadTask.phase != BulkLoadPhase::Submitted) {
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
+		    .detail("Reason", "WrongPhase")
+		    .detail("Task", bulkLoadTask.toString());
+		throw bulkload_task_failed();
+	}
+	if (!normalKeys.contains(bulkLoadTask.getRange())) {
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
+		    .detail("Reason", "RangeOutOfScope")
+		    .detail("Task", bulkLoadTask.toString());
+		throw bulkload_task_failed();
+	}
+	wait(turnOffUserWriteTrafficForBulkLoad(tr, bulkLoadTask.getRange()));
+	bulkLoadTask.submitTime = now();
+	wait(krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTask.getRange(), bulkLoadTaskStateValue(bulkLoadTask)));
+	return Void();
+}
+
 // Submit bulkload task and overwrite any existing task and lock range
 ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadTaskState bulkLoadTask) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			if (bulkLoadTask.phase != BulkLoadPhase::Submitted) {
-				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Reason", "WrongPhase")
-				    .detail("Task", bulkLoadTask.toString());
-				throw bulkload_task_failed();
-			}
-			if (!normalKeys.contains(bulkLoadTask.getRange())) {
-				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Reason", "RangeOutOfScope")
-				    .detail("Task", bulkLoadTask.toString());
-				throw bulkload_task_failed();
-			}
-			wait(turnOffUserWriteTrafficForBulkLoad(&tr, bulkLoadTask.getRange()));
-			bulkLoadTask.submitTime = now();
-			wait(krmSetRange(&tr, bulkLoadTaskPrefix, bulkLoadTask.getRange(), bulkLoadTaskStateValue(bulkLoadTask)));
+			wait(setBulkLoadSubmissionTransaction(&tr, bulkLoadTask));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -2952,24 +2958,215 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 	return bulkLoadTaskState;
 }
 
-// Update bulkload task to acknowledge state and unlock the range
-ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId) {
+ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId) {
+	state BulkLoadTaskState bulkLoadTaskState;
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	wait(store(bulkLoadTaskState,
+	           getBulkLoadTask(tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged })));
+	bulkLoadTaskState.phase = BulkLoadPhase::Acknowledged;
+	ASSERT(range == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
+	ASSERT(normalKeys.contains(range));
+	wait(krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState)));
+	wait(turnOnUserWriteTrafficForBulkLoad(tr, bulkLoadTaskState.getRange()));
+	return Void();
+}
+
+// We acknowledge a bulkload task when the bulkload job see the task completes.
+// Update bulkload task to acknowledge state and unlock the range.
+// A acknowledged bulkload task will be automatically erased by DD.
+ACTOR Future<Void> finalizeBulkLoadTask(Database cx, KeyRange range, UID taskId) {
 	state Transaction tr(cx);
 	loop {
-		state BulkLoadTaskState bulkLoadTaskState;
 		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(store(bulkLoadTaskState,
-			           getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged })));
-			bulkLoadTaskState.phase = BulkLoadPhase::Acknowledged;
-			ASSERT(range == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
-			ASSERT(normalKeys.contains(range));
-			wait(krmSetRange(
-			    &tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState)));
-			wait(turnOnUserWriteTrafficForBulkLoad(&tr, bulkLoadTaskState.getRange()));
+			wait(setBulkLoadFinalizeTransaction(&tr, range, taskId));
 			wait(tr.commit());
 			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Optional<BulkLoadJobState>> getAliveBulkLoadJob(Transaction* tr) {
+	state RangeResult rangeResult;
+	// At most one job at a time, so looking at the first returned range is sufficient
+	wait(store(rangeResult,
+	           krmGetRanges(tr,
+	                        bulkLoadJobPrefix,
+	                        normalKeys,
+	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+	ASSERT(rangeResult.size() >= 2);
+	ASSERT(rangeResult[0].key == normalKeys.begin);
+	if (rangeResult[0].value.empty()) {
+		return Optional<BulkLoadJobState>();
+	}
+	return decodeBulkLoadJobState(rangeResult[0].value);
+}
+
+ACTOR Future<Optional<BulkLoadJobState>> getAliveBulkLoadJob(Database cx) {
+	state Optional<BulkLoadJobState> aliveJob;
+	state Transaction tr(cx);
+	loop {
+		try {
+			wait(store(aliveJob, getAliveBulkLoadJob(&tr)));
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return aliveJob;
+}
+
+// Update bulkLoadJob metadata with the input jobState.
+// Throw bulkload_task_outdated error if the input job is outdated.
+ACTOR Future<Void> updateBulkLoadJobMetadataTransaction(Transaction* tr, BulkLoadJobState jobState) {
+	ASSERT(jobState.getPhase() != BulkLoadJobPhase::Invalid && jobState.getPhase() != BulkLoadJobPhase::Submitted &&
+	       jobState.hasManifest());
+	Optional<BulkLoadJobState> anyCurrentJob = wait(getAliveBulkLoadJob(tr));
+	if (!anyCurrentJob.present()) {
+		throw bulkload_task_outdated(); // has been cancelled
+	}
+	BulkLoadJobState currentJob = anyCurrentJob.get();
+	ASSERT(currentJob.getPhase() != BulkLoadJobPhase::Invalid);
+	ASSERT(currentJob.getPhase() == BulkLoadJobPhase::Submitted || currentJob.hasManifest());
+	if (currentJob.getJobId() != jobState.getJobId()) {
+		throw bulkload_task_outdated();
+	}
+	wait(krmSetRange(tr, bulkLoadJobPrefix, jobState.getManifestRange(), bulkLoadJobValue(jobState)));
+	return Void();
+}
+
+ACTOR Future<bool> checkBulkLoadJobComplete(Database cx, UID jobId) {
+	state Transaction tr(cx);
+	state Key beginKey = normalKeys.begin;
+	state Key endKey = normalKeys.end;
+	state BulkLoadJobState existJob;
+	state KeyRange rangeToRead;
+	state RangeResult bulkLoadJobResult;
+	while (beginKey < endKey) {
+		try {
+			bulkLoadJobResult.clear();
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			wait(store(bulkLoadJobResult, krmGetRanges(&tr, bulkLoadJobPrefix, rangeToRead)));
+			for (int i = 0; i < bulkLoadJobResult.size() - 1; i++) {
+				if (bulkLoadJobResult[i].value.empty()) {
+					TraceEvent(SevWarn, "DDBulkLoadJobHasBeenCleared").detail("JobId", jobId);
+					throw bulkload_task_outdated();
+				}
+				existJob = decodeBulkLoadJobState(bulkLoadJobResult[i].value);
+				// When start loading a job, the old job metadata must be cleared at first.
+				// So, any existing bulkload job id must match the running job id.
+				ASSERT(existJob.getJobId() == jobId);
+				if (existJob.getPhase() != BulkLoadJobPhase::Complete) {
+					TraceEvent(SevDebug, "DDBulkLoadJobIncomplete").detail("ExistJob", existJob.toString());
+					return false;
+				}
+			}
+			beginKey = bulkLoadJobResult.back().key;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return true;
+}
+
+ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
+	ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);
+	state Transaction tr(cx);
+	loop {
+		try {
+			// There is at most one bulkLoad job or bulkDump job at a time globally
+			Optional<UID> aliveBulkDumpJob = wait(getAliveBulkDumpJob(&tr));
+			if (aliveBulkDumpJob.present()) {
+				TraceEvent(SevInfo, "SubmitBulkLoadJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Conflict to a running BulkDump job")
+				    .detail("SubmitBulkLoadJob", jobState.toString())
+				    .detail("ExistBulkDumpJob", aliveBulkDumpJob.get());
+				throw bulkload_task_failed();
+			}
+			Optional<BulkLoadJobState> aliveJob = wait(getAliveBulkLoadJob(&tr));
+			if (aliveJob.present()) {
+				if (aliveJob.get().getJobId() == jobState.getJobId()) {
+					return Void(); // The job has been submitted.
+				}
+				TraceEvent(SevInfo, "SubmitBulkLoadJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Conflict to a running BulkLoad job")
+				    .detail("SubmitJob", jobState.toString())
+				    .detail("ExistJob", aliveJob.get().toString());
+				throw bulkload_task_failed();
+			}
+			if (jobState.getPhase() != BulkLoadJobPhase::Submitted) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadJobError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Input input phase is not submit")
+				    .detail("Task", jobState.toString());
+				throw bulkload_task_failed();
+			}
+			if (!normalKeys.contains(jobState.getJobRange())) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadJobError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Input range is out of scope")
+				    .detail("SubmitBulkLoadJob", jobState.toString());
+				throw bulkload_task_failed();
+			}
+			wait(krmSetRange(&tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(jobState)));
+			wait(tr.commit());
+			TraceEvent(SevInfo, "BulkLoadJobSubmitted")
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("SubmitBulkLoadJob", jobState.toString());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> clearBulkLoadJob(Database cx, UID jobId) {
+	state Transaction tr(cx);
+	state Key beginKey = normalKeys.begin;
+	state Key endKey = normalKeys.end;
+	state BulkLoadJobState existJob;
+	state KeyRange rangeToRead;
+	state RangeResult bulkLoadJobResult;
+	while (beginKey < endKey) {
+		try {
+			bulkLoadJobResult.clear();
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			wait(store(bulkLoadJobResult, krmGetRanges(&tr, bulkLoadJobPrefix, rangeToRead)));
+			for (int i = 0; i < bulkLoadJobResult.size() - 1; i++) {
+				if (bulkLoadJobResult[i].value.empty()) {
+					continue;
+				}
+				existJob = decodeBulkLoadJobState(bulkLoadJobResult[i].value);
+				// We only clear the metadata if it has the same jobId as the input Id.
+				// When there is a new jobId persisted different than the input Id,
+				// a new job has been submitted successfully. Since a new job can be submitted successfully if and only
+				// if no old metadata exists (the old job metadata has been cleared). So, we can stop at this point.
+				if (existJob.getJobId() != jobId) {
+					TraceEvent(SevWarn, "DDBulkLoadJobHasChanged")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("InputJobId", jobId)
+					    .detail("ExistJob", existJob.toString());
+					throw bulkload_task_outdated();
+				}
+			}
+			wait(krmSetRangeCoalescing(&tr, bulkLoadJobPrefix, rangeToRead, normalKeys, StringRef()));
+			wait(tr.commit());
+			tr.reset();
+
+			beginKey = bulkLoadJobResult.back().key;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -3034,7 +3231,7 @@ ACTOR Future<int> getBulkDumpMode(Database cx) {
 // There is at most one bulk dump job at any time on the entire key space.
 // A job of a range can spawn multiple tasks according to the shard boundary.
 // Those tasks share the same job Id (aka belonging to the same job).
-ACTOR Future<Optional<UID>> existAnyBulkDumpTask(Transaction* tr) {
+ACTOR Future<Optional<UID>> getAliveBulkDumpJob(Transaction* tr) {
 	state RangeResult rangeResult;
 	wait(store(rangeResult,
 	           krmGetRanges(tr,
@@ -3054,124 +3251,102 @@ ACTOR Future<Optional<UID>> existAnyBulkDumpTask(Transaction* tr) {
 	return Optional<UID>();
 }
 
-ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpTask) {
+ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<UID> existJobId = wait(existAnyBulkDumpTask(&tr));
-			if (existJobId.present() && existJobId.get() != bulkDumpTask.getJobId()) {
-				TraceEvent(SevWarn, "SubmitBulkDumpTaskError")
+			// There is at most one bulkLoad job or bulkDump job at a time globally
+			Optional<BulkLoadJobState> aliveBulkLoadJob = wait(getAliveBulkLoadJob(&tr));
+			if (aliveBulkLoadJob.present()) {
+				TraceEvent(SevWarn, "SubmitBulkDumpJobFailed")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
-				    .detail("Reason", "ExistingDifferentJob")
-				    .detail("ExistingJobId", existJobId.get())
-				    .detail("NewJobId", bulkDumpTask.getJobId())
-				    .detail("Task", bulkDumpTask.toString());
-			}
-			if (existJobId.present() && existJobId.get() == bulkDumpTask.getJobId()) {
-				TraceEvent(SevWarn, "SubmitBulkDumpTaskError")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Reason", "ExistingSameJob")
-				    .detail("ExistingJobId", existJobId.get())
-				    .detail("NewJobId", bulkDumpTask.getJobId())
-				    .detail("Task", bulkDumpTask.toString());
-				return Void(); // give up if a job with same id has been submitted
-			}
-			if (bulkDumpTask.getPhase() != BulkDumpPhase::Submitted) {
-				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkDumpTaskError")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Reason", "WrongPhase")
-				    .detail("Task", bulkDumpTask.toString());
+				    .detail("Reason", "Conflict to a running BulkLoad job")
+				    .detail("AliveBulkLoadJob", aliveBulkLoadJob.get().toString())
+				    .detail("NewJob", bulkDumpJob.toString());
 				throw bulkdump_task_failed();
 			}
-			if (!normalKeys.contains(bulkDumpTask.getJobRange())) {
-				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Reason", "RangeOutOfScope")
-				    .detail("Task", bulkDumpTask.toString());
-				throw bulkdump_task_failed();
-			}
-			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpTask.getJobRange(), bulkDumpStateValue(bulkDumpTask)));
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
-}
-
-ACTOR Future<Void> clearBulkDumpJob(Database cx) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.clear(allKeys.withPrefix(bulkDumpPrefix));
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
-}
-
-ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(Database cx,
-                                                                     KeyRange rangeToRead,
-                                                                     Optional<size_t> limit,
-                                                                     Optional<BulkDumpPhase> phase) {
-	state Transaction tr(cx);
-	state Key readBegin = rangeToRead.begin;
-	state Key readEnd = rangeToRead.end;
-	state RangeResult rangeResult;
-	state std::vector<BulkDumpState> res;
-	while (readBegin < readEnd) {
-		state int retryCount = 0;
-		loop {
-			try {
-				rangeResult.clear();
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(store(rangeResult,
-				           krmGetRanges(&tr,
-				                        bulkDumpPrefix,
-				                        KeyRangeRef(readBegin, readEnd),
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
-				break;
-			} catch (Error& e) {
-				if (retryCount > 30) {
-					throw timed_out();
+			Optional<UID> aliveJobId = wait(getAliveBulkDumpJob(&tr));
+			if (aliveJobId.present()) {
+				if (aliveJobId.get() == bulkDumpJob.getJobId()) {
+					return Void(); // The job has been persisted
 				}
-				wait(tr.onError(e));
-				retryCount++;
+				TraceEvent(SevWarn, "SubmitBulkDumpJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Conflict to a running BulkDump job")
+				    .detail("AliveJobId", aliveJobId.get().toString())
+				    .detail("NewJob", bulkDumpJob.toString());
+				throw bulkdump_task_failed();
 			}
+			if (bulkDumpJob.getPhase() != BulkDumpPhase::Submitted) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkDumpJobError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Input phase is not submitted")
+				    .detail("NewJob", bulkDumpJob.toString());
+				throw bulkdump_task_failed();
+			}
+			if (!normalKeys.contains(bulkDumpJob.getJobRange())) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkDumpJobError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Input range is out of scope")
+				    .detail("NewJob", bulkDumpJob.toString());
+				throw bulkdump_task_failed();
+			}
+			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpJob.getJobRange(), bulkDumpStateValue(bulkDumpJob)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
-		for (int i = 0; i < rangeResult.size() - 1; ++i) {
-			if (rangeResult[i].value.empty()) {
-				continue;
-			}
-			BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
-			KeyRange range = Standalone(KeyRangeRef(rangeResult[i].key, rangeResult[i + 1].key));
-			if (bulkDumpState.getRange().empty()) {
-				ASSERT(bulkDumpState.getJobRange().contains(range));
-				continue;
-			}
-			if (!phase.present() || phase.get() == bulkDumpState.getPhase()) {
-				res.push_back(bulkDumpState);
-			}
-			if (limit.present() && res.size() >= limit.get()) {
-				return res;
-			}
-		}
-		readBegin = rangeResult.back().key;
 	}
+	return Void();
+}
 
-	return res;
+ACTOR Future<Void> clearBulkDumpJob(Database cx, UID jobId) {
+	state Transaction tr(cx);
+	state Key beginKey = normalKeys.begin;
+	state Key endKey = normalKeys.end;
+	state BulkDumpState existJob;
+	state KeyRange rangeToRead;
+	state RangeResult bulkDumpResult;
+	while (beginKey < endKey) {
+		try {
+			bulkDumpResult.clear();
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			wait(store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead)));
+			for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
+				if (bulkDumpResult[i].value.empty()) {
+					continue;
+				}
+				existJob = decodeBulkDumpState(bulkDumpResult[i].value);
+				// We only clear the metadata if it has the same jobId as the input Id.
+				// When there is a new jobId persisted different than the input Id,
+				// a new job has been submitted successfully. Since a new job can be submitted successfully if and only
+				// if no old metadata exists (the old job metadata has been cleared). So, we can stop at this point.
+				if (existJob.getJobId() != jobId) {
+					TraceEvent(SevWarn, "DDBulkDumpJobHasChanged")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("InputJobId", jobId)
+					    .detail("ExistJob", existJob.toString());
+					throw bulkload_task_outdated();
+				}
+			}
+			wait(krmSetRangeCoalescing(&tr, bulkDumpPrefix, rangeToRead, normalKeys, StringRef()));
+			wait(tr.commit());
+			tr.reset();
+
+			beginKey = bulkDumpResult.back().key;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
 }
 
 ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {

@@ -173,23 +173,50 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 // When the mode is on, DD will periodically check if there is any bulkload task to do by scaning the metadata.
 ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
 
-// Get valid bulk load task state within the input range
-ACTOR Future<std::vector<BulkLoadTaskState>> getValidBulkLoadTasksWithinRange(Database cx,
-                                                                              KeyRange rangeToRead,
-                                                                              size_t limit,
-                                                                              Optional<BulkLoadPhase> phase);
+// Get bulk load tasks which range is fully contained by the input range.
+// If phase is provided, then return the task with the input phase.
+ACTOR Future<std::vector<BulkLoadTaskState>> getBulkLoadTasksWithinRange(
+    Database cx,
+    KeyRange rangeToRead,
+    size_t limit = 10,
+    Optional<BulkLoadPhase> phase = Optional<BulkLoadPhase>());
+
+// Create a bulkload task submission transaction without commit
+// Used by ManagementAPI and bulkdumpRestore at DD
+ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);
 
 // Submit a bulk load task
 ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadTaskState bulkLoadTask);
 
-// Acknowledge a bulk load task if it has been completed
-ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId);
+// Create an bulkload task acknowledge transaction without commit
+// Used by ManagementAPI and bulkdumpRestore at DD
+ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);
+
+// Finalize a bulk load task if it has been completed
+ACTOR Future<Void> finalizeBulkLoadTask(Database cx, KeyRange range, UID taskId);
 
 // Get bulk load task for the input range and taskId
 ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
                                                 KeyRange range,
                                                 UID taskId,
                                                 std::vector<BulkLoadPhase> phases);
+
+// Submit a BulkLoad job: loading data from a remote folder using bulkloading mechanism.
+// There is at most one BulkLoad or one BulkDump job at a time.
+// If there is any existing BulkLoad or BulkDump job, reject the new job.
+ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState);
+
+// Create a transaction for updating bulkload metadata
+// Return true if did the update, otherwise, return false
+ACTOR Future<Void> updateBulkLoadJobMetadataTransaction(Transaction* tr, BulkLoadJobState jobState);
+
+// TODO(BulkLoad): Cancel or clear the BulkLoad job
+ACTOR Future<Void> clearBulkLoadJob(Database cx, UID jobId);
+
+// Get alive bulkload job
+ACTOR Future<Optional<BulkLoadJobState>> getAliveBulkLoadJob(Transaction* tr);
+
+ACTOR Future<Optional<BulkLoadJobState>> getAliveBulkLoadJob(Database cx);
 
 // Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
 // the metadata.
@@ -198,21 +225,20 @@ ACTOR Future<int> setBulkDumpMode(Database cx, int mode);
 // Get bulk dump mode value.
 ACTOR Future<int> getBulkDumpMode(Database cx);
 
-// Clear the existing bulkdump job metadata
-ACTOR Future<Void> clearBulkDumpJob(Database cx);
+// TODO(BulkDump): Cancel or clear the BulkDump job
+ACTOR Future<Void> clearBulkDumpJob(Database cx, UID jobId);
 
-// Submit a bulkdump job. If there is any existing job, reject the new job
-ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpState);
+// Check if the input bulkLoad job is in complete state. Throw bulkload_task_outdated if the job has been cleared.
+// A job is complete if and only if all tasks have been completed.
+ACTOR Future<bool> checkBulkLoadJobComplete(Database cx, UID jobId);
 
-// Get bulkdump tasks within the input range. Each range has at most one task running on.
-ACTOR Future<std::vector<BulkDumpState>> getBulkDumpTasksWithinRange(
-    Database cx,
-    KeyRange rangeToRead,
-    Optional<size_t> limit = Optional<size_t>(),
-    Optional<BulkDumpPhase> phase = Optional<BulkDumpPhase>());
+// Submit a bulkdump job: dumping data to a remote folder by storage servers.
+// There is at most one BulkLoad or one BulkDump job at a time.
+// If there is any existing BulkLoad or BulkDump job, reject the new job.
+ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob);
 
 // Return the existing Job ID
-ACTOR Future<Optional<UID>> existAnyBulkDumpTask(Transaction* tr);
+ACTOR Future<Optional<UID>> getAliveBulkDumpJob(Transaction* tr);
 
 // Get total number of completed tasks within the input range
 ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);

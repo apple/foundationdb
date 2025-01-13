@@ -79,7 +79,7 @@ std::string generateBulkDumpJobFolder(const UID& jobId);
 std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId);
 
 // Define job root folder.
-std::string getBulkDumpJobRoot(const std::string& root, const UID& jobId);
+std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId);
 
 // Define job manifest file content based on job's all BulkLoadManifest.
 // Each row is a range sorted by the beginKey. Any two ranges do not have overlapping.
@@ -98,6 +98,7 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
                                               Version dumpVersion,
                                               const KeyRange& dumpRange,
                                               int64_t dumpBytes,
+                                              int64_t dumpKeyCount,
                                               BulkLoadType dumpType,
                                               BulkLoadTransportMethod transportMethod);
 
