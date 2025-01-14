@@ -110,6 +110,23 @@ function test_s3_backup_and_restore {
     err "Failed loading data into fdb"
     return 1
   fi
+  # Edit the url. Backup adds 'data' to the path. Need this url for
+  # cleanup of test data.
+  local edited_url=$(echo "${local_url}" | sed -e "s/ctest/data\/ctest/" )
+  readonly edited_url
+  if [[ "${USE_S3}" == "true" ]]; then
+    # Run this rm only if s3. In seaweed, it would fail because
+    # bucket doesn't exist yet (they are lazily created).
+    if ! "${local_build_dir}/bin/s3client" \
+        "${KNOBS[*]}" \
+        --tls-ca-file "${TLS_CA_FILE}" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${local_scratch_dir}" \
+        rm "${edited_url}"; then
+      err "Failed rm of ${edited_url}"
+      return 1
+    fi
+  fi
   log "Run s3 backup"
   if ! backup "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}"; then
     err "Failed backup"
@@ -128,6 +145,16 @@ function test_s3_backup_and_restore {
   log "Verify restore"
   if ! verify_data "${local_build_dir}" "${local_scratch_dir}"; then
     err "Failed verification of data in fdb"
+    return 1
+  fi
+  # Cleanup test data.
+  if ! "${local_build_dir}/bin/s3client" \
+      "${KNOBS[*]}" \
+      --tls-ca-file "${TLS_CA_FILE}" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${local_scratch_dir}" \
+      rm "${edited_url}"; then
+    err "Failed rm of ${edited_url}"
     return 1
   fi
   log "Check for Severity=40 errors"
@@ -149,7 +176,7 @@ TEST_SCRATCH_DIR=
 TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
 readonly TLS_CA_FILE
 readonly HTTP_VERBOSE_LEVEL=10
-KNOBS=("--knob_http_request_aws_v4_header=true" "--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
 readonly KNOBS
 readonly TAG="test_backup"
 # Should we use S3? If USE_S3 is not defined, then check if
