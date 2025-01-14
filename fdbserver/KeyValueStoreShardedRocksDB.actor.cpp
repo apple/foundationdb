@@ -1959,7 +1959,7 @@ private:
 	std::vector<Reference<Histogram>> readRangeQueueWaitHistograms;
 	std::vector<Reference<Histogram>> readValueQueueWaitHistograms;
 	std::vector<Reference<Histogram>> readPrefixQueueWaitHistograms;
-	std::vector<Reference<Histogram>> readRangeNewIteratorHistograms; // Zhe: haven't used?
+	std::vector<Reference<Histogram>> readRangeNewIteratorHistograms;
 	std::vector<Reference<Histogram>> readValueGetHistograms;
 	std::vector<Reference<Histogram>> readPrefixGetHistograms;
 	// Writer Histogram

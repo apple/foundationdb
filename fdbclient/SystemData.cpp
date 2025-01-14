@@ -1210,6 +1210,20 @@ BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value) {
 	return bulkLoadTaskState;
 }
 
+const KeyRangeRef bulkLoadJobKeys = KeyRangeRef("\xff/bulkLoadJob/"_sr, "\xff/bulkLoadJob0"_sr);
+const KeyRef bulkLoadJobPrefix = bulkLoadJobKeys.begin;
+
+const Value bulkLoadJobValue(const BulkLoadJobState& bulkLoadJobState) {
+	return ObjectWriter::toValue(bulkLoadJobState, IncludeVersion());
+}
+
+BulkLoadJobState decodeBulkLoadJobState(const ValueRef& value) {
+	BulkLoadJobState bulkLoadJobState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(bulkLoadJobState);
+	return bulkLoadJobState;
+}
+
 // Bulk dumping keys
 const KeyRef bulkDumpModeKey = "\xff/bulkDumpMode"_sr;
 const KeyRangeRef bulkDumpKeys = KeyRangeRef("\xff/bulkDump/"_sr, "\xff/bulkDump0"_sr);

@@ -5984,11 +5984,12 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 	state std::map<Key, Value> sample;
 	state int64_t currentExpectedBytes = 0;
 	state Key beginKey = range.begin;
-	state Key lastKey = range.end;
-	state ErrorOr<GetKeyValuesReply> rep;
+	state Key lastKey = range.begin;
+	state bool immediateError = true;
 	// Accumulate data read from local storage to kvsToDump and make sampling until any error presents
 	loop {
 		// Read data and stop for any error
+		state ErrorOr<GetKeyValuesReply> rep;
 		try {
 			state GetKeyValuesRequest localReq;
 			localReq.begin = firstGreaterOrEqual(beginKey);
@@ -6012,8 +6013,11 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 			break;
 		}
 
+		// immediateError is used in case the read is failed at the first range
+		immediateError = false;
+
 		// Given the data, create KVS and sample. Stop if the accumulated data size is too large.
-		for (const auto& kv : rep.get().data) {
+		for (const auto& kv : rep.get().data) { // TODO(BulkDump): directly read from special key space.
 			lastKey = kv.key;
 			auto res = kvsToDump.insert({ kv.key, kv.value });
 			ASSERT(res.second);
@@ -6023,14 +6027,17 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 				    sample.insert({ kv.key, BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned()) });
 				ASSERT(resSample.second);
 			}
-			currentExpectedBytes = currentExpectedBytes + kv.expectedSize() + kv.expectedSize();
+			currentExpectedBytes = currentExpectedBytes + kv.expectedSize();
 			if (currentExpectedBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
 				break;
 			}
 		}
 
 		// Stop if no more data or having too large bytes
-		if (!rep.get().more || currentExpectedBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
+		if (currentExpectedBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
+			break;
+		} else if (!rep.get().more) {
+			lastKey = range.end; // Use the range end as the lastKey
 			break;
 		}
 
@@ -6038,6 +6045,11 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 		wait(delay(0.1));
 		beginKey = keyAfter(lastKey);
 	}
+
+	if (immediateError) {
+		throw retry();
+	}
+
 	return RangeDumpData(kvsToDump, sample, lastKey, currentExpectedBytes);
 }
 
@@ -6083,7 +6095,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	state RangeDumpData rangeDumpData;
 	state UID jobId = req.bulkDumpState.getJobId();
 	state std::string rootFolderLocal = data->bulkDumpFolder;
-	state std::string rootFolderRemote = req.bulkDumpState.getRemoteRoot();
+	state std::string rootFolderRemote = req.bulkDumpState.getJobRoot();
 	// Use jobId and taskId as the folder to store the data of the task range
 	ASSERT(req.bulkDumpState.getTaskId().present());
 	state std::string taskFolder = getBulkDumpJobTaskFolder(jobId, req.bulkDumpState.getTaskId().get());
@@ -6107,7 +6119,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			wait(store(versionToDump, tr.getReadVersion()));
 
 			// Read data
-			// TODO(BulkDump): Read data from other servers and do checksum
+			// TODO(BulkDump): Read data from other servers at the versionToDump as much as possible
 			wait(store(rangeDumpData, getRangeDataToDump(data, rangeToDump, versionToDump)));
 
 			// Generate local file paths and remote file paths
@@ -6132,8 +6144,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			                                            SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
 
 			// Write to SST file
-			state KeyRange dataRange =
-			    rangeToDump & Standalone(KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey)));
+			state KeyRange dataRange = rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey));
 			state BulkLoadManifest manifest =
 			    dumpDataFileToLocalDirectory(data->thisServerID,
 			                                 rangeDumpData.kvs,
@@ -6144,16 +6155,20 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			                                 versionToDump,
 			                                 dataRange, // the actual range of the rangeDumpData.kvs
 			                                 rangeDumpData.kvsBytes,
+			                                 rangeDumpData.kvs.size(),
 			                                 dumpType,
 			                                 transportMethod);
 			readBytes = readBytes + rangeDumpData.kvsBytes;
-			TraceEvent(SevInfo, "SSBulkDump", data->thisServerID)
+			TraceEvent(SevInfo, "SSBulkDumpDataFileGenerated", data->thisServerID)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
 			    .detail("Task", req.bulkDumpState.toString())
 			    .detail("ChecksumServers", describe(req.checksumServers))
 			    .detail("RangeToDump", rangeToDump)
 			    .detail("DataRange", dataRange)
 			    .detail("RootFolderLocal", rootFolderLocal)
 			    .detail("RelativeFolder", relativeFolder)
+			    .detail("DataKeyCount", rangeDumpData.kvs.size())
 			    .detail("DataBytes", rangeDumpData.kvsBytes)
 			    .detail("RemoteFileSet", manifest.fileSet.toString())
 			    .detail("BatchNum", batchNum);

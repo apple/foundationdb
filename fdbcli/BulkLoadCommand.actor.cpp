@@ -39,7 +39,7 @@ ACTOR Future<Void> getBulkLoadTaskStateByRange(Database cx,
                                                size_t countLimit,
                                                Optional<BulkLoadPhase> phase) {
 	try {
-		std::vector<BulkLoadTaskState> res = wait(getValidBulkLoadTasksWithinRange(cx, rangeToRead, countLimit, phase));
+		std::vector<BulkLoadTaskState> res = wait(getBulkLoadTasksWithinRange(cx, rangeToRead, countLimit, phase));
 		int64_t finishCount = 0;
 		int64_t unfinishedCount = 0;
 		for (const auto& bulkLoadTaskState : res) {
@@ -106,7 +106,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			return UID();
 		}
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		wait(acknowledgeBulkLoadTask(cx, range, taskId));
+		wait(finalizeBulkLoadTask(cx, range, taskId));
 		return taskId;
 
 	} else if (tokencmp(tokens[1], "local")) {
@@ -129,17 +129,17 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 		std::string byteSampleFile = tokens[6].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
 		BulkLoadFileSet fileSet =
-		    BulkLoadFileSet(folder, "", generateEmptyManifestFileName(), dataFile, byteSampleFile);
+		    BulkLoadFileSet(folder, "", generateEmptyManifestFileName(), dataFile, byteSampleFile, BulkLoadChecksum());
 		state BulkLoadTaskState bulkLoadTask =
-		    createNewBulkLoadTask(deterministicRandom()->randomUniqueID(),
-		                          range,
-		                          fileSet,
-		                          BulkLoadByteSampleSetting(0, "hashlittle2", 0, 0, 0), // We fake it here
-		                          /*snapshotVersion=*/invalidVersion,
-		                          /*checksum=*/"",
-		                          /*bytes=*/-1,
-		                          BulkLoadType::SST,
-		                          BulkLoadTransportMethod::CP);
+		    createBulkLoadTask(deterministicRandom()->randomUniqueID(),
+		                       range,
+		                       fileSet,
+		                       BulkLoadByteSampleSetting(0, "hashlittle2", 0, 0, 0), // We fake it here
+		                       /*snapshotVersion=*/invalidVersion,
+		                       /*bytes=*/-1,
+		                       /*keyCount=*/-1,
+		                       BulkLoadType::SST,
+		                       BulkLoadTransportMethod::CP);
 		wait(submitBulkLoadTask(cx, bulkLoadTask));
 		return bulkLoadTask.getTaskId();
 

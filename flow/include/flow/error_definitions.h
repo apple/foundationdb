@@ -163,6 +163,7 @@ ERROR( transaction_rejected_range_locked, 1242, "Transaction rejected due to ran
 ERROR( bulkdump_task_failed, 1243, "Bulk dumping task failed" )
 ERROR( bulkdump_task_outdated, 1244, "Bulk dumping task outdated" )
 ERROR( bulkload_fileset_invalid_filepath, 1245, "Bulkload fileset provides invalid filepath" )
+ERROR( bulkload_manifest_decode_error, 1246, "Bulkload manifest string is failed to decode" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

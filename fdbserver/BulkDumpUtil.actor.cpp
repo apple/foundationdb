@@ -37,10 +37,6 @@
 #include "flow/flow.h"
 #include <stdexcept>
 #include <string>
-#include <boost/url/url.hpp>
-#include <boost/url/parse.hpp>
-#include <boost/url/error_types.hpp>
-#include <boost/url/string_view.hpp>
 #include "flow/actorcompiler.h" // has to be last include
 
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
@@ -81,28 +77,6 @@ std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId) {
 	return joinPath(jobId.toString(), taskId.toString());
 }
 
-// Append a string to a path.
-// 'path' is a filesystem path or an URL.
-// TODO(BulkDump): use this everywhere
-std::string appendToPath(const std::string& path, const std::string& append) {
-	boost::system::result<boost::urls::url_view> parse_result = boost::urls::parse_uri(path);
-	if (!parse_result.has_value()) {
-		// Failed to parse 'path' as an URL. Do the default path join.
-		return joinPath(path, append);
-	}
-	// boost::urls::url thinks its an URL.
-	boost::urls::url url = parse_result.value();
-	if (url.scheme() != "blobstore") {
-		// For now, until we add support for other urls like file:///.
-		throw std::invalid_argument("Invalid url scheme");
-	}
-	return std::string(url.set_path(joinPath(url.path(), append)).buffer());
-}
-
-std::string getBulkDumpJobRoot(const std::string& root, const UID& jobId) {
-	return appendToPath(root, jobId.toString());
-}
-
 std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,
                                                                          const std::string& relativeFolder,
                                                                          const std::string& rootLocal,
@@ -111,8 +85,10 @@ std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version
 	const std::string manifestFileName = generateBulkDumpManifestFileName(dumpVersion);
 	const std::string dataFileName = generateBulkDumpDataFileName(dumpVersion);
 	const std::string byteSampleFileName = generateBulkDumpByteSampleFileName(dumpVersion);
-	BulkLoadFileSet fileSetLocal(rootLocal, relativeFolder, manifestFileName, dataFileName, byteSampleFileName);
-	BulkLoadFileSet fileSetRemote(rootRemote, relativeFolder, manifestFileName, dataFileName, byteSampleFileName);
+	BulkLoadFileSet fileSetLocal(
+	    rootLocal, relativeFolder, manifestFileName, dataFileName, byteSampleFileName, BulkLoadChecksum());
+	BulkLoadFileSet fileSetRemote(
+	    rootRemote, relativeFolder, manifestFileName, dataFileName, byteSampleFileName, BulkLoadChecksum());
 	return std::make_pair(fileSetLocal, fileSetRemote);
 }
 
@@ -181,6 +157,7 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
                                               Version dumpVersion,
                                               const KeyRange& dumpRange,
                                               int64_t dumpBytes,
+                                              int64_t dumpKeyCount,
                                               BulkLoadType dumpType,
                                               BulkLoadTransportMethod transportMethod) {
 	// Step 1: Clean up local folder
@@ -218,13 +195,14 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
 	                              remoteFileSetConfig.getRelativePath(),
 	                              remoteFileSetConfig.getManifestFileName(),
 	                              containDataFile ? remoteFileSetConfig.getDataFileName() : "",
-	                              containByteSampleFile ? remoteFileSetConfig.getByteSampleFileName() : "");
+	                              containByteSampleFile ? remoteFileSetConfig.getByteSampleFileName() : "",
+	                              BulkLoadChecksum());
 	BulkLoadManifest manifest(fileSetRemote,
 	                          dumpRange.begin,
 	                          dumpRange.end,
 	                          dumpVersion,
-	                          "",
 	                          dumpBytes,
+	                          dumpKeyCount,
 	                          byteSampleSetting,
 	                          dumpType,
 	                          transportMethod);
@@ -376,7 +354,7 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 			wait(store(result, krmGetRanges(&tr, bulkDumpPrefix, rangeToPersist)));
 			bool anyNew = false;
 			for (int i = 0; i < result.size() - 1; i++) {
-				if (result[i].value.empty()) {
+				if (result[i].value.empty()) { // has been cancelled
 					throw bulkdump_task_outdated();
 				}
 				BulkDumpState currentBulkDumpState = decodeBulkDumpState(result[i].value);
