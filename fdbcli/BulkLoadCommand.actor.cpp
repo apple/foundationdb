@@ -71,9 +71,131 @@ ACTOR Future<Void> getBulkLoadTaskStateByRange(Database cx,
 	return Void();
 }
 
-ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clusterFile,
-                                       Database cx,
-                                       std::vector<StringRef> tokens) {
+ACTOR Future<bool> getOngoingBulkLoadJob(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			Optional<BulkLoadJobState> job = wait(getAliveBulkLoadJob(&tr));
+			if (job.present()) {
+				fmt::println("Running bulk loading job: {}", job.get().toString());
+				return true;
+			} else {
+				fmt::println("No bulk loading job is running");
+				return false;
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> getBulkLoadCompleteRanges(Database cx, KeyRange rangeToRead) {
+	try {
+		size_t finishCount = wait(getBulkLoadCompleteTaskCount(cx, rangeToRead));
+		fmt::println("Finished {} tasks", finishCount);
+	} catch (Error& e) {
+		if (e.code() == error_code_timed_out) {
+			fmt::println("timed out");
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<UID> bulkLoadUnitTestCommandActor(Database cx, std::vector<StringRef> tokens) {
+	if (tokencmp(tokens[2], "acknowledge")) {
+		// Acknowledge any completed bulk loading task and clear the corresponding metadata
+		if (tokens.size() != 6) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		state UID taskId = UID::fromString(tokens[2].toString());
+		Key rangeBegin = tokens[4];
+		Key rangeEnd = tokens[5];
+		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+		wait(finalizeBulkLoadTask(cx, range, taskId));
+		return taskId;
+
+	} else if (tokencmp(tokens[2], "local")) {
+		// Generate spec of bulk loading local files and submit the bulk loading task.
+		// This is used for testing of bulkload task engine.
+		// Therefore, some information of manifest is ignored.
+		if (tokens.size() < 8) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		Key rangeBegin = tokens[3];
+		Key rangeEnd = tokens[4];
+		// Bulk load can only inject data to normal key space, aka "" ~ \xff
+		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		std::string folder = tokens[5].toString();
+		std::string dataFile = tokens[6].toString();
+		std::string byteSampleFile = tokens[7].toString();
+		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+		BulkLoadFileSet fileSet =
+		    BulkLoadFileSet(folder, "", generateEmptyManifestFileName(), dataFile, byteSampleFile, BulkLoadChecksum());
+		state BulkLoadTaskState bulkLoadTask =
+		    createBulkLoadTask(deterministicRandom()->randomUniqueID(),
+		                       range,
+		                       fileSet,
+		                       BulkLoadByteSampleSetting(0, "hashlittle2", 0, 0, 0), // We fake it here
+		                       /*snapshotVersion=*/invalidVersion,
+		                       /*bytes=*/-1,
+		                       /*keyCount=*/-1,
+		                       BulkLoadType::SST,
+		                       BulkLoadTransportMethod::CP);
+		wait(submitBulkLoadTask(cx, bulkLoadTask));
+		return bulkLoadTask.getTaskId();
+
+	} else if (tokencmp(tokens[2], "status")) {
+		// Get progress of existing bulk loading tasks intersecting the input range
+		if (tokens.size() < 7) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		Key rangeBegin = tokens[3];
+		Key rangeEnd = tokens[4];
+		// Bulk load can only inject data to normal key space, aka "" ~ \xff
+		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+		std::string inputPhase = tokens[5].toString();
+		Optional<BulkLoadPhase> phase;
+		if (inputPhase == "all") {
+			phase = Optional<BulkLoadPhase>();
+		} else if (inputPhase == "submitted") {
+			phase = BulkLoadPhase::Submitted;
+		} else if (inputPhase == "triggered") {
+			phase = BulkLoadPhase::Triggered;
+		} else if (inputPhase == "running") {
+			phase = BulkLoadPhase::Running;
+		} else if (inputPhase == "complete") {
+			phase = BulkLoadPhase::Complete;
+		} else if (inputPhase == "acknowledged") {
+			phase = BulkLoadPhase::Acknowledged;
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		int countLimit = std::stoi(tokens[6].toString());
+		wait(getBulkLoadTaskStateByRange(cx, range, countLimit, phase));
+		return UID();
+
+	} else {
+		printUsage(tokens[0]);
+		return UID();
+	}
+}
+
+ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 	if (tokencmp(tokens[1], "mode")) {
 		// Set bulk loading mode
 		if (tokens.size() != 3) {
@@ -92,91 +214,76 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 			printUsage(tokens[0]);
 			return UID();
 		}
-	} else if (tokencmp(tokens[1], "acknowledge")) {
-		// Acknowledge any completed bulk loading task and clear the corresponding metadata
-		if (tokens.size() != 5) {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		state UID taskId = UID::fromString(tokens[2].toString());
-		Key rangeBegin = tokens[3];
-		Key rangeEnd = tokens[4];
-		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		wait(finalizeBulkLoadTask(cx, range, taskId));
+	} else if (tokencmp(tokens[1], "unittest")) {
+		// For internal unit test only
+		UID taskId = wait(bulkLoadUnitTestCommandActor(cx, tokens));
 		return taskId;
 
 	} else if (tokencmp(tokens[1], "local")) {
-		// Generate spec of bulk loading local files and submit the bulk loading task.
-		// This is used for testing of bulkload task engine.
-		// Therefore, some information of manifest is ignored.
-		if (tokens.size() < 7) {
+		if (tokens.size() != 6) {
 			printUsage(tokens[0]);
 			return UID();
 		}
-		Key rangeBegin = tokens[2];
-		Key rangeEnd = tokens[3];
+		UID jobId = UID::fromString(tokens[2].toString());
+		Key rangeBegin = tokens[3];
+		Key rangeEnd = tokens[4];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
 		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
 			printUsage(tokens[0]);
 			return UID();
 		}
-		std::string folder = tokens[4].toString();
-		std::string dataFile = tokens[5].toString();
-		std::string byteSampleFile = tokens[6].toString();
+		std::string jobRoot = tokens[5].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		BulkLoadFileSet fileSet =
-		    BulkLoadFileSet(folder, "", generateEmptyManifestFileName(), dataFile, byteSampleFile, BulkLoadChecksum());
-		state BulkLoadTaskState bulkLoadTask =
-		    createBulkLoadTask(deterministicRandom()->randomUniqueID(),
-		                       range,
-		                       fileSet,
-		                       BulkLoadByteSampleSetting(0, "hashlittle2", 0, 0, 0), // We fake it here
-		                       /*snapshotVersion=*/invalidVersion,
-		                       /*bytes=*/-1,
-		                       /*keyCount=*/-1,
-		                       BulkLoadType::SST,
-		                       BulkLoadTransportMethod::CP);
-		wait(submitBulkLoadTask(cx, bulkLoadTask));
-		return bulkLoadTask.getTaskId();
+		state BulkLoadJobState bulkLoadJob = createBulkLoadJob(jobId, range, jobRoot, BulkLoadTransportMethod::CP);
+		wait(submitBulkLoadJob(cx, bulkLoadJob));
+		return bulkLoadJob.getJobId();
+
+	} else if (tokencmp(tokens[1], "blobstore")) {
+		if (tokens.size() != 6) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		UID jobId = UID::fromString(tokens[2].toString());
+		Key rangeBegin = tokens[3];
+		Key rangeEnd = tokens[4];
+		// Bulk load can only inject data to normal key space, aka "" ~ \xff
+		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		std::string jobRoot = tokens[5].toString();
+		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
+		BulkLoadJobState bulkLoadJob = createBulkLoadJob(jobId, range, jobRoot, BulkLoadTransportMethod::BLOBSTORE);
+		wait(submitBulkLoadJob(cx, bulkLoadJob));
+		return bulkLoadJob.getJobId();
+
+	} else if (tokencmp(tokens[1], "clear")) {
+		if (tokens.size() != 3) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		state UID jobId = UID::fromString(tokens[2].toString());
+		wait(clearBulkLoadJob(cx, jobId));
+		fmt::println("Job {} has been cleared. No task will be spawned.", jobId.toString());
+		return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
-		// Get progress of existing bulk loading tasks intersecting the input range
-		if (tokens.size() < 6) {
+		if (tokens.size() != 4) {
 			printUsage(tokens[0]);
+			return UID();
+		}
+		bool anyJob = wait(getOngoingBulkLoadJob(cx));
+		if (!anyJob) {
 			return UID();
 		}
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
-		// Bulk load can only inject data to normal key space, aka "" ~ \xff
 		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
 			printUsage(tokens[0]);
 			return UID();
 		}
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		std::string inputPhase = tokens[4].toString();
-		Optional<BulkLoadPhase> phase;
-		if (inputPhase == "all") {
-			phase = Optional<BulkLoadPhase>();
-		} else if (inputPhase == "submitted") {
-			phase = BulkLoadPhase::Submitted;
-		} else if (inputPhase == "triggered") {
-			phase = BulkLoadPhase::Triggered;
-		} else if (inputPhase == "running") {
-			phase = BulkLoadPhase::Running;
-		} else if (inputPhase == "complete") {
-			phase = BulkLoadPhase::Complete;
-		} else if (inputPhase == "acknowledged") {
-			phase = BulkLoadPhase::Acknowledged;
-		} else {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		int countLimit = std::stoi(tokens[5].toString());
-		wait(getBulkLoadTaskStateByRange(cx, range, countLimit, phase));
+		wait(getBulkLoadCompleteRanges(cx, range));
 		return UID();
 
 	} else {
@@ -187,12 +294,17 @@ ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clust
 
 CommandFactory bulkLoadFactory(
     "bulkload",
-    CommandHelp("bulkload [mode|acknowledge|local|status] [ARGs]",
-                "bulkload commands",
-                "To set bulkLoad mode: `bulkload mode [on|off]'\n"
-                "To acknowledge completed tasks within a range: `bulkload acknowledge <TaskID> <BeginKey> <EndKey>'\n"
-                "To trigger a task injecting a SST file from local file system: `bulkload local <BeginKey> <EndKey> "
-                "<Folder> <DataFile> <ByteSampleFile>'\n"
-                "To get progress of tasks within a range: `bulkload status <BeginKey> <EndKey> "
-                "[all|submitted|triggered|running|complete] <limit>'\n"));
+    CommandHelp(
+        "bulkload [mode|acknowledge|local|status] [ARGs]",
+        "bulkload commands",
+        "To set bulkload mode: `bulkload mode [on|off]'\n"
+        "To load a range from SST files: `bulkload [local|blobstore] <BeginKey> <EndKey> dumpFolder`\n"
+        "To clear current bulkload job: `bulkload clear <JobID>`\n"
+        "To get completed bulkload ranges: `bulkload status <BeginKey> <EndKey>`\n"
+        "BulkLoad tasks are operated when setting unittest.\n"
+        "To acknowledge completed tasks within a range: `bulkload unittest acknowledge <TaskID> <BeginKey> <EndKey>'\n"
+        "To trigger a task injecting a SST file from local file system: `bulkload unittest local <BeginKey> <EndKey> "
+        "<Folder> <DataFile> <ByteSampleFile>'\n"
+        "To get progress of tasks within a range: `bulkload unittest status <BeginKey> <EndKey> "
+        "[all|submitted|triggered|running|complete] <limit>'\n"));
 } // namespace fdb_cli

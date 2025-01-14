@@ -1715,15 +1715,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "bulkload")) {
-					UID taskId = wait(makeInterruptable(bulkLoadCommandActor(ccf, localDb, tokens)));
+					UID taskId = wait(makeInterruptable(bulkLoadCommandActor(localDb, tokens)));
 					if (taskId.isValid()) {
-						printf("Received bulkload task: %s\n", taskId.toString().c_str());
+						printf("Received Job ID: %s\n", taskId.toString().c_str());
 					}
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "bulkdump")) {
-					UID jobId = wait(makeInterruptable(bulkDumpCommandActor(ccf, localDb, tokens)));
+					UID jobId = wait(makeInterruptable(bulkDumpCommandActor(localDb, tokens)));
 					if (jobId.isValid()) {
 						printf("Received Job ID: %s\n", jobId.toString().c_str());
 					}

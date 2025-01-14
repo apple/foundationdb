@@ -2972,7 +2972,7 @@ ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange rang
 	return Void();
 }
 
-// We acknowledge a bulkload task when the bulkload job see the task completes.
+// We finalize a bulkload task when the bulkload job see the task completes.
 // Update bulkload task to acknowledge state and unlock the range.
 // A acknowledged bulkload task will be automatically erased by DD.
 ACTOR Future<Void> finalizeBulkLoadTask(Database cx, KeyRange range, UID taskId) {
@@ -3162,6 +3162,7 @@ ACTOR Future<Void> clearBulkLoadJob(Database cx, UID jobId) {
 					throw bulkload_task_outdated();
 				}
 			}
+			// TODO(BulkLoad): cancel bulkload task
 			wait(krmSetRangeCoalescing(&tr, bulkLoadJobPrefix, rangeToRead, normalKeys, StringRef()));
 			wait(tr.commit());
 			tr.reset();
@@ -3172,6 +3173,48 @@ ACTOR Future<Void> clearBulkLoadJob(Database cx, UID jobId) {
 		}
 	}
 	return Void();
+}
+
+ACTOR Future<size_t> getBulkLoadCompleteTaskCount(Database cx, KeyRange rangeToRead) {
+	state Transaction tr(cx);
+	state Key readBegin = rangeToRead.begin;
+	state Key readEnd = rangeToRead.end;
+	state RangeResult rangeResult;
+	state size_t completeTaskCount = 0;
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkLoadJobPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+		for (int i = 0; i < rangeResult.size() - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkLoadJobState bulkLoadJobState = decodeBulkLoadJobState(rangeResult[i].value);
+			if (bulkLoadJobState.getPhase() == BulkLoadJobPhase::Complete) {
+				completeTaskCount++;
+			}
+		}
+		readBegin = rangeResult.back().key;
+	}
+	return completeTaskCount;
 }
 
 ACTOR Future<int> setBulkDumpMode(Database cx, int mode) {

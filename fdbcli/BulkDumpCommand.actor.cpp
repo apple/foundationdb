@@ -62,9 +62,7 @@ ACTOR Future<Void> getBulkDumpCompleteRanges(Database cx, KeyRange rangeToRead) 
 	return Void();
 }
 
-ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clusterFile,
-                                       Database cx,
-                                       std::vector<StringRef> tokens) {
+ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 	state BulkDumpState bulkDumpJob;
 	if (tokencmp(tokens[1], "mode")) {
 		if (tokens.size() != 2 && tokens.size() != 3) {
@@ -108,9 +106,9 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
 			printUsage(tokens[0]);
 			return UID();
 		}
-		std::string remoteRoot = tokens[4].toString();
+		std::string jobRoot = tokens[4].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		bulkDumpJob = createBulkDumpJob(range, remoteRoot, BulkLoadType::SST, BulkLoadTransportMethod::CP);
+		bulkDumpJob = createBulkDumpJob(range, jobRoot, BulkLoadType::SST, BulkLoadTransportMethod::CP);
 		wait(submitBulkDumpJob(cx, bulkDumpJob));
 		return bulkDumpJob.getJobId();
 
@@ -126,9 +124,9 @@ ACTOR Future<UID> bulkDumpCommandActor(Reference<IClusterConnectionRecord> clust
 			printUsage(tokens[0]);
 			return UID();
 		}
-		std::string remoteRoot = tokens[4].toString();
+		std::string jobRoot = tokens[4].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		bulkDumpJob = createBulkDumpJob(range, remoteRoot, BulkLoadType::SST, BulkLoadTransportMethod::BLOBSTORE);
+		bulkDumpJob = createBulkDumpJob(range, jobRoot, BulkLoadType::SST, BulkLoadTransportMethod::BLOBSTORE);
 		wait(submitBulkDumpJob(cx, bulkDumpJob));
 		return bulkDumpJob.getJobId();
 
@@ -172,7 +170,7 @@ CommandFactory bulkDumpFactory(
     CommandHelp("bulkdump [mode|local|blobstore|clear|status] [ARGs]",
                 "bulkdump commands",
                 "To set bulkdump mode: `bulkdump mode [on|off]'\n"
-                "To dump a range to SST files: `bulkdump [local|blobstore] <BeginKey> <EndKey> dumpFolder`\n"
+                "To dump a range to SST files: `bulkdump [local|blobstore] <BeginKey> <EndKey> jobRoot`\n"
                 "To clear current bulkdump job: `bulkdump clear <JobID>`\n"
                 "To get completed bulkdump ranges: `bulkdump status <BeginKey> <EndKey>`\n"));
 } // namespace fdb_cli
