@@ -258,7 +258,7 @@ if [[ "${USE_S3}" == "true" ]]; then
   readonly TEST_SCRATCH_DIR
   if ! readarray -t configs < <(aws_setup "${TEST_SCRATCH_DIR}"); then
     err "Failed aws_setup"
-    return 1
+    exit 1
   fi
   readonly host="${configs[0]}"
   readonly bucket="${configs[1]}"
@@ -276,12 +276,12 @@ else
   fi
   if ! TEST_SCRATCH_DIR=$(create_weed_dir "${scratch_dir}"); then
     err "Failed create of the weed dir." >&2
-    return 1
+    exit 1
   fi
   readonly TEST_SCRATCH_DIR
   if ! host=$( run_weed "${scratch_dir}" "${TEST_SCRATCH_DIR}"); then
     err "Failed to run seaweed"
-    return 1
+    exit 1
   fi
   readonly host
   readonly bucket="${SEAWEED_BUCKET}"

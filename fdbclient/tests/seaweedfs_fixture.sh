@@ -178,7 +178,7 @@ function start_weed {
       # Dump out the tail of the weed log because its going to get cleaned up when
       # we exit this script. Give the user an idea of what went wrong.
       if [[ -f "${dir}/weed.INFO" ]]; then
-        tail -50 "${dir}/weed.INFO" >&2
+        tail -1000 "${dir}/weed.INFO" >&2
       fi
       echo "ERROR: Failed to start weed" >&2
       return 1
