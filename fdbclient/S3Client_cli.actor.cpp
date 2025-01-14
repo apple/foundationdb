@@ -111,18 +111,18 @@ static void printUsage(std::string const& programName) {
 	             "                 Has no effect unless --log is specified.\n"
 	             "  --blob-credentials FILE\n"
 	             "                 File containing blob credentials in JSON format.\n"
-	             "                 The same credential format/file fdbbackup uses.\n" TLS_HELP
+	             "                 The same credential format/file fdbbackup uses.\n"
+	             "                 See 'Blob Credential Files' in https://apple.github.io/foundationdb/backups.html.\n"
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --knob-KNOBNAME KNOBVALUE\n"
 	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
 	             "EXAMPLES:\n"
 	             " "
 	          << programName
-	          << " --blob-credentials /path/to/credentials.json cp /path/to/source /path/to/target\n"
-	             " "
-	          << programName
-	          << " --knob_http_verbose_level=10 --log  "
-	             "cp 'blobstore://localhost:8333/x?bucket=backup&region=us&secure_connection=0' dir3\n";
+	          << " --knob_http_verbose_level=10 --tls-ca-file /etc/ssl/cert.pem \\\n"
+	             " --blob-credentials /tmp/s3.6GWo/blob_credentials.json --log --logdir /tmp/s3.6GWo/logs cp \\\n"
+	             " 'blobstore://@backup-us-west-2.s3.amazonaws.com/dir/x.txt?bucket=backup-us-west-2&region=us-west-2' "
+	             "/tmp/x.txt\n";
 	return;
 }
 
