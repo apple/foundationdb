@@ -1496,6 +1496,7 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		bulkLoadJob =
 		    BulkLoadJobState(jobId, jobRoot, jobRange, jobTransportMethod, BulkLoadJobPhase::Triggered, manifest);
 		ASSERT(bulkLoadJob.isValidTask());
+
 		// Step 2: Trigger bulkload task which is handled by bulkload task engine
 		wait(store(bulkLoadTask, bulkLoadJobTriggerTask(self, bulkLoadJob)));
 		TraceEvent(SevInfo, "DDBulkLoadJobNewTaskTriggered", self->ddId)
@@ -1545,8 +1546,10 @@ ACTOR Future<Void> bulkLoadJobOnRuningTask(Reference<DataDistributor> self, Bulk
 	state Transaction tr(cx);
 	state BulkLoadTaskState bulkLoadTask;
 	try {
+		// Step 1: Get ongoing bulkload task
 		// Currently, if there is an existing bulkload task, the task is guaranteed to be completed.
-		// TODO(BulkLoad): We will add bulkload task cancellation. In this case, we need to handle this scenario.
+		// TODO(BulkLoad): Check if the bulkload job id matches. We will add bulkload task cancellation. In this case,
+		// we need to handle this scenario.
 		wait(store(bulkLoadTask, bulkLoadJobGetOngoingTask(self, bulkLoadJob.getManifestRange())));
 		TraceEvent(SevInfo, "DDBulkLoadJobOnRunningTask", self->ddId)
 		    .setMaxEventLength(-1)
@@ -1596,7 +1599,6 @@ ACTOR Future<Void> bulkLoadJobMarkEmptyRangeComplete(Reference<DataDistributor> 
                                                      BulkLoadTransportMethod jobTransportMethod,
                                                      std::string manifestLocalTempFolder,
                                                      BulkLoadJobFileManifestEntry manifestEntry) {
-	ASSERT(bulkLoadJob.getPhase() == BulkLoadJobPhase::Complete);
 	state Database cx = self->txnProcessor->context();
 	state Transaction tr(cx);
 	state BulkLoadJobState bulkLoadJob;
