@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Test bulkload. Uses seaweedfs:
+# Test bulkload. Uses S3 or seaweedfs if not available:
 # (https://github.com/seaweedfs/seaweedfs) as substitute.
 #
 # In the below we start a small FDB cluster, populate it with
@@ -13,14 +13,15 @@
 # so you can manually rerun commands or peruse logs and data
 # under SCRATCH_DIR.
 
-# Install signal traps. Depends on globals being set.
-# Calls the cleanup function.
+# Make sure cleanup on script exit.
 trap "exit 1" HUP INT PIPE QUIT TERM
 trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
 function cleanup {
-  shutdown_fdb_cluster
+  if type shutdown_fdb_cluster &> /dev/null; then
+    shutdown_fdb_cluster
+  fi
   if type shutdown_weed &> /dev/null; then
     shutdown_weed "${TEST_SCRATCH_DIR}"
   fi
@@ -43,9 +44,10 @@ function resolve_to_absolute_path {
 }
 
 # Run the bulkdump command.
-# $1 The build directory
+# $1 The url to dump to
 # $2 The scratch directory
-# $3 The weed port s3 is listening on.
+# $3 Credentials to use
+# $4 build directory
 function bulkdump {
   local local_url="${1}"
   local local_scratch_dir="${2}"
@@ -116,11 +118,39 @@ function test_basic_bulkdump_and_bulkload {
     err "Failed loading data into fdb"
     return 1
   fi
+  # Comment out for now till its working.
+  #if [[ "${USE_S3}" == "true" ]]; then
+  if false; then
+    # Run this rm only if s3. In seaweed, it would fail because
+    # bucket doesn't exist yet (they are lazily created).
+    if ! "${local_build_dir}/bin/s3client" \
+        "${KNOBS[*]}" \
+        --tls-ca-file "${TLS_CA_FILE}" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${local_scratch_dir}" \
+        rm "${local_url}"; then
+      err "Failed rm of ${local_url}"
+      return 1
+    fi
+  fi
   log "Run bulkdump"
   if ! bulkdump "${local_url}" "${local_scratch_dir}" "${credentials}" "${local_build_dir}"; then
     err "Failed bulkdump"
     return 1
   fi
+  if ! clear_data "${local_build_dir}" "${local_scratch_dir}"; then
+    err "Failed clear data in fdb"
+    return 1
+  fi
+  #if ! bulkload "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}"; then
+  #  err "Failed bulkload"
+  #  return 1
+  #fi
+  #log "Verify restore"
+  #if ! verify_data "${local_build_dir}" "${local_scratch_dir}"; then
+  #  err "Failed verification of data in fdb"
+  #  return 1
+  #fi
   log "Check for Severity=40 errors"
   if ! grep_for_severity40 "${local_scratch_dir}"; then
     err "Found Severity=40 errors in logs"
@@ -135,14 +165,23 @@ set -o pipefail
 set -o noclobber
 
 # Globals
-
 # TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
 # It gets cleaned up on the way out of the test.
 TEST_SCRATCH_DIR=
 TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
 readonly TLS_CA_FILE
-S3_RESOURCE="bulkdump-$(date -Iseconds | sed -e 's/[[:punct:]]/-/g')"
-readonly S3_RESOURCE
+readonly HTTP_VERBOSE_LEVEL=10
+KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+readonly KNOBS
+# Should we use S3? If USE_S3 is not defined, then check if
+# OKTETO_NAMESPACE is defined (It is defined on the okteto
+# internal apple dev environments where S3 is available).
+readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
+# Clear these environment variables. fdbbackup goes looking for them
+# and if EITHER is set, it will go via a proxy instead of to where we.
+# want it to go.
+unset HTTP_PROXY
+unset HTTPS_PROXY
 
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
@@ -181,38 +220,69 @@ if [[ ! -d "${build_dir}" ]]; then
   err "${build_dir} is not a directory"
   exit 1
 fi
-# Set up scratch directory global.
 scratch_dir="${TMPDIR:-/tmp}"
 if (( $# == 3 )); then
   scratch_dir="${3}"
 fi
 readonly scratch_dir
 
-# Now source in the seaweedfs fixture so we can use its methods in the below.
-# shellcheck source=/dev/null
-if ! source "${cwd}/seaweedfs_fixture.sh"; then
-  err "Failed to source seaweedfs_fixture.sh"
-  exit 1
+# Set host, bucket, and blob_credentials_file whether seaweed or s3.
+readonly path_prefix="bulkload/ctests"
+host=
+query_str=
+blob_credentials_file=
+# Comment out for now till its working.
+#if [[ "${USE_S3}" == "true" ]]; then
+if false; then
+  log "Testing against s3"
+  # Now source in the aws fixture so we can use its methods in the below.
+  # shellcheck source=/dev/null
+  if ! source "${cwd}/../../fdbclient/tests/aws_fixture.sh"; then
+    err "Failed to source aws_fixture.sh"
+    exit 1
+  fi
+  if ! TEST_SCRATCH_DIR=$( create_aws_dir "${scratch_dir}" ); then
+    err "Failed creating local aws_dir"
+    exit 1
+  fi
+  readonly TEST_SCRATCH_DIR
+  if ! readarray -t configs < <(aws_setup "${TEST_SCRATCH_DIR}"); then
+    err "Failed aws_setup"
+    return 1
+  fi
+  readonly host="${configs[0]}"
+  readonly bucket="${configs[1]}"
+  readonly blob_credentials_file="${configs[2]}"
+  readonly region="${configs[3]}"
+  query_str="bucket=${bucket}&region=${region}"
+  # Make these environment variables available for the fdb cluster when s3.
+  export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
+  export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
+else
+  log "Testing against seaweedfs"
+  # Now source in the seaweedfs fixture so we can use its methods in the below.
+  # shellcheck source=/dev/null
+  if ! source "${cwd}/../../fdbclient/tests/seaweedfs_fixture.sh"; then
+    err "Failed to source seaweedfs_fixture.sh"
+    exit 1
+  fi
+  if ! TEST_SCRATCH_DIR=$(create_weed_dir "${scratch_dir}"); then
+    err "Failed create of the weed dir." >&2
+    return 1
+  fi
+  readonly TEST_SCRATCH_DIR
+  if ! host=$( run_weed "${scratch_dir}" "${TEST_SCRATCH_DIR}"); then
+    err "Failed to run seaweed"
+    return 1
+  fi
+  readonly host
+  readonly bucket="${SEAWEED_BUCKET}"
+  readonly region="all_regions"
+  # Reference a non-existent blob file (its ignored by seaweed)
+  readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
+  # Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
+  query_str="bucket=${bucket}&region=${region}&secure_connection=0"
 fi
-# Here we create a tmpdir to hold seaweed logs and data in global WEED_DIR hosted
-# by seaweedfs_fixture.sh which we sourced above. Call shutdown_weed to clean up.
-if ! TEST_SCRATCH_DIR=$( create_weed_dir "${scratch_dir}" ); then
-  err "failed create of the weed dir." >&2
-  exit 1
-fi
-readonly TEST_SCRATCH_DIR
-if ! host=$( run_weed "${scratch_dir}" "${TEST_SCRATCH_DIR}"); then
-  err "Failed to run seaweed"
-  return 1
-fi
-readonly host
-readonly bucket="${SEAWEED_BUCKET}"
-readonly region="all_regions"
-# Reference a non-existent blob file (its ignored by seaweed)
-readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
-# Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
-readonly query_str="bucket=${bucket}&region=${region}&secure_connection=0"
-readonly path_prefix="bulkload"
 
 # Source in the fdb cluster.
 # shellcheck source=/dev/null

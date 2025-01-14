@@ -170,6 +170,7 @@ set -o nounset  # a.k.a. set -u
 set -o pipefail
 set -o noclobber
 
+# Globals
 # TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
 # It gets cleaned up on the way out of the test.
 TEST_SCRATCH_DIR=
@@ -183,8 +184,6 @@ readonly TAG="test_backup"
 # OKTETO_NAMESPACE is defined (It is defined on the okteto
 # internal apple dev environments where S3 is available).
 readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
-S3_RESOURCE="backup-$(date -Iseconds | sed -e 's/[[:punct:]]/-/g')"
-readonly S3_RESOURCE
 # Clear these environment variables. fdbbackup goes looking for them
 # and if EITHER is set, it will go via a proxy instead of to where we.
 # want it to go.
@@ -228,7 +227,6 @@ if [[ ! -d "${build_dir}" ]]; then
   err "${build_dir} is not a directory"
   exit 1
 fi
-# Set up scratch directory global.
 scratch_dir="${TMPDIR:-/tmp}"
 if (( $# == 3 )); then
   scratch_dir="${3}"
@@ -262,7 +260,7 @@ if [[ "${USE_S3}" == "true" ]]; then
   readonly blob_credentials_file="${configs[2]}"
   readonly region="${configs[3]}"
   query_str="bucket=${bucket}&region=${region}"
-  # Set available when the fdb cluster and the backup_agent starts.
+  # Make these environment variables available for the fdb cluster and backup_agent when s3.
   export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
   export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
 else
@@ -291,6 +289,7 @@ else
   query_str="bucket=${bucket}&region=${region}&secure_connection=0"
 fi
 
+# Source in the fdb cluster.
 # shellcheck source=/dev/null
 if ! source "${cwd}/../../fdbclient/tests/fdb_cluster_fixture.sh"; then
   err "Failed to source fdb_cluster_fixture.sh"

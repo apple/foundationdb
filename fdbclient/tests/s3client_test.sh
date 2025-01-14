@@ -184,9 +184,7 @@ function test_dir_upload_and_download {
   fi
 }
 
-# Some copied from down the page on
-# https://stackoverflow.com/questions/192249/how-do-i-parse-command-line-arguments-in-bash
-# set -o xtrace   # a.k.a set -x
+# set -o xtrace   # a.k.a set -x  # Set this one when debugging (or 'bash -x THIS_SCRIPT').
 set -o errexit  # a.k.a. set -e
 set -o nounset  # a.k.a. set -u
 set -o pipefail

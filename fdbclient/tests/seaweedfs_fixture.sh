@@ -121,7 +121,7 @@ function download_weed {
 function create_weed_dir {
   local dir="${1}"
   local weed_dir
-  weed_dir=$(mktemp -d -p "${dir}" -t weed.XXXX)
+  weed_dir=$(mktemp -d -p "${dir}" -t weed.$$.XXXX)
   # Exit if the temp directory wasn't created successfully.
   if [[ ! -d "${weed_dir}" ]]; then
     echo "ERROR: Failed create of weed directory ${weed_dir}" >&2

@@ -40,7 +40,7 @@ function shutdown_aws {
 function create_aws_dir {
   local dir="${1}"
   local aws_dir
-  aws_dir=$(mktemp -d -p "${dir}" -t s3.XXXX)
+  aws_dir=$(mktemp -d -p "${dir}" -t s3.$$.XXXX)
   # Exit if the temp directory wasn't created successfully.
   if [[ ! -d "${aws_dir}" ]]; then
     echo "ERROR: Failed create of aws  directory ${aws_dir}" >&2
@@ -81,6 +81,8 @@ function write_blob_credentials {
 function aws_setup {
   local local_aws_dir="${1}"
   # Fetch token, region, etc. from our aws environment.
+  # On 169.254.169.254, see
+  # https://www.baeldung.com/linux/cloud-ip-meaning#169254169254-and-other-link-local-addresses-on-the-cloud
   if ! imdsv2_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" \
       -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"); then
     err "Failed reading token"
