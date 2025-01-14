@@ -235,6 +235,9 @@ if [[ "${USE_S3}" == "true" ]]; then
   readonly blob_credentials_file="${configs[2]}"
   readonly region="${configs[3]}"
   query_str="bucket=${bucket}&region=${region}"
+  # Set available when the fdb cluster and the backup_agent starts.
+  export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
+  export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
 else
   log "Testing against seaweedfs"
   # Now source in the seaweedfs fixture so we can use its methods in the below.
@@ -260,12 +263,6 @@ else
   # Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
   query_str="bucket=${bucket}&region=${region}&secure_connection=0"
 fi
-
-# Set these environment variables so they are available when the fdb cluster and the
-# backup_agent start.
-export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
-#export FDB_TLS_VERIFY_PEERS="Check.Valid=0"
-export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
 
 # shellcheck source=/dev/null
 if ! source "${cwd}/../../fdbclient/tests/fdb_cluster_fixture.sh"; then
