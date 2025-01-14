@@ -70,13 +70,15 @@ function start_fdb_cluster {
 # Start backup_agent
 # $1 The build dir.
 # $2 The scratch dir.
+# $@ List of knobs to pass
 function start_backup_agent {
   local local_build_dir="${1}"
   local local_scratch_dir="${2}"
+  shift 2
   "${local_build_dir}/bin/backup_agent" \
     -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     --log --logdir="${local_scratch_dir}" \
-    --knob_http_verbose_level=10 &
+    ${@} &
   local pid=$!
   if ! ps -p "${pid}" &> /dev/null; then
     wait "${pid}"

@@ -3,6 +3,24 @@
 # Functions to download and start https://github.com/seaweedfs/seaweedfs,
 # a blob store with an S3 API.
 #
+# Here is how to use this fixture:
+#  # Source in the seaweedfs fixture so we can use its methods in the below.
+#  if ! source "${cwd}/seaweedfs_fixture.sh"; then
+#    err "Failed to source seaweedfs_fixture.sh"
+#    exit 1
+#  fi
+#  # Save off return from create_weed_dir. You'll need it below.
+#  if ! TEST_SCRATCH_DIR=$(create_weed_dir "${scratch_dir}"); then
+#    err "Failed create of the weed dir." >&2
+#    return 1
+#  fi
+#  readonly TEST_SCRATCH_DIR
+#  if ! host=$( run_weed "${scratch_dir}" "${TEST_SCRATCH_DIR}"); then
+#    err "Failed to run seaweed"
+#    return 1
+#  fi
+#  # When done, call shutdown_weed passing TEST_SCRATCH_DIR.
+#
 
 # Globals.
 # Use same bucket always because seaweed makes volumes per bucket and
@@ -13,15 +31,15 @@ export SEAWEED_BUCKET
 
 # Cleanup the mess we've made. For calling from signal trap on exit.
 function shutdown_weed {
-  local local_scratch_dir="${1}"
-  if [[ -f "${local_scratch_dir}/weed.pid" ]]; then
+  local local_test_scratch_dir="${1}"
+  if [[ -f "${local_test_scratch_dir}/weed.pid" ]]; then
     # KILL! If we send SIGTERM, seaweedfs hangs out
     # ten seconds before shutting down (could config.
     # time but just kill it -- there is no state to save).
-    kill -9 $(cat "${local_scratch_dir}/weed.pid")
+    kill -9 $(cat "${local_test_scratch_dir}/weed.pid")
   fi
-  if [[ -d "${local_scratch_dir}" ]]; then
-    rm -rf "${local_scratch_dir}"
+  if [[ -d "${local_test_scratch_dir}" ]]; then
+    rm -rf "${local_test_scratch_dir}"
   fi
 }
 
@@ -182,22 +200,23 @@ function start_weed {
 }
 
 # Run seaweed.
-# Source this script and then do `run_weed WEED_DIR`
-# User will have to shut it down.
-# $1 Dir to use
+# Call create_weed_dir first so you have a test_scratch_dir to pass in here.
+# User will have to shut it down by calling shutdown_weed ${test_scratch_dir}.
+# $1 Where to download weed binary to (we will check this dir to see if already
+# a weed binary downloaded).
+# $2 weed_dir (return after calling create_weed_dir so call it first).
+# Returns s3 host to use for talking to weed.
 function run_weed {
-  local local_scratch_dir="${1}"
-  if ! weed_binary_path="$(download_weed "${local_scratch_dir}")"; then
+  local weed_download_dir="${1}"
+  local local_weed_dir="${2}"
+  local weed_binary_path
+  if ! weed_binary_path="$(download_weed "${weed_download_dir}")"; then
     echo "ERROR: failed download of weed binary." >&2
     return 1
   fi
-  local dir
-  if ! dir=$(create_weed_dir "${local_scratch_dir}"); then
-    echo "ERROR: failed create of the weed dir." >&2
-    return 1
-  fi
-  if ! s3_port=$(start_weed "${weed_binary_path}" "${dir}"); then
+  if ! s3_port=$(start_weed "${weed_binary_path}" "${local_weed_dir}"); then
     echo "ERROR: failed start of weed server." >&2
     return 1
   fi
+  echo "localhost:${s3_port}"
 }

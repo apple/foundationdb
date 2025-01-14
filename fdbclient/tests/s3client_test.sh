@@ -56,7 +56,7 @@ function upload_download {
   # (seaweed doesn't support asking for hash in GET request so
   # it fails the request as malformed).
   local integrity_check=false
-  if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then
+  if [[ "${USE_S3}" == "true" ]]; then
     # Enable integrity checking unless an override.
     if [[ "${no_integrity_check}" == false ]]; then
       integrity_check=true
@@ -67,9 +67,7 @@ function upload_download {
         --knob_http_verbose_level=10 \
         --knob_blobstore_encryption_type=aws:kms \
         --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
-        --tls-ca-file ${TLS_CA_FILE} \
-        --tls-certificate-file "${dir}/cert.pem" \
-        --tls-key-file "${dir}/key.pem" \
+        --tls-ca-file "${TLS_CA_FILE}" \
         --blob-credentials "${credentials}" \
         --log --logdir "${logsdir}" \
         rm "${url}"; then
@@ -81,9 +79,7 @@ function upload_download {
       --knob_http_verbose_level=10 \
       --knob_blobstore_encryption_type=aws:kms \
       --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
-      --tls-ca-file ${TLS_CA_FILE} \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
+      --tls-ca-file "${TLS_CA_FILE}" \
       --blob-credentials "${credentials}" \
       --log --logdir "${logsdir}" \
       cp "${object}" "${url}"; then
@@ -94,9 +90,7 @@ function upload_download {
       --knob_http_verbose_level=10 \
       --knob_blobstore_encryption_type=aws:kms \
       --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
-      --tls-ca-file ${TLS_CA_FILE} \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
+      --tls-ca-file "${TLS_CA_FILE}" \
       --blob-credentials "${credentials}" \
       --log --logdir "${logsdir}" \
       cp "${url}" "${downloaded_object}"; then
@@ -107,9 +101,7 @@ function upload_download {
       --knob_http_verbose_level=10 \
       --knob_blobstore_encryption_type=aws:kms \
       --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
-      --tls-ca-file ${TLS_CA_FILE} \
-      --tls-certificate-file "${dir}/cert.pem" \
-      --tls-key-file "${dir}/key.pem" \
+      --tls-ca-file "${TLS_CA_FILE}" \
       --blob-credentials "${credentials}" \
       --log --logdir "${logsdir}" \
       rm "${url}"; then
@@ -207,6 +199,10 @@ set -o noclobber
 TEST_SCRATCH_DIR=
 TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
 readonly TLS_CA_FILE
+# Should we use S3? If USE_S3 is not defined, then check if
+# OKTETO_NAMESPACE is defined (It is defined on the okteto
+# internal apple dev environments where S3 is available).
+readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
 
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
@@ -247,7 +243,8 @@ host=
 query_str=
 blob_credentials_file=
 path_prefix=
-if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then
+if [[ "${USE_S3}" == "true" ]]; then
+  log "Testing against s3"
   # Now source in the aws fixture so we can use its methods in the below.
   # shellcheck source=/dev/null
   if ! source "${cwd}/aws_fixture.sh"; then
@@ -259,73 +256,36 @@ if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then
     exit 1
   fi
   readonly TEST_SCRATCH_DIR
-  # Get a pem and cert file for TLS to use (Connection needs to be secure when
-  # going to S3 w/ blobstore_encryption_type=aws:kms. For seaweed we do an
-  # insecure connnection (The TLS args are ignored) just because it is a little
-  # awkward running TLS seaweedfs server. Downloading rather than
-  # generating pem and cert for now because running openssl generation fails in our dev env
-  # with 'DSO support routines:DSO_load:could not load the shared library:crypto/dso/dso_lib.c:162:'
-  curl https://raw.githubusercontent.com/FoundationDB/fdb-kubernetes-operator/refs/heads/main/config/test-certs/cert.pem \
-      -o "${TEST_SCRATCH_DIR}/cert.pem"
-  curl https://raw.githubusercontent.com/FoundationDB/fdb-kubernetes-operator/refs/heads/main/config/test-certs/key.pem \
-      -o "${TEST_SCRATCH_DIR}/key.pem"
-  # Fetch token, region, etc. from our aws environment.
-  if ! imdsv2_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" \
-      -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"); then
-    err "Failed reading token"
-    exit 1
+  if ! readarray -t configs < <(aws_setup "${TEST_SCRATCH_DIR}"); then
+    err "Failed aws_setup"
+    return 1
   fi
-  readonly imdsv2_token
-  if ! region=$( curl -H "X-aws-ec2-metadata-token: ${imdsv2_token}" \
-      "http://169.254.169.254/latest/meta-data/placement/region"); then
-    err "Failed reading region"
-    exit 1
-  fi
-  readonly region
-  if ! account_id=$( aws --output text sts get-caller-identity --query 'Account' ); then
-    err "Failed reading account id"
-    exit 1
-  fi
-  readonly account_id
-  readonly bucket="backup-${account_id}-${region}"
-  # Add the '@' in front so we force reading of credentials file when s3
-  readonly host="@${bucket}.s3.amazonaws.com"
-  if ! blob_credentials_file=$(write_blob_credentials "${imdsv2_token}" "${host}" "${TEST_SCRATCH_DIR}"); then
-    err "Failed to write credentials file"
-    exit 1
-  fi
-  readonly blob_credentials_file
-  # s3client_test is where we can write to in apple dev
+  readonly host="${configs[0]}"
+  readonly bucket="${configs[1]}"
+  readonly blob_credentials_file="${configs[2]}"
+  readonly region="${configs[3]}"
   query_str="bucket=${bucket}&region=${region}"
   path_prefix="bulkload/test/s3client"
 else
+  log "Testing against seaweedfs"
   # Now source in the seaweedfs fixture so we can use its methods in the below.
   # shellcheck source=/dev/null
   if ! source "${cwd}/seaweedfs_fixture.sh"; then
     err "Failed to source seaweedfs_fixture.sh"
     exit 1
   fi
-  # Download seaweed.
-  if ! weed_binary_path="$(download_weed "${scratch_dir}")"; then
-    err "failed download of weed binary." >&2
-    exit 1
-  fi
-  readonly weed_binary_path
-  # Here we create a tmpdir to hold seaweed logs and data in global WEED_DIR hosted
-  # by seaweedfs_fixture.sh which we sourced above. Call shutdown_weed to clean up.
-  if ! TEST_SCRATCH_DIR=$( create_weed_dir "${scratch_dir}" ); then
-    err "failed create of the weed dir." >&2
-    exit 1
+  if ! TEST_SCRATCH_DIR=$(create_weed_dir "${scratch_dir}"); then
+    err "Failed create of the weed dir." >&2
+    return 1
   fi
   readonly TEST_SCRATCH_DIR
-  log "Starting seaweed..."
-  if ! s3_port=$(start_weed "${weed_binary_path}" "${TEST_SCRATCH_DIR}"); then
-    err "failed start of weed server." >&2
-    exit 1
+  if ! host=$( run_weed "${scratch_dir}" "${TEST_SCRATCH_DIR}"); then
+    err "Failed to run seaweed"
+    return 1
   fi
-  readonly host="localhost:${s3_port}"
+  readonly host
   readonly bucket="${SEAWEED_BUCKET}"
-  readonly region="us"
+  readonly region="all_regions"
   # Reference a non-existent blob file (its ignored by seaweed)
   readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
   # Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
@@ -339,7 +299,7 @@ url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
 test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
 log_test_result $? "${test}"
 
-if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then
+if [[ "${USE_S3}" == "true" ]]; then
   # Only run this on s3. It is checking that the old s3blobstore md5 checksum still works.
   test="test_file_upload_and_download_no_integrity_check"
   url="blobstore://${host}/${path_prefix}/${test}?${query_str}"

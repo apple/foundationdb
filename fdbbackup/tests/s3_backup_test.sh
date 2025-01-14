@@ -1,13 +1,11 @@
 #!/bin/bash
 #
-# Test backup and restore from s3 where we use seaweedfs
-# (https://github.com/seaweedfs/seaweedfs) as substitute for
-# AWS S3.
+# Test backup and restore from s3.
 #
 # In the below we start a small FDB cluster, populate it with
-# some data and then start up a seaweedfs instance. We then run
-# a backup to 'S3' and then a restores. We verify
-# the restore is the same as the original.
+# some data and then start up a seaweedfs instance or use S3
+# if it is available. We then run a backup to 'S3' and then
+# a restore. We verify the restore is the same as the original.
 #
 # Debugging, run this script w/ the -x flag: e.g. bash -x s3_backup_test.sh...
 # You can also disable the cleanup. This will leave processes up
@@ -16,28 +14,6 @@
 #
 # See https://apple.github.io/foundationdb/backups.html
 
-# set -o xtrace   # a.k.a set -x  # Set this one when debugging (or 'bash -x THIS_SCRIPT').
-set -o errexit  # a.k.a. set -e
-set -o nounset  # a.k.a. set -u
-set -o pipefail
-set -o noclobber
-
-# Globals that get set below and are used when we cleanup.
-SCRATCH_DIR=
-# Use one bucket only for all tests. More buckets means
-# we need more seaweed volumes which can be an issue when
-# little diskspace
-readonly BUCKET="${S3_BUCKET:-testbucket}"
-readonly TAG="test_backup"
-S3_RESOURCE="backup-$(date -Iseconds | sed -e 's/[[:punct:]]/-/g')"
-readonly S3_RESOURCE
-readonly HTTP_VERBOSE_LEVEL=2
-# Clear these environment variables. fdbbackup goes looking for them
-# and if EITHER is set, it will go via a proxy instead of to where we.
-# want it to go.
-unset HTTP_PROXY
-unset HTTPS_PROXY
-
 # Install signal traps. Depends on globals being set.
 # Calls the cleanup function.
 trap "exit 1" HUP INT PIPE QUIT TERM
@@ -45,10 +21,14 @@ trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
 function cleanup {
-  shutdown_weed
-  shutdown_fdb_cluster
-  if [[ -d "${SCRATCH_DIR}" ]]; then
-    rm -rf "${SCRATCH_DIR}"
+  if type shutdown_fdb_cluster &> /dev/null; then
+    shutdown_fdb_cluster
+  fi
+  if type shutdown_weed &> /dev/null; then
+    shutdown_weed "${TEST_SCRATCH_DIR}"
+  fi
+  if type shutdown_aws &> /dev/null; then
+    : # shutdown_aws "${TEST_SCRATCH_DIR}"
   fi
 }
 
@@ -68,22 +48,24 @@ function resolve_to_absolute_path {
 # Run the fdbbackup command.
 # $1 The build directory
 # $2 The scratch directory
-# $3 The weed port s3 is listening on.
+# $3 The S3 url.
+# $4 credentials file
 function backup {
   local local_build_dir="${1}"
-  local scratch_dir="${2}"
-  local weed_s3_port="${3}"
+  local local_scratch_dir="${2}"
+  local local_url="${3}"
+  local local_credentials="${4}"
   # Backup to s3. Without the -k argument in the below, the backup gets
   # 'No restore target version given, will use maximum restorable version from backup description.'
   # TODO: Why is -k needed?
   if ! "${local_build_dir}"/bin/fdbbackup start \
-    -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
+    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     -t "${TAG}" -w \
-    -d "blobstore://localhost:${weed_s3_port}/${S3_RESOURCE}?bucket=${BUCKET}&secure_connection=0&region=us" \
+    -d "${local_url}" \
     -k '"" \xff' \
-    --log --logdir="${scratch_dir}" \
-    --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-    --knob_http_request_aws_v4_header=true
+    --log --logdir="${local_scratch_dir}" \
+    --blob-credentials "${local_credentials}" \
+    "${KNOBS[*]}"
   then
     err "Start fdbbackup failed"
     return 1
@@ -93,18 +75,20 @@ function backup {
 # Run the fdbrestore command.
 # $1 The build directory
 # $2 The scratch directory
-# $3 The weed port s3 is listening on.
+# $3 The S3 url
+# $4 credentials file
 function restore {
   local local_build_dir="${1}"
-  local scratch_dir="${2}"
-  local weed_s3_port="${3}"
+  local local_scratch_dir="${2}"
+  local local_url="${3}"
+  local local_credentials="${4}"
   if ! "${local_build_dir}"/bin/fdbrestore start \
-    --dest-cluster-file "${scratch_dir}/loopback_cluster/fdb.cluster" \
+    --dest-cluster-file "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     -t "${TAG}" -w \
-    -r "blobstore://localhost:${weed_s3_port}/${S3_RESOURCE}?bucket=${BUCKET}&secure_connection=0&region=us" \
-    --log --logdir="${scratch_dir}" \
-    --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" -t first_backup  \
-    --knob_http_request_aws_v4_header=true
+    -r "${url}" \
+    --log --logdir="${local_scratch_dir}" \
+    --blob-credentials "${local_credentials}" \
+    "${KNOBS[*]}"
   then
     err "Start fdbrestore failed"
     return 1
@@ -112,57 +96,73 @@ function restore {
 }
 
 # Run a backup to s3 and then a restore.
-# $1 build directory
+# $1 The url to use
 # $2 the scratch directory
-# $3 the s3_port to go against.
+# $3 The credentials file.
+# $4 build directory
 function test_s3_backup_and_restore {
-  local local_build_dir="${1}"
-  local scratch_dir="${2}"
-  local local_s3_port="${3}"
+  local local_url="${1}"
+  local local_scratch_dir="${2}"
+  local credentials="${3}"
+  local local_build_dir="${4}"
   log "Load data"
-  if ! load_data "${local_build_dir}" "${scratch_dir}"; then
+  if ! load_data "${local_build_dir}" "${local_scratch_dir}"; then
     err "Failed loading data into fdb"
     return 1
   fi
   log "Run s3 backup"
-  if ! backup "${local_build_dir}" "${scratch_dir}" "${local_s3_port}"; then
+  if ! backup "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}"; then
     err "Failed backup"
     return 1
   fi
   log "Clear fdb data"
-  if ! clear_data "${local_build_dir}" "${scratch_dir}"; then
+  if ! clear_data "${local_build_dir}" "${local_scratch_dir}"; then
     err "Failed clear data in fdb"
     return 1
   fi
   log "Restore from s3"
-  if ! restore "${local_build_dir}" "${scratch_dir}" "${local_s3_port}"; then
+  if ! restore "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}"; then
     err "Failed restore"
     return 1
   fi
   log "Verify restore"
-  if ! verify_data "${local_build_dir}" "${scratch_dir}"; then
+  if ! verify_data "${local_build_dir}" "${local_scratch_dir}"; then
     err "Failed verification of data in fdb"
     return 1
   fi
   log "Check for Severity=40 errors"
-  if ! grep_for_severity40 "${scratch_dir}"; then
+  if ! grep_for_severity40 "${local_scratch_dir}"; then
     err "Found Severity=40 errors in logs"
     return 1
   fi
 }
 
-# Log pass or fail.
-# $1 Test errcode
-# $2 Test name
-function log_test_result {
-  local test_errcode=$1
-  local test_name=$2
-  if (( "${test_errcode}" == 0 )); then
-    log "PASSED ${test_name}"
-  else
-    log "FAILED ${test_name}"
-  fi
-}
+# set -o xtrace   # a.k.a set -x  # Set this one when debugging (or 'bash -x THIS_SCRIPT').
+set -o errexit  # a.k.a. set -e
+set -o nounset  # a.k.a. set -u
+set -o pipefail
+set -o noclobber
+
+# TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
+# It gets cleaned up on the way out of the test.
+TEST_SCRATCH_DIR=
+TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
+readonly TLS_CA_FILE
+readonly HTTP_VERBOSE_LEVEL=10
+KNOBS=("--knob_http_request_aws_v4_header=true" "--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+readonly KNOBS
+readonly TAG="test_backup"
+# Should we use S3? If USE_S3 is not defined, then check if
+# OKTETO_NAMESPACE is defined (It is defined on the okteto
+# internal apple dev environments where S3 is available).
+readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
+S3_RESOURCE="backup-$(date -Iseconds | sed -e 's/[[:punct:]]/-/g')"
+readonly S3_RESOURCE
+# Clear these environment variables. fdbbackup goes looking for them
+# and if EITHER is set, it will go via a proxy instead of to where we.
+# want it to go.
+unset HTTP_PROXY
+unset HTTPS_PROXY
 
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
@@ -174,23 +174,11 @@ if ! cwd=$( cd -P "$( dirname "${path}" )" >/dev/null 2>&1 && pwd ); then
   exit 1
 fi
 readonly cwd
-# Source in the fdb cluster, backup common, and seaweedfs fixtures.
-# shellcheck source=/dev/null
-if ! source "${cwd}/../../fdbclient/tests/seaweedfs_fixture.sh"; then
-  err "Failed to source seaweedfs_fixture.sh"
-  exit 1
-fi
-# shellcheck source=/dev/null
-if ! source "${cwd}/../../fdbclient/tests/fdb_cluster_fixture.sh"; then
-  err "Failed to source fdb_cluster_fixture.sh"
-  exit 1
-fi
 # shellcheck source=/dev/null
 if ! source "${cwd}/../../fdbclient/tests/tests_common.sh"; then
   err "Failed to source tests_common.sh"
   exit 1
 fi
-
 # Process command-line options.
 if (( $# < 2 )) || (( $# > 3 )); then
     echo "ERROR: ${0} requires the fdb src and build directories --"
@@ -214,50 +202,90 @@ if [[ ! -d "${build_dir}" ]]; then
   exit 1
 fi
 # Set up scratch directory global.
-base_scratch_dir="${TMPDIR:-/tmp}"
+scratch_dir="${TMPDIR:-/tmp}"
 if (( $# == 3 )); then
-  base_scratch_dir="${3}"
+  scratch_dir="${3}"
 fi
-readonly base_scratch_dir
-# mktemp works differently on mac than on unix; the XXXX's are ignored on mac.
-if ! tmpdir=$(mktemp -p "${base_scratch_dir}" --directory -t s3backup.XXXX); then
-  err "Failed mktemp"
+readonly scratch_dir
+
+# Set host, bucket, and blob_credentials_file whether seaweed or s3.
+readonly path_prefix="ctests"
+host=
+query_str=
+blob_credentials_file=
+if [[ "${USE_S3}" == "true" ]]; then
+  log "Testing against s3"
+  # Now source in the aws fixture so we can use its methods in the below.
+  # shellcheck source=/dev/null
+  if ! source "${cwd}/../../fdbclient/tests/aws_fixture.sh"; then
+    err "Failed to source aws_fixture.sh"
+    exit 1
+  fi
+  if ! TEST_SCRATCH_DIR=$( create_aws_dir "${scratch_dir}" ); then
+    err "Failed creating local aws_dir"
+    exit 1
+  fi
+  readonly TEST_SCRATCH_DIR
+  if ! readarray -t configs < <(aws_setup "${TEST_SCRATCH_DIR}"); then
+    err "Failed aws_setup"
+    return 1
+  fi
+  readonly host="${configs[0]}"
+  readonly bucket="${configs[1]}"
+  readonly blob_credentials_file="${configs[2]}"
+  readonly region="${configs[3]}"
+  query_str="bucket=${bucket}&region=${region}"
+else
+  log "Testing against seaweedfs"
+  # Now source in the seaweedfs fixture so we can use its methods in the below.
+  # shellcheck source=/dev/null
+  if ! source "${cwd}/../../fdbclient/tests/seaweedfs_fixture.sh"; then
+    err "Failed to source seaweedfs_fixture.sh"
+    exit 1
+  fi
+  if ! TEST_SCRATCH_DIR=$(create_weed_dir "${scratch_dir}"); then
+    err "Failed create of the weed dir." >&2
+    return 1
+  fi
+  readonly TEST_SCRATCH_DIR
+  if ! host=$( run_weed "${scratch_dir}" "${TEST_SCRATCH_DIR}"); then
+    err "Failed to run seaweed"
+    return 1
+  fi
+  readonly host
+  readonly bucket="${SEAWEED_BUCKET}"
+  readonly region="all_regions"
+  # Reference a non-existent blob file (its ignored by seaweed)
+  readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
+  # Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
+  query_str="bucket=${bucket}&region=${region}&secure_connection=0"
+fi
+
+# Set these environment variables so they are available when the fdb cluster and the
+# backup_agent start.
+export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
+#export FDB_TLS_VERIFY_PEERS="Check.Valid=0"
+export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
+
+# shellcheck source=/dev/null
+if ! source "${cwd}/../../fdbclient/tests/fdb_cluster_fixture.sh"; then
+  err "Failed to source fdb_cluster_fixture.sh"
   exit 1
 fi
-SCRATCH_DIR=$(resolve_to_absolute_path "${tmpdir}")
-readonly SCRATCH_DIR
-
 # Startup fdb cluster and backup agent.
-if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${SCRATCH_DIR}"; then
+if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR}"; then
   err "Failed start FDB cluster"
   exit 1
 fi
 log "FDB cluster is up"
-if ! start_backup_agent "${build_dir}" "${SCRATCH_DIR}"; then
+if ! start_backup_agent "${build_dir}" "${TEST_SCRATCH_DIR}" "${KNOBS[*]}"; then
   err "Failed start backup_agent"
   exit 1
 fi
 log "Backup_agent is up"
 
-# Download seaweed.
-# Download to base_scratch_dir so its there for the next test.
-log "Fetching seaweedfs..."
-if ! weed_binary_path="$(download_weed "${base_scratch_dir}")"; then
-  err "Failed download of weed binary."
-  exit 1
-fi
-readonly weed_binary_path
-if ! weed_dir=$( create_weed_dir "${SCRATCH_DIR}" ); then
-  err "Failed to create the weed dir."
-  exit 1
-fi
-if ! s3_port=$(start_weed "${weed_binary_path}" "${weed_dir}" ); then
-  err "failed start of weed server."
-  exit 1
-fi
-readonly s3_port
-log "Seaweed server is up; s3.port=${s3_port}"
-
 # Run tests.
-test_s3_backup_and_restore "${build_dir}" "${SCRATCH_DIR}" "${s3_port}"
+test="test_s3_backup_and_restore"
+url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+test_s3_backup_and_restore "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}"
 log_test_result $? "test_s3_backup_and_restore"

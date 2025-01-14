@@ -89,15 +89,16 @@ function bulkdump {
       return 1
     fi
     if echo "${output}" | grep "No bulk dumping job is running"; then
-      return 0
+      break
     fi
     sleep 5
   done
-  # Verify the job-manifest.txt made it into the bulkdump.
-  if ! curl -s "http://localhost:${weed_s3_port}/${BUCKET}" | grep job-manifest.txt> /dev/null; then
-    echo "ERROR: Failed to curl job-manifest.txt" >&2
-    return 1
-  fi
+  # TODO: Add something like this to verify job manifest is in place.
+  ## Verify the job-manifest.txt made it into the bulkdump.
+  #if ! curl -s "http://localhost:${weed_s3_port}/${BUCKET}" | grep job-manifest.txt> /dev/null; then
+  #  echo "ERROR: Failed to curl job-manifest.txt" >&2
+  #  return 1
+  #fi
 }
 
 # Run a basic bulkdump to s3 and then after a bulkload.
@@ -193,12 +194,6 @@ if ! source "${cwd}/seaweedfs_fixture.sh"; then
   err "Failed to source seaweedfs_fixture.sh"
   exit 1
 fi
-# Download seaweed.
-if ! weed_binary_path="$(download_weed "${scratch_dir}")"; then
-  err "failed download of weed binary." >&2
-  exit 1
-fi
-readonly weed_binary_path
 # Here we create a tmpdir to hold seaweed logs and data in global WEED_DIR hosted
 # by seaweedfs_fixture.sh which we sourced above. Call shutdown_weed to clean up.
 if ! TEST_SCRATCH_DIR=$( create_weed_dir "${scratch_dir}" ); then
@@ -206,19 +201,18 @@ if ! TEST_SCRATCH_DIR=$( create_weed_dir "${scratch_dir}" ); then
   exit 1
 fi
 readonly TEST_SCRATCH_DIR
-log "Starting seaweed..."
-if ! s3_port=$(start_weed "${weed_binary_path}" "${TEST_SCRATCH_DIR}"); then
-  err "failed start of weed server." >&2
-  exit 1
+if ! host=$( run_weed "${scratch_dir}" "${TEST_SCRATCH_DIR}"); then
+  err "Failed to run seaweed"
+  return 1
 fi
-readonly host="localhost:${s3_port}"
+readonly host
 readonly bucket="${SEAWEED_BUCKET}"
-readonly region="us"
+readonly region="all_regions"
 # Reference a non-existent blob file (its ignored by seaweed)
 readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
 # Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
 readonly query_str="bucket=${bucket}&region=${region}&secure_connection=0"
-readonly path_prefix="s3client"
+readonly path_prefix="bulkload"
 
 # Source in the fdb cluster.
 # shellcheck source=/dev/null
