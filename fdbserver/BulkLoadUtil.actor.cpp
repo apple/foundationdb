@@ -164,21 +164,21 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 	}
 }
 
-ACTOR Future<Void> downloadSingleFile(BulkLoadTransportMethod transportMethod,
-                                      std::string fromRemotePath,
-                                      std::string toLocalPath,
-                                      UID logId) {
+ACTOR Future<Void> downloadManifestFile(BulkLoadTransportMethod transportMethod,
+                                        std::string fromRemotePath,
+                                        std::string toLocalPath,
+                                        UID logId) {
 	state int retryCount = 0;
 	loop {
 		try {
 			if (transportMethod == BulkLoadTransportMethod::CP) {
-				TraceEvent(SevInfo, "DownloadSingleFile", logId)
+				TraceEvent(SevInfo, "DownloadManifestFile", logId)
 				    .detail("FromRemotePath", fromRemotePath)
 				    .detail("ToLocalPath", toLocalPath);
 				bulkLoadFileCopy(abspath(fromRemotePath), abspath(toLocalPath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
 				wait(delay(0.1));
 			} else {
-				TraceEvent(SevError, "DownloadSingleFileError", logId)
+				TraceEvent(SevError, "DownloadManifestFileError", logId)
 				    .detail("Reason", "Transport method is not implemented")
 				    .detail("TransportMethod", transportMethod)
 				    .detail("FromRemotePath", fromRemotePath)
@@ -195,7 +195,7 @@ ACTOR Future<Void> downloadSingleFile(BulkLoadTransportMethod transportMethod,
 			}
 			retryCount++;
 			if (retryCount > 10) {
-				TraceEvent(SevWarnAlways, "DownloadSingleFileError", logId)
+				TraceEvent(SevWarnAlways, "DownloadManifestFileError", logId)
 				    .errorUnsuppressed(e)
 				    .detail("TransportMethod", transportMethod)
 				    .detail("FromRemotePath", fromRemotePath)
@@ -214,20 +214,15 @@ ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod trans
                                                    std::string localJobManifestFilePath,
                                                    std::string remoteJobManifestFilePath,
                                                    UID logId) {
-	wait(downloadSingleFile(transportMethod, remoteJobManifestFilePath, localJobManifestFilePath, logId));
+	wait(downloadManifestFile(transportMethod, remoteJobManifestFilePath, localJobManifestFilePath, logId));
 	return Void();
 }
 
 // Get manifest within the input range
-ACTOR Future<std::unordered_map<Key, BulkLoadManifest>> getBulkLoadManifestMetadataFromFiles(
-    std::string localJobManifestFilePath,
-    KeyRange range,
-    std::string manifestLocalTempFolder,
-    BulkLoadTransportMethod transportMethod,
-    std::string jobRoot,
-    UID logId) {
+ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>>
+getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestFilePath, KeyRange range, UID logId) {
 	ASSERT(fileExists(abspath(localJobManifestFilePath)));
-	state std::unordered_map<Key, BulkLoadManifest> res;
+	state std::unordered_map<Key, BulkLoadJobFileManifestEntry> res;
 	const std::string jobManifestRawString =
 	    readFileBytes(abspath(localJobManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
 	state std::vector<std::string> lines = splitString(jobManifestRawString, "\n");
@@ -243,24 +238,32 @@ ACTOR Future<std::unordered_map<Key, BulkLoadManifest>> getBulkLoadManifestMetad
 		if (overlappingRange.empty()) {
 			// Ignore the manifest entry if no overlapping range
 			lineIdx = lineIdx + 1;
+			// Here we do not do break here because we always scan the entire file assuming the manifest entry is not
+			// sorted by beginKey in the file.
 			continue;
 		}
-		state std::string remoteManifestFilePath = joinPath(jobRoot, manifestEntry.getManifestRelativePath());
-		platform::eraseDirectoryRecursive(abspath(manifestLocalTempFolder));
-		ASSERT(platform::createDirectory(abspath(manifestLocalTempFolder)));
-		state std::string localManifestFilePath = joinPath(manifestLocalTempFolder, basename(remoteManifestFilePath));
-		// Download the manifest file
-		// TODO(BulkLoad): to maximize the throughput, we want to do downloadSingleFile() in parallel.
-		wait(downloadSingleFile(transportMethod, remoteManifestFilePath, localManifestFilePath, logId));
-		const std::string manifestRawString =
-		    readFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
-		ASSERT(!manifestRawString.empty());
-		BulkLoadManifest manifest(manifestRawString);
-		auto returnV = res.insert({ manifest.getBeginKey(), manifest });
+		auto returnV = res.insert({ manifestEntry.getBeginKey(), manifestEntry });
 		ASSERT(returnV.second);
-		wait(delay(1.0));
+		if (lineIdx % 1000 == 0) {
+			wait(delay(0.1)); // yield per batch
+		}
 		lineIdx = lineIdx + 1;
 	}
-	platform::eraseDirectoryRecursive(abspath(manifestLocalTempFolder));
 	return res;
+}
+
+ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobFileManifestEntry manifestEntry,
+                                                                    std::string manifestLocalTempFolder,
+                                                                    BulkLoadTransportMethod transportMethod,
+                                                                    std::string jobRoot,
+                                                                    UID logId) {
+	state std::string remoteManifestFilePath = joinPath(jobRoot, manifestEntry.getManifestRelativePath());
+	state std::string localManifestFilePath =
+	    joinPath(manifestLocalTempFolder,
+	             deterministicRandom()->randomUniqueID().toString() + "-" + basename(remoteManifestFilePath));
+	wait(downloadManifestFile(transportMethod, remoteManifestFilePath, localManifestFilePath, logId));
+	const std::string manifestRawString =
+	    readFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
+	ASSERT(!manifestRawString.empty());
+	return BulkLoadManifest(manifestRawString);
 }
