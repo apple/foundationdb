@@ -41,7 +41,7 @@ Although only one CC can succeed in recovery, which is guaranteed by Paxos algor
 
 Scenario 1: A majority of coordinators reboot at the same time and the current running CC is still alive. When those coordinators reboot, they may likely choose a different process as CC. The new CC kicks off  `ClusterRecovery` actor that drives the recovery. The old CC will know the existence of the new CC when it sends heart-beat to coordinators periodically (in sub-seconds). The old CC will kill itself, once it was told by a majority of coordinators about the existence of the new CC. Old roles (such as master and proxies) will commit suicide as well after the old CC dies. This prevents the cluster to have two sets of transaction systems. In summary, the cluster may have both the old CC and new CC alive in sub-seconds before the old CC confirms the existence of the new CC.
 
-Scenario 2: Network partition makes the current running CC unable to connect to a majority of coordinators. Before the CC detects it, the coordinators can elect a new CC and recovery will happen. Typically, the old CC can quickly realize it cannot connect to a majority of coordinators and kill itself. In the rare situation when the old CC does not die within a short time period *and* the network partition is resolved before the old CC dies. Only one CC can succeed the recovery because only one CC can lock the cstate (see Phase 2: LOCKING_CSTATE).
+Scenario 2: Network partition makes the current running CC unable to connect to a majority of coordinators. Before the CC detects it, the coordinators can elect a new CC and recovery will happen. Typically, the old CC can quickly realize it cannot connect to a majority of coordinators and it will kill itself. In the rare situation when the old CC does not die within a short time period *and* the network partition is resolved before the old CC dies. Only one CC can succeed the recovery because only one CC can lock the cstate (see Phase 2: LOCKING_CSTATE).
 
 (The management of the CC's liveness is tricky to be implemented correctly. After four major revisions of the code, this functionality *should* be bug-free certified by Evan. ;))
 
@@ -68,7 +68,7 @@ The transaction system state before the recovery is the starting point for the c
 
 This phase locks the coordinated state (cstate) to make sure there is only one CC who can change the cstate. Otherwise, we may end up with more than one master accepting commits after the recovery. To achieve that, the CC needs to get currently alive tLogs’ interfaces and sends commands to tLogs to lock their states, preventing them from accepting any further writes.
 
-Recall that `ServerDBInfo` has CC's interface and is propagated by CC to every process in a cluster. The current running tLogs can use the CC interface in its `ServerDBInfo` to send itself's interface to CC.
+Recall that `ServerDBInfo` has CC's interface and is propagated by CC to every process in a cluster. The current running tLogs can use the CC interface in its `ServerDBInfo` to send its interface to CC.
 CC simply waits on receiving the `TLogRejoinRequest` streams: for each tLog’s interface received, the CC compares the interface ID with the tLog ID read from cstate. Once the CC collects enough old tLog interfaces, it will use the interfaces to lock those tLogs.
 The logic of collecting tLogs’ interfaces is implemented in `trackRejoins()` function.
 The logic of locking the tLogs is implemented in `epochEnd()` function in [TagPartitionedLogSystems.actor.cpp](https://github.com/apple/foundationdb/blob/main/fdbserver/TagPartitionedLogSystem.actor.cpp).
@@ -77,7 +77,7 @@ Once we lock the cstate, we bump the `recoveryCount` by 1 and write the `recover
 
 *How does each tLog know the current CC’s interface?*
 
-CC interface is stored in `serverDBInfo`. CC broadcasts `serverDBInfo` to all processes. tLog processes (i,e., tLog workers) monitor the `serverDBInfo` in an actor `rejoinClusterController`. When the `serverDBInfo` changes, it will register itself to the new CC. The logic for a tLog worker to monitor `serverDBInfo` change is implemented in `monitorServerDBInfo()` actor.
+CC interface is stored in `serverDBInfo`. The CC broadcasts `serverDBInfo` to all processes. tLog processes (i,e., tLog workers) monitor the `serverDBInfo` in an actor `rejoinClusterController`. When the `serverDBInfo` changes, it will register itself to the new CC. The logic for a tLog worker to monitor `serverDBInfo` change is implemented in `monitorServerDBInfo()` actor.
 
 *How does each role, such as tLog and data distributor (DD), register its interface to CC?*
 
