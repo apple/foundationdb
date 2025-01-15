@@ -218,6 +218,9 @@ ACTOR Future<Optional<BulkLoadJobState>> getAliveBulkLoadJob(Transaction* tr);
 
 ACTOR Future<Optional<BulkLoadJobState>> getAliveBulkLoadJob(Database cx);
 
+// Get total number of completed tasks within the input range
+ACTOR Future<size_t> getBulkLoadCompleteTaskCount(Database cx, KeyRange rangeToRead);
+
 // Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
 // the metadata.
 ACTOR Future<int> setBulkDumpMode(Database cx, int mode);

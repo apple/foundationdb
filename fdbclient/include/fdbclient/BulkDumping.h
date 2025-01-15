@@ -163,8 +163,8 @@ private:
 
 // User API to create bulkDump task metadata
 // The dumped data is within the input range
-// The data is dumped to the input remoteRoot
-// The remoteRoot is a local root string or a remote blobstore root string
+// The data is dumped to the input jobRoot
+// The jobRoot is a local root string or a remote blobstore root string
 BulkDumpState createBulkDumpJob(const KeyRange& range,
                                 const std::string& jobRoot,
                                 const BulkLoadType& type,
