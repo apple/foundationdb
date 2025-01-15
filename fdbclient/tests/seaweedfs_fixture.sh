@@ -170,7 +170,9 @@ function start_weed {
       sleep 5
     done
     # The process died. If it was because of port clash, go around again w/ new ports.
-    if grep "bind: address already in use" "${dir}/weed.INFO" &> /dev/null ; then
+    # You'll see errors like this:
+    # F0115 05:22:28.312464 master.go:166 Master startup error: listen tcp 127.0.0.1:9334: listen: address already in use
+    if grep "address already in use" "${dir}/weed.INFO" &> /dev/null ; then
       # Clashed w/ existing port. Go around again and get new ports.
       :
     else
