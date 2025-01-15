@@ -1998,9 +1998,17 @@ Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> TagPartition
 		int safe_range_begin = logSet->tLogWriteAntiQuorum;
 		int new_safe_range_begin = std::min(logSet->tLogWriteAntiQuorum, (int)(results.size() - 1));
 		int safe_range_end = std::max(logSet->tLogReplicationFactor - absent, 1);
+		// The index (in "results" vector) of the recovery version that we will use in the check below
+		// to decide whether to restart recovery not. In "main" we use the version at index
+		// "(safe_range_end - 1)" - this is to minimize the chances of restarting the current recovery
+		// process. With "version vector" we use the version at index "new_safe_range_begin" - this is
+		// because choosing any other version will invalidate the changes that we made to the peek logic
+		// in the context of version vector.
+		int version_index =
+		    (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST ? (safe_range_end - 1) : new_safe_range_begin);
 
-		if (!lastEnd.present() || ((safe_range_end > 0) && (safe_range_end - 1 < results.size()) &&
-		                           results[safe_range_end - 1].end < lastEnd.get())) {
+		if (!lastEnd.present() ||
+		    ((version_index >= 0) && (version_index < results.size()) && results[version_index].end < lastEnd.get())) {
 			Version knownCommittedVersion = 0;
 			for (int i = 0; i < results.size(); i++) {
 				knownCommittedVersion = std::max(knownCommittedVersion, results[i].knownCommittedVersion);
@@ -2026,6 +2034,12 @@ Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> TagPartition
 			    .detail("KnownCommittedVersion", knownCommittedVersion)
 			    .detail("EpochEnd", lockInfo.epochEnd);
 
+			// @note In "main" any version in the index range [safe_range_begin, safe_range_end) can be
+			// picked as the recovery version. We pick the version at index "new_safe_range_begin" in order
+			// to minimize the number of recovery restarts and also to minimize the amount of data we need
+			// to copy during recovery. With "version vector" we pick the version "new_safe_range_begin"
+			// as choosing any other version will invalidate the changes that we made to the peek logic
+			// in the context of version vector.
 			return std::make_tuple(knownCommittedVersion, results[new_safe_range_begin].end, results);
 		}
 	}
