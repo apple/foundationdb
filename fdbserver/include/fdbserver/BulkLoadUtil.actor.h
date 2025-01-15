@@ -47,14 +47,14 @@ ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod trans
 
 // Extract manifest entries from job manifest file with the input range
 ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>>
-getBulkLoadEntryFromJobManifestFile(std::string localJobManifestFilePath, KeyRange range, UID logId);
+getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestFilePath, KeyRange range, UID logId);
 
 // Get BulkLoad manifest metadata from the entry in the job manifest file
-ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetaFromEntry(BulkLoadJobFileManifestEntry manifestEntry,
-                                                                std::string manifestLocalTempFolder,
-                                                                BulkLoadTransportMethod transportMethod,
-                                                                std::string jobRoot,
-                                                                UID logId);
+ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobFileManifestEntry manifestEntry,
+                                                                    std::string manifestLocalTempFolder,
+                                                                    BulkLoadTransportMethod transportMethod,
+                                                                    std::string jobRoot,
+                                                                    UID logId);
 
 #include "flow/unactorcompiler.h"
 #endif

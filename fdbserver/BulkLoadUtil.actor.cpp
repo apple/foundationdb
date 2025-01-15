@@ -220,7 +220,7 @@ ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod trans
 
 // Get manifest within the input range
 ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>>
-getBulkLoadEntryFromJobManifestFile(std::string localJobManifestFilePath, KeyRange range, UID logId) {
+getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestFilePath, KeyRange range, UID logId) {
 	ASSERT(fileExists(abspath(localJobManifestFilePath)));
 	state std::unordered_map<Key, BulkLoadJobFileManifestEntry> res;
 	const std::string jobManifestRawString =
@@ -252,11 +252,11 @@ getBulkLoadEntryFromJobManifestFile(std::string localJobManifestFilePath, KeyRan
 	return res;
 }
 
-ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetaFromEntry(BulkLoadJobFileManifestEntry manifestEntry,
-                                                                std::string manifestLocalTempFolder,
-                                                                BulkLoadTransportMethod transportMethod,
-                                                                std::string jobRoot,
-                                                                UID logId) {
+ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobFileManifestEntry manifestEntry,
+                                                                    std::string manifestLocalTempFolder,
+                                                                    BulkLoadTransportMethod transportMethod,
+                                                                    std::string jobRoot,
+                                                                    UID logId) {
 	state std::string remoteManifestFilePath = joinPath(jobRoot, manifestEntry.getManifestRelativePath());
 	state std::string localManifestFilePath =
 	    joinPath(manifestLocalTempFolder,
