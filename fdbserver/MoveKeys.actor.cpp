@@ -743,7 +743,10 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 
 			// Post validate consistency of update of keyServers and serverKeys
 			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-				wait(auditLocationMetadataPostCheck(occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId));
+				ASSERT_WE_THINK(!keys.empty());
+				if (!keys.empty()) {
+					wait(auditLocationMetadataPostCheck(occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId));
+				}
 			}
 			break;
 		} catch (Error& e) {
@@ -1927,15 +1930,15 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				    .detail("DataMove", dataMove.toString())
 				    .detail("BulkLoadTaskState", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
 
-				// Post validate consistency of update of keyServers and serverKeys
-				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-					if (!currentKeys.empty()) {
-						wait(auditLocationMetadataPostCheck(occ, currentKeys, "startMoveShards_postcheck", dataMoveId));
-					}
-				}
-
 				dataMove = DataMoveMetaData();
 				if (currentKeys.end == keys.end) {
+					// Post validate consistency of update of keyServers and serverKeys
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
+						ASSERT_WE_THINK(!keys.empty());
+						if (!keys.empty()) {
+							wait(auditLocationMetadataPostCheck(occ, keys, "startMoveShards_postcheck", dataMoveId));
+						}
+					}
 					break;
 				}
 			} catch (Error& e) {
@@ -2355,13 +2358,15 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 					wait(tr.commit());
 
-					// Post validate consistency of update of keyServers and serverKeys
-					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-						wait(auditLocationMetadataPostCheck(
-						    occ, range, "finishMoveShards_postcheck", relocationIntervalId));
-					}
-
 					if (range.end == dataMove.ranges.front().end) {
+						// Post validate consistency of update of keyServers and serverKeys
+						if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
+							ASSERT_WE_THINK(!dataMove.ranges.front().empty());
+							if (!dataMove.ranges.front().empty()) {
+								wait(auditLocationMetadataPostCheck(
+								    occ, dataMove.ranges.front(), "finishMoveShards_postcheck", relocationIntervalId));
+							}
+						}
 						break;
 					}
 				} else {
@@ -3151,12 +3156,15 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("Range", range);
 
-				// Post validate consistency of update of keyServers and serverKeys
-				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-					wait(auditLocationMetadataPostCheck(occ, range, "cleanUpDataMoveCore_postcheck", dataMoveId));
-				}
-
 				if (range.end == dataMove.ranges.front().end) {
+					// Post validate consistency of update of keyServers and serverKeys
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
+						ASSERT_WE_THINK(!dataMove.ranges.front().empty());
+						if (!dataMove.ranges.front().empty()) {
+							wait(auditLocationMetadataPostCheck(
+							    occ, dataMove.ranges.front(), "cleanUpDataMoveCore_postcheck", dataMoveId));
+						}
+					}
 					break;
 				}
 			} catch (Error& e) {
