@@ -4070,6 +4070,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
+		if (g_network->isSimulated() && !noUnseed) {
+			noUnseed = true;
+		}
 		auto a = new Writer::CheckpointAction(&shardManager, request);
 
 		auto res = a->reply.getFuture();
