@@ -431,7 +431,10 @@ std::string constructResourcePath(Reference<S3BlobStoreEndpoint> b,
 	}
 
 	if (!object.empty()) {
-		resource += "/";
+		// Don't add a slash if the object starts with one
+		if (!object.starts_with("/")) {
+			resource += "/";
+		}
 		resource += object;
 	}
 

@@ -64,11 +64,14 @@ function bulkdump {
   fi
   if ! "${local_build_dir}"/bin/fdbcli \
     -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
-    --exec "bulkdump blobstore \"\" \xff \"${url}\""
+    --exec "bulkdump blobstore \"\" \xff \"${url}\"" > /dev/null
   then
     err "Bulkdump start failed"
     return 1
   fi
+  local output=
+  local jobid=
+  # Now wait until the status is NOT "Running bulk dumping job"
   while true; do
     if ! output=$( "${local_build_dir}"/bin/fdbcli \
       -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
@@ -77,11 +80,16 @@ function bulkdump {
       err "Bulkdump status 1 failed"
       return 1
     fi
-    if ! echo "${output}" | grep "Running bulk dumping job"; then
+    if ! echo "${output}" | grep "Running bulk dumping job:" > /dev/null; then
       break
+    elif [[ -z "${jobid}" ]]; then
+      if line=$(echo "${output}" | grep "Running bulk dumping job:"); then
+        jobid=$(echo "${line}" | sed -e 's/.*Running bulk dumping job://' | xargs)
+      fi
     fi
     sleep 5
   done
+  # Wait until status is 'No bulk dumping job is running'.
   while true; do
     if ! output=$( "${local_build_dir}"/bin/fdbcli \
       -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
@@ -90,7 +98,70 @@ function bulkdump {
       err "Bulkdump status 2 failed"
       return 1
     fi
-    if echo "${output}" | grep "No bulk dumping job is running"; then
+    if echo "${output}" | grep "No bulk dumping job is running" &> /dev/null; then
+      break
+    fi
+    sleep 5
+  done
+  echo "${jobid}"
+  # TODO: Add something like this to verify job manifest is in place.
+  ## Verify the job-manifest.txt made it into the bulkdump.
+  #if ! curl -s "http://localhost:${weed_s3_port}/${BUCKET}" | grep job-manifest.txt> /dev/null; then
+  #  echo "ERROR: Failed to curl job-manifest.txt" >&2
+  #  return 1
+  #fi
+}
+
+# Run the bulkload command.
+# $1 The url to load from
+# $2 The scratch directory
+# $3 Credentials to use
+# $4 build directory
+function bulkload {
+  local local_url="${1}"
+  local local_scratch_dir="${2}"
+  local credentials="${3}"
+  local local_build_dir="${4}"
+  local jobid="${5}"
+  # Bulklaod from s3. Set bulkload mode to on
+  # Then start a bulkload and wait till its done.
+  if ! "${local_build_dir}"/bin/fdbcli \
+    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
+    --exec "bulkload mode on"
+  then
+    err "Bulkload mode on failed"
+    return 1
+  fi
+  if ! "${local_build_dir}"/bin/fdbcli \
+    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
+    --exec "bulkload blobstore ${jobid} \"\" \xff \"${url}\""
+  then
+    err "Bulkload start failed"
+    return 1
+  fi
+  local output
+  while true; do
+    if ! output=$( "${local_build_dir}"/bin/fdbcli \
+      -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
+      --exec "bulkload status \"\" \xff " )
+    then
+      err "Bulkload status 1 failed"
+      return 1
+    fi
+    if ! echo "${output}" | grep "Running bulk loading job:" &> /dev/null; then
+      break
+    fi
+    sleep 5
+  done
+  while true; do
+    if ! output=$( "${local_build_dir}"/bin/fdbcli \
+      -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
+      --exec "bulkload status \"\" \xff " )
+    then
+      err "Bulkload status 2 failed"
+      return 1
+    fi
+    if echo "${output}" | grep "No bulk loading job is running" &> /dev/null; then
       break
     fi
     sleep 5
@@ -118,9 +189,7 @@ function test_basic_bulkdump_and_bulkload {
     err "Failed loading data into fdb"
     return 1
   fi
-  # Comment out for now till its working.
-  #if [[ "${USE_S3}" == "true" ]]; then
-  if false; then
+  if [[ "${USE_S3}" == "true" ]]; then
     # Run this rm only if s3. In seaweed, it would fail because
     # bucket doesn't exist yet (they are lazily created).
     if ! "${local_build_dir}/bin/s3client" \
@@ -134,7 +203,7 @@ function test_basic_bulkdump_and_bulkload {
     fi
   fi
   log "Run bulkdump"
-  if ! bulkdump "${local_url}" "${local_scratch_dir}" "${credentials}" "${local_build_dir}"; then
+  if ! jobid=$(bulkdump "${local_url}" "${local_scratch_dir}" "${credentials}" "${local_build_dir}"); then
     err "Failed bulkdump"
     return 1
   fi
@@ -142,15 +211,15 @@ function test_basic_bulkdump_and_bulkload {
     err "Failed clear data in fdb"
     return 1
   fi
-  #if ! bulkload "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}"; then
-  #  err "Failed bulkload"
-  #  return 1
-  #fi
-  #log "Verify restore"
-  #if ! verify_data "${local_build_dir}" "${local_scratch_dir}"; then
-  #  err "Failed verification of data in fdb"
-  #  return 1
-  #fi
+  if ! bulkload "${local_url}" "${local_scratch_dir}" "${credentials}" "${local_build_dir}" "${jobid}"; then
+    err "Failed bulkload"
+    return 1
+  fi
+  log "Verify restore"
+  if ! verify_data "${local_build_dir}" "${local_scratch_dir}"; then
+    err "Failed verification of data in fdb"
+    return 1
+  fi
   log "Check for Severity=40 errors"
   if ! grep_for_severity40 "${local_scratch_dir}"; then
     err "Found Severity=40 errors in logs"
@@ -231,9 +300,7 @@ readonly path_prefix="bulkload/ctests"
 host=
 query_str=
 blob_credentials_file=
-# Comment out for now till its working.
-#if [[ "${USE_S3}" == "true" ]]; then
-if false; then
+if [[ "${USE_S3}" == "true" ]]; then
   log "Testing against s3"
   # Now source in the aws fixture so we can use its methods in the below.
   # shellcheck source=/dev/null
@@ -291,7 +358,8 @@ if ! source "${cwd}/fdb_cluster_fixture.sh"; then
   exit 1
 fi
 # Startup fdb cluster.
-if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR}"; then
+# Start up 9 SSs because bulk load tries to avoid loading back on to the team it dumped from.
+if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR}" 9 "${KNOBS[@]}"; then
   err "Failed start FDB cluster"
   exit 1
 fi

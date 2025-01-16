@@ -183,7 +183,7 @@ SCRATCH_DIR=$(resolve_to_absolute_path "${tmpdir}")
 readonly SCRATCH_DIR
 
 # Startup fdb cluster and backup agent.
-if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${SCRATCH_DIR}"; then
+if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${SCRATCH_DIR}" 1; then
   err "Failed start FDB cluster"
   exit 1
 fi

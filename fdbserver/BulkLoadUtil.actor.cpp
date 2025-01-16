@@ -22,6 +22,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ClientKnobs.h"
+#include "fdbclient/S3Client.actor.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
@@ -125,6 +126,25 @@ void bulkLoadTransportCP_impl(BulkLoadFileSet fromRemoteFileSet,
 	return;
 }
 
+ACTOR Future<Void> bulkLoadTransportBlobstore_impl(BulkLoadFileSet fromRemoteFileSet,
+                                                   BulkLoadFileSet toLocalFileSet,
+                                                   size_t fileBytesMax,
+                                                   UID logId) {
+	// Clear existing local folder
+	platform::eraseDirectoryRecursive(abspath(toLocalFileSet.getFolder()));
+	ASSERT(platform::createDirectory(abspath(toLocalFileSet.getFolder())));
+	// TODO(BulkDump): Make use of fileBytesMax
+	// TODO: File-at-a-time costs because we make connection for each.
+	wait(copyDownFile(fromRemoteFileSet.getDataFileFullPath(), abspath(toLocalFileSet.getDataFileFullPath())));
+	// Copy byte sample file if exists
+	if (fromRemoteFileSet.hasByteSampleFile()) {
+		wait(copyDownFile(fromRemoteFileSet.getBytesSampleFileFullPath(),
+		                  abspath(toLocalFileSet.getBytesSampleFileFullPath())));
+	}
+	// TODO(BulkLoad): Throw error if the date/bytesample file does not exist while the filename is not empty
+	return Void();
+}
+
 ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMethod transportMethod,
                                                           BulkLoadFileSet fromRemoteFileSet,
                                                           std::string toLocalRoot,
@@ -147,6 +167,11 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 				// fromRemoteFileSet.
 				bulkLoadTransportCP_impl(
 				    fromRemoteFileSet, toLocalFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
+			} else if (transportMethod == BulkLoadTransportMethod::BLOBSTORE) {
+				// Copy the data file and the sample file from remote folder to a local folder specified by
+				// fromRemoteFileSet.
+				wait(bulkLoadTransportBlobstore_impl(
+				    fromRemoteFileSet, toLocalFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
 			} else {
 				ASSERT(false);
 			}
@@ -177,6 +202,12 @@ ACTOR Future<Void> downloadManifestFile(BulkLoadTransportMethod transportMethod,
 				    .detail("ToLocalPath", toLocalPath);
 				bulkLoadFileCopy(abspath(fromRemotePath), abspath(toLocalPath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
 				wait(delay(0.1));
+			} else if (transportMethod == BulkLoadTransportMethod::BLOBSTORE) {
+				TraceEvent(SevInfo, "DownloadManifestFile", logId)
+				    .detail("FromRemotePath", fromRemotePath)
+				    .detail("ToLocalPath", toLocalPath);
+				// TODO: Make use of fileBytesMax
+				wait(copyDownFile(fromRemotePath, abspath(toLocalPath)));
 			} else {
 				TraceEvent(SevError, "DownloadManifestFileError", logId)
 				    .detail("Reason", "Transport method is not implemented")
@@ -257,10 +288,10 @@ ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobF
                                                                     BulkLoadTransportMethod transportMethod,
                                                                     std::string jobRoot,
                                                                     UID logId) {
-	state std::string remoteManifestFilePath = joinPath(jobRoot, manifestEntry.getManifestRelativePath());
+	state std::string remoteManifestFilePath = appendToPath(jobRoot, manifestEntry.getManifestRelativePath());
 	state std::string localManifestFilePath =
 	    joinPath(manifestLocalTempFolder,
-	             deterministicRandom()->randomUniqueID().toString() + "-" + basename(remoteManifestFilePath));
+	             deterministicRandom()->randomUniqueID().toString() + "-" + basename(getPath(remoteManifestFilePath)));
 	wait(downloadManifestFile(transportMethod, remoteManifestFilePath, localManifestFilePath, logId));
 	const std::string manifestRawString =
 	    readFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
