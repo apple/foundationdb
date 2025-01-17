@@ -27,10 +27,7 @@ import fdb
 
 
 def initialize_logger_level(logging_level):
-    """
-    Refactored to use a dictionary to map logging levels to their corresponding
-    constants, making the function more concise and avoiding repetitive if-elif blocks.
-    """
+  
     logger = get_logger()
 
     # Map logging levels to their corresponding constants
@@ -43,8 +40,11 @@ def initialize_logger_level(logging_level):
 
     if logging_level not in LOGGING_LEVELS:
         raise ValueError(f"Invalid logging level: {logging_level}")
-
+    
     logger.setLevel(LOGGING_LEVELS[logging_level])
+
+
+
 
 
 
