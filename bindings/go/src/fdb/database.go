@@ -31,6 +31,10 @@ import (
 	"runtime"
 )
 
+// ErrMultiVersionClientUnavailable is returned when the multi-version client API is unavailable.
+// Client status information is available only when such API is enabled.
+var ErrMultiVersionClientUnavailable = errors.New("multi-version client API is unavailable")
+
 // Database is a handle to a FoundationDB database. Database is a lightweight
 // object that may be efficiently copied, and is safe for concurrent use by
 // multiple goroutines.
@@ -133,6 +137,29 @@ func (d Database) RebootWorker(address string, checkFile bool, suspendDuration i
 	return err
 }
 
+// GetClientStatus returns a JSON byte slice containing database client-side status information.
+// At the top level the report describes the status of the Multi-Version Client database - its initialization state, the protocol version, the available client versions; it also embeds the status of the actual version-specific database and within it the addresses of various FDB server roles the client is aware of and their connection status.
+// NOTE: ErrMultiVersionClientUnavailable will be returned if the Multi-Version client API was not enabled.
+func (d Database) GetClientStatus() ([]byte, error) {
+	if apiVersion == 0 {
+		return nil, errAPIVersionUnset
+	}
+
+	st := &futureByteSlice{
+		future: newFutureWithDb(d.database, nil, C.fdb_database_get_client_status(d.ptr)),
+	}
+
+	b, err := st.Get()
+	if err != nil {
+		return nil, err
+	}
+	if len(b) == 0 {
+		return nil, ErrMultiVersionClientUnavailable
+	}
+
+	return b, nil
+}
+
 func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, err error) {
 	for {
 		ret, err = wrapped()
@@ -219,7 +246,8 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 //
 // The transaction is retried if the error is or wraps a retryable Error.
 // The error is unwrapped.
-// Read transactions are never committed and destroyed before returning to caller.
+// Read transactions are never committed and destroyed automatically via GC,
+// once all their futures go out of scope.
 //
 // Do not return Future objects from the function provided to ReadTransact. The
 // Transaction created by ReadTransact may be finalized at any point after
