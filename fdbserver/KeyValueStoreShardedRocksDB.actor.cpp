@@ -232,7 +232,7 @@ public:
 		compactionReasons[index]++;
 	}
 
-	void OnTableFileCreated(const rocksdb::TableFileCreationInfo& info) {
+	void OnTableFileCreated(const rocksdb::TableFileCreationInfo& info) override {
 		numRangeDeletionsInTableFile->sample(info.table_properties.num_range_deletions);
 		numPointDeletionsInTableFile->sample(info.table_properties.num_deletions);
 		numEntriesInTableFile->sample(info.table_properties.num_entries);
