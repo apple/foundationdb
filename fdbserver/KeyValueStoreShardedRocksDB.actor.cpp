@@ -3713,7 +3713,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		} else {
 			auto a = std::make_unique<Writer::OpenAction>(&shardManager, metrics, &readSemaphore, &fetchSemaphore);
 			openFuture = a->done.getFuture();
-			if (SERVER_KNOBS->ROCKSDB_METRICS_IN_SIMULATION) {
+			if (SERVER_KNOBS->ROCKSDB_ENABLE_NONDETERMINISM) {
 				this->metrics =
 				    ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
 				    rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager, this->path);

@@ -3,7 +3,7 @@ storageEngineType = 5 # Always pick ShardedRocks
 
 # These can cause non-determinism, but we don't do unseed check for this test
 [[knobs]]
-rocksdb_metrics_in_simulation = true 
+rocksdb_enable_nondeterminism = true
 shard_encode_location_metadata = true
 
 [[test]]

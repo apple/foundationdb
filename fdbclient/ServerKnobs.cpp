@@ -597,8 +597,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_CF_METRICS_DELAY,                            900.0 );
 	init( ROCKSDB_MAX_LOG_FILE_SIZE,                        10485760 ); // 10MB.
 	init( ROCKSDB_KEEP_LOG_FILE_NUM,                             100 ); // Keeps 1GB log per storage server.
-	// Does manual flushes at regular intervals(seconds), incase rocksdb did not flush. Feature disable if the value is 0.
-	init( ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL,                      0 ); if( randomize && BUGGIFY ) ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL = deterministicRandom()->randomInt(4, 10);
+	// Does manual flushes at regular intervals(seconds), incase rocksdb did not flush. Feature disabled if the value is 0.
+	init( ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL,                    600 ); if( isSimulated ) ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL = deterministicRandom()->randomInt(4, 1200);
 	init( ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    true );
 	init( ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 true );
 	init( ROCKSDB_FULLFILE_CHECKSUM,                           false ); if ( randomize && BUGGIFY ) ROCKSDB_FULLFILE_CHECKSUM = true;
@@ -609,7 +609,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY,               0 ); if ( randomize && BUGGIFY ) ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY = 8; // Default: 0 (disabled). Supported values: 0, 1, 2, 4, 8.
 	// Block cache key-value checksum. Checksum is validated during read, so has non-trivial impact on read performance.
 	init( ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY,                  0 ); if ( randomize && BUGGIFY ) ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY = 8; // Default: 0 (disabled). Supported values: 0, 1, 2, 4, 8.
-	init( ROCKSDB_METRICS_IN_SIMULATION,                       false );
+	init( ROCKSDB_ENABLE_NONDETERMINISM,                       false );
 	init( SHARDED_ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,          false );	
 	init( SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,               0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01();
 	init( SHARD_METADATA_SCAN_BYTES_LIMIT,                  10485760 ); // 10MB

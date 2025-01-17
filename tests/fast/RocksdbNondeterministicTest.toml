@@ -2,7 +2,7 @@
 storageEngineType = 4 # Always pick RocksDB
 
 [[knobs]]
-rocksdb_metrics_in_simulation = true # This can cause non-determinism, but we don't do unseed check for this test
+rocksdb_enable_nondeterminism = true # This can cause non-determinism, but we don't do unseed check for this test
 
 [[test]]
 testTitle = 'Clogged'
