@@ -4070,6 +4070,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
+		// ShardedRocks with checkpoint is known to be non-deterministic
+		// so setting noUnseed=true. See https://github.com/apple/foundationdb/pull/11841
+		// for more context.
+		if (g_network->isSimulated() && !noUnseed) {
+			noUnseed = true;
+		}
 		auto a = new Writer::CheckpointAction(&shardManager, request);
 
 		auto res = a->reply.getFuture();

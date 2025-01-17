@@ -59,11 +59,7 @@ bool shouldCreateCheckpoint(const UID& dataMoveId) {
 	DataMoveType type;
 	DataMovementReason reason;
 	decodeDataMoveId(dataMoveId, assigned, emptyRange, type, reason);
-	const bool ret = (type == DataMoveType::PHYSICAL || type == DataMoveType::PHYSICAL_EXP);
-	if (ret && g_network->isSimulated() && !noUnseed) {
-		noUnseed = true;
-	}
-	return ret;
+	return (type == DataMoveType::PHYSICAL || type == DataMoveType::PHYSICAL_EXP);
 }
 
 // Unassigns keyrange `range` from server `ssId`, except ranges in `shards`.
