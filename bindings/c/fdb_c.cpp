@@ -30,6 +30,7 @@
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "foundationdb/fdb_c.h"
 #include "foundationdb/fdb_c_internal.h"
+#include "fdbclient/buildid.h"
 
 int g_api_version = 0;
 
@@ -597,6 +598,10 @@ FDBFuture* fdb_cluster_create_database_v609(FDBCluster* c, uint8_t const* db_nam
 	}
 
 	return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(Reference<IDatabase>(DB(db))).extractPtr();
+}
+
+extern "C" DLLEXPORT const uint8_t* fdb_retrieve_build_id() {
+	return retrieveBuildID();
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database) {
@@ -1418,13 +1423,13 @@ extern "C" DLLEXPORT fdb_error_t fdb_select_api_version_impl(int runtime_version
 	Error::init();
 
 	// Versioned API changes -- descending order by version (new changes at top)
-	// FDB_API_CHANGED( function, ver ) means there is a new implementation as of ver, and a function function_(ver-1)
-	// is the old implementation. FDB_API_REMOVED( function, ver ) means the function was removed as of ver, and
-	// function_(ver-1) is the old implementation
+	// FDB_API_CHANGED( function, ver ) means there is a new implementation as of ver, and a function
+	// function_(ver-1) is the old implementation. FDB_API_REMOVED( function, ver ) means the function was removed
+	// as of ver, and function_(ver-1) is the old implementation
 	//
 	// WARNING: use caution when implementing removed functions by calling public API functions. This can lead to
-	// undesired behavior when using the multi-version API. Instead, it is better to have both the removed and public
-	// functions call an internal implementation function. See fdb_create_database_impl for an example.
+	// undesired behavior when using the multi-version API. Instead, it is better to have both the removed and
+	// public functions call an internal implementation function. See fdb_create_database_impl for an example.
 	FDB_API_REMOVED(fdb_future_get_version, 620);
 	FDB_API_REMOVED(fdb_create_cluster, 610);
 	FDB_API_REMOVED(fdb_cluster_create_database, 610);
