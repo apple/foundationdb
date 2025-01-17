@@ -655,6 +655,7 @@ rocksdb::DBOptions getOptions() {
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
 	options.atomic_flush = SERVER_KNOBS->ROCKSDB_ATOMIC_FLUSH;
+	options.use_direct_io_for_flush_and_compaction = SERVER_KNOBS->SHARDED_ROCKSDB_USE_DIRECT_IO;
 	if (SERVER_KNOBS->SHARDED_ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->SHARDED_ROCKSDB_BACKGROUND_PARALLELISM);
 	}
