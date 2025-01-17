@@ -23,6 +23,7 @@
 
 #include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
@@ -549,7 +550,11 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 
 ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::string context, UID dataMoveId) {
 	if (range.empty()) {
-		TraceEvent(SevWarn, "CheckLocationMetadataEmptyInputRange").detail("By", "PostCheck").detail("Range", range);
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "CheckLocationMetadataEmptyInputRange")
+		    .detail("By", "PostCheck")
+		    .detail("Range", range)
+		    .detail("Context", context)
+		    .detail("DataMoveId", dataMoveId.toString());
 		return Void();
 	}
 	state std::vector<Future<Void>> actors;
@@ -743,10 +748,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 
 			// Post validate consistency of update of keyServers and serverKeys
 			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-				ASSERT_WE_THINK(!keys.empty());
-				if (!keys.empty()) {
-					wait(auditLocationMetadataPostCheck(occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId));
-				}
+				wait(auditLocationMetadataPostCheck(occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId));
 			}
 			break;
 		} catch (Error& e) {
@@ -1934,10 +1936,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (currentKeys.end == keys.end) {
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-						ASSERT_WE_THINK(!keys.empty());
-						if (!keys.empty()) {
-							wait(auditLocationMetadataPostCheck(occ, keys, "startMoveShards_postcheck", dataMoveId));
-						}
+						wait(auditLocationMetadataPostCheck(occ, keys, "startMoveShards_postcheck", dataMoveId));
 					}
 					break;
 				}
@@ -2361,11 +2360,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					if (range.end == dataMove.ranges.front().end) {
 						// Post validate consistency of update of keyServers and serverKeys
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-							ASSERT_WE_THINK(!dataMove.ranges.front().empty());
-							if (!dataMove.ranges.front().empty()) {
-								wait(auditLocationMetadataPostCheck(
-								    occ, dataMove.ranges.front(), "finishMoveShards_postcheck", relocationIntervalId));
-							}
+							wait(auditLocationMetadataPostCheck(
+							    occ, dataMove.ranges.front(), "finishMoveShards_postcheck", relocationIntervalId));
 						}
 						break;
 					}
@@ -3159,11 +3155,8 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				if (range.end == dataMove.ranges.front().end) {
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-						ASSERT_WE_THINK(!dataMove.ranges.front().empty());
-						if (!dataMove.ranges.front().empty()) {
-							wait(auditLocationMetadataPostCheck(
-							    occ, dataMove.ranges.front(), "cleanUpDataMoveCore_postcheck", dataMoveId));
-						}
+						wait(auditLocationMetadataPostCheck(
+						    occ, dataMove.ranges.front(), "cleanUpDataMoveCore_postcheck", dataMoveId));
 					}
 					break;
 				}
