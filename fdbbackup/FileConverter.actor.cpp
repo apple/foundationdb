@@ -489,6 +489,8 @@ ACTOR Future<Void> convert(ConvertParams params) {
 			arena = Arena();
 		}
 
+		// keep getting data until a new version is encounter, then flush all data buffered and start to buffer for a
+		// new version.
 		ArenaReader rd(data.arena, data.message, AssumeVersion(g_network->protocolVersion()));
 		MutationRef m;
 		rd >> m;
