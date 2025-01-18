@@ -8760,7 +8760,7 @@ bool fetchKeyCanRetry(const Error& e) {
 	case error_code_commit_proxy_memory_limit_exceeded:
 	case error_code_storage_replica_comparison_error:
 	case error_code_unreachable_storage_replica:
-	case error_code_operation_failed: // for fetchKey based bulkload
+	case error_code_bulkload_task_failed: // for fetchKey based bulkload
 		return true;
 	default:
 		return false;
@@ -8804,13 +8804,14 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 		// TODO(BulkLoad): what if the data file is empty but the totalKeyCount is not zero
 		state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
 		reader->open(abspath(dataPath));
-		state size_t readKeyCount = 0;
+		state size_t keyIndex = 0;
 		state Key lastKey;
 		loop {
 			RangeResult rep;
 			while (reader->hasNext()) {
 				KeyValue kv = reader->next();
 				if (!keys.contains(kv.key)) {
+					keyIndex = keyIndex + 1;
 					continue;
 				}
 				if (lastKey.empty()) {
@@ -8823,12 +8824,16 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 					throw operation_failed();
 				}
 				rep.push_back_deep(rep.arena(), kv);
-				readKeyCount = readKeyCount + 1;
+				keyIndex = keyIndex + 1;
 				if (rep.expectedSize() >= SERVER_KNOBS->FETCH_BLOCK_BYTES) {
 					break;
 				}
+				if (g_network->isSimulated() && deterministicRandom()->random01() < BUGGIFY ? 0.1 : 0.01) {
+					ASSERT(keyIndex > 0);
+					break; // improve coverage in simulation testing
+				}
 			}
-			rep.more = readKeyCount < totalKeyCount;
+			rep.more = keyIndex < totalKeyCount;
 			// We do not need to set readThrough because there is no shard boundary concept when bulkloading a file
 			results.send(rep);
 			if (!reader->hasNext()) {
@@ -8848,7 +8853,7 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 		    .detail("Keys", keys)
 		    .detail("DataPath", dataPath)
 		    .detail("TotalKeyCount", totalKeyCount);
-		results.sendError(operation_failed());
+		results.sendError(bulkload_task_failed());
 		throw;
 	}
 }
