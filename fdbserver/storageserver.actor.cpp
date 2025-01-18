@@ -13781,6 +13781,13 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 			UID dataMoveId = UID();
 			ConductBulkLoad conductBulkLoad = ConductBulkLoad::False;
 			for (auto bulkLoadIt : bulkLoadTaskRangeMap.intersectingRanges(keys)) {
+				// A persisted SS local bulkLoad task metadata maybe outdated.
+				// Since a storage server can handle one data move on a range at a time, the SS always
+				// process the latest data move. When the data move is handled by changeServerKeys(),
+				// we persist the bulkload task metadata and the shard assignment metadata at the same version with
+				// the same shard boundary. So, a task metadata is not stale if and only if the range is assigned and
+				// the bulkload task range is aligned to the shard assignment metadata boundary.
+				// Any bulkload task not in 'aliveDataMoveId' is an outdated task metadata which will be erased next.
 				if (!bulkLoadIt->value().present() || !nowAssigned) {
 					continue;
 				}

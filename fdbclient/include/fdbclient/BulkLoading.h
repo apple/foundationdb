@@ -930,6 +930,14 @@ BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const std::string& jobRoot,
                                    const BulkLoadTransportMethod& transportMethod);
 
+// When the storage engine is not ShardedRocksDB, SS conducts bulkLoad using fetchKey based method.
+// In this case, SS needs to persist the bulkload task metadata locally because when SS restarts, SS
+// does not have the bulkload task information. So, we need to persist this information to SS disk locally.
+// This data structure is the metadata persisted at SS special key space locally.
+// We add the bulkload task metadata at the same version when the range is set as assigned.
+// We remove the metadata at the version when the range is marked as available.
+// When SS restarts, we recovery the task from the metadata and remove any outdate persisted task.
+// A persisted task is outdated if the range is not assigned or the range is aligned to the assigned range boundary.
 struct SSBulkLoadMetadata {
 public:
 	constexpr static FileIdentifier file_identifier = 1384506;
