@@ -443,6 +443,8 @@ struct BulkLoadManifest {
 
 	int64_t getTotalBytes() const { return bytes; }
 
+	int64_t getKeyCount() const { return keyCount; }
+
 	BulkLoadFileSet getFileSet() const { return fileSet; }
 
 	bool isEmptyRange() const {
@@ -549,6 +551,8 @@ struct BulkLoadTaskState {
 	std::string getFolder() const { return manifest.getFolder(); }
 
 	int64_t getTotalBytes() const { return manifest.getTotalBytes(); }
+
+	int64_t getKeyCount() const { return manifest.getKeyCount(); }
 
 	BulkLoadFileSet getFileSet() const { return manifest.getFileSet(); }
 
@@ -925,5 +929,29 @@ BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const KeyRange& range,
                                    const std::string& jobRoot,
                                    const BulkLoadTransportMethod& transportMethod);
+
+struct SSBulkLoadMetadata {
+public:
+	constexpr static FileIdentifier file_identifier = 1384506;
+
+	SSBulkLoadMetadata() = default;
+
+	SSBulkLoadMetadata(const UID& dataMoveId, const KeyRange& range) : dataMoveId(dataMoveId), range(range) {}
+
+	bool isValid() const { return dataMoveId.isValid(); }
+
+	KeyRange getRange() const { return range; }
+
+	UID getDataMoveId() const { return dataMoveId; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, dataMoveId, range);
+	}
+
+private:
+	UID dataMoveId;
+	KeyRange range;
+};
 
 #endif

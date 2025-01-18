@@ -30,9 +30,25 @@
 const std::string simulationBulkLoadFolder = joinPath("simfdb", "bulkload");
 
 struct BulkLoadTaskTestUnit {
+	BulkLoadTaskTestUnit() = default;
+
+	size_t getTotalBytes() const {
+		size_t bytes = 0;
+		for (const auto& kv : data) {
+			bytes = bytes + kv.expectedSize(); // This size is different from size used by fetchKeys
+		}
+		return bytes;
+	}
+
+	size_t getKeyCount() const { return data.size(); }
+
+	std::string toString() const {
+		return "[BulkLoadTaskTestUnit]: [Bytes]: " + std::to_string(getTotalBytes()) +
+		       ", [Keys]: " + std::to_string(getKeyCount());
+	}
+
 	BulkLoadTaskState bulkLoadTask;
 	std::vector<KeyValue> data;
-	BulkLoadTaskTestUnit() = default;
 };
 
 struct BulkLoading : TestWorkload {
@@ -368,6 +384,14 @@ struct BulkLoading : TestWorkload {
 		return res;
 	}
 
+	std::vector<Key> getAllKeys(const std::vector<KeyValue>& kvs) {
+		std::vector<Key> res;
+		for (const auto& kv : kvs) {
+			res.push_back(kv.key);
+		}
+		return res;
+	}
+
 	BulkLoadTaskTestUnit generateBulkLoadTaskUnit(BulkLoading* self,
 	                                              std::string folderPath,
 	                                              int dataSize,
@@ -386,10 +410,14 @@ struct BulkLoading : TestWorkload {
 		                                                 SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
 		                                                 SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY),
 		                       /*snapshotVersion=*/invalidVersion,
-		                       /*bytes=*/-1,
-		                       /*keyCount=*/-1,
+		                       taskUnit.getTotalBytes(),
+		                       taskUnit.getKeyCount(),
 		                       BulkLoadType::SST,
 		                       BulkLoadTransportMethod::CP);
+		TraceEvent("BulkLoadingWorkLoadTaskUnitGenerated")
+		    .detail("TaskUnit", taskUnit.toString())
+		    .detail("RangeToLoad", rangeToLoad)
+		    .detail("Data", describe(self->getAllKeys(taskUnit.data)));
 		return taskUnit;
 	}
 
@@ -428,7 +456,9 @@ struct BulkLoading : TestWorkload {
 				TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
 				    .detail("Reason", "Key mismatch")
 				    .detail("KVS", kvs[i])
-				    .detail("DB", kvsdb[i]);
+				    .detail("DB", kvsdb[i])
+				    .detail("AllKVS", describe(self->getAllKeys(kvs)))
+				    .detail("AllDB", describe(self->getAllKeys(kvsdb)));
 				return false;
 			} else if (kvs[i].value != kvsdb[i].value) {
 				TraceEvent(SevError, "BulkLoadingWorkLoadDataWrong")
@@ -647,7 +677,8 @@ struct BulkLoading : TestWorkload {
 		}
 
 		// Run test
-		if (deterministicRandom()->coinflip()) {
+		// if (deterministicRandom()->coinflip()) {
+		if (true) {
 			// Inject data to three non-overlapping ranges
 			wait(self->simpleTest(self, cx));
 		} else {

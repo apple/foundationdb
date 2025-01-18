@@ -34,17 +34,34 @@
 #include "flow/actorcompiler.h" // has to be last include
 #include "flow/flow.h"
 
-ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx, UID dataMoveId, UID logId) {
+ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx,
+                                                                           UID dataMoveId,
+                                                                           Version ssVersion,
+                                                                           UID logId) {
+	state Transaction tr(cx);
+	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	loop {
-		state Transaction tr(cx);
 		try {
-			Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
-			if (!val.present()) {
-				TraceEvent(SevWarn, "SSBulkLoadDataMoveIdNotExist", logId).detail("DataMoveID", dataMoveId);
-				return Optional<BulkLoadTaskState>();
+			state Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
+			ASSERT(tr.getReadVersion().isReady());
+			if (tr.getReadVersion().get() < ssVersion) {
+				wait(delay(0.1));
+				tr.reset();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				continue;
 			}
-			DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
-			return dataMoveMetaData.bulkLoadTaskState;
+			if (!val.present()) {
+				TraceEvent(SevWarnAlways, "SSBulkLoadDataMoveIdNotExist", logId)
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("ReadVersion", tr.getReadVersion().get())
+				    .detail("SSVersion", ssVersion);
+				return Optional<BulkLoadTaskState>();
+			} else {
+				DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
+				return dataMoveMetaData.bulkLoadTaskState;
+			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
