@@ -30,11 +30,12 @@ function start_fdb_cluster {
   local local_scratch_dir="${3}"
   local ss_count="${4}"
   shift 4
-  local extra_knobs=("${@}")
   local knobs="--knob_shard_encode_location_metadata=true"
-  for item in "${extra_knobs[@]}"; do
-    knobs="${knobs} ${item}"
-  done
+  if (( $# > 0 )); then
+    for item in "${@}"; do
+      knobs="${knobs} ${item}"
+    done
+  fi
   knobs=$(echo "$knobs" | sed 's/^[[:space:]]*//')
   local output="${local_scratch_dir}/output.$$.txt"
   local port_prefix=1500
@@ -90,7 +91,10 @@ function start_backup_agent {
   local local_build_dir="${1}"
   local local_scratch_dir="${2}"
   shift 2
-  local extra_knobs=("${@}")
+  local local_knobs=""
+  if (( $# > 0 )); then
+    local_knobs="${*}"
+  fi
   # Just using ${extra_knobs[*]} in the below will output a string
   # quoted by single quotes; its what bash does when string has spaces
   # or special characters. To get around this, we printf the string instead;
@@ -99,7 +103,7 @@ function start_backup_agent {
   "${local_build_dir}/bin/backup_agent" \
     -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     --log --logdir="${local_scratch_dir}" \
-    $(printf "%s" "${extra_knobs[*]}") &
+    $(printf "%s" "${local_knobs}") &
   local pid=$!
   if ! ps -p "${pid}" &> /dev/null; then
     wait "${pid}"
