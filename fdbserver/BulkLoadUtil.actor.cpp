@@ -59,7 +59,19 @@ ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Datab
 				    .detail("SSVersion", ssVersion);
 				return Optional<BulkLoadTaskState>();
 			} else {
-				DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
+				state DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
+				if (!dataMoveMetaData.bulkLoadTaskState.present()) {
+					wait(delay(0.1));
+					tr.reset();
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					// DD moveShard progressively persists dataMoveMetadata based on range.
+					// Therefore, it is possible that the dataMoveMetadata is persisted at a subrange partially.
+					// Note that DD moveShard only persist the bulkload metadata in the dataMoveMetadata when all
+					// subranges have been persisted. Therefore, if the data move id indicating the move is for bulk
+					// loading, the SS should wait until the bulkLoad metadata is included in the dataMoveMetadata.
+					continue;
+				}
 				return dataMoveMetaData.bulkLoadTaskState;
 			}
 		} catch (Error& e) {

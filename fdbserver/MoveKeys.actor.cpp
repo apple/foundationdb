@@ -1894,6 +1894,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						                 newBulkLoadTaskState.getRange(),
 						                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
 						TraceEvent(SevInfo, "DDBulkLoadEngineTaskRunningPersist", relocationIntervalId)
+						    .detail("DataMoveID", dataMoveId)
 						    .detail("BulkLoadTaskState", newBulkLoadTaskState.toString());
 						dataMove.bulkLoadTaskState = newBulkLoadTaskState;
 					}
@@ -2335,6 +2336,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							                 newBulkLoadTaskState.getRange(),
 							                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
 							TraceEvent(SevInfo, "DDBulkLoadEngineTaskCompletePersist", relocationIntervalId)
+							    .detail("DataMoveID", dataMoveId)
 							    .detail("BulkLoadTaskState", newBulkLoadTaskState.toString());
 							dataMove.bulkLoadTaskState = newBulkLoadTaskState;
 						}
