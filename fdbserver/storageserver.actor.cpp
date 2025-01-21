@@ -10862,9 +10862,6 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
 		removeDataRange(data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, *r);
 		setAvailableStatus(data, *r, false);
-		if (conductBulkLoad) {
-			clearBulkLoadStatus(data, dataMoveId);
-		}
 	}
 
 	// Clear the moving-in empty range, and set it available at the latestVersion.

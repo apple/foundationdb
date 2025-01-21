@@ -890,6 +890,38 @@ private:
 	size_t bytes;
 };
 
+// When the storage engine is not ShardedRocksDB, SS conducts bulkLoad using fetchKey based method.
+// In this case, SS needs to persist the bulkload task metadata locally because when SS restarts, SS
+// does not have the bulkload task information.
+// This data structure is the metadata persisted at SS special key space locally.
+// We add the bulkload task metadata at the same version when the range is set as assigned.
+// We remove the metadata at the version when the range is marked as available.
+// When SS restarts, we recovery the task from the metadata and remove any outdated persisted task.
+// A persisted task is outdated if the range is not assigned or the range is aligned to the assigned range boundary.
+struct SSBulkLoadMetadata {
+public:
+	constexpr static FileIdentifier file_identifier = 1384506;
+
+	SSBulkLoadMetadata() = default;
+
+	SSBulkLoadMetadata(const UID& dataMoveId, const KeyRange& range) : dataMoveId(dataMoveId), range(range) {}
+
+	bool isValid() const { return dataMoveId.isValid(); }
+
+	KeyRange getRange() const { return range; }
+
+	UID getDataMoveId() const { return dataMoveId; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, dataMoveId, range);
+	}
+
+private:
+	UID dataMoveId;
+	KeyRange range;
+};
+
 // Define job manifest file name.
 std::string getBulkLoadJobManifestFileName();
 
@@ -929,37 +961,5 @@ BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const KeyRange& range,
                                    const std::string& jobRoot,
                                    const BulkLoadTransportMethod& transportMethod);
-
-// When the storage engine is not ShardedRocksDB, SS conducts bulkLoad using fetchKey based method.
-// In this case, SS needs to persist the bulkload task metadata locally because when SS restarts, SS
-// does not have the bulkload task information.
-// This data structure is the metadata persisted at SS special key space locally.
-// We add the bulkload task metadata at the same version when the range is set as assigned.
-// We remove the metadata at the version when the range is marked as available.
-// When SS restarts, we recovery the task from the metadata and remove any outdated persisted task.
-// A persisted task is outdated if the range is not assigned or the range is aligned to the assigned range boundary.
-struct SSBulkLoadMetadata {
-public:
-	constexpr static FileIdentifier file_identifier = 1384506;
-
-	SSBulkLoadMetadata() = default;
-
-	SSBulkLoadMetadata(const UID& dataMoveId, const KeyRange& range) : dataMoveId(dataMoveId), range(range) {}
-
-	bool isValid() const { return dataMoveId.isValid(); }
-
-	KeyRange getRange() const { return range; }
-
-	UID getDataMoveId() const { return dataMoveId; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, dataMoveId, range);
-	}
-
-private:
-	UID dataMoveId;
-	KeyRange range;
-};
 
 #endif
