@@ -134,7 +134,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
 	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE
 };
@@ -220,7 +220,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io-trust-warn-only",        SO_NONE },
 	{ OPT_TRACE_FORMAT,          "--trace-format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist-binpath",         SO_REQ_SEP },
-	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob-credential-file",      SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS,      "--blob-credentials",          SO_REQ_SEP },
 	{ OPT_CONFIG_PATH,           "--config-path",               SO_REQ_SEP },
 	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
 	{ OPT_NO_CONFIG_DB,          "--no-config-db",              SO_NONE },
@@ -698,6 +698,9 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " Machine class (valid options are storage, transaction,"
 	                 " resolution, grv_proxy, commit_proxy, master, test, unset, stateless, log, router,"
 	                 " and cluster_controller).");
+	printOptionUsage("--blob-credentials FILE",
+	                 "File containing blob credentials in JSON format. Can be specified "
+	                 "multiple times for multiple files. See fdbbackup usage for more details.");
 	printOptionUsage("--profiler-",
 	                 "Set an actor profiler option. Supported options are:\n"
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
@@ -1655,24 +1658,9 @@ private:
 			case OPT_WHITELIST_BINPATH:
 				whitelistBinPaths = args.OptionArg();
 				break;
-			case OPT_BLOB_CREDENTIAL_FILE:
+			case OPT_BLOB_CREDENTIALS:
 				// Add blob credential following backup agent example
 				blobCredentials.push_back(args.OptionArg());
-				printf("blob credential file:%s\n", blobCredentials.back().c_str());
-
-				blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
-				if (blobCredsFromENV != nullptr) {
-					fprintf(stderr, "[WARNING] Set blob credential via env variable is not tested yet\n");
-					TraceEvent(SevError, "FastRestoreGetBlobCredentialFile")
-					    .detail("Reason", "Set blob credential via env variable is not tested yet");
-					StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
-					do {
-						StringRef file = t.eat(":");
-						if (file.size() != 0) {
-							blobCredentials.push_back(file.toString());
-						}
-					} while (t.size() != 0);
-				}
 				break;
 			case OPT_CONFIG_PATH:
 				configPath = args.OptionArg();
@@ -1797,6 +1785,17 @@ private:
 				break;
 			}
 			}
+		}
+		// Sets up blob credentials, including one from the environment FDB_BLOB_CREDENTIALS.
+		// Below is top-half of BackupTLSConfig::setupBlobCredentials().
+		const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+		if (blobCredsFromENV != nullptr) {
+			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
+			do {
+				StringRef file = t.eat(":");
+				if (file.size() != 0)
+					blobCredentials.push_back(file.toString());
+			} while (t.size() != 0);
 		}
 
 		setThreadLocalDeterministicRandomSeed(randomSeed);

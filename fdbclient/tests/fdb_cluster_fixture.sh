@@ -21,27 +21,43 @@ function shutdown_fdb_cluster {
 # $1 source directory
 # $2 build directory
 # $3 scratch directory
+# $4 How many SS to run
+# ... knobs to apply to the cluster.
 # Check $? on return.
 function start_fdb_cluster {
   local local_source_dir="${1}"
   local local_build_dir="${2}"
   local local_scratch_dir="${3}"
+  local ss_count="${4}"
+  shift 4
+  local knobs="--knob_shard_encode_location_metadata=true"
+  if (( $# > 0 )); then
+    for item in "${@}"; do
+      knobs="${knobs} ${item}"
+    done
+  fi
+  knobs=$(echo "$knobs" | sed 's/^[[:space:]]*//')
   local output="${local_scratch_dir}/output.$$.txt"
   local port_prefix=1500
   while : ; do
     port_prefix="$(( port_prefix + 100 ))"
     # Disable exit on error temporarily so can capture result from run cluster.
     # Then redirect the output of the run_customer_cluster.sh via tee via
-    # 'process substitution'; piping to tee hangs on success..
+    # 'process substitution'; piping to tee hangs on success.
     set +o errexit  # a.k.a. set +e
     set +o noclobber
+    # In the below $knobs will pick up single quotes -- its what bash does when it
+    # outputs strings with spaces or special characters. In this case, we want the
+    # single quotes.
     LOOPBACK_DIR="${local_scratch_dir}/loopback_cluster" PORT_PREFIX="${port_prefix}" \
       "${local_source_dir}/tests/loopback_cluster/run_custom_cluster.sh" \
       "${local_build_dir}" \
-      --knobs "--knob_shard_encode_location_metadata=true" \
+      --knobs "${knobs}" \
       --stateless_count 1 --replication_count 1 --logs_count 1 \
-      --storage_count 1 --storage_type ssd-rocksdb-v1 \
-      --dump_pids on > >( tee "${output}" ) 2>&1
+      --storage_count "${ss_count}" --storage_type ssd-sharded-rocksdb \
+      --dump_pids on \
+      > >(tee "${output}") \
+      2> >(tee "${output}" >&2)
     status="$?"
     # Restore exit on error.
     set -o errexit  # a.k.a. set -e
@@ -75,10 +91,19 @@ function start_backup_agent {
   local local_build_dir="${1}"
   local local_scratch_dir="${2}"
   shift 2
+  local local_knobs=""
+  if (( $# > 0 )); then
+    local_knobs="${*}"
+  fi
+  # Just using ${extra_knobs[*]} in the below will output a string
+  # quoted by single quotes; its what bash does when string has spaces
+  # or special characters. To get around this, we printf the string instead;
+  # this will print out string w/ spaces w/o quotes.
+  # Don't quote the printf substatement... bash will add single quotes.
   "${local_build_dir}/bin/backup_agent" \
     -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     --log --logdir="${local_scratch_dir}" \
-    ${@} &
+    $(printf "%s" "${local_knobs}") &
   local pid=$!
   if ! ps -p "${pid}" &> /dev/null; then
     wait "${pid}"

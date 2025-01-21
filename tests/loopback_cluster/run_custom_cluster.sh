@@ -52,7 +52,11 @@ function start_servers {
     fi
     local port=$(( PORT_PREFIX + SERVER_COUNT ))
     local zone="${4}-Z-$(( j % REPLICATION_COUNT ))"
-    ${2} "${FDB}" -p auto:"${port}" ${KNOBS:+"$KNOBS"} -c "${3}" \
+    # There may be more than one knob in KNOBS separated by spaces. Bash will quote
+    # it all with single-quotes because the string has a space in it. We don't want
+    # that behavior; fdbserver won't be able to parse the quoted knobs. To get around
+    # this native bash behavior, we printf the KNOBS string.
+    ${2} "${FDB}" -p auto:"${port}" ${KNOBS:+$(printf "%s" "${KNOBS}")} -c "${3}" \
       -d "${datadir}" -L "${logdir}" -C "${CLUSTER}" \
       --datacenter_id="${4}" \
       --locality-zoneid "${zone}" \

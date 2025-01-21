@@ -77,7 +77,7 @@ ACTOR Future<bool> getOngoingBulkLoadJob(Database cx) {
 		try {
 			Optional<BulkLoadJobState> job = wait(getAliveBulkLoadJob(&tr));
 			if (job.present()) {
-				fmt::println("Running bulk loading job: {}", job.get().toString());
+				fmt::println("Running bulk loading job: {}", job.get().getJobId().toString());
 				return true;
 			} else {
 				fmt::println("No bulk loading job is running");

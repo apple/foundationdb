@@ -86,6 +86,11 @@ std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadM
 	return res;
 }
 
+std::string getPath(const std::string& path) {
+	boost::system::result<boost::urls::url_view> parse_result = boost::urls::parse_uri(path);
+	return parse_result.has_value() ? parse_result.value().path() : path;
+}
+
 // TODO(BulkLoad): use this everywhere
 std::string appendToPath(const std::string& path, const std::string& append) {
 	boost::system::result<boost::urls::url_view> parse_result = boost::urls::parse_uri(path);

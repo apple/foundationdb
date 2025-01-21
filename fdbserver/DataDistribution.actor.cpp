@@ -1835,7 +1835,7 @@ ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void>
 				std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
 				std::string jobManifestFileName = getBulkLoadJobManifestFileName();
 				std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
-				std::string remoteJobManifestFilePath = joinPath(remoteFolder, jobManifestFileName);
+				std::string remoteJobManifestFilePath = appendToPath(remoteFolder, jobManifestFileName);
 				std::unordered_map<Key, BulkLoadJobFileManifestEntry> manifestEntryMap =
 				    wait(fetchBulkLoadTaskManifestEntryMap(
 				        jobTransportMethod, localJobManifestFilePath, remoteJobManifestFilePath, jobRange, self->ddId));

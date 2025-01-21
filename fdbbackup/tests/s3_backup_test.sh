@@ -296,12 +296,12 @@ if ! source "${cwd}/../../fdbclient/tests/fdb_cluster_fixture.sh"; then
   exit 1
 fi
 # Startup fdb cluster and backup agent.
-if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR}"; then
+if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR}" 1; then
   err "Failed start FDB cluster"
   exit 1
 fi
 log "FDB cluster is up"
-if ! start_backup_agent "${build_dir}" "${TEST_SCRATCH_DIR}" "${KNOBS[*]}"; then
+if ! start_backup_agent "${build_dir}" "${TEST_SCRATCH_DIR}" "${KNOBS[@]}"; then
   err "Failed start backup_agent"
   exit 1
 fi
