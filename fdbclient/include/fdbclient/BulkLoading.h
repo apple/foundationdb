@@ -932,7 +932,7 @@ BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
 
 // When the storage engine is not ShardedRocksDB, SS conducts bulkLoad using fetchKey based method.
 // In this case, SS needs to persist the bulkload task metadata locally because when SS restarts, SS
-// does not have the bulkload task information. So, we need to persist this information to SS disk locally.
+// does not have the bulkload task information.
 // This data structure is the metadata persisted at SS special key space locally.
 // We add the bulkload task metadata at the same version when the range is set as assigned.
 // We remove the metadata at the version when the range is marked as available.
