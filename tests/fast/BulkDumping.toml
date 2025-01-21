@@ -1,6 +1,6 @@
 [configuration]
 config = 'triple'
-storageEngineType = 5
+storageEngineType = 0
 machineCount = 15
 coordinators = 3
 extraStorageMachineCountPerDC = 5
@@ -14,9 +14,10 @@ encryptModes = ['disabled'] # Do not support encryption
 # The purpose of setting the knob to true was to enable the shard rocksdb storage engine
 # The shard rocksdb storage engine is set up before this knob is overridden
 # The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check
-# so for this BulkDumping test, the shard RocksDB storage engine is always turned on.
 shard_encode_location_metadata = true
-dd_storage_wiggle_pause_threshold = 1 # mitigate perpetual wiggle since it causes bulkload engine hard to get a valid team to inject data
+
+# mitigate perpetual wiggle since it causes bulkload engine hard to get a valid team to inject data
+dd_storage_wiggle_pause_threshold = 1
 
 # BulkLoad relies on RangeLock
 enable_read_lock_on_range = true

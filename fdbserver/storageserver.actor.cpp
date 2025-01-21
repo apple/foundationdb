@@ -8828,7 +8828,7 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 				if (rep.expectedSize() >= SERVER_KNOBS->FETCH_BLOCK_BYTES) {
 					break;
 				}
-				if (g_network->isSimulated() && deterministicRandom()->random01() < BUGGIFY ? 0.1 : 0.01) {
+				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
 					ASSERT(keyIndex > 0);
 					break; // improve coverage in simulation testing
 				}

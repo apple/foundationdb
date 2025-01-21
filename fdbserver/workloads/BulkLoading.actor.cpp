@@ -677,8 +677,7 @@ struct BulkLoading : TestWorkload {
 		}
 
 		// Run test
-		// if (deterministicRandom()->coinflip()) {
-		if (true) {
+		if (deterministicRandom()->coinflip()) {
 			// Inject data to three non-overlapping ranges
 			wait(self->simpleTest(self, cx));
 		} else {

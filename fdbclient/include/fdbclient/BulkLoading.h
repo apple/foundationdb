@@ -936,7 +936,7 @@ BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
 // This data structure is the metadata persisted at SS special key space locally.
 // We add the bulkload task metadata at the same version when the range is set as assigned.
 // We remove the metadata at the version when the range is marked as available.
-// When SS restarts, we recovery the task from the metadata and remove any outdate persisted task.
+// When SS restarts, we recovery the task from the metadata and remove any outdated persisted task.
 // A persisted task is outdated if the range is not assigned or the range is aligned to the assigned range boundary.
 struct SSBulkLoadMetadata {
 public:
