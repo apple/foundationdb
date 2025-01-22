@@ -213,8 +213,10 @@ ACTOR Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapP
 	if (!conflictRange.empty())
 		tr->addReadConflictRange(conflictRange);
 
-	tr->clear(withPrefix);
-	tr->set(withPrefix.begin, value);
+	tr->clear(withPrefix); // clear [keyVersionMap/begin, keyVersionMap/end)
+	tr->set(withPrefix.begin, value); // set keyVersionMap/begin to value(input version)
+	// set keyVersionMap/end to oldValue: because end is exclusive here,
+	// but starting from end it might be covered by another range file, so set it to old value
 	tr->set(withPrefix.end, oldValue);
 
 	return Void();

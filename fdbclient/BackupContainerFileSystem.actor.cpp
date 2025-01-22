@@ -259,12 +259,15 @@ public:
 		for (int idx : indices) {
 			const LogFile& file = files[idx];
 			if (lastEnd == invalidVersion) {
-				if (file.beginVersion > begin)
+				if (file.beginVersion > begin) {
+					// the first version of the first file must be smaller or equal to the desired beginVersion
 					return false;
+				}
 				if (file.endVersion > begin) {
 					lastBegin = begin;
 					lastTags = file.totalTags;
 				} else {
+					// if endVerison of file is smaller than desired beginVersion, then do not include this file
 					continue;
 				}
 			} else if (lastEnd < file.beginVersion) {
@@ -907,7 +910,6 @@ public:
 	// If "keyRangesFilter" is empty, the file set will cover all key ranges present in the backup.
 	// It's generally a good idea to specify "keyRangesFilter" to reduce the number of files for
 	// restore times.
-	//
 	// If "logsOnly" is true, then only log files are returned and "keyRangesFilter" is ignored,
 	// because the log can contain mutations of the whole key space, unlike range files that each
 	// is limited to a smaller key range.
@@ -977,6 +979,7 @@ public:
 			if (restorable.targetVersion < maxKeyRangeVersion)
 				continue;
 
+			// restorable.snapshot.beginVersion is set to the smallest(oldest) snapshot's beginVersion
 			restorable.snapshot = snapshots[i];
 
 			// No logs needed if there is a complete filtered key space snapshot at the target version.

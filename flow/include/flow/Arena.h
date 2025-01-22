@@ -43,6 +43,7 @@
 #include <limits>
 #include <optional>
 #include <set>
+#include <unordered_set>
 #include <type_traits>
 #include <sstream>
 #include <string_view>
@@ -191,7 +192,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	int unused() const;
 	const void* getData() const;
 	const void* getNextData() const;
-	size_t totalSize() const;
+	size_t totalSize(std::unordered_set<ArenaBlock*>&) const;
 	size_t estimatedTotalSize() const;
 	void wipeUsed();
 	// just for debugging:

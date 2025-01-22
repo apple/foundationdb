@@ -143,7 +143,8 @@ size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 		if (fastInaccurateEstimate) {
 			result = impl->estimatedTotalSize();
 		} else {
-			result = impl->totalSize();
+			std::unordered_set<ArenaBlock*> visited;
+			result = impl->totalSize(visited);
 		}
 
 		disallowAccess(impl.getPtr());
@@ -208,7 +209,7 @@ const void* ArenaBlock::getNextData() const {
 	return (const uint8_t*)getData() + used();
 }
 
-size_t ArenaBlock::totalSize() const {
+size_t ArenaBlock::totalSize(std::unordered_set<ArenaBlock*>& visited) const {
 	if (isTiny()) {
 		return size();
 	}
@@ -224,7 +225,10 @@ size_t ArenaBlock::totalSize() const {
 			totalSizeEstimate += r->aligned4kBufferSize;
 		} else {
 			allowAccess(r->next);
-			totalSizeEstimate += r->next->totalSize();
+			// Skip visited arenas and avoid stack overflow for circular references
+			if (visited.insert(r->next).second) {
+				totalSizeEstimate += r->next->totalSize(visited);
+			}
 			disallowAccess(r->next);
 		}
 		o = r->nextBlockOffset;
