@@ -66,7 +66,6 @@ const StringRef ROCKSDB_COMMIT_LATENCY_HISTOGRAM = "RocksDBCommitLatency"_sr;
 const StringRef ROCKSDB_COMMIT_ACTION_HISTOGRAM = "RocksDBCommitAction"_sr;
 const StringRef ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM = "RocksDBCommitQueueWait"_sr;
 const StringRef ROCKSDB_WRITE_HISTOGRAM = "RocksDBWrite"_sr;
-const StringRef ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM = "RocksDBDeleteCompactRange"_sr;
 const StringRef ROCKSDB_READRANGE_LATENCY_HISTOGRAM = "RocksDBReadRangeLatency"_sr;
 const StringRef ROCKSDB_READVALUE_LATENCY_HISTOGRAM = "RocksDBReadValueLatency"_sr;
 const StringRef ROCKSDB_READPREFIX_LATENCY_HISTOGRAM = "RocksDBReadPrefixLatency"_sr;
@@ -79,6 +78,10 @@ const StringRef ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM = "RocksDBReadPrefixQueue
 const StringRef ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM = "RocksDBReadRangeNewIterator"_sr;
 const StringRef ROCKSDB_READVALUE_GET_HISTOGRAM = "RocksDBReadValueGet"_sr;
 const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = "RocksDBReadPrefixGet"_sr;
+
+// RocksDB Internal stats.
+const KeyRef ROCKSDB_STATS_HISTOGRAM_GROUP = "RocksDBInternalStats"_sr;
+
 // Flush reason code:
 // https://github.com/facebook/rocksdb/blob/63a5125a5220d953bf504daf33694f038403cc7c/include/rocksdb/listener.h#L164-L181
 // This function needs to be updated when flush code changes.
@@ -182,6 +185,14 @@ class RocksDBEventListener : public rocksdb::EventListener {
 public:
 	RocksDBEventListener(UID id)
 	  : logId(id), compactionReasons((int)CompactionReason::kNumOfReasons), flushReasons(ROCKSDB_NUM_FLUSH_REASONS),
+	    numRangeDeletionsInTableFile(Histogram::getHistogram(ROCKSDB_STATS_HISTOGRAM_GROUP,
+	                                                         "NumRangeDeletionsInTableFile"_sr,
+	                                                         Histogram::Unit::bytes)),
+	    numPointDeletionsInTableFile(Histogram::getHistogram(ROCKSDB_STATS_HISTOGRAM_GROUP,
+	                                                         "NumPointDeletionsInTableFile"_sr,
+	                                                         Histogram::Unit::bytes)),
+	    numEntriesInTableFile(
+	        Histogram::getHistogram(ROCKSDB_STATS_HISTOGRAM_GROUP, "NumEntriesInTableFile"_sr, Histogram::Unit::bytes)),
 	    lastResetTime(now()) {}
 
 	void OnStallConditionsChanged(const rocksdb::WriteStallInfo& info) override {
@@ -218,6 +229,12 @@ public:
 			return;
 		}
 		compactionReasons[index]++;
+	}
+
+	void OnTableFileCreated(const rocksdb::TableFileCreationInfo& info) override {
+		numRangeDeletionsInTableFile->sample(info.table_properties.num_range_deletions);
+		numPointDeletionsInTableFile->sample(info.table_properties.num_deletions);
+		numEntriesInTableFile->sample(info.table_properties.num_entries);
 	}
 
 	void logRecentRocksDBBackgroundWorkStats(UID ssId, std::string logReason = "PeriodicLog") {
@@ -270,6 +287,11 @@ private:
 	std::atomic_int flushTotal;
 	std::atomic_int compactionTotal;
 
+	// Histograms.
+	Reference<Histogram> numRangeDeletionsInTableFile;
+	Reference<Histogram> numPointDeletionsInTableFile;
+	Reference<Histogram> numEntriesInTableFile;
+
 	double lastResetTime;
 };
 
@@ -320,12 +342,283 @@ private:
 	std::mutex mutex;
 };
 
+// Collects range deletion count during table file creation. Marks table file for compaction if range deletion count
+// exceeds threshold.
+class CompactOnRangeDeletionCollector : public rocksdb::TablePropertiesCollector {
+public:
+	CompactOnRangeDeletionCollector(uint64_t numRangeDeletionsAllowed, std::atomic_uint* numFilesMarkedForCompaction)
+	  : threshold(numRangeDeletionsAllowed), numFilesMarkedForCompaction(numFilesMarkedForCompaction) {
+		ASSERT(numFilesMarkedForCompaction);
+	}
+
+	// AddUserKey() will be called when a new key/value pair is inserted into the
+	// table.
+	// @params key    the user key that is inserted into the table.
+	// @params value  the value that is inserted into the table.
+	// @params file_size  file size up to now
+	// TODO: Consider collecting point deletion info.
+	rocksdb::Status AddUserKey(const rocksdb::Slice& key,
+	                           const rocksdb::Slice& value,
+	                           rocksdb::EntryType type,
+	                           rocksdb::SequenceNumber seq,
+	                           uint64_t file_size) override {
+		if (type == rocksdb::EntryType::kEntryRangeDeletion) {
+			++numRangeDeletions;
+		}
+		return rocksdb::Status::OK();
+	}
+
+	// Finish() will be called when a table has already been built and is ready for writing the properties block.
+	// @params properties  User will add their collected statistics to
+	// `properties`.
+	// Number of range deletion is included in rocksdb's table properties. No need to add a custom entry.
+	rocksdb::Status Finish(rocksdb::UserCollectedProperties* /*properties*/) override {
+		if (numRangeDeletions > threshold) {
+			++(*numFilesMarkedForCompaction);
+		}
+		return rocksdb::Status::OK();
+	};
+
+	// Return the human-readable properties, where the key is property name and
+	// the value is the human-readable form of value. No additional properties needed
+	// for this collector.
+	rocksdb::UserCollectedProperties GetReadableProperties() const override {
+		return rocksdb::UserCollectedProperties();
+	}
+
+	// The name of the properties collector can be used for debugging purpose.
+	const char* Name() const override { return "CompactOnRangeDeletionCollector"; }
+
+	// EXPERIMENTAL Return whether the output file should be further compacted based on the threshold.
+	bool NeedCompact() const override { return threshold > 0 && numRangeDeletions > threshold; }
+
+private:
+	uint64_t threshold = 0;
+	uint64_t numRangeDeletions = 0;
+	std::atomic_uint* numFilesMarkedForCompaction;
+};
+
+class CompactOnRangeDeletionCollectorFactory : public rocksdb::TablePropertiesCollectorFactory {
+public:
+	// A factory of a table property collector that marks a SST file as need-compaction when the number of range
+	// deletions exceeds the threshold.
+	// @param numRangeDeletionsAllowed,  triggers compaction range deletion count exceeds numRangeDeletionsAllowed.
+	CompactOnRangeDeletionCollectorFactory(uint64_t numRangeDeletionsAllowed)
+	  : threshold(numRangeDeletionsAllowed), numFilesMarkedForCompaction(0) {}
+
+	~CompactOnRangeDeletionCollectorFactory() {}
+
+	rocksdb::TablePropertiesCollector* CreateTablePropertiesCollector(
+	    rocksdb::TablePropertiesCollectorFactory::Context context) override {
+		return new CompactOnRangeDeletionCollector(threshold, &numFilesMarkedForCompaction);
+	}
+
+	uint getNumFilesMarkedForCompaction() { return numFilesMarkedForCompaction; }
+
+	static const char* kClassName() { return "CompactOnRangeDeletionCollectorFactory"; }
+	const char* Name() const override { return kClassName(); }
+
+	std::string ToString() const override {
+		return "CompactOnRangeDeletionCollectorFactory: " + std::to_string(threshold);
+	}
+
+	void logMetrics(bool reset) {
+		TraceEvent("CompactOnRangeDeletionMetrics")
+		    .detail("NumFilesMarkedForCompaction", numFilesMarkedForCompaction)
+		    .detail("Threshold", threshold);
+		if (reset) {
+			numFilesMarkedForCompaction = 0;
+		}
+	}
+
+private:
+	const uint64_t threshold;
+	std::atomic_uint numFilesMarkedForCompaction;
+};
+struct Counters {
+	CounterCollection cc;
+	Counter immediateThrottle;
+	Counter failedToAcquire;
+	Counter convertedRangeDeletions;
+
+	Counters()
+	  : cc("RocksDBCounters"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
+	    convertedRangeDeletions("ConvertedRangeDeletions", cc) {}
+};
+
+rocksdb::CompactionPri getCompactionPriority() {
+	switch (SERVER_KNOBS->ROCKSDB_COMPACTION_PRI) {
+	case 0:
+		return rocksdb::CompactionPri::kByCompensatedSize;
+	case 1:
+		return rocksdb::CompactionPri::kOldestLargestSeqFirst;
+	case 2:
+		return rocksdb::CompactionPri::kOldestSmallestSeqFirst;
+	case 3:
+		return rocksdb::CompactionPri::kMinOverlappingRatio;
+	case 4:
+		return rocksdb::CompactionPri::kRoundRobin;
+	default:
+		TraceEvent(SevWarn, "InvalidCompactionPriority").detail("KnobValue", SERVER_KNOBS->ROCKSDB_COMPACTION_PRI);
+		return rocksdb::CompactionPri::kMinOverlappingRatio;
+	}
+}
+
+rocksdb::WALRecoveryMode getWalRecoveryMode() {
+	switch (SERVER_KNOBS->ROCKSDB_WAL_RECOVERY_MODE) {
+	case 0:
+		return rocksdb::WALRecoveryMode::kTolerateCorruptedTailRecords;
+	case 1:
+		return rocksdb::WALRecoveryMode::kAbsoluteConsistency;
+	case 2:
+		return rocksdb::WALRecoveryMode::kPointInTimeRecovery;
+	case 3:
+		return rocksdb::WALRecoveryMode::kSkipAnyCorruptedRecords;
+	default:
+		TraceEvent(SevWarn, "InvalidWalRecoveryMode").detail("KnobValue", SERVER_KNOBS->ROCKSDB_WAL_RECOVERY_MODE);
+		return rocksdb::WALRecoveryMode::kPointInTimeRecovery;
+	}
+}
+
 // Encapsulation of shared states.
 struct ShardedRocksDBState {
 	bool closing = false;
-};
+	Counters counters;
+	std::shared_ptr<rocksdb::Cache> blockCache = nullptr;
+	std::shared_ptr<CompactOnRangeDeletionCollectorFactory> compactOnRangeDeletionFactory = nullptr;
 
-std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
+	ShardedRocksDBState() {
+		if (SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE > 0) {
+			blockCache =
+			    rocksdb::NewLRUCache(SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE,
+			                         -1, /* num_shard_bits, default value:-1*/
+			                         false, /* strict_capacity_limit, default value:false */
+			                         SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO /* high_pri_pool_ratio */);
+		}
+		if (SERVER_KNOBS->SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD > 0) {
+			compactOnRangeDeletionFactory = std::make_shared<CompactOnRangeDeletionCollectorFactory>(
+			    SERVER_KNOBS->SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD);
+		}
+	}
+
+	rocksdb::ColumnFamilyOptions getCFOptions() {
+		rocksdb::ColumnFamilyOptions options;
+
+		if (SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES) {
+			options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
+			options.OptimizeLevelStyleCompaction(SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_BUDGET);
+		}
+		options.write_buffer_size = SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_BUFFER_SIZE;
+		options.max_write_buffer_number = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
+		options.target_file_size_base = SERVER_KNOBS->SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE;
+		options.target_file_size_multiplier = SERVER_KNOBS->SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
+
+		if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
+			options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+		}
+
+		options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
+		options.memtable_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
+		options.block_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+		options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
+		options.memtable_max_range_deletions = SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
+		if (SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
+			options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT;
+		}
+		if (SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT > 0) {
+			options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT;
+		}
+
+		if (compactOnRangeDeletionFactory) {
+			options.table_properties_collector_factories.emplace_back(compactOnRangeDeletionFactory);
+		}
+
+		// Compact sstables when there's too much deleted stuff.
+		if (SERVER_KNOBS->ROCKSDB_ENABLE_COMPACT_ON_DELETION) {
+			// Creates a factory of a table property collector that marks a SST
+			// file as need-compaction when it observe at least "D" deletion
+			// entries in any "N" consecutive entries, or the ratio of tombstone
+			// entries >= deletion_ratio.
+
+			// @param sliding_window_size "N". Note that this number will be
+			//     round up to the smallest multiple of 128 that is no less
+			//     than the specified size.
+			// @param deletion_trigger "D".  Note that even when "N" is changed,
+			//     the specified number for "D" will not be changed.
+			// @param deletion_ratio, if <= 0 or > 1, disable triggering compaction
+			//     based on deletion ratio. Disabled by default.
+			options.table_properties_collector_factories.emplace_back(
+			    rocksdb::NewCompactOnDeletionCollectorFactory(SERVER_KNOBS->ROCKSDB_CDCF_SLIDING_WINDOW_SIZE,
+			                                                  SERVER_KNOBS->ROCKSDB_CDCF_DELETION_TRIGGER,
+			                                                  SERVER_KNOBS->ROCKSDB_CDCF_DELETION_RATIO));
+		}
+
+		rocksdb::BlockBasedTableOptions bbOpts;
+		if (SERVER_KNOBS->SHARDED_ROCKSDB_PREFIX_LEN > 0) {
+			// Prefix blooms are used during Seek.
+			options.prefix_extractor.reset(rocksdb::NewFixedPrefixTransform(SERVER_KNOBS->SHARDED_ROCKSDB_PREFIX_LEN));
+
+			// Also turn on bloom filters in the memtable.
+			// TODO: Make a knob for this as well.
+			options.memtable_prefix_bloom_size_ratio = 0.1;
+
+			// 5 -- Can be read by RocksDB's versions since 6.6.0. Full and partitioned
+			// filters use a generally faster and more accurate Bloom filter
+			// implementation, with a different schema.
+			// https://github.com/facebook/rocksdb/blob/b77569f18bfc77fb1d8a0b3218f6ecf571bc4988/include/rocksdb/table.h#L391
+			bbOpts.format_version = 5;
+
+			// Create and apply a bloom filter using the 10 bits
+			// which should yield a ~1% false positive rate:
+			// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#full-filters-new-format
+			bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
+
+			// The whole key blooms are only used for point lookups.
+			// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#prefix-vs-whole-key
+			bbOpts.whole_key_filtering = false;
+		}
+
+		options.level0_file_num_compaction_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
+		options.level0_slowdown_writes_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
+		options.level0_stop_writes_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
+
+		bbOpts.cache_index_and_filter_blocks = SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+		bbOpts.pin_l0_filter_and_index_blocks_in_cache = SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+		bbOpts.cache_index_and_filter_blocks_with_high_priority =
+		    SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+		bbOpts.block_cache = blockCache;
+
+		options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
+
+		options.compaction_pri = getCompactionPriority();
+
+		return options;
+	}
+
+	rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
+		auto options = getCFOptions();
+		// never slowdown ingest.
+		options.level0_file_num_compaction_trigger = (1 << 30);
+		options.level0_slowdown_writes_trigger = (1 << 30);
+		options.level0_stop_writes_trigger = (1 << 30);
+		options.soft_pending_compaction_bytes_limit = 0;
+		options.hard_pending_compaction_bytes_limit = 0;
+
+		// no auto compactions please. The application should issue a
+		// manual compaction after all data is loaded into L0.
+		options.disable_auto_compactions = true;
+		// A manual compaction run should pick all files in L0 in
+		// a single compaction run.
+		options.max_compaction_bytes = (static_cast<uint64_t>(1) << 60);
+
+		// It is better to have only 2 levels, otherwise a manual
+		// compaction would compact at every possible level, thereby
+		// increasing the total time needed for compactions.
+		options.num_levels = 2;
+
+		return options;
+	}
+};
 
 rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
@@ -491,170 +784,12 @@ Error statusToError(const rocksdb::Status& s) {
 	}
 }
 
-rocksdb::CompactionPri getCompactionPriority() {
-	switch (SERVER_KNOBS->ROCKSDB_COMPACTION_PRI) {
-	case 0:
-		return rocksdb::CompactionPri::kByCompensatedSize;
-	case 1:
-		return rocksdb::CompactionPri::kOldestLargestSeqFirst;
-	case 2:
-		return rocksdb::CompactionPri::kOldestSmallestSeqFirst;
-	case 3:
-		return rocksdb::CompactionPri::kMinOverlappingRatio;
-	case 4:
-		return rocksdb::CompactionPri::kRoundRobin;
-	default:
-		TraceEvent(SevWarn, "InvalidCompactionPriority").detail("KnobValue", SERVER_KNOBS->ROCKSDB_COMPACTION_PRI);
-		return rocksdb::CompactionPri::kMinOverlappingRatio;
-	}
-}
-
-rocksdb::WALRecoveryMode getWalRecoveryMode() {
-	switch (SERVER_KNOBS->ROCKSDB_WAL_RECOVERY_MODE) {
-	case 0:
-		return rocksdb::WALRecoveryMode::kTolerateCorruptedTailRecords;
-	case 1:
-		return rocksdb::WALRecoveryMode::kAbsoluteConsistency;
-	case 2:
-		return rocksdb::WALRecoveryMode::kPointInTimeRecovery;
-	case 3:
-		return rocksdb::WALRecoveryMode::kSkipAnyCorruptedRecords;
-	default:
-		TraceEvent(SevWarn, "InvalidWalRecoveryMode").detail("KnobValue", SERVER_KNOBS->ROCKSDB_WAL_RECOVERY_MODE);
-		return rocksdb::WALRecoveryMode::kPointInTimeRecovery;
-	}
-}
-
-rocksdb::ColumnFamilyOptions getCFOptions() {
-	rocksdb::ColumnFamilyOptions options;
-
-	if (SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES) {
-		options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
-		options.OptimizeLevelStyleCompaction(SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_BUDGET);
-	}
-	options.write_buffer_size = SERVER_KNOBS->SHARDED_ROCKSDB_WRITE_BUFFER_SIZE;
-	options.max_write_buffer_number = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
-	options.target_file_size_base = SERVER_KNOBS->SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE;
-	options.target_file_size_multiplier = SERVER_KNOBS->SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
-
-	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
-		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
-	}
-	options.memtable_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
-	options.block_protection_bytes_per_key = SERVER_KNOBS->ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
-	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
-	options.memtable_max_range_deletions = SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
-	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
-	if (SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
-		options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT;
-	}
-	if (SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT > 0) {
-		options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT;
-	}
-
-	// Compact sstables when there's too much deleted stuff.
-	if (SERVER_KNOBS->ROCKSDB_ENABLE_COMPACT_ON_DELETION) {
-		// Creates a factory of a table property collector that marks a SST
-		// file as need-compaction when it observe at least "D" deletion
-		// entries in any "N" consecutive entries, or the ratio of tombstone
-		// entries >= deletion_ratio.
-
-		// @param sliding_window_size "N". Note that this number will be
-		//     round up to the smallest multiple of 128 that is no less
-		//     than the specified size.
-		// @param deletion_trigger "D".  Note that even when "N" is changed,
-		//     the specified number for "D" will not be changed.
-		// @param deletion_ratio, if <= 0 or > 1, disable triggering compaction
-		//     based on deletion ratio. Disabled by default.
-		options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(
-			SERVER_KNOBS->ROCKSDB_CDCF_SLIDING_WINDOW_SIZE,
-			SERVER_KNOBS->ROCKSDB_CDCF_DELETION_TRIGGER,
-			SERVER_KNOBS->ROCKSDB_CDCF_DELETION_RATIO) };
-	}
-
-	rocksdb::BlockBasedTableOptions bbOpts;
-	if (SERVER_KNOBS->SHARDED_ROCKSDB_PREFIX_LEN > 0) {
-		// Prefix blooms are used during Seek.
-		options.prefix_extractor.reset(rocksdb::NewFixedPrefixTransform(SERVER_KNOBS->SHARDED_ROCKSDB_PREFIX_LEN));
-
-		// Also turn on bloom filters in the memtable.
-		// TODO: Make a knob for this as well.
-		options.memtable_prefix_bloom_size_ratio = 0.1;
-
-		// 5 -- Can be read by RocksDB's versions since 6.6.0. Full and partitioned
-		// filters use a generally faster and more accurate Bloom filter
-		// implementation, with a different schema.
-		// https://github.com/facebook/rocksdb/blob/b77569f18bfc77fb1d8a0b3218f6ecf571bc4988/include/rocksdb/table.h#L391
-		bbOpts.format_version = 5;
-
-		// Create and apply a bloom filter using the 10 bits
-		// which should yield a ~1% false positive rate:
-		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#full-filters-new-format
-		bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
-
-		// The whole key blooms are only used for point lookups.
-		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#prefix-vs-whole-key
-		bbOpts.whole_key_filtering = false;
-	}
-
-	options.level0_file_num_compaction_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
-	options.level0_slowdown_writes_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
-	options.level0_stop_writes_trigger = SERVER_KNOBS->SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
-
-	if (rocksdb_block_cache == nullptr && SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE > 0) {
-		rocksdb_block_cache =
-		    rocksdb::NewLRUCache(SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE,
-		                         -1, /* num_shard_bits, default value:-1*/
-		                         false, /* strict_capacity_limit, default value:false */
-		                         SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO /* high_pri_pool_ratio */);
-		bbOpts.cache_index_and_filter_blocks = SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
-		bbOpts.pin_l0_filter_and_index_blocks_in_cache = SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
-		bbOpts.cache_index_and_filter_blocks_with_high_priority =
-		    SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
-	}
-	bbOpts.block_cache = rocksdb_block_cache;
-
-	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
-
-	options.compaction_pri = getCompactionPriority();
-
-	return options;
-}
-
-rocksdb::ColumnFamilyOptions getCFOptionsForInactiveShard() {
-	if (g_network->isSimulated()) {
-		return getCFOptions();
-	} else {
-		ASSERT(false); // FIXME: remove when SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE feature is well tuned
-	}
-	auto options = getCFOptions();
-	// never slowdown ingest.
-	options.level0_file_num_compaction_trigger = (1 << 30);
-	options.level0_slowdown_writes_trigger = (1 << 30);
-	options.level0_stop_writes_trigger = (1 << 30);
-	options.soft_pending_compaction_bytes_limit = 0;
-	options.hard_pending_compaction_bytes_limit = 0;
-
-	// no auto compactions please. The application should issue a
-	// manual compaction after all data is loaded into L0.
-	options.disable_auto_compactions = true;
-	// A manual compaction run should pick all files in L0 in
-	// a single compaction run.
-	options.max_compaction_bytes = (static_cast<uint64_t>(1) << 60);
-
-	// It is better to have only 2 levels, otherwise a manual
-	// compaction would compact at every possible level, thereby
-	// increasing the total time needed for compactions.
-	options.num_levels = 2;
-
-	return options;
-}
-
 rocksdb::DBOptions getOptions() {
 	rocksdb::DBOptions options;
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
 	options.atomic_flush = SERVER_KNOBS->ROCKSDB_ATOMIC_FLUSH;
+	options.use_direct_io_for_flush_and_compaction = SERVER_KNOBS->SHARDED_ROCKSDB_USE_DIRECT_IO;
 	if (SERVER_KNOBS->SHARDED_ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->SHARDED_ROCKSDB_BACKGROUND_PARALLELISM);
 	}
@@ -871,12 +1006,12 @@ struct PhysicalShard {
 				TraceEvent(SevInfo, "RocksDBRestoreEmptyShard")
 				    .detail("ShardId", id)
 				    .detail("CheckpointID", checkpoint.checkpointID);
-				status = db->CreateColumnFamily(getCFOptions(), id, &cf);
+				status = db->CreateColumnFamily(cfOptions, id, &cf);
 			} else {
 				TraceEvent(SevInfo, "RocksDBRestoreCF");
 				rocksdb::ImportColumnFamilyOptions importOptions;
 				importOptions.move_files = SERVER_KNOBS->ROCKSDB_IMPORT_MOVE_FILES;
-				status = db->CreateColumnFamilyWithImport(getCFOptions(), id, importOptions, metaData, &cf);
+				status = db->CreateColumnFamilyWithImport(cfOptions, id, importOptions, metaData, &cf);
 				TraceEvent(SevInfo, "RocksDBRestoreCFEnd").detail("Status", status.ToString());
 			}
 		} else if (format == RocksDBKeyValues) {
@@ -1066,28 +1201,18 @@ int readRangeInDb(PhysicalShard* shard,
 	return accumulatedBytes;
 }
 
-struct Counters {
-	CounterCollection cc;
-	Counter immediateThrottle;
-	Counter failedToAcquire;
-	Counter convertedRangeDeletions;
-
-	Counters()
-	  : cc("RocksDBCounters"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
-	    convertedRangeDeletions("ConvertedRangeDeletions", cc) {}
-};
-
 // Manages physical shards and maintains logical shard mapping.
 class ShardManager {
 public:
 	ShardManager(std::string path,
 	             UID logId,
+	             std::shared_ptr<ShardedRocksDBState> rState,
 	             const rocksdb::DBOptions& options,
 	             std::shared_ptr<RocksDBErrorListener> errorListener,
 	             std::shared_ptr<RocksDBEventListener> eventListener,
 	             Counters* cc,
 	             std::shared_ptr<IteratorPool> iteratorPool)
-	  : path(path), logId(logId), dbOptions(options), cfOptions(getCFOptions()), dataShardMap(nullptr, specialKeys.end),
+	  : path(path), logId(logId), rState(rState), dbOptions(options), dataShardMap(nullptr, specialKeys.end),
 	    counters(cc), iteratorPool(iteratorPool) {
 		if (!g_network->isSimulated()) {
 			// Generating trace events in non-FDB thread will cause errors. The event listener is tested with local FDB
@@ -1199,12 +1324,12 @@ public:
 			if (name == METADATA_SHARD_ID) {
 				foundMetadata = true;
 			}
-			descriptors.push_back(rocksdb::ColumnFamilyDescriptor(name, cfOptions));
+			descriptors.push_back(rocksdb::ColumnFamilyDescriptor(name, rState->getCFOptions()));
 		}
 
 		// Add default column family if it's a newly opened database.
 		if (descriptors.size() == 0) {
-			descriptors.push_back(rocksdb::ColumnFamilyDescriptor("default", cfOptions));
+			descriptors.push_back(rocksdb::ColumnFamilyDescriptor("default", rState->getCFOptions()));
 		}
 
 		std::vector<rocksdb::ColumnFamilyHandle*> handles;
@@ -1320,7 +1445,7 @@ public:
 			physicalShards[defaultShard->id] = defaultShard;
 
 			// Create metadata shard.
-			auto metadataShard = std::make_shared<PhysicalShard>(db, METADATA_SHARD_ID, cfOptions);
+			auto metadataShard = std::make_shared<PhysicalShard>(db, METADATA_SHARD_ID, rState->getCFOptions());
 			metadataShard->init();
 			columnFamilyMap[metadataShard->cf->GetID()] = metadataShard->cf;
 			physicalShards[METADATA_SHARD_ID] = metadataShard;
@@ -1445,8 +1570,8 @@ public:
 			}
 		}
 
-		auto cfOptions = active ? getCFOptions() : getCFOptionsForInactiveShard();
-		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, cfOptions));
+		auto currentCfOptions = active ? rState->getCFOptions() : rState->getCFOptionsForInactiveShard();
+		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, currentCfOptions));
 		std::shared_ptr<PhysicalShard>& shard = it->second;
 
 		activePhysicalShardIds.emplace(id);
@@ -1807,7 +1932,7 @@ public:
 			logRocksDBError(s, "Close");
 			return;
 		}
-		s = rocksdb::DestroyDB(path, rocksdb::Options(dbOptions, getCFOptions()));
+		s = rocksdb::DestroyDB(path, rocksdb::Options(dbOptions, rState->getCFOptions()));
 		if (!s.ok()) {
 			logRocksDBError(s, "DestroyDB");
 		}
@@ -1894,8 +2019,8 @@ public:
 private:
 	const std::string path;
 	const UID logId;
+	std::shared_ptr<ShardedRocksDBState> rState;
 	rocksdb::DBOptions dbOptions;
-	rocksdb::ColumnFamilyOptions cfOptions;
 	rocksdb::DB* db = nullptr;
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>> physicalShards;
 	std::unordered_set<std::string> activePhysicalShardIds;
@@ -1911,7 +2036,9 @@ private:
 
 class RocksDBMetrics {
 public:
-	RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics> stats);
+	RocksDBMetrics(UID debugID,
+	               std::shared_ptr<ShardedRocksDBState> rState,
+	               std::shared_ptr<rocksdb::Statistics> stats);
 	void logStats(rocksdb::DB* db, std::string manifestDirectory);
 	// PerfContext
 	void resetPerfContext();
@@ -1935,13 +2062,13 @@ public:
 	Reference<Histogram> getCommitActionHistogram();
 	Reference<Histogram> getCommitQueueWaitHistogram();
 	Reference<Histogram> getWriteHistogram();
-	Reference<Histogram> getDeleteCompactRangeHistogram();
 	std::vector<std::pair<std::string, int64_t>> getManifestBytes(std::string manifestDirectory);
 
 private:
 	const UID debugID;
 	// Global Statistic Input to RocksDB DB instance
 	std::shared_ptr<rocksdb::Statistics> stats;
+	std::shared_ptr<ShardedRocksDBState> rState;
 	// Statistic Output from RocksDB
 	std::vector<std::tuple<const char*, uint32_t, uint64_t>> tickerStats;
 	std::vector<std::pair<const char*, std::string>> intPropertyStats;
@@ -1967,7 +2094,6 @@ private:
 	Reference<Histogram> commitActionHistogram;
 	Reference<Histogram> commitQueueWaitHistogram;
 	Reference<Histogram> writeHistogram;
-	Reference<Histogram> deleteCompactRangeHistogram;
 
 	uint64_t getRocksdbPerfcontextMetric(int metric);
 };
@@ -2034,12 +2160,11 @@ Reference<Histogram> RocksDBMetrics::getCommitQueueWaitHistogram() {
 Reference<Histogram> RocksDBMetrics::getWriteHistogram() {
 	return writeHistogram;
 }
-Reference<Histogram> RocksDBMetrics::getDeleteCompactRangeHistogram() {
-	return deleteCompactRangeHistogram;
-}
 
-RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics> stats)
-  : debugID(debugID), stats(stats) {
+RocksDBMetrics::RocksDBMetrics(UID debugID,
+                               std::shared_ptr<ShardedRocksDBState> rState,
+                               std::shared_ptr<rocksdb::Statistics> stats)
+  : debugID(debugID), rState(rState), stats(stats) {
 	tickerStats = {
 		{ "StallMicros", rocksdb::STALL_MICROS, 0 },
 		{ "BytesRead", rocksdb::BYTES_READ, 0 },
@@ -2220,8 +2345,6 @@ RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics>
 	    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM, Histogram::Unit::milliseconds);
 	writeHistogram =
 	    Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_WRITE_HISTOGRAM, Histogram::Unit::milliseconds);
-	deleteCompactRangeHistogram = Histogram::getHistogram(
-	    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM, Histogram::Unit::milliseconds);
 }
 
 void RocksDBMetrics::logStats(rocksdb::DB* db, std::string manifestDirectory) {
@@ -2252,8 +2375,8 @@ void RocksDBMetrics::logStats(rocksdb::DB* db, std::string manifestDirectory) {
 	ASSERT(db->GetProperty(rocksdb::DB::Properties::kDBWriteStallStats, &propValue));
 	TraceEvent(SevInfo, "DBWriteStallStats", debugID).detail("Stats", propValue);
 
-	if (rocksdb_block_cache) {
-		e.detail("CacheUsage", rocksdb_block_cache->GetUsage());
+	if (rState->blockCache) {
+		e.detail("CacheUsage", rState->blockCache->GetUsage());
 	}
 }
 
@@ -2440,6 +2563,9 @@ ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDB
 				break;
 			}
 			rocksDBMetrics->logStats(db, manifestDirectory);
+			if (rState->compactOnRangeDeletionFactory) {
+				rState->compactOnRangeDeletionFactory->logMetrics(/*reset=*/true);
+			}
 			if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) {
 				rocksDBMetrics->logPerfContext(true);
 			}
@@ -2982,7 +3108,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					rocksdb::ColumnFamilyHandle* handle;
 					const std::string cfName = deterministicRandom()->randomAlphaNumeric(8);
 					s = a.shardManager->getDb()->CreateColumnFamilyWithImport(
-					    getCFOptions(), cfName, importOptions, metadata, &handle);
+					    rocksdb::ColumnFamilyOptions(), cfName, importOptions, metadata, &handle);
 					if (!s.ok()) {
 						TraceEvent(SevError, "ShardedRocksCheckpointValidateImportError", logId)
 						    .detail("Status", s.ToString())
@@ -3615,8 +3741,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    eventListener(std::make_shared<RocksDBEventListener>(id)),
 	    errorFuture(forwardError(errorListener->getFuture())), dbOptions(getOptions()),
 	    iteratorPool(std::make_shared<IteratorPool>()),
-	    shardManager(path, id, dbOptions, errorListener, eventListener, &counters, iteratorPool),
-	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, dbOptions.statistics)) {
+	    shardManager(path, id, rState, dbOptions, errorListener, eventListener, &counters, iteratorPool),
+	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, rState, dbOptions.statistics)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
 		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
 		// will also block the network thread in a way that would be unacceptable in production but is a necessary
