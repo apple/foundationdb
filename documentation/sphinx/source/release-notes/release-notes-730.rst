@@ -12,9 +12,9 @@ Release Notes
 * Added knob to pause perpetual storage wiggle when TSS count target is met. `(PR #11824) <https://github.com/apple/foundationdb/pull/11824>`_
 * Updated exclusion code to reduce the requests that are made by locality-based exclusions. `(PR #11848) <https://github.com/apple/foundationdb/pull/11848>`_
 * Added multiple improvements to reduce the false positive rate of gray failure triggered recoveries. `(PR #11850) <https://github.com/apple/foundationdb/pull/11850>`_, `(PR #11852) <https://github.com/apple/foundationdb/pull/11852>`_, `(PR #11885) <https://github.com/apple/foundationdb/pull/11885>`_
-* Added knob to use direct IO for ShardedRocks storage engine. `(PR #11891) <https://github.com/apple/foundationdb/pull/11891>`_
-* Added knob to compact based on number of range deletions in file for ShardedRocks storage engine. `(PR #11890) <https://github.com/apple/foundationdb/pull/11890>`_
-* Added improvements to RocksDB force flush logic. `(PR #11845) <https://github.com/apple/foundationdb/pull/11845>`_
+* Added a knob to use direct IO for ShardedRocks storage engine. `(PR #11891) <https://github.com/apple/foundationdb/pull/11891>`_
+* Added a knob to compact based on number of range deletions in file for ShardedRocks storage engine. `(PR #11890) <https://github.com/apple/foundationdb/pull/11890>`_
+* Updated RocksDB force flush interval based on the last flush time. `(PR #11845) <https://github.com/apple/foundationdb/pull/11845>`_
 
 7.3.57
 ======
