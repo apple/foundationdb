@@ -192,7 +192,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	int unused() const;
 	const void* getData() const;
 	const void* getNextData() const;
-	size_t totalSize(std::unordered_set<ArenaBlock*>) const;
+	size_t totalSize(std::unordered_set<ArenaBlock*>&) const;
 	size_t estimatedTotalSize() const;
 	void wipeUsed();
 	// just for debugging:

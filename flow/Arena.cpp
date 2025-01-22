@@ -209,7 +209,7 @@ const void* ArenaBlock::getNextData() const {
 	return (const uint8_t*)getData() + used();
 }
 
-size_t ArenaBlock::totalSize(std::unordered_set<ArenaBlock*> visited) const {
+size_t ArenaBlock::totalSize(std::unordered_set<ArenaBlock*>& visited) const {
 	if (isTiny()) {
 		return size();
 	}
