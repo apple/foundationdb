@@ -36,7 +36,7 @@
 
 ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx,
                                                                            UID dataMoveId,
-                                                                           Version ssVersion,
+                                                                           Version minVersion,
                                                                            UID logId) {
 	state Transaction tr(cx);
 	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -45,7 +45,7 @@ ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Datab
 		try {
 			state Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 			ASSERT(tr.getReadVersion().isReady());
-			if (tr.getReadVersion().get() < ssVersion) {
+			if (tr.getReadVersion().get() < minVersion) {
 				wait(delay(0.1));
 				tr.reset();
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -56,7 +56,7 @@ ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Datab
 				TraceEvent(SevWarnAlways, "SSBulkLoadDataMoveIdNotExist", logId)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("ReadVersion", tr.getReadVersion().get())
-				    .detail("SSVersion", ssVersion);
+				    .detail("MinVersion", minVersion);
 				return Optional<BulkLoadTaskState>();
 			} else {
 				state DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());

@@ -28,10 +28,10 @@
 #include "fdbclient/BulkLoading.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-// Get the bulkLoadTask metadata of the dataMoveMetadata since the ssVersion given the dataMoveId
+// Get the bulkLoadTask metadata of the dataMoveMetadata since the minVersion given the dataMoveId
 ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx,
                                                                            UID dataMoveId,
-                                                                           Version ssVersion,
+                                                                           Version minVersion,
                                                                            UID logId);
 
 ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMethod transportMethod,

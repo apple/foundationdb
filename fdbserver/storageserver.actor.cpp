@@ -7670,7 +7670,10 @@ void removeDataRange(StorageServer* ss,
 void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available);
 void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned);
 void updateStorageShard(StorageServer* self, StorageServerShard shard);
-void setDataMoveStatus(StorageServer* self, KeyRangeRef keys, UID dataMoveId, ConductBulkLoad conductBulkLoad);
+void setRangeBasedBulkLoadStatus(StorageServer* self,
+                                 KeyRangeRef keys,
+                                 UID dataMoveId,
+                                 ConductBulkLoad conductBulkLoad);
 
 void coalescePhysicalShards(StorageServer* data, KeyRangeRef keys) {
 	auto shardRanges = data->shards.intersectingRanges(keys);
@@ -8767,6 +8770,7 @@ bool fetchKeyCanRetry(const Error& e) {
 	}
 }
 
+// TODO(Zhe): cleanup the file
 ACTOR Future<BulkLoadFileSet> bulkLoadFetchKeyValueFileToLoad(StorageServer* data,
                                                               std::string dir,
                                                               BulkLoadTaskState bulkLoadTaskState) {
@@ -9251,7 +9255,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 							TraceEvent(SevInfo, "FetchKeyConductBulkLoad", data->thisServerID)
 							    .detail("DataMoveId", dataMoveId.toString())
 							    .detail("Range", keys)
-							    .detail("BlockRange", blockRange)
+							    .detail("NewSplitBeginKey", blockBegin)
 							    .detail("Phase", "Split range");
 						}
 					}
@@ -9449,8 +9453,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		setAvailableStatus(data,
 		                   keys,
 		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
-
-		// TODO(BulkLoad): clear status correctly in the presence of range split.
 
 		// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor until
 		// this point.
@@ -10684,6 +10686,7 @@ void cleanUpChangeFeeds(StorageServer* data, const KeyRangeRef& keys, Version ve
 	}
 }
 
+// TODO(Zhe): use SSBulkLoadMetadata bulkLoadInfoIfAddingShard as the input
 void changeServerKeys(StorageServer* data,
                       const KeyRangeRef& keys,
                       bool nowAssigned,
@@ -10744,11 +10747,11 @@ void changeServerKeys(StorageServer* data,
 	for (int i = 0; i < ranges.size(); i++) {
 		if (!ranges[i].value) {
 			ASSERT((KeyRangeRef&)ranges[i] == keys); // there shouldn't be any nulls except for the range being inserted
-		} else if (ranges[i].value->notAssigned()) {
+		} else if (ranges[i].value->notAssigned())
 			data->addShard(ShardInfo::newNotAssigned(ranges[i]));
-		} else if (ranges[i].value->isReadable()) {
+		else if (ranges[i].value->isReadable())
 			data->addShard(ShardInfo::newReadWrite(ranges[i], data));
-		} else {
+		else {
 			ASSERT(ranges[i].value->adding);
 			data->addShard(ShardInfo::newAdding(data,
 			                                    ranges[i],
@@ -11371,7 +11374,7 @@ private:
 					if (!nowAssigned) {
 						ASSERT(!conductBulkLoad);
 					}
-					setDataMoveStatus(data, keys, dataMoveId, conductBulkLoad);
+					setRangeBasedBulkLoadStatus(data, keys, dataMoveId, conductBulkLoad);
 
 					// The changes for version have already been received (and are being processed now).  We need to
 					// fetch the data for change.version-1 (changes from versions < change.version) If emptyRange,
@@ -13299,13 +13302,16 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 	}
 }
 
-void setDataMoveStatus(StorageServer* self, KeyRangeRef keys, UID dataMoveId, ConductBulkLoad conductBulkLoad) {
+void setRangeBasedBulkLoadStatus(StorageServer* self,
+                                 KeyRangeRef keys,
+                                 UID dataMoveId,
+                                 ConductBulkLoad conductBulkLoad) {
 	ASSERT(!keys.empty());
 	Version logV = self->data().getLatestVersion();
 	auto& mLV = self->addVersionToMutationLog(logV);
 	KeyRange dataMoveKeys = KeyRangeRef(persistBulkLoadTaskKeys.begin.toString() + keys.begin.toString(),
 	                                    persistBulkLoadTaskKeys.begin.toString() + keys.end.toString());
-	//TraceEvent("SetDataMoveStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", dataMoveKeys.begin).detail("RangeEnd", dataMoveKeys.end);
+	//TraceEvent("SetRangeBasedBulkLoadStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", dataMoveKeys.begin).detail("RangeEnd", dataMoveKeys.end);
 	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, dataMoveKeys.begin, dataMoveKeys.end));
 	++self->counters.kvSystemClearRanges;
 	self->addMutationToMutationLog(
