@@ -448,7 +448,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	    .detail("TaskInstance", THIS_ADDR);
 
 	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
-	              "%lld  CurrentVersion: %lld FirstConsistentVersion: %lld  ApplyVersionLag: %lld  LastError: %s",
+	              "%lld  ApplyVersionLag: %lld  LastError: %s",
 	              tag.get().c_str(),
 	              uid.toString().c_str(),
 	              status.get().toString().c_str(),
@@ -457,8 +457,6 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	              fileBlocksDispatched.get() - fileBlocksFinished.get(),
 	              fileCount.get(),
 	              bytesWritten.get(),
-	              currentVersion.get(),
-	              firstConsistentVersion.get(),
 	              lag.get(),
 	              errstr.c_str());
 }
@@ -5183,7 +5181,6 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state bool atLeastOneIteratorHasNext = true;
 		state Version minVersion;
 		state int k;
-		state int versionRestored = 0;
 		state std::vector<Version> minVs(totalItereators, 0);
 		while (atLeastOneIteratorHasNext) {
 			minVs.resize(totalItereators, 0);
@@ -5272,7 +5269,6 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 						}
 					}
 				}
-				++versionRestored;
 			}
 			mutationsSingleVersion.clear();
 		}
@@ -5514,7 +5510,6 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				                                                       TaskCompletionKey::joinWith(allPartsDone)));
 			}
 		}
-		bool is_set = wait(allPartsDone->isSet(tr));
 		addTaskFutures.push_back(RestoreLogDataPartitionedTaskFunc::addTask(
 		    tr, taskBucket, task, maxTagID, logs, beginVersion, endVersion, TaskCompletionKey::joinWith(allPartsDone)));
 		// even if file exsists, but they are empty, in this case just start the next batch
@@ -6281,6 +6276,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		// add log files
 		state std::vector<RestoreConfig::RestoreFile>::iterator logStart = logFiles.begin();
 		state std::vector<RestoreConfig::RestoreFile>::iterator logEnd = logFiles.end();
+		state int txBytes = 0;
 
 		tr->reset();
 		while (logStart != logEnd) {
@@ -6290,16 +6286,16 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				wait(taskBucket->keepRunning(tr, task));
 
-				state std::vector<RestoreConfig::RestoreFile>::iterator i = logStart;
+				state std::vector<RestoreConfig::RestoreFile>::iterator logIt = logStart;
 
-				state int txBytes = 0;
+				txBytes = 0;
 				state int logFileCount = 0;
 				auto fileSet = restore.logFileSet();
 				// TODO: split files into multiple keys, because files can be in the order of 10k or 100k, which
 				// probably can't fit due to size limit for a value in FDB. as a result, fileSet has everything,
 				// including [beginVersion, endVersion] for each tag
-				for (; i != logEnd && txBytes < 1e6; ++i) {
-					txBytes += fileSet.insert(tr, *i);
+				for (; logIt != logEnd && txBytes < 1e6; ++logIt) {
+					txBytes += fileSet.insert(tr, *logIt);
 					++logFileCount;
 				}
 				wait(tr->commit());
@@ -6310,7 +6306,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("TransactionBytes", txBytes)
 				    .detail("TaskInstance", THIS_ADDR);
 
-				logStart = i;
+				logStart = logIt;
 				tr->reset();
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -6328,14 +6324,14 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				wait(taskBucket->keepRunning(tr, task));
 
-				i = rangeStart;
+				state std::vector<RestoreConfig::RestoreFile>::iterator rangeIt = rangeStart;
 
 				txBytes = 0;
 				state int rangeFileCount = 0;
 				auto fileSet = restore.rangeFileSet();
 				// as a result, fileSet has everything, including [beginVersion, endVersion] for each tag
-				for (; i != rangeEnd && txBytes < 1e6; ++i) {
-					txBytes += fileSet.insert(tr, *i);
+				for (; rangeIt != rangeEnd && txBytes < 1e6; ++rangeIt) {
+					txBytes += fileSet.insert(tr, *rangeIt);
 					// handle the remaining
 					++rangeFileCount;
 				}
@@ -6347,7 +6343,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("TransactionBytes", txBytes)
 				    .detail("TaskInstance", THIS_ADDR);
 
-				rangeStart = i;
+				rangeStart = rangeIt;
 				tr->reset();
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -6366,17 +6362,17 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				wait(taskBucket->keepRunning(tr, task));
 
-				i = start;
+				state std::vector<RestoreConfig::RestoreFile>::iterator it = start;
 
 				txBytes = 0;
 				state int nFileBlocks = 0;
 				state int nFiles = 0;
 				auto fileSet = restore.fileSet();
 				// as a result, fileSet has everything, including [beginVersion, endVersion] for each tag
-				for (; i != end && txBytes < 1e6; ++i) {
-					txBytes += fileSet.insert(tr, *i);
+				for (; it != end && txBytes < 1e6; ++it) {
+					txBytes += fileSet.insert(tr, *it);
 					// handle the remaining
-					nFileBlocks += (i->fileSize + i->blockSize - 1) / i->blockSize;
+					nFileBlocks += (it->fileSize + it->blockSize - 1) / it->blockSize;
 					++nFiles;
 				}
 
@@ -6392,7 +6388,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("TransactionBytes", txBytes)
 				    .detail("TaskInstance", THIS_ADDR);
 
-				start = i;
+				start = it;
 				tr->reset();
 			} catch (Error& e) {
 				wait(tr->onError(e));
