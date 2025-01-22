@@ -1210,7 +1210,7 @@ BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value) {
 	return bulkLoadTaskState;
 }
 
-const Value SSBulkLoadMetadataValue(const SSBulkLoadMetadata& ssBulkLoadMetadata) {
+const Value ssBulkLoadMetadataValue(const SSBulkLoadMetadata& ssBulkLoadMetadata) {
 	return ObjectWriter::toValue(ssBulkLoadMetadata, IncludeVersion());
 }
 

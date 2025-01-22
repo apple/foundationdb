@@ -895,31 +895,26 @@ private:
 // does not have the bulkload task information.
 // This data structure is the metadata persisted at SS special key space locally.
 // We add the bulkload task metadata at the same version when the range is set as assigned.
-// We remove the metadata at the version when the range is marked as available.
-// When SS restarts, we recovery the task from the metadata and remove any outdated persisted task.
-// A persisted task is outdated if the range is not assigned or the range is aligned to the assigned range boundary.
 struct SSBulkLoadMetadata {
 public:
 	constexpr static FileIdentifier file_identifier = 1384506;
 
-	SSBulkLoadMetadata() = default;
+	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false){};
 
-	SSBulkLoadMetadata(const UID& dataMoveId, const KeyRange& range) : dataMoveId(dataMoveId), range(range) {}
+	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId), conductBulkLoad(true) {}
 
 	bool isValid() const { return dataMoveId.isValid(); }
-
-	KeyRange getRange() const { return range; }
 
 	UID getDataMoveId() const { return dataMoveId; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, dataMoveId, range);
+		serializer(ar, dataMoveId, conductBulkLoad);
 	}
 
 private:
 	UID dataMoveId;
-	KeyRange range;
+	bool conductBulkLoad = false;
 };
 
 // Define job manifest file name.

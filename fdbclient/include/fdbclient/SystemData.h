@@ -530,7 +530,7 @@ extern const KeyRef bulkLoadTaskPrefix;
 const Value bulkLoadTaskStateValue(const BulkLoadTaskState& bulkLoadTaskState);
 BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value);
 
-const Value SSBulkLoadMetadataValue(const SSBulkLoadMetadata& ssBulkLoadMetadata);
+const Value ssBulkLoadMetadataValue(const SSBulkLoadMetadata& ssBulkLoadMetadata);
 SSBulkLoadMetadata decodeSSBulkLoadMetadata(const ValueRef& value);
 
 extern const KeyRangeRef bulkLoadJobKeys;

@@ -225,20 +225,6 @@ static const std::string serverBulkDumpFolder = "bulkDumpFiles";
 static const KeyRangeRef persistBulkLoadTaskKeys =
     KeyRangeRef(PERSIST_PREFIX "BulkLoadTask/"_sr, PERSIST_PREFIX "BulkLoadTask0"_sr);
 
-inline Key encodePersistBulkLoadTaskKey(const UID& dataMoveId) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(persistBulkLoadTaskKeys.begin);
-	wr << dataMoveId;
-	return wr.toValue();
-}
-
-inline UID decodePersistBulkLoadTaskKey(const Key& key) {
-	UID dataMoveId;
-	BinaryReader rd(key.removePrefix(persistBulkLoadTaskKeys.begin), Unversioned());
-	rd >> dataMoveId;
-	return dataMoveId;
-}
-
 // Accumulative checksum related prefix
 static const KeyRangeRef persistAccumulativeChecksumKeys =
     KeyRangeRef(PERSIST_PREFIX "AccumulativeChecksum/"_sr, PERSIST_PREFIX "AccumulativeChecksum0"_sr);
@@ -471,6 +457,14 @@ struct AddingShard : NonCopyable {
 
 	bool isDataTransferred() const { return phase >= FetchingCF; }
 	bool isDataAndCFTransferred() const { return phase >= Waiting; }
+
+	Optional<UID> getDataMoveIdForBulkLoad() const {
+		if (conductBulkLoad == ConductBulkLoad::True) {
+			return dataMoveId;
+		} else {
+			return Optional<UID>();
+		}
+	}
 };
 
 class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
@@ -568,6 +562,14 @@ public:
 
 	void validate() const {
 		// TODO: Complete this.
+	}
+
+	Optional<UID> getDataMoveIdForBulkLoad() const {
+		if (adding) {
+			return adding->getDataMoveIdForBulkLoad();
+		} else {
+			return Optional<UID>();
+		}
 	}
 
 	bool isReadable() const { return readWrite != nullptr; }
@@ -1322,7 +1324,6 @@ public:
 	StorageServerDisk storage;
 
 	KeyRangeMap<Reference<ShardInfo>> shards;
-	std::unordered_map<UID, SSBulkLoadMetadata> bulkLoadTaskMap; // keep alive bulkload task
 	std::unordered_map<int64_t, SSPhysicalShard> physicalShards;
 	uint64_t shardChangeCounter; // max( shards->changecounter )
 
@@ -7669,8 +7670,7 @@ void removeDataRange(StorageServer* ss,
 void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available);
 void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned);
 void updateStorageShard(StorageServer* self, StorageServerShard shard);
-void setBulkLoadStatus(StorageServer* self, KeyRangeRef keys, UID dataMoveId);
-void clearBulkLoadStatus(StorageServer* self, UID dataMoveId);
+void setDataMoveStatus(StorageServer* self, KeyRangeRef keys, UID dataMoveId, ConductBulkLoad conductBulkLoad);
 
 void coalescePhysicalShards(StorageServer* data, KeyRangeRef keys) {
 	auto shardRanges = data->shards.intersectingRanges(keys);
@@ -9137,7 +9137,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .detail("KeyEnd", keys.end)
 					    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
 					    .detail("Version", fetchVersion)
-					    .detail("More", this_block.more);
+					    .detail("More", this_block.more)
+					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("ConductBulkLoad", conductBulkLoad);
 
 					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
 					if (MUTATION_TRACKING_ENABLED) {
@@ -9447,13 +9449,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		setAvailableStatus(data,
 		                   keys,
 		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
-		if (conductBulkLoad) {
-			clearBulkLoadStatus(data, shard->dataMoveId);
-			TraceEvent(SevInfo, "FetchKeyConductBulkLoad", data->thisServerID)
-			    .detail("DataMoveId", dataMoveId.toString())
-			    .detail("Range", keys)
-			    .detail("Phase", "Complete");
-		}
+
+		// TODO(BulkLoad): clear status correctly in the presence of range split.
 
 		// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor until
 		// this point.
@@ -10695,17 +10692,12 @@ void changeServerKeys(StorageServer* data,
                       DataMovementReason dataMoveReason,
                       const UID& dataMoveId,
                       ConductBulkLoad conductBulkLoad) {
-	if (conductBulkLoad) {
-		ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId));
-	}
 	ASSERT(!keys.empty());
 	TraceEvent("ChangeServerKeys", data->thisServerID)
 	    .detail("KeyBegin", keys.begin)
 	    .detail("KeyEnd", keys.end)
 	    .detail("NowAssigned", nowAssigned)
 	    .detail("Version", version)
-	    .detail("DataMoveId", dataMoveId.toString())
-	    .detail("ConductBulkLoad", conductBulkLoad)
 	    .detail("Context", changeServerKeysContextName(context));
 	validate(data);
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
@@ -10729,9 +10721,7 @@ void changeServerKeys(StorageServer* data,
 	if (!isDifferent) {
 		TraceEvent(SevDebug, "CSKShortCircuit", data->thisServerID)
 		    .detail("KeyBegin", keys.begin)
-		    .detail("KeyEnd", keys.end)
-		    .detail("DataMoveId", dataMoveId.toString())
-		    .detail("ConductBulkLoad", conductBulkLoad);
+		    .detail("KeyEnd", keys.end);
 		return;
 	}
 
@@ -10755,29 +10745,11 @@ void changeServerKeys(StorageServer* data,
 		if (!ranges[i].value) {
 			ASSERT((KeyRangeRef&)ranges[i] == keys); // there shouldn't be any nulls except for the range being inserted
 		} else if (ranges[i].value->notAssigned()) {
-			if (conductBulkLoad) {
-				TraceEvent(SevDebug, "ChangeServerKeyBulkLoadShardUpdate", data->thisServerID)
-				    .detail("DataMoveId", dataMoveId.toString())
-				    .detail("Range", ranges[i].toString())
-				    .detail("Case", "New not assigned");
-			}
 			data->addShard(ShardInfo::newNotAssigned(ranges[i]));
 		} else if (ranges[i].value->isReadable()) {
-			if (conductBulkLoad) {
-				TraceEvent(SevDebug, "ChangeServerKeyBulkLoadShardUpdate", data->thisServerID)
-				    .detail("DataMoveId", dataMoveId.toString())
-				    .detail("Range", ranges[i].toString())
-				    .detail("Case", "New read write");
-			}
 			data->addShard(ShardInfo::newReadWrite(ranges[i], data));
 		} else {
 			ASSERT(ranges[i].value->adding);
-			if (conductBulkLoad) {
-				TraceEvent(SevDebug, "ChangeServerKeyBulkLoadShardUpdate", data->thisServerID)
-				    .detail("DataMoveId", dataMoveId.toString())
-				    .detail("Range", ranges[i].toString())
-				    .detail("Case", "Adding");
-			}
 			data->addShard(ShardInfo::newAdding(data,
 			                                    ranges[i],
 			                                    ranges[i].value->adding->reason,
@@ -11394,8 +11366,12 @@ private:
 					setAssignedStatus(data, keys, nowAssigned);
 					if (conductBulkLoad) {
 						ASSERT(!emptyRange && dataMoveIdIsValidForBulkLoad(dataMoveId));
-						setBulkLoadStatus(data, keys, dataMoveId);
+						ASSERT(nowAssigned);
 					}
+					if (!nowAssigned) {
+						ASSERT(!conductBulkLoad);
+					}
+					setDataMoveStatus(data, keys, dataMoveId, conductBulkLoad);
 
 					// The changes for version have already been received (and are being processed now).  We need to
 					// fetch the data for change.version-1 (changes from versions < change.version) If emptyRange,
@@ -13236,6 +13212,8 @@ void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 	} else {
 		storage->set(KeyValueRef(persistShardAssignedKeys.begin.toString(), "0"_sr));
 		storage->set(KeyValueRef(persistShardAvailableKeys.begin.toString(), "0"_sr));
+		storage->set(
+		    KeyValueRef(persistBulkLoadTaskKeys.begin.toString(), ssBulkLoadMetadataValue(SSBulkLoadMetadata())));
 	}
 
 	auto view = data->tenantMap.atLatest();
@@ -13321,50 +13299,32 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 	}
 }
 
-void setBulkLoadStatus(StorageServer* self, KeyRangeRef keys, UID dataMoveId) {
-	ASSERT(dataMoveId.isValid() && dataMoveId != anonymousShardId);
-	ASSERT(!keys.empty() && keys.end <= normalKeys.end);
+void setDataMoveStatus(StorageServer* self, KeyRangeRef keys, UID dataMoveId, ConductBulkLoad conductBulkLoad) {
+	ASSERT(!keys.empty());
 	Version logV = self->data().getLatestVersion();
 	auto& mLV = self->addVersionToMutationLog(logV);
-	auto it = self->bulkLoadTaskMap.begin();
-	int counter = 0;
-	while (it != self->bulkLoadTaskMap.end()) {
-		ASSERT(it->second.getDataMoveId() == it->first);
-		KeyRange overlappingRange = it->second.getRange() & keys;
-		if (!overlappingRange.empty()) {
-			KeyRange singleKeyRangeToClear = singleKeyRange(encodePersistBulkLoadTaskKey(it->second.getDataMoveId()));
-			self->addMutationToMutationLog(
-			    mLV, MutationRef(MutationRef::ClearRange, singleKeyRangeToClear.begin, singleKeyRangeToClear.end));
-			it = self->bulkLoadTaskMap.erase(it);
-		} else {
-			it++;
-		}
-		counter++;
+	KeyRange dataMoveKeys = KeyRangeRef(persistBulkLoadTaskKeys.begin.toString() + keys.begin.toString(),
+	                                    persistBulkLoadTaskKeys.begin.toString() + keys.end.toString());
+	//TraceEvent("SetDataMoveStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", dataMoveKeys.begin).detail("RangeEnd", dataMoveKeys.end);
+	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, dataMoveKeys.begin, dataMoveKeys.end));
+	++self->counters.kvSystemClearRanges;
+	self->addMutationToMutationLog(
+	    mLV,
+	    MutationRef(MutationRef::SetValue,
+	                dataMoveKeys.begin,
+	                ssBulkLoadMetadataValue(conductBulkLoad ? SSBulkLoadMetadata(dataMoveId) : SSBulkLoadMetadata())));
+	if (keys.end != allKeys.end) {
+		Optional<UID> endDataMoveId = self->shards.rangeContaining(keys.end)->value()->getDataMoveIdForBulkLoad();
+		self->addMutationToMutationLog(
+		    mLV,
+		    MutationRef(MutationRef::SetValue,
+		                dataMoveKeys.end,
+		                ssBulkLoadMetadataValue(endDataMoveId.present() ? SSBulkLoadMetadata(endDataMoveId.get())
+		                                                                : SSBulkLoadMetadata())));
 	}
-	if (counter > 10) {
-		TraceEvent(SevWarnAlways, "StorageServerHasTooManyOngoingBulkLoadTask", self->thisServerID)
-		    .suppressFor(60.0)
-		    .detail("Count", counter);
-		// TODO(BulkLoad): Set SS bulkload parallelism, there is at most 1 bulkload task at a time.
-	}
-	self->bulkLoadTaskMap[dataMoveId] = SSBulkLoadMetadata(dataMoveId, keys);
-	self->addMutationToMutationLog(mLV,
-	                               MutationRef(MutationRef::SetValue,
-	                                           encodePersistBulkLoadTaskKey(dataMoveId),
-	                                           SSBulkLoadMetadataValue(SSBulkLoadMetadata(dataMoveId, keys))));
 	if (BUGGIFY) {
 		self->maybeInjectTargetedRestart(logV);
 	}
-}
-
-void clearBulkLoadStatus(StorageServer* self, UID dataMoveId) {
-	KeyRange singleKeyRangeToClear = singleKeyRange(encodePersistBulkLoadTaskKey(dataMoveId));
-	self->bulkLoadTaskMap.erase(dataMoveId);
-	Version logV = self->data().getLatestVersion();
-	auto& mLV = self->addVersionToMutationLog(logV);
-	self->addMutationToMutationLog(
-	    mLV, MutationRef(MutationRef::ClearRange, singleKeyRangeToClear.begin, singleKeyRangeToClear.end));
-	return;
 }
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
@@ -13698,6 +13658,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	data->setInitialVersion(version);
 	data->bytesRestored += fVersion.get().expectedSize();
 
+	TraceEvent(SevInfo, "StorageServerRestoreVersion", data->thisServerID).detail("Version", version);
+
 	state RangeResult pendingCheckpoints = fPendingCheckpoints.get();
 	state int pCLoc;
 	for (pCLoc = 0; pCLoc < pendingCheckpoints.size(); ++pCLoc) {
@@ -13749,16 +13711,19 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state KeyRangeMap<Optional<UID>> bulkLoadTaskRangeMap;
 	bulkLoadTaskRangeMap.insert(allKeys, Optional<UID>());
 	state RangeResult bulkLoadTasks = fBulkLoadTask.get();
-	for (int i = 0; i < bulkLoadTasks.size(); i++) {
-		ASSERT(!bulkLoadTasks[i].value.empty());
+	for (int i = 0; i < bulkLoadTasks.size() - 1; i++) {
+		if (bulkLoadTasks[i].value.empty()) {
+			continue;
+		}
+		KeyRange bulkLoadRange = KeyRangeRef(bulkLoadTasks[i].key, bulkLoadTasks[i + 1].key);
 		SSBulkLoadMetadata metadata = decodeSSBulkLoadMetadata(bulkLoadTasks[i].value);
-		ASSERT(normalKeys.contains(metadata.getRange()));
-		bulkLoadTaskRangeMap.insert(metadata.getRange(), metadata.getDataMoveId());
-		auto res = data->bulkLoadTaskMap.insert({ metadata.getDataMoveId(), metadata });
-		ASSERT(res.second);
+		ASSERT(normalKeys.contains(bulkLoadRange));
+		bulkLoadTaskRangeMap.insert(bulkLoadRange, metadata.getDataMoveId());
+		TraceEvent(SevInfo, "SSBulkLoadStateRestoreSeeDataMove", data->thisServerID)
+		    .detail("DataMoveId", metadata.getDataMoveId())
+		    .detail("Range", bulkLoadRange);
 	}
 	bulkLoadTaskRangeMap.coalesce(allKeys);
-	state std::unordered_set<UID> aliveDataMoveId;
 
 	state RangeResult assigned = fShardAssigned.get();
 	data->bytesRestored += assigned.logicalSize();
@@ -13783,22 +13748,20 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 			UID dataMoveId = UID();
 			ConductBulkLoad conductBulkLoad = ConductBulkLoad::False;
 			for (auto bulkLoadIt : bulkLoadTaskRangeMap.intersectingRanges(keys)) {
-				// A persisted SS local bulkLoad task metadata maybe outdated.
-				// Since a storage server can handle one data move on a range at a time, the SS always
-				// process the latest data move. When the data move is handled by changeServerKeys(),
 				// we persist the bulkload task metadata and the shard assignment metadata at the same version with
-				// the same shard boundary. So, a task metadata is not stale if and only if the range is assigned and
-				// the bulkload task range is aligned to the shard assignment metadata boundary.
-				// Any bulkload task not in 'aliveDataMoveId' is an outdated task metadata which will be erased next.
-				if (!bulkLoadIt->value().present() || !nowAssigned) {
+				// the same shard boundary.
+				if (!bulkLoadIt->value().present()) {
 					continue;
 				}
-				if (bulkLoadIt->range() == keys) {
-					dataMoveId = bulkLoadIt->value().get();
-					conductBulkLoad = ConductBulkLoad::True;
-					aliveDataMoveId.insert(dataMoveId);
-					break;
-				}
+				ASSERT(bulkLoadIt->range() == keys && nowAssigned);
+				dataMoveId = bulkLoadIt->value().get();
+				conductBulkLoad = ConductBulkLoad::True;
+				break;
+			}
+			if (conductBulkLoad) {
+				TraceEvent(SevInfo, "SSBulkLoadStateRestore", data->thisServerID)
+				    .detail("Range", keys)
+				    .detail("DataMoveId", dataMoveId.toString());
 			}
 			changeServerKeys(data,
 			                 keys,
@@ -13812,16 +13775,6 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 			if (!nowAssigned)
 				ASSERT(data->newestAvailableVersion.allEqual(keys, invalidVersion));
 			wait(yield());
-		}
-	}
-
-	auto it = data->bulkLoadTaskMap.begin();
-	while (it != data->bulkLoadTaskMap.end()) {
-		if (aliveDataMoveId.find(it->first) == aliveDataMoveId.end()) {
-			storage->clear(singleKeyRange(encodePersistBulkLoadTaskKey(it->first)));
-			it = data->bulkLoadTaskMap.erase(it);
-		} else {
-			it++;
 		}
 	}
 
