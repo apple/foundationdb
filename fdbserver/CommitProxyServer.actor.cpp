@@ -562,23 +562,10 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 			MutationRef backupMutation;
 			backupMutation.type = MutationRef::SetValue;
 			// Assign the second parameter as the part
-			backupMutation.param2 = val.substr(
-			    part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
-			    std::min(val.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
-
-			// Write the last part of the mutation to the serialization, if the buffer is not defined
-			if (!partBuffer) {
-				// Serialize the part to the writer
-				wr << bigEndian32(part);
-
-				// Define the last buffer part
-				partBuffer = (uint32_t*)((char*)wr.getData() + wr.getLength() - sizeof(uint32_t));
-			} else {
-				*partBuffer = bigEndian32(part);
-			}
-
 			// Define the mutation type and and location
-			backupMutation.param1 = wr.toValue();
+			Standalone<StringRef> backupVal = getBackupValue(val, part);
+			backupMutation.param2 = backupVal;
+			backupMutation.param1 = getBackupKey(wr, &partBuffer, part);
 			ASSERT(backupMutation.param1.startsWith(
 			    logRangeMutation->first)); // We are writing into the configured destination
 
