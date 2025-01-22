@@ -903,9 +903,9 @@ public:
 
 	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId), conductBulkLoad(true) {}
 
-	bool isValid() const { return dataMoveId.isValid(); }
-
 	UID getDataMoveId() const { return dataMoveId; }
+
+	bool getConductBulkLoad() const { return conductBulkLoad; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

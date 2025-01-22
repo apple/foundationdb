@@ -13309,8 +13309,7 @@ void setRangeBasedBulkLoadStatus(StorageServer* self,
 	ASSERT(!keys.empty());
 	Version logV = self->data().getLatestVersion();
 	auto& mLV = self->addVersionToMutationLog(logV);
-	KeyRange dataMoveKeys = KeyRangeRef(persistBulkLoadTaskKeys.begin.toString() + keys.begin.toString(),
-	                                    persistBulkLoadTaskKeys.begin.toString() + keys.end.toString());
+	KeyRange dataMoveKeys = keys.withPrefix(persistBulkLoadTaskKeys.begin);
 	//TraceEvent("SetRangeBasedBulkLoadStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", dataMoveKeys.begin).detail("RangeEnd", dataMoveKeys.end);
 	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, dataMoveKeys.begin, dataMoveKeys.end));
 	++self->counters.kvSystemClearRanges;
@@ -13721,13 +13720,17 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		if (bulkLoadTasks[i].value.empty()) {
 			continue;
 		}
-		KeyRange bulkLoadRange = KeyRangeRef(bulkLoadTasks[i].key, bulkLoadTasks[i + 1].key);
+		KeyRange bulkLoadRange =
+		    KeyRangeRef(bulkLoadTasks[i].key, bulkLoadTasks[i + 1].key).removePrefix(persistBulkLoadTaskKeys.begin);
 		SSBulkLoadMetadata metadata = decodeSSBulkLoadMetadata(bulkLoadTasks[i].value);
-		ASSERT(normalKeys.contains(bulkLoadRange));
-		bulkLoadTaskRangeMap.insert(bulkLoadRange, metadata.getDataMoveId());
-		TraceEvent(SevInfo, "SSBulkLoadStateRestoreSeeDataMove", data->thisServerID)
+		if (!metadata.getConductBulkLoad()) {
+			continue;
+		}
+		TraceEvent(SevInfo, "SSBulkLoadMetaDataRestore", data->thisServerID)
 		    .detail("DataMoveId", metadata.getDataMoveId())
 		    .detail("Range", bulkLoadRange);
+		ASSERT(normalKeys.contains(bulkLoadRange));
+		bulkLoadTaskRangeMap.insert(bulkLoadRange, metadata.getDataMoveId());
 	}
 	bulkLoadTaskRangeMap.coalesce(allKeys);
 
