@@ -2005,11 +2005,11 @@ Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> TagPartition
 		// because choosing any other version may result in not copying the correct version range to the
 		// log servers in the latest epoch and also will invalidate the changes that we made to the peek
 		// logic in the context of version vector.
-		int version_index =
+		int versionIndex =
 		    (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST ? (safe_range_end - 1) : new_safe_range_begin);
 
 		if (!lastEnd.present() ||
-		    ((version_index >= 0) && (version_index < results.size()) && results[version_index].end < lastEnd.get())) {
+		    ((versionIndex >= 0) && (versionIndex < results.size()) && results[versionIndex].end < lastEnd.get())) {
 			Version knownCommittedVersion = 0;
 			for (int i = 0; i < results.size(); i++) {
 				knownCommittedVersion = std::max(knownCommittedVersion, results[i].knownCommittedVersion);
