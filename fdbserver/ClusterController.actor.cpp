@@ -72,7 +72,9 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
+#include "flow/Buggify.h"
 #include "flow/Error.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 
@@ -601,6 +603,12 @@ bool isHealthySingleton(ClusterControllerData* self,
 	    self->isUsedNotMaster(currWorker.details.interf.locality.processId()) || bestFitness < currFitness ||
 	    (currFitness == bestFitness && currWorker.details.interf.locality.processId() == self->masterProcessId &&
 	     newWorker.interf.locality.processId() != self->masterProcessId);
+	if (g_network->isSimulated() && singleton.getRole() == Role::DATA_DISTRIBUTOR &&
+	    SERVER_KNOBS->CC_ENFORCE_USE_UNFIT_DD_IN_SIM) {
+		// It is possible that DD co-locate with a role other than master in the simulation.
+		// This can cause the simulation stuck if it always halts DD.
+		shouldRerecruit = false;
+	}
 	if (shouldRerecruit) {
 		std::string roleAbbr = singleton.getRole().abbreviation;
 		TraceEvent(("CCHalt" + roleAbbr).c_str(), self->id)

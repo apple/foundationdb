@@ -381,6 +381,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_BULKLOAD_TASK_METADATA_READ_SIZE,                   100 ); if( randomize && BUGGIFY ) DD_BULKLOAD_TASK_METADATA_READ_SIZE = deterministicRandom()->randomInt(2, 100);
 	init( DD_BULKLOAD_PARALLELISM,                                10 ); if( randomize && BUGGIFY ) DD_BULKLOAD_PARALLELISM = deterministicRandom()->randomInt(1, 10);
 	init( DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC,                 5.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC = deterministicRandom()->random01() * 4 + 1;
+	init( CC_ENFORCE_USE_UNFIT_DD_IN_SIM,                      false ); 
 
 	// BulkDumping
 	init( DD_BULKLOAD_AND_DUMP_TASK_METADATA_READ_SIZE,          100 ); if( randomize && BUGGIFY ) DD_BULKLOAD_AND_DUMP_TASK_METADATA_READ_SIZE = deterministicRandom()->randomInt(2, 100);
