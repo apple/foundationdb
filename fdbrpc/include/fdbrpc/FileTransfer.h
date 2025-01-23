@@ -183,11 +183,12 @@ public:
 	                                   bool verify = true) {
 
 		uint32_t expected_crc = 0;
+		uint32_t expected_size = 0;
 		{
 			GetFileInfoRequest request;
 			ClientContext context;
 			request.set_file_name(filename);
-			request.set_get_crc_checksum(true);
+			request.set_get_crc_checksum(verify);
 			request.set_get_size(true);
 			GetFileInfoReply response;
 			auto res = stub_->GetFileInfo(&context, request, &response);
@@ -195,6 +196,7 @@ public:
 				return std::nullopt;
 			}
 			expected_crc = response.crc_checksum();
+			expected_size = response.file_size();
 		}
 
 		DownloadRequest request;
@@ -224,6 +226,7 @@ public:
 
 		// Close file after writing
 		output_file.close();
+		failed = failed || (bytes_read != expected_size);
 
 		// Verify checksum
 		if (!failed && verify) {
