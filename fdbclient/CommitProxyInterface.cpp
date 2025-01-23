@@ -28,7 +28,7 @@ Standalone<StringRef> getBackupKey(BinaryWriter& wr, uint32_t** partBuffer, int 
 	return wr.toValue();
 }
 
-Key getBackupValue(Key content, int part) {
+StringRef getBackupValue(Key& content, int part) {
 	return content.substr(
 	    part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
 	    std::min(content.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));

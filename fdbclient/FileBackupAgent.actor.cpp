@@ -5067,8 +5067,7 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < param2Concat.size(); part++) {
 		KeyValueRef backupKV;
 		// Assign the second parameter as the part
-		Standalone<StringRef> backupVal = getBackupValue(param2Concat, part);
-		backupKV.value = backupVal;
+		backupKV.value = getBackupValue(param2Concat, part);
 		backupKV.key = getBackupKey(wrParam1, &partBuffer, part);
 		results.push_back_deep(results.arena(), backupKV);
 	}

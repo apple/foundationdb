@@ -783,7 +783,7 @@ struct SetThrottledShardRequest {
 };
 
 Standalone<StringRef> getBackupKey(BinaryWriter& wr, uint32_t** partBuffer, int part);
-Key getBackupValue(Key content, int part);
+StringRef getBackupValue(Key& content, int part);
 
 // Instantiated in CommitProxyInterface.cpp
 extern template class GetEncryptCipherKeys<ClientDBInfo>;
