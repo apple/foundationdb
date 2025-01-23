@@ -8874,7 +8874,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state int64_t totalBytes = 0;
 	state int priority = dataMovementPriority(shard->reason);
 	state UID dataMoveId = shard->getSSBulkLoadMetadata().getDataMoveId();
-	state ConductBulkLoad conductBulkLoad = shard->getSSBulkLoadMetadata().getConductBulkLoad();
+	state ConductBulkLoad conductBulkLoad = ConductBulkLoad(shard->getSSBulkLoadMetadata().getConductBulkLoad());
 	state Optional<BulkLoadTaskState> bulkLoadTaskState;
 	state std::string bulkLoadLocalDir =
 	    joinPath(joinPath(data->bulkLoadFolder, dataMoveId.toString()), fetchKeysID.toString());
