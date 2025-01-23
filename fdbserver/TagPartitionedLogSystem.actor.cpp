@@ -1975,8 +1975,18 @@ Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> TagPartition
 	bool bTooManyFailures = (results.size() <= logSet->tLogWriteAntiQuorum);
 
 	// Check if failed logs complete the policy
-	bTooManyFailures = bTooManyFailures || ((unResponsiveSet.size() >= logSet->tLogReplicationFactor) &&
-	                                        (unResponsiveSet.validate(logSet->tLogPolicy)));
+	// @note Do not do the replication policy validation check if version vector
+	// is enabled. The implication of this change is that recoveries could take
+	// longer when version vector is enabled - that's fine for now as "version
+	// vector" is an experimental feature at this point.
+	// @todo Extend "getRecoverVersionUnicast()" (the function that finds the
+	// recovery version when version vector is enabled) to do the replication
+	// policy check in an efficient manner, and enable the validation check
+	// here at that point.
+	bTooManyFailures =
+	    bTooManyFailures ||
+	    ((unResponsiveSet.size() >= logSet->tLogReplicationFactor) &&
+	     (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST || (unResponsiveSet.validate(logSet->tLogPolicy))));
 
 	// Check all combinations of the AntiQuorum within the failed
 	if (!bTooManyFailures && (logSet->tLogWriteAntiQuorum) &&
@@ -2187,6 +2197,8 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 		}
 		// If the commit proxy sent this version to "N" log servers then at least
 		// (N - replicationFactor + 1) log servers must be available.
+		// @todo Also do the replication policy validation check here, and enable
+		// that check in "getDurableVersion()" at that point.
 		if (!(versionAvailableTLogs[version].count() >= tLogs.count() - replicationFactor + 1)) {
 			break;
 		}
