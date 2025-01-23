@@ -19,6 +19,10 @@
  */
 
 #ifdef FLOW_GRPC_ENABLED
+
+#ifndef FDBRPC_FLOW_GRPC_TESTS_H
+#define FDBRPC_FLOW_GRPC_TESTS_H
+
 #include <cstdio>
 #include <thread>
 #include "flow/Error.h"
@@ -104,4 +108,5 @@ private:
 
 } // namespace fdbrpc_test
 
-#endif
+#endif // FDBRPC_FLOW_GRPC_TESTS_H
+#endif // FLOW_GRPC_ENABLED

@@ -20,7 +20,6 @@
 
 #ifdef FLOW_GRPC_ENABLED
 #include <ctime>
-#include <random>
 #include "flow/UnitTest.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/FlowGrpcTests.h"
@@ -94,7 +93,7 @@ TEST_CASE("/fdbrpc/grpc/basic_stream_server") {
 }
 
 TEST_CASE("/fdbrpc/grpc/future_destroy") {
-	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50500"));
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50502"));
 	GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	Future<Void> _ = server.run();
@@ -117,7 +116,7 @@ TEST_CASE("/fdbrpc/grpc/future_destroy") {
 }
 
 TEST_CASE("/fdbrpc/grpc/stream_destroy") {
-	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50501"));
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50503"));
 	GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	Future<Void> _ = server.run();
@@ -178,7 +177,7 @@ TEST_CASE("/fdbrpc/grpc/file_transfer") {
 	using platform::TmpFile;
 
 	// -- Server --
-	std::string server_address("127.0.0.1:50051");
+	std::string server_address("127.0.0.1:50504");
 	FileTransferServiceImpl service;
 
 	grpc::ServerBuilder builder;
@@ -225,7 +224,7 @@ TEST_CASE("/fdbrpc/grpc/file_transfer_byte_flip") {
 	using platform::TmpFile;
 
 	// -- Server --
-	std::string server_address("127.0.0.1:50051");
+	std::string server_address("127.0.0.1:50505");
 	FileTransferServiceImpl service;
 	service.SetErrorInjection(FileTransferServiceImpl::FLIP_BYTE);
 
@@ -267,7 +266,7 @@ TEST_CASE("/fdbrpc/grpc/file_transfer_fail_random") {
 	using platform::TmpFile;
 
 	// -- Server --
-	std::string server_address("127.0.0.1:50051");
+	std::string server_address("127.0.0.1:50506");
 	FileTransferServiceImpl service;
 	service.SetErrorInjection(FileTransferServiceImpl::FAIL_RANDOMLY);
 
