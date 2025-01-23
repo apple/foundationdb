@@ -6080,7 +6080,8 @@ void cleanUpBulkDumpFolder(StorageServer* data) {
 	try {
 		platform::eraseDirectoryRecursive(abspath(data->bulkDumpFolder));
 	} catch (Error& e) {
-		return;
+		TraceEvent(SevError, "CleanUpBulkDumpFolderError", data->thisServerID).errorUnsuppressed(e);
+		throw e;
 	}
 	return;
 }
@@ -6089,7 +6090,8 @@ void cleanUpBulkLoadFolder(StorageServer* data) {
 	try {
 		platform::eraseDirectoryRecursive(abspath(data->bulkLoadFolder));
 	} catch (Error& e) {
-		return;
+		TraceEvent(SevError, "CleanUpBulkLoadFolderError", data->thisServerID).errorUnsuppressed(e);
+		throw e;
 	}
 	return;
 }
@@ -8859,7 +8861,8 @@ void cleanUpFetchKeyBasedBulkLoadFolder(const std::string& folder) {
 	try {
 		platform::eraseDirectoryRecursive(folder);
 	} catch (Error& e) {
-		ASSERT_WE_THINK(false);
+		TraceEvent(SevError, "CleanUpFetchKeyBasedBulkLoadFolderError").errorUnsuppressed(e).detail("Folder", folder);
+		throw e;
 	}
 	return;
 }
@@ -9083,8 +9086,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("DataMoveId", dataMoveId.toString())
 				    .detail("Range", keys)
 				    .detail("Phase", "Read task metadata");
-				ASSERT(dataMoveId.isValid() &&
-				       dataMoveId != anonymousShardId); // TODO(BulkLoad): remove dangerous assert
+				ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId)); // TODO(BulkLoad): remove dangerous assert
 				wait(store(
 				    bulkLoadTaskState,
 				    getBulkLoadTaskStateFromDataMove(data->cx, dataMoveId, data->version.get(), data->thisServerID)));
@@ -9093,8 +9095,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// this is an bulk load data move but it is not. To tolerate this issue, here we check
 				// whether the bulkLoadTaskState metadata is persisted in the data move metadata. If yes,
 				// this SS conducts bulk loading. If no, the SS conducts a normal data move.
-				if (bulkLoadTaskState.present()) {
-					ASSERT(bulkLoadTaskState.get().getDataMoveId() == dataMoveId); // TODO(BulkLoad): remove this assert
+				if (bulkLoadTaskState.present() && bulkLoadTaskState.get().getDataMoveId() == dataMoveId) {
 					TraceEvent(SevInfo, "FetchKeyConductBulkLoad", data->thisServerID)
 					    .detail("DataMoveId", dataMoveId.toString())
 					    .detail("Range", keys)
@@ -9107,9 +9108,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				} else {
 					hold = tryGetRange(results, &tr, keys);
 					rangeEnd = keys.end;
-					// TODO(BulkLoad): set task failed instead of sliently doing data moves
-					TraceEvent(SevInfo, "FetchKeyConductBulkLoad", data->thisServerID)
+					TraceEvent(SevError, "FetchKeyConductBulkLoad", data->thisServerID)
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
 					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("PersistMetadata", bulkLoadTaskState.get().toString())
 					    .detail("Range", keys)
 					    .detail("Phase", "Failed to get task metadata");
 				}
@@ -9132,6 +9135,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						wait(waitForAll(delays));
 					}
 					state RangeResult this_block = waitNext(results.getFuture());
+
 					state int expectedBlockSize =
 					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
 
@@ -10134,14 +10138,12 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	// this is an bulk load data move but it is not. To tolerate this issue, here we check
 	// whether the bulkLoadTaskState metadata is persisted in the data move metadata. If yes,
 	// this SS conducts bulk loading. If no, the SS conducts a normal data move.
-	if (bulkLoadTaskState.present()) {
-		ASSERT(bulkLoadTaskState.get().getDataMoveId() == moveInShard->dataMoveId());
-		// TODO(BulkLoad): remove this assert
-		TraceEvent(SevInfo, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)
+	if (bulkLoadTaskState.present() && bulkLoadTaskState.get().getDataMoveId() != moveInShard->dataMoveId()) {
+		TraceEvent(SevError, "FetchShardBeginReceivedBulkLoadTask", data->thisServerID)
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
 		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("BulkLoadTask", bulkLoadTaskState.get().toString());
-	} else {
-		// TODO(BulkLoad): Mark bulkload task failed instead of keeping slient
 	}
 
 	loop {
@@ -10703,12 +10705,12 @@ void changeServerKeys(StorageServer* data,
                       DataMovementReason dataMoveReason,
                       const SSBulkLoadMetadata& bulkLoadInfoForAddingShard) {
 	ASSERT(!keys.empty());
-	TraceEvent("ChangeServerKeys", data->thisServerID)
-	    .detail("KeyBegin", keys.begin)
-	    .detail("KeyEnd", keys.end)
-	    .detail("NowAssigned", nowAssigned)
-	    .detail("Version", version)
-	    .detail("Context", changeServerKeysContextName(context));
+	// TraceEvent("ChangeServerKeys", data->thisServerID)
+	//     .detail("KeyBegin", keys.begin)
+	//     .detail("KeyEnd", keys.end)
+	//     .detail("NowAssigned", nowAssigned)
+	//     .detail("Version", version)
+	//     .detail("Context", changeServerKeysContextName(context));
 	validate(data);
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
 	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys, data->thisServerID);
@@ -10722,10 +10724,6 @@ void changeServerKeys(StorageServer* data,
 			    .detail("KeyBegin", it->range().begin)
 			    .detail("KeyEnd", it->range().end);
 			break;
-		} else {
-			TraceEvent(SevDebug, "CSKRangeNoDifferent", data->thisServerID)
-			    .detail("KeyBegin", it->range().begin)
-			    .detail("KeyEnd", it->range().end);
 		}
 	}
 	if (!isDifferent) {
@@ -10777,15 +10775,15 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
-		TraceEvent(SevDebug, "CSKRange", data->thisServerID)
-		    .detail("KeyBegin", range.begin)
-		    .detail("KeyEnd", range.end)
-		    .detail("Available", dataAvailable)
-		    .detail("NowAssigned", nowAssigned)
-		    .detail("NewestAvailable", r->value())
-		    .detail("ShardState0", data->shards[range.begin]->debugDescribeState())
-		    .detail("SSBulkLoadMetaData", bulkLoadInfoForAddingShard.toString())
-		    .detail("Context", context);
+		// TraceEvent(SevDebug, "CSKRange", data->thisServerID)
+		//     .detail("KeyBegin", range.begin)
+		//     .detail("KeyEnd", range.end)
+		//     .detail("Available", dataAvailable)
+		//     .detail("NowAssigned", nowAssigned)
+		//     .detail("NewestAvailable", r->value())
+		//     .detail("ShardState0", data->shards[range.begin]->debugDescribeState())
+		//     .detail("SSBulkLoadMetaData", bulkLoadInfoForAddingShard.toString())
+		//     .detail("Context", context);
 		if (context == CSK_ASSIGN_EMPTY && !dataAvailable) {
 			ASSERT(nowAssigned);
 			TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
@@ -11135,7 +11133,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 							// Physical shard move fall back happens if and only if the data move is failed to get the
 							// checkpoint. However, this case never happens the bulkload. So, the bulkload does not
 							// support fall back.
-							ASSERT(!conductBulkLoad); // TODO(BulkLoad): review this
+							ASSERT(!conductBulkLoad); // TODO(BulkLoad): remove this assert
 							data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 							data->newestDirtyVersion.insert(range, cVer);
 							// TODO: removeDataRange if the moveInShard has written to the kvs.
@@ -11429,7 +11427,7 @@ private:
 			if (conductBulkLoad && (dataMoveId == anonymousShardId || !dataMoveId.isValid())) {
 				// If conductBulkLoad == true but dataMoveId is not usable, SS should ignore the request by setting the
 				// conductBulkLoad to false. Then, a normal data move is triggered.
-				TraceEvent(SevWarnAlways, "SSBulkLoadDataMoveIdInvalid", data->thisServerID)
+				TraceEvent(SevError, "SSBulkLoadDataMoveIdInvalid", data->thisServerID)
 				    .detail("Message",
 				            "A bulkload request is converted to a normal data move because the data move id is either "
 				            "anonymousShardId or invalid. Please check DD setting to see if the bulkload dependency is "
@@ -11438,7 +11436,6 @@ private:
 				    .detail("KVStoreType", data->storage.getKeyValueStoreType())
 				    .detail("DataMoveId", dataMoveId.toString());
 				conductBulkLoad = ConductBulkLoad::False;
-				ASSERT_WE_THINK(false);
 			}
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
@@ -13256,6 +13253,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 
 void updateStorageShard(StorageServer* data, StorageServerShard shard) {
 	StorageServerShard::ShardState shardState = shard.getShardState();
+	// Added to evaluate the invariant: Only the following four state can be seen in the storage shard metadata.
 	ASSERT_WE_THINK(shardState == StorageServerShard::NotAssigned || shardState == StorageServerShard::Adding ||
 	                shardState == StorageServerShard::MovingIn || shardState == StorageServerShard::ReadWrite);
 	auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
@@ -13709,26 +13707,28 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		}
 	}
 
-	state KeyRangeMap<Optional<UID>> bulkLoadTaskRangeMap;
+	state KeyRangeMap<Optional<UID>> bulkLoadTaskRangeMap; // store dataMoveId on ranges with active bulkload tasks
 	bulkLoadTaskRangeMap.insert(allKeys, Optional<UID>());
 	state RangeResult bulkLoadTasks = fBulkLoadTask.get();
 	for (int i = 0; i < bulkLoadTasks.size() - 1; i++) {
 		if (bulkLoadTasks[i].value.empty()) {
 			continue;
 		}
-		KeyRange bulkLoadRange =
-		    KeyRangeRef(bulkLoadTasks[i].key, bulkLoadTasks[i + 1].key).removePrefix(persistBulkLoadTaskKeys.begin);
 		SSBulkLoadMetadata metadata = decodeSSBulkLoadMetadata(bulkLoadTasks[i].value);
 		if (!metadata.getConductBulkLoad()) {
 			continue;
 		}
+		KeyRange bulkLoadRange =
+		    KeyRangeRef(bulkLoadTasks[i].key, bulkLoadTasks[i + 1].key).removePrefix(persistBulkLoadTaskKeys.begin);
 		TraceEvent(SevInfo, "SSBulkLoadMetaDataRestore", data->thisServerID)
 		    .detail("DataMoveId", metadata.getDataMoveId())
 		    .detail("Range", bulkLoadRange);
+		// Assert checks the invariant: any bulkload task range cannot exceed the boundary of user key space.
 		ASSERT(normalKeys.contains(bulkLoadRange));
 		bulkLoadTaskRangeMap.insert(bulkLoadRange, metadata.getDataMoveId());
 	}
-	bulkLoadTaskRangeMap.coalesce(allKeys);
+	// BulkLoadTaskRangeMap range boundary is aligned to the shard assignment boundary, because we persist the bulkload
+	// task metadata and the shard assignment metadata at the same version with the same shard boundary.
 
 	state RangeResult assigned = fShardAssigned.get();
 	data->bytesRestored += assigned.logicalSize();
@@ -13758,6 +13758,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 				if (!bulkLoadIt->value().present()) {
 					continue;
 				}
+				// Assert checks the invariant: any bulkload task data move has set to assign the range and the range
+				// must align to the shard assignment boundary.
 				ASSERT(bulkLoadIt->range() == keys && nowAssigned);
 				dataMoveId = bulkLoadIt->value().get();
 				conductBulkLoad = ConductBulkLoad::True;

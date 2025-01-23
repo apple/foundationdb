@@ -72,9 +72,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "flow/Buggify.h"
 #include "flow/Error.h"
-#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 

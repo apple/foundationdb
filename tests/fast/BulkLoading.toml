@@ -8,7 +8,7 @@ processesPerMachine = 2
 # Do not support tenant, encryption, and TSS
 tenantModes = ['disabled']
 encryptModes = ['disabled']
-disableTss = true
+disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
 
 [[knobs]]
 # This knob is commented out since the knob override is done *after* the simulation system is set up. However,
