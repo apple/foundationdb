@@ -221,6 +221,7 @@ static const std::string serverCheckpointFolder = "serverCheckpoints";
 static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
 static const std::string serverBulkDumpFolder = "bulkDumpFiles";
+static const std::string serverBulkLoadFolder = "bulkLoadFiles";
 
 static const KeyRangeRef persistBulkLoadTaskKeys =
     KeyRangeRef(PERSIST_PREFIX "BulkLoadTask/"_sr, PERSIST_PREFIX "BulkLoadTask0"_sr);
@@ -1397,6 +1398,7 @@ public:
 	std::string checkpointFolder;
 	std::string fetchedCheckpointFolder;
 	std::string bulkDumpFolder;
+	std::string bulkLoadFolder;
 
 	// defined only during splitMutations()/addMutation()
 	UpdateEagerReadInfo* updateEagerReads;
@@ -6083,6 +6085,15 @@ void cleanUpBulkDumpFolder(StorageServer* data) {
 	return;
 }
 
+void cleanUpBulkLoadFolder(StorageServer* data) {
+	try {
+		platform::eraseDirectoryRecursive(abspath(data->bulkLoadFolder));
+	} catch (Error& e) {
+		return;
+	}
+	return;
+}
+
 // The SS actor handling bulk dump task sent from DD.
 // The SS partitions the task range into batches and make progress on each batch one by one.
 // Each batch is a subrange of the task range sent from DD.
@@ -8753,7 +8764,6 @@ bool fetchKeyCanRetry(const Error& e) {
 	}
 }
 
-// TODO(Zhe): cleanup the file
 ACTOR Future<BulkLoadFileSet> bulkLoadFetchKeyValueFileToLoad(StorageServer* data,
                                                               std::string dir,
                                                               BulkLoadTaskState bulkLoadTaskState) {
@@ -8845,6 +8855,15 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 	}
 }
 
+void cleanUpFetchKeyBasedBulkLoadFolder(const std::string& folder) {
+	try {
+		platform::eraseDirectoryRecursive(folder);
+	} catch (Error& e) {
+		ASSERT_WE_THINK(false);
+	}
+	return;
+}
+
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
@@ -8857,7 +8876,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state UID dataMoveId = shard->getSSBulkLoadMetadata().getDataMoveId();
 	state ConductBulkLoad conductBulkLoad = shard->getSSBulkLoadMetadata().getConductBulkLoad();
 	state Optional<BulkLoadTaskState> bulkLoadTaskState;
-	state std::string bulkLoadLocalDir = fetchedCheckpointDir(data->folder, dataMoveId);
+	state std::string bulkLoadLocalDir =
+	    joinPath(joinPath(data->bulkLoadFolder, dataMoveId.toString()), fetchKeysID.toString());
 	state PromiseStream<Key> destroyedFeeds;
 	state FetchKeysMetricReporter metricReporter(fetchKeysID,
 	                                             startTime,
@@ -9457,6 +9477,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		data->counters.fetchExecutingMS += 1000 * (now() - executeStart);
 
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
+		if (conductBulkLoad) {
+			cleanUpFetchKeyBasedBulkLoadFolder(bulkLoadLocalDir);
+		}
+
 	} catch (Error& e) {
 		TraceEvent(SevDebug, interval.end(), data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -9488,6 +9512,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("KnownCommittedVersion", data->knownCommittedVersion.get());
 		if (e.code() != error_code_actor_cancelled)
 			data->otherError.sendError(e); // Kill the storage server.  Are there any recoverable errors?
+		if (conductBulkLoad) {
+			cleanUpFetchKeyBasedBulkLoadFolder(bulkLoadLocalDir);
+		}
 		throw; // goes nowhere
 	}
 
@@ -15110,6 +15137,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
 	self.bulkDumpFolder = joinPath(self.folder, serverBulkDumpFolder);
+	self.bulkLoadFolder = joinPath(self.folder, serverBulkLoadFolder);
 	self.actors.add(rocksdbLogCleaner(folder));
 
 	try {
@@ -15127,6 +15155,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		platform::createDirectory(self.fetchedCheckpointFolder);
 
 		cleanUpBulkDumpFolder(&self);
+		cleanUpBulkLoadFolder(&self);
 
 		EncryptionAtRestMode encryptionMode = wait(self.storage.encryptionMode());
 		TraceEvent("StorageServerInitProgress", ssi.id())
@@ -15229,6 +15258,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
 	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
 	self.bulkDumpFolder = joinPath(self.folder, serverBulkDumpFolder);
+	self.bulkLoadFolder = joinPath(self.folder, serverBulkLoadFolder);
 
 	if (!directoryExists(self.checkpointFolder)) {
 		TraceEvent(SevWarnAlways, "SSRebootCheckpointDirNotExists", self.thisServerID);
@@ -15240,6 +15270,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	}
 
 	cleanUpBulkDumpFolder(&self);
+	cleanUpBulkLoadFolder(&self);
 
 	self.actors.add(rocksdbLogCleaner(folder));
 	try {

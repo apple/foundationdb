@@ -1,9 +1,8 @@
 [configuration]
 config = 'triple'
 storageEngineType = 0
-machineCount = 12
-coordinators = 3
-extraStorageMachineCountPerDC = 3
+machineCount = 15
+extraStorageMachineCountPerDC = 5
 processesPerMachine = 2
 tenantModes = ['disabled'] # Do not support tenant
 encryptModes = ['disabled'] # Do not support encryption
