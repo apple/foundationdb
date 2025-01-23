@@ -484,6 +484,8 @@ protected:
 
 	Future<Void> waitForAllDataRemoved(UID serverID, Version addedVersion) const;
 
+	bool allServersHaveMinAvailableSpace(double minAvailableSpaceRatio) const;
+
 	// calculate minLoadBytes / avgLoadBytes among servers. An unhealthy server's load is considered as 0. If the
 	// average load of each storage server is less than smallLoadThreshold, return 1 always.
 	double loadBytesBalanceRatio(int64_t smallLoadThreshold) const;
