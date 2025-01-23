@@ -243,10 +243,6 @@ inline uint16_t decodePersistAccumulativeChecksumKey(const Key& key) {
 	return bigEndian16(acsIndex);
 }
 
-bool dataMoveIdIsValidForBulkLoad(const UID& dataMoveId) {
-	return dataMoveId.isValid() && dataMoveId != anonymousShardId;
-}
-
 // MoveInUpdates caches new updates of a move-in shard, before that shard is ready to accept writes.
 struct MoveInUpdates {
 	MoveInUpdates() : spilled(MoveInUpdatesSpilled::False) {}
@@ -403,8 +399,7 @@ struct AddingShard : NonCopyable {
 	Promise<Void> fetchComplete;
 	Promise<Void> readWrite;
 	DataMovementReason reason;
-	UID dataMoveId;
-	ConductBulkLoad conductBulkLoad = ConductBulkLoad::False;
+	SSBulkLoadMetadata ssBulkLoadMetadata;
 
 	// During the Fetching phase, it saves newer mutations whose version is greater or equal to fetchClient's
 	// fetchVersion, while the shard is still busy catching up with fetchClient. It applies these updates after fetching
@@ -435,14 +430,13 @@ struct AddingShard : NonCopyable {
 	AddingShard(StorageServer* server,
 	            KeyRangeRef const& keys,
 	            DataMovementReason reason,
-	            const UID& dataMoveId,
-	            ConductBulkLoad conductBulkLoad);
+	            const SSBulkLoadMetadata& ssBulkLoadMetadata);
 
 	// When fetchKeys "partially completes" (splits an adding shard in two), this is used to construct the left half
 	AddingShard(AddingShard* prev, KeyRange const& keys)
 	  : keys(keys), fetchClient(prev->fetchClient), server(prev->server), transferredVersion(prev->transferredVersion),
-	    fetchVersion(prev->fetchVersion), phase(prev->phase), reason(prev->reason), dataMoveId(prev->dataMoveId),
-	    conductBulkLoad(prev->conductBulkLoad) {}
+	    fetchVersion(prev->fetchVersion), phase(prev->phase), reason(prev->reason),
+	    ssBulkLoadMetadata(prev->ssBulkLoadMetadata) {}
 	~AddingShard() {
 		if (!fetchComplete.isSet())
 			fetchComplete.send(Void());
@@ -458,13 +452,7 @@ struct AddingShard : NonCopyable {
 	bool isDataTransferred() const { return phase >= FetchingCF; }
 	bool isDataAndCFTransferred() const { return phase >= Waiting; }
 
-	Optional<UID> getDataMoveIdForBulkLoad() const {
-		if (conductBulkLoad == ConductBulkLoad::True) {
-			return dataMoveId;
-		} else {
-			return Optional<UID>();
-		}
-	}
+	SSBulkLoadMetadata getSSBulkLoadMetadata() const { return ssBulkLoadMetadata; }
 };
 
 class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
@@ -491,10 +479,8 @@ public:
 	static ShardInfo* newAdding(StorageServer* data,
 	                            KeyRange keys,
 	                            DataMovementReason reason,
-	                            const UID& dataMoveId,
-	                            ConductBulkLoad conductBulkLoad) {
-		return new ShardInfo(
-		    keys, std::make_unique<AddingShard>(data, keys, reason, dataMoveId, conductBulkLoad), nullptr);
+	                            const SSBulkLoadMetadata& ssBulkLoadMetadata) {
+		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, reason, ssBulkLoadMetadata), nullptr);
 	}
 	static ShardInfo* addingSplitLeft(KeyRange keys, AddingShard* oldShard) {
 		return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr);
@@ -564,11 +550,11 @@ public:
 		// TODO: Complete this.
 	}
 
-	Optional<UID> getDataMoveIdForBulkLoad() const {
+	SSBulkLoadMetadata getSSBulkLoadMetadata() const {
 		if (adding) {
-			return adding->getDataMoveIdForBulkLoad();
+			return adding->getSSBulkLoadMetadata();
 		} else {
-			return Optional<UID>();
+			return SSBulkLoadMetadata();
 		}
 	}
 
@@ -7670,10 +7656,7 @@ void removeDataRange(StorageServer* ss,
 void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available);
 void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned);
 void updateStorageShard(StorageServer* self, StorageServerShard shard);
-void setRangeBasedBulkLoadStatus(StorageServer* self,
-                                 KeyRangeRef keys,
-                                 UID dataMoveId,
-                                 ConductBulkLoad conductBulkLoad);
+void setRangeBasedBulkLoadStatus(StorageServer* self, KeyRangeRef keys, const SSBulkLoadMetadata& ssBulkLoadMetadata);
 
 void coalescePhysicalShards(StorageServer* data, KeyRangeRef keys) {
 	auto shardRanges = data->shards.intersectingRanges(keys);
@@ -8871,9 +8854,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state Version fetchVersion = invalidVersion;
 	state int64_t totalBytes = 0;
 	state int priority = dataMovementPriority(shard->reason);
-	state UID dataMoveId = shard->dataMoveId;
-
-	state ConductBulkLoad conductBulkLoad = shard->conductBulkLoad;
+	state UID dataMoveId = shard->getSSBulkLoadMetadata().getDataMoveId();
+	state ConductBulkLoad conductBulkLoad = shard->getSSBulkLoadMetadata().getConductBulkLoad();
 	state Optional<BulkLoadTaskState> bulkLoadTaskState;
 	state std::string bulkLoadLocalDir = fetchedCheckpointDir(data->folder, dataMoveId);
 	state PromiseStream<Key> destroyedFeeds;
@@ -9245,12 +9227,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						shard->server->addShard(ShardInfo::newShard(data, rightShard));
 					} else {
 						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard));
-						shard->server->addShard(ShardInfo::newAdding(data,
-						                                             KeyRangeRef(blockBegin, keys.end),
-						                                             shard->reason,
-						                                             shard->dataMoveId,
-						                                             shard->conductBulkLoad));
-						ASSERT(shard->dataMoveId == dataMoveId && shard->conductBulkLoad == conductBulkLoad);
+						shard->server->addShard(ShardInfo::newAdding(
+						    data, KeyRangeRef(blockBegin, keys.end), shard->reason, shard->getSSBulkLoadMetadata()));
 						if (conductBulkLoad) {
 							TraceEvent(SevInfo, "FetchKeyConductBulkLoad", data->thisServerID)
 							    .detail("DataMoveId", dataMoveId.toString())
@@ -9519,10 +9497,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 AddingShard::AddingShard(StorageServer* server,
                          KeyRangeRef const& keys,
                          DataMovementReason reason,
-                         const UID& dataMoveId,
-                         ConductBulkLoad conductBulkLoad)
+                         const SSBulkLoadMetadata& ssBulkLoadMetadata)
   : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious),
-    reason(reason), dataMoveId(dataMoveId), conductBulkLoad(conductBulkLoad) {
+    reason(reason), ssBulkLoadMetadata(ssBulkLoadMetadata) {
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -10436,12 +10413,17 @@ ShardInfo* ShardInfo::newShard(StorageServer* data, const StorageServerShard& sh
 		res = newNotAssigned(shard.range);
 		break;
 	case StorageServerShard::Adding:
-		res = newAdding(data, shard.range, DataMovementReason::INVALID, UID(), ConductBulkLoad::False);
+		// This handles two cases: (1) old data moves when encode_shard_location_metadata is off; (2) fallback data
+		// moves. For case 1, the bulkload is available only if the encode_shard_location_metadata is on. Therefore, the
+		// old data moves is never for bulkload. For case 2, fallback happens only if fetchCheckpoint fails which is not
+		// a case for bulkload which does not do fetchCheckpoint.
+		res = newAdding(data, shard.range, DataMovementReason::INVALID, SSBulkLoadMetadata());
 		break;
 	case StorageServerShard::ReadWritePending:
-		TraceEvent(SevDebug, "CancellingAlmostReadyMoveInShard").detail("StorageServerShard", shard.toString());
+		TraceEvent(SevWarnAlways, "CancellingAlmostReadyMoveInShard").detail("StorageServerShard", shard.toString());
 		ASSERT(!shard.moveInShardId.present());
-		res = newAdding(data, shard.range, DataMovementReason::INVALID, UID(), ConductBulkLoad::False);
+		// TODO(BulkLoad): current bulkload with ShardedRocksDB and PhysicalSharMove cannot handle this fallback case.
+		res = newAdding(data, shard.range, DataMovementReason::INVALID, SSBulkLoadMetadata());
 		break;
 	case StorageServerShard::MovingIn: {
 		ASSERT(shard.moveInShardId.present());
@@ -10686,15 +10668,13 @@ void cleanUpChangeFeeds(StorageServer* data, const KeyRangeRef& keys, Version ve
 	}
 }
 
-// TODO(Zhe): use SSBulkLoadMetadata bulkLoadInfoIfAddingShard as the input
 void changeServerKeys(StorageServer* data,
                       const KeyRangeRef& keys,
                       bool nowAssigned,
                       Version version,
                       ChangeServerKeysContext context,
                       DataMovementReason dataMoveReason,
-                      const UID& dataMoveId,
-                      ConductBulkLoad conductBulkLoad) {
+                      const SSBulkLoadMetadata& bulkLoadInfoForAddingShard) {
 	ASSERT(!keys.empty());
 	TraceEvent("ChangeServerKeys", data->thisServerID)
 	    .detail("KeyBegin", keys.begin)
@@ -10753,11 +10733,8 @@ void changeServerKeys(StorageServer* data,
 			data->addShard(ShardInfo::newReadWrite(ranges[i], data));
 		else {
 			ASSERT(ranges[i].value->adding);
-			data->addShard(ShardInfo::newAdding(data,
-			                                    ranges[i],
-			                                    ranges[i].value->adding->reason,
-			                                    ranges[i].value->adding->dataMoveId,
-			                                    ranges[i].value->adding->conductBulkLoad));
+			data->addShard(ShardInfo::newAdding(
+			    data, ranges[i], ranges[i].value->adding->reason, ranges[i].value->getSSBulkLoadMetadata()));
 			CODE_PROBE(true, "ChangeServerKeys reFetchKeys");
 		}
 	}
@@ -10780,8 +10757,7 @@ void changeServerKeys(StorageServer* data,
 		    .detail("NowAssigned", nowAssigned)
 		    .detail("NewestAvailable", r->value())
 		    .detail("ShardState0", data->shards[range.begin]->debugDescribeState())
-		    .detail("DataMoveId", dataMoveId.toString())
-		    .detail("ConductBulkLoad", conductBulkLoad)
+		    .detail("SSBulkLoadMetaData", bulkLoadInfoForAddingShard.toString())
 		    .detail("Context", context);
 		if (context == CSK_ASSIGN_EMPTY && !dataAvailable) {
 			ASSERT(nowAssigned);
@@ -10813,7 +10789,7 @@ void changeServerKeys(StorageServer* data,
 			} else {
 				auto& shard = data->shards[range.begin];
 				if (!shard->assigned() || shard->keys != range)
-					data->addShard(ShardInfo::newAdding(data, range, dataMoveReason, dataMoveId, conductBulkLoad));
+					data->addShard(ShardInfo::newAdding(data, range, dataMoveReason, bulkLoadInfoForAddingShard));
 			}
 		} else {
 			changeNewestAvailable.emplace_back(range, latestVersion);
@@ -11129,6 +11105,10 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						if (context == CSK_FALL_BACK) {
 							updatedShards.push_back(
 							    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::Adding));
+							// Physical shard move fall back happens if and only if the data move is failed to get the
+							// checkpoint. However, this case never happens the bulkload. So, the bulkload does not
+							// support fall back.
+							ASSERT(!conductBulkLoad); // TODO(BulkLoad): review this
 							data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 							data->newestDirtyVersion.insert(range, cVer);
 							// TODO: removeDataRange if the moveInShard has written to the kvs.
@@ -11374,20 +11354,15 @@ private:
 					if (!nowAssigned) {
 						ASSERT(!conductBulkLoad);
 					}
-					setRangeBasedBulkLoadStatus(data, keys, dataMoveId, conductBulkLoad);
+					SSBulkLoadMetadata bulkLoadMetadata(dataMoveId, conductBulkLoad);
+					setRangeBasedBulkLoadStatus(data, keys, bulkLoadMetadata);
 
 					// The changes for version have already been received (and are being processed now).  We need to
 					// fetch the data for change.version-1 (changes from versions < change.version) If emptyRange,
 					// treat the shard as empty, see removeKeysFromFailedServer() for more details about this
 					// scenario.
-					changeServerKeys(data,
-					                 keys,
-					                 nowAssigned,
-					                 currentVersion - 1,
-					                 context,
-					                 dataMoveReason,
-					                 dataMoveId,
-					                 conductBulkLoad);
+					changeServerKeys(
+					    data, keys, nowAssigned, currentVersion - 1, context, dataMoveReason, bulkLoadMetadata);
 				}
 			}
 
@@ -13253,6 +13228,9 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 }
 
 void updateStorageShard(StorageServer* data, StorageServerShard shard) {
+	StorageServerShard::ShardState shardState = shard.getShardState();
+	ASSERT_WE_THINK(shardState == StorageServerShard::NotAssigned || shardState == StorageServerShard::Adding ||
+	                shardState == StorageServerShard::MovingIn || shardState == StorageServerShard::ReadWrite);
 	auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 
 	KeyRange shardKeys = KeyRangeRef(persistStorageServerShardKeys.begin.toString() + shard.range.begin.toString(),
@@ -13302,10 +13280,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 	}
 }
 
-void setRangeBasedBulkLoadStatus(StorageServer* self,
-                                 KeyRangeRef keys,
-                                 UID dataMoveId,
-                                 ConductBulkLoad conductBulkLoad) {
+void setRangeBasedBulkLoadStatus(StorageServer* self, KeyRangeRef keys, const SSBulkLoadMetadata& ssBulkLoadMetadata) {
 	ASSERT(!keys.empty());
 	Version logV = self->data().getLatestVersion();
 	auto& mLV = self->addVersionToMutationLog(logV);
@@ -13314,18 +13289,12 @@ void setRangeBasedBulkLoadStatus(StorageServer* self,
 	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, dataMoveKeys.begin, dataMoveKeys.end));
 	++self->counters.kvSystemClearRanges;
 	self->addMutationToMutationLog(
-	    mLV,
-	    MutationRef(MutationRef::SetValue,
-	                dataMoveKeys.begin,
-	                ssBulkLoadMetadataValue(conductBulkLoad ? SSBulkLoadMetadata(dataMoveId) : SSBulkLoadMetadata())));
+	    mLV, MutationRef(MutationRef::SetValue, dataMoveKeys.begin, ssBulkLoadMetadataValue(ssBulkLoadMetadata)));
 	if (keys.end != allKeys.end) {
-		Optional<UID> endDataMoveId = self->shards.rangeContaining(keys.end)->value()->getDataMoveIdForBulkLoad();
+		SSBulkLoadMetadata endBulkLoadMetadata =
+		    self->shards.rangeContaining(keys.end)->value()->getSSBulkLoadMetadata();
 		self->addMutationToMutationLog(
-		    mLV,
-		    MutationRef(MutationRef::SetValue,
-		                dataMoveKeys.end,
-		                ssBulkLoadMetadataValue(endDataMoveId.present() ? SSBulkLoadMetadata(endDataMoveId.get())
-		                                                                : SSBulkLoadMetadata())));
+		    mLV, MutationRef(MutationRef::SetValue, dataMoveKeys.end, ssBulkLoadMetadataValue(endBulkLoadMetadata)));
 	}
 	if (BUGGIFY) {
 		self->maybeInjectTargetedRestart(logV);
@@ -13778,8 +13747,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 			                 version,
 			                 CSK_RESTORE,
 			                 DataMovementReason::INVALID,
-			                 dataMoveId,
-			                 conductBulkLoad);
+			                 SSBulkLoadMetadata(dataMoveId, conductBulkLoad));
 
 			if (!nowAssigned)
 				ASSERT(data->newestAvailableVersion.allEqual(keys, invalidVersion));

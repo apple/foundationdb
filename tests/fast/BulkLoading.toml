@@ -1,12 +1,13 @@
 [configuration]
 config = 'triple'
 storageEngineType = 0
-machineCount = 15
+machineCount = 12
 coordinators = 3
-extraStorageMachineCountPerDC = 5
+extraStorageMachineCountPerDC = 3
 processesPerMachine = 2
 tenantModes = ['disabled'] # Do not support tenant
 encryptModes = ['disabled'] # Do not support encryption
+disableTss = true # Do not support TSS
 
 [[knobs]]
 # This knob is commented out since the knob override is done *after* the simulation system is set up. However,

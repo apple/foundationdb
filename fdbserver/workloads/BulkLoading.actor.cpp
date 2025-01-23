@@ -69,7 +69,9 @@ struct BulkLoading : TestWorkload {
 		             "StorageCorruption",
 		             "StorageServerCheckpointRestoreTest",
 		             "ValidateStorage",
-		             "RandomRangeLock" });
+		             "RandomRangeLock",
+		             "BlobFailureInjection",
+		             "Attrition" });
 	}
 
 	BulkLoading(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}

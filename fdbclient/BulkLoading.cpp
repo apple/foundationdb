@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BulkLoading.h"
+#include "fdbclient/SystemData.h"
 #include "flow/Error.h"
 
 #include <boost/url/url.hpp>
@@ -126,4 +127,26 @@ BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const std::string& jobRoot,
                                    const BulkLoadTransportMethod& transportMethod) {
 	return BulkLoadJobState(dumpJobIdToLoad, jobRoot, range, transportMethod);
+}
+
+bool getConductBulkLoadFromDataMoveId(const UID& dataMoveId) {
+	bool nowAssigned = false;
+	bool emptyRange = false;
+	DataMoveType dataMoveType = DataMoveType::LOGICAL;
+	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
+	decodeDataMoveId(dataMoveId, nowAssigned, emptyRange, dataMoveType, dataMoveReason);
+	bool conductBulkLoad =
+	    dataMoveType == DataMoveType::LOGICAL_BULKLOAD || dataMoveType == DataMoveType::PHYSICAL_BULKLOAD;
+	if (conductBulkLoad) {
+		ASSERT(!emptyRange && dataMoveIdIsValidForBulkLoad(dataMoveId));
+		ASSERT(nowAssigned);
+	}
+	if (!nowAssigned) {
+		ASSERT(!conductBulkLoad);
+	}
+	return conductBulkLoad;
+}
+
+bool dataMoveIdIsValidForBulkLoad(const UID& dataMoveId) {
+	return dataMoveId.isValid() && dataMoveId != anonymousShardId;
 }

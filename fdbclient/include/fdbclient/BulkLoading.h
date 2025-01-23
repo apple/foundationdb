@@ -890,6 +890,10 @@ private:
 	size_t bytes;
 };
 
+bool dataMoveIdIsValidForBulkLoad(const UID& dataMoveId);
+
+bool getConductBulkLoadFromDataMoveId(const UID& dataMoveId);
+
 // When the storage engine is not ShardedRocksDB, SS conducts bulkLoad using fetchKey based method.
 // In this case, SS needs to persist the bulkload task metadata locally because when SS restarts, SS
 // does not have the bulkload task information.
@@ -901,11 +905,25 @@ public:
 
 	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false){};
 
-	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId), conductBulkLoad(true) {}
+	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId) {
+		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
+		return;
+	}
+
+	SSBulkLoadMetadata(const UID& dataMoveId, bool inputConductBulkLoad) : dataMoveId(dataMoveId) {
+		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
+		ASSERT(conductBulkLoad == inputConductBulkLoad);
+		return;
+	}
 
 	UID getDataMoveId() const { return dataMoveId; }
 
 	bool getConductBulkLoad() const { return conductBulkLoad; }
+
+	std::string toString() const {
+		return "[SSBulkLoadMetadata]: [dataMoveId]: " + dataMoveId.toString() +
+		       ", [conductBulkLoad]: " + std::to_string(conductBulkLoad);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
