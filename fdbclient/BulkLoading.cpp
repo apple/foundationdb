@@ -27,6 +27,28 @@
 #include <boost/url/error_types.hpp>
 #include <boost/url/string_view.hpp>
 
+bool getConductBulkLoadFromDataMoveId(const UID& dataMoveId) {
+	bool nowAssigned = false;
+	bool emptyRange = false;
+	DataMoveType dataMoveType = DataMoveType::LOGICAL;
+	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
+	decodeDataMoveId(dataMoveId, nowAssigned, emptyRange, dataMoveType, dataMoveReason);
+	bool conductBulkLoad =
+	    dataMoveType == DataMoveType::LOGICAL_BULKLOAD || dataMoveType == DataMoveType::PHYSICAL_BULKLOAD;
+	if (conductBulkLoad) {
+		ASSERT(!emptyRange && dataMoveIdIsValidForBulkLoad(dataMoveId));
+		ASSERT(nowAssigned);
+	}
+	if (!nowAssigned) {
+		ASSERT(!conductBulkLoad);
+	}
+	return conductBulkLoad;
+}
+
+bool dataMoveIdIsValidForBulkLoad(const UID& dataMoveId) {
+	return dataMoveId.isValid() && dataMoveId != anonymousShardId;
+}
+
 std::string stringRemovePrefix(std::string str, const std::string& prefix) {
 	if (str.compare(0, prefix.length(), prefix) == 0) {
 		str.erase(0, prefix.length());
@@ -127,26 +149,4 @@ BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const std::string& jobRoot,
                                    const BulkLoadTransportMethod& transportMethod) {
 	return BulkLoadJobState(dumpJobIdToLoad, jobRoot, range, transportMethod);
-}
-
-bool getConductBulkLoadFromDataMoveId(const UID& dataMoveId) {
-	bool nowAssigned = false;
-	bool emptyRange = false;
-	DataMoveType dataMoveType = DataMoveType::LOGICAL;
-	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
-	decodeDataMoveId(dataMoveId, nowAssigned, emptyRange, dataMoveType, dataMoveReason);
-	bool conductBulkLoad =
-	    dataMoveType == DataMoveType::LOGICAL_BULKLOAD || dataMoveType == DataMoveType::PHYSICAL_BULKLOAD;
-	if (conductBulkLoad) {
-		ASSERT(!emptyRange && dataMoveIdIsValidForBulkLoad(dataMoveId));
-		ASSERT(nowAssigned);
-	}
-	if (!nowAssigned) {
-		ASSERT(!conductBulkLoad);
-	}
-	return conductBulkLoad;
-}
-
-bool dataMoveIdIsValidForBulkLoad(const UID& dataMoveId) {
-	return dataMoveId.isValid() && dataMoveId != anonymousShardId;
 }
