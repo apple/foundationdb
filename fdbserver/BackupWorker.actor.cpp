@@ -949,7 +949,14 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Version tagAt = std::max(self->pulledVersion.get(), std::max(self->startVersion, self->savedVersion));
 	state Arena prev;
 
-	TraceEvent("BackupWorkerPull", self->myId).log();
+	// Going out of noop mode, the popVersion could be larger than savedVersion
+	// and we can't peek messages between savedVersion and popVersion.
+	tagAt = std::max(tagAt, self->popVersion);
+	TraceEvent("BackupWorkerPull", self->myId)
+	    .detail("Tag", self->tag)
+	    .detail("Version", tagAt)
+	    .detail("PopVersion", self->popVersion)
+	    .detail("SavedVersion", self->savedVersion);
 	loop {
 		while (self->paused.get()) {
 			wait(self->paused.onChange());
@@ -1051,6 +1058,7 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 						self->minKnownCommittedVersion =
 						    std::max(committedVersion.get(), self->minKnownCommittedVersion);
 						TraceEvent("BackupWorkerNoopPop", self->myId)
+						    .detail("Tag", self->tag)
 						    .detail("SavedVersion", self->savedVersion)
 						    .detail("PopVersion", self->popVersion);
 						self->pop(); // Pop while the worker is in this NOOP state.
