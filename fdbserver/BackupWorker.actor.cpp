@@ -969,6 +969,16 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 				logSystemChange = self->logSystem.onChange();
 			}
 		}
+		// When TLog sets popped version, it means mutations between popped() and tagAt are unavailable
+		// on the TLog. So, we should stop pulling data from the TLog.
+		if (r->popped() > 0) {
+			TraceEvent(SevWarn, "BackupWorkerPullMissingMutations", self->myId)
+			    .detail("Tag", self->tag)
+			    .detail("BackupEpoch", self->backupEpoch)
+			    .detail("Popped", r->popped())
+			    .detail("ExpectedPeekVersion", tagAt);
+			throw worker_removed();
+		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
 		// Note we aggressively peek (uncommitted) messages, but only committed
