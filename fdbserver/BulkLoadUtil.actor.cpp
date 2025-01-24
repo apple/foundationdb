@@ -53,7 +53,7 @@ ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Datab
 				continue;
 			}
 			if (!val.present()) {
-				TraceEvent(SevWarnAlways, "SSBulkLoadDataMoveIdNotExist", logId)
+				TraceEvent(SevWarn, "SSBulkLoadDataMoveIdNotExist", logId)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("ReadVersion", tr.getReadVersion().get())
 				    .detail("MinVersion", minVersion);
