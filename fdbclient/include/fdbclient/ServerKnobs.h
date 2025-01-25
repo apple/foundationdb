@@ -41,6 +41,7 @@ public:
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 	bool ENABLE_VERSION_VECTOR;
 	bool ENABLE_VERSION_VECTOR_TLOG_UNICAST;
+	bool ENABLE_VERSION_VECTOR_REPLY_RECOVERY;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
 	double MAX_VERSION_RATE_MODIFIER;
@@ -578,10 +579,10 @@ public:
 	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
-	bool ROCKSDB_METRICS_IN_SIMULATION; // Whether rocksdb traceevent metrics will be emitted in simulation. Note that
-	                                    // turning this on in simulation could lead to non-deterministic runs since we
-	                                    // rely on rocksdb metadata. This knob also applies to sharded rocks storage
-	                                    // engine.
+	bool ROCKSDB_ENABLE_NONDETERMINISM; // Whether rocksdb nondeterministic behavior should be enabled in simulation.
+	                                    // Note that turning this on in simulation could lead to non-deterministic runs
+	                                    // since we rely on rocksdb metadata. This knob also applies to sharded rocks
+	                                    // storage engine.
 	bool SHARDED_ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
 	int SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
@@ -598,6 +599,7 @@ public:
 	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE;
 	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
 	bool SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
+	int SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD;
 	int SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t SHARDED_ROCKSDB_BLOCK_CACHE_SIZE;
 	double SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
@@ -614,6 +616,7 @@ public:
 	bool SHARDED_ROCKSDB_READ_ASYNC_IO;
 	int SHARDED_ROCKSDB_PREFIX_LEN;
 	double SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
+	bool SHARDED_ROCKSDB_USE_DIRECT_IO;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;

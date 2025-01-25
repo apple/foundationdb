@@ -52,6 +52,13 @@ enum class BulkLoadTransportMethod : uint8_t {
 // The number should increase by 1 when we change the metadata in a release.
 const int bulkLoadManifestFormatVersion = 1;
 
+// Append a string to a path.
+// 'path' is a filesystem path or an URL.
+// 'append' is what to append to path.
+// URLs can have query strings so we need to be careful where we append.
+// TODO(BulkDump): use this everywhere
+std::string appendToPath(const std::string& path, const std::string& append);
+
 // Here are important metadata: (1) BulkLoadTaskState; (2) BulkDumpState; (3) BulkLoadManifest. BulkLoadTaskState is
 // only used for bulkload core engine which persists the metadata for each unit bulkload range (aka. task).
 // BulkDumpState is used for bulk dumping. BulkLoadManifest is the metadata for persisting core information of the
@@ -235,7 +242,7 @@ public:
 		} else if (relativePath.empty()) {
 			return rootPath;
 		} else {
-			return joinPath(rootPath, relativePath);
+			return appendToPath(rootPath, relativePath);
 		}
 	}
 
@@ -259,7 +266,11 @@ public:
 			    .detail("FileSet", toString());
 			throw bulkload_fileset_invalid_filepath();
 		} else {
-			return joinPath(getFolder(), dataFileName);
+			TraceEvent(SevInfo, "BulkLoadFileSetProvideDataFile")
+			    .detail("DataFile", dataFileName)
+			    .detail("Relative", getRelativePath())
+			    .detail("Folder", getFolder());
+			return appendToPath(getFolder(), dataFileName);
 		}
 	}
 
@@ -271,7 +282,7 @@ public:
 			    .detail("FileSet", toString());
 			throw bulkload_fileset_invalid_filepath();
 		} else {
-			return joinPath(getFolder(), byteSampleFileName);
+			return appendToPath(getFolder(), byteSampleFileName);
 		}
 	}
 
@@ -953,8 +964,10 @@ std::string generateEmptyManifestFileName();
 // Rows: BeginKey, EndKey, Version, Bytes, ManifestPath
 std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
 
-// Append a string to a path. 'path' is a filesystem path or an URL.
-std::string appendToPath(const std::string& path, const std::string& append);
+// Return path.
+// If the input is a filesystem path, return the path.
+// If the input is an URL, return the path part of the URL.
+std::string getPath(const std::string& path_or_url);
 
 // Define bulkLoad/bulkDump job folder using the root path and the jobId.
 std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId);
@@ -974,5 +987,4 @@ BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const KeyRange& range,
                                    const std::string& jobRoot,
                                    const BulkLoadTransportMethod& transportMethod);
-
 #endif

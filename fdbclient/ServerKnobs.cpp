@@ -40,6 +40,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_VERSION_VECTOR,                               false );
 	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                  false );
 	init( ENABLE_VERSION_VECTOR_HA_OPTIMIZATION,               false );
+	init( ENABLE_VERSION_VECTOR_REPLY_RECOVERY,                false );
 
 	bool buggifyShortReadWindow = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR;
 	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = VERSIONS_PER_SECOND; else if (buggifyShortReadWindow) MAX_READ_TRANSACTION_LIFE_VERSIONS = std::max<int>(1, 0.1 * VERSIONS_PER_SECOND); else if( randomize && BUGGIFY ) MAX_READ_TRANSACTION_LIFE_VERSIONS = 10 * VERSIONS_PER_SECOND;
@@ -596,8 +597,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_CF_METRICS_DELAY,                            900.0 );
 	init( ROCKSDB_MAX_LOG_FILE_SIZE,                        10485760 ); // 10MB.
 	init( ROCKSDB_KEEP_LOG_FILE_NUM,                             100 ); // Keeps 1GB log per storage server.
-	// Does manual flushes at regular intervals(seconds), incase rocksdb did not flush. Feature disable if the value is 0.
-	init( ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL,                      0 ); if( randomize && BUGGIFY ) ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL = deterministicRandom()->randomInt(4, 10);
+	// Does manual flushes at regular intervals(seconds), incase rocksdb did not flush. Feature disabled if the value is 0.
+	init( ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL,                    600 ); if( isSimulated ) ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL = deterministicRandom()->randomInt(4, 1200);
 	init( ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    true );
 	init( ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 true );
 	init( ROCKSDB_FULLFILE_CHECKSUM,                           false ); if ( randomize && BUGGIFY ) ROCKSDB_FULLFILE_CHECKSUM = true;
@@ -608,7 +609,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY,               0 ); if ( randomize && BUGGIFY ) ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY = 8; // Default: 0 (disabled). Supported values: 0, 1, 2, 4, 8.
 	// Block cache key-value checksum. Checksum is validated during read, so has non-trivial impact on read performance.
 	init( ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY,                  0 ); if ( randomize && BUGGIFY ) ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY = 8; // Default: 0 (disabled). Supported values: 0, 1, 2, 4, 8.
-	init( ROCKSDB_METRICS_IN_SIMULATION,                       false );
+	init( ROCKSDB_ENABLE_NONDETERMINISM,                       false );
 	init( SHARDED_ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH,          false );	
 	init( SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,               0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01();
 	init( SHARD_METADATA_SCAN_BYTES_LIMIT,                  10485760 ); // 10MB
@@ -624,7 +625,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                 6 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,            16 << 20 ); // 16MB
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,             1 ); // RocksDB default.
-	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,          true );
+	bool suggestCompactRange = deterministicRandom()->coinflip();
+	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,            false ); if (isSimulated) SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE = suggestCompactRange;
+	init( SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD,       200 ); if (isSimulated) SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD = suggestCompactRange? 0:50; 
 	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                     4 );
 	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE, isSimulated?   128 << 20 : 3LL << 30); // 3GB
 	init( SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO,              0.5 ); /* Share of high priority Index&filter blocks in cache */
@@ -642,6 +645,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init (SHARDED_ROCKSDB_READ_ASYNC_IO,                       false ); if (isSimulated) SHARDED_ROCKSDB_READ_ASYNC_IO = deterministicRandom()->coinflip();
 	init( SHARDED_ROCKSDB_PREFIX_LEN,                              0 ); if( randomize && BUGGIFY )  SHARDED_ROCKSDB_PREFIX_LEN = deterministicRandom()->randomInt(1, 20);
 	init( SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE,              0.001 ); if( randomize && BUGGIFY ) SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
+	init( SHARDED_ROCKSDB_USE_DIRECT_IO,                 false ); if (isSimulated) SHARDED_ROCKSDB_USE_DIRECT_IO = deterministicRandom()->coinflip();
 
 
 	// Leader election

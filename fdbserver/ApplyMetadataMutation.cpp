@@ -587,6 +587,7 @@ private:
 	}
 
 	void checkSetApplyMutationsEndRange(MutationRef m) {
+		// only proceed when see mutation with applyMutationsEndRange
 		if (!m.param1.startsWith(applyMutationsEndRange.begin)) {
 			return;
 		}
@@ -609,6 +610,11 @@ private:
 		auto addPrefixValue = txnStateStore->readValue(uid.withPrefix(applyMutationsAddPrefixRange.begin)).get();
 		auto removePrefixValue = txnStateStore->readValue(uid.withPrefix(applyMutationsRemovePrefixRange.begin)).get();
 		auto beginValue = txnStateStore->readValue(uid.withPrefix(applyMutationsBeginRange.begin)).get();
+		// TraceEvent("BackupAgentBaseApplyMutationsBegin")
+		//     .detail("BeginVersion",
+		//             beginValue.present() ? BinaryReader::fromStringRef<Version>(beginValue.get(), Unversioned()) : 0)
+		//     .detail("EndVersion", p.endVersion)
+		//     .log();
 		p.worker = applyMutations(
 		    cx,
 		    uid,

@@ -83,16 +83,13 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	// average. Streaming would require changing this s3blobstore interface.
 	// Make 32MB the max size for now even though its arbitrary and way to big.
 	state std::string content = readFileBytes(filepath, 1024 * 1024 * 32);
-	TraceEvent("S3ClientUploadStart")
+	TraceEvent("S3ClientCopyUpFileStart")
 	    .detail("filepath", filepath)
 	    .detail("bucket", bucket)
 	    .detail("resource", resource)
 	    .detail("size", content.size());
-	// On checksumming: The below writeEntireFile will md5 the content we pass in here
-	// and after upload, it will compare to the etag returned by s3. If they don't match,
-	// we fail the upload.
 	wait(endpoint->writeEntireFile(bucket, resource, content));
-	TraceEvent("S3ClientUpload")
+	TraceEvent("S3ClientCopyUpFileEnd")
 	    .detail("filepath", filepath)
 	    .detail("bucket", bucket)
 	    .detail("resource", resource)
@@ -174,16 +171,17 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
                                        std::string bucket,
                                        std::string resource,
                                        std::string filepath) {
-	// On checksumming: The below readEntireFile will check the etag if the
-	// knob blobstore_enable_etag_on_get is set. The default for the s3client is to
-	// check the etag against content. For backup, the default is not to check etag.
+	TraceEvent("S3ClientCopyDownFileStart")
+	    .detail("filepath", filepath)
+	    .detail("bucket", bucket)
+	    .detail("resource", resource);
 	std::string content = wait(endpoint->readEntireFile(bucket, resource));
 	auto parent = std::filesystem::path(filepath).parent_path();
 	if (parent != "" && !std::filesystem::exists(parent)) {
 		std::filesystem::create_directories(parent);
 	}
 	writeFile(filepath, content);
-	TraceEvent("S3ClientDownload")
+	TraceEvent("S3ClientCopyDownFileEnd")
 	    .detail("filepath", filepath)
 	    .detail("bucket", bucket)
 	    .detail("resource", resource)
@@ -206,7 +204,7 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 	state std::string bucket = parameters["bucket"];
 	S3BlobStoreEndpoint::ListResult items = wait(endpoint->listObjects(bucket, resource));
 	state std::vector<S3BlobStoreEndpoint::ObjectInfo> objects = items.objects;
-	TraceEvent("S3ClientDownloadDirStart")
+	TraceEvent("S3ClientDownDirecotryStart")
 	    .detail("filecount", objects.size())
 	    .detail("bucket", bucket)
 	    .detail("resource", resource);
@@ -215,7 +213,7 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 		std::string s3path = object.name;
 		wait(copyDownFile(endpoint, bucket, s3path, filepath));
 	}
-	TraceEvent("S3ClientDownloadDirEnd").detail("bucket", bucket).detail("resource", resource);
+	TraceEvent("S3ClientDownDirectoryEnd").detail("bucket", bucket).detail("resource", resource);
 	return Void();
 }
 

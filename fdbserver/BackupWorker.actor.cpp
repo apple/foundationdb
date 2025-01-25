@@ -671,6 +671,7 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
                                StringRef mutation,
                                int64_t* blockEnd,
                                int blockSize) {
+	// format: version, subversion, messageSize, message
 	state int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + mutation.size();
 
 	// Convert to big Endianness for version.version, version.sub, and msgSize

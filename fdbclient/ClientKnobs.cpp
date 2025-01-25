@@ -184,6 +184,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BACKUP_DISPATCH_ADDTASK_SIZE,             50 );
 	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
 	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 20;
+	init (RESTORE_PARTITIONED_BATCH_VERSION_SIZE, 10000000); // each step restores 10s worth of data
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );
 	init( APPLY_MIN_LOCK_BYTES,                   11e6 ); //Must be bigger than TRANSACTION_SIZE_LIMIT
@@ -248,7 +249,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR,      60  );
 	init( BLOBSTORE_MAX_DELAY_CONNECTION_FAILED,    10  );
-	init (BLOBSTORE_ENABLE_ETAG_ON_GET,             false );
+	init (BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK,false );
 
 	init( BLOBSTORE_LIST_REQUESTS_PER_SECOND,       200 );
 	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
