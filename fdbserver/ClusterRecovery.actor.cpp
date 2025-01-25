@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <utility>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/MetaclusterRegistration.h"
 #include "fdbrpc/sim_validation.h"
@@ -625,15 +627,22 @@ ACTOR Future<Void> configurationMonitor(Reference<ClusterRecoveryData> self, Dat
 	}
 }
 
-ACTOR static Future<Optional<Version>> getMinBackupVersion(Reference<ClusterRecoveryData> self, Database cx) {
+// Returns the minimum backup version and the maximum backup worker noop version.
+ACTOR static Future<std::pair<Optional<Version>, Optional<Version>>> getMinBackupVersion(
+    Reference<ClusterRecoveryData> self,
+    Database cx) {
 	loop {
 		state ReadYourWritesTransaction tr(cx);
 
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> value = wait(tr.get(backupStartedKey));
-			Optional<Version> minVersion;
+			state Future<Optional<Value>> fValue = tr.get(backupStartedKey);
+			state Future<Optional<Value>> fNoopValue = tr.get(backupWorkerMaxNoopVersionKey);
+			wait(success(fValue) && success(fNoopValue));
+			Optional<Value> value = fValue.get();
+			Optional<Value> noopValue = fNoopValue.get();
+			Optional<Version> minVersion, noopVersion;
 			if (value.present()) {
 				auto uidVersions = decodeBackupStartedValue(value.get());
 				TraceEvent e("GotBackupStartKey", self->dbgid);
@@ -646,7 +655,10 @@ ACTOR static Future<Optional<Version>> getMinBackupVersion(Reference<ClusterReco
 			} else {
 				TraceEvent("EmptyBackupStartKey", self->dbgid).log();
 			}
-			return minVersion;
+			if (noopValue.present()) {
+				noopVersion = BinaryReader::fromStringRef<Version>(noopValue.get(), Unversioned());
+			}
+			return std::make_pair(minVersion, noopVersion);
 
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -695,17 +707,23 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> se
 		                    backup_worker_failed()));
 	}
 
-	state Future<Optional<Version>> fMinVersion = getMinBackupVersion(self, cx);
+	state Future<std::pair<Optional<Version>, Optional<Version>>> fMinVersion = getMinBackupVersion(self, cx);
 	wait(gotProgress && success(fMinVersion));
-	TraceEvent("MinBackupVersion", self->dbgid).detail("Version", fMinVersion.get().present() ? fMinVersion.get() : -1);
+	Optional<Version> minVersion = fMinVersion.get().first;
+	Optional<Version> noopVersion = fMinVersion.get().second;
+	TraceEvent("MinBackupVersion", self->dbgid)
+	    .detail("Version", minVersion.present() ? minVersion.get() : -1)
+	    .detail("NoopVersion", noopVersion.present() ? noopVersion.get() : -1);
 
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
 	    backupProgress->getUnfinishedBackup();
 	for (const auto& [epochVersionTags, tagVersions] : toRecruit) {
 		const Version oldEpochEnd = std::get<1>(epochVersionTags);
-		if (!fMinVersion.get().present() || fMinVersion.get().get() + 1 >= oldEpochEnd) {
+		if ((!minVersion.present() || minVersion.get() + 1 >= oldEpochEnd) ||
+		    (noopVersion.present() && noopVersion.get() >= oldEpochEnd)) {
 			TraceEvent("SkipBackupRecruitment", self->dbgid)
-			    .detail("MinVersion", fMinVersion.get().present() ? fMinVersion.get() : -1)
+			    .detail("MinVersion", minVersion.present() ? minVersion.get() : -1)
+			    .detail("NoopVersion", noopVersion.present() ? noopVersion.get() : -1)
 			    .detail("Epoch", epoch)
 			    .detail("OldEpoch", std::get<0>(epochVersionTags))
 			    .detail("OldEpochEnd", oldEpochEnd);
