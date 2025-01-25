@@ -130,9 +130,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	Key keyForIndex(int n) { return key(n); }
 	Key key(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }
 	Value value(int n) { return doubleToTestKey(n, keyPrefix); }
-	KeyRangeRef keyRange(int n) {
-		KeyRef beginKey = doubleToTestKey((double)n / nodeCount, keyPrefix);
-		KeyRef endKey = beginKey.withSuffix(" end"_sr);
+	KeyRange keyRange(int n) {
+		Key beginKey = doubleToTestKey((double)n / nodeCount, keyPrefix);
+		Key endKey = beginKey.withSuffix(" end"_sr);
 		return KeyRangeRef(beginKey, endKey);
 	}
 	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
