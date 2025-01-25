@@ -8805,12 +8805,18 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 		reader->open(abspath(dataPath));
 		state size_t keyIndex = 0;
 		state Key lastKey;
+		state KeyValue kv;
+		state RangeResult rep;
 		loop {
-			RangeResult rep;
+			rep.clear();
 			while (reader->hasNext()) {
-				KeyValue kv = reader->next();
+				kv = reader->next();
 				if (!keys.contains(kv.key)) {
 					keyIndex = keyIndex + 1;
+					if (keyIndex % SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE ==
+					    SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE - 1) {
+						wait(yield());
+					}
 					continue;
 				}
 				if (lastKey.empty()) {

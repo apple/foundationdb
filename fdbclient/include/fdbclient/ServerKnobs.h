@@ -410,6 +410,7 @@ public:
 	int DD_BULKDUMP_PARALLELISM; // the max number of concurrent bulk dump tasks in DD
 	int SS_SERVE_BULKDUMP_PARALLELISM; // the number of bulk dump tasks that can concurrently happen at a SS
 	int64_t SS_BULKDUMP_BATCH_BYTES; // the max bytes when SS creates a batch to dump
+	int SS_BULKLOAD_GETRANGE_BATCH_SIZE; // the max number of keys to scan before do context switch
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
