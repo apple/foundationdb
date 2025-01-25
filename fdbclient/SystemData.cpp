@@ -1119,6 +1119,7 @@ const KeyRangeRef backupProgressKeys("\xff\x02/backupProgress/"_sr, "\xff\x02/ba
 const KeyRef backupProgressPrefix = backupProgressKeys.begin;
 const KeyRef backupStartedKey = "\xff\x02/backupStarted"_sr;
 extern const KeyRef backupPausedKey = "\xff\x02/backupPaused"_sr;
+extern const KeyRef backupWorkerMaxNoopVersionKey = "\xff\x02/backupWorkerMaxNoopVersion"_sr;
 
 const Key backupProgressKeyFor(UID workerID) {
 	BinaryWriter wr(Unversioned());
