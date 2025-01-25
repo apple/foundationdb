@@ -2291,7 +2291,7 @@ public:
 			self->getAverageShardBytes.send(avgShardBytes);
 			int64_t avgBytes = wait(avgShardBytes.getFuture());
 			double ratio;
-			bool imbalance;
+			bool imbalance, noMinAvailSpace;
 			int numSSToBeLoadBytesBalanced;
 
 			if (SERVER_KNOBS->PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO) {
@@ -2311,9 +2311,12 @@ public:
 			}
 			CODE_PROBE(imbalance, "Perpetual Wiggle pause because cluster is imbalance.");
 
+			noMinAvailSpace =
+			    !self->allServersHaveMinAvailableSpace(SERVER_KNOBS->PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO);
+
 			// there must not have other teams to place wiggled data
 			takeRest = self->server_info.size() <= self->configuration.storageTeamSize ||
-			           self->machine_info.size() < self->configuration.storageTeamSize || imbalance;
+			           self->machine_info.size() < self->configuration.storageTeamSize || imbalance || noMinAvailSpace;
 
 			if (SERVER_KNOBS->PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET &&
 			    self->configuration.storageMigrationType == StorageMigrationType::DEFAULT) {
@@ -2336,6 +2339,7 @@ public:
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 				    .detail("TargetTSSInDC", self->getTargetTSSInDC())
 				    .detail("ReachTSSPairTarget", self->reachTSSPairTarget())
+				    .detail("NoMinAvailableSpace", noMinAvailSpace)
 				    .detail("MigrationType", self->configuration.storageMigrationType.toString());
 			}
 		}
@@ -4090,6 +4094,23 @@ bool DDTeamCollection::isCorrectDC(TCServerInfo const& server) const {
 
 Future<Void> DDTeamCollection::removeBadTeams() {
 	return DDTeamCollectionImpl::removeBadTeams(this);
+}
+
+bool DDTeamCollection::allServersHaveMinAvailableSpace(double minAvailableSpaceRatio) const {
+	for (auto& [id, s] : server_info) {
+		// If a healthy SS don't have storage metrics, skip this round
+		if (server_status.get(s->getId()).isUnhealthy() || !s->metricsPresent()) {
+			TraceEvent(SevDebug, "AllServersHaveMinAvailableSpaceNoMetrics").detail("Server", id);
+			return false;
+		}
+
+		if (!s->hasHealthyAvailableSpace(minAvailableSpaceRatio)) {
+			TraceEvent(SevDebug, "AllServersHaveMinAvailableSpaceNotTrue").detail("Server", id);
+			return false;
+		}
+	}
+
+	return true;
 }
 
 double DDTeamCollection::loadBytesBalanceRatio(int64_t smallLoadThreshold) const {
