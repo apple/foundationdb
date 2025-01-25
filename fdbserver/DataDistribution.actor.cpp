@@ -2043,6 +2043,7 @@ ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
 			        &tr, bulkDumpPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_AND_DUMP_TASK_METADATA_READ_SIZE)));
 			for (; bulkDumpResultIndex < bulkDumpResult.size() - 1; bulkDumpResultIndex++) {
 				if (bulkDumpResult[bulkDumpResultIndex].value.empty()) {
+					wait(delay(0.1));
 					continue;
 				}
 				BulkDumpState bulkDumpState = decodeBulkDumpState(bulkDumpResult[bulkDumpResultIndex].value);
@@ -2140,7 +2141,7 @@ ACTOR Future<Void> bulkDumpTaskScheduler(Reference<DataDistributor> self) {
 				throw e;
 			}
 		}
-		wait(delay(5.0));
+		wait(delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC));
 	}
 	return Void();
 }
