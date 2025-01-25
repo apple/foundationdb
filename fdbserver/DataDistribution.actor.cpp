@@ -662,10 +662,13 @@ public:
 
 			if (self->initData->mode == 1 && self->context->isDDEnabled()) {
 				// mode may be set true by system operator using fdbcli and isEnabled() set to true
+				TraceEvent("DataDistributionInitComplete", self->ddId).log();
 				break;
 			}
 
-			TraceEvent("DataDistributionDisabled", self->ddId).log();
+			TraceEvent("DataDistributionDisabled", self->ddId)
+			    .detail("Mode", self->initData->mode)
+			    .detail("Enabled", self->context->isDDEnabled());
 
 			TraceEvent("MovingData", self->ddId)
 			    .detail("InFlight", 0)
