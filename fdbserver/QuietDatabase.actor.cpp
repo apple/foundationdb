@@ -1015,6 +1015,8 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompleti
 	return Void();
 }
 
+ACTOR Future<Void> disableBackupWorker(Database cx);
+
 // Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
 // requires the database to be available and healthy in order to succeed.
 ACTOR Future<Void> waitForQuietDatabase(Database cx,
@@ -1057,6 +1059,10 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	printf("Set perpetual_storage_wiggle=0 ...\n");
 	state Version version = wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
+
+	printf("Disabling backup worker ...\n");
+	wait(disableBackupWorker(cx));
+	printf("Disabled backup worker.\n");
 
 	wait(disableConsistencyScanInSim(cx, false));
 
