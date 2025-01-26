@@ -475,15 +475,16 @@ struct BackupData {
 
 		loop {
 			wait(onChange);
-			if (onChange.isReady() && !self->pulling) {
-				onChange = self->popTrigger.onTrigger();
+			onChange = self->popTrigger.onTrigger();
+			if (!self->pulling) {
 				// Save the noop pop version, which sets min version for
-				// the next backup job.
-				wait(_saveNoopVersion(self, self->popVersion));
+				// the next backup job. Note this version may change after the wait.
+				state Version popVersion = self->popVersion;
+				wait(_saveNoopVersion(self, popVersion));
 				TraceEvent("BackupWorkerNoopPop", self->myId)
 				    .detail("Tag", self->tag)
 				    .detail("SavedVersion", self->savedVersion)
-				    .detail("PopVersion", self->popVersion);
+				    .detail("PopVersion", popVersion);
 				self->pop();
 			}
 		}
@@ -993,11 +994,32 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 	}
 }
 
+ACTOR static Future<Version> getNoopVersion(BackupData* self) {
+	state Transaction tr(self->cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			Optional<Value> noopValue = wait(tr.get(backupWorkerMaxNoopVersionKey));
+			if (noopValue.present()) {
+				return BinaryReader::fromStringRef<Version>(noopValue.get(), Unversioned());
+			} else {
+				return invalidVersion;
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 // Pulls data from TLog servers using LogRouter tag.
 ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
-	state Version tagAt = std::max(self->pulledVersion.get(), std::max(self->startVersion, self->savedVersion));
+	state Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
 	state Arena prev;
 
 	// Going out of noop mode, the popVersion could be larger than savedVersion
@@ -1030,12 +1052,21 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// When TLog sets popped version, it means mutations between popped() and tagAt are unavailable
 		// on the TLog. So, we should stop pulling data from the TLog.
 		if (r->popped() > 0) {
-			TraceEvent(SevError, "BackupWorkerPullMissingMutations", self->myId)
+			Version maxNoopVersion = wait(getNoopVersion(self));
+			Severity sev = maxNoopVersion != invalidVersion && maxNoopVersion < r->popped() ? SevError : SevWarnAlways;
+			TraceEvent(sev, "BackupWorkerPullMissingMutations", self->myId)
 			    .detail("Tag", self->tag)
 			    .detail("BackupEpoch", self->backupEpoch)
 			    .detail("Popped", r->popped())
+			    .detail("NoopPoppedVersion", maxNoopVersion)
 			    .detail("ExpectedPeekVersion", tagAt);
-			throw worker_removed();
+			ASSERT(self->backupEpoch < self->recruitedEpoch && maxNoopVersion >= r->popped());
+			// This can only happen when the backup was in NOOP mode in the previous epoch,
+			// where NOOP mode popped version is larger than the expected peek version.
+			// CC recruits this worker from epoch's begin version, which is lower than the
+			// noop popped version. So it's ok for this worker to continue from the popped
+			// version. Max noop popped version (maybe from a different tag) should be larger
+			// than the popped version.
 		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
