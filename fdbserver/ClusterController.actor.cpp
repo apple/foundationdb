@@ -603,8 +603,10 @@ bool isHealthySingleton(ClusterControllerData* self,
 	     newWorker.interf.locality.processId() != self->masterProcessId);
 	if (g_network->isSimulated() && singleton.getRole() == Role::DATA_DISTRIBUTOR &&
 	    SERVER_KNOBS->CC_ENFORCE_USE_UNFIT_DD_IN_SIM) {
-		// It is possible that DD co-locate with a role other than master in the simulation.
+		// It is possible that DD location is not optimal in the simulation.
 		// This can cause the simulation stuck if it always halts DD.
+		// TODO(BulkLoad): this is a work around. We should figure out why DD can be repeatedly
+		// terminated by CC throughout the simulation.
 		shouldRerecruit = false;
 	}
 	if (shouldRerecruit) {
