@@ -13,7 +13,7 @@ FDB_PIDS=()
 function shutdown_fdb_cluster {
   # Kill all running fdb processes.
   for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
-    kill -9 "${FDB_PIDS[i]}"
+    kill -9 "${FDB_PIDS[i]}" || true
   done
 }
 
@@ -64,6 +64,8 @@ function start_fdb_cluster {
     set -o noclobber
     # Set the global FDB_PIDS
     FDB_PIDS=($(grep -e "PIDS=" "${output}" | sed -e 's/PIDS=//' | xargs)) || true
+    # For debugging... on exit, it can complain: 'line 16: kill: Binary: arguments must be process or job IDs'
+    echo "${FDB_PIDS[*]}"
     if (( status == 0 )); then
       # Give the db a second to come healthy.
       sleep 1
