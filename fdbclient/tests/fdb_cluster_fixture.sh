@@ -65,7 +65,9 @@ function start_fdb_cluster {
     # Set the global FDB_PIDS
     FDB_PIDS=($(grep -e "PIDS=" "${output}" | sed -e 's/PIDS=//' | xargs)) || true
     # For debugging... on exit, it can complain: 'line 16: kill: Binary: arguments must be process or job IDs'
-    echo "${FDB_PIDS[*]}"
+    if [[ -n "${FDB_PIDS[*]:-}" ]]; then
+      echo "${FDB_PIDS[*]}"
+    fi
     if (( status == 0 )); then
       # Give the db a second to come healthy.
       sleep 1
