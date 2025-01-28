@@ -86,25 +86,41 @@ std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadM
 	return res;
 }
 
+// For now, we only support blobstore:// urls. Later, lets add support for file:// urls, etc.
+// 'blobstore://' is the first match, credentials including '@' are optional and second regex match.
+// The third match is the host + path, etc. of the url.
+static const std::regex BLOBSTORE_URL_PATTERN(R"((blobstore://)([A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+@)?(.+)$)");
+
 std::string getPath(const std::string& path) {
-	boost::system::result<boost::urls::url_view> parse_result = boost::urls::parse_uri(path);
-	return parse_result.has_value() ? parse_result.value().path() : path;
+	std::smatch matches;
+	if (!std::regex_match(path, matches, BLOBSTORE_URL_PATTERN)) {
+		return path;
+	}
+	// We want boost::url to parse out the path but it cannot digest credentials. Strip them out
+	// before passing to boost::url.
+	try {
+		boost::urls::url url = boost::urls::parse_uri(matches[1].str() + matches[3].str()).value();
+		return url.path();
+	} catch (const boost::urls::system_error& e) {
+		throw std::invalid_argument("Invalid url " + path + " " + e.what());
+	}
 }
 
 // TODO(BulkLoad): use this everywhere
 std::string appendToPath(const std::string& path, const std::string& append) {
-	boost::system::result<boost::urls::url_view> parse_result = boost::urls::parse_uri(path);
-	if (!parse_result.has_value()) {
-		// Failed to parse 'path' as an URL. Do the default path join.
+	std::smatch matches;
+	if (!std::regex_match(path, matches, BLOBSTORE_URL_PATTERN)) {
 		return joinPath(path, append);
 	}
-	// boost::urls::url thinks its an URL.
-	boost::urls::url url = parse_result.value();
-	if (url.scheme() != "blobstore") {
-		// For now, until we add support for other urls like file:///.
-		throw std::invalid_argument("Invalid url scheme");
+	// We want boost::url to parse out the path but it cannot digest credentials. Strip them out
+	// before passing to boost::url.
+	try {
+		boost::urls::url url = boost::urls::parse_uri(matches[1].str() + matches[3].str()).value();
+		auto newUrl = std::string(url.set_path(joinPath(url.path(), append)).buffer());
+		return matches[1].str() + matches[2].str() + newUrl.substr(matches[1].str().length());
+	} catch (const boost::urls::system_error& e) {
+		throw std::invalid_argument("Invalid url " + path + " " + e.what());
 	}
-	return std::string(url.set_path(joinPath(url.path(), append)).buffer());
 }
 
 std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId) {

@@ -39,6 +39,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/S3Client.actor.h"
+#include "fdbclient/BulkLoading.h"
 #include "flow/Platform.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
@@ -138,10 +139,7 @@ ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
 	    .detail("destinationFileSet", destinationFileSet.toString());
 	state int pNumDeleted = 0;
 	state int64_t pBytesDeleted = 0;
-	// Throws error if s3url is invalid.
-	boost::urls::url url = boost::urls::parse_uri(s3url).value();
-	// Get path to the batch dir.
-	state std::string batch_dir = joinPath(url.path(), destinationFileSet.getRelativePath());
+	state std::string batch_dir = joinPath(getPath(s3url), destinationFileSet.getRelativePath());
 	// Delete the batch dir if it exists already (need to check bucket exists else 404 and s3blobstore errors out).
 	bool exists = wait(endpoint->bucketExists(bucket));
 	if (exists) {
