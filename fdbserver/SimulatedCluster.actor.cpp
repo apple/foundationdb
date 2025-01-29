@@ -1846,7 +1846,12 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 	StringRef reason;
 	SimulationStorageEngine result = SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE;
 
-	if (testConfig.storageEngineType.present()) {
+	if (isEncryptionEnabled) {
+		// Only storage engine supporting encryption is Redwood.
+		reason = "EncryptionEnabled"_sr;
+		result = SimulationStorageEngine::REDWOOD;
+
+	} else if (testConfig.storageEngineType.present()) {
 		reason = "ConfigureSpecified"_sr;
 		result = testConfig.storageEngineType.get();
 		if (testConfig.excludedStorageEngineType(result) ||
@@ -1856,6 +1861,13 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 			TraceEvent(SevError, "StorageEngineNotSupported").detail("StorageEngineType", result);
 			ASSERT(false);
 		}
+
+	} else if (SERVER_KNOBS->ENFORCE_SHARDED_ROCKSDB_SIM_IF_AVALIABLE &&
+	           testConfig.storageEngineExcludeTypes.find(SimulationStorageEngine::SHARDED_ROCKSDB) ==
+	               testConfig.storageEngineExcludeTypes.end()) {
+		reason = "ENFORCE_SHARDED_ROCKSDB_SIM_IF_AVALIABLE is enabled"_sr;
+		result = SimulationStorageEngine::SHARDED_ROCKSDB;
+
 	} else {
 		std::unordered_set<SimulationStorageEngine> storageEngineAvailable;
 		for (const auto& storageEngine : SIMULATION_STORAGE_ENGINE) {
@@ -1895,12 +1907,6 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		if (result == SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE) {
 			UNREACHABLE();
 		}
-	}
-
-	if (isEncryptionEnabled) {
-		// Only storage engine supporting encryption is Redwood.
-		reason = "EncryptionEnabled"_sr;
-		result = SimulationStorageEngine::REDWOOD;
 	}
 
 	TraceEvent(SevInfo, "SimulationStorageEngine")
