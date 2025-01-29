@@ -3071,7 +3071,10 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 							}
 							invalidateExcludedProcessComplaints(self);
 							TraceEvent(SevWarnAlways, "DegradedServerDetectedAndTriggerRecovery")
-							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
+							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth())
+							    .detail("DegradedServers", degradedServerString)
+							    .detail("DisconnectedServers", disconnectedServerString)
+							    .detail("DegradedSatellite", self->degradationInfo.degradedSatellite);
 							self->db.forceMasterFailure.trigger();
 						} else {
 							TraceEvent(SevWarnAlways, "RecentRecoveryCountHigh")
