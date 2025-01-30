@@ -3251,9 +3251,9 @@ public:
 		    StorageMetadataType::currentTime(),
 		    server->getStoreType(),
 		    !(server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
-		                                       : self->configuration.storageServerStoreType) ||
-		      server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
-		                                       : self->configuration.perpetualStoreType)));
+		                                       : (self->configuration.perpetualStoreType.isValid()
+		                                              ? self->configuration.perpetualStoreType
+		                                              : self->configuration.storageServerStoreType))));
 
 		// read storage metadata
 		loop {
