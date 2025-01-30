@@ -9104,6 +9104,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// Check the correctness: bulkLoadTaskMetadata stored in dataMoveMetadata must have the same
 					// dataMoveId.
 					ASSERT(bulkLoadTaskState.get().getDataMoveId() == dataMoveId);
+					// We download the data file to local disk and pass the data file path to read in the next step.
 					BulkLoadFileSet localFileSet =
 					    wait(bulkLoadFetchKeyValueFileToLoad(data, bulkLoadLocalDir, bulkLoadTaskState.get()));
 					hold = tryGetRangeForBulkLoad(
@@ -10166,22 +10167,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 					ASSERT(bulkLoadTaskState.get().getDataMoveId() != moveInShard->dataMoveId());
 					wait(bulkLoadFetchShardFileToLoad(data, moveInShard, dir, bulkLoadTaskState.get()));
 				} else {
-					// This a SS may be failed to read the bulkload task metadata because the data move has been
-					// cancelled by a new data move with the overlapping range. In this case, This fetchKey actor will
-					// be cancelled and the data will be removed. So, we convert the task to a normal bulkload.
-					// Discussion about the data inconsistency:
-					// Note that within the destination team, the version to read the bulkload task metadata selected by
-					// different SSes can be different, because SS is only required to read the metadata at a version
-					// at least when the DD persists the bulkload task metadata. It is possible that a SS1 gets the
-					// metadata at version V1 and do the bulkload task while another SS2 is failed to get the metadata
-					// at version V2 (V2 > V1) and do the normal data move. However, there is not data inconsistency
-					// because: 1. from V1 to V2, aka [V1, V2), the FDB client still reads the data from the source
-					// servers because the data move is not finished and the keyServer does not update; 2. since V2, SS1
-					// must have received the data move cancellation signal because the bulkload task metadata is stored
-					// in the data move metadata which is cleared only if the data move is cancelled by a transaction
-					// This cancellation transaction unassigns the range from SS1 and SS2 at a version between V1 and
-					// V2. Since V2, the cancellation transaction has taken effects, SS1 has dropped the loaded data
-					// that have been loaded at V2. For SS2, since V2, the range is cleared as well.
+					// For the safety analysis about falling back to the normal datamove, see comments in the fetchKeys.
 					wait(fetchShardCheckpoint(data, moveInShard, dir));
 					TraceEvent(SevWarn, "FetchShardConductBulkLoadFailedForNoMetadata", data->thisServerID)
 					    .detail("DataMoveId", moveInShard->dataMoveId());
