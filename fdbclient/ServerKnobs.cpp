@@ -293,7 +293,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO,             0.85 );
 	init( PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO,              8 );
 	init( PERPETUAL_WIGGLE_DISABLE_REMOVER,                     true );
-	init( PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET,         false ); if (isSimulated)PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET = deterministicRandom()->coinflip();
+	init( PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET,         false ); if (isSimulated) PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET = deterministicRandom()->coinflip();
+	init( PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO,           0.30 ); if (isSimulated) PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO = 0.05;
 	init( LOG_ON_COMPLETION_DELAY,         DD_QUEUE_LOGGING_INTERVAL );
 	init( BEST_TEAM_MAX_TEAM_TRIES,                               10 );
 	init( BEST_TEAM_OPTION_COUNT,                                  4 );
@@ -641,12 +642,13 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER,       4 );
 	init( SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER,         20 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER,             36 ); // RocksDB default.
-	init( SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE,      false ); if (isSimulated) SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE = true;
+	init( SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE,      false ); // Open the knob can significantly slow down the simulation
 	init( SHARDED_ROCKSDB_MAX_OPEN_FILES,                      50000 ); // Should be smaller than OS's fd limit.
 	init (SHARDED_ROCKSDB_READ_ASYNC_IO,                       false ); if (isSimulated) SHARDED_ROCKSDB_READ_ASYNC_IO = deterministicRandom()->coinflip();
 	init( SHARDED_ROCKSDB_PREFIX_LEN,                              0 ); if( randomize && BUGGIFY )  SHARDED_ROCKSDB_PREFIX_LEN = deterministicRandom()->randomInt(1, 20);
 	init( SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE,              0.001 ); if( randomize && BUGGIFY ) SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
-	init( SHARDED_ROCKSDB_USE_DIRECT_IO,                 false ); if (isSimulated) SHARDED_ROCKSDB_USE_DIRECT_IO = deterministicRandom()->coinflip();
+	init( SHARDED_ROCKSDB_USE_DIRECT_IO,                       false ); if (isSimulated) SHARDED_ROCKSDB_USE_DIRECT_IO = deterministicRandom()->coinflip();
+	init( ENFORCE_SHARDED_ROCKSDB_SIM_IF_AVALIABLE,            false ); // Turn off by default.
 
 
 	// Leader election

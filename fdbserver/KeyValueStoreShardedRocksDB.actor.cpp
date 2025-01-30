@@ -4884,7 +4884,7 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 	kvStore->dispose();
 	wait(waitForAll(closes));
 
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	ASSERT(!directoryExists(rocksDBTestDir));
 	platform::eraseDirectoryRecursive(checkpointDir);
 
 	return Void();
@@ -4945,10 +4945,9 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 
 	std::vector<Future<Void>> closes;
 	closes.push_back(kvStore->onClosed());
-	kvStore->close();
+	kvStore->dispose();
 	wait(waitForAll(closes));
-
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	ASSERT(!directoryExists(rocksDBTestDir));
 
 	return Void();
 }
@@ -5036,6 +5035,8 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 		ASSERT(status.ok());
 		ASSERT(value == targetValue.toString());
 	}
+	auto s = db->Close();
+	ASSERT(s.ok());
 	delete db;
 	return Void();
 }

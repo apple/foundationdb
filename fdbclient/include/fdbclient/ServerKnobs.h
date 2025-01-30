@@ -278,6 +278,9 @@ public:
 	double PERPETUAL_WIGGLE_DELAY; // The max interval between the last wiggle finish and the next wiggle start
 	bool PERPETUAL_WIGGLE_DISABLE_REMOVER; // Whether the start of perpetual wiggle replace team remover
 	bool PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET;
+	double PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO; // Pause wiggle until all Storage servers have minimumn
+	                                                   // of PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO disk
+	                                                   // space available.
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
@@ -618,6 +621,7 @@ public:
 	int SHARDED_ROCKSDB_PREFIX_LEN;
 	double SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
 	bool SHARDED_ROCKSDB_USE_DIRECT_IO;
+	bool ENFORCE_SHARDED_ROCKSDB_SIM_IF_AVALIABLE; // set to enforce shardedrocks in simulation as much as possible
 
 	// Leader election
 	int MAX_NOTIFICATIONS;

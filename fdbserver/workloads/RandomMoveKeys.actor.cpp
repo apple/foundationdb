@@ -158,11 +158,14 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 			state DDEnabledState ddEnabledState;
 			std::unique_ptr<MoveKeysParams> params;
 			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-				UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
-				                               AssignEmptyRange(false),
-				                               DataMoveType::PHYSICAL,
-				                               DataMovementReason::TEAM_HEALTHY,
-				                               UnassignShard(false));
+				UID dataMoveId =
+				    newDataMoveId(deterministicRandom()->randomUInt64(),
+				                  AssignEmptyRange(false),
+				                  deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY
+				                      ? DataMoveType::PHYSICAL
+				                      : DataMoveType::LOGICAL,
+				                  DataMovementReason::TEAM_HEALTHY,
+				                  UnassignShard(false));
 				params = std::make_unique<MoveKeysParams>(dataMoveId,
 				                                          std::vector<KeyRange>{ keys },
 				                                          destinationTeamIDs,

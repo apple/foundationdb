@@ -207,10 +207,12 @@ function test_basic_bulkdump_and_bulkload {
     err "Failed bulkdump"
     return 1
   fi
+  log "Clear data"
   if ! clear_data "${local_build_dir}" "${local_scratch_dir}"; then
     err "Failed clear data in fdb"
     return 1
   fi
+  log "Bulkload"
   if ! bulkload "${local_url}" "${local_scratch_dir}" "${credentials}" "${local_build_dir}" "${jobid}"; then
     err "Failed bulkload"
     return 1
@@ -239,7 +241,7 @@ set -o noclobber
 TEST_SCRATCH_DIR=
 TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
 readonly TLS_CA_FILE
-readonly HTTP_VERBOSE_LEVEL=10
+readonly HTTP_VERBOSE_LEVEL=2
 KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
 readonly KNOBS
 # Should we use S3? If USE_S3 is not defined, then check if
