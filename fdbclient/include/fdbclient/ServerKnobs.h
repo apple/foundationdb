@@ -619,6 +619,7 @@ public:
 	int SHARDED_ROCKSDB_PREFIX_LEN;
 	double SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
 	bool SHARDED_ROCKSDB_USE_DIRECT_IO;
+	bool ENFORCE_SHARDED_ROCKSDB_SIM_IF_AVALIABLE; // set to enforce shardedrocks in simulation as much as possible
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
