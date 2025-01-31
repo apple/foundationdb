@@ -8846,6 +8846,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state Optional<BulkLoadTaskState> bulkLoadTaskState;
 	state std::string bulkLoadLocalDir =
 	    joinPath(joinPath(data->bulkLoadFolder, dataMoveId.toString()), fetchKeysID.toString());
+	// Since the fetchKey can split, so multiple fetchzkeys can have the same data move id. We want each fetchkey
+	// downloads its file without conflict, so we add fetchKeysID to the bulkLoadLocalDir.
 	state PromiseStream<Key> destroyedFeeds;
 	state FetchKeysMetricReporter metricReporter(fetchKeysID,
 	                                             startTime,
