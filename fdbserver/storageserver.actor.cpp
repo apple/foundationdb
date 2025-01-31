@@ -8795,69 +8795,28 @@ ACTOR Future<BulkLoadFileSet> bulkLoadFetchKeyValueFileToLoad(StorageServer* dat
 	return toLocalFileSet;
 }
 
-ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
-                                          KeyRange keys,
-                                          size_t totalKeyCount,
-                                          std::string dataPath) {
+ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results, KeyRange keys, std::string dataPath) {
 	try {
 		// TODO(BulkLoad): what if the data file is empty but the totalKeyCount is not zero
-		state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
+		state Key beginKey = keys.begin;
+		state Key endKey = keys.end;
+		state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
+		    keys, SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 		reader->open(abspath(dataPath));
-		state size_t keyIndex = 0;
-		state Key lastKey;
-		state KeyValue kv;
-		state RangeResult rep;
 		loop {
-			rep.clear();
-			while (reader->hasNext()) {
-				kv = reader->next();
-				if (!keys.contains(kv.key)) {
-					keyIndex = keyIndex + 1;
-					if (keyIndex % SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE ==
-					    SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE - 1) {
-						wait(yield());
-					}
-					continue;
-				}
-				if (lastKey.empty()) {
-					lastKey = kv.key;
-				} else {
-					ASSERT(kv.key > lastKey); // Assuming the reader returns sorted keys
-				}
-				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
-					TraceEvent(SevWarnAlways, "TryGetRangeForBulkLoadInjectError");
-					throw operation_failed();
-				}
-				rep.push_back_deep(rep.arena(), kv);
-				keyIndex = keyIndex + 1;
-				if (rep.expectedSize() >= SERVER_KNOBS->FETCH_BLOCK_BYTES) {
-					break;
-				}
-				if (g_network->isSimulated() && deterministicRandom()->random01() < 0.05) {
-					ASSERT(keyIndex > 0);
-					break; // improve coverage in simulation testing
-				}
-			}
-			rep.more = keyIndex < totalKeyCount;
-			// We do not need to set readThrough because there is no shard boundary concept when bulkloading a file
+			RangeResult rep = reader->getRange(KeyRangeRef(beginKey, endKey));
 			results.send(rep);
-			if (!reader->hasNext()) {
-				ASSERT(!rep.more);
+			if (!rep.more) {
 				results.sendError(end_of_stream());
 				return Void();
 			}
-
-			wait(delay(0.1));
+			beginKey = keyAfter(rep.back().key);
+			wait(delay(0.1)); // context switch to avoid busy loop
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		TraceEvent(SevWarn, "TryGetRangeForBulkLoadError")
-		    .errorUnsuppressed(e)
-		    .detail("Keys", keys)
-		    .detail("DataPath", dataPath)
-		    .detail("TotalKeyCount", totalKeyCount);
 		results.sendError(bulkload_task_failed());
 		throw;
 	}
@@ -9107,8 +9066,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// We download the data file to local disk and pass the data file path to read in the next step.
 					BulkLoadFileSet localFileSet =
 					    wait(bulkLoadFetchKeyValueFileToLoad(data, bulkLoadLocalDir, bulkLoadTaskState.get()));
-					hold = tryGetRangeForBulkLoad(
-					    results, keys, bulkLoadTaskState.get().getKeyCount(), localFileSet.getDataFileFullPath());
+					hold = tryGetRangeForBulkLoad(results, keys, localFileSet.getDataFileFullPath());
 					rangeEnd = keys.end;
 				} else {
 					// This a SS may be failed to read the bulkload task metadata because the data move has been
