@@ -13682,9 +13682,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	bulkLoadTaskRangeMap.insert(allKeys, Optional<UID>());
 	state RangeResult bulkLoadTasks = fBulkLoadTask.get();
 	for (int i = 0; i < bulkLoadTasks.size() - 1; i++) {
-		if (bulkLoadTasks[i].value.empty()) {
-			continue;
-		}
+		ASSERT(!bulkLoadTasks[i].value.empty()); // Important invariant
 		SSBulkLoadMetadata metadata = decodeSSBulkLoadMetadata(bulkLoadTasks[i].value);
 		if (!metadata.getConductBulkLoad()) {
 			continue;
