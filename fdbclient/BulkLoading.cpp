@@ -101,7 +101,7 @@ std::string getPath(const std::string& path) {
 	try {
 		boost::urls::url url = boost::urls::parse_uri(matches[1].str() + matches[3].str()).value();
 		return url.path();
-	} catch (const boost::urls::system_error& e) {
+	} catch (std::system_error& e) {
 		throw std::invalid_argument("Invalid url " + path + " " + e.what());
 	}
 }
@@ -118,7 +118,7 @@ std::string appendToPath(const std::string& path, const std::string& append) {
 		boost::urls::url url = boost::urls::parse_uri(matches[1].str() + matches[3].str()).value();
 		auto newUrl = std::string(url.set_path(joinPath(url.path(), append)).buffer());
 		return matches[1].str() + matches[2].str() + newUrl.substr(matches[1].str().length());
-	} catch (const boost::urls::system_error& e) {
+	} catch (std::system_error& e) {
 		throw std::invalid_argument("Invalid url " + path + " " + e.what());
 	}
 }
