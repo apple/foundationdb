@@ -276,7 +276,7 @@ struct BackupData {
 	CounterCollection cc;
 	Future<Void> logger;
 	Future<Void> noopPopper; // holds actor to save progress in NOOP mode
-	AsyncTrigger popTrigger; // trigger to pop version in NOOP mode
+	AsyncVar<Version> popTrigger; // trigger to pop version in NOOP mode
 
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo> const> db, const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
@@ -471,16 +471,17 @@ struct BackupData {
 	}
 
 	ACTOR static Future<Void> _noopPopper(BackupData* self) {
-		state Future<Void> onChange = self->popTrigger.onTrigger();
+		state Future<Void> onChange = self->popTrigger.onChange();
 
 		loop {
 			wait(onChange);
-			onChange = self->popTrigger.onTrigger();
+			onChange = self->popTrigger.onChange();
 			if (!self->pulling) {
 				// Save the noop pop version, which sets min version for
 				// the next backup job. Note this version may change after the wait.
-				state Version popVersion = self->popVersion;
+				state Version popVersion = self->popTrigger.get();
 				wait(_saveNoopVersion(self, popVersion));
+				self->popVersion = popVersion;
 				TraceEvent("BackupWorkerNoopPop", self->myId)
 				    .detail("Tag", self->tag)
 				    .detail("SavedVersion", self->savedVersion)
@@ -1037,6 +1038,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 		loop choose {
 			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+				DisabledTraceEvent("BackupWorkerGotMore", self->myId)
+				    .detail("Tag", self->tag)
+				    .detail("CursorVersion", r->version().version);
 				break;
 			}
 			when(wait(logSystemChange)) {
@@ -1135,11 +1139,11 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 				}
 				when(wait(success(committedVersion) || delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
 					if (committedVersion.isReady()) {
-						self->popVersion =
-						    std::max(self->popVersion, std::max(committedVersion.get(), self->savedVersion));
+						Version newPopVersion =
+						    std::max({ self->popVersion, self->savedVersion, committedVersion.get() });
 						self->minKnownCommittedVersion =
 						    std::max(committedVersion.get(), self->minKnownCommittedVersion);
-						self->popTrigger.trigger();
+						self->popTrigger.set(newPopVersion);
 						committedVersion = Never();
 					} else {
 						committedVersion = self->getMinKnownCommittedVersion();
