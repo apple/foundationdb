@@ -487,7 +487,10 @@ void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader
 	TraceEvent(SevDebug, "RocksDBColumnFamilyReaderInputFiles", logId).detail("Files", describe(files));
 	const std::string path = joinPath(rocksCF.sstFiles.front().db_path, checkpointReaderSubDir);
 
+	// Try to read the existing DB, the checkpoint could have been imported already.
 	rocksdb::Status status = tryOpenForRead(path);
+
+	// Existing DB is not ready to use, redo checkpoint import.
 	if (!status.ok()) {
 		TraceEvent(SevDebug, "RocksDBCheckpointOpenForReadFailed", logId)
 		    .detail("Status", status.ToString())
@@ -581,18 +584,22 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::tryOpenForRead(const std::str
 	status = db->Get(readOptions, db->DefaultColumnFamily(), toSlice(readerInitialized), &value);
 	if (!status.ok() && !status.IsNotFound()) {
 		logRocksDBError(status, "CheckpointCheckInitState", logId);
+		auto closeStatus = closeInternal(path, /*deleteOnClose=*/true);
+		if (!closeStatus.ok()) {
+			logRocksDBError(closeStatus, "CheckpointCloseInternal", logId);
+		}
+		delete db;
 		return status;
 	}
 
 	if (status.IsNotFound()) {
 		status = closeInternal(path, /*deleteOnClose=*/true);
 		if (!status.ok()) {
-			return status;
-		} else {
-			delete db;
-			TraceEvent(SevDebug, "RocksDBCheckpointReaderTryOpenError", logId).detail("Path", path);
-			return rocksdb::Status::Aborted();
+			logRocksDBError(status, "CheckpointCloseInternal", logId);
 		}
+		delete db;
+		TraceEvent(SevDebug, "RocksDBCheckpointReaderTryOpenError", logId).detail("Path", path);
+		return rocksdb::Status::Aborted();
 	}
 
 	ASSERT(handles.size() == 2);
