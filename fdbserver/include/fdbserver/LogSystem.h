@@ -790,6 +790,8 @@ struct LogPushData : NonCopyable {
 
 	void writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations);
 
+	void setPushLocations(std::vector<int> locations) { storedLocations = locations; }
+
 	template <class T>
 	void writeTypedMessage(T const& item, bool metadataMessage = false, bool allLocations = false);
 
@@ -825,6 +827,7 @@ private:
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<bool> messagesWritten; // if messagesWriter has written anything
 	std::vector<int> msg_locations;
+	Optional<std::vector<int>> storedLocations;
 	// Stores message locations that have had span information written to them
 	// for the current transaction. Adding transaction info will reset this
 	// field.
@@ -842,6 +845,15 @@ private:
 	Tag chooseRouterTag() {
 		return savedRandomRouterTag.present() ? savedRandomRouterTag.get() : logSystem->getRandomRouterTag();
 	}
+
+	void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations = false) {
+		if (storedLocations.present()) {
+			msg_locations = storedLocations.get();
+			return;
+		}
+		msg_locations.clear();
+		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
+	}
 };
 
 template <class T>
@@ -853,8 +865,7 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 	for (auto& tag : next_message_tags) {
 		prev_tags.push_back(tag);
 	}
-	msg_locations.clear();
-	logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
+	getPushLocations(prev_tags, msg_locations, allLocations);
 
 	BinaryWriter bw(AssumeVersion(g_network->protocolVersion()));
 
