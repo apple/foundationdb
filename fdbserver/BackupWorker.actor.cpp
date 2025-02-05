@@ -293,6 +293,7 @@ struct BackupData {
 		specialCounter(cc, "AvailableBytes", [this]() { return this->lock->available(); });
 		logger =
 		    cc.traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "BackupWorkerMetrics");
+		popTrigger.set(invalidVersion);
 		noopPopper = _noopPopper(this);
 	}
 
@@ -1023,9 +1024,10 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
 	state Arena prev;
 
-	// Going out of noop mode, the popVersion could be larger than savedVersion
+	// Going out of noop mode, the popVersion could be larger than
+	// savedVersion or ongoing pop version, i.e., popTrigger.get(),
 	// and we can't peek messages between savedVersion and popVersion.
-	tagAt = std::max(tagAt, self->popVersion);
+	tagAt = std::max({ tagAt, self->popVersion, self->popTrigger.get() });
 	TraceEvent("BackupWorkerPull", self->myId)
 	    .detail("Tag", self->tag)
 	    .detail("Version", tagAt)
