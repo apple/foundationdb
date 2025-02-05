@@ -8804,6 +8804,7 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results, Ke
 		    keys, SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 		reader->open(abspath(dataPath));
 		loop {
+			// TODO(BulkLoad): this is a blocking call. We will make this as async call.
 			RangeResult rep = reader->getRange(KeyRangeRef(beginKey, endKey));
 			results.send(rep);
 			if (!rep.more) {

@@ -847,6 +847,9 @@ KeyValue RocksDBSstFileReader::next() {
 	return res;
 }
 
+// TODO(BulkLoad): current the bulkload is the only place using the method.
+// This is implemented as the sync call for the simplicity. In the future
+// we will implement this as async call using action.
 RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
 	RangeResult rep;
 	size_t expectedSize = 0;
