@@ -852,7 +852,7 @@ private:
 			return;
 		}
 		msg_locations.clear();
-		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
+		logSystem->getPushLocations(tags, msg_locations, allLocations);
 	}
 };
 
