@@ -60,6 +60,17 @@ struct ChangeConfigWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
+	std::string getConfigMode(const std::string& configMode, bool existingDB) {
+		std::string res = configMode;
+		if (existingDB) {
+			size_t pos = res.find("new ");
+			if (pos != std::string::npos) {
+				res.replace(pos, 4, ""); // 4 is the length of "new "
+			}
+		}
+		return res;
+	}
+
 	ACTOR Future<Void> configureExtraDatabase(ChangeConfigWorkload* self, Database db) {
 		wait(delay(5 * deterministicRandom()->random01()));
 		if (self->configMode.size()) {
@@ -74,13 +85,7 @@ struct ChangeConfigWorkload : TestWorkload {
 				TraceEvent("WaitForReplicasExtraEnd").log();
 				existingDB = true;
 			}
-			std::string configMode = self->configMode;
-			if (existingDB) {
-				size_t pos = configMode.find("new ");
-				if (pos != std::string::npos) {
-					configMode.replace(pos, 4, ""); // 4 is the length of "new "
-				}
-			}
+			std::string configMode = self->getConfigMode(self->configMode, existingDB);
 			wait(success(ManagementAPI::changeConfig(db.getReference(), configMode, true)));
 		}
 		if (self->networkAddresses.size()) {
@@ -131,13 +136,7 @@ struct ChangeConfigWorkload : TestWorkload {
 				TraceEvent("WaitForReplicasEnd").log();
 				existingDB = true;
 			}
-			std::string configMode = self->configMode;
-			if (existingDB) {
-				size_t pos = configMode.find("new ");
-				if (pos != std::string::npos) {
-					configMode.replace(pos, 4, ""); // 4 is the length of "new "
-				}
-			}
+			std::string configMode = self->getConfigMode(self->configMode, existingDB);
 			wait(success(ManagementAPI::changeConfig(cx.getReference(), configMode, true)));
 		}
 		if ((g_network->isSimulated() && g_simulator->configDBType != ConfigDBType::SIMPLE) ||
