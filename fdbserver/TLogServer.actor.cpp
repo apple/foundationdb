@@ -144,6 +144,7 @@ public:
 		queue->close();
 		delete this;
 	}
+	IDiskQueue::location getNextReadLocation() { return queue->getNextReadLocation(); }
 
 private:
 	IDiskQueue* queue;
@@ -984,6 +985,8 @@ ACTOR Future<Void> popDiskQueue(TLogData* self, Reference<LogData> logData) {
 	auto locationIter = logData->versionLocation.lower_bound(logData->persistentDataVersion);
 	// If version vector is enabled then we need to preserve all versions from "knownCommittedVersion"
 	// onwards (for recovery purpose). Adjust the iterator position accordingly.
+	// @todo extend the code to consider the "knownCommittedVersion" of log servers
+	// from "priorCommittedLogServers" too.
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
 	    logData->knownCommittedVersion < logData->persistentDataVersion) {
 		locationIter = logData->versionLocation.lastLessOrEqual(logData->knownCommittedVersion);
@@ -1134,15 +1137,47 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 		    KeyValueRef(persistRecoveryLocationKey, BinaryWriter::toValue(locationIter->value.first, Unversioned())));
 	}
 
+	state Version unicastRelevantMinimumVersion = std::numeric_limits<Version>::max();
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-		auto kcvLocationIter = logData->versionLocation.lastLessOrEqual(logData->knownCommittedVersion);
-		if (kcvLocationIter != logData->versionLocation.end()) {
-			self->persistentData->set(KeyValueRef(persistUnicastRecoveryLocationKey,
-			                                      BinaryWriter::toValue(kcvLocationIter->value.first, Unversioned())));
+		// Track the position of the known committed version of "logData" - that is
+		// the position we will need to start reading the diskQueue from, in order to
+		// build "LogData::unknownCommittedVersions", in case of a restart.
+		state Reference<LogData> unicastRelevantLogData = logData;
+
+		// Track the position of the known committed version of the relevant log server
+		// from the previous epoch's log system - if the system is currently going through
+		// recovery and the current log system is not yet committed to the coordinated
+		// state then the previous epoch's log system will become the current log system
+		// in case the current recovery fails, so we will need to consider (committed) log
+		// servers from the previous epoch too.
+		auto const& dbInfo = self->dbInfo->get();
+		for (auto& it : self->id_data) {
+			if (std::find(dbInfo.priorCommittedLogServers.begin(),
+			              dbInfo.priorCommittedLogServers.end(),
+			              it.second->logId) != dbInfo.priorCommittedLogServers.end()) {
+				unicastRelevantLogData = it.second;
+			}
 		}
 
-		self->persistentData->set(
-		    KeyValueRef(persistSpillTargetLogDataIdKey, BinaryWriter::toValue(logData->logId, Unversioned())));
+		if (unicastRelevantLogData) {
+			auto kcvLocationIter =
+			    unicastRelevantLogData->versionLocation.lastLessOrEqual(unicastRelevantLogData->knownCommittedVersion);
+			if (kcvLocationIter != unicastRelevantLogData->versionLocation.end()) {
+				self->persistentData->set(
+				    KeyValueRef(persistUnicastRecoveryLocationKey,
+				                BinaryWriter::toValue(kcvLocationIter->value.first, Unversioned())));
+			}
+
+			// @note "persistSpillTargetLogDataIdKey" is not used in the latest version
+			// of the code that builds "unknownCommittedVersions" list on restart. Consider
+			// removing this key later.
+			self->persistentData->set(
+			    KeyValueRef(persistSpillTargetLogDataIdKey, BinaryWriter::toValue(logData->logId, Unversioned())));
+
+			unicastRelevantMinimumVersion =
+			    unicastRelevantLogData
+			        ->knownCommittedVersion; // we don't want to purge versions from diskqueue from this version onwards
+		}
 	}
 
 	self->persistentData->set(
@@ -1225,7 +1260,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 			self->persistentQueue->forgetBefore(
 			    (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST
 			         ? newPersistentDataVersion
-			         : std::min(minVersion, logData->knownCommittedVersion)),
+			         : std::min(minVersion, unicastRelevantMinimumVersion)),
 			    logData); // SOMEDAY: this can cause a slow task (~0.5ms), presumably from erasing too many versions.
 			              // Should we limit the number of versions cleared at a time?
 		}
@@ -3334,10 +3369,31 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		    BinaryReader::fromStringRef<Version>(it.value, Unversioned());
 	}
 
-	state IDiskQueue::location minimumRecoveryLocation = 0;
+	state IDiskQueue::location minimumRecoveryLocation =
+	    0; // the position to start reading the disk queue from (on recovery)
+	state IDiskQueue::location nonUnicastRecoveryLocation =
+	    0; // the position to start reading the disk queue from (on recovery) when version vector/unicast is disabled
 	if (fRecoveryLocation.get().present()) {
-		minimumRecoveryLocation =
+		nonUnicastRecoveryLocation =
 		    BinaryReader::fromStringRef<IDiskQueue::location>(fRecoveryLocation.get().get(), Unversioned());
+
+		// Initialize "minimumRecoveryLocation".
+		minimumRecoveryLocation = nonUnicastRecoveryLocation;
+	}
+
+	state IDiskQueue::location unicastRecoveryLocation =
+	    0; // the position to start reading the disk queue from (on recovery) when version vector/unicast is enabled
+	// @note versions in the position range (unicastRecoveryLocation, nonUnicastRecoveryLocation]
+	// will be read in order to build "LogData::unknownCommittedVersions" (needed by the unicast
+	// recovery algorithm) only.
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && fUnicastRecoveryLocation.get().present()) {
+		unicastRecoveryLocation =
+		    BinaryReader::fromStringRef<IDiskQueue::location>(fUnicastRecoveryLocation.get().get(), Unversioned());
+
+		// Update "minimumRecoveryLocation".
+		if (unicastRecoveryLocation < minimumRecoveryLocation) {
+			minimumRecoveryLocation = unicastRecoveryLocation;
+		}
 	}
 
 	state int idx = 0;
@@ -3429,22 +3485,6 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		}
 	}
 
-	state Optional<UID> spillTargetLogDataId;
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && fUnicastRecoveryLocation.get().present() &&
-	    fSpillTargetLogDataId.get().present()) {
-		spillTargetLogDataId = BinaryReader::fromStringRef<UID>(fSpillTargetLogDataId.get().get(), Unversioned());
-		auto iter = self->id_data.find(spillTargetLogDataId.get());
-		if (iter != self->id_data.end()) {
-			Reference<LogData> spillTargetLogData = iter->second;
-			if (spillTargetLogData->knownCommittedVersion < spillTargetLogData->persistentDataDurableVersion) {
-				minimumRecoveryLocation = BinaryReader::fromStringRef<IDiskQueue::location>(
-				    fUnicastRecoveryLocation.get().get(), Unversioned());
-			}
-		} else {
-			spillTargetLogDataId.reset();
-		}
-	}
-
 	std::sort(logsByVersion.begin(), logsByVersion.end());
 	for (const auto& pair : logsByVersion) {
 		// TLogs that have been fully spilled won't have queue entries read in the loop below.
@@ -3463,6 +3503,10 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		bool recoveryFinished = wait(self->persistentQueue->initializeRecovery(minimumRecoveryLocation));
 		if (recoveryFinished)
 			throw end_of_stream();
+		// Check if the version to be read is to be used to build "LogData::unknownCommittedVersions" only.
+		state bool buildUnknownCommittedOnly =
+		    (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
+		     (self->persistentQueue->getNextReadLocation() < nonUnicastRecoveryLocation));
 		loop {
 			if (allRemoved.isReady()) {
 				CODE_PROBE(true, "all tlogs removed during queue recovery");
@@ -3485,11 +3529,17 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 					// logData->version.get());
 
 					if (logData) {
-						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && spillTargetLogDataId.present() &&
-						    qe.id == spillTargetLogDataId.get() && qe.version < logData->persistentDataDurableVersion) {
+
+						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && buildUnknownCommittedOnly) {
+							logData->knownCommittedVersion =
+							    std::max(logData->knownCommittedVersion, qe.knownCommittedVersion);
 							logData->unknownCommittedVersions.emplace_front(qe.version, qe.prevVersion, qe.tLogLocIds);
 							// Purge versions from "unknownCommittedVersions" list till the "knownCommittedVersion".
 							logData->purgeUnknownCommittedVersions(logData->knownCommittedVersion);
+							if (buildUnknownCommittedOnly) {
+								buildUnknownCommittedOnly =
+								    (self->persistentQueue->getNextReadLocation() < nonUnicastRecoveryLocation);
+							}
 							continue;
 						}
 
@@ -3533,6 +3583,10 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 							ASSERT_WE_THINK(qe.version == logData->version.get());
 						}
 					}
+					if (buildUnknownCommittedOnly) {
+						buildUnknownCommittedOnly =
+						    (self->persistentQueue->getNextReadLocation() < nonUnicastRecoveryLocation);
+					}
 				}
 				when(wait(allRemoved)) {
 					throw worker_removed();
@@ -3548,6 +3602,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	CODE_PROBE(now() - startt >= 1.0, "TLog recovery took more than 1 second");
 
 	for (auto it : self->id_data) {
+		// @todo to be removed later (after getting enough test coverage for the above code)
+		ASSERT_WE_THINK(it.second->knownCommittedVersion <= it.second->version.get());
 		if (it.second->queueCommittedVersion.get() == 0) {
 			TraceEvent("TLogZeroVersion", self->dbgid).detail("LogId", it.first);
 			it.second->queueCommittedVersion.set(it.second->version.get());
