@@ -63,6 +63,7 @@ struct ChangeConfigWorkload : TestWorkload {
 	ACTOR Future<Void> configureExtraDatabase(ChangeConfigWorkload* self, Database db) {
 		wait(delay(5 * deterministicRandom()->random01()));
 		if (self->configMode.size()) {
+			state bool existingDB = false;
 			if (g_simulator->startingDisabledConfiguration != "") {
 				// It is not safe to allow automatic failover to a region which is not fully replicated,
 				// so wait for both regions to be fully replicated before enabling failover
@@ -72,7 +73,14 @@ struct ChangeConfigWorkload : TestWorkload {
 				wait(waitForFullReplication(db));
 				TraceEvent("WaitForReplicasExtraEnd").log();
 			}
-			wait(success(ManagementAPI::changeConfig(db.getReference(), self->configMode, true)));
+			std::string configMode = self->configMode;
+			if (existingDB) {
+				size_t pos = configMode.find("new ");
+				if (pos != std::string::npos) {
+					configMode.replace(pos, 4, ""); // 4 is the length of "new "
+				}
+			}
+			wait(success(ManagementAPI::changeConfig(db.getReference(), configMode, true)));
 		}
 		if (self->networkAddresses.size()) {
 			if (self->networkAddresses == "auto")
@@ -111,6 +119,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if (self->configMode.size()) {
+			state bool existingDB = false;
 			if (g_network->isSimulated() && g_simulator->startingDisabledConfiguration != "") {
 				// It is not safe to allow automatic failover to a region which is not fully replicated,
 				// so wait for both regions to be fully replicated before enabling failover
@@ -119,8 +128,16 @@ struct ChangeConfigWorkload : TestWorkload {
 				TraceEvent("WaitForReplicas").log();
 				wait(waitForFullReplication(cx));
 				TraceEvent("WaitForReplicasEnd").log();
+				existingDB = true;
 			}
-			wait(success(ManagementAPI::changeConfig(cx.getReference(), self->configMode, true)));
+			std::string configMode = self->configMode;
+			if (existingDB) {
+				size_t pos = configMode.find("new ");
+				if (pos != std::string::npos) {
+					configMode.replace(pos, 4, ""); // 4 is the length of "new "
+				}
+			}
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), configMode, true)));
 		}
 		if ((g_network->isSimulated() && g_simulator->configDBType != ConfigDBType::SIMPLE) ||
 		    !g_network->isSimulated()) {
