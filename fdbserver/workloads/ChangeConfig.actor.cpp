@@ -72,6 +72,7 @@ struct ChangeConfigWorkload : TestWorkload {
 				TraceEvent("WaitForReplicasExtra").log();
 				wait(waitForFullReplication(db));
 				TraceEvent("WaitForReplicasExtraEnd").log();
+				existingDB = true;
 			}
 			std::string configMode = self->configMode;
 			if (existingDB) {
