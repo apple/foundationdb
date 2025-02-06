@@ -23,9 +23,10 @@
 
 #include <memory>
 #include <thread>
-#include <grpcpp/grpcpp.h>
-
 #include <boost/asio.hpp>
+
+#undef loop
+#include <grpcpp/grpcpp.h>
 
 #include "flow/IThreadPool.h"
 #include "flow/flow.h"

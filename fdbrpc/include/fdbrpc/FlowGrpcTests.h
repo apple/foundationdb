@@ -25,8 +25,11 @@
 
 #include <cstdio>
 #include <thread>
-#include "flow/Error.h"
+
+#undef loop
 #include "fdbrpc/test/echo.grpc.pb.h"
+
+#include "flow/Error.h"
 
 namespace fdbrpc_test {
 

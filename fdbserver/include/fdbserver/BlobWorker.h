@@ -220,4 +220,5 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	bool maybeInjectTargetedRestart();
 };
 
+#include "flow/unactorcompiler.h"
 #endif

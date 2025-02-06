@@ -20,10 +20,10 @@
 
 #ifdef FLOW_GRPC_ENABLED
 #include <ctime>
-#include "flow/UnitTest.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/FlowGrpcTests.h"
 #include "fdbrpc/FileTransfer.h"
+#include "flow/UnitTest.h"
 #include "flow/flow.h"
 
 // So that tests are not optimized out. :/
@@ -77,7 +77,7 @@ TEST_CASE("/fdbrpc/grpc/basic_stream_server") {
 		EchoRequest request;
 		request.set_message("Ping!");
 		auto stream = client.call(&TestEchoService::Stub::EchoRecvStream10, request);
-		loop {
+		while (true) {
 			auto response = co_await stream;
 			ASSERT_EQ(response.message(), "Echo: Ping!");
 			count += 1;
@@ -158,7 +158,7 @@ TEST_CASE("/fdbrpc/grpc/stream_destroy") {
 // 		EchoRequest request;
 // 		request.set_message("Ping!");
 // 		auto stream = client.call(&TestEchoService::Stub::EchoSendStream10, request);
-// 		loop {
+// 		while (true) {
 // 			auto response = co_await stream;
 // 		    ASSERT_EQ(response.message(), "Echo: Ping!");
 // 			count += 1;

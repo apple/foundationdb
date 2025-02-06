@@ -20,10 +20,11 @@
 #ifdef FLOW_GRPC_ENABLED
 #ifndef FDBRPC_FILE_TRANSFER_H
 #define FDBRPC_FILE_TRANSFER_H
-
 #include <cstdio>
 #include <optional>
 #include <fstream>
+
+#undef loop
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/server_context.h>
 #include <grpcpp/support/status.h>

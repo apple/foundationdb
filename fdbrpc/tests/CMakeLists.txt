@@ -8,7 +8,7 @@ if(NOT WIN32)
   endif()
 endif()
 
-if(FLOW_GRPC_ENABLED)
+if(WITH_GRPC)
   generate_grpc_protobuf(fdbrpc.test protos/echo.proto)
 endif()
 add_flow_target(EXECUTABLE NAME fdbrpc_bench SRCS fdbrpc_bench.actor.cpp)

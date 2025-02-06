@@ -68,7 +68,7 @@ target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(fdbrpc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 target_link_libraries(fdbrpc PUBLIC flow libb64 md5 PRIVATE rapidjson)
 
-if (FLOW_GRPC_ENABLED)
+if (WITH_GRPC)
   generate_grpc_protobuf(fdbrpc.file_transfer protos/file_transfer.proto)
 
   target_link_libraries(fdbrpc PUBLIC proto_fdbrpc_test)
