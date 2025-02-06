@@ -2641,7 +2641,7 @@ ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string co
 		wait(delay(seconds));
 		while (true) {
 			double delaySeconds = disableConnectionFailures(context, ForceDisable::False);
-			if (delaySeconds > 0) {
+			if (delaySeconds > 0.001) {
 				wait(delay(delaySeconds));
 			} else {
 				break;
