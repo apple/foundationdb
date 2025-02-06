@@ -1310,7 +1310,8 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 }
 
 ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, AuditType auditType) {
-	if (SERVER_KNOBS->DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM && (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica))	{
+	if (SERVER_KNOBS->DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM &&
+	    (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica)) {
 		return Void();
 	}
 	TraceEvent(SevDebug, "AuditStorageCorrectnessBegin").detail("AuditType", auditType);

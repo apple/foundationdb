@@ -410,7 +410,8 @@ public:
 	                                              // between two rounds
 	bool CC_ENFORCE_USE_UNFIT_DD_IN_SIM; // Set for CC to enforce to use an unfit DD in the simulation. This knob
 	                                     // takes effect only in the simulation.
-	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the simulation.
+	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the
+	                                                       // simulation.
 	int DD_BULKDUMP_PARALLELISM; // the max number of concurrent bulk dump tasks in DD
 	int SS_SERVE_BULKDUMP_PARALLELISM; // the number of bulk dump tasks that can concurrently happen at a SS
 	int64_t SS_BULKDUMP_BATCH_BYTES; // the max bytes when SS creates a batch to dump
