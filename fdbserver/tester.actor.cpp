@@ -2639,7 +2639,14 @@ ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string co
 		TraceEvent(SevWarnAlways, ("ScheduleDisableConnectionFailures_" + context).c_str())
 		    .detail("At", now() + seconds);
 		wait(delay(seconds));
-		disableConnectionFailures(context);
+		while (true) {
+			double delaySeconds = disableConnectionFailures(context, ForceDisable::False);
+			if (delaySeconds > 0.001) {
+				wait(delay(delaySeconds));
+			} else {
+				break;
+			}
+		}
 	}
 	return Void();
 }
@@ -2859,7 +2866,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 
-	enableConnectionFailures("Tester");
+	enableConnectionFailures("Tester", FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS);
 	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
 	state Future<Void> repairDataCenter;
 	if (useDB) {

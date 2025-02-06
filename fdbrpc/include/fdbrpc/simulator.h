@@ -28,6 +28,7 @@
 
 #include <boost/unordered_set.hpp>
 
+#include "flow/BooleanParam.h"
 #include "flow/flow.h"
 #include "flow/Histogram.h"
 #include "flow/ChaosMetrics.h"
@@ -349,6 +350,7 @@ public:
 	double connectionFailuresDisableDuration;
 	bool speedUpSimulation;
 	double connectionFailureEnableTime; // Last time connection failure is enabled.
+	double connectionFailureDisableTime = 0; // Latest time connection failure should be disabled.
 	bool disableTLogRecoveryFinish;
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
@@ -465,10 +467,18 @@ struct DiskParameters : ReferenceCounted<DiskParameters> {
 extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int64_t size, bool sync = false);
 
 // Enables connection failures, i.e., clogging, in simulation
-void enableConnectionFailures(std::string const& context);
+void enableConnectionFailures(std::string const& context, double duration);
 
-// Disables connection failures, i.e., clogging, in simulation
-void disableConnectionFailures(std::string const& context);
+FDB_BOOLEAN_PARAM(ForceDisable);
+// Disables connection failures, i.e., clogging, in simulation.
+// Returns the remaining seconds for the connection failures to be disabled
+// if the disabling time has been extended. The caller should retry after
+// the specified time has elapsed. If flag is true, don't extend the time
+// and disable the connection failures immediately.
+double disableConnectionFailures(std::string const& context, ForceDisable flag = ForceDisable::True);
+
+// Extend connection failures in simulation
+void extendConnectionFailures(std::string const& context, double duration);
 
 class Sim2FileSystem : public IAsyncFileSystem {
 public:
