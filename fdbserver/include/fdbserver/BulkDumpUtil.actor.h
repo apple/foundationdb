@@ -35,7 +35,7 @@ struct SSBulkDumpTask {
 	SSBulkDumpTask(const StorageServerInterface& targetServer,
 	               const std::vector<UID>& checksumServers,
 	               const BulkDumpState& bulkDumpState)
-	  : targetServer(targetServer), checksumServers(checksumServers), bulkDumpState(bulkDumpState){};
+	  : targetServer(targetServer), checksumServers(checksumServers), bulkDumpState(bulkDumpState) {};
 
 	std::string toString() const {
 		return "[BulkDumpState]: " + bulkDumpState.toString() + ", [TargetServer]: " + targetServer.toString() +
@@ -122,9 +122,6 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod
                                          BulkLoadFileSet sourceFileSet,
                                          BulkLoadFileSet destinationFileSet,
                                          UID logId);
-
-// Erase file folder
-void clearFileFolder(const std::string& folderPath);
 
 class ParallelismLimitor {
 public:

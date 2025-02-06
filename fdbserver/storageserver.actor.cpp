@@ -6076,26 +6076,6 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 	return RangeDumpData(kvsToDump, sample, lastKey, currentExpectedBytes);
 }
 
-void cleanUpBulkDumpFolder(StorageServer* data) {
-	try {
-		platform::eraseDirectoryRecursive(abspath(data->bulkDumpFolder));
-	} catch (Error& e) {
-		TraceEvent(SevError, "CleanUpBulkDumpFolderError", data->thisServerID).errorUnsuppressed(e);
-		throw e;
-	}
-	return;
-}
-
-void cleanUpBulkLoadFolder(StorageServer* data) {
-	try {
-		platform::eraseDirectoryRecursive(abspath(data->bulkLoadFolder));
-	} catch (Error& e) {
-		TraceEvent(SevError, "CleanUpBulkLoadFolderError", data->thisServerID).errorUnsuppressed(e);
-		throw e;
-	}
-	return;
-}
-
 // The SS actor handling bulk dump task sent from DD.
 // The SS partitions the task range into batches and make progress on each batch one by one.
 // Each batch is a subrange of the task range sent from DD.
@@ -6256,11 +6236,10 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 		}
 		wait(delay(1.0));
 	}
-	try {
-		clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
-	} catch (Error& e) {
-		// exit
-	}
+
+	// Do best effort cleanup
+	clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)), data->thisServerID, /*ignoreError=*/true);
+
 	return Void();
 }
 
@@ -8802,6 +8781,7 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results, Ke
 		state Key endKey = keys.end;
 		state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
 		    keys, SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE, SERVER_KNOBS->FETCH_BLOCK_BYTES);
+		// TODO(BulkLoad): this can be a slow task. We will make this as async call.
 		reader->open(abspath(dataPath));
 		loop {
 			// TODO(BulkLoad): this is a blocking call. We will make this as async call.
@@ -8823,16 +8803,6 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results, Ke
 	}
 }
 
-void cleanUpFetchKeyBasedBulkLoadFolder(const std::string& folder) {
-	try {
-		platform::eraseDirectoryRecursive(folder);
-	} catch (Error& e) {
-		TraceEvent(SevError, "CleanUpFetchKeyBasedBulkLoadFolderError").errorUnsuppressed(e).detail("Folder", folder);
-		throw e;
-	}
-	return;
-}
-
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
@@ -8844,7 +8814,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state int priority = dataMovementPriority(shard->reason);
 	state UID dataMoveId = shard->getSSBulkLoadMetadata().getDataMoveId();
 	state ConductBulkLoad conductBulkLoad = ConductBulkLoad(shard->getSSBulkLoadMetadata().getConductBulkLoad());
-	state Optional<BulkLoadTaskState> bulkLoadTaskState;
 	state std::string bulkLoadLocalDir =
 	    joinPath(joinPath(data->bulkLoadFolder, dataMoveId.toString()), fetchKeysID.toString());
 	// Since the fetchKey can split, so multiple fetchzkeys can have the same data move id. We want each fetchkey
@@ -9055,48 +9024,29 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("Range", keys)
 				    .detail("Phase", "Read task metadata");
 				ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId)); // TODO(BulkLoad): remove dangerous assert
-				wait(store(
-				    bulkLoadTaskState,
-				    getBulkLoadTaskStateFromDataMove(data->cx, dataMoveId, data->version.get(), data->thisServerID)));
-				if (bulkLoadTaskState.present()) {
-					TraceEvent(SevInfo, "FetchKeyConductBulkLoad", data->thisServerID)
-					    .detail("DataMoveId", dataMoveId.toString())
-					    .detail("Range", keys)
-					    .detail("Phase", "Got task metadata");
-					// Check the correctness: bulkLoadTaskMetadata stored in dataMoveMetadata must have the same
-					// dataMoveId.
-					ASSERT(bulkLoadTaskState.get().getDataMoveId() == dataMoveId);
-					// We download the data file to local disk and pass the data file path to read in the next step.
-					BulkLoadFileSet localFileSet =
-					    wait(bulkLoadFetchKeyValueFileToLoad(data, bulkLoadLocalDir, bulkLoadTaskState.get()));
-					hold = tryGetRangeForBulkLoad(results, keys, localFileSet.getDataFileFullPath());
-					rangeEnd = keys.end;
-				} else {
-					// This a SS may be failed to read the bulkload task metadata because the data move has been
-					// cancelled by a new data move with the overlapping range. In this case, This fetchKey actor will
-					// be cancelled and the data will be removed. So, we convert the task to a normal bulkload.
-					// Discussion about the data inconsistency:
-					// Note that within the destination team, the version to read the bulkload task metadata selected by
-					// different SSes can be different, because SS is only required to read the metadata at a version
-					// at least when the DD persists the bulkload task metadata. It is possible that a SS1 gets the
-					// metadata at version V1 and do the bulkload task while another SS2 is failed to get the metadata
-					// at version V2 (V2 > V1) and do the normal data move. However, there is not data inconsistency
-					// because: 1. from V1 to V2, aka [V1, V2), the FDB client still reads the data from the source
-					// servers because the data move is not finished and the keyServer does not update; 2. since V2, SS1
-					// must have received the data move cancellation signal because the bulkload task metadata is stored
-					// in the data move metadata which is cleared only if the data move is cancelled by a transaction
-					// This cancellation transaction unassigns the range from SS1 and SS2 at a version between V1 and
-					// V2. Since V2, the cancellation transaction has taken effects, SS1 has dropped the loaded data
-					// that have been loaded at V2. For SS2, since V2, the range is cleared as well.
-					hold = tryGetRange(results, &tr, keys);
-					rangeEnd = keys.end;
-					TraceEvent(SevWarn, "FetchKeyConductBulkLoad", data->thisServerID)
-					    .setMaxEventLength(-1)
-					    .setMaxFieldLength(-1)
-					    .detail("DataMoveId", dataMoveId.toString())
-					    .detail("Range", keys)
-					    .detail("Phase", "Failed to get task metadata");
-				}
+				// Get the bulkload task metadata from the data move metadata. Note that a SS can receive a data move
+				// mutation before the bulkload task metadata is persisted. In this case, the SS will not be able to
+				// read the bulkload task. SS will wait at this point until the bulkload task metadata is persisted.
+				// Moreover, the bulkload task metadata is persist at a verison at least the version when this SS
+				// receives the datamove mutation. Therefore, the SS should read the bulkload task metadata at a version
+				// at least this SS version.
+				// Note that it is possible that this SS can never get the bulkload metadata because the bulkload data
+				// move is cancelled or replaced by another data move. In this case, while
+				// getBulkLoadTaskStateFromDataMove get stuck, this fetchKeys is guaranteed to be cancelled.
+				BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
+				    data->cx, dataMoveId, /*atLeastVersion=*/data->version.get(), data->thisServerID));
+				TraceEvent(SevInfo, "FetchKeyConductBulkLoad", data->thisServerID)
+				    .detail("DataMoveId", dataMoveId.toString())
+				    .detail("Range", keys)
+				    .detail("Phase", "Got task metadata");
+				// Check the correctness: bulkLoadTaskMetadata stored in dataMoveMetadata must have the same
+				// dataMoveId.
+				ASSERT(bulkLoadTaskState.getDataMoveId() == dataMoveId);
+				// We download the data file to local disk and pass the data file path to read in the next step.
+				BulkLoadFileSet localFileSet =
+				    wait(bulkLoadFetchKeyValueFileToLoad(data, bulkLoadLocalDir, bulkLoadTaskState));
+				hold = tryGetRangeForBulkLoad(results, keys, localFileSet.getDataFileFullPath());
+				rangeEnd = keys.end;
 			} else {
 				hold = tryGetRange(results, &tr, keys);
 				rangeEnd = keys.end;
@@ -9463,7 +9413,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
 		if (conductBulkLoad) {
-			cleanUpFetchKeyBasedBulkLoadFolder(bulkLoadLocalDir);
+			// Do best effort cleanup
+			clearFileFolder(bulkLoadLocalDir, data->thisServerID, /*ignoreError=*/true);
 		}
 
 	} catch (Error& e) {
@@ -9498,7 +9449,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		if (e.code() != error_code_actor_cancelled)
 			data->otherError.sendError(e); // Kill the storage server.  Are there any recoverable errors?
 		if (conductBulkLoad) {
-			cleanUpFetchKeyBasedBulkLoadFolder(bulkLoadLocalDir);
+			// Do best effort cleanup
+			clearFileFolder(bulkLoadLocalDir, data->thisServerID, /*ignoreError=*/true);
 		}
 		throw; // goes nowhere
 	}
@@ -9812,12 +9764,9 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 	return Void();
 }
 
-ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
-                                              MoveInShard* moveInShard,
-                                              Optional<BulkLoadTaskState> bulkLoadTaskState) {
+ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* moveInShard) {
 	TraceEvent(SevInfo, "FetchShardIngestCheckpointBegin", data->thisServerID)
-	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
-	    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
+	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 	ASSERT(moveInShard->getPhase() == MoveInPhase::Ingesting);
 	state double startTime = now();
 
@@ -9829,8 +9778,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 		TraceEvent(SevWarn, "FetchShardIngestedCheckpointError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("MoveInShard", moveInShard->toString())
-		    .detail("Checkpoints", describe(moveInShard->checkpoints()))
-		    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
+		    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 		if (e.code() == error_code_failed_to_restore_checkpoint && !moveInShard->failed()) {
 			moveInShard->setPhase(MoveInPhase::Fetching);
 			updateMoveInShardMetaData(data, moveInShard);
@@ -9841,8 +9789,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 
 	TraceEvent(SevInfo, "FetchShardIngestedCheckpoint", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->toString())
-	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
-	    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
+	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 
 	if (moveInShard->failed()) {
 		return Void();
@@ -9868,15 +9815,13 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 				TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySampleNotInRange", data->thisServerID)
 				    .detail("Checkpoint", checkpoint.toString())
 				    .detail("SampleKey", key)
-				    .detail("Size", size)
-				    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
+				    .detail("Size", size);
 				continue;
 			}
 			TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySample", data->thisServerID)
 			    .detail("Checkpoint", checkpoint.checkpointID.toString())
 			    .detail("SampleKey", key)
-			    .detail("Size", size)
-			    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
+			    .detail("Size", size);
 			data->metrics.byteSample.sample.insert(key, size);
 			data->metrics.notifyBytes(key, size);
 			data->addMutationToMutationLogOrStorage(
@@ -9896,8 +9841,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
 	    .detail("Bytes", totalBytes)
 	    .detail("Duration", duration)
-	    .detail("Rate", static_cast<double>(totalBytes) / duration)
-	    .detail("BulkLoadTask", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
+	    .detail("Rate", static_cast<double>(totalBytes) / duration);
 
 	return Void();
 }
@@ -10108,8 +10052,10 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 
-	state Optional<BulkLoadTaskState> bulkLoadTaskState;
-	if (moveInShard->meta->conductBulkLoad) {
+	state BulkLoadTaskState bulkLoadTaskState;
+	state bool conductBulkLoad = moveInShard->meta->conductBulkLoad;
+	if (conductBulkLoad) {
+		// Get the bulkload task metadata from the data move metadata. For details, see the comments in the fetchKeys.
 		wait(store(bulkLoadTaskState,
 		           getBulkLoadTaskStateFromDataMove(
 		               data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID)));
@@ -10122,19 +10068,18 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 		try {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
 			if (phase == MoveInPhase::Fetching) {
-				if (bulkLoadTaskState.present()) {
+				if (conductBulkLoad) {
 					// Check the correctness: bulkLoadTaskMetadata stored in dataMoveMetadata must have the same
 					// dataMoveId.
-					ASSERT(bulkLoadTaskState.get().getDataMoveId() != moveInShard->dataMoveId());
-					wait(bulkLoadFetchShardFileToLoad(data, moveInShard, dir, bulkLoadTaskState.get()));
+					ASSERT(bulkLoadTaskState.getDataMoveId() != moveInShard->dataMoveId());
+					wait(bulkLoadFetchShardFileToLoad(data, moveInShard, dir, bulkLoadTaskState));
 				} else {
-					// For the safety analysis about falling back to the normal datamove, see comments in the fetchKeys.
 					wait(fetchShardCheckpoint(data, moveInShard, dir));
 					TraceEvent(SevWarn, "FetchShardConductBulkLoadFailedForNoMetadata", data->thisServerID)
 					    .detail("DataMoveId", moveInShard->dataMoveId());
 				}
 			} else if (phase == MoveInPhase::Ingesting) {
-				wait(fetchShardIngestCheckpoint(data, moveInShard, bulkLoadTaskState));
+				wait(fetchShardIngestCheckpoint(data, moveInShard));
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
 				wait(fetchShardApplyUpdates(data, moveInShard, moveInUpdates));
 			} else if (phase == MoveInPhase::Complete) {
@@ -15126,8 +15071,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		platform::createDirectory(self.checkpointFolder);
 		platform::createDirectory(self.fetchedCheckpointFolder);
 
-		cleanUpBulkDumpFolder(&self);
-		cleanUpBulkLoadFolder(&self);
+		clearFileFolder(self.bulkDumpFolder, self.thisServerID, /*ignoreError=*/false);
+		clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
 
 		EncryptionAtRestMode encryptionMode = wait(self.storage.encryptionMode());
 		TraceEvent("StorageServerInitProgress", ssi.id())
@@ -15241,8 +15186,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		platform::createDirectory(self.fetchedCheckpointFolder);
 	}
 
-	cleanUpBulkDumpFolder(&self);
-	cleanUpBulkLoadFolder(&self);
+	clearFileFolder(self.bulkDumpFolder, self.thisServerID, /*ignoreError=*/false);
+	clearFileFolder(self.bulkLoadFolder, self.thisServerID, /*ignoreError=*/false);
 
 	self.actors.add(rocksdbLogCleaner(folder));
 	try {
