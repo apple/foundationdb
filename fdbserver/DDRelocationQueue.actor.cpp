@@ -988,9 +988,6 @@ void DDQueue::launchQueuedWork(RelocateData launchData, const DDEnabledState* dd
 }
 
 DataMoveType newDataMoveType(bool doBulkLoading) {
-	if (doBulkLoading && SERVER_KNOBS->BULKLOAD_ONLY_USE_PHYSICAL_SHARD_MOVE) {
-		return DataMoveType::PHYSICAL_BULKLOAD;
-	}
 	DataMoveType type = DataMoveType::LOGICAL;
 	if (deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY) {
 		type = DataMoveType::PHYSICAL;
@@ -1178,15 +1175,16 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else {
-						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
-						                               AssignEmptyRange::False,
-						                               newDataMoveType(doBulkLoading),
-						                               rrs.dmReason);
+						DataMoveType dataMoveType = newDataMoveType(rrs.bulkLoadTask.present());
+						rrs.dataMoveId = newDataMoveId(
+						    deterministicRandom()->randomUInt64(), AssignEmptyRange::False, dataMoveType, rrs.dmReason);
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID", this->distributorId)
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
 						    .detail("TrackID", rrs.randomId)
 						    .detail("Range", rrs.keys)
 						    .detail("Reason", rrs.reason.toString())
+						    .detail("DoBulkLoading", rrs.bulkLoadTask.present())
+						    .detail("DataMoveType", dataMoveType)
 						    .detail("DataMoveReason", static_cast<int>(rrs.dmReason));
 					}
 				} else {

@@ -30,6 +30,7 @@ function start_fdb_cluster {
   local local_scratch_dir="${3}"
   local ss_count="${4}"
   shift 4
+  #TODO(BulkLoad): enable_read_lock_on_range
   local knobs="--knob_shard_encode_location_metadata=true"
   if (( $# > 0 )); then
     for item in "${@}"; do
@@ -49,12 +50,15 @@ function start_fdb_cluster {
     # In the below $knobs will pick up single quotes -- its what bash does when it
     # outputs strings with spaces or special characters. In this case, we want the
     # single quotes.
+    # TODO(BulkLoad): randomly select storage engine.
+    # Currently, we cannot use shardedrocksdb because bulkload fetchkey does not support
+    # shardedrocksdb. 
     LOOPBACK_DIR="${local_scratch_dir}/loopback_cluster" PORT_PREFIX="${port_prefix}" \
       "${local_source_dir}/tests/loopback_cluster/run_custom_cluster.sh" \
       "${local_build_dir}" \
       --knobs "${knobs}" \
       --stateless_count 1 --replication_count 1 --logs_count 1 \
-      --storage_count "${ss_count}" --storage_type ssd-sharded-rocksdb \
+      --storage_count "${ss_count}" --storage_type ssd \
       --dump_pids on \
       > >(tee "${output}") \
       2> >(tee "${output}" >&2)

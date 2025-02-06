@@ -35,17 +35,46 @@
 #include "flow/actorcompiler.h" // has to be last include
 #include "flow/flow.h"
 
-ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx, UID dataMoveId, UID logId) {
+ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx,
+                                                                           UID dataMoveId,
+                                                                           Version minVersion,
+                                                                           UID logId) {
+	state Transaction tr(cx);
+	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	loop {
-		state Transaction tr(cx);
 		try {
-			Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
-			if (!val.present()) {
-				TraceEvent(SevWarn, "SSBulkLoadDataMoveIdNotExist", logId).detail("DataMoveID", dataMoveId);
-				return Optional<BulkLoadTaskState>();
+			state Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
+			ASSERT(tr.getReadVersion().isReady());
+			if (tr.getReadVersion().get() < minVersion) {
+				wait(delay(0.1));
+				tr.reset();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				continue;
 			}
-			DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
-			return dataMoveMetaData.bulkLoadTaskState;
+			if (!val.present()) {
+				TraceEvent(SevWarn, "SSBulkLoadDataMoveIdNotExist", logId)
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("ReadVersion", tr.getReadVersion().get())
+				    .detail("MinVersion", minVersion);
+				return Optional<BulkLoadTaskState>();
+			} else {
+				state DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
+				if (!dataMoveMetaData.bulkLoadTaskState.present()) {
+					wait(delay(0.1));
+					tr.reset();
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					// DD moveShard progressively persists dataMoveMetadata based on range.
+					// Therefore, it is possible that the dataMoveMetadata is persisted at a subrange partially.
+					// Note that DD moveShard only persist the bulkload metadata in the dataMoveMetadata when all
+					// subranges have been persisted. Therefore, if the data move id indicating the move is for bulk
+					// loading, the SS should wait until the bulkLoad metadata is included in the dataMoveMetadata.
+					continue;
+				}
+				return dataMoveMetaData.bulkLoadTaskState;
+			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}

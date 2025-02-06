@@ -790,6 +790,14 @@ bool RocksDBSstFileWriter::finish() {
 class RocksDBSstFileReader : public IRocksDBSstFileReader {
 public:
 	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())){};
+
+	RocksDBSstFileReader(const KeyRange& rangeBoundary, size_t rowLimit, size_t byteLimit)
+	  : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())), rowLimit(rowLimit),
+	    byteLimit(byteLimit) {
+		beginSlice = toSlice(rangeBoundary.begin);
+		endSlice = toSlice(rangeBoundary.end);
+	};
+
 	~RocksDBSstFileReader() {}
 
 	void open(const std::string localFile) override;
@@ -798,18 +806,37 @@ public:
 
 	bool hasNext() const override;
 
+	RangeResult getRange(const KeyRange& range) override;
+
 private:
 	std::unique_ptr<rocksdb::SstFileReader> sstReader;
 	std::unique_ptr<rocksdb::Iterator> iter;
 	std::string localFile;
+	rocksdb::Slice beginSlice;
+	rocksdb::Slice endSlice;
+	size_t byteLimit = -1;
+	size_t rowLimit = -1;
 };
 
 void RocksDBSstFileReader::open(const std::string localFile) {
 	this->localFile = abspath(localFile);
 	rocksdb::Status status = sstReader->Open(this->localFile);
 	if (status.ok()) {
-		iter.reset(sstReader->NewIterator(getReadOptions()));
-		iter->SeekToFirst();
+		rocksdb::ReadOptions readOptions = getReadOptions();
+		if (!beginSlice.empty()) {
+			readOptions.iterate_lower_bound = &beginSlice;
+		}
+		if (!endSlice.empty()) {
+			readOptions.iterate_upper_bound = &endSlice;
+			// Note that iterator can return the endSlice but this endSlice is out of the range.
+			// So, we need to check whether the key from iterator is out of the range.
+		}
+		iter.reset(sstReader->NewIterator(readOptions));
+		if (!beginSlice.empty()) {
+			iter->Seek(beginSlice);
+		} else {
+			iter->SeekToFirst();
+		}
 	} else {
 		TraceEvent(SevError, "RocksDBSstFileReaderWrapperOpenFileError")
 		    .detail("LocalFile", this->localFile)
@@ -825,6 +852,44 @@ KeyValue RocksDBSstFileReader::next() {
 	KeyValue res(KeyValueRef(toStringRef(this->iter->key()), toStringRef(this->iter->value())));
 	iter->Next();
 	return res;
+}
+
+// TODO(BulkLoad): current the bulkload is the only place using the method.
+// This is implemented as the sync call for the simplicity. In the future
+// we will implement this as async call using action.
+RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
+	RangeResult rep;
+	size_t expectedSize = 0;
+	size_t keyCount = 0;
+	ASSERT(iter != nullptr);
+	iter->Seek(toSlice(range.begin));
+	if (!iter->Valid() || toStringRef(iter->key()) >= range.end) {
+		rep.more = false;
+		return rep;
+	}
+	while (true) {
+		KeyValue kv = KeyValueRef(toStringRef(iter->key()), toStringRef(iter->value()));
+		rep.push_back_deep(rep.arena(), kv);
+		expectedSize = expectedSize + kv.expectedSize();
+		keyCount++;
+		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
+			TraceEvent(SevWarnAlways, "TryGetRangeForBulkLoadInjectError");
+			throw operation_failed();
+		}
+		if ((byteLimit > 0 && expectedSize >= byteLimit) || (rowLimit > 0 && keyCount >= rowLimit)) {
+			break;
+		}
+
+		iter->Next(); // Go to next at first, then decide if the rep has more.
+		if (!iter->Valid()) {
+			break;
+		}
+		if (toStringRef(iter->key()) >= range.end) {
+			break;
+		}
+	}
+	rep.more = iter->Valid() && toStringRef(iter->key()) < range.end;
+	return rep;
 }
 
 class RocksDBCheckpointByteSampleReader : public ICheckpointByteSampleReader {
@@ -1345,6 +1410,17 @@ std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter() {
 std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader() {
 #ifdef WITH_ROCKSDB
 	std::unique_ptr<IRocksDBSstFileReader> sstReader = std::make_unique<RocksDBSstFileReader>();
+	return sstReader;
+#endif // WITH_ROCKSDB
+	return nullptr;
+}
+
+std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader(const KeyRange& range,
+                                                               size_t rowLimit,
+                                                               size_t byteLimit) {
+#ifdef WITH_ROCKSDB
+	std::unique_ptr<IRocksDBSstFileReader> sstReader =
+	    std::make_unique<RocksDBSstFileReader>(range, rowLimit, byteLimit);
 	return sstReader;
 #endif // WITH_ROCKSDB
 	return nullptr;

@@ -240,11 +240,18 @@ public:
 					unhealthyTeamCount++;
 					continue;
 				}
-				bool allDestServerHaveLowDiskUtil =
-				    dest->getEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL) > 0;
-				if (!allDestServerHaveLowDiskUtil) {
-					notEligibileTeamCount++;
-					continue;
+				// In the simulation, the available disk space is simulated randomly.
+				// So, it is possible that a random low disk space can cause the bulkload test
+				// stuck at failing to get an eligible team.
+				// We still want to have this low disk space check in the simulation, but we
+				// do not want this check blocking the simulation. So, we randomly do the check.
+				if (!g_network->isSimulated() || deterministicRandom()->random01() < 0.5) {
+					bool anyDestServerHaveLowDiskUtil =
+					    dest->getEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL) > 0;
+					if (!anyDestServerHaveLowDiskUtil) {
+						notEligibileTeamCount++;
+						continue;
+					}
 				}
 				bool ok = true;
 				for (const auto& srcId : req.src) {
@@ -3839,7 +3846,11 @@ void DDTeamCollection::updateTeamEligibility() {
 			    .detail("TeamId", team->getTeamID())
 			    .detail("CPU", team->getAverageCPU())
 			    .detail("AvailableSpace", team->getMinAvailableSpace())
-			    .detail("AvailableSpaceRatio", team->getMinAvailableSpaceRatio());
+			    .detail("AvailableSpaceRatio", team->getMinAvailableSpaceRatio())
+			    .detail("LowDiskUtil", lowDiskUtil)
+			    .detail("LowCPU", lowCPU)
+			    .detail("PivotSpace", teamPivots.pivotAvailableSpaceRatio)
+			    .detail("PivotCPU", teamPivots.pivotCPU);
 
 			if (lowDiskUtil) {
 				lowDiskUtilTotal++;
