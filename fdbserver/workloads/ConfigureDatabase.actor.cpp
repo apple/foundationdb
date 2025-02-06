@@ -524,7 +524,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 						state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 						std::string localityFilter;
 						int selectSSCount =
-						    deterministicRandom()->randomInt(1, std::min(4, (int)(storageServers.size())));
+						    deterministicRandom()->randomInt(1, std::min(4, (int)(storageServers.size() + 1)));
 						std::vector<StringRef> localityKeys = { LocalityData::keyDcId,
 							                                    LocalityData::keyDataHallId,
 							                                    LocalityData::keyZoneId,
