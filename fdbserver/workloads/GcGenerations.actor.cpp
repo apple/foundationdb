@@ -200,6 +200,7 @@ struct GcGenerationsWorkload : TestWorkload {
 
 		wait(self->generateMultipleTxnGenerations(self, cx));
 		self->unclogAll();
+		disableConnectionFailures("GcGenerations");
 
 		wait(self->generationReduced(self));
 
