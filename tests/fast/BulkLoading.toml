@@ -34,6 +34,9 @@ min_byte_sampling_probability = 0.5
 # CC can repeatedly re-recruit new DD for the unfit recruitment which can block the test.
 cc_enforce_use_unfit_dd_in_sim = true
 
+# AuditStorage replica check can cause tooManyTraceEvents because both tests are large
+disable_audit_storage_final_replica_check_in_sim = true
+
 [[test]]
 testTitle = 'BulkLoadingWorkload'
 useDB = true
