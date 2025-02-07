@@ -1681,6 +1681,12 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 		// overwrite whatever decision we made before
 		generateFearless = testConfig.generateFearless.get();
 	}
+#ifdef NO_MULTIREGION_TEST
+	if (generateFearless) {
+		// Tests requiring multiregion cannot run if desired build does not support it.
+		throw internal_error;
+	}
+#endif
 	datacenters =
 	    testConfig.simpleConfig
 	        ? 1
@@ -2189,7 +2195,6 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 	if (needsRemote || deterministicRandom()->random01() < 0.5) {
 		regionArr.push_back(remoteObj);
 	}
-
 	if (needsRemote) {
 		g_simulator->originalRegions =
 		    "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
@@ -2340,10 +2345,12 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
+#if (!NO_MULTIREGION_TEST)
 	if (!testConfig.singleRegion &&
 	    (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5))) {
 		setRegions(testConfig);
 	}
+#endif
 	setMachineCount(testConfig);
 	setCoordinators(testConfig);
 

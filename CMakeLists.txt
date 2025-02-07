@@ -125,6 +125,12 @@ set(FDB_FUTURE_VERSION "7.5.0")
 set(FDB_PREV_RELEASE_VERSION "7.3.41")
 set(FDB_PREV2_RELEASE_VERSION "7.1.33")
 
+set(NO_MULTIREGION_TEST OFF CACHE BOOL "When set, disable simulation tests using multiple regions.")
+if (NO_MULTIREGION_TEST)
+    add_definitions(-DNO_MULTIREGION_TEST)
+    message(STATUS "NO_MULTIREGION_TEST is set to ${NO_MULTIREGION_TEST}")
+endif()
+
 ################################################################################
 # Flow
 ################################################################################
