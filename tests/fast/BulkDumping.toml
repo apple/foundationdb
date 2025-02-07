@@ -40,6 +40,7 @@ disable_audit_storage_final_replica_check_in_sim = true
 [[test]]
 testTitle = 'BulkDumpingWorkload'
 useDB = true
+waitForQuiescence = false
 
     [[test.workload]]
     testName = 'BulkDumpingWorkload'
