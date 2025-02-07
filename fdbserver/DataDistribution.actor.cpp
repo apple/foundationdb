@@ -35,19 +35,14 @@
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/Tenant.h"
-#include "fdbrpc/Replication.h"
 #include "fdbserver/BulkDumpUtil.actor.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/Knobs.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/WaitFailure.h"
@@ -55,7 +50,6 @@
 #include "fdbserver/MockDataDistributor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
-#include "flow/BooleanParam.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
@@ -2016,7 +2010,7 @@ ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self
 	generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, content, self->ddId);
 	wait(uploadBulkDumpJobManifestFile(
 	    transportMethod, localJobManifestFilePath, remoteFolder, jobManifestFileName, self->ddId));
-	clearFileFolder(localFolder);
+	clearFileFolder(localFolder, self->ddId, /*ignoreError=*/true); // best effort to clear the local folder
 	return Void();
 }
 

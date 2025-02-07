@@ -123,9 +123,6 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod
                                          BulkLoadFileSet destinationFileSet,
                                          UID logId);
 
-// Erase file folder
-void clearFileFolder(const std::string& folderPath);
-
 class ParallelismLimitor {
 public:
 	ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}

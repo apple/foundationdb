@@ -21,7 +21,6 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/S3Client.actor.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/Knobs.h"
@@ -32,13 +31,13 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
-#include "flow/flow.h"
 
-ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx,
-                                                                           UID dataMoveId,
-                                                                           Version minVersion,
-                                                                           UID logId) {
+ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
+                                                                 UID dataMoveId,
+                                                                 Version atLeastVersion,
+                                                                 UID logId) {
 	state Transaction tr(cx);
 	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -46,22 +45,18 @@ ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Datab
 		try {
 			state Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 			ASSERT(tr.getReadVersion().isReady());
-			if (tr.getReadVersion().get() < minVersion) {
+			if (tr.getReadVersion().get() < atLeastVersion) {
 				wait(delay(0.1));
 				tr.reset();
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				continue;
 			}
-			if (!val.present()) {
-				TraceEvent(SevWarn, "SSBulkLoadDataMoveIdNotExist", logId)
-				    .detail("DataMoveID", dataMoveId)
-				    .detail("ReadVersion", tr.getReadVersion().get())
-				    .detail("MinVersion", minVersion);
-				return Optional<BulkLoadTaskState>();
-			} else {
+			if (val.present()) {
 				state DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
-				if (!dataMoveMetaData.bulkLoadTaskState.present()) {
+				if (dataMoveMetaData.bulkLoadTaskState.present()) {
+					return dataMoveMetaData.bulkLoadTaskState.get();
+				} else {
 					wait(delay(0.1));
 					tr.reset();
 					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -73,8 +68,14 @@ ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Datab
 					// loading, the SS should wait until the bulkLoad metadata is included in the dataMoveMetadata.
 					continue;
 				}
-				return dataMoveMetaData.bulkLoadTaskState;
 			}
+			TraceEvent(SevWarnAlways, "SSBulkLoadDataMoveIdNotExist", logId)
+			    .detail("Message", "This fetchKey is blocked and will be cancelled later")
+			    .detail("DataMoveID", dataMoveId)
+			    .detail("ReadVersion", tr.getReadVersion().get())
+			    .detail("AtLeastVersion", atLeastVersion);
+			wait(Never());
+			throw internal_error(); // does not happen
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -135,13 +136,37 @@ void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytes
 	return;
 }
 
+// TODO(BulkLoad): slow task
+void clearFileFolder(const std::string& folderPath, const UID& logId, bool ignoreError) {
+	try {
+		platform::eraseDirectoryRecursive(abspath(folderPath));
+	} catch (Error& e) {
+		if (logId.isValid()) {
+			TraceEvent(ignoreError ? SevWarn : SevWarnAlways, "ClearFileFolderError", logId)
+			    .error(e)
+			    .detail("FolderPath", folderPath);
+		}
+		if (ignoreError) {
+			return;
+		}
+		throw e;
+	}
+	return;
+}
+
+// TODO(BulkLoad): slow task
+void resetFileFolder(const std::string& folderPath) {
+	clearFileFolder(abspath(folderPath));
+	ASSERT(platform::createDirectory(abspath(folderPath)));
+	return;
+}
+
 void bulkLoadTransportCP_impl(BulkLoadFileSet fromRemoteFileSet,
                               BulkLoadFileSet toLocalFileSet,
                               size_t fileBytesMax,
                               UID logId) {
 	// Clear existing local folder
-	platform::eraseDirectoryRecursive(abspath(toLocalFileSet.getFolder()));
-	ASSERT(platform::createDirectory(abspath(toLocalFileSet.getFolder())));
+	resetFileFolder(abspath(toLocalFileSet.getFolder()));
 	// Copy data file
 	bulkLoadFileCopy(
 	    abspath(fromRemoteFileSet.getDataFileFullPath()), abspath(toLocalFileSet.getDataFileFullPath()), fileBytesMax);
@@ -160,9 +185,8 @@ ACTOR Future<Void> bulkLoadTransportBlobstore_impl(BulkLoadFileSet fromRemoteFil
                                                    size_t fileBytesMax,
                                                    UID logId) {
 	// Clear existing local folder
-	platform::eraseDirectoryRecursive(abspath(toLocalFileSet.getFolder()));
-	ASSERT(platform::createDirectory(abspath(toLocalFileSet.getFolder())));
-	// TODO(BulkDump): Make use of fileBytesMax
+	resetFileFolder(abspath(toLocalFileSet.getFolder()));
+	// TODO(BulkLoad): Make use of fileBytesMax
 	// TODO: File-at-a-time costs because we make connection for each.
 	wait(copyDownFile(fromRemoteFileSet.getDataFileFullPath(), abspath(toLocalFileSet.getDataFileFullPath())));
 	// Copy byte sample file if exists

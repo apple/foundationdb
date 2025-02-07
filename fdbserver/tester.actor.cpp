@@ -1310,6 +1310,10 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 }
 
 ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, AuditType auditType) {
+	if (SERVER_KNOBS->DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM &&
+	    (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica)) {
+		return Void();
+	}
 	TraceEvent(SevDebug, "AuditStorageCorrectnessBegin").detail("AuditType", auditType);
 	state Database cx;
 	state UID auditId;
@@ -1964,6 +1968,9 @@ ACTOR Future<Void> runConsistencyCheckerUrgentHolder(Reference<AsyncVar<Optional
 }
 
 Future<Void> checkConsistencyUrgentSim(Database cx, std::vector<TesterInterface> testers) {
+	if (SERVER_KNOBS->DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM) {
+		return Void();
+	}
 	return runConsistencyCheckerUrgentHolder(
 	    Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(), cx, testers, 1, /*repeatRun=*/false);
 }
