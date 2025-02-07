@@ -28,7 +28,9 @@ set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
 # Statically link OpenSSL to FDB, see
 #    https://cmake.org/cmake/help/v3.24/module/FindOpenSSL.html
 # Without the flags, OpenSSL is dynamically linked.
-set(OPENSSL_USE_STATIC_LIBS TRUE)
+# For FIPS compliance, we need to use the OpenSSL from the container
+# that is FIPS compliant.
+# set(OPENSSL_USE_STATIC_LIBS TRUE)
 if (WIN32)
   set(OPENSSL_MSVC_STATIC_RT ON)
 endif()
@@ -187,7 +189,7 @@ if(toml11_FOUND)
   add_library(toml11_target INTERFACE)
   target_link_libraries(toml11_target INTERFACE toml11::toml11)
 else()
-  include(ExternalProject)  
+  include(ExternalProject)
   ExternalProject_add(toml11Project
     URL "https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz"
     URL_HASH SHA256=bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d
