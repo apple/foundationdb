@@ -301,12 +301,42 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Returns true iff aggressive migration was triggered.
+	// This is needed because there are certain topologies where it's not possible for DD (perpetual wiggle) to migrate
+	// storage servers to the new storage engine. As an example, if the DC has just 1 SS, DD will decide not to do
+	// perpetual wiggle because there's no room. In such cases, we issue aggressive migration which can do in-place
+	// migration.
+	ACTOR Future<bool> issueAggressiveMigrationIfNeeded(Database cx,
+	                                                    DatabaseConfiguration conf,
+	                                                    std::vector<StorageServerInterface> storageServers) {
+		state std::unordered_map<std::string /* dc id */, int /* number of ss in that dc id */> dcIdToSSCount;
+		for (const auto& ss : storageServers) {
+			if (ss.locality.dcId().present()) {
+				const auto& dcId = ss.locality.dcId().get().toString();
+				if (!dcIdToSSCount.contains(dcId)) {
+					dcIdToSSCount[dcId] = 0;
+				}
+				dcIdToSSCount[dcId] += 1;
+			}
+		}
+
+		for (const auto& [_, ssCount] : dcIdToSSCount) {
+			if (ssCount <= conf.storageTeamSize) {
+				wait(success(IssueConfigurationChange(cx, "storage_migration_type=aggressive", false)));
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	ACTOR Future<bool> _check(ConfigureDatabaseWorkload* self, Database cx) {
 		wait(delay(30.0));
 		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
 		// there
 		if (self->allowTestStorageMigration || self->waitStoreTypeCheck) {
+			state bool aggressiveMigrationTriggered = false;
 			loop {
 				// There exists a race where the check can start before the last transaction that singleDB issued
 				// finishes, if singleDB gets actor cancelled from a timeout at the end of a test. This means the
@@ -321,6 +351,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 				state bool pass = true;
 				state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+
+				if (!aggressiveMigrationTriggered) {
+					wait(store(aggressiveMigrationTriggered,
+					           self->issueAggressiveMigrationIfNeeded(cx, conf, storageServers)));
+				}
 
 				for (i = 0; i < storageServers.size(); i++) {
 					// Check that each storage server has the correct key value store type
@@ -489,7 +524,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 						state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 						std::string localityFilter;
 						int selectSSCount =
-						    deterministicRandom()->randomInt(1, std::min(4, (int)(storageServers.size())));
+						    deterministicRandom()->randomInt(1, std::min(4, (int)(storageServers.size() + 1)));
 						std::vector<StringRef> localityKeys = { LocalityData::keyDcId,
 							                                    LocalityData::keyDataHallId,
 							                                    LocalityData::keyZoneId,
