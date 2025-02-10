@@ -5068,7 +5068,8 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 		KeyValueRef backupKV;
 		// Assign the second parameter as the part
 		backupKV.value = getBackupValue(param2Concat, part);
-		backupKV.key = getBackupKey(wrParam1, &partBuffer, part);
+		Key key = getBackupKey(wrParam1, &partBuffer, part); // holds the memory
+		backupKV.key = key;
 		results.push_back_deep(results.arena(), backupKV);
 	}
 	return results;
@@ -6508,7 +6509,7 @@ struct LogInfo : public ReferenceCounted<LogInfo> {
 	Version endVersion;
 	int64_t offset;
 
-	LogInfo() : offset(0){};
+	LogInfo() : offset(0) {}
 };
 
 class FileBackupAgentImpl {

@@ -564,7 +564,8 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 			// Assign the second parameter as the part
 			// Define the mutation type and and location
 			backupMutation.param2 = getBackupValue(val, part);
-			backupMutation.param1 = getBackupKey(wr, &partBuffer, part);
+			Key key = getBackupKey(wr, &partBuffer, part); // holds the memory for backupMutation
+			backupMutation.param1 = key;
 			ASSERT(backupMutation.param1.startsWith(
 			    logRangeMutation->first)); // We are writing into the configured destination
 
