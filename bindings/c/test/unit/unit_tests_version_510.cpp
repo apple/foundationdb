@@ -77,8 +77,7 @@ TEST_CASE("Set and Get Key-Value") {
 	// Set a key-value pair
 	std::string key = prefix + "testKey";
 	std::string value = "testValue";
-	fdb_check(fdb_transaction_set(
-	    tr.tr, (const uint8_t*)key.c_str(), key.size(), (const uint8_t*)value.c_str(), value.size()));
+	fdb_transaction_set(tr.tr, (const uint8_t*)key.c_str(), key.size(), (const uint8_t*)value.c_str(), value.size());
 
 	Future commitFuture{ fdb_transaction_commit(tr.tr) };
 	fdb_check(fdb_future_block_until_ready(commitFuture.f));
