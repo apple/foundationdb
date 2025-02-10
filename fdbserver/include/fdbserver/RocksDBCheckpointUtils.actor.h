@@ -59,6 +59,8 @@ public:
 
 	virtual bool hasNext() const = 0;
 
+	virtual RangeResult getRange(const KeyRange& range) = 0;
+
 	virtual ~IRocksDBSstFileReader() {}
 };
 
@@ -358,6 +360,10 @@ std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const
 std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter();
 
 std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader();
+
+std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader(const KeyRange& range,
+                                                               size_t rowLimit,
+                                                               size_t byteLimit);
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
 

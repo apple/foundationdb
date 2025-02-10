@@ -4794,7 +4794,7 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	return Void();
 }
 
-TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
+TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointBasic") {
 	state std::string rocksDBTestDir = "sharded-rocks-checkpoint-restore";
 	state std::map<Key, Value> kvs({ { "a"_sr, "TestValueA"_sr },
 	                                 { "ab"_sr, "TestValueAB"_sr },
@@ -4890,7 +4890,7 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 	return Void();
 }
 
-TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
+TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointRestore") {
 	state std::string rocksDBTestDir = "sharded-rocks-checkpoint" + deterministicRandom()->randomAlphaNumeric(5);
 	state std::map<Key, Value> kvs({ { "ab"_sr, "TestValueAB"_sr },
 	                                 { "ad"_sr, "TestValueAD"_sr },
@@ -4952,7 +4952,7 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 	return Void();
 }
 
-TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
+TEST_CASE("noSim/ShardedRocksDBCheckpoint/RocksDBSstFileWriter") {
 	state std::string localFile = "rocksdb-sst-file-dump.sst";
 	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 	// Write nothing to sst file

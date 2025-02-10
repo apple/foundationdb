@@ -204,7 +204,10 @@ function build_and_push_images () {
             --tag "${image_tag}" \
             --file Dockerfile \
             --target "${image}" .
-        if [ "${image}" == 'foundationdb' ] || [ "${image}" == 'foundationdb-kubernetes-sidecar' ] || [ "${image}" == 'ycsb' ] ; then
+        if [ "${image}" == 'foundationdb' ] || \
+              [ "${image}" == 'foundationdb-kubernetes-sidecar' ] || \
+              [ "${image}" == 'ycsb' ] || \
+              [ "${image}" == 'fdb-kubernetes-monitor' ]; then
             tags_to_push+=("${image_tag}")
         fi
     done

@@ -229,7 +229,6 @@ public:
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].
 	bool ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT;
-	bool BULKLOAD_ONLY_USE_PHYSICAL_SHARD_MOVE; // If true, bulk load only uses physical shard move
 	int64_t MAX_PHYSICAL_SHARD_BYTES;
 	double PHYSICAL_SHARD_METRICS_DELAY;
 	double ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME;
@@ -409,9 +408,14 @@ public:
 	int DD_BULKLOAD_AND_DUMP_TASK_METADATA_READ_SIZE; // the number of bulk dump tasks read from metadata at a time
 	double DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk dump scheduler has to wait
 	                                              // between two rounds
+	bool CC_ENFORCE_USE_UNFIT_DD_IN_SIM; // Set for CC to enforce to use an unfit DD in the simulation. This knob
+	                                     // takes effect only in the simulation.
+	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the
+	                                                       // simulation.
 	int DD_BULKDUMP_PARALLELISM; // the max number of concurrent bulk dump tasks in DD
 	int SS_SERVE_BULKDUMP_PARALLELISM; // the number of bulk dump tasks that can concurrently happen at a SS
 	int64_t SS_BULKDUMP_BATCH_BYTES; // the max bytes when SS creates a batch to dump
+	int SS_BULKLOAD_GETRANGE_BATCH_SIZE; // the max number of keys to scan before do context switch
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;

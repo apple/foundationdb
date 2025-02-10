@@ -40,6 +40,7 @@
 FDB_BOOLEAN_PARAM(AssignEmptyRange);
 FDB_BOOLEAN_PARAM(UnassignShard);
 FDB_BOOLEAN_PARAM(EnablePhysicalShardMove);
+FDB_BOOLEAN_PARAM(ConductBulkLoad);
 
 enum class DataMoveType : uint8_t {
 	LOGICAL = 0,
@@ -528,6 +529,9 @@ extern const KeyRangeRef bulkLoadTaskKeys;
 extern const KeyRef bulkLoadTaskPrefix;
 const Value bulkLoadTaskStateValue(const BulkLoadTaskState& bulkLoadTaskState);
 BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value);
+
+const Value ssBulkLoadMetadataValue(const SSBulkLoadMetadata& ssBulkLoadMetadata);
+SSBulkLoadMetadata decodeSSBulkLoadMetadata(const ValueRef& value);
 
 extern const KeyRangeRef bulkLoadJobKeys;
 extern const KeyRef bulkLoadJobPrefix;

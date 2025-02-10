@@ -1210,6 +1210,17 @@ BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value) {
 	return bulkLoadTaskState;
 }
 
+const Value ssBulkLoadMetadataValue(const SSBulkLoadMetadata& ssBulkLoadMetadata) {
+	return ObjectWriter::toValue(ssBulkLoadMetadata, IncludeVersion());
+}
+
+SSBulkLoadMetadata decodeSSBulkLoadMetadata(const ValueRef& value) {
+	SSBulkLoadMetadata ssBulkLoadMetadata;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(ssBulkLoadMetadata);
+	return ssBulkLoadMetadata;
+}
+
 const KeyRangeRef bulkLoadJobKeys = KeyRangeRef("\xff/bulkLoadJob/"_sr, "\xff/bulkLoadJob0"_sr);
 const KeyRef bulkLoadJobPrefix = bulkLoadJobKeys.begin;
 

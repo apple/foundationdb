@@ -454,6 +454,8 @@ struct BulkLoadManifest {
 
 	int64_t getTotalBytes() const { return bytes; }
 
+	int64_t getKeyCount() const { return keyCount; }
+
 	BulkLoadFileSet getFileSet() const { return fileSet; }
 
 	bool isEmptyRange() const {
@@ -560,6 +562,8 @@ struct BulkLoadTaskState {
 	std::string getFolder() const { return manifest.getFolder(); }
 
 	int64_t getTotalBytes() const { return manifest.getTotalBytes(); }
+
+	int64_t getKeyCount() const { return manifest.getKeyCount(); }
 
 	BulkLoadFileSet getFileSet() const { return manifest.getFileSet(); }
 
@@ -895,6 +899,51 @@ private:
 	std::string manifestRelativePath;
 	Version version;
 	size_t bytes;
+};
+
+bool dataMoveIdIsValidForBulkLoad(const UID& dataMoveId);
+
+bool getConductBulkLoadFromDataMoveId(const UID& dataMoveId);
+
+// When the storage engine is not ShardedRocksDB, SS conducts bulkLoad using fetchKey based method.
+// In this case, SS needs to persist the bulkload task metadata locally because when SS restarts, SS
+// does not have the bulkload task information.
+// This data structure is the metadata persisted at SS special key space locally.
+// We add the bulkload task metadata at the same version when the range is set as assigned.
+struct SSBulkLoadMetadata {
+public:
+	constexpr static FileIdentifier file_identifier = 1384506;
+
+	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false){};
+
+	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId) {
+		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
+		return;
+	}
+
+	SSBulkLoadMetadata(const UID& dataMoveId, bool inputConductBulkLoad) : dataMoveId(dataMoveId) {
+		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
+		ASSERT(conductBulkLoad == inputConductBulkLoad);
+		return;
+	}
+
+	UID getDataMoveId() const { return dataMoveId; }
+
+	bool getConductBulkLoad() const { return conductBulkLoad; }
+
+	std::string toString() const {
+		return "[SSBulkLoadMetadata]: [dataMoveId]: " + dataMoveId.toString() +
+		       ", [conductBulkLoad]: " + std::to_string(conductBulkLoad);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, dataMoveId, conductBulkLoad);
+	}
+
+private:
+	UID dataMoveId;
+	bool conductBulkLoad = false;
 };
 
 // Define job manifest file name.

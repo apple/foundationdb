@@ -3015,20 +3015,41 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 	return delayUntil(diskParameters->nextOperation + randomLatency);
 }
 
-void enableConnectionFailures(std::string const& context) {
+void enableConnectionFailures(std::string const& context, double duration) {
 	if (g_network->isSimulated()) {
 		g_simulator->connectionFailuresDisableDuration = 0;
 		g_simulator->speedUpSimulation = false;
 		g_simulator->connectionFailureEnableTime = now();
-		TraceEvent(SevWarnAlways, ("EnableConnectionFailures_" + context).c_str());
+		g_simulator->connectionFailureDisableTime = now() + duration;
+		TraceEvent(SevWarnAlways, ("EnableConnectionFailures_" + context).c_str()).detail("Duration", duration);
 	}
 }
 
-void disableConnectionFailures(std::string const& context) {
+double disableConnectionFailures(std::string const& context, ForceDisable flag) {
 	if (g_network->isSimulated()) {
-		g_simulator->connectionFailuresDisableDuration = DISABLE_CONNECTION_FAILURE_FOREVER;
-		g_simulator->speedUpSimulation = true;
-		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
+		if (now() < g_simulator->connectionFailureDisableTime && flag == ForceDisable::False) {
+			TraceEvent(("DisableConnectionFailuresDelayed_" + context).c_str())
+			    .detail("Until", g_simulator->connectionFailureDisableTime);
+			return g_simulator->connectionFailureDisableTime - now();
+		} else {
+			g_simulator->connectionFailuresDisableDuration = DISABLE_CONNECTION_FAILURE_FOREVER;
+			g_simulator->speedUpSimulation = true;
+			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
+			return 0;
+		}
+	}
+	return 0;
+}
+
+void extendConnectionFailures(std::string const& context, double duration) {
+	if (g_network->isSimulated()) {
+		if (g_simulator->speedUpSimulation) {
+			enableConnectionFailures(context, duration);
+		} else {
+			g_simulator->connectionFailureDisableTime =
+			    std::max(now() + duration, g_simulator->connectionFailureDisableTime);
+			TraceEvent(SevWarnAlways, ("ExtendConnectionFailures_" + context).c_str()).detail("Duration", duration);
+		}
 	}
 }
 

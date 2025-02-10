@@ -1128,6 +1128,10 @@ TEST_CASE("/fdbserver/worker/addressIsRemoteLogRouter") {
 
 // Returns true if the `peer` has enough measurement samples that should be checked by the health monitor.
 bool shouldCheckPeer(Reference<Peer> peer) {
+	TraceEvent(SevDebug, "ShouldCheckPeer")
+	    .detail("ConnectFailedCount", peer->connectFailedCount)
+	    .detail("PingLatencyPopulationSize", peer->pingLatencies.getPopulationSize());
+
 	if (peer->connectFailedCount != 0) {
 		return true;
 	}
@@ -1194,6 +1198,14 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		workerLocation = Satellite;
 	}
 
+	TraceEvent(SevInfo, "DoPeerHealthCheck")
+	    .detail("WorkerLocation", workerLocation)
+	    .detail("StorageServersPresent", storageServers.present())
+	    .detail("StorageServersPrimarySize",
+	            storageServers.present() ? std::to_string(storageServers.get().primary.size()) : "NA")
+	    .detail("StorageServersRemoteSize",
+	            storageServers.present() ? std::to_string(storageServers.get().remote.size()) : "NA");
+
 	if (workerLocation == None && !enablePrimaryTxnSystemHealthCheck->get()) {
 		// This worker doesn't need to monitor anything if it is not in transaction system or in remote satellite.
 		return req;
@@ -1226,7 +1238,13 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
 		    .detail("PingCount", peer->pingLatencies.getPopulationSize())
 		    .detail("PingTimeoutCount", peer->timeoutCount)
-		    .detail("ConnectionFailureCount", peer->connectFailedCount);
+		    .detail("ConnectionFailureCount", peer->connectFailedCount)
+		    .detail("WorkerLocation", workerLocation)
+		    .detail("PeerInPrimaryDc", addressInDbAndPrimaryDc(address, dbInfo))
+		    .detail("PeerInRemoteDc", addressInDbAndRemoteDc(address, dbInfo))
+		    .detail("PeerInPrimarySatelliteDc", addressInDbAndPrimarySatelliteDc(address, dbInfo))
+		    .detail("PeerIsRemoteLogRouter", addressIsRemoteLogRouter(address, dbInfo));
+
 		if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 		    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
 			// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
@@ -1453,9 +1471,15 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 	}
 	loop {
 		state Future<Void> nextHealthCheckDelay = Never();
-		if ((dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS ||
-		     enablePrimaryTxnSystemHealthCheck->get()) &&
-		    ccInterface->get().present()) {
+		const RecoveryState& recoveryState = dbInfo->get().recoveryState;
+		const bool primaryTxnSystemHealthCheckEnabled = enablePrimaryTxnSystemHealthCheck->get();
+		const bool ccInterfacePresent = ccInterface->get().present();
+		TraceEvent(SevInfo, "WorkerHealthMonitor")
+		    .detail("DBInfoRecoveryState", recoveryState)
+		    .detail("PrimaryTxnSystemHealthCheckEnabled", primaryTxnSystemHealthCheckEnabled)
+		    .detail("CCInterfacePresent", ccInterface->get().present());
+		if ((recoveryState >= RecoveryState::ACCEPTING_COMMITS || primaryTxnSystemHealthCheckEnabled) &&
+		    ccInterfacePresent) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			state Optional<PrimaryAndRemoteAddresses> storageServers;
 			if (db.present()) {

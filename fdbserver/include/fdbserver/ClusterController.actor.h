@@ -3259,6 +3259,12 @@ public:
 	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
 	// transaction system in the primary data center.
 	bool shouldTriggerRecoveryDueToDegradedServers() {
+		const bool ccExcluded = id_worker[clusterControllerProcessId].priorityInfo.isExcluded;
+		TraceEvent(SevInfo, "ShouldTriggerRecoveryDueToDegradedServers")
+		    .detail("DegradedServersSize", degradationInfo.degradedServers.size())
+		    .detail("DisconnectedServersSize", degradationInfo.disconnectedServers.size())
+		    .detail("CCExcluded", ccExcluded);
+
 		if (degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size() >
 		    SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
 			return false;
@@ -3266,11 +3272,14 @@ public:
 
 		// Do not trigger recovery if the cluster controller is excluded, since the master will change
 		// anyways once the cluster controller is moved
-		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+		if (ccExcluded) {
 			return false;
 		}
 
-		return transactionSystemContainsDegradedServers();
+		const bool txnSystemContainsDegradedServers = transactionSystemContainsDegradedServers();
+		TraceEvent(SevInfo, "ShouldTriggerRecoveryDueToDegradedServers")
+		    .detail("TransactionSystemContainsDegradedServers", txnSystemContainsDegradedServers);
+		return txnSystemContainsDegradedServers;
 	}
 	// Returns true when the cluster controller should trigger a failover due to degraded servers used in the
 	// transaction system in the primary data center, and no degradation in the remote data center.

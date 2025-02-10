@@ -28,7 +28,18 @@
 #include "fdbclient/BulkLoading.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<Optional<BulkLoadTaskState>> getBulkLoadTaskStateFromDataMove(Database cx, UID dataMoveId, UID logId);
+// Erase file folder
+void clearFileFolder(const std::string& folderPath, const UID& logId = UID(), bool ignoreError = false);
+
+// Erase and recreate file folder
+void resetFileFolder(const std::string& folderPath);
+
+// Get the bulkLoadTask metadata of the dataMoveMetadata since the atLeastVersion given the dataMoveId
+// This actor is stuck if the actor is failed to read the dataMoveMetadata.
+ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
+                                                                 UID dataMoveId,
+                                                                 Version atLeastVersion,
+                                                                 UID logId);
 
 ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMethod transportMethod,
                                                           BulkLoadFileSet fromRemoteFileSet,

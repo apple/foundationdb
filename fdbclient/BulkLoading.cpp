@@ -19,12 +19,35 @@
  */
 
 #include "fdbclient/BulkLoading.h"
+#include "fdbclient/SystemData.h"
 #include "flow/Error.h"
 
 #include <boost/url/url.hpp>
 #include <boost/url/parse.hpp>
 #include <boost/url/error_types.hpp>
 #include <boost/url/string_view.hpp>
+
+bool getConductBulkLoadFromDataMoveId(const UID& dataMoveId) {
+	bool nowAssigned = false;
+	bool emptyRange = false;
+	DataMoveType dataMoveType = DataMoveType::LOGICAL;
+	DataMovementReason dataMoveReason = DataMovementReason::INVALID;
+	decodeDataMoveId(dataMoveId, nowAssigned, emptyRange, dataMoveType, dataMoveReason);
+	bool conductBulkLoad =
+	    dataMoveType == DataMoveType::LOGICAL_BULKLOAD || dataMoveType == DataMoveType::PHYSICAL_BULKLOAD;
+	if (conductBulkLoad) {
+		ASSERT(!emptyRange && dataMoveIdIsValidForBulkLoad(dataMoveId));
+		ASSERT(nowAssigned);
+	}
+	if (!nowAssigned) {
+		ASSERT(!conductBulkLoad);
+	}
+	return conductBulkLoad;
+}
+
+bool dataMoveIdIsValidForBulkLoad(const UID& dataMoveId) {
+	return dataMoveId.isValid() && dataMoveId != anonymousShardId;
+}
 
 std::string stringRemovePrefix(std::string str, const std::string& prefix) {
 	if (str.compare(0, prefix.length(), prefix) == 0) {

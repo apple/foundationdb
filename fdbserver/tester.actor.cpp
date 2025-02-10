@@ -1310,6 +1310,10 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 }
 
 ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, AuditType auditType) {
+	if (SERVER_KNOBS->DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM &&
+	    (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica)) {
+		return Void();
+	}
 	TraceEvent(SevDebug, "AuditStorageCorrectnessBegin").detail("AuditType", auditType);
 	state Database cx;
 	state UID auditId;
@@ -1964,6 +1968,9 @@ ACTOR Future<Void> runConsistencyCheckerUrgentHolder(Reference<AsyncVar<Optional
 }
 
 Future<Void> checkConsistencyUrgentSim(Database cx, std::vector<TesterInterface> testers) {
+	if (SERVER_KNOBS->DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM) {
+		return Void();
+	}
 	return runConsistencyCheckerUrgentHolder(
 	    Reference<AsyncVar<Optional<ClusterControllerFullInterface>>>(), cx, testers, 1, /*repeatRun=*/false);
 }
@@ -2639,7 +2646,14 @@ ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string co
 		TraceEvent(SevWarnAlways, ("ScheduleDisableConnectionFailures_" + context).c_str())
 		    .detail("At", now() + seconds);
 		wait(delay(seconds));
-		disableConnectionFailures(context);
+		while (true) {
+			double delaySeconds = disableConnectionFailures(context, ForceDisable::False);
+			if (delaySeconds > 0.001) {
+				wait(delay(delaySeconds));
+			} else {
+				break;
+			}
+		}
 	}
 	return Void();
 }
@@ -2859,7 +2873,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 
-	enableConnectionFailures("Tester");
+	enableConnectionFailures("Tester", FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS);
 	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
 	state Future<Void> repairDataCenter;
 	if (useDB) {

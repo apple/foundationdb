@@ -22,12 +22,11 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbrpc/FlowTransport.h"
 #include "fdbserver/BulkDumpUtil.actor.h"
+#include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
-#include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Optional.h"
@@ -35,7 +34,6 @@
 #include "flow/Trace.h"
 #include "fdbclient/S3Client.actor.h" // include the header for S3Client
 #include "flow/flow.h"
-#include <stdexcept>
 #include <string>
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -124,17 +122,6 @@ void writeStringToFile(const std::string& path, const std::string& content) {
 	return writeFile(abspath(path), content);
 }
 
-void clearFileFolder(const std::string& folderPath) {
-	platform::eraseDirectoryRecursive(abspath(folderPath));
-	return;
-}
-
-void resetFileFolder(const std::string& folderPath, const UID& logId) {
-	clearFileFolder(abspath(folderPath));
-	platform::createDirectory(abspath(folderPath));
-	return;
-}
-
 void bulkDumpFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax, UID logId) {
 	const std::string content = readFileBytes(abspath(fromFile), fileBytesMax);
 	writeStringToFile(toFile, content);
@@ -161,7 +148,7 @@ BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
                                               BulkLoadType dumpType,
                                               BulkLoadTransportMethod transportMethod) {
 	// Step 1: Clean up local folder
-	resetFileFolder((abspath(localFileSetConfig.getFolder())), logId);
+	resetFileFolder((abspath(localFileSetConfig.getFolder())));
 
 	// Step 2: Dump data to file
 	bool containDataFile = false;
@@ -240,7 +227,7 @@ void bulkDumpTransportCP_impl(const BulkLoadFileSet& sourceFileSet,
                               size_t fileBytesMax,
                               UID logId) {
 	// Clear remote existing folder
-	resetFileFolder(abspath(destinationFileSet.getFolder()), logId);
+	resetFileFolder(abspath(destinationFileSet.getFolder()));
 	// Copy bulk dump files to the remote folder
 	ASSERT(sourceFileSet.hasManifestFile() && destinationFileSet.hasManifestFile());
 	bulkDumpFileCopy(abspath(sourceFileSet.getManifestFileFullPath()),
@@ -305,7 +292,7 @@ void generateBulkDumpJobManifestFile(const std::string& workFolder,
                                      const std::string& localJobManifestFilePath,
                                      const std::string& content,
                                      const UID& logId) {
-	resetFileFolder(workFolder, logId);
+	resetFileFolder(workFolder);
 	writeStringToFile(localJobManifestFilePath, content);
 	TraceEvent(SevInfo, "GenerateBulkDumpJobManifestWriteLocal", logId)
 	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
