@@ -286,7 +286,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO,             0.85 );
 	init( PW_MAX_SS_LESSTHAN_MIN_BYTES_BALANCE_RATIO,              8 );
 	init( PERPETUAL_WIGGLE_DISABLE_REMOVER,                     true );
-	init( PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET,         false ); if (isSimulated) PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET = deterministicRandom()->coinflip();
+	init( PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET,          true ); if (isSimulated) PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET = deterministicRandom()->coinflip();
 	init( PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO,           0.30 ); if (isSimulated) PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO = 0.05;
 	init( LOG_ON_COMPLETION_DELAY,         DD_QUEUE_LOGGING_INTERVAL );
 	init( BEST_TEAM_MAX_TEAM_TRIES,                               10 );
@@ -602,8 +602,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,            16 << 20 ); // 16MB
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,             1 ); // RocksDB default.
 	bool suggestCompactRange = deterministicRandom()->coinflip();
-	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,            false ); if (isSimulated) SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE = suggestCompactRange;
-	init( SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD,       200 ); if (isSimulated) SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD = suggestCompactRange? 0:50; 
+	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,             true ); if (isSimulated) SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE = suggestCompactRange;
+	init( SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD,        0 ); if (isSimulated) SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD = suggestCompactRange? 0:50; 
 	init( SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS,                     4 );
 	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE, isSimulated?   128 << 20 : 3LL << 30); // 3GB
 	init( SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO,              0.5 ); /* Share of high priority Index&filter blocks in cache */
@@ -619,7 +619,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_MAX_OPEN_FILES,                      50000 ); // Should be smaller than OS's fd limit.
 	init( SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE,       false); if (isSimulated) SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE = deterministicRandom()->coinflip();
 	init (SHARDED_ROCKSDB_READ_ASYNC_IO,                       false ); if (isSimulated) SHARDED_ROCKSDB_READ_ASYNC_IO = deterministicRandom()->coinflip();
-	init( SHARDED_ROCKSDB_PREFIX_LEN,                              0 ); if( randomize && BUGGIFY )  SHARDED_ROCKSDB_PREFIX_LEN = deterministicRandom()->randomInt(1, 20);
+	init( SHARDED_ROCKSDB_PREFIX_LEN,                             11 ); if( randomize && BUGGIFY )  SHARDED_ROCKSDB_PREFIX_LEN = deterministicRandom()->randomInt(1, 20);
 	init( SHARDED_ROCKSDB_BLOOM_FILTER_BITS,                       3 ); if( randomize && BUGGIFY )  SHARDED_ROCKSDB_BLOOM_FILTER_BITS = deterministicRandom()->randomInt(3, 10);
 	init (SHARDED_ROCKSDB_MEMTABLE_BLOOM_FILTER_RATIO,           0.1 );
 	init( SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE,              0.001 ); if( randomize && BUGGIFY ) SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
