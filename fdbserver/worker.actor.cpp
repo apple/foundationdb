@@ -1129,6 +1129,7 @@ TEST_CASE("/fdbserver/worker/addressIsRemoteLogRouter") {
 // Returns true if the `peer` has enough measurement samples that should be checked by the health monitor.
 bool shouldCheckPeer(Reference<Peer> peer) {
 	TraceEvent(SevDebug, "ShouldCheckPeer")
+	    .suppressFor(0.1)
 	    .detail("ConnectFailedCount", peer->connectFailedCount)
 	    .detail("PingLatencyPopulationSize", peer->pingLatencies.getPopulationSize());
 

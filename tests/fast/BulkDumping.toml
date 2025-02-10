@@ -37,6 +37,9 @@ cc_enforce_use_unfit_dd_in_sim = true
 # AuditStorage replica check can cause tooManyTraceEvents because both tests are large
 disable_audit_storage_final_replica_check_in_sim = true
 
+# Since the machineCount is large, this test produces more trace events to complete
+max_trace_lines = 5000000
+
 [[test]]
 testTitle = 'BulkDumpingWorkload'
 useDB = true
