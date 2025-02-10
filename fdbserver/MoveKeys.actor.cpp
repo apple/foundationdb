@@ -1650,6 +1650,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 			state Key begin = keys.begin;
 			state KeyRange currentKeys = keys;
 
+			state std::vector<Future<Void>> actors; // Note this clears ongoing actors from the previous iteration
 			state Transaction tr(occ);
 
 			try {
@@ -1723,7 +1724,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				}
 
 				currentKeys = KeyRangeRef(begin, keys.end);
-				state std::vector<Future<Void>> actors;
 
 				if (!currentKeys.empty()) {
 					const int rowLimit = SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT;
