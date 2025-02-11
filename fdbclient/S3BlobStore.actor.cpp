@@ -24,6 +24,8 @@
 #include "fdbclient/Knobs.h"
 #include "flow/IConnection.h"
 #include "flow/Trace.h"
+#include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
@@ -1129,13 +1131,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(reqF, requestTimeout));
-			if (!_r) {
-				TraceEvent("S3BlobStoreDoRequestAfterDoRequestNoResponse")
-				    .detail("Verb", verb)
-				    .detail("Resource", resource)
-				    .detail("Timeout", requestTimeout);
-				continue;
-			}
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
 				// simulate an error from s3
 				_r->code = badRequestCode;
@@ -1151,7 +1146,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 			rconn.conn.clear();
 		} catch (Error& e) {
-			TraceEvent("S3BlobStoreDoRequestError")
+			TraceEvent(SevWarn, "S3BlobStoreDoRequestError")
 			    .errorUnsuppressed(e)
 			    .detail("Verb", verb)
 			    .detail("Resource", resource);
@@ -1957,86 +1952,46 @@ ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore,
                                   void* data,
                                   int length,
                                   int64_t offset) {
-	wait(bstore->requestRateRead->getAllowance(1));
-	// Build up a trace event for the read object request to log on exception.
-	state TraceEvent te("S3BlobStoreReadObject");
-	te.detail("Bucket", bucket)
-	    .detail("Length", length)
-	    .detail("Offset", offset)
-	    .detail("Host", bstore->host)
-	    .detail("Port", bstore->service);
-
 	try {
 		if (length <= 0) {
-			te.detail("Result", "EmptyRead");
+			TraceEvent(SevWarn, "S3BlobStoreReadObjectEmptyRead").detail("Length", length);
 			return 0;
 		}
 
 		// Log rate limiter state
 		wait(bstore->requestRateRead->getAllowance(1));
-		te.detail("GotRateLimiterAllowance", true);
 
 		state std::string resource = constructResourcePath(bstore, bucket, object);
-		te.detail("Resource", resource);
 		state HTTP::Headers headers;
 		headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
 
-		// Log request details
-		te.detail("RangeHeader", headers["Range"]).detail("HasCredentials", bstore->credentials.present());
-
-		// Check credentials before making request
-		if (bstore->credentials.present()) {
-			te.detail("CredentialsKey", bstore->credentials.get().key)
-			    .detail("HasSecret", !bstore->credentials.get().secret.empty())
-			    .detail("HasToken", !bstore->credentials.get().securityToken.empty());
-		}
-
 		// Attempt the request
 		state Reference<HTTP::IncomingResponse> r;
-		try {
-			Reference<HTTP::IncomingResponse> _r =
-			    wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
-			r = _r;
-			te.detail("RequestSuccess", true);
-		} catch (Error& e) {
-			te.errorUnsuppressed(e).detail("Phase", "DoRequest");
-			throw;
-		}
-
-		// Analyze response
-		te.detail("ResponseContentLength", r->data.contentLen)
-		    .detail("ResponseContentSize", r->data.content.size())
-		    .detail("Code", r->code);
+		Reference<HTTP::IncomingResponse> _r =
+		    wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
+		r = _r;
 
 		if (r->code == 404) {
 			throw file_not_found();
 		}
 
 		// Verify response has content
-		if (r->data.contentLen != r->data.content.size()) {
-			te.detail("Result", "HeaderOnlyResponse")
-			    .detail("ContentLength", r->data.contentLen)
-			    .detail("ActualSize", r->data.content.size());
+		if (r->data.contentLen != r->data.content.size() || r->data.contentLen != length) {
+			TraceEvent(SevWarn, "S3BlobStoreReadObjectContentLengthMismatch")
+			    .detail("Expected", r->data.contentLen)
+			    .detail("Actual", r->data.content.size())
+			    .detail("Length", length);
 			throw io_error();
 		}
 
-		// Copy data and return bytes read
-		int bytesToCopy = std::min<int64_t>(r->data.contentLen, length);
 		try {
-			if (data == nullptr) {
-				te.detail("Error", "NullDestinationBuffer");
-				throw io_error();
-			}
-			memcpy(data, r->data.content.data(), bytesToCopy);
-			te.detail("Result", "Success").detail("BytesRead", bytesToCopy);
-			return bytesToCopy;
+			memcpy(data, r->data.content.data(), r->data.contentLen);
+			return r->data.contentLen;
 		} catch (Error& e) {
-			te.detail("Result", "MemcpyError").detail("ErrorWhat", e.what());
 			throw io_error();
 		}
 
 	} catch (Error& e) {
-		te.errorUnsuppressed(e);
 		TraceEvent(SevWarn, "S3BlobStoreEndpoint_ReadError")
 		    .error(e)
 		    .detail("Bucket", bucket)

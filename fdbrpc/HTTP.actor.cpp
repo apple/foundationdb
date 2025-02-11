@@ -356,11 +356,11 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		*pos = 0;
 
 		// Read until there are at least contentLen bytes available at pos
-		wait(read_fixed_into_string(conn, r->contentLen - r->content.size(), &r->content, *pos));
+		wait(read_fixed_into_string(conn, r->contentLen, &r->content, *pos));
 
 		// There shouldn't be any bytes after content.
 		if (r->content.size() != r->contentLen) {
-			TraceEvent(SevError, "HTTPContentLengthMismatch")
+			TraceEvent(SevWarn, "HTTPContentLengthMismatch")
 			    .detail("ContentLength", r->contentLen)
 			    .detail("ContentSize", r->content.size());
 			throw http_bad_response();
@@ -410,7 +410,7 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 
 		// If the header parsing did not consume all of the buffer then something is wrong
 		if (*pos != r->content.size()) {
-			TraceEvent(SevError, "HTTPContentLengthMismatch2")
+			TraceEvent(SevWarn, "HTTPContentLengthMismatch2")
 			    .detail("ContentLength", r->contentLen)
 			    .detail("ContentSize", r->content.size());
 			throw http_bad_response();
@@ -420,7 +420,7 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		r->content.erase(r->contentLen);
 	} else {
 		// Some unrecogize response content scheme is being used.
-		TraceEvent(SevError, "HTTPUnknownContentScheme")
+		TraceEvent(SevWarn, "HTTPUnknownContentScheme")
 		    .detail("ContentLength", r->contentLen)
 		    .detail("ContentSize", r->content.size());
 		throw http_bad_response();
@@ -433,14 +433,13 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		}
 
 		if (!HTTP::verifyMD5(r, false)) { // false arg means do not fail if the Content-MD5 header is missing.
-			TraceEvent(SevError, "HTTPMD5Mismatch")
+			TraceEvent(SevWarn, "HTTPMD5Mismatch")
 			    .detail("ContentLength", r->contentLen)
 			    .detail("ContentSize", r->content.size());
 			throw http_bad_response();
 		}
 	}
 
-	TraceEvent(SevInfo, "HTTPReadHTTPDataDone").detail("ContentSize", r->content.size());
 	return Void();
 }
 
@@ -461,7 +460,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 	// read verb
 	ss >> r->verb;
 	if (ss.fail()) {
-		TraceEvent(SevError, "HTTPRequestVerbNotFound")
+		TraceEvent(SevWarn, "HTTPRequestVerbNotFound")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
 		    .detail("LineLen", lineLen)
@@ -472,7 +471,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 	// read resource
 	ss >> r->resource;
 	if (ss.fail()) {
-		TraceEvent(SevError, "HTTPRequestResourceNotFound")
+		TraceEvent(SevWarn, "HTTPRequestResourceNotFound")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
 		    .detail("LineLen", lineLen)
@@ -484,7 +483,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 	std::string httpVersion;
 	ss >> httpVersion;
 	if (ss.fail()) {
-		TraceEvent(SevError, "HTTPRequestHTTPVersionNotFound")
+		TraceEvent(SevWarn, "HTTPRequestHTTPVersionNotFound")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
 		    .detail("LineLen", lineLen)
@@ -493,7 +492,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 	}
 
 	if (ss && !ss.eof()) {
-		TraceEvent(SevError, "HTTPRequestExtraData")
+		TraceEvent(SevWarn, "HTTPRequestExtraData")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
 		    .detail("LineLen", lineLen)
@@ -504,7 +503,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 	float version;
 	sscanf(httpVersion.c_str(), "HTTP/%f", &version);
 	if (version < 1.1) {
-		TraceEvent(SevError, "HTTPRequestHTTPVersionLessThan1_1")
+		TraceEvent(SevWarn, "HTTPRequestHTTPVersionLessThan1_1")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
 		    .detail("LineLen", lineLen)
@@ -548,7 +547,7 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::IncomingResponse> r,
 	int reachedEnd = -1;
 	sscanf(buf.c_str() + pos, "HTTP/%f %d%n", &r->version, &r->code, &reachedEnd);
 	if (reachedEnd < 0) {
-		TraceEvent(SevError, "HTTPResponseCodeNotFound")
+		TraceEvent(SevWarn, "HTTPResponseCodeNotFound")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
 		    .detail("LineLen", lineLen)
@@ -688,6 +687,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 			if (iid != r->data.headers.end()) {
 				responseID = iid->second;
 			}
+			event.detail("RequestIDReceived", responseID);
 
 			// If the response code is 5xx (server error) then a response ID is not expected
 			// so a missing id will be ignored but a mismatching id will still be an error.
@@ -699,7 +699,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 				event.detail("RequestIDMismatch", true);
 				err = http_bad_request_id();
 
-				TraceEvent(SevError, "HTTPRequestFailedIDMismatch")
+				TraceEvent(SevWarn, "HTTPRequestFailedIDMismatch")
 				    .error(err.get())
 				    .detail("DebugID", conn->getDebugID())
 				    .detail("RemoteAddress", conn->getPeerAddress())
@@ -812,8 +812,7 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 		if (!err.present() && r->code == 200) {
 			TraceEvent(SevDebug, "ProxyRequestSuccess")
 			    .detail("RemoteHost", remoteHost)
-			    .detail("RemoteService", remoteService)
-			    .log();
+			    .detail("RemoteService", remoteService);
 			return Void();
 		}
 
