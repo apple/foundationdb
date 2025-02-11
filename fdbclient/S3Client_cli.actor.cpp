@@ -337,7 +337,10 @@ int main(int argc, char** argv) {
 		    new CSimpleOpt(argc, argv, s3client_cli::Options, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE | SO_O_NOERR));
 		auto param = makeReference<s3client_cli::Params>();
 		status = s3client_cli::parseCommandLine(param, args.get());
-		std::cout << "Command line: " << commandLine << " " << param->toString() << std::endl;
+		TraceEvent("S3ClientCommandLine")
+		    .detail("CommandLine", commandLine)
+		    .detail("Params", param->toString())
+		    .detail("Status", status);
 		if (status != FDB_EXIT_SUCCESS) {
 			s3client_cli::printUsage(argv[0]);
 			return status;

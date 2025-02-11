@@ -1129,13 +1129,19 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(reqF, requestTimeout));
+			if (!_r) {
+				TraceEvent("S3BlobStoreDoRequestAfterDoRequestNoResponse")
+				    .detail("Verb", verb)
+				    .detail("Resource", resource)
+				    .detail("Timeout", requestTimeout);
+				continue;
+			}
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
 				// simulate an error from s3
 				_r->code = badRequestCode;
 				simulateS3TokenError = true;
 			}
 			r = _r;
-
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
 			if (r->data.headers["Connection"] != "close") {
@@ -1163,6 +1169,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		// If err is not present then r is valid.
 		// If r->code is in successCodes then record the successful request and return r.
 		if (!err.present() && successCodes.count(r->code) != 0) {
+			TraceEvent(SevDebug, "S3BlobStoreDoRequestSuccessful")
+			    .detail("Verb", verb)
+			    .detail("Error", err.present())
+			    .detail("ErrorString", err.present() ? err.get().name() : "")
+			    .detail("Resource", resource)
+			    .detail("ResponseCode", r->code)
+			    .detail("ResponseContentSize", r->data.content.size())
+			    .log();
 			bstore->s_stats.requests_successful++;
 			++bstore->blobStats->requestsSuccessful;
 			return r;
@@ -1943,23 +1957,94 @@ ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore,
                                   void* data,
                                   int length,
                                   int64_t offset) {
-	if (length <= 0)
-		return 0;
 	wait(bstore->requestRateRead->getAllowance(1));
+	// Build up a trace event for the read object request to log on exception.
+	state TraceEvent te("S3BlobStoreReadObject");
+	te.detail("Bucket", bucket)
+	    .detail("Length", length)
+	    .detail("Offset", offset)
+	    .detail("Host", bstore->host)
+	    .detail("Port", bstore->service);
 
-	state std::string resource = constructResourcePath(bstore, bucket, object);
-	state HTTP::Headers headers;
-	headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
-	Reference<HTTP::IncomingResponse> r =
-	    wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
-	if (r->code == 404)
-		throw file_not_found();
-	if (r->data.contentLen !=
-	    r->data.content.size()) // Double check that this wasn't a header-only response, probably unnecessary
-		throw io_error();
-	// Copy the output bytes, server could have sent more or less bytes than requested so copy at most length bytes
-	memcpy(data, r->data.content.data(), std::min<int64_t>(r->data.contentLen, length));
-	return r->data.contentLen;
+	try {
+		if (length <= 0) {
+			te.detail("Result", "EmptyRead");
+			return 0;
+		}
+
+		// Log rate limiter state
+		wait(bstore->requestRateRead->getAllowance(1));
+		te.detail("GotRateLimiterAllowance", true);
+
+		state std::string resource = constructResourcePath(bstore, bucket, object);
+		te.detail("Resource", resource);
+		state HTTP::Headers headers;
+		headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
+
+		// Log request details
+		te.detail("RangeHeader", headers["Range"]).detail("HasCredentials", bstore->credentials.present());
+
+		// Check credentials before making request
+		if (bstore->credentials.present()) {
+			te.detail("CredentialsKey", bstore->credentials.get().key)
+			    .detail("HasSecret", !bstore->credentials.get().secret.empty())
+			    .detail("HasToken", !bstore->credentials.get().securityToken.empty());
+		}
+
+		// Attempt the request
+		state Reference<HTTP::IncomingResponse> r;
+		try {
+			Reference<HTTP::IncomingResponse> _r =
+			    wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
+			r = _r;
+			te.detail("RequestSuccess", true);
+		} catch (Error& e) {
+			te.errorUnsuppressed(e).detail("Phase", "DoRequest");
+			throw;
+		}
+
+		// Analyze response
+		te.detail("ResponseContentLength", r->data.contentLen)
+		    .detail("ResponseContentSize", r->data.content.size())
+		    .detail("Code", r->code);
+
+		if (r->code == 404) {
+			throw file_not_found();
+		}
+
+		// Verify response has content
+		if (r->data.contentLen != r->data.content.size()) {
+			te.detail("Result", "HeaderOnlyResponse")
+			    .detail("ContentLength", r->data.contentLen)
+			    .detail("ActualSize", r->data.content.size());
+			throw io_error();
+		}
+
+		// Copy data and return bytes read
+		int bytesToCopy = std::min<int64_t>(r->data.contentLen, length);
+		try {
+			if (data == nullptr) {
+				te.detail("Error", "NullDestinationBuffer");
+				throw io_error();
+			}
+			memcpy(data, r->data.content.data(), bytesToCopy);
+			te.detail("Result", "Success").detail("BytesRead", bytesToCopy);
+			return bytesToCopy;
+		} catch (Error& e) {
+			te.detail("Result", "MemcpyError").detail("ErrorWhat", e.what());
+			throw io_error();
+		}
+
+	} catch (Error& e) {
+		te.errorUnsuppressed(e);
+		TraceEvent(SevWarn, "S3BlobStoreEndpoint_ReadError")
+		    .error(e)
+		    .detail("Bucket", bucket)
+		    .detail("Object", object)
+		    .detail("Length", length)
+		    .detail("Offset", offset);
+		throw;
+	}
 }
 
 Future<int> S3BlobStoreEndpoint::readObject(std::string const& bucket,
@@ -2090,6 +2175,27 @@ Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucke
                                                         std::string const& uploadID,
                                                         MultiPartSetT const& parts) {
 	return finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID, parts);
+}
+
+ACTOR Future<Void> abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                             std::string bucket,
+                                             std::string object,
+                                             std::string uploadID) {
+	wait(bstore->requestRateWrite->getAllowance(1));
+
+	std::string resource = constructResourcePath(bstore, bucket, object);
+	resource += format("?uploadId=%s", uploadID.c_str());
+
+	HTTP::Headers headers;
+	Reference<HTTP::IncomingResponse> r =
+	    wait(bstore->doRequest("DELETE", resource, headers, nullptr, 0, { 200, 204 }));
+	return Void();
+}
+
+Future<Void> S3BlobStoreEndpoint::abortMultiPartUpload(std::string const& bucket,
+                                                       std::string const& object,
+                                                       std::string const& uploadID) {
+	return abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID);
 }
 
 TEST_CASE("/backup/s3/v4headers") {
