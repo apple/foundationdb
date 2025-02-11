@@ -572,7 +572,7 @@ struct ShardedRocksDBState {
 			// Create and apply a bloom filter using the 10 bits
 			// which should yield a ~1% false positive rate:
 			// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#full-filters-new-format
-			bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
+			bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(SERVER_KNOBS->SHARDED_ROCKSDB_BLOOM_FILTER_BITS));
 
 			// The whole key blooms are only used for point lookups.
 			// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#prefix-vs-whole-key
