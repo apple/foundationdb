@@ -133,10 +133,15 @@ public:
 		ASSERT(numRunningTasks.get() >= 0);
 	}
 
+	inline void incrementTaskCounter() {
+		ASSERT(numRunningTasks.get() < maxParallelism);
+		numRunningTasks.set(numRunningTasks.get() + 1);
+		ASSERT(numRunningTasks.get() <= maxParallelism);
+	}
+
 	// return true if succeed
-	inline bool tryIncrementTaskCounter() {
+	inline bool canStart() {
 		if (numRunningTasks.get() < maxParallelism) {
-			numRunningTasks.set(numRunningTasks.get() + 1);
 			return true;
 		} else {
 			return false;
