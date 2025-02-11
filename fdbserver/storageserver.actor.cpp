@@ -10839,6 +10839,10 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	    keys,
 	    Reference<ShardInfo>()); // null reference indicates the range being changed
 	std::unordered_map<UID, std::shared_ptr<MoveInShard>> updatedMoveInShards;
+
+	// When TSS is lagging behind, it could see data move conflicts. The conflicting TSS will not recover from error and
+	// needs to be removed.
+	Severity sev = data->isTss() ? SevWarnAlways : SevError;
 	for (int i = 0; i < ranges.size(); i++) {
 		const Reference<ShardInfo> currentShard = ranges[i].value;
 		const KeyRangeRef currentRange = static_cast<KeyRangeRef>(ranges[i]);
@@ -10848,26 +10852,28 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 		}
 		if (!currentShard.isValid()) {
 			if (currentRange != keys) {
-				TraceEvent(SevError, "PhysicalShardStateError")
+				TraceEvent(sev, "PhysicalShardStateError")
 				    .detail("SubError", "RangeDifferent")
 				    .detail("CurrentRange", currentRange)
 				    .detail("ModifiedRange", keys)
 				    .detail("Assigned", nowAssigned)
 				    .detail("DataMoveId", dataMoveId)
-				    .detail("Version", version);
-				throw internal_error();
+				    .detail("Version", version)
+				    .detail("InitialVersion", currentShard->version);
+				throw data_move_conflict();
 			}
 		} else if (currentShard->notAssigned()) {
 			if (!nowAssigned) {
-				TraceEvent(SevError, "PhysicalShardStateError")
+				TraceEvent(sev, "PhysicalShardStateError")
 				    .detail("SubError", "UnassignEmptyRange")
 				    .detail("Assigned", nowAssigned)
 				    .detail("ModifiedRange", keys)
 				    .detail("DataMoveId", dataMoveId)
 				    .detail("Version", version)
 				    .detail("ConflictingShard", currentShard->shardId)
-				    .detail("DesiredShardId", currentShard->desiredShardId);
-				throw internal_error();
+				    .detail("DesiredShardId", currentShard->desiredShardId)
+				    .detail("InitialVersion", currentShard->version);
+				throw data_move_conflict();
 			}
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
@@ -10888,15 +10894,16 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("ResultingShard", newShard.toString());
 		} else if (currentShard->adding) {
 			if (nowAssigned) {
-				TraceEvent(SevError, "PhysicalShardStateError")
+				TraceEvent(sev, "PhysicalShardStateError")
 				    .detail("SubError", "UpdateAddingShard")
 				    .detail("Assigned", nowAssigned)
 				    .detail("ModifiedRange", keys)
 				    .detail("DataMoveId", dataMoveId)
 				    .detail("Version", version)
 				    .detail("ConflictingShard", currentShard->shardId)
-				    .detail("DesiredShardId", currentShard->desiredShardId);
-				throw internal_error();
+				    .detail("DesiredShardId", currentShard->desiredShardId)
+				    .detail("InitialVersion", currentShard->version);
+				throw data_move_conflict();
 			}
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
@@ -10908,15 +10915,16 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("ResultingShard", newShard.toString());
 		} else if (currentShard->moveInShard) {
 			if (nowAssigned) {
-				TraceEvent(SevError, "PhysicalShardStateError")
+				TraceEvent(sev, "PhysicalShardStateError")
 				    .detail("SubError", "UpdateMoveInShard")
 				    .detail("Assigned", nowAssigned)
 				    .detail("ModifiedRange", keys)
 				    .detail("DataMoveId", dataMoveId)
 				    .detail("Version", version)
 				    .detail("ConflictingShard", currentShard->shardId)
-				    .detail("DesiredShardId", currentShard->desiredShardId);
-				throw internal_error();
+				    .detail("DesiredShardId", currentShard->desiredShardId)
+				    .detail("InitialVersion", currentShard->version);
+				throw data_move_conflict();
 			}
 			currentShard->moveInShard->cancel();
 			updatedMoveInShards.emplace(currentShard->moveInShard->id(), currentShard->moveInShard);
