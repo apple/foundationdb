@@ -119,15 +119,21 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
 }
 
 // Upload a part of a multipart upload with retry logic.
-ACTOR static Future<PartState> uploadPartWithRetry(Reference<S3BlobStoreEndpoint> endpoint,
-                                                   std::string bucket,
-                                                   std::string objectName,
-                                                   std::string uploadID,
-                                                   PartState part, // Pass by value for state management
-                                                   std::string partData,
-                                                   int retryDelayMs) {
+ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoint,
+                                          std::string bucket,
+                                          std::string objectName,
+                                          std::string uploadID,
+                                          PartState part, // Pass by value for state management
+                                          std::string partData,
+                                          int retryDelayMs) {
 	state PartState resultPart = part;
 	state UnsentPacketQueue packets;
+	TraceEvent("S3ClientUploadPartStart")
+	    .detail("Bucket", bucket)
+	    .detail("Object", objectName)
+	    .detail("PartNumber", part.partNumber)
+	    .detail("Offset", resultPart.offset)
+	    .detail("Size", resultPart.size);
 
 	try {
 		PacketWriter pw(packets.getWriteBuffer(partData.size()), nullptr, Unversioned());
@@ -138,6 +144,12 @@ ACTOR static Future<PartState> uploadPartWithRetry(Reference<S3BlobStoreEndpoint
 
 		resultPart.etag = etag;
 		resultPart.completed = true;
+		TraceEvent("S3ClientUploadPartEnd")
+		    .detail("Bucket", bucket)
+		    .detail("Object", objectName)
+		    .detail("PartNumber", part.partNumber)
+		    .detail("Offset", resultPart.offset)
+		    .detail("Size", resultPart.size);
 		return resultPart;
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "S3ClientUploadPartError")
@@ -205,8 +217,8 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			part.md5 = md5;
 			parts.push_back(part);
 
-			uploadFutures.push_back(uploadPartWithRetry(
-			    endpoint, bucket, objectName, uploadID, part, partDatas.back(), config.retryDelayMs));
+			uploadFutures.push_back(
+			    uploadPart(endpoint, bucket, objectName, uploadID, part, partDatas.back(), config.retryDelayMs));
 
 			offset += partSize;
 			partNumber++;
@@ -390,6 +402,12 @@ ACTOR static Future<PartState> downloadPartWithRetry(Reference<S3BlobStoreEndpoi
 		wait(file->write(buffer.data(), bytesRead, resultPart.offset));
 
 		resultPart.completed = true;
+		TraceEvent("S3ClientDownloadPartEnd")
+		    .detail("Bucket", bucket)
+		    .detail("Object", objectName)
+		    .detail("PartNumber", part.partNumber)
+		    .detail("Offset", resultPart.offset)
+		    .detail("Size", resultPart.size);
 		return resultPart;
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "S3ClientDownloadPartError")
