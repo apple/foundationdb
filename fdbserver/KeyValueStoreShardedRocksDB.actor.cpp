@@ -559,8 +559,7 @@ struct ShardedRocksDBState {
 			options.prefix_extractor.reset(rocksdb::NewFixedPrefixTransform(SERVER_KNOBS->SHARDED_ROCKSDB_PREFIX_LEN));
 
 			// Also turn on bloom filters in the memtable.
-			// TODO: Make a knob for this as well.
-			options.memtable_prefix_bloom_size_ratio = 0.1;
+			options.memtable_prefix_bloom_size_ratio = SERVER_KNOBS->SHARDED_ROCKSDB_MEMTABLE_BLOOM_FILTER_RATIO;
 
 			// 5 -- Can be read by RocksDB's versions since 6.6.0. Full and partitioned
 			// filters use a generally faster and more accurate Bloom filter
@@ -571,7 +570,7 @@ struct ShardedRocksDBState {
 			// Create and apply a bloom filter using the 10 bits
 			// which should yield a ~1% false positive rate:
 			// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#full-filters-new-format
-			bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
+			bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(SERVER_KNOBS->SHARDED_ROCKSDB_BLOOM_FILTER_BITS));
 
 			// The whole key blooms are only used for point lookups.
 			// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#prefix-vs-whole-key
