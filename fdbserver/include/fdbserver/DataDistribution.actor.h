@@ -564,10 +564,7 @@ inline bool bulkDumpIsEnabled(int bulkDumpModeValue) {
 
 class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
 public:
-	BulkLoadTaskCollection(UID ddId, int maxParallelism)
-	  : ddId(ddId), maxParallelism(maxParallelism), numRunningTasks(0) {
-		bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadEngineTask>());
-	}
+	BulkLoadTaskCollection(UID ddId) : ddId(ddId) { bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadEngineTask>()); }
 
 	// Return true if there exists a bulk load task
 	bool overlappingTask(KeyRange range) {
@@ -709,30 +706,9 @@ public:
 		return res;
 	}
 
-	inline void decrementTaskCounter() {
-		ASSERT(numRunningTasks.get() <= maxParallelism);
-		numRunningTasks.set(numRunningTasks.get() - 1);
-		ASSERT(numRunningTasks.get() >= 0);
-	}
-
-	// return true if succeed
-	inline bool tryStart() {
-		if (numRunningTasks.get() < maxParallelism) {
-			numRunningTasks.set(numRunningTasks.get() + 1);
-			return true;
-		} else {
-			return false;
-		}
-	}
-
-	inline bool canStart() const { return numRunningTasks.get() < maxParallelism; }
-	inline Future<Void> waitUntilChanged() const { return numRunningTasks.onChange(); }
-
 private:
 	KeyRangeMap<Optional<DDBulkLoadEngineTask>> bulkLoadTaskMap;
 	UID ddId;
-	AsyncVar<int> numRunningTasks;
-	int maxParallelism;
 };
 
 #ifndef __INTEL_COMPILER
