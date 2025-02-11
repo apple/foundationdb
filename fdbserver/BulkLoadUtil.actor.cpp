@@ -88,6 +88,9 @@ ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // in
                                              std::string byteSampleFileFullPath, // output file
                                              UID logId) {
 	state int counter = 0;
+	state bool res = false;
+	state int retryCount = 0;
+	state double startTime = now();
 	loop {
 		try {
 			state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
@@ -113,21 +116,33 @@ ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // in
 			// In this case, no SST sample byte file is generated
 			if (anySampled) {
 				ASSERT(sstWriter->finish());
-				return true;
+				res = true;
 			} else {
 				ASSERT(!sstWriter->finish());
 				deleteFile(abspath(byteSampleFileFullPath));
-				return false;
 			}
+			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			TraceEvent(SevWarn, "SSBulkLoadTaskSamplingError", logId).errorUnsuppressed(e);
+			TraceEvent(SevWarn, "SSBulkLoadTaskSamplingError", logId)
+			    .errorUnsuppressed(e)
+			    .detail("DataFileFullPath", dataFileFullPath)
+			    .detail("ByteSampleFileFullPath", byteSampleFileFullPath)
+			    .detail("Duration", now() - startTime)
+			    .detail("RetryCount", retryCount);
 			wait(delay(5.0));
 			deleteFile(abspath(byteSampleFileFullPath));
+			retryCount++;
 		}
 	}
+	TraceEvent(SevInfo, "SSBulkLoadTaskSamplingComplete", logId)
+	    .detail("DataFileFullPath", dataFileFullPath)
+	    .detail("ByteSampleFileFullPath", byteSampleFileFullPath)
+	    .detail("Duration", now() - startTime)
+	    .detail("RetryCount", retryCount);
+	return res;
 }
 
 void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
@@ -202,6 +217,8 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
                                                           BulkLoadFileSet fromRemoteFileSet,
                                                           std::string toLocalRoot,
                                                           UID logId) {
+	state int retryCount = 0;
+	state double startTime = now();
 	ASSERT(transportMethod != BulkLoadTransportMethod::Invalid);
 	loop {
 		try {
@@ -226,9 +243,16 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 				wait(bulkLoadTransportBlobstore_impl(
 				    fromRemoteFileSet, toLocalFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
 			} else {
-				ASSERT(false);
+				UNREACHABLE();
 			}
 			// TODO(BulkLoad): Check file checksum
+			TraceEvent(SevInfo, "SSBulkLoadDownloadTaskFileSet", logId)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("FromRemoteFileSet", fromRemoteFileSet.toString())
+			    .detail("ToLocalRoot", toLocalRoot)
+			    .detail("Duration", now() - startTime)
+			    .detail("RetryCount", retryCount);
 
 			return toLocalFileSet;
 
@@ -236,7 +260,15 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			TraceEvent(SevWarn, "SSBulkLoadDownloadTaskFileSetError", logId).errorUnsuppressed(e);
+			TraceEvent(SevWarn, "SSBulkLoadDownloadTaskFileSetError", logId)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .errorUnsuppressed(e)
+			    .detail("FromRemoteFileSet", fromRemoteFileSet.toString())
+			    .detail("ToLocalRoot", toLocalRoot)
+			    .detail("Duration", now() - startTime)
+			    .detail("RetryCount", retryCount);
+			retryCount++;
 			wait(delay(5.0));
 		}
 	}
@@ -247,43 +279,40 @@ ACTOR Future<Void> downloadManifestFile(BulkLoadTransportMethod transportMethod,
                                         std::string toLocalPath,
                                         UID logId) {
 	state int retryCount = 0;
+	state double startTime = now();
 	loop {
 		try {
 			if (transportMethod == BulkLoadTransportMethod::CP) {
-				TraceEvent(SevInfo, "DownloadManifestFile", logId)
-				    .detail("FromRemotePath", fromRemotePath)
-				    .detail("ToLocalPath", toLocalPath);
 				bulkLoadFileCopy(abspath(fromRemotePath), abspath(toLocalPath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
 				wait(delay(0.1));
 			} else if (transportMethod == BulkLoadTransportMethod::BLOBSTORE) {
-				TraceEvent(SevInfo, "DownloadManifestFile", logId)
-				    .detail("FromRemotePath", fromRemotePath)
-				    .detail("ToLocalPath", toLocalPath);
 				// TODO: Make use of fileBytesMax
 				wait(copyDownFile(fromRemotePath, abspath(toLocalPath)));
 			} else {
-				TraceEvent(SevError, "DownloadManifestFileError", logId)
-				    .detail("Reason", "Transport method is not implemented")
-				    .detail("TransportMethod", transportMethod)
-				    .detail("FromRemotePath", fromRemotePath)
-				    .detail("ToLocalPath", toLocalPath);
 				UNREACHABLE();
 			}
 			if (!fileExists(abspath(toLocalPath))) {
 				throw retry();
 			}
+			TraceEvent(SevInfo, "DownloadManifestFile", logId)
+			    .detail("FromRemotePath", fromRemotePath)
+			    .detail("ToLocalPath", toLocalPath)
+			    .detail("Duration", now() - startTime)
+			    .detail("RetryCount", retryCount);
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
+			TraceEvent(SevWarnAlways, "DownloadManifestFileError", logId)
+			    .errorUnsuppressed(e)
+			    .detail("TransportMethod", transportMethod)
+			    .detail("FromRemotePath", fromRemotePath)
+			    .detail("ToLocalPath", toLocalPath)
+			    .detail("RetryCount", retryCount)
+			    .detail("Duration", now() - startTime);
 			retryCount++;
 			if (retryCount > 10) {
-				TraceEvent(SevWarnAlways, "DownloadManifestFileError", logId)
-				    .errorUnsuppressed(e)
-				    .detail("TransportMethod", transportMethod)
-				    .detail("FromRemotePath", fromRemotePath)
-				    .detail("ToLocalPath", toLocalPath);
 				throw e;
 			}
 			wait(delay(5.0));
