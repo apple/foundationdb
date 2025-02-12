@@ -463,8 +463,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 		TraceEvent(SevWarn, "HTTPRequestVerbNotFound")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
-		    .detail("LineLen", lineLen)
-		    .log();
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
@@ -474,8 +473,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 		TraceEvent(SevWarn, "HTTPRequestResourceNotFound")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
-		    .detail("LineLen", lineLen)
-		    .log();
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
@@ -486,8 +484,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 		TraceEvent(SevWarn, "HTTPRequestHTTPVersionNotFound")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
-		    .detail("LineLen", lineLen)
-		    .log();
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
@@ -495,8 +492,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 		TraceEvent(SevWarn, "HTTPRequestExtraData")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
-		    .detail("LineLen", lineLen)
-		    .log();
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
@@ -506,8 +502,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 		TraceEvent(SevWarn, "HTTPRequestHTTPVersionLessThan1_1")
 		    .detail("Buffer", buf)
 		    .detail("Pos", pos)
-		    .detail("LineLen", lineLen)
-		    .log();
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
@@ -737,7 +732,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		}
 
 		if (err.present()) {
-			event.detail("IsThisTheDuplicateInlineError", err.get().name());
 			throw err.get();
 		}
 

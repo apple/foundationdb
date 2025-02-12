@@ -1976,21 +1976,22 @@ ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore,
 		}
 
 		// Verify response has content
-		if (r->data.contentLen != r->data.content.size() || r->data.contentLen != length) {
+		if (r->data.contentLen != r->data.content.size()) {
 			TraceEvent(SevWarn, "S3BlobStoreReadObjectContentLengthMismatch")
 			    .detail("Expected", r->data.contentLen)
-			    .detail("Actual", r->data.content.size())
-			    .detail("Length", length);
+			    .detail("Actual", r->data.content.size());
 			throw io_error();
 		}
 
 		try {
-			memcpy(data, r->data.content.data(), r->data.contentLen);
+			// Copy the output bytes, server could have sent more or less bytes than requested so copy at most length
+			// bytes
+			memcpy(data, r->data.content.data(), std::min<int64_t>(r->data.contentLen, length));
 			return r->data.contentLen;
 		} catch (Error& e) {
+			TraceEvent(SevWarn, "S3BlobStoreReadObjectMemcpyError").detail("Error", e.what());
 			throw io_error();
 		}
-
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "S3BlobStoreEndpoint_ReadError")
 		    .error(e)
