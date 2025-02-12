@@ -1146,6 +1146,8 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 	state BulkLoadTaskState triggeredBulkLoadTask;
 	state Version commitVersion = invalidVersion;
 	state double beginTime = now();
+	ASSERT(self->bulkLoadEngineParallelismLimitor.canStart());
+	self->bulkLoadEngineParallelismLimitor.incrementTaskCounter();
 	try {
 		// Step 1: persist bulk load task phase as triggered
 		std::pair<BulkLoadTaskState, Version> triggeredBulkLoadTask_ = wait(triggerBulkLoadTask(self, range, taskId));
@@ -1248,7 +1250,7 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 					           bulkLoadTaskState.phase == BulkLoadPhase::Running) {
 						// Limit parallelism
 						loop {
-							if (self->bulkLoadEngineParallelismLimitor.tryIncrementTaskCounter()) {
+							if (self->bulkLoadEngineParallelismLimitor.canStart()) {
 								break;
 							}
 							wait(self->bulkLoadEngineParallelismLimitor.waitUntilCounterChanged());
@@ -1400,6 +1402,8 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 	state BulkLoadTaskState bulkLoadTask;
 	state BulkLoadJobState bulkLoadJob;
 	state double beginTime = now();
+	ASSERT(self->bulkLoadParallelismLimitor.canStart());
+	self->bulkLoadParallelismLimitor.incrementTaskCounter();
 	try {
 		// Step 1: Get manifest metadata by downloading the manifest file
 		BulkLoadManifest manifest = wait(getBulkLoadManifestMetadataFromEntry(
@@ -1461,6 +1465,8 @@ ACTOR Future<Void> bulkLoadJobOnRuningTask(Reference<DataDistributor> self, Bulk
 	state Transaction tr(cx);
 	state BulkLoadTaskState bulkLoadTask;
 	state double beginTime = now();
+	ASSERT(self->bulkLoadParallelismLimitor.canStart());
+	self->bulkLoadParallelismLimitor.incrementTaskCounter();
 	try {
 		// Step 1: Get ongoing bulkload task
 		// Currently, if there is an existing bulkload task, the task is guaranteed to be completed.
@@ -1647,7 +1653,7 @@ ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self,
 					        existJob.getManifestRange().begin)) {
 						// Limit parallelism
 						loop {
-							if (self->bulkLoadParallelismLimitor.tryIncrementTaskCounter()) {
+							if (self->bulkLoadParallelismLimitor.canStart()) {
 								break;
 							}
 							wait(self->bulkLoadParallelismLimitor.waitUntilCounterChanged());
@@ -1675,7 +1681,7 @@ ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self,
 						ASSERT(self->bulkLoadJobManager.jobId == jobId);
 						// Limit parallelism
 						loop {
-							if (self->bulkLoadParallelismLimitor.tryIncrementTaskCounter()) {
+							if (self->bulkLoadParallelismLimitor.canStart()) {
 								break;
 							}
 							wait(self->bulkLoadParallelismLimitor.waitUntilCounterChanged());
@@ -1807,6 +1813,8 @@ ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
                                   BulkDumpState bulkDumpState,
                                   std::vector<UID> checksumServers) {
 	state double beginTime = now();
+	ASSERT(self->bulkDumpParallelismLimitor.canStart());
+	self->bulkDumpParallelismLimitor.incrementTaskCounter();
 	TraceEvent(SevInfo, "DDBulkDumpDoTaskStart", self->ddId)
 	    .detail("TargetSS", ssi.id())
 	    .detail("BulkDumpState", bulkDumpState.toString());
@@ -1897,7 +1905,7 @@ ACTOR Future<bool> scheduleBulkDumpTasks(Reference<DataDistributor> self) {
 					if (!self->ongoingBulkDumpActors.liveActorAt(taskRange.begin)) {
 						// Limit parallelism
 						loop {
-							if (self->bulkDumpParallelismLimitor.tryIncrementTaskCounter()) {
+							if (self->bulkDumpParallelismLimitor.canStart()) {
 								break;
 							}
 							wait(self->bulkDumpParallelismLimitor.waitUntilCounterChanged());
