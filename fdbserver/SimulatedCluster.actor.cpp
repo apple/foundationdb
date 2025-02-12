@@ -1675,17 +1675,17 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 // Sets generateFearless and number of dataCenters based on testConfig details
 // The number of datacenters may be overwritten in setRegions
 void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
-	generateFearless =
-	    testConfig.simpleConfig ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
-	if (testConfig.generateFearless.present()) {
-		// overwrite whatever decision we made before
-		generateFearless = testConfig.generateFearless.get();
-	}
+
 #ifdef NO_MULTIREGION_TEST
-	if (generateFearless) {
-		// Tests requiring multiregion cannot run if desired build does not support it.
-		throw internal_error;
+	if (testConfig.minimumRegions > 1 || (testConfig.generateFearless.present() && testConfig.generateFearless.get())) {
+		throw internal_error_msg("Test requires multi-region while the flag is turned off in the build process");
 	}
+	generateFearless = false;
+#else
+	generateFearless =
+	    testConfig.generateFearless.present()
+	        ? testConfig.generateFearless.get()
+	        : (!testConfig.simpleConfig && (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5));
 #endif
 	datacenters =
 	    testConfig.simpleConfig
@@ -2195,6 +2195,7 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 	if (needsRemote || deterministicRandom()->random01() < 0.5) {
 		regionArr.push_back(remoteObj);
 	}
+
 	if (needsRemote) {
 		g_simulator->originalRegions =
 		    "regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
