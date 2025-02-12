@@ -2,6 +2,18 @@
 Release Notes
 #############
 
+7.3.61
+======
+* Same as 7.3.60 release with AVX enabled.
+
+7.3.60
+======
+* Fixed a potential corruption of the destination storage server when shard_encode_location_metadata is enabled. `(PR #11934) <https://github.com/apple/foundationdb/pull/11934>`_
+* Paused storage wiggle when all storage servers do not have enough available space. `(PR #11911) <https://github.com/apple/foundationdb/pull/11911>`_
+* Updated Sharded RocksDB knobs. `(PR #11936) <https://github.com/apple/foundationdb/pull/11936>`_
+* Fixed storage migration to consider the perpetualStorageEngine setting. `(PR #11940) <https://github.com/apple/foundationdb/pull/11940>`_
+* Improved the coverage of location metadata auditing. `(PR #11897) <https://github.com/apple/foundationdb/pull/11897>`_
+
 7.3.59
 ======
 * Same as 7.3.58 release with AVX enabled.
