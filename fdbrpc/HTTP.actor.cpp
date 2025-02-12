@@ -489,10 +489,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 	}
 
 	if (ss && !ss.eof()) {
-		TraceEvent(SevWarn, "HTTPRequestExtraData")
-		    .detail("Buffer", buf)
-		    .detail("Pos", pos)
-		    .detail("LineLen", lineLen);
+		TraceEvent(SevWarn, "HTTPRequestExtraData").detail("Buffer", buf).detail("Pos", pos).detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
