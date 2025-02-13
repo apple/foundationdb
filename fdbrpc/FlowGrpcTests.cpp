@@ -1,4 +1,3 @@
-
 /**
  * FlowGrpcTests.actor.cpp
  *
@@ -20,9 +19,11 @@
  */
 
 #ifdef FLOW_GRPC_ENABLED
-#include "flow/UnitTest.h"
+#include <ctime>
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/FlowGrpcTests.h"
+#include "fdbrpc/FileTransfer.h"
+#include "flow/UnitTest.h"
 #include "flow/flow.h"
 
 // So that tests are not optimized out. :/
@@ -30,6 +31,16 @@ void forceLinkGrpcTests2() {}
 
 namespace fdbrpc_test {
 namespace asio = boost::asio;
+
+std::string generate_random_string(int size) {
+	const std::string characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+	std::string random_string;
+	for (int i = 0; i < size; ++i) {
+		random_string += characters[deterministicRandom()->randomInt(0, characters.size())];
+	}
+
+	return random_string;
+}
 
 TEST_CASE("/fdbrpc/grpc/basic_coro") {
 	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50500"));
@@ -66,7 +77,7 @@ TEST_CASE("/fdbrpc/grpc/basic_stream_server") {
 		EchoRequest request;
 		request.set_message("Ping!");
 		auto stream = client.call(&TestEchoService::Stub::EchoRecvStream10, request);
-		loop {
+		while (true) {
 			auto response = co_await stream;
 			ASSERT_EQ(response.message(), "Echo: Ping!");
 			count += 1;
@@ -82,7 +93,7 @@ TEST_CASE("/fdbrpc/grpc/basic_stream_server") {
 }
 
 TEST_CASE("/fdbrpc/grpc/future_destroy") {
-	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50500"));
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50502"));
 	GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	Future<Void> _ = server.run();
@@ -105,7 +116,7 @@ TEST_CASE("/fdbrpc/grpc/future_destroy") {
 }
 
 TEST_CASE("/fdbrpc/grpc/stream_destroy") {
-	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50501"));
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50503"));
 	GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	Future<Void> _ = server.run();
@@ -147,7 +158,7 @@ TEST_CASE("/fdbrpc/grpc/stream_destroy") {
 // 		EchoRequest request;
 // 		request.set_message("Ping!");
 // 		auto stream = client.call(&TestEchoService::Stub::EchoSendStream10, request);
-// 		loop {
+// 		while (true) {
 // 			auto response = co_await stream;
 // 		    ASSERT_EQ(response.message(), "Echo: Ping!");
 // 			count += 1;
@@ -161,6 +172,137 @@ TEST_CASE("/fdbrpc/grpc/stream_destroy") {
 // 	}
 // 	co_return;
 // }
+
+TEST_CASE("/fdbrpc/grpc/file_transfer") {
+	using platform::TmpFile;
+
+	// -- Server --
+	std::string server_address("127.0.0.1:50504");
+	FileTransferServiceImpl service;
+
+	grpc::ServerBuilder builder;
+	builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+	builder.RegisterService(&service);
+
+	std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+	std::cout << "Server listening on " << server_address << std::endl;
+
+	// -- Client --
+	auto channel = grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials());
+	auto client = FileTransferClient(channel);
+	TmpFile src;
+	TmpFile dest;
+	std::cout << "Writing 1GB random bytes to source file.\n";
+	int bytes_written = 0;
+	for (int i = 0; i < 1024; ++i) {
+		const int size = i < 1023 ? 1024 * 1024 : (1024 * 1024) / 2; // Make last block smaller.
+		auto rand_str = generate_random_string(size);
+		src.append((const uint8_t*)rand_str.c_str(), size);
+		bytes_written += size;
+	}
+	std::cout << "Finished writing " << bytes_written << " bytes.\n";
+
+	// -- Start file transfer --
+	std::cout << "Invoking gRPC File Transfer call.\n";
+	auto start = std::chrono::high_resolution_clock::now();
+	auto res = client.DownloadFile(src.getFileName(), dest.getFileName());
+	std::cout << "Src = " << src.getFileName() << ", Dest = " << dest.getFileName() << "\n";
+	auto end = std::chrono::high_resolution_clock::now();
+	auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+	std::cout << "Time taken: " << diff.count() << std::endl;
+	ASSERT(res.has_value());
+	std::cout << "Bytes downloaded: " << res.value() << std::endl;
+	ASSERT_EQ(res.value(), bytes_written);
+	src.destroyFile();
+	dest.destroyFile();
+
+	server->Shutdown();
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/grpc/file_transfer_byte_flip") {
+	using platform::TmpFile;
+
+	// -- Server --
+	std::string server_address("127.0.0.1:50505");
+	FileTransferServiceImpl service;
+	service.SetErrorInjection(FileTransferServiceImpl::FLIP_BYTE);
+
+	grpc::ServerBuilder builder;
+	builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+	builder.RegisterService(&service);
+
+	std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+	std::cout << "Server listening on " << server_address << std::endl;
+
+	// -- Client --
+	auto channel = grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials());
+	auto client = FileTransferClient(channel);
+	TmpFile src;
+	TmpFile dest;
+	std::cout << "Writing 1GB random bytes to source file.\n";
+	int bytes_written = 0;
+	for (int i = 0; i < 1024; ++i) {
+		const int size = i < 1023 ? 1024 * 1024 : (1024 * 1024) / 2; // Make last block smaller.
+		auto rand_str = generate_random_string(size);
+		src.append((const uint8_t*)rand_str.c_str(), size);
+		bytes_written += size;
+	}
+	std::cout << "Finished writing " << bytes_written << " bytes.\n";
+
+	// -- Start file transfer --
+	std::cout << "Invoking gRPC File Transfer call.\n";
+	auto res = client.DownloadFile(src.getFileName(), dest.getFileName());
+	std::cout << "Src = " << src.getFileName() << ", Dest = " << dest.getFileName() << "\n";
+	ASSERT(!res.has_value());
+	src.destroyFile();
+	dest.destroyFile();
+
+	server->Shutdown();
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/grpc/file_transfer_fail_random") {
+	using platform::TmpFile;
+
+	// -- Server --
+	std::string server_address("127.0.0.1:50506");
+	FileTransferServiceImpl service;
+	service.SetErrorInjection(FileTransferServiceImpl::FAIL_RANDOMLY);
+
+	grpc::ServerBuilder builder;
+	builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+	builder.RegisterService(&service);
+
+	std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+	std::cout << "Server listening on " << server_address << std::endl;
+
+	// -- Client --
+	auto channel = grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials());
+	auto client = FileTransferClient(channel);
+	TmpFile src;
+	TmpFile dest;
+	std::cout << "Writing 1GB random bytes to source file.\n";
+	int bytes_written = 0;
+	for (int i = 0; i < 1024; ++i) {
+		const int size = i < 1023 ? 1024 * 1024 : (1024 * 1024) / 2; // Make last block smaller.
+		auto rand_str = generate_random_string(size);
+		src.append((const uint8_t*)rand_str.c_str(), size);
+		bytes_written += size;
+	}
+	std::cout << "Finished writing " << bytes_written << " bytes.\n";
+
+	// -- Start file transfer --
+	std::cout << "Invoking gRPC File Transfer call.\n";
+	auto res = client.DownloadFile(src.getFileName(), dest.getFileName());
+	std::cout << "Src = " << src.getFileName() << ", Dest = " << dest.getFileName() << "\n";
+	ASSERT(!res.has_value());
+	src.destroyFile();
+	dest.destroyFile();
+
+	server->Shutdown();
+	return Void();
+}
 
 } // namespace fdbrpc_test
 
