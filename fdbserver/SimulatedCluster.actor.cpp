@@ -1675,12 +1675,18 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 // Sets generateFearless and number of dataCenters based on testConfig details
 // The number of datacenters may be overwritten in setRegions
 void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
-	generateFearless =
-	    testConfig.simpleConfig ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
-	if (testConfig.generateFearless.present()) {
-		// overwrite whatever decision we made before
-		generateFearless = testConfig.generateFearless.get();
+
+#ifdef NO_MULTIREGION_TEST
+	if (testConfig.minimumRegions > 1 || (testConfig.generateFearless.present() && testConfig.generateFearless.get())) {
+		throw internal_error_msg("Test requires multi-region while the flag is turned off in the build process");
 	}
+	generateFearless = false;
+#else
+	generateFearless =
+	    testConfig.generateFearless.present()
+	        ? testConfig.generateFearless.get()
+	        : (!testConfig.simpleConfig && (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5));
+#endif
 	datacenters =
 	    testConfig.simpleConfig
 	        ? 1
@@ -2346,10 +2352,12 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
+#if (!NO_MULTIREGION_TEST)
 	if (!testConfig.singleRegion &&
 	    (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5))) {
 		setRegions(testConfig);
 	}
+#endif
 	setMachineCount(testConfig);
 	setCoordinators(testConfig);
 
