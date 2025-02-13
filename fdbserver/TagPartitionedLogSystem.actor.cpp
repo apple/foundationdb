@@ -638,6 +638,7 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 				if (tpcvMap.get().contains(location)) {
 					prevVersion = tpcvMap.get()[location];
 				} else {
+					ASSERT(!msg.size());
 					location++;
 					continue;
 				}
