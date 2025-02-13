@@ -2935,8 +2935,17 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	RangeResult result = wait(krmGetRanges(tr, bulkLoadTaskPrefix, range));
 	if (result.size() > 2) {
+		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		    .detail("Reason", "TooManyRanges")
+		    .detail("Range", printable(range))
+		    .detail("Size", result.size())
+		    .detail("TaskId", taskId.toString());
 		throw bulkload_task_outdated();
 	} else if (result[0].value.empty()) {
+		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		    .detail("Reason", "EmptyValue")
+		    .detail("Range", printable(range))
+		    .detail("TaskId", taskId.toString());
 		throw bulkload_task_outdated();
 	}
 	ASSERT(result.size() == 2);
@@ -2944,15 +2953,31 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 	ASSERT(bulkLoadTaskState.getTaskId().isValid());
 	if (taskId != bulkLoadTaskState.getTaskId()) {
 		// This task is overwritten by a newer task
+		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		    .detail("Reason", "TaskIdMismatch")
+		    .detail("Range", printable(range))
+		    .detail("TaskId", taskId.toString())
+		    .detail("TaskIdInDB", bulkLoadTaskState.getTaskId().toString());
 		throw bulkload_task_outdated();
 	}
 	KeyRange currentRange = KeyRangeRef(result[0].key, result[1].key);
 	if (bulkLoadTaskState.getRange() != currentRange) {
 		// This task is partially overwritten by a newer task
 		ASSERT(bulkLoadTaskState.getRange().contains(currentRange));
+		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		    .detail("Reason", "RangeMismatch")
+		    .detail("Range", printable(range))
+		    .detail("TaskId", taskId.toString())
+		    .detail("RangeInDB", printable(currentRange))
+		    .detail("RangeInTask", printable(bulkLoadTaskState.getRange()));
 		throw bulkload_task_outdated();
 	}
 	if (phases.size() > 0 && !bulkLoadTaskState.onAnyPhase(phases)) {
+		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		    .detail("Reason", "PhaseMismatch")
+		    .detail("Range", printable(range))
+		    .detail("TaskId", taskId.toString())
+		    .detail("Phase", bulkLoadTaskState.phase);
 		throw bulkload_task_outdated();
 	}
 	return bulkLoadTaskState;
