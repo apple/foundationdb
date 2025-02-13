@@ -350,7 +350,7 @@ std::string readFileBytes(std::string const& filename, size_t maxSize);
 size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len);
 
 // Write data buffer into file
-void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count);
+void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count, bool append = false);
 
 // Write text into file
 void writeFile(std::string const& filename, std::string const& content);
@@ -462,6 +462,7 @@ public:
 	~TmpFile();
 	size_t read(uint8_t* buff, size_t len);
 	void write(const uint8_t* buff, size_t len);
+	void append(const uint8_t* buff, size_t len);
 	bool destroyFile();
 	std::string getFileName() const { return filename; }
 

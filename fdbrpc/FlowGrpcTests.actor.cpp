@@ -20,9 +20,9 @@
 #ifdef FLOW_GRPC_ENABLED
 #include <cstdio>
 
-#include "flow/UnitTest.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/FlowGrpcTests.h"
+#include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

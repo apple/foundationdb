@@ -85,16 +85,20 @@ function(generate_grpc_protobuf pkg_name)
   package_name_to_proto_target(target_name ${pkg_name})
   package_name_to_path(out_rel_path ${pkg_name})
 
-  add_library(${target_name} ${proto_files})
+  add_library(${target_name} STATIC ${proto_files})
+  target_include_directories(${target_name} PUBLIC ${CMAKE_BINARY_DIR}/generated/)
   target_include_directories(${target_name} PUBLIC ${Protobuf_INCLUDE_DIRS} ${gRPC_INCLUDE_DIRS})
   target_link_libraries(${target_name} PUBLIC gRPC::grpc++)
 
-  set(protoc_out_dir "${CMAKE_BINARY_DIR}/generated/${out_rel_path}/")
-  message(STATUS "Generating protobuf target = ${target_name}, out_path = ${protoc_out_dir}")
+  set(protoc_out_dir "${CMAKE_BINARY_DIR}/generated/${out_rel_path}")
+  message(STATUS "Generating protobuf target = ${target_name}, out_path = ${protoc_out_dir}, files = ${ARGN}")
+
   protobuf_generate(
       TARGET ${target_name}
       PROTOC_OUT_DIR ${protoc_out_dir}
       GENERATE_EXTENSIONS .pb.h .pb.cc
+      APPEND_PATH ${out_rel_path}
+      PROTOS ${proto_files}
   )
 
   protobuf_generate(
@@ -103,7 +107,7 @@ function(generate_grpc_protobuf pkg_name)
       PROTOC_OUT_DIR ${protoc_out_dir}
       PLUGIN protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
       GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
+      APPEND_PATH ${out_rel_path}
+      PROTOS ${proto_files}
   )
-
-  target_include_directories(${target_name} PUBLIC "${protoc_out_dir}")
 endfunction()

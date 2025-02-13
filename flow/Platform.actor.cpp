@@ -3074,8 +3074,11 @@ std::string readFileBytes(std::string const& filename, size_t maxSize) {
 	return ret;
 }
 
-void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
-	std::ofstream ofs(filename, std::fstream::out | std::fstream::binary);
+void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count, bool append) {
+	auto fflags = std::fstream::out | std::fstream::binary;
+	if (append)
+		fflags |= std::fstream::app;
+	std::ofstream ofs(filename, fflags);
 	if (!ofs.good()) {
 		TraceEvent("WriteFileBytes_FileOpenError").detail("Filename", filename).GetLastError();
 		throw io_error();
@@ -3369,7 +3372,11 @@ size_t TmpFile::read(uint8_t* buff, size_t len) {
 }
 
 void TmpFile::write(const uint8_t* buff, size_t len) {
-	writeFileBytes(filename, buff, len);
+	writeFileBytes(filename, buff, len, false);
+}
+
+void TmpFile::append(const uint8_t* buff, size_t len) {
+	writeFileBytes(filename, buff, len, true);
 }
 
 bool TmpFile::destroyFile() {
