@@ -1546,7 +1546,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				DataMoveType dataMoveType = newDataMoveType(doBulkLoading);
 				rd.dataMoveId = newDataMoveId(
 				    deterministicRandom()->randomUInt64(), AssignEmptyRange::False, dataMoveType, rd.dmReason);
-				TraceEvent(SevInfo, "DDBulkLoadNewDataMoveID", this->distributorId)
+				TraceEvent(SevInfo, "DDBulkLoadNewDataMoveID", self->distributorId)
 				    .detail("DataMoveID", rd.dataMoveId.toString())
 				    .detail("TrackID", rd.randomId)
 				    .detail("Range", rd.keys)
