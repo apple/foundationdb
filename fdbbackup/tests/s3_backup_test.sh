@@ -28,7 +28,7 @@ function cleanup {
     shutdown_weed "${TEST_SCRATCH_DIR}"
   fi
   if type shutdown_aws &> /dev/null; then
-    : # shutdown_aws "${TEST_SCRATCH_DIR}"
+    shutdown_aws "${TEST_SCRATCH_DIR}"
   fi
 }
 

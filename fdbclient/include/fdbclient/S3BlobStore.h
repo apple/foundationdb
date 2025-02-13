@@ -424,4 +424,7 @@ public:
 	                                   std::string const& object,
 	                                   std::string const& uploadID,
 	                                   MultiPartSetT const& parts);
+	Future<Void> abortMultiPartUpload(std::string const& bucket,
+	                                  std::string const& object,
+	                                  std::string const& uploadID);
 };

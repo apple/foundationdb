@@ -24,6 +24,8 @@
 #include "fdbclient/Knobs.h"
 #include "flow/IConnection.h"
 #include "flow/Trace.h"
+#include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
@@ -1135,7 +1137,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 				simulateS3TokenError = true;
 			}
 			r = _r;
-
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
 			if (r->data.headers["Connection"] != "close") {
@@ -1145,7 +1146,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 			rconn.conn.clear();
 		} catch (Error& e) {
-			TraceEvent("S3BlobStoreDoRequestError")
+			TraceEvent(SevWarn, "S3BlobStoreDoRequestError")
 			    .errorUnsuppressed(e)
 			    .detail("Verb", verb)
 			    .detail("Resource", resource);
@@ -1163,6 +1164,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		// If err is not present then r is valid.
 		// If r->code is in successCodes then record the successful request and return r.
 		if (!err.present() && successCodes.count(r->code) != 0) {
+			TraceEvent(SevDebug, "S3BlobStoreDoRequestSuccessful")
+			    .detail("Verb", verb)
+			    .detail("Error", err.present())
+			    .detail("ErrorString", err.present() ? err.get().name() : "")
+			    .detail("Resource", resource)
+			    .detail("ResponseCode", r->code)
+			    .detail("ResponseContentSize", r->data.content.size())
+			    .log();
 			bstore->s_stats.requests_successful++;
 			++bstore->blobStats->requestsSuccessful;
 			return r;
@@ -1943,23 +1952,55 @@ ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore,
                                   void* data,
                                   int length,
                                   int64_t offset) {
-	if (length <= 0)
-		return 0;
-	wait(bstore->requestRateRead->getAllowance(1));
+	try {
+		if (length <= 0) {
+			TraceEvent(SevWarn, "S3BlobStoreReadObjectEmptyRead").detail("Length", length);
+			return 0;
+		}
 
-	state std::string resource = constructResourcePath(bstore, bucket, object);
-	state HTTP::Headers headers;
-	headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
-	Reference<HTTP::IncomingResponse> r =
-	    wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
-	if (r->code == 404)
-		throw file_not_found();
-	if (r->data.contentLen !=
-	    r->data.content.size()) // Double check that this wasn't a header-only response, probably unnecessary
-		throw io_error();
-	// Copy the output bytes, server could have sent more or less bytes than requested so copy at most length bytes
-	memcpy(data, r->data.content.data(), std::min<int64_t>(r->data.contentLen, length));
-	return r->data.contentLen;
+		// Log rate limiter state
+		wait(bstore->requestRateRead->getAllowance(1));
+
+		state std::string resource = constructResourcePath(bstore, bucket, object);
+		state HTTP::Headers headers;
+		headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
+
+		// Attempt the request
+		state Reference<HTTP::IncomingResponse> r;
+		Reference<HTTP::IncomingResponse> _r =
+		    wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
+		r = _r;
+
+		if (r->code == 404) {
+			throw file_not_found();
+		}
+
+		// Verify response has content
+		if (r->data.contentLen != r->data.content.size()) {
+			TraceEvent(SevWarn, "S3BlobStoreReadObjectContentLengthMismatch")
+			    .detail("Expected", r->data.contentLen)
+			    .detail("Actual", r->data.content.size());
+			throw io_error();
+		}
+
+		try {
+			// Copy the output bytes, server could have sent more or less bytes than requested so copy at most length
+			// bytes
+			memcpy(data, r->data.content.data(), std::min<int64_t>(r->data.contentLen, length));
+			return r->data.contentLen;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "S3BlobStoreReadObjectMemcpyError").detail("Error", e.what());
+			throw io_error();
+		}
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "S3BlobStoreEndpoint_ReadError")
+		    .error(e)
+		    .detail("Bucket", bucket)
+		    .detail("Object", object)
+		    .detail("Length", length)
+		    .detail("Offset", offset);
+		throw;
+	}
 }
 
 Future<int> S3BlobStoreEndpoint::readObject(std::string const& bucket,
@@ -2090,6 +2131,27 @@ Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucke
                                                         std::string const& uploadID,
                                                         MultiPartSetT const& parts) {
 	return finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID, parts);
+}
+
+ACTOR Future<Void> abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                             std::string bucket,
+                                             std::string object,
+                                             std::string uploadID) {
+	wait(bstore->requestRateWrite->getAllowance(1));
+
+	std::string resource = constructResourcePath(bstore, bucket, object);
+	resource += format("?uploadId=%s", uploadID.c_str());
+
+	HTTP::Headers headers;
+	Reference<HTTP::IncomingResponse> r =
+	    wait(bstore->doRequest("DELETE", resource, headers, nullptr, 0, { 200, 204 }));
+	return Void();
+}
+
+Future<Void> S3BlobStoreEndpoint::abortMultiPartUpload(std::string const& bucket,
+                                                       std::string const& object,
+                                                       std::string const& uploadID) {
+	return abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID);
 }
 
 TEST_CASE("/backup/s3/v4headers") {

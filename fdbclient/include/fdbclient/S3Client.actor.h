@@ -37,6 +37,11 @@
 //   blobstore://<access_key>:<secret_key>@<endpoint>/resource?bucket=<bucket>, etc.
 // See the section 'Backup URls' in the backup documentation,
 // https://apple.github.io/foundationdb/backups.html, for more information.
+// Checksumming: up and down load are now multipart. While we md5 the upload
+// part -- the upload will be rejected by s3 if it doesn't match its calculation
+// on its side -- a checksum of the whole file is best maintained externally,
+// created before file upload, and then verified as equal the downloaded assembled
+// files checksum.
 // TODO: Handle prefix as a parameter on the URL so can strip the first part
 // of the resource from the blobstore URL.
 

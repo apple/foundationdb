@@ -23,6 +23,7 @@
 
 #include "flow/IRandom.h"
 #include "flow/Net2Packet.h"
+#include "flow/Trace.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "flow/Knobs.h"
@@ -127,7 +128,15 @@ std::string IncomingResponse::toString() const {
 	for (auto h : data.headers)
 		r += fmt::format("Response Header: {0}: {1}\n", h.first, h.second);
 	r.append("-- RESPONSE CONTENT--\n");
-	r.append(data.content);
+	// Limit the length of the response content to 1024 bytes for logging.
+	// No one wants 40MB of content dumped to the console.
+	int maxLen = 1024;
+	if (data.content.size() > maxLen) {
+		r.append(data.content.substr(0, maxLen));
+		r.append("...\n");
+	} else {
+		r.append(data.content);
+	}
 	r.append("\n--------\n");
 	return r;
 }
@@ -243,8 +252,9 @@ ACTOR Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
 // Reads from conn (as needed) until there are at least len bytes starting at pos in buf
 ACTOR Future<Void> read_fixed_into_string(Reference<IConnection> conn, int len, std::string* buf, size_t pos) {
 	state int stop_size = pos + len;
-	while (buf->size() < stop_size)
+	while (buf->size() < stop_size) {
 		wait(success(read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE)));
+	}
 	return Void();
 }
 
@@ -255,7 +265,6 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 	loop {
 		// Get a line, reading more data from conn if necessary
 		size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", buf, *pos));
-
 		// If line is empty we have reached the end of the headers.
 		if (lineLen == 0) {
 			// Increment pos to move past the empty line.
@@ -283,6 +292,7 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 			*pos += valueStart;
 		} else {
 			// Malformed header line (at least according to this simple parsing)
+			TraceEvent(SevError, "HTTPReadHeadersMalformed").detail("Buffer", *buf).detail("Pos", *pos);
 			throw http_bad_response();
 		}
 
@@ -295,6 +305,7 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 			*pos += len;
 		} else {
 			// Malformed header line (at least according to this simple parsing)
+			TraceEvent(SevError, "HTTPReadHeadersMalformed").detail("Buffer", *buf).detail("Pos", *pos);
 			throw http_bad_response();
 		}
 
@@ -302,6 +313,7 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 	}
 }
 
+// buf has the http header line in it at *pos offset.
 // FIXME: should this throw a different error for http requests? Or should we rename http_bad_response to
 // http_bad_<something>?
 ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
@@ -316,15 +328,17 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 	wait(read_http_response_headers(conn, &r->headers, buf, pos));
 
 	auto i = r->headers.find("Content-Length");
-	if (i != r->headers.end())
+	if (i != r->headers.end()) {
 		r->contentLen = strtoll(i->second.c_str(), NULL, 10);
-	else
+	} else {
 		r->contentLen = -1; // Content length unknown
+	}
 
 	state std::string transferEncoding;
 	i = r->headers.find("Transfer-Encoding");
-	if (i != r->headers.end())
+	if (i != r->headers.end()) {
 		transferEncoding = i->second;
+	}
 
 	r->content.clear();
 
@@ -345,8 +359,12 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		wait(read_fixed_into_string(conn, r->contentLen, &r->content, *pos));
 
 		// There shouldn't be any bytes after content.
-		if (r->content.size() != r->contentLen)
+		if (r->content.size() != r->contentLen) {
+			TraceEvent(SevWarn, "HTTPContentLengthMismatch")
+			    .detail("ContentLength", r->contentLen)
+			    .detail("ContentSize", r->content.size());
 			throw http_bad_response();
+		}
 	} else if (transferEncoding == "chunked") {
 		// Copy remaining buffer data to content which will now be the read buffer for the chunk encoded data.
 		// Overall this will be fairly efficient since most bytes will only be written once but some bytes will
@@ -391,13 +409,20 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		wait(read_http_response_headers(conn, &r->headers, &r->content, pos));
 
 		// If the header parsing did not consume all of the buffer then something is wrong
-		if (*pos != r->content.size())
+		if (*pos != r->content.size()) {
+			TraceEvent(SevWarn, "HTTPContentLengthMismatch2")
+			    .detail("ContentLength", r->contentLen)
+			    .detail("ContentSize", r->content.size());
 			throw http_bad_response();
+		}
 
 		// Now truncate the buffer to just the dechunked contiguous content.
 		r->content.erase(r->contentLen);
 	} else {
 		// Some unrecogize response content scheme is being used.
+		TraceEvent(SevWarn, "HTTPUnknownContentScheme")
+		    .detail("ContentLength", r->contentLen)
+		    .detail("ContentSize", r->content.size());
 		throw http_bad_response();
 	}
 
@@ -408,6 +433,9 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		}
 
 		if (!HTTP::verifyMD5(r, false)) { // false arg means do not fail if the Content-MD5 header is missing.
+			TraceEvent(SevWarn, "HTTPMD5Mismatch")
+			    .detail("ContentLength", r->contentLen)
+			    .detail("ContentSize", r->content.size());
 			throw http_bad_response();
 		}
 	}
@@ -432,12 +460,20 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 	// read verb
 	ss >> r->verb;
 	if (ss.fail()) {
+		TraceEvent(SevWarn, "HTTPRequestVerbNotFound")
+		    .detail("Buffer", buf)
+		    .detail("Pos", pos)
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
 	// read resource
 	ss >> r->resource;
 	if (ss.fail()) {
+		TraceEvent(SevWarn, "HTTPRequestResourceNotFound")
+		    .detail("Buffer", buf)
+		    .detail("Pos", pos)
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
@@ -445,16 +481,25 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 	std::string httpVersion;
 	ss >> httpVersion;
 	if (ss.fail()) {
+		TraceEvent(SevWarn, "HTTPRequestHTTPVersionNotFound")
+		    .detail("Buffer", buf)
+		    .detail("Pos", pos)
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
 	if (ss && !ss.eof()) {
+		TraceEvent(SevWarn, "HTTPRequestExtraData").detail("Buffer", buf).detail("Pos", pos).detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
 	float version;
 	sscanf(httpVersion.c_str(), "HTTP/%f", &version);
 	if (version < 1.1) {
+		TraceEvent(SevWarn, "HTTPRequestHTTPVersionLessThan1_1")
+		    .detail("Buffer", buf)
+		    .detail("Pos", pos)
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
@@ -462,7 +507,6 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 	pos += lineLen + 2;
 
 	wait(readHTTPData(&r->data, conn, &buf, &pos, false, false));
-
 	return Void();
 }
 
@@ -494,8 +538,14 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::IncomingResponse> r,
 
 	int reachedEnd = -1;
 	sscanf(buf.c_str() + pos, "HTTP/%f %d%n", &r->version, &r->code, &reachedEnd);
-	if (reachedEnd < 0)
+	if (reachedEnd < 0) {
+		TraceEvent(SevWarn, "HTTPResponseCodeNotFound")
+		    .detail("Buffer", buf)
+		    .detail("Pos", pos)
+		    .detail("LineLen", lineLen)
+		    .log();
 		throw http_bad_response();
+	}
 
 	// Move position past the line found and the delimiter length
 	pos += lineLen + 2;
@@ -568,7 +618,9 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		}
 
 		state Reference<HTTP::IncomingResponse> r(new HTTP::IncomingResponse());
+		event.detail("IsHeaderOnlyResponse", request->isHeaderOnlyResponse());
 		state Future<Void> responseReading = r->read(conn, request->isHeaderOnlyResponse());
+		event.detail("ResponseReading", responseReading.isReady());
 
 		send_start = timer();
 
@@ -584,6 +636,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 				    .detail("Error", responseReading.isError())
 				    .detail("QueueEmpty", request->data.content->empty())
 				    .detail("Verb", request->verb)
+				    .detail("TotalSent", total_sent)
+				    .detail("ContentLen", request->data.contentLen)
 				    .log();
 				conn->close();
 				r->data.headers["Connection"] = "close";
@@ -602,8 +656,9 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 			sendRate->returnUnused(trySend - len);
 			total_sent += len;
 			request->data.content->sent(len);
-			if (request->data.content->empty())
+			if (request->data.content->empty()) {
 				break;
+			}
 
 			wait(conn->onWritable());
 			wait(yield(TaskPriority::WriteSocket));
@@ -615,6 +670,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		event.detail("ResponseCode", r->code);
 		event.detail("ResponseContentLen", r->data.contentLen);
 		event.detail("Elapsed", elapsed);
+		event.detail("RequestIDHeader", requestIDHeader);
 
 		Optional<Error> err;
 		if (!requestIDHeader.empty()) {
@@ -632,9 +688,10 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 			// If request/response IDs do not match and either this is not a server error
 			// or it is but the response ID is not empty then log an error.
 			if (requestID != responseID && (!serverError || !responseID.empty())) {
+				event.detail("RequestIDMismatch", true);
 				err = http_bad_request_id();
 
-				TraceEvent(SevError, "HTTPRequestFailedIDMismatch")
+				TraceEvent(SevWarn, "HTTPRequestFailedIDMismatch")
 				    .error(err.get())
 				    .detail("DebugID", conn->getDebugID())
 				    .detail("RemoteAddress", conn->getPeerAddress())
@@ -662,6 +719,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 			           total_sent,
 			           r->data.contentLen);
 		}
+
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			fmt::print("[{}] HTTP RESPONSE:  {} {}\n{}\n",
 			           conn->getDebugID().toString(),
@@ -745,8 +803,7 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 		if (!err.present() && r->code == 200) {
 			TraceEvent(SevDebug, "ProxyRequestSuccess")
 			    .detail("RemoteHost", remoteHost)
-			    .detail("RemoteService", remoteService)
-			    .log();
+			    .detail("RemoteService", remoteService);
 			return Void();
 		}
 
