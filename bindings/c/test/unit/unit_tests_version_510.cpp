@@ -69,8 +69,8 @@ struct Transaction {
 // assembly code that handles emulating older api versions, but there's no
 // reason why this shouldn't also test api version 510 specific behavior.
 
-//  Case 1 : - Adding Test case for " to Ensures the ability to set and retrieve a key-value pair using transactions."
-TEST_CASE("Set and Get Key-Value") {
+//  Test Case 1 : Ensures the ability to set key and get value using transaction API
+TEST_CASE("SET_AND_GET") {
 	Transaction tr;
 	fdb_check(fdb_database_create_transaction(db, &tr.tr));
 
@@ -89,7 +89,8 @@ TEST_CASE("Set and Get Key-Value") {
 
 	const uint8_t* valueOut;
 	int valueLen;
-	fdb_check(fdb_future_get_value(getFuture.f, nullptr, &valueOut, &valueLen));
+	fdb_bool_t present;
+	fdb_check(fdb_future_get_value(getFuture.f, &present, &valueOut, &valueLen));
 	std::string retrievedValue((const char*)valueOut, valueLen);
 
 	CHECK(retrievedValue == value);
