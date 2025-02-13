@@ -27,18 +27,25 @@ import fdb
 
 
 def initialize_logger_level(logging_level):
+  
     logger = get_logger()
 
-    assert logging_level in ["DEBUG", "INFO", "WARNING", "ERROR"]
+    # Map logging levels to their corresponding constants
+    LOGGING_LEVELS = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+    }
 
-    if logging_level == "DEBUG":
-        logger.setLevel(logging.DEBUG)
-    elif logging_level == "INFO":
-        logger.setLevel(logging.INFO)
-    elif logging_level == "WARNING":
-        logger.setLevel(logging.WARNING)
-    elif logging_level == "ERROR":
-        logger.setLevel(logging.ERROR)
+    if logging_level not in LOGGING_LEVELS:
+        raise ValueError(f"Invalid logging level: {logging_level}")
+    
+    logger.setLevel(LOGGING_LEVELS[logging_level])
+
+
+
+
 
 
 def get_logger():
