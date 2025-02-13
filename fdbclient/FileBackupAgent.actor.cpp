@@ -5067,19 +5067,9 @@ Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
 	for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < param2Concat.size(); part++) {
 		KeyValueRef backupKV;
 		// Assign the second parameter as the part
-		backupKV.value = param2Concat.substr(part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
-		                                     std::min(param2Concat.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
-		                                              CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
-		// Write the last part of the mutation to the serialization, if the buffer is not defined
-		if (!partBuffer) {
-			// part = 0
-			wrParam1 << bigEndian32(part);
-			partBuffer = (uint32_t*)((char*)wrParam1.getData() + wrParam1.getLength() - sizeof(uint32_t));
-		} else {
-			// part > 0
-			*partBuffer = bigEndian32(part);
-		}
-		backupKV.key = wrParam1.toValue();
+		backupKV.value = getBackupValue(param2Concat, part);
+		Key key = getBackupKey(wrParam1, &partBuffer, part); // holds the memory
+		backupKV.key = key;
 		results.push_back_deep(results.arena(), backupKV);
 	}
 	return results;
@@ -6519,7 +6509,7 @@ struct LogInfo : public ReferenceCounted<LogInfo> {
 	Version endVersion;
 	int64_t offset;
 
-	LogInfo() : offset(0){};
+	LogInfo() : offset(0) {}
 };
 
 class FileBackupAgentImpl {
