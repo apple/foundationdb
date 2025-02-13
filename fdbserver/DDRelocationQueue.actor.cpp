@@ -30,6 +30,7 @@
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -1174,6 +1175,10 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
+					} else if (rrs.bulkLoadTask.present()) {
+						// We have to decide this after prevCleanup completes.
+						// For details, see the comment in dataDistributionRelocator.
+						rrs.dataMoveId = UID();
 					} else {
 						DataMoveType dataMoveType = newDataMoveType(rrs.bulkLoadTask.present());
 						rrs.dataMoveId = newDataMoveId(
@@ -1183,7 +1188,6 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 						    .detail("TrackID", rrs.randomId)
 						    .detail("Range", rrs.keys)
 						    .detail("Reason", rrs.reason.toString())
-						    .detail("DoBulkLoading", rrs.bulkLoadTask.present())
 						    .detail("DataMoveType", dataMoveType)
 						    .detail("DataMoveReason", static_cast<int>(rrs.dmReason));
 					}
@@ -1472,6 +1476,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state WantTrueBestIfMoveout wantTrueBestIfMoveout(getWantTrueBestIfMoveout(rd.priority));
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
+
+	// We will decide doBulkLoading after prevCleanup completes.
+	// rd.bulkLoadTask.present() is just the default value.
 	state bool doBulkLoading = rd.bulkLoadTask.present();
 
 	try {
@@ -1500,6 +1507,54 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			inFlightRange.value().cancellable = false;
 
 			wait(prevCleanup);
+
+			if (doBulkLoading) {
+				// Wait until the overlapped old bulkload relocator get cancelled.
+				// At this point, the existing metadata is updated by the old relocator.
+				// No more change will be made to the metadata.
+				// At this point, we check if the current rd.bulkLoadTask is outdated.
+				// If yes, do not do bulkload.
+				state Transaction tr(self->txnProcessor->context());
+				loop {
+					try {
+						BulkLoadTaskState currentBulkLoadTaskState =
+						    wait(getBulkLoadTask(&tr,
+						                         rd.bulkLoadTask.get().coreState.getRange(),
+						                         rd.bulkLoadTask.get().coreState.getTaskId(),
+						                         { BulkLoadPhase::Triggered, BulkLoadPhase::Running }));
+						break;
+					} catch (Error& e) {
+						if (e.code() == error_code_bulkload_task_outdated) {
+							// Notify the bulkload task actor to exit. This avoid bulkload task engine
+							// gets stuck in case a new task overwrite this task on metadata. To schedule
+							// the new task, the old task actor has to exit.
+							if (rd.bulkLoadTask.get().completeAck.canBeSet()) {
+								rd.bulkLoadTask.get().completeAck.sendError(bulkload_task_outdated());
+							}
+							doBulkLoading = false;
+							// we do not want to reset rd.bulkLoadTask here because
+							// the busyness calculation is based on whether rd.bulkLoadTask is set.
+							// When calculating the busyness, we do not count the work for any
+							// rd with bulkLoadTask set.
+							// TODO(BulkLoad): reset rd.bulkLoadTask here for the risk of overloading the source
+							// servers.
+							break;
+						}
+						wait(tr.onError(e));
+					}
+				}
+				DataMoveType dataMoveType = newDataMoveType(doBulkLoading);
+				rd.dataMoveId = newDataMoveId(
+				    deterministicRandom()->randomUInt64(), AssignEmptyRange::False, dataMoveType, rd.dmReason);
+				TraceEvent(SevInfo, "DDBulkLoadNewDataMoveID", this->distributorId)
+				    .detail("DataMoveID", rd.dataMoveId.toString())
+				    .detail("TrackID", rd.randomId)
+				    .detail("Range", rd.keys)
+				    .detail("Reason", rd.reason.toString())
+				    .detail("DataMoveType", dataMoveType)
+				    .detail("DoBulkLoading", doBulkLoading)
+				    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
+			}
 
 			auto f = self->dataMoves.intersectingRanges(rd.keys);
 			for (auto it = f.begin(); it != f.end(); ++it) {
@@ -1991,8 +2046,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          relocateShardInterval.pairID,
 				                                          ddEnabledState,
 				                                          CancelConflictingDataMoves::False,
-				                                          rd.bulkLoadTask.present() ? rd.bulkLoadTask.get().coreState
-				                                                                    : Optional<BulkLoadTaskState>());
+				                                          doBulkLoading ? rd.bulkLoadTask.get().coreState
+				                                                        : Optional<BulkLoadTaskState>());
 			} else {
 				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 				                                          rd.keys,
@@ -2006,8 +2061,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          relocateShardInterval.pairID,
 				                                          ddEnabledState,
 				                                          CancelConflictingDataMoves::False,
-				                                          rd.bulkLoadTask.present() ? rd.bulkLoadTask.get().coreState
-				                                                                    : Optional<BulkLoadTaskState>());
+				                                          doBulkLoading ? rd.bulkLoadTask.get().coreState
+				                                                        : Optional<BulkLoadTaskState>());
 			}
 			state Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
 			state Future<Void> pollHealth =
