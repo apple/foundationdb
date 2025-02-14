@@ -2988,7 +2988,13 @@ ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange rang
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	wait(store(bulkLoadTaskState,
-	           getBulkLoadTask(tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged })));
+	           getBulkLoadTask(
+	               tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })));
+	if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
+		TraceEvent(SevWarnAlways, "ManagementAPIAcknowledgeErrorTask")
+		    .detail("TaskId", taskId.toString())
+		    .detail("Range", printable(range));
+	}
 	bulkLoadTaskState.phase = BulkLoadPhase::Acknowledged;
 	ASSERT(range == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
 	ASSERT(normalKeys.contains(range));

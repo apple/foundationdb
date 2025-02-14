@@ -520,6 +520,7 @@ enum class BulkLoadPhase : uint8_t {
 	Running = 3, // Update atomically with updating KeyServer dest servers in startMoveKey
 	Complete = 4, // Update atomically with updating KeyServer src servers in finishMoveKey
 	Acknowledged = 5, // Updated by users; DD automatically clear metadata with this phase
+	Error = 6, // Updated by DD when this task has unretriable error
 };
 
 struct BulkLoadTaskState {
@@ -543,7 +544,7 @@ struct BulkLoadTaskState {
 		if (dataMoveId.present()) {
 			res = res + ", [DataMoveId]: " + dataMoveId.get().toString();
 		}
-		res = res + ", [TaskId]: " + taskId.toString();
+		res = res + ", [TaskId]: " + taskId.toString() + ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase));
 		return res;
 	}
 

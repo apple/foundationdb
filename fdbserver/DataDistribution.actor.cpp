@@ -1139,6 +1139,33 @@ ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Referenc
 	}
 }
 
+// TODO(BulkLoad): add reason to persist
+// TODO(BulkLoad): issue a normal data move if the bulkload data move is issued for team unhealthy
+ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
+	state Database cx = self->txnProcessor->context();
+	state Transaction tr(cx);
+	state BulkLoadTaskState bulkLoadTaskState;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
+			wait(store(bulkLoadTaskState,
+			           getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running })));
+			bulkLoadTaskState.phase = BulkLoadPhase::Error;
+			ASSERT(range == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
+			ASSERT(normalKeys.contains(range));
+			wait(krmSetRange(
+			    &tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
 // A bulk load task is guaranteed to be either complete or overwritten by another task
 // When a bulk load task is trigged, the range traffic is turned off atomically
 // If the task completes, the task re-enables the traffic atomically
@@ -1189,6 +1216,28 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		    .detail("Duration", now() - beginTime);
 		if (e.code() == error_code_movekeys_conflict) {
 			throw e;
+		}
+		if (e.code() == error_code_bulkload_task_stuck) {
+			// The task is stuck, we need to fail the task
+			TraceEvent(SevWarn, "DDBulkLoadEngineDoBulkLoadTaskStuck", self->ddId)
+			    .detail("Range", range)
+			    .detail("TaskID", taskId);
+			try {
+				wait(failBulkLoadTask(self, range, taskId)); // mark this task failed in system metadata
+				TraceEvent(SevWarn, "DDBulkLoadEngineFailTaskComplete", self->ddId)
+				    .detail("Range", range)
+				    .detail("TaskID", taskId);
+			} catch (Error& failTaskError) {
+				if (failTaskError.code() == error_code_actor_cancelled) {
+					throw failTaskError;
+				}
+				TraceEvent(SevWarn, "DDBulkLoadEngineFailTaskError", self->ddId)
+				    .errorUnsuppressed(failTaskError)
+				    .detail("Range", range)
+				    .detail("TaskID", taskId);
+				ASSERT(failTaskError.code() == error_code_bulkload_task_outdated);
+				// sliently exits
+			}
 		}
 		// sliently exits
 	}
@@ -1268,6 +1317,10 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 						    .detail("TaskID", bulkLoadTaskState.getTaskId());
 						bulkLoadActors.push_back(
 						    eraseBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId()));
+					} else if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
+						TraceEvent(SevWarnAlways, "DDBulkLoadEngineFindTaskUnretriableError", self->ddId)
+						    .detail("Range", bulkLoadTaskState.getRange())
+						    .detail("TaskID", bulkLoadTaskState.getTaskId());
 					} else {
 						ASSERT(bulkLoadTaskState.phase == BulkLoadPhase::Complete);
 					}
