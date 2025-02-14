@@ -25,10 +25,8 @@
 
 #include "fdbserver/DataDistributionTeam.h"
 #include "flow/ActorCollection.h"
-#include "flow/Deque.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
-#include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -1886,7 +1884,23 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("DestOverloadedCount", destOverloadedCount)
 					    .detail("TeamCollectionId", tciIndex)
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
-					    .detail("NumOfTeamCollections", self->teamCollections.size());
+					    .detail("NumOfTeamCollections", self->teamCollections.size())
+					    .detail("ConductingBulkLoad", doBulkLoading);
+					if (doBulkLoading && stuckCount == 50) {
+						ASSERT(rd.bulkLoadTask.present());
+						TraceEvent(SevWarnAlways, "DDBulkLoadTaskStuck", self->distributorId)
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("TraceID", rd.randomId)
+						    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString())
+						    .detail("DataMoveID", rd.dataMoveId)
+						    .detail("Reason", rd.reason.toString())
+						    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
+						if (rd.bulkLoadTask.get().completeAck.canBeSet()) {
+							// Unretriable error. So, we give up the task at this time.
+							rd.bulkLoadTask.get().completeAck.sendError(bulkload_task_stuck());
+						}
+					}
 					if (rd.isRestore() && stuckCount > 50) {
 						throw data_move_dest_team_not_found();
 					}
