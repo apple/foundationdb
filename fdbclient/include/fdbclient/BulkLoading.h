@@ -520,7 +520,7 @@ enum class BulkLoadPhase : uint8_t {
 	Running = 3, // Update atomically with updating KeyServer dest servers in startMoveKey
 	Complete = 4, // Update atomically with updating KeyServer src servers in finishMoveKey
 	Acknowledged = 5, // Updated by users; DD automatically clear metadata with this phase
-	Error = 6, // Updated by this task has unretriable error
+	Error = 6, // Updated by DD when this task has unretriable error
 };
 
 struct BulkLoadTaskState {
@@ -915,7 +915,7 @@ struct SSBulkLoadMetadata {
 public:
 	constexpr static FileIdentifier file_identifier = 1384506;
 
-	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false) {};
+	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false){};
 
 	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId) {
 		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);

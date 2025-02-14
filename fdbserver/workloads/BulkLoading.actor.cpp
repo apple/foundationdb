@@ -57,7 +57,7 @@ struct BulkLoading : TestWorkload {
 	static constexpr auto NAME = "BulkLoadingWorkload";
 	const bool enabled;
 	bool pass;
-	bool debugging = true;
+	bool debugging = false;
 	bool backgroundTrafficEnabled = deterministicRandom()->coinflip();
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode

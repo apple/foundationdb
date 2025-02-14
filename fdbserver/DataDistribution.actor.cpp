@@ -1140,6 +1140,7 @@ ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Referenc
 }
 
 // TODO(BulkLoad): add reason to persist
+// TODO(BulkLoad): issue a normal data move if the bulkload data move is issued for team unhealthy
 ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
 	state Database cx = self->txnProcessor->context();
 	state Transaction tr(cx);
