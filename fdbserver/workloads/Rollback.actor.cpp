@@ -28,10 +28,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// Choose a random proxy and a random tLog, represented as unclogTlog.
-// The workload first clogs network link between the chosen proxy and all tLogs but the unclogTlog;
-// While the network is still clogged, the workload kills the proxy and clogs the unclogged tlog's interface.
-// Note: The clogged network link's latency will become "clogDuration".
 struct RollbackWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "Rollback";
 
