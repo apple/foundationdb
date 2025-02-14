@@ -1150,7 +1150,8 @@ ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self, KeyRange ra
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
-			wait(store(bulkLoadTaskState, getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Triggered })));
+			wait(store(bulkLoadTaskState,
+			           getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running })));
 			bulkLoadTaskState.phase = BulkLoadPhase::Error;
 			ASSERT(range == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
 			ASSERT(normalKeys.contains(range));
@@ -1223,10 +1224,17 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 			    .detail("TaskID", taskId);
 			try {
 				wait(failBulkLoadTask(self, range, taskId)); // mark this task failed in system metadata
+				TraceEvent(SevWarn, "DDBulkLoadEngineFailTaskComplete", self->ddId)
+				    .detail("Range", range)
+				    .detail("TaskID", taskId);
 			} catch (Error& failTaskError) {
 				if (failTaskError.code() == error_code_actor_cancelled) {
 					throw failTaskError;
 				}
+				TraceEvent(SevWarn, "DDBulkLoadEngineFailTaskError", self->ddId)
+				    .errorUnsuppressed(failTaskError)
+				    .detail("Range", range)
+				    .detail("TaskID", taskId);
 				ASSERT(failTaskError.code() == error_code_bulkload_task_outdated);
 				// sliently exits
 			}
