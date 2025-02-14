@@ -645,6 +645,7 @@ enum class BulkLoadJobPhase : uint8_t {
 	Submitted = 1,
 	Triggered = 2,
 	Complete = 3,
+	Error = 4,
 };
 
 struct BulkLoadJobState {
@@ -711,6 +712,12 @@ public:
 	void markComplete() {
 		ASSERT(phase == BulkLoadJobPhase::Triggered || phase == BulkLoadJobPhase::Complete);
 		phase = BulkLoadJobPhase::Complete;
+		return;
+	}
+
+	void markUnretrievableError() {
+		ASSERT(phase == BulkLoadJobPhase::Triggered || phase == BulkLoadJobPhase::Complete);
+		phase = BulkLoadJobPhase::Error;
 		return;
 	}
 

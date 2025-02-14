@@ -1395,7 +1395,9 @@ ACTOR Future<BulkLoadTaskState> bulkLoadJobGetOngoingTask(Reference<DataDistribu
 	return existTasks[0];
 }
 
-ACTOR Future<Void> bulkLoadJobWaitUntilTaskComplete(Reference<DataDistributor> self, BulkLoadTaskState bulkLoadTask) {
+// If the task reaches unretrievable error, return true; otherwise, return false.
+ACTOR Future<bool> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistributor> self,
+                                                           BulkLoadTaskState bulkLoadTask) {
 	ASSERT(bulkLoadTask.isValid());
 	state Database cx = self->txnProcessor->context();
 	state Transaction tr(cx);
@@ -1409,16 +1411,21 @@ ACTOR Future<Void> bulkLoadJobWaitUntilTaskComplete(Reference<DataDistributor> s
 			                             BulkLoadPhase::Triggered,
 			                             BulkLoadPhase::Running,
 			                             BulkLoadPhase::Complete,
-			                             BulkLoadPhase::Acknowledged })));
-			if (bulkLoadTask.phase == BulkLoadPhase::Complete || bulkLoadTask.phase == BulkLoadPhase::Acknowledged) {
-				break;
+			                             BulkLoadPhase::Acknowledged,
+			                             BulkLoadPhase::Error })));
+			if (bulkLoadTask.phase == BulkLoadPhase::Error) {
+				TraceEvent(SevWarnAlways, "DDbulkLoadJobWaitUntilTaskCompleteOrErrorUnretrievableError", self->ddId)
+				    .detail("Task", bulkLoadTask.toString());
+				return true; // has error
+			} else if (bulkLoadTask.phase == BulkLoadPhase::Complete ||
+			           bulkLoadTask.phase == BulkLoadPhase::Acknowledged) {
+				return false; // no error
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 		wait(delay(10.0));
 	}
-	return Void();
 }
 
 ACTOR Future<Void> bulkLoadJobFinalizeTask(Reference<DataDistributor> self,
@@ -1476,16 +1483,27 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		    .detail("Duration", now() - beginTime);
 
 		// Step 3: Monitor the bulkload completion
-		wait(bulkLoadJobWaitUntilTaskComplete(self, bulkLoadTask));
-		TraceEvent(SevInfo, "DDBulkLoadJobNewTaskLoadComplete", self->ddId)
-		    .setMaxEventLength(-1)
-		    .setMaxFieldLength(-1)
-		    .detail("Task", bulkLoadTask.toString())
-		    .detail("BulkLoadJob", bulkLoadJob.toString())
-		    .detail("Duration", now() - beginTime);
+		bool unretrievableError = wait(bulkLoadJobWaitUntilTaskCompleteOrError(self, bulkLoadTask));
+		if (unretrievableError) {
+			TraceEvent(SevWarnAlways, "DDBulkLoadJobNewTaskLoadUnretrievableError", self->ddId)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("Task", bulkLoadTask.toString())
+			    .detail("BulkLoadJob", bulkLoadJob.toString())
+			    .detail("Duration", now() - beginTime);
+			bulkLoadJob.markUnretrievableError();
+		} else {
+			TraceEvent(SevInfo, "DDBulkLoadJobNewTaskLoadComplete", self->ddId)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("Task", bulkLoadTask.toString())
+			    .detail("BulkLoadJob", bulkLoadJob.toString())
+			    .detail("Duration", now() - beginTime);
+			bulkLoadJob.markComplete();
+		}
 
-		// Step 4: Finalize bulkload task
-		bulkLoadJob.markComplete();
+		// Step 4: Persist bulkLoadJob metadata and turn on traffic
+		// If a bulkload task is error, the job acknowledges this issue without retrying but persisting error.
 		wait(bulkLoadJobFinalizeTask(self, bulkLoadTask, bulkLoadJob));
 		TraceEvent(SevInfo, "DDBulkLoadJobNewTaskFinalized", self->ddId)
 		    .setMaxEventLength(-1)
@@ -1524,7 +1542,7 @@ ACTOR Future<Void> bulkLoadJobOnRuningTask(Reference<DataDistributor> self, Bulk
 	try {
 		// Step 1: Get ongoing bulkload task
 		// Currently, if there is an existing bulkload task, the task is guaranteed to be completed.
-		// TODO(BulkLoad): Check if the bulkload job id matches. We will add bulkload task cancellation. In this case,
+		// TODO(BulkLoad): Check if the bulkload job id matches. We will add bulkload job cancellation. In this case,
 		// we need to handle this scenario.
 		wait(store(bulkLoadTask, bulkLoadJobGetOngoingTask(self, bulkLoadJob.getManifestRange())));
 		TraceEvent(SevInfo, "DDBulkLoadJobOnRunningTask", self->ddId)
@@ -1535,16 +1553,27 @@ ACTOR Future<Void> bulkLoadJobOnRuningTask(Reference<DataDistributor> self, Bulk
 		    .detail("Duration", now() - beginTime);
 
 		// Step 2: Monitor the bulkload completion
-		wait(bulkLoadJobWaitUntilTaskComplete(self, bulkLoadTask));
-		TraceEvent(SevInfo, "DDBulkLoadJobOnRunningTaskLoadComplete", self->ddId)
-		    .setMaxEventLength(-1)
-		    .setMaxFieldLength(-1)
-		    .detail("Task", bulkLoadTask.toString())
-		    .detail("BulkLoadJob", bulkLoadJob.toString())
-		    .detail("Duration", now() - beginTime);
+		bool unretrievableError = wait(bulkLoadJobWaitUntilTaskCompleteOrError(self, bulkLoadTask));
+		if (unretrievableError) {
+			TraceEvent(SevWarnAlways, "DDBulkLoadJobOnRunningTaskLoadUnretrievableError", self->ddId)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("Task", bulkLoadTask.toString())
+			    .detail("BulkLoadJob", bulkLoadJob.toString())
+			    .detail("Duration", now() - beginTime);
+			bulkLoadJob.markUnretrievableError();
+		} else {
+			TraceEvent(SevInfo, "DDBulkLoadJobOnRunningTaskLoadComplete", self->ddId)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("Task", bulkLoadTask.toString())
+			    .detail("BulkLoadJob", bulkLoadJob.toString())
+			    .detail("Duration", now() - beginTime);
+			bulkLoadJob.markComplete();
+		}
 
-		// Step 3: Finalize bulkload task
-		bulkLoadJob.markComplete();
+		// Step 3: Persist bulkLoadJob metadata and turn on traffic
+		// If a bulkload task is error, the job acknowledges this issue without retrying but persisting error.
 		wait(bulkLoadJobFinalizeTask(self, bulkLoadTask, bulkLoadJob));
 		TraceEvent(SevInfo, "DDBulkLoadJobOnRunningTaskFinalized", self->ddId)
 		    .setMaxEventLength(-1)
@@ -1690,6 +1719,20 @@ ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self,
 					wait(delay(0.1));
 					continue;
 				}
+
+				if (existJob.getPhase() == BulkLoadJobPhase::Error) {
+					TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorTaskError", self->ddId)
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("JobId", jobId)
+					    .detail("JobRange", jobRange)
+					    .detail("JobRoot", jobRoot)
+					    .detail("JobTransportMethod", jobTransportMethod)
+					    .detail("ExistJob", existJob.toString());
+					wait(delay(0.1));
+					continue;
+				}
+
 				TraceEvent(SevDebug, "DDBulkLoadJobExecutorTaskRun", self->ddId)
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
