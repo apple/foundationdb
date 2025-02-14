@@ -2609,7 +2609,7 @@ public:
 		// create a key pair for AuthZ testing
 		auto key = mkcert::makeEcP256();
 		authKeys.insert(std::make_pair(Standalone<StringRef>("DefaultKey"_sr), key));
-		g_network = net2 = newNet2(TLSConfig(), /*useThreadPool=*/false, true);
+		g_network = net2 = newNet2(TLSConfig(), /*useThreadPool=*/false, true, true /* setAsMainThread */);
 		g_network->addStopCallback(Net2FileSystem::stop);
 		Net2FileSystem::newFileSystem();
 		check_yield(TaskPriority::Zero);

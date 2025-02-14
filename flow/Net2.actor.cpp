@@ -2112,9 +2112,12 @@ boost::asio::const_buffer SendBufferIterator::operator*() const {
 	return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
 }
 
-INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics) {
+INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics, bool setAsMainThread) {
 	try {
 		N2::g_net2 = new N2::Net2(tlsConfig, useThreadPool, useMetrics);
+		if (setAsMainThread) {
+			N2::thread_network = N2::g_net2;
+		}
 	} catch (boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());
 		throw unknown_error();

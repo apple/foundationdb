@@ -134,7 +134,7 @@ class TLSConfig;
 class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE INetwork;
 
 extern INetwork* g_network;
-extern INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool = false, bool useMetrics = false);
+extern INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool = false, bool useMetrics = false, bool setAsMainThread = false);
 inline INetwork* _swift_newNet2(const TLSConfig* tlsConfig, bool useThreadPool = false, bool useMetrics = false) {
 	return newNet2(*tlsConfig, useThreadPool, useMetrics);
 }
