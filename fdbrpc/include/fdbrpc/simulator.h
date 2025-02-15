@@ -430,6 +430,7 @@ public:
 	WipedString makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
 
 	static thread_local ProcessInfo* currentProcess;
+	static thread_local bool isMainThread;
 
 	bool checkInjectedCorruption();
 
