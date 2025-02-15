@@ -3091,6 +3091,13 @@ ACTOR Future<bool> checkBulkLoadJobComplete(Database cx, UID jobId) {
 				// When start loading a job, the old job metadata must be cleared at first.
 				// So, any existing bulkload job id must match the running job id.
 				ASSERT(existJob.getJobId() == jobId);
+				if (existJob.getPhase() == BulkLoadJobPhase::Error) {
+					TraceEvent(SevWarnAlways, "DDBulkLoadJobHasErrorTask")
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("Task", existJob.toString());
+					continue;
+				}
 				if (existJob.getPhase() != BulkLoadJobPhase::Complete) {
 					TraceEvent(SevDebug, "DDBulkLoadJobIncomplete").detail("ExistJob", existJob.toString());
 					return false;
@@ -3191,6 +3198,11 @@ ACTOR Future<Void> clearBulkLoadJob(Database cx, UID jobId) {
 					    .detail("InputJobId", jobId)
 					    .detail("ExistJob", existJob.toString());
 					throw bulkload_task_outdated();
+				}
+				if (existJob.getPhase() == BulkLoadJobPhase::Error) {
+					TraceEvent(SevWarnAlways, "DDBulkLoadClearMetadataStopSinceJobHasErrorTask")
+					    .detail("Task", existJob.toString());
+					throw bulkload_task_failed();
 				}
 			}
 			// TODO(BulkLoad): cancel bulkload task

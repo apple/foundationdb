@@ -984,10 +984,17 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 }
 
 // Must be atomic
-void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadTaskState bulkLoadTaskState) {
+// If cancelledDataMovePriority is set, we may need to issue a data move for the task range because previous data move
+// has been stuck and forced to exit. If that data move is an team unhealthy data move, we need to issue a new data
+// move.
+void createShardToBulkLoad(DataDistributionTracker* self,
+                           const BulkLoadTaskState& bulkLoadTaskState,
+                           Optional<int> cancelledDataMovePriority) {
 	KeyRange keys = bulkLoadTaskState.getRange();
 	ASSERT(!keys.empty());
-	TraceEvent e(SevInfo, "DDBulkLoadEngineCreateShardToBulkLoad", self->distributorId);
+	bool issueDataMoveForCancel = cancelledDataMovePriority.present();
+	TraceEvent e(
+	    issueDataMoveForCancel ? SevWarnAlways : SevInfo, "DDBulkLoadEngineCreateShardToBulkLoad", self->distributorId);
 	e.detail("TaskId", bulkLoadTaskState.getTaskId());
 	e.detail("BulkLoadRange", keys);
 	// Create shards at the two ends and do not data move for those shards
@@ -998,6 +1005,9 @@ void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadTaskState bulk
 			KeyRange leftRange = Standalone(KeyRangeRef(it->range().begin, keys.begin));
 			e.detail("FirstSplitShard", it->range());
 			restartShardTrackers(self, leftRange);
+			issueDataMoveForCancel = false;
+			// Shard boundary has changed. So, there has a shard split or merge data move as a normal data move.
+			// Or a new bulkload task has been issued on the range. So, we need not issue data move at this time.
 		}
 		break;
 	}
@@ -1008,6 +1018,8 @@ void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadTaskState bulk
 			KeyRange rightRange = Standalone(KeyRangeRef(keys.end, it->range().end));
 			e.detail("LastSplitShard", it->range());
 			restartShardTrackers(self, rightRange);
+			issueDataMoveForCancel = false;
+			// See comments at Step 1
 			break;
 		}
 	}
@@ -1022,11 +1034,26 @@ void createShardToBulkLoad(DataDistributionTracker* self, BulkLoadTaskState bulk
 			shardCount = shardCount + it->value().stats->get().get().shardCount;
 		}
 	}
-	restartShardTrackers(self, keys, ShardMetrics(oldStats, now(), shardCount));
-	self->shardsAffectedByTeamFailure->defineShard(keys);
-	self->output.send(
-	    RelocateShard(keys, DataMovementReason::TEAM_HEALTHY, RelocateReason::OTHER, bulkLoadTaskState.getTaskId()));
+	if (!cancelledDataMovePriority.present()) {
+		// If this is for a new bulkload task
+		restartShardTrackers(self, keys, ShardMetrics(oldStats, now(), shardCount));
+		self->shardsAffectedByTeamFailure->defineShard(keys);
+		self->output.send(RelocateShard(
+		    keys, DataMovementReason::TEAM_HEALTHY, RelocateReason::OTHER, bulkLoadTaskState.getTaskId()));
+	} else if (issueDataMoveForCancel) {
+		// If this is for a cancelled task
+		restartShardTrackers(self, keys, ShardMetrics(oldStats, now(), shardCount));
+		self->shardsAffectedByTeamFailure->defineShard(keys);
+		ASSERT(cancelledDataMovePriority.present() &&
+		       cancelledDataMovePriority.get() != SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
+		self->output.send(RelocateShard(keys,
+		                                priorityToDataMovementReason(cancelledDataMovePriority.get()),
+		                                RelocateReason::OTHER,
+		                                bulkLoadTaskState.getTaskId()));
+	}
 	e.detail("NewShardToLoad", keys);
+	e.detail("CancelledDataMove", cancelledDataMovePriority.present() ? cancelledDataMovePriority.get() : -1);
+	e.detail("IssueDataMoveForCancel", issueDataMoveForCancel);
 	return;
 }
 
@@ -1684,7 +1711,7 @@ struct DataDistributionTrackerImpl {
 					triggerStorageQueueRebalance(self, req);
 				}
 				when(BulkLoadShardRequest req = waitNext(self->triggerShardBulkLoading)) {
-					createShardToBulkLoad(self, req.bulkLoadTaskState);
+					createShardToBulkLoad(self, req.bulkLoadTaskState, req.cancelledDataMovePriority);
 				}
 				when(wait(self->actors.getResult())) {}
 				when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
