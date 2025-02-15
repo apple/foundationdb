@@ -24,9 +24,12 @@ type Account struct {
     Token   string `json:"token"`
 }
 
-func writeCredentialsFile(region, credFile string, accessKey, secretKey, token string) error {
+func writeCredentialsFile(bucket, region, credFile string, accessKey, secretKey, token string) error {
     s3Endpoint := fmt.Sprintf("s3.%s.amazonaws.com", region)
     
+    // Bulkload hostname is like this backup-112664522426-us-west-2.s3-us-west-2.amazonaws.com
+    // i.e. bucket and then s3.region.amazonaws.com.
+    // So add records for this format and for s3.REGION.amazonaws.com too.
     blobCreds := BlobCredentials{
         Accounts: map[string]Account{
             "@" + s3Endpoint: {
@@ -35,6 +38,16 @@ func writeCredentialsFile(region, credFile string, accessKey, secretKey, token s
                 Token:   token,
             },
             "@" + s3Endpoint + ":443": {
+                Secret:  secretKey,
+                APIKey:  accessKey,
+                Token:   token,
+            },
+            "@" + bucket + "." + s3Endpoint: {
+                Secret:  secretKey,
+                APIKey:  accessKey,
+                Token:   token,
+            },
+            "@" + bucket + "." + s3Endpoint + ":443": {
                 Secret:  secretKey,
                 APIKey:  accessKey,
                 Token:   token,
@@ -54,7 +67,7 @@ func writeCredentialsFile(region, credFile string, accessKey, secretKey, token s
     return nil
 }
 
-func refreshCredentials(region, credFile string) error {
+func refreshCredentials(bucket, region, credFile string) error {
     ctx := context.Background()
     
     // Load the AWS SDK configuration - this will automatically use IRSA when running in EKS
@@ -72,7 +85,7 @@ func refreshCredentials(region, credFile string) error {
     }
 
     // Write credentials to file
-    if err := writeCredentialsFile(region, credFile, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken); err != nil {
+    if err := writeCredentialsFile(bucket, region, credFile, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken); err != nil {
         return fmt.Errorf("failed to write credentials: %v", err)
     }
 
@@ -83,13 +96,21 @@ func main() {
     // Add usage message
     flag.Usage = func() {
         fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
-        fmt.Fprintf(os.Stderr, "A credential fetcher for AWS S3 that continuously refreshes credentials for FDB blob storage.\n\n")
+        fmt.Fprintf(os.Stderr, "A credential fetcher for AWS S3 that continuously refreshes credentials for FDB blob storage.\n")
         fmt.Fprintf(os.Stderr, "Options:\n")
         flag.PrintDefaults()
     }
 
-    region := flag.String("region", "us-west-2", "AWS region for S3 endpoint")
+    defaultRegion := "us-west-2"
+    if envRegion := os.Getenv("AWS_REGION"); envRegion != "" {
+        defaultRegion = envRegion
+    }
+    
+    region := flag.String("region", defaultRegion, "AWS region for S3 endpoint (default from AWS_REGION env var)")
     dir := flag.String("dir", "", "Directory path where credentials file will be stored")
+    defaultBucket := fmt.Sprintf("backup-112664522426-%s", defaultRegion)
+    bucket := flag.String("bucket", defaultBucket, "S3 bucket name")
+    daemon := flag.Bool("daemon", false, "Run perpetually updating credentials on a period.")
     flag.Parse()
 
     if *dir == "" {
@@ -103,10 +124,21 @@ func main() {
 
     credFile := filepath.Join(*dir, "s3_blob_credentials.json")
 
+    // If run-once is true, just generate credentials and exit
+    if !*daemon {
+        if err := refreshCredentials(*bucket, *region, credFile); err != nil {
+            log.Fatalf("Failed to refresh credentials: %v", err)
+        }
+        log.Printf("Credentials written successfully to %s", credFile)
+        return
+    }
+
     // Main credential refresh loop
+    log.Printf("Starting credential refresh loop")
     for {
-        if err := refreshCredentials(*region, credFile); err != nil {
+        if err := refreshCredentials(*bucket, *region, credFile); err != nil {
             log.Printf("Failed to refresh credentials: %v", err)
+            log.Printf("Will retry in 1 minute...")
             time.Sleep(time.Minute)
             continue
         }
