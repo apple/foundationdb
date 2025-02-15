@@ -22,11 +22,11 @@ Contributing to FoundationDB can be in contributions to the code base, sharing y
 
 ### Latest Stable Releases
 
-The lastest stable releases are (were) versions that are recommended for production use, which have been extensively validated via simulation and real cluster tests and used in our production environment.
+The latest stable releases are (were) versions that are recommended for production use, which have been extensively validated via simulation and real cluster tests and used in our production environment.
 
 | Branch   |     Latest Production Release      |  Notes |
 |:--------:|:-------------:|------:|
-| 7.3      |  [7.3.57](https://github.com/apple/foundationdb/releases/tag/7.3.57) | Supported |
+| 7.3      |  [7.3.59](https://github.com/apple/foundationdb/releases/tag/7.3.59) | Supported |
 | 7.2      |   | Experimental |
 | 7.1      |  [7.1.57](https://github.com/apple/foundationdb/releases/tag/7.1.57)   |   Bug fixes |
 | 7.0      |           |   Experimental |
@@ -37,7 +37,7 @@ The lastest stable releases are (were) versions that are recommended for product
 - `Experimental` branches are those used for internal feature testing. They are not recommended for production use.
 - `Unsupported` branches are those which will no longer receive any updates.
 
-If you are running on old production releases, we recommend always upgrading to the next major release's latest version, and then continue to the next major version, e.g., 6.2.X -> 6.3.25 -> 7.1.57 -> 7.3.57. These upgrade paths have been well tested in production (skipping a major release, not marked as `Experimental`, for an upgrade is only tested in simulation).
+If you are running on old production releases, we recommend always upgrading to the next major release's latest version, and then continue to the next major version, e.g., 6.2.X -> 6.3.25 -> 7.1.57 -> 7.3.59. These upgrade paths have been well tested in production (skipping a major release, not marked as `Experimental`, for an upgrade is only tested in simulation).
 
 ### Binary downloads
 
