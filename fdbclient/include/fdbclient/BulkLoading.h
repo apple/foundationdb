@@ -572,6 +572,10 @@ struct BulkLoadTaskState {
 
 	BulkLoadType getLoadType() const { return manifest.getLoadType(); }
 
+	void setCancelledDataMovePriority(int priority) { cancelledDataMovePriority = priority; }
+
+	Optional<int> getCancelledDataMovePriority() const { return cancelledDataMovePriority; }
+
 	bool onAnyPhase(const std::vector<BulkLoadPhase>& inputPhases) const {
 		for (const auto& inputPhase : inputPhases) {
 			if (inputPhase == phase) {
@@ -619,7 +623,8 @@ struct BulkLoadTaskState {
 		           triggerTime,
 		           startTime,
 		           completeTime,
-		           restartCount);
+		           restartCount,
+		           cancelledDataMovePriority);
 	}
 
 	// Updated by DD
@@ -638,6 +643,8 @@ private:
 	Optional<UID> dataMoveId;
 	// Set by DD or users
 	BulkLoadManifest manifest;
+	Optional<int> cancelledDataMovePriority; // Set when the task is failed for unretrievable error.
+	// In this case, we want to re-issue data move on the task range if the data move is team unhealthy related.
 };
 
 enum class BulkLoadJobPhase : uint8_t {
@@ -698,6 +705,8 @@ public:
 	BulkLoadJobPhase getPhase() const { return phase; }
 
 	bool hasManifest() const { return manifest.present(); }
+
+	bool isError() const { return phase == BulkLoadJobPhase::Error; } // return true if unretrievable error happens
 
 	KeyRange getManifestRange() const {
 		ASSERT(hasManifest());

@@ -1140,8 +1140,10 @@ ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Referenc
 }
 
 // TODO(BulkLoad): add reason to persist
-// TODO(BulkLoad): issue a normal data move if the bulkload data move is issued for team unhealthy
-ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
+ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
+                                    KeyRange range,
+                                    UID taskId,
+                                    int cancelledDataMovePriority) {
 	state Database cx = self->txnProcessor->context();
 	state Transaction tr(cx);
 	state BulkLoadTaskState bulkLoadTaskState;
@@ -1153,6 +1155,7 @@ ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self, KeyRange ra
 			wait(store(bulkLoadTaskState,
 			           getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running })));
 			bulkLoadTaskState.phase = BulkLoadPhase::Error;
+			bulkLoadTaskState.setCancelledDataMovePriority(cancelledDataMovePriority);
 			ASSERT(range == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
 			ASSERT(normalKeys.contains(range));
 			wait(krmSetRange(
@@ -1170,7 +1173,7 @@ ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self, KeyRange ra
 // When a bulk load task is trigged, the range traffic is turned off atomically
 // If the task completes, the task re-enables the traffic atomically
 ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
-	state Promise<Void> completeAck;
+	state Promise<BulkLoadAck> completeAck;
 	state BulkLoadTaskState triggeredBulkLoadTask;
 	state Version commitVersion = invalidVersion;
 	state double beginTime = now();
@@ -1199,12 +1202,38 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		// The completion of the task relies on the fact that a data move on a range is either
 		// completed by itself or replaced by a data move on the overlapping range
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
-		wait(completeAck.getFuture()); // proceed when a data move completes with this task
-		TraceEvent(SevInfo, "DDBulkLoadEngineDoBulkLoadTaskComplete", self->ddId)
-		    .setMaxEventLength(-1)
-		    .setMaxFieldLength(-1)
-		    .detail("Task", triggeredBulkLoadTask.toString())
-		    .detail("Duration", now() - beginTime);
+		state BulkLoadAck ack = wait(completeAck.getFuture()); // proceed when a data move completes with this task
+		if (ack.unretrievableError) {
+			TraceEvent(SevWarnAlways, "DDBulkLoadEngineTaskUnretrievableError", self->ddId)
+			    .detail("CancelledDataMovePriority", ack.dataMovePriority)
+			    .detail("Range", range)
+			    .detail("TaskID", taskId);
+			try {
+				// Mark this task failed in system metadata
+				wait(failBulkLoadTask(self, range, taskId, ack.dataMovePriority));
+				TraceEvent(SevWarnAlways, "DDBulkLoadEngineFailTaskComplete", self->ddId)
+				    .detail("CancelledDataMovePriority", ack.dataMovePriority)
+				    .detail("Range", range)
+				    .detail("TaskID", taskId);
+			} catch (Error& failTaskError) {
+				if (failTaskError.code() == error_code_actor_cancelled) {
+					throw failTaskError;
+				}
+				TraceEvent(SevWarnAlways, "DDBulkLoadEngineFailTaskError", self->ddId)
+				    .errorUnsuppressed(failTaskError)
+				    .detail("CancelledDataMovePriority", ack.dataMovePriority)
+				    .detail("Range", range)
+				    .detail("TaskID", taskId);
+				ASSERT(failTaskError.code() == error_code_bulkload_task_outdated);
+				// sliently exits
+			}
+		} else {
+			TraceEvent(SevInfo, "DDBulkLoadEngineDoBulkLoadTaskComplete", self->ddId)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("Task", triggeredBulkLoadTask.toString())
+			    .detail("Duration", now() - beginTime);
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
@@ -1216,28 +1245,6 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		    .detail("Duration", now() - beginTime);
 		if (e.code() == error_code_movekeys_conflict) {
 			throw e;
-		}
-		if (e.code() == error_code_bulkload_task_stuck) {
-			// The task is stuck, we need to fail the task
-			TraceEvent(SevWarn, "DDBulkLoadEngineDoBulkLoadTaskStuck", self->ddId)
-			    .detail("Range", range)
-			    .detail("TaskID", taskId);
-			try {
-				wait(failBulkLoadTask(self, range, taskId)); // mark this task failed in system metadata
-				TraceEvent(SevWarn, "DDBulkLoadEngineFailTaskComplete", self->ddId)
-				    .detail("Range", range)
-				    .detail("TaskID", taskId);
-			} catch (Error& failTaskError) {
-				if (failTaskError.code() == error_code_actor_cancelled) {
-					throw failTaskError;
-				}
-				TraceEvent(SevWarn, "DDBulkLoadEngineFailTaskError", self->ddId)
-				    .errorUnsuppressed(failTaskError)
-				    .detail("Range", range)
-				    .detail("TaskID", taskId);
-				ASSERT(failTaskError.code() == error_code_bulkload_task_outdated);
-				// sliently exits
-			}
 		}
 		// sliently exits
 	}
@@ -1257,6 +1264,13 @@ ACTOR Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange r
 			wait(krmSetRangeCoalescing(&tr, bulkLoadTaskPrefix, range, normalKeys, StringRef()));
 			wait(tr.commit());
 			self->bulkLoadTaskCollection->eraseTask(bulkLoadTask);
+			Optional<int> cancelledDataMovePriority = bulkLoadTask.getCancelledDataMovePriority();
+			if (cancelledDataMovePriority.present() &&
+			    cancelledDataMovePriority.get() != SERVER_KNOBS->PRIORITY_TEAM_HEALTHY) {
+				// When cancelledDataMovePriority is set, we want to issue a data move. For details, see comments at
+				// cancelledDataMovePriority of BulkLoadTaskState.
+				self->triggerShardBulkLoading.send(BulkLoadShardRequest(bulkLoadTask, cancelledDataMovePriority.get()));
+			}
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_bulkload_task_outdated) {
