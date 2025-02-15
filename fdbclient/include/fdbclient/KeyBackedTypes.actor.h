@@ -362,7 +362,6 @@ public:
 
 	template <class Transaction>
 	Future<Optional<T>> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
-
 		if constexpr (is_transaction_creator<Transaction>) {
 			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
 				if constexpr (SystemAccess) {

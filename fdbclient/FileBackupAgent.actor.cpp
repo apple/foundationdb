@@ -4102,8 +4102,10 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				auto it = std::find_if(
 				    ids.begin(), ids.end(), [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
 				if (it == ids.end()) {
+					// if not exist, then set it in ids and save it back
 					ids.emplace_back(uid, Params.beginVersion().get(task));
 				} else {
+					// if already exist, update local
 					Params.beginVersion().set(task, it->second);
 				}
 
@@ -4113,6 +4115,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				}
 
 				// The task may be restarted. Set the watch if started key has NOT been set.
+				// why we do not check the value, i.e. true or false?
 				if (!taskStarted.get().present()) {
 					watchFuture = tr->watch(config.allWorkerStarted().key);
 				}
