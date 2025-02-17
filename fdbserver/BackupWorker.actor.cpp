@@ -1001,9 +1001,9 @@ ACTOR static Future<Version> getNoopVersion(BackupData* self) {
 
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 			Optional<Value> noopValue = wait(tr.get(backupWorkerMaxNoopVersionKey));
 			if (noopValue.present()) {
@@ -1021,13 +1021,17 @@ ACTOR static Future<Version> getNoopVersion(BackupData* self) {
 ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
-	state Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
 	state Arena prev;
 
 	// Going out of noop mode, the popVersion could be larger than
 	// savedVersion or ongoing pop version, i.e., popTrigger.get(),
 	// and we can't peek messages between savedVersion and popVersion.
-	tagAt = std::max({ tagAt, self->popVersion, self->popTrigger.get() });
+	state Version tagAt = std::max({ self->pulledVersion.get(),
+	                                 self->startVersion,
+	                                 self->savedVersion,
+	                                 self->popVersion,
+	                                 self->popTrigger.get() });
+
 	TraceEvent("BackupWorkerPull", self->myId)
 	    .detail("Tag", self->tag)
 	    .detail("Version", tagAt)
