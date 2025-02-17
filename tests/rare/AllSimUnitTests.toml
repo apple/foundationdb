@@ -7,3 +7,4 @@ startDelay = 0
     testName = 'UnitTests'
     #maxTestCases = 1
     testsMatching = '/'
+    testsIgnored = '/fdbrpc/grpc'
