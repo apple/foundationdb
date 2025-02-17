@@ -162,15 +162,13 @@ struct UnitTestWorkload : TestWorkload {
 			return false;
 		}
 
-		bool matched = true;
 		for (auto ignorePatt : testsIgnored) {
 			if (StringRef(testName).startsWith(ignorePatt)) {
-				matched = false;
-				break;
+				return false;
 			}
 		}
 
-		return matched;
+		return true;
 	}
 
 	ACTOR static Future<Void> runUnitTests(UnitTestWorkload* self) {
