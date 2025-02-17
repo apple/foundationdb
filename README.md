@@ -22,11 +22,11 @@ Contributing to FoundationDB can be in contributions to the code base, sharing y
 
 ### Latest Stable Releases
 
-The lastest stable releases are (were) versions that are recommended for production use, which have been extensively validated via simulation and real cluster tests and used in our production environment.
+The latest stable releases are (were) versions that are recommended for production use, which have been extensively validated via simulation and real cluster tests and used in our production environment.
 
 | Branch   |     Latest Production Release      |  Notes |
 |:--------:|:-------------:|------:|
-| 7.3      |  [7.3.57](https://github.com/apple/foundationdb/releases/tag/7.3.57) | Supported |
+| 7.3      |  [7.3.59](https://github.com/apple/foundationdb/releases/tag/7.3.59) | Supported |
 | 7.2      |   | Experimental |
 | 7.1      |  [7.1.57](https://github.com/apple/foundationdb/releases/tag/7.1.57)   |   Bug fixes |
 | 7.0      |           |   Experimental |
@@ -37,7 +37,7 @@ The lastest stable releases are (were) versions that are recommended for product
 - `Experimental` branches are those used for internal feature testing. They are not recommended for production use.
 - `Unsupported` branches are those which will no longer receive any updates.
 
-If you are running on old production releases, we recommend always upgrading to the next major release's latest version, and then continue to the next major version, e.g., 6.2.X -> 6.3.25 -> 7.1.57 -> 7.3.57. These upgrade paths have been well tested in production (skipping a major release, not marked as `Experimental`, for an upgrade is only tested in simulation).
+If you are running on old production releases, we recommend always upgrading to the next major release's latest version, and then continue to the next major version, e.g., 6.2.X -> 6.3.25 -> 7.1.57 -> 7.3.59. These upgrade paths have been well tested in production (skipping a major release, not marked as `Experimental`, for an upgrade is only tested in simulation).
 
 ### Binary downloads
 
@@ -53,7 +53,7 @@ The official docker image for building is [`foundationdb/build`](https://hub.doc
 
 To build outside of the official docker image, you'll need at least these dependencies:
 
-1. Install cmake Version 3.13 or higher [CMake](https://cmake.org/)
+1. Install cmake Version 3.24.2 or higher [CMake](https://cmake.org/)
 1. Install [Mono](https://www.mono-project.com/download/stable/)
 1. Install [Ninja](https://ninja-build.org/) (optional, but recommended)
 
@@ -189,8 +189,8 @@ $SRCDIR/packaging/osx/buildpkg.sh . $SRCDIR
 Under Windows, only Visual Studio with ClangCl is supported
 
 1. Install Visual Studio 2019 (IDE or Build Tools), and enable llvm support
-1. Install  [CMake 3.15](https://cmake.org/) or higher
-1. Download [Boost 1.77.0](https://boostorg.jfrog.io/artifactory/main/release/1.77.0/source/boost_1_77_0.7z)
+1. Install  [CMake 3.24.2](https://cmake.org/) or higher
+1. Download [Boost 1.86.0](https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2)
 1. Unpack boost to C:\boost, or use `-DBOOST_ROOT=<PATH_TO_BOOST>` with `cmake` if unpacked elsewhere
 1. Install [Python](https://www.python.org/downloads/) if is not already installed by Visual Studio
 1. (Optional) Install [OpenJDK 11](https://developers.redhat.com/products/openjdk/download) to build Java bindings
