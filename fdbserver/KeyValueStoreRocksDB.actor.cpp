@@ -2506,7 +2506,7 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	const std::string& checkpointDir = abspath(a.request.checkpointDir);
 
 	if (a.request.format == DataMoveRocksCF) {
-		rocksdb::ExportImportFilesMetaData* pMetadata;
+		rocksdb::ExportImportFilesMetaData* pMetadata{ nullptr };
 		platform::eraseDirectoryRecursive(checkpointDir);
 		s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
 		if (!s.ok()) {
