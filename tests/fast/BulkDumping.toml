@@ -1,9 +1,5 @@
 [configuration]
-config = 'triple'
-storageEngineType = 0
-machineCount = 15
-extraStorageMachineCountPerDC = 5
-processesPerMachine = 2
+storageEngineExcludeTypes = [5] #FIXME: remove after allowing to do bulkloading with fetchKey and shardedrocksdb
 
 # Do not support tenant, encryption, and TSS
 tenantModes = ['disabled']
@@ -17,9 +13,6 @@ disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for
 # The shard rocksdb storage engine is set up before this knob is overridden
 # The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check.
 shard_encode_location_metadata = true
-
-# Mitigate perpetual wiggle since it causes bulkload engine hard to get a valid team to inject data
-dd_storage_wiggle_pause_threshold = 1
 
 # Rely on RangeLock
 enable_read_lock_on_range = true

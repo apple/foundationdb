@@ -155,7 +155,7 @@ struct BulkLoading : TestWorkload {
 		}
 	}
 
-	ACTOR Future<std::pair<std::vector<BulkLoadTaskState>, bool>> checkAllTaskCompleteOrError(Database cx) {
+	ACTOR Future<std::pair<bool, std::vector<BulkLoadTaskState>>> checkAllTaskCompleteOrError(Database cx) {
 		state Transaction tr(cx);
 		state Key beginKey = allKeys.begin;
 		state Key endKey = allKeys.end;
@@ -179,7 +179,7 @@ struct BulkLoading : TestWorkload {
 							    .setMaxEventLength(-1)
 							    .setMaxFieldLength(-1)
 							    .detail("Task", bulkLoadTaskState.toString());
-							return std::make_pair(errorTasks, false);
+							return std::make_pair(false, errorTasks);
 						}
 						if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
 							TraceEvent("BulkLoadingWorkLoadFailedTasks")
@@ -195,14 +195,14 @@ struct BulkLoading : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
-		return std::make_pair(errorTasks, true);
+		return std::make_pair(true, errorTasks);
 	}
 
 	ACTOR Future<std::vector<BulkLoadTaskState>> waitUntilAllTaskCompleteOrError(BulkLoading* self, Database cx) {
 		loop {
-			std::pair<std::vector<BulkLoadTaskState>, bool> res = wait(self->checkAllTaskCompleteOrError(cx));
-			if (res.second) { // If all tasks are complete or error
-				return res.first; // Return errorTasks
+			std::pair<bool, std::vector<BulkLoadTaskState>> res = wait(self->checkAllTaskCompleteOrError(cx));
+			if (res.first) { // If all tasks are complete or error
+				return res.second; // Return errorTasks
 			}
 			wait(delay(10.0));
 		}

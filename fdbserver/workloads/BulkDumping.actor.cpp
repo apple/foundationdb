@@ -157,25 +157,56 @@ struct BulkDumping : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> waitUntilLoadJobComplete(Database cx) {
+	ACTOR Future<std::pair<bool, std::vector<BulkLoadJobState>>> checkAllTaskCompleteOrError(Database cx) {
+		state RangeResult rangeResult;
+		state Key beginKey = normalKeys.begin;
+		state Key endKey = normalKeys.end;
 		state Transaction tr(cx);
-		loop {
+		state std::vector<BulkLoadJobState> errorTasks;
+		while (beginKey < endKey) {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<BulkLoadJobState> aliveJob = wait(getAliveBulkLoadJob(&tr));
-				if (!aliveJob.present()) {
-					break;
+				rangeResult.clear();
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkLoadJobPrefix,
+				                        KeyRangeRef(beginKey, endKey),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				for (int i = 0; i < rangeResult.size() - 1; ++i) {
+					if (rangeResult[i].value.empty()) {
+						continue;
+					}
+					BulkLoadJobState bulkLoadJobState = decodeBulkLoadJobState(rangeResult[i].value);
+					if (bulkLoadJobState.getPhase() == BulkLoadJobPhase::Error) {
+						TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadBulkLoadJobHasError")
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("Task", bulkLoadJobState.toString());
+						errorTasks.push_back(bulkLoadJobState);
+					}
+					if (bulkLoadJobState.getPhase() != BulkLoadJobPhase::Complete &&
+					    bulkLoadJobState.getPhase() != BulkLoadJobPhase::Error) {
+						return std::make_pair(false, errorTasks);
+					}
 				}
+				beginKey = rangeResult.back().key;
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw e;
-				}
 				wait(tr.onError(e));
 			}
-			wait(delay(30.0));
 		}
-		return Void();
+		return std::make_pair(true, errorTasks);
+	}
+
+	ACTOR Future<std::vector<BulkLoadJobState>> waitUntilLoadJobCompleteOrError(BulkDumping* self, Database cx) {
+		loop {
+			std::pair<bool, std::vector<BulkLoadJobState>> res = wait(self->checkAllTaskCompleteOrError(cx));
+			if (res.first) { // If all tasks are complete or error
+				return res.second; // Return errorTasks
+			}
+			wait(delay(10.0));
+		}
 	}
 
 	ACTOR Future<std::map<Key, Value>> getAllKVSFromDB(Database cx) {
@@ -196,6 +227,36 @@ struct BulkDumping : TestWorkload {
 			}
 		}
 		return kvs;
+	}
+
+	bool keyContainedInRanges(Key key, const std::vector<KeyRange>& ranges) {
+		for (const auto& range : ranges) {
+			if (range.contains(key)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool checkSame(BulkDumping* self,
+	               std::map<Key, Value> kvs,
+	               std::map<Key, Value> newKvs,
+	               std::vector<KeyRange> ignoreRanges) {
+		std::vector<KeyValue> kvsToCheck;
+		std::vector<KeyValue> newKvsToCheck;
+		for (const auto& [key, value] : kvs) {
+			if (self->keyContainedInRanges(key, ignoreRanges)) {
+				continue;
+			}
+			kvsToCheck.push_back(KeyValueRef(key, value));
+		}
+		for (const auto& [key, value] : newKvs) {
+			if (self->keyContainedInRanges(key, ignoreRanges)) {
+				continue;
+			}
+			newKvsToCheck.push_back(KeyValueRef(key, value));
+		}
+		return kvsToCheck == newKvsToCheck;
 	}
 
 	ACTOR Future<Void> _start(BulkDumping* self, Database cx) {
@@ -236,12 +297,17 @@ struct BulkDumping : TestWorkload {
 		wait(submitBulkLoadJob(cx, bulkLoadJob));
 
 		// Wait until the load job complete
-		wait(self->waitUntilLoadJobComplete(cx));
+		state std::vector<KeyRange> errorRanges;
+		std::vector<BulkLoadJobState> errorJobs = wait(self->waitUntilLoadJobCompleteOrError(self, cx));
+		for (const auto& errorJob : errorJobs) {
+			ASSERT(errorJob.hasManifest());
+			errorRanges.push_back(errorJob.getManifestRange());
+		}
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Complete").detail("Job", newJob.toString());
 
 		// Check the loaded data in DB is same as the data in DB before dumping
 		std::map<Key, Value> newKvs = wait(self->getAllKVSFromDB(cx));
-		if (kvs != newKvs) {
+		if (!self->checkSame(self, kvs, newKvs, errorRanges)) {
 			TraceEvent(SevError, "BulkDumpingWorkLoadError").detail("KVS", kvs.size()).detail("NewKVS", newKvs.size());
 			ASSERT(false);
 		}

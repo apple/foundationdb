@@ -227,9 +227,14 @@ struct GetMetricsListRequest {
 
 struct BulkLoadShardRequest {
 	BulkLoadTaskState bulkLoadTaskState;
+	Optional<int> cancelledDataMovePriority; // Set to the data move priority of the task if the task is failed for
+	                                         // unretrievable error.
+	BulkLoadShardRequest() = default;
 
-	BulkLoadShardRequest() {}
 	BulkLoadShardRequest(BulkLoadTaskState const& bulkLoadTaskState) : bulkLoadTaskState(bulkLoadTaskState) {}
+
+	BulkLoadShardRequest(BulkLoadTaskState const& bulkLoadTaskState, int cancelledDataMovePriority)
+	  : bulkLoadTaskState(bulkLoadTaskState), cancelledDataMovePriority(cancelledDataMovePriority) {}
 };
 
 // PhysicalShardCollection maintains physical shard concepts in data distribution
@@ -534,15 +539,27 @@ struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
 
+// Used to piggyback the data move priority when an unretrievable error happens to the task datamove.
+// If the priority indicates the data move is a team unhealthy related data move, the bulkload engine
+// system trigger a new data move when terminate the error task.
+struct BulkLoadAck {
+	bool unretrievableError = false;
+	int dataMovePriority = -1;
+
+	BulkLoadAck() = default;
+	BulkLoadAck(bool unretrievableError, int dataMovePriority)
+	  : unretrievableError(unretrievableError), dataMovePriority(dataMovePriority) {}
+};
+
 struct DDBulkLoadEngineTask {
 	BulkLoadTaskState coreState;
 	Version commitVersion = invalidVersion;
-	Promise<Void> completeAck; // satisfied when a data move for this task completes for the first time, where the task
-	                           // metadata phase has been complete
+	Promise<BulkLoadAck> completeAck; // Satisfied when a data move for this task completes or unretrievable error for
+	                                  // the first time, where the task metadata phase is Complete or Error.
 
 	DDBulkLoadEngineTask() = default;
 
-	DDBulkLoadEngineTask(BulkLoadTaskState coreState, Version commitVersion, Promise<Void> completeAck)
+	DDBulkLoadEngineTask(BulkLoadTaskState coreState, Version commitVersion, Promise<BulkLoadAck> completeAck)
 	  : coreState(coreState), commitVersion(commitVersion), completeAck(completeAck) {}
 
 	bool operator==(const DDBulkLoadEngineTask& rhs) const {
@@ -594,7 +611,9 @@ public:
 	// DDTracker stops any shard boundary change overlapping the task range
 	// DDQueue attaches the task to following data moves until the task has been completed
 	// If there are overlapped old tasks, make it outdated by sending a signal to completeAck
-	void publishTask(const BulkLoadTaskState& bulkLoadTaskState, Version commitVersion, Promise<Void> completeAck) {
+	void publishTask(const BulkLoadTaskState& bulkLoadTaskState,
+	                 Version commitVersion,
+	                 Promise<BulkLoadAck> completeAck) {
 		if (overlappingTaskSince(bulkLoadTaskState.getRange(), commitVersion)) {
 			throw bulkload_task_outdated();
 		}
@@ -653,7 +672,7 @@ public:
 			}
 			// It is possible that the task has been completed by a past data move
 			if (it->value().get().completeAck.canBeSet()) {
-				it->value().get().completeAck.send(Void());
+				it->value().get().completeAck.send(BulkLoadAck());
 				TraceEvent(SevDebug, "DDBulkLoadEngineCollectionTerminateTask", ddId)
 				    .detail("Range", bulkLoadTaskState.getRange())
 				    .detail("TaskRange", it->range())
