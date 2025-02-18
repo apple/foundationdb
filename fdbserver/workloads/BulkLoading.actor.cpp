@@ -155,6 +155,8 @@ struct BulkLoading : TestWorkload {
 		}
 	}
 
+	// First return value is whether all tasks are complete or error.
+	// Second return value is the error tasks.
 	ACTOR Future<std::pair<bool, std::vector<BulkLoadTaskState>>> checkAllTaskCompleteOrError(Database cx) {
 		state Transaction tr(cx);
 		state Key beginKey = allKeys.begin;
@@ -248,7 +250,7 @@ struct BulkLoading : TestWorkload {
 		return true;
 	}
 
-	bool keyContainedInRanges(Key key, const std::vector<KeyRange>& ranges) {
+	bool keyContainedInRanges(const Key& key, const std::vector<KeyRange>& ranges) {
 		for (const auto& range : ranges) {
 			if (range.contains(key)) {
 				return true;

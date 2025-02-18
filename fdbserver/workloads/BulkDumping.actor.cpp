@@ -229,7 +229,7 @@ struct BulkDumping : TestWorkload {
 		return kvs;
 	}
 
-	bool keyContainedInRanges(Key key, const std::vector<KeyRange>& ranges) {
+	bool keyContainedInRanges(const Key& key, const std::vector<KeyRange>& ranges) {
 		for (const auto& range : ranges) {
 			if (range.contains(key)) {
 				return true;
