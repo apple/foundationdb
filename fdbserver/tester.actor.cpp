@@ -2658,6 +2658,24 @@ ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string co
 	return Void();
 }
 
+ACTOR Future<Void> disableBackupWorker(Database cx) {
+	ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=0", true));
+	if (res != ConfigurationResult::SUCCESS) {
+		TraceEvent("BackupWorkerDisableFailed").detail("Result", res);
+		throw operation_failed();
+	}
+	return Void();
+}
+
+ACTOR Future<Void> enableBackupWorker(Database cx) {
+	ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true));
+	if (res != ConfigurationResult::SUCCESS) {
+		TraceEvent("BackupWorkerEnableFailed").detail("Result", res);
+		throw operation_failed();
+	}
+	return Void();
+}
+
 /**
  * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
  *
@@ -2694,6 +2712,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state bool waitForQuiescenceEnd = false;
 	state bool restorePerpetualWiggleSetting = false;
 	state bool perpetualWiggleEnabled = false;
+	state bool backupWorkerEnabled = false;
 	state double startDelay = 0.0;
 	state double databasePingDelay = 1e9;
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
@@ -2757,14 +2776,19 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
 		}
+		std::string_view confView(reinterpret_cast<const char*>(startingConfiguration.begin()),
+		                          startingConfiguration.size());
 		if (restorePerpetualWiggleSetting) {
-			std::string_view confView(reinterpret_cast<const char*>(startingConfiguration.begin()),
-			                          startingConfiguration.size());
 			const std::string setting = "perpetual_storage_wiggle:=";
 			auto pos = confView.find(setting);
 			if (pos != confView.npos && confView.at(pos + setting.size()) == '1') {
 				perpetualWiggleEnabled = true;
 			}
+		}
+		const std::string bwSetting = "backup_worker_enabled:=";
+		auto pos = confView.find(bwSetting);
+		if (pos != confView.npos && confView.at(pos + bwSetting.size()) == '1') {
+			backupWorkerEnabled = true;
 		}
 	}
 
@@ -2863,6 +2887,12 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			Version cVer = wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
 			(void)cVer;
 			printf("Set perpetual_storage_wiggle=1 Done.\n");
+		}
+
+		if (backupWorkerEnabled) {
+			printf("Enabling backup worker ...\n");
+			wait(enableBackupWorker(cx));
+			printf("Enabled backup worker.\n");
 		}
 
 		// TODO: Move this to a BehaviorInjection workload once that concept exists.
