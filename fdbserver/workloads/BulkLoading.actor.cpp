@@ -59,6 +59,8 @@ struct BulkLoading : TestWorkload {
 	bool pass;
 	bool debugging = false;
 	bool backgroundTrafficEnabled = deterministicRandom()->coinflip();
+	UID jobId = deterministicRandom()->randomUniqueID();
+	bool initializeBulkLoadMetadata = deterministicRandom()->coinflip();
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -84,6 +86,22 @@ struct BulkLoading : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	ACTOR Future<Void> clearAllBulkLoadTask(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				wait(krmSetRange(&tr, bulkLoadTaskPrefix, normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState())));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
 
 	ACTOR Future<Void> submitBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadTaskState> tasks) {
 		state int i = 0;
@@ -170,7 +188,9 @@ struct BulkLoading : TestWorkload {
 				for (int i = 0; i < res.size() - 1; i++) {
 					if (!res[i].value.empty()) {
 						BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
-						ASSERT(bulkLoadTaskState.isValid(/*checkManifest=*/false));
+						if (!bulkLoadTaskState.isValid()) {
+							continue;
+						}
 						// We do not check manifest because we are not fully setting manifest in this simulation test
 						if (bulkLoadTaskState.getRange() != KeyRangeRef(res[i].key, res[i + 1].key)) {
 							continue; // Ignore outdated task
@@ -211,38 +231,42 @@ struct BulkLoading : TestWorkload {
 	}
 
 	ACTOR Future<bool> checkBulkLoadMetadataCleared(BulkLoading* self, Database cx) {
-		state Key beginKey = allKeys.begin;
-		state Key endKey = allKeys.end;
-		state KeyRange rangeToRead;
+		state Key beginKey = normalKeys.begin;
+		state Key endKey = normalKeys.end;
 		state Transaction tr(cx);
 		while (beginKey < endKey) {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-				RangeResult res = wait(krmGetRanges(&tr, bulkLoadTaskPrefix, allKeys));
-				beginKey = res.back().key;
-				int emptyCount = 0;
+				RangeResult res = wait(krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
+				int clearedCount = 0;
 				int nonEmptyCount = 0;
 				for (int i = 0; i < res.size() - 1; i++) {
-					if (!res[i].value.empty()) {
-						BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
-						KeyRange currentRange = Standalone(KeyRangeRef(res[i].key, res[i + 1].key));
-						if (bulkLoadTaskState.getRange() == currentRange) {
-							TraceEvent("BulkLoadingWorkLoadMetadataNotCleared")
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
-							    .detail("BulkLoadTask", bulkLoadTaskState.toString());
-							return false;
-						} else {
-							ASSERT(bulkLoadTaskState.getRange().contains(currentRange));
-						}
-						nonEmptyCount++;
-					} else {
-						emptyCount++;
+					ASSERT(!self->initializeBulkLoadMetadata || !res[i].value.empty());
+					if (res[i].value.empty()) {
+						continue;
 					}
+					BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
+					if (!bulkLoadTaskState.isValid()) {
+						clearedCount++;
+						continue;
+					}
+					KeyRange currentRange = Standalone(KeyRangeRef(res[i].key, res[i + 1].key));
+					if (bulkLoadTaskState.getRange() == currentRange) {
+						TraceEvent("BulkLoadingWorkLoadMetadataNotCleared")
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("BulkLoadTask", bulkLoadTaskState.toString());
+						return false;
+					}
+					ASSERT(bulkLoadTaskState.getRange().contains(currentRange));
+					nonEmptyCount++;
 				}
-				ASSERT(emptyCount - 1 - 1 <= nonEmptyCount);
-				break;
+				if (self->initializeBulkLoadMetadata && (clearedCount > nonEmptyCount + 1)) {
+					TraceEvent(SevError, "BulkLoadingWorkLoadTooManyClearedCount")
+					    .detail("ClearedCount", clearedCount)
+					    .detail("NonEmptyCount", nonEmptyCount);
+				}
+				beginKey = res.back().key;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
@@ -414,7 +438,7 @@ struct BulkLoading : TestWorkload {
 		taskUnit.data = self->generateOrderedKVS(self, rangeToLoad, dataSize);
 		BulkLoadFileSet fileSet = self->generateSSTFiles(self, folderPath, taskUnit);
 		taskUnit.bulkLoadTask =
-		    createBulkLoadTask(deterministicRandom()->randomUniqueID(),
+		    createBulkLoadTask(self->jobId,
 		                       rangeToLoad,
 		                       fileSet,
 		                       BulkLoadByteSampleSetting(0,
@@ -551,6 +575,7 @@ struct BulkLoading : TestWorkload {
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		wait(self->finalizeBulkLoadTasks(self, cx, bulkLoadTaskStates));
+		wait(acknowledgeAllErrorBulkLoadTasks(cx, self->jobId, normalKeys));
 		loop {
 			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
 			if (cleared) {
@@ -682,6 +707,7 @@ struct BulkLoading : TestWorkload {
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
 		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		wait(self->finalizeBulkLoadTasks(self, cx, bulkLoadTaskStates));
+		wait(acknowledgeAllErrorBulkLoadTasks(cx, self->jobId, normalKeys));
 		loop {
 			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
 			if (cleared) {
@@ -718,6 +744,10 @@ struct BulkLoading : TestWorkload {
 			disableConnectionFailures("BulkLoading");
 		}
 
+		if (self->initializeBulkLoadMetadata) {
+			wait(self->clearAllBulkLoadTask(cx));
+		}
+
 		// Run background traffic
 		if (self->backgroundTrafficEnabled) {
 			state std::vector<Future<Void>> trafficActors;
@@ -736,7 +766,6 @@ struct BulkLoading : TestWorkload {
 			wait(self->complexTest(self, cx));
 		}
 		// self->produceLargeData(self, cx); // Produce data set that is used in loop back cluster test
-
 		return Void();
 	}
 };

@@ -458,7 +458,7 @@ struct BulkLoadManifest {
 
 	BulkLoadFileSet getFileSet() const { return fileSet; }
 
-	bool isEmptyRange() const {
+	bool hasEmptyData() const {
 		if (keyCount == 0) {
 			ASSERT(bytes == 0);
 		} else {
@@ -530,8 +530,13 @@ struct BulkLoadTaskState {
 
 	// For submitting a task by a job
 	BulkLoadTaskState(const UID& jobId, const BulkLoadManifest& manifest)
-	  : jobId(jobId), taskId(deterministicRandom()->randomUniqueID()), phase(BulkLoadPhase::Submitted),
-	    manifest(manifest) {}
+	  : jobId(jobId), taskId(deterministicRandom()->randomUniqueID()), manifest(manifest) {
+		if (manifest.hasEmptyData()) {
+			phase = BulkLoadPhase::Complete; // If no data to load, the task is complete.
+		} else {
+			phase = BulkLoadPhase::Submitted;
+		}
+	}
 
 	bool operator==(const BulkLoadTaskState& rhs) const {
 		return jobId == rhs.jobId && taskId == rhs.taskId && getRange() == rhs.getRange() &&
@@ -551,6 +556,10 @@ struct BulkLoadTaskState {
 	KeyRange getRange() const { return manifest.getRange(); }
 
 	UID getTaskId() const { return taskId; }
+
+	UID getJobId() const { return jobId; }
+
+	bool hasEmptyData() const { return manifest.hasEmptyData(); }
 
 	std::string getRootPath() const { return manifest.getRootPath(); }
 
@@ -650,7 +659,6 @@ private:
 enum class BulkLoadJobPhase : uint8_t {
 	Invalid = 0,
 	Submitted = 1,
-	Triggered = 2,
 	Complete = 3,
 	Error = 4,
 };
@@ -671,26 +679,11 @@ public:
 		ASSERT(isValid());
 	}
 
-	// Used when trigger a task or mark a task as complete by bulkLoadJobExecutor
-	BulkLoadJobState(const UID& jobId,
-	                 const std::string& jobRoot,
-	                 const KeyRange& jobRange,
-	                 const BulkLoadTransportMethod& transportMethod,
-	                 const BulkLoadJobPhase& phase,
-	                 const BulkLoadManifest& manifest)
-	  : jobId(jobId), jobRoot(jobRoot), jobRange(jobRange), transportMethod(transportMethod), phase(phase),
-	    manifest(manifest) {
-		ASSERT(isValid());
-	}
-
 	std::string toString() const {
 		std::string res = "[BulkLoadJobState]: [JobId]: " + jobId.toString() + ", [JobRoot]: " + jobRoot +
 		                  ", [JobRange]: " + jobRange.toString() +
 		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) +
 		                  ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod));
-		if (manifest.present()) {
-			res = res + ", " + manifest.get().toString();
-		}
 		return res;
 	}
 
@@ -704,31 +697,7 @@ public:
 
 	BulkLoadJobPhase getPhase() const { return phase; }
 
-	bool hasManifest() const { return manifest.present(); }
-
-	bool isError() const { return phase == BulkLoadJobPhase::Error; } // return true if unretrievable error happens
-
-	KeyRange getManifestRange() const {
-		ASSERT(hasManifest());
-		return manifest.get().getRange();
-	}
-
-	std::string getManifestFileFullPath() const {
-		ASSERT(hasManifest());
-		return manifest.get().getManifestFileFullPath();
-	}
-
-	void markComplete() {
-		ASSERT(phase == BulkLoadJobPhase::Triggered || phase == BulkLoadJobPhase::Complete);
-		phase = BulkLoadJobPhase::Complete;
-		return;
-	}
-
-	void markUnretrievableError() {
-		ASSERT(phase == BulkLoadJobPhase::Triggered || phase == BulkLoadJobPhase::Complete);
-		phase = BulkLoadJobPhase::Error;
-		return;
-	}
+	void setPhase(BulkLoadJobPhase inputPhase) { phase = inputPhase; }
 
 	bool isValid() const {
 		if (!jobId.isValid()) {
@@ -746,37 +715,9 @@ public:
 		return true;
 	}
 
-	bool isValidTask() const {
-		if (!isValid()) {
-			return false;
-		}
-		if (phase == BulkLoadJobPhase::Invalid) {
-			return false;
-		}
-		if (!manifest.present() || !manifest.get().isValid()) {
-			return false;
-		}
-		return true;
-	}
-
-	BulkLoadManifest getManifest() const {
-		ASSERT(manifest.present());
-		return manifest.get();
-	}
-
-	std::string getDataFileFullPath() const {
-		ASSERT(manifest.present());
-		return manifest.get().getDataFileFullPath();
-	}
-
-	std::string getBytesSampleFileFullPath() const {
-		ASSERT(manifest.present());
-		return manifest.get().getBytesSampleFileFullPath();
-	}
-
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase, manifest);
+		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase);
 	}
 
 private:
@@ -788,7 +729,6 @@ private:
 	// Given the job manifest file is stored in the jobFolder, the
 	// jobFolder = getBulkLoadJobRoot(jobRoot, jobId).
 	BulkLoadJobPhase phase;
-	Optional<BulkLoadManifest> manifest;
 };
 
 // Define the bulkload job manifest file header
@@ -904,7 +844,7 @@ public:
 
 	bool isValid() const { return beginKey < endKey && version != invalidVersion; }
 
-	bool isEmptyRange() const { return bytes == 0; }
+	bool hasEmptyData() const { return bytes == 0; }
 
 	Key getBeginKey() const { return beginKey; }
 
@@ -931,7 +871,7 @@ struct SSBulkLoadMetadata {
 public:
 	constexpr static FileIdentifier file_identifier = 1384506;
 
-	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false){};
+	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false) {};
 
 	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId) {
 		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
