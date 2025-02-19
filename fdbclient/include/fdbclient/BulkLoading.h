@@ -659,8 +659,8 @@ private:
 enum class BulkLoadJobPhase : uint8_t {
 	Invalid = 0,
 	Submitted = 1,
-	Complete = 3,
-	Error = 4,
+	Complete = 2,
+	Error = 3,
 };
 
 struct BulkLoadJobState {
@@ -871,7 +871,7 @@ struct SSBulkLoadMetadata {
 public:
 	constexpr static FileIdentifier file_identifier = 1384506;
 
-	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false) {};
+	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false){};
 
 	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId) {
 		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
