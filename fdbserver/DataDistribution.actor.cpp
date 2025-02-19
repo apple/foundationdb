@@ -383,7 +383,6 @@ struct DDBulkLoadJobManager {
 	BulkLoadJobState jobState;
 	BulkLoadTransportMethod jobTransportMethod;
 	std::unordered_map<Key, BulkLoadJobFileManifestEntry> manifestEntryMap;
-	KeyRangeActorMap ongoingBulkLoadJobActors;
 	std::string manifestLocalTempFolder;
 
 	DDBulkLoadJobManager() = default;
@@ -1616,11 +1615,11 @@ ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>> fetchBulkLoa
 ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self, BulkLoadJobState jobState) {
 	state BulkLoadJobFileManifestEntry manifestEntry;
 	state Key beginKeyToDispatch = jobState.getJobRange().begin;
+	state std::vector<Future<Void>> actors;
 	loop {
 		auto it = self->bulkLoadJobManager.manifestEntryMap.find(beginKeyToDispatch);
 		ASSERT(it != self->bulkLoadJobManager.manifestEntryMap.end());
 		manifestEntry = it->second;
-		ASSERT(!self->bulkLoadJobManager.ongoingBulkLoadJobActors.liveActorAt(manifestEntry.getBeginKey()));
 		// Limit parallelism
 		loop {
 			if (self->bulkLoadParallelismLimitor.canStart()) {
@@ -1633,14 +1632,12 @@ ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self, BulkLo
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("ManifestEntry", manifestEntry.toString());
-		self->bulkLoadJobManager.ongoingBulkLoadJobActors.insert( // TODO: change the actor map to vector
-		    manifestEntry.getRange(),
-		    bulkLoadJobExecuteTask(self,
-		                           jobState.getJobId(),
-		                           jobState.getJobRoot(),
-		                           jobState.getTransportMethod(),
-		                           self->bulkLoadJobManager.manifestLocalTempFolder,
-		                           manifestEntry));
+		actors.push_back(bulkLoadJobExecuteTask(self,
+		                                        jobState.getJobId(),
+		                                        jobState.getJobRoot(),
+		                                        jobState.getTransportMethod(),
+		                                        self->bulkLoadJobManager.manifestLocalTempFolder,
+		                                        manifestEntry));
 		if (manifestEntry.getEndKey() == jobState.getJobRange().end) {
 			// last round
 			break;
@@ -1649,6 +1646,7 @@ ACTOR Future<Void> bulkLoadJobDispatcher(Reference<DataDistributor> self, BulkLo
 			wait(delay(0.1));
 		}
 	}
+	wait(waitForAll(actors));
 	return Void();
 }
 
