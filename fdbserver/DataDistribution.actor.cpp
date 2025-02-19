@@ -1791,13 +1791,13 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 		TraceEvent(SevInfo, "DDBulkLoadJobNoJobExist", self->ddId);
 		return Void();
 	}
+	state UID jobId = job.get().getJobId();
+	state KeyRange jobRange = job.get().getJobRange();
+	state std::string jobRoot = job.get().getJobRoot();
+	state BulkLoadTransportMethod jobTransportMethod = job.get().getTransportMethod();
 
 	// If a bulkload job is not finished, run bulkLoadJobDispatcher
 	if (job.get().getPhase() != BulkLoadJobPhase::Complete && job.get().getPhase() != BulkLoadJobPhase::Error) {
-		state UID jobId = job.get().getJobId();
-		state KeyRange jobRange = job.get().getJobRange();
-		state std::string jobRoot = job.get().getJobRoot();
-		state BulkLoadTransportMethod jobTransportMethod = job.get().getTransportMethod();
 		TraceEvent(SevInfo, "DDBulkLoadFoundJobToRun", self->ddId)
 		    .detail("JobId", jobId)
 		    .detail("JobRange", jobRange)
