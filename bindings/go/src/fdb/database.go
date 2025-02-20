@@ -40,6 +40,8 @@ import (
 // usually created and committed automatically by the (Database).Transact
 // method.
 type Database struct {
+	// String reference to the cluster file.
+	clusterFile string
 	*database
 }
 
@@ -58,6 +60,22 @@ func (opt DatabaseOptions) setOpt(code int, param []byte) error {
 	return setOpt(func(p *C.uint8_t, pl C.int) C.fdb_error_t {
 		return C.fdb_database_set_option(opt.d.ptr, C.FDBDatabaseOption(code), p, pl)
 	}, param)
+}
+
+// Close will close the Database and clean up all resources.
+// You have to ensure that you're not resuing this database.
+func (d *Database) Close() {
+	networkMutex.Lock()
+	defer networkMutex.Unlock()
+
+	// If an entry for this database exists remove it.
+	if _, ok := openDatabases[d.clusterFile]; ok {
+		// Remove database object from the cached databases
+		delete(openDatabases, d.clusterFile)
+	}
+
+	// Destroy the database
+	d.destroy()
 }
 
 func (d *database) destroy() {

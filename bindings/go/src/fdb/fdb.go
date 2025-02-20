@@ -337,7 +337,7 @@ func createDatabase(clusterFile string) (Database, error) {
 	db := &database{outdb}
 	runtime.SetFinalizer(db, (*database).destroy)
 
-	return Database{db}, nil
+	return Database{clusterFile, db}, nil
 }
 
 // Deprecated: Use OpenDatabase instead.
