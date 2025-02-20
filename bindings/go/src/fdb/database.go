@@ -75,10 +75,6 @@ func (d *Database) Close() {
 	}
 
 	// Destroy the database
-	d.destroy()
-}
-
-func (d *database) destroy() {
 	C.fdb_database_destroy(d.ptr)
 }
 

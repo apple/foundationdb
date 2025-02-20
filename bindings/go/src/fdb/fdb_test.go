@@ -47,7 +47,7 @@ func ExampleOpenDefault() {
 		return
 	}
 
-	_ = db
+	db.Close()
 
 	// Output:
 }
@@ -55,6 +55,7 @@ func ExampleOpenDefault() {
 func TestVersionstamp(t *testing.T) {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
 
 	setVs := func(t fdb.Transactor, key fdb.Key) (fdb.FutureKey, error) {
 		fmt.Printf("setOne called with:  %T\n", t)
@@ -101,6 +102,8 @@ func TestVersionstamp(t *testing.T) {
 func TestReadTransactionOptions(t *testing.T) {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
+
 	_, e := db.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
 		rtr.Options().SetAccessSystemKeys()
 		return rtr.Get(fdb.Key("\xff/")).MustGet(), nil
@@ -113,6 +116,7 @@ func TestReadTransactionOptions(t *testing.T) {
 func ExampleTransactor() {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
 
 	setOne := func(t fdb.Transactor, key fdb.Key, value []byte) error {
 		fmt.Printf("setOne called with:  %T\n", t)
@@ -164,6 +168,7 @@ func ExampleTransactor() {
 func ExampleReadTransactor() {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
 
 	getOne := func(rt fdb.ReadTransactor, key fdb.Key) ([]byte, error) {
 		fmt.Printf("getOne called with: %T\n", rt)
@@ -217,6 +222,7 @@ func ExampleReadTransactor() {
 func ExamplePrefixRange() {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
 
 	tr, e := db.CreateTransaction()
 	if e != nil {
@@ -256,6 +262,7 @@ func ExamplePrefixRange() {
 func ExampleRangeIterator() {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
 
 	tr, e := db.CreateTransaction()
 	if e != nil {
@@ -323,6 +330,7 @@ var (
 func TestCreateTenant(t *testing.T) {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
 
 	testTenantName := fdb.Key("test-create-tenant")
 
@@ -340,6 +348,7 @@ func TestCreateTenant(t *testing.T) {
 func TestCreateExistTenant(t *testing.T) {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
 
 	testTenantName := fdb.Key("test-exist-tenant")
 
@@ -369,6 +378,7 @@ func TestOpenNotExistTenant(t *testing.T) {
 func TestDeleteNotExistTenant(t *testing.T) {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
 
 	testTenantName := fdb.Key("test-not-exist-tenant")
 
@@ -404,6 +414,7 @@ func assertErrorCodeEqual(t *testing.T, actual error, expected fdb.Error) {
 func TestListTenant(t *testing.T) {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
 
 	testTenantName1 := fdb.Key("1-test-list-1-tenant-1")
 	testTenantName2 := fdb.Key("2-test-list-2-tenant-2")
@@ -435,6 +446,7 @@ func TestListTenant(t *testing.T) {
 func TestInvalidPrefixTenant(t *testing.T) {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()
+	defer db.Close()
 
 	testTenantName := fdb.Key("\xFFtest-invalid-prefix-tenant")
 

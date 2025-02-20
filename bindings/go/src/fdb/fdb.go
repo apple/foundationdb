@@ -31,7 +31,6 @@ import (
 	"bytes"
 	"fmt"
 	"log"
-	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -334,10 +333,7 @@ func createDatabase(clusterFile string) (Database, error) {
 		return Database{}, Error{int(err)}
 	}
 
-	db := &database{outdb}
-	runtime.SetFinalizer(db, (*database).destroy)
-
-	return Database{clusterFile, db}, nil
+	return Database{clusterFile, &database{outdb}}, nil
 }
 
 // Deprecated: Use OpenDatabase instead.
