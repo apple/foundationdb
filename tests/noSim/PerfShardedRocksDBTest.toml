@@ -1,6 +1,9 @@
+# long running sharded rocksdb unit tests.
 [[knobs]]
 rocksdb_cf_range_deletion_limit=1000
 rocksdb_use_point_delete_for_system_keys=true
+sharded_rocksdb_histograms_sample_rate=1.0
+
 
 [[test]]
  testTitle = 'UnitTests'
