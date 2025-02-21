@@ -60,6 +60,16 @@ FROM golang:1.22.5-bullseye AS go-build
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
+COPY fdb-aws-s3-credentials-fetcher/ /fdb-aws-s3-credentials-fetcher
+WORKDIR /fdb-aws-s3-credentials-fetcher
+RUN go build -o /fdb-aws-s3-credentials-fetcher *.go
+
+# For now use 'base'. Later, could use a more stripped down image.
+FROM base AS fdb-aws-s3-credentials-fetcher-sidecar
+# Install the kubernetes monitor binary
+COPY --from=go-build /fdb-aws-s3-credentials-fetcher /usr/bin/
+ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
+
 
 FROM base AS foundationdb-base
 
