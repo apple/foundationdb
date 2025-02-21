@@ -123,7 +123,7 @@ struct BulkDumping : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<UID> aliveJob = wait(getAliveBulkDumpJob(&tr));
+				Optional<UID> aliveJob = wait(getSubmittedBulkDumpJob(&tr));
 				if (!aliveJob.present()) {
 					break;
 				}
@@ -157,38 +157,36 @@ struct BulkDumping : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<std::pair<bool, std::vector<BulkLoadJobState>>> checkAllTaskCompleteOrError(Database cx) {
+	ACTOR Future<KeyRange> getBulkLoadJobCompleteRange(Database cx, UID jobId, KeyRange jobRange) {
 		state RangeResult rangeResult;
-		state Key beginKey = normalKeys.begin;
-		state Key endKey = normalKeys.end;
+		state Key beginKey = jobRange.begin;
+		state Key endKey = jobRange.end;
+		state KeyRange completeRange;
 		state Transaction tr(cx);
-		state std::vector<BulkLoadJobState> errorTasks;
 		while (beginKey < endKey) {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				rangeResult.clear();
-				wait(store(rangeResult,
-				           krmGetRanges(&tr,
-				                        bulkLoadJobPrefix,
-				                        KeyRangeRef(beginKey, endKey),
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
-				for (int i = 0; i < rangeResult.size() - 1; ++i) {
+				wait(store(rangeResult, krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey))));
+				for (int i = 0; i < rangeResult.size() - 1; i++) {
 					if (rangeResult[i].value.empty()) {
-						continue;
+						throw bulkload_task_outdated();
 					}
-					BulkLoadJobState bulkLoadJobState = decodeBulkLoadJobState(rangeResult[i].value);
-					if (bulkLoadJobState.getPhase() == BulkLoadJobPhase::Error) {
-						TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadBulkLoadJobHasError")
-						    .setMaxEventLength(-1)
-						    .setMaxFieldLength(-1)
-						    .detail("Task", bulkLoadJobState.toString());
-						errorTasks.push_back(bulkLoadJobState);
+					BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
+					if (!jobState.isValid()) {
+						throw bulkload_task_outdated();
 					}
-					if (bulkLoadJobState.getPhase() != BulkLoadJobPhase::Complete &&
-					    bulkLoadJobState.getPhase() != BulkLoadJobPhase::Error) {
-						return std::make_pair(false, errorTasks);
+					if (jobState.getJobId() != jobId) {
+						throw bulkload_task_outdated();
+					}
+					if (jobState.getPhase() == BulkLoadJobPhase::Complete ||
+					    jobState.getPhase() == BulkLoadJobPhase::Error) {
+						if (completeRange.empty()) {
+							completeRange = Standalone(KeyRangeRef(rangeResult[i].key, rangeResult[i + 1].key));
+						} else {
+							completeRange = Standalone(KeyRangeRef(completeRange.begin, rangeResult[i + 1].key));
+						}
 					}
 				}
 				beginKey = rangeResult.back().key;
@@ -196,16 +194,74 @@ struct BulkDumping : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
-		return std::make_pair(true, errorTasks);
+		return completeRange;
 	}
 
-	ACTOR Future<std::vector<BulkLoadJobState>> waitUntilLoadJobCompleteOrError(BulkDumping* self, Database cx) {
-		loop {
-			std::pair<bool, std::vector<BulkLoadJobState>> res = wait(self->checkAllTaskCompleteOrError(cx));
-			if (res.first) { // If all tasks are complete or error
-				return res.second; // Return errorTasks
+	// Return error tasks
+	ACTOR Future<std::vector<BulkLoadTaskState>> validateAllBulkLoadTaskAcknowledgedOrError(Database cx,
+	                                                                                        UID jobId,
+	                                                                                        KeyRange jobRange) {
+		state RangeResult rangeResult;
+		state Key beginKey = jobRange.begin;
+		state Key endKey = jobRange.end;
+		state Transaction tr(cx);
+		state std::vector<BulkLoadTaskState> errorTasks;
+		TraceEvent("BulkDumpingWorkLoad")
+		    .detail("Phase", "ValidateAllBulkLoadTaskAcknowledgedOrError")
+		    .detail("Job", jobId.toString())
+		    .detail("Range", jobRange);
+		while (beginKey < endKey) {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				rangeResult.clear();
+				wait(store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey))));
+				for (int i = 0; i < rangeResult.size() - 1; ++i) {
+					ASSERT(!rangeResult[i].value.empty());
+					BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(rangeResult[i].value);
+					if (!bulkLoadTaskState.isValid()) {
+						continue; // Has been cleared by engine
+					}
+					if (bulkLoadTaskState.getJobId() != jobId) {
+						throw bulkload_task_outdated();
+					}
+					if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
+						TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadBulkLoadTaskHasError")
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("Task", bulkLoadTaskState.toString());
+						errorTasks.push_back(bulkLoadTaskState);
+					}
+					if (bulkLoadTaskState.phase != BulkLoadPhase::Acknowledged &&
+					    bulkLoadTaskState.phase != BulkLoadPhase::Error) {
+						TraceEvent(SevError, "BulkDumpingWorkLoadBulkLoadTaskWrongPhase")
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("Task", bulkLoadTaskState.toString());
+						ASSERT(false);
+					}
+				}
+				beginKey = rangeResult.back().key;
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
-			wait(delay(10.0));
+		}
+		return errorTasks;
+	}
+
+	ACTOR Future<std::vector<BulkLoadTaskState>> waitUntilLoadJobCompleteOrError(BulkDumping* self,
+	                                                                             Database cx,
+	                                                                             UID jobId,
+	                                                                             KeyRange jobRange) {
+		loop {
+			KeyRange completeRange = wait(self->getBulkLoadJobCompleteRange(cx, jobId, jobRange));
+			if (completeRange != jobRange) {
+				wait(delay(10.0));
+				continue;
+			}
+			std::vector<BulkLoadTaskState> errorTasks =
+			    wait(self->validateAllBulkLoadTaskAcknowledgedOrError(cx, jobId, jobRange));
+			return errorTasks;
 		}
 	}
 
@@ -229,7 +285,7 @@ struct BulkDumping : TestWorkload {
 		return kvs;
 	}
 
-	bool keyContainedInRanges(Key key, const std::vector<KeyRange>& ranges) {
+	bool keyContainedInRanges(const Key& key, const std::vector<KeyRange>& ranges) {
 		for (const auto& range : ranges) {
 			if (range.contains(key)) {
 				return true;
@@ -298,10 +354,10 @@ struct BulkDumping : TestWorkload {
 
 		// Wait until the load job complete
 		state std::vector<KeyRange> errorRanges;
-		std::vector<BulkLoadJobState> errorJobs = wait(self->waitUntilLoadJobCompleteOrError(self, cx));
-		for (const auto& errorJob : errorJobs) {
-			ASSERT(errorJob.hasManifest());
-			errorRanges.push_back(errorJob.getManifestRange());
+		std::vector<BulkLoadTaskState> errorTasks =
+		    wait(self->waitUntilLoadJobCompleteOrError(self, cx, newJob.getJobId(), newJob.getJobRange()));
+		for (const auto& errorTask : errorTasks) {
+			errorRanges.push_back(errorTask.getRange());
 		}
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Complete").detail("Job", newJob.toString());
 
@@ -311,6 +367,10 @@ struct BulkDumping : TestWorkload {
 			TraceEvent(SevError, "BulkDumpingWorkLoadError").detail("KVS", kvs.size()).detail("NewKVS", newKvs.size());
 			ASSERT(false);
 		}
+
+		// Acknowledge any error task of the job
+		wait(acknowledgeAllErrorBulkLoadTasks(cx, bulkLoadJob.getJobId(), bulkLoadJob.getJobRange()));
+
 		return Void();
 	}
 };
