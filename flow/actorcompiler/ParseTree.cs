@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -37,137 +37,174 @@ namespace actorcompiler
     abstract class Statement
     {
         public int FirstSourceLine;
+
         public virtual bool containsWait()
         {
             return false;
         }
     };
+
     class PlainOldCodeStatement : Statement
     {
         public string code;
+
         public override string ToString()
         {
             return code;
         }
     };
+
     class StateDeclarationStatement : Statement
     {
         public VarDeclaration decl;
+
         public override string ToString()
         {
             if (decl.initializerConstructorSyntax)
                 return string.Format("State {0} {1}({2});", decl.type, decl.name, decl.initializer);
             else
-                return string.Format("State {0} {1} = {2};", decl.type, decl.name, decl.initializer);
+                return string.Format(
+                    "State {0} {1} = {2};",
+                    decl.type,
+                    decl.name,
+                    decl.initializer
+                );
         }
     };
+
     class WhileStatement : Statement
     {
         public string expression;
         public Statement body;
+
         public override bool containsWait()
         {
             return body.containsWait();
         }
     };
+
     class ForStatement : Statement
     {
         public string initExpression = "";
         public string condExpression = "";
         public string nextExpression = "";
         public Statement body;
+
         public override bool containsWait()
         {
             return body.containsWait();
         }
     };
+
     class RangeForStatement : Statement
     {
         public string rangeExpression;
         public string rangeDecl;
         public Statement body;
+
         public override bool containsWait()
         {
             return body.containsWait();
         }
     };
+
     class LoopStatement : Statement
     {
         public Statement body;
+
         public override string ToString()
         {
             return "Loop " + body.ToString();
         }
+
         public override bool containsWait()
         {
             return body.containsWait();
         }
     };
-    class BreakStatement : Statement
-    {
-    };
-    class ContinueStatement : Statement
-    {
-    };
+
+    class BreakStatement : Statement { };
+
+    class ContinueStatement : Statement { };
+
     class IfStatement : Statement
     {
         public string expression;
         public bool constexpr;
         public Statement ifBody;
-        public Statement elseBody;  // might be null
+        public Statement elseBody; // might be null
+
         public override bool containsWait()
         {
             return ifBody.containsWait() || (elseBody != null && elseBody.containsWait());
         }
     };
+
     class ReturnStatement : Statement
     {
         public string expression;
+
         public override string ToString()
         {
             return "Return " + expression;
         }
     };
+
     class WaitStatement : Statement
     {
         public VarDeclaration result;
         public string futureExpression;
         public bool resultIsState;
         public bool isWaitNext;
+
         public override string ToString()
         {
-            return string.Format("Wait {0} {1} <- {2} ({3})", result.type, result.name, futureExpression, resultIsState ? "state" : "local");
+            return string.Format(
+                "Wait {0} {1} <- {2} ({3})",
+                result.type,
+                result.name,
+                futureExpression,
+                resultIsState ? "state" : "local"
+            );
         }
+
         public override bool containsWait()
         {
             return true;
         }
     };
+
     class ChooseStatement : Statement
     {
         public Statement body;
+
         public override string ToString()
         {
             return "Choose " + body.ToString();
         }
+
         public override bool containsWait()
         {
             return body.containsWait();
         }
     };
+
     class WhenStatement : Statement
     {
         public WaitStatement wait;
         public Statement body;
+
         public override string ToString()
         {
             return string.Format("When ({0}) {1}", wait, body);
         }
+
         public override bool containsWait()
         {
             return true;
         }
     };
+
     class TryStatement : Statement
     {
         public struct Catch
@@ -179,6 +216,7 @@ namespace actorcompiler
 
         public Statement tryBody;
         public List<Catch> catches;
+
         public override bool containsWait()
         {
             if (tryBody.containsWait())
@@ -189,6 +227,7 @@ namespace actorcompiler
             return false;
         }
     };
+
     class ThrowStatement : Statement
     {
         public string expression;
@@ -197,14 +236,18 @@ namespace actorcompiler
     class CodeBlock : Statement
     {
         public Statement[] statements;
+
         public override string ToString()
         {
-            return string.Join("\n", 
+            return string.Join(
+                "\n",
                 new string[] { "CodeBlock" }
                     .Concat(statements.Select(s => s.ToString()))
                     .Concat(new string[] { "EndCodeBlock" })
-                    .ToArray());
+                    .ToArray()
+            );
         }
+
         public override bool containsWait()
         {
             foreach (Statement s in statements)
@@ -213,7 +256,6 @@ namespace actorcompiler
             return false;
         }
     };
-
 
     class Declaration
     {
@@ -229,7 +271,7 @@ namespace actorcompiler
         public string name;
         public string enclosingClass = null;
         public VarDeclaration[] parameters;
-        public VarDeclaration[] templateFormals;  //< null if not a template
+        public VarDeclaration[] templateFormals; //< null if not a template
         public CodeBlock body;
         public int SourceLine;
         public bool isStatic = false;
@@ -239,8 +281,15 @@ namespace actorcompiler
         public bool isForwardDeclaration = false;
         public bool isTestCase = false;
 
-        public bool IsCancellable() { return returnType != null && !isUncancellable; }
-        public void SetUncancellable() { isUncancellable = true; }
+        public bool IsCancellable()
+        {
+            return returnType != null && !isUncancellable;
+        }
+
+        public void SetUncancellable()
+        {
+            isUncancellable = true;
+        }
     };
 
     class Descr
