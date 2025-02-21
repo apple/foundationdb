@@ -1848,7 +1848,7 @@ public:
 
 		for (auto const& shard : shards) {
 			sizes.emplace_back(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(shard))));
-			TraceEvent(SevWarnAlways, "DDShardLost", self->distributorId)
+			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "DDShardLost", self->distributorId)
 			    .detail("ServerTeamID", team->getTeamID())
 			    .detail("ShardBegin", shard.begin)
 			    .detail("ShardEnd", shard.end);
