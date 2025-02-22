@@ -1798,14 +1798,43 @@ Version TagPartitionedLogSystem::getPeekEnd() const {
 		return std::numeric_limits<Version>::max();
 }
 
+std::vector<Reference<LocalitySet>> TagPartitionedLogSystem::getPushLocationsForTags(
+    std::vector<int>& fromLocations) const {
+	std::vector<Reference<LocalitySet>> restrictedLogSets;
+	for (auto& log : tLogs) {
+		int locationOffset = 0;
+
+		if (!log->isLocal || !log->logServers.size()) {
+			locationOffset += log->logServers.size();
+			continue;
+		}
+		std::vector<LocalityEntry> e;
+		for (int i : fromLocations) {
+			if (i >= locationOffset && i < locationOffset + log->logServers.size()) {
+				e.emplace_back(LocalityEntry(i));
+			}
+		}
+		restrictedLogSets.push_back(log->logServerSet->restrict(e));
+		locationOffset += log->logServers.size();
+	}
+	return restrictedLogSets;
+}
+
 void TagPartitionedLogSystem::getPushLocations(VectorRef<Tag> tags,
                                                std::vector<int>& locations,
-                                               bool allLocations) const {
+                                               bool allLocations,
+                                               Optional<std::vector<Reference<LocalitySet>>> fromLocations) const {
 	int locationOffset = 0;
-	for (auto& log : tLogs) {
-		if (log->isLocal && log->logServers.size()) {
-			log->getPushLocations(tags, locations, locationOffset, allLocations);
-			locationOffset += log->logServers.size();
+	int setIndex = 0;
+	for (auto& logSet : tLogs) {
+		if (logSet->isLocal && logSet->logServers.size()) {
+			if (fromLocations.present()) {
+				logSet->getPushLocations(tags, locations, locationOffset, allLocations, fromLocations.get()[setIndex]);
+				setIndex++;
+			} else {
+				logSet->getPushLocations(tags, locations, locationOffset, allLocations);
+			}
+			locationOffset += logSet->logServers.size();
 		}
 	}
 }

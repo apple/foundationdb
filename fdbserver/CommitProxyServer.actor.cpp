@@ -869,6 +869,7 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 		}
 	}
 
+	// if (toCommit.logSystem->hasRemoteLogs()) {
 	if (toCommit.getLogRouterTags()) {
 		toCommit.storeRandomRouterTag();
 		transactionTags.insert(toCommit.savedRandomRouterTag.get());
@@ -1787,11 +1788,15 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			// TraceEvent("ResolverReturn").detail("ReturnTags",reply.writtenTags).detail("TPCVsize",reply.tpcvMap.size()).detail("ReqTags",self->writtenTagsPreResolution);
 			self->tpcvMap = reply.tpcvMap;
-			std::vector<int> locations(self->tpcvMap.size());
+
+			// extract push locations from tpcv
+			std::vector<int> fromLocations;
+			fromLocations.reserve(reply.tpcvMap.size());
 			for (const auto& pair : self->tpcvMap) {
-				locations.push_back(pair.first);
+				fromLocations.push_back(pair.first);
 			}
-			self->toCommit.setPushLocations(locations);
+			// save push locations for each tag
+			self->toCommit.setPushLocationsForTags(fromLocations);
 		}
 		self->toCommit.addWrittenTags(reply.writtenTags);
 	}
