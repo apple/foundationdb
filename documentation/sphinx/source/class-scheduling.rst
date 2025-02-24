@@ -30,7 +30,7 @@ Open a Python interactive interpreter and import the FoundationDB API module::
 
 Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions::
 
-    >>> fdb.api_version(740)
+    >>> fdb.api_version(800)
 
 Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the :ref:`default cluster file <default-cluster-file>`. ::
 
@@ -48,7 +48,7 @@ When this command returns without exception, the modification is durably stored 
 If this is all working, it looks like we are ready to start building a real application. For reference, here's the full code for "hello world"::
 
     import fdb
-    fdb.api_version(740)
+    fdb.api_version(800)
     db = fdb.open()
     db[b'hello'] = b'world'
     print 'hello', db[b'hello']
@@ -91,7 +91,7 @@ FoundationDB includes a few tools that make it easy to model data using this app
 opening a :ref:`directory <developer-guide-directories>` in the database::
 
     import fdb
-    fdb.api_version(740)
+    fdb.api_version(800)
 
     db = fdb.open()
     scheduling = fdb.directory.create_or_open(db, ('scheduling',))
@@ -337,7 +337,7 @@ Here's the code for the scheduling tutorial::
     import fdb
     import fdb.tuple
 
-    fdb.api_version(740)
+    fdb.api_version(800)
 
 
     ####################################
