@@ -569,7 +569,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
                                                                Reference<OutgoingRequest> request,
                                                                Reference<IRateControl> sendRate,
                                                                int64_t* pSent,
-                                                               Reference<IRateControl> recvRate) {
+                                                               Reference<IRateControl> recvRate,
+                                                               bool* hasDoneError = nullptr) {
 	state TraceEvent event(SevDebug, "HTTPRequest");
 
 	// There is no standard http request id header field, so either a global default can be set via a knob
@@ -650,7 +651,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 				trySend = deterministicRandom()->randomInt(1, 10);
 			}
 			wait(sendRate->getAllowance(trySend));
-			int len = conn->write(request->data.content->getUnsent(), trySend);
+			int len = conn->write(request->data.content->getUnsent(), trySend, hasDoneError);
 			if (pSent != nullptr)
 				*pSent += len;
 			sendRate->returnUnused(trySend - len);
@@ -757,8 +758,9 @@ Future<Reference<IncomingResponse>> doRequest(Reference<IConnection> conn,
                                               Reference<OutgoingRequest> request,
                                               Reference<IRateControl> sendRate,
                                               int64_t* pSent,
-                                              Reference<IRateControl> recvRate) {
-	return doRequestActor(conn, request, sendRate, pSent, recvRate);
+                                              Reference<IRateControl> recvRate,
+                                              bool* hasDoneError) {
+	return doRequestActor(conn, request, sendRate, pSent, recvRate, hasDoneError);
 }
 
 ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,

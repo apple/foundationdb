@@ -46,7 +46,7 @@ public:
 	Future<Void> onWritable() override;
 	Future<Void> onReadable() override;
 	int read(uint8_t* begin, uint8_t* end) override;
-	int write(SendBuffer const* buffer, int limit) override;
+	int write(SendBuffer const* buffer, int limit, bool* hasDoneError = nullptr) override;
 	NetworkAddress getPeerAddress() const override;
 	bool hasTrustedPeer() const override;
 	UID getDebugID() const override;

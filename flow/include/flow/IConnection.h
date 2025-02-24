@@ -71,7 +71,9 @@ public:
 	// entire byte set that the caller was attempting to write even if it is unable to write all of it immediately. Due
 	// to limitations of TLSConnection, callers must also avoid reallocations that reduce the amount of written data in
 	// the first buffer in the chain.
-	virtual int write(SendBuffer const* buffer, int limit = std::numeric_limits<int>::max()) = 0;
+	virtual int write(SendBuffer const* buffer,
+	                  int limit = std::numeric_limits<int>::max(),
+	                  bool* hasDoneError = nullptr) = 0;
 
 	// Returns the network address and port of the other end of the connection.  In the case of an incoming connection,
 	// this may not be an address we can connect to!

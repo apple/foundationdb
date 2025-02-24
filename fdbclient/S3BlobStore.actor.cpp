@@ -22,7 +22,9 @@
 
 #include "fdbclient/ClientKnobs.h"
 #include "fdbclient/Knobs.h"
+#include "flow/Error.h"
 #include "flow/IConnection.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
@@ -1005,8 +1007,9 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 	state int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
 	state int thisTry = 1;
 	state int badRequestCode = 400;
-	state bool s3TokenError = false;
+	state bool s3TokenError = true;
 	state double nextRetryDelay = 2.0;
+	state bool hasDoneError = false;
 
 	loop {
 		state Optional<Error> err;
@@ -1083,8 +1086,13 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 					    .detail("V4", CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER)
 					    .log();
 					wait(bstore->requestRate->getAllowance(1));
-					Future<Reference<HTTP::IncomingResponse>> dryrunResponse = HTTP::doRequest(
-					    rconn.conn, dryrunRequest, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
+					Future<Reference<HTTP::IncomingResponse>> dryrunResponse =
+					    HTTP::doRequest(rconn.conn,
+					                    dryrunRequest,
+					                    bstore->sendRate,
+					                    &bstore->s_stats.bytes_sent,
+					                    bstore->recvRate,
+					                    &hasDoneError);
 					Reference<HTTP::IncomingResponse> _dryrunR = wait(timeoutError(dryrunResponse, requestTimeout));
 					dryrunR = _dryrunR;
 					std::string s3Error = parseErrorCodeFromS3(dryrunR->data.content);
@@ -1114,7 +1122,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 				}
 			} catch (Error& e) {
 				// retry with GET failed, but continue to do original request anyway
-				TraceEvent(SevError, "ErrorDuringRetryS3TokenIssue").errorUnsuppressed(e);
+				TraceEvent(SevWarn, "ErrorDuringRetryS3TokenIssue").errorUnsuppressed(e);
+				// continue;
 			}
 			setHeaders(bstore, req);
 			req->resource = getCanonicalURI(bstore, req);
@@ -1153,7 +1162,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 			// TODO: should this also do rconn.conn.clear()? (would need to extend lifetime outside of try block)
-			err = e;
+			err = e; // ROOT CAUSE: If there is any error happens to HTTP::doRequest, we do not return the conn.
 		}
 
 		double end = g_network->timer();

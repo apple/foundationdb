@@ -418,7 +418,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of
 	// bytes written (might be 0) (or may throw an error if the connection dies)
-	int write(SendBuffer const* buffer, int limit) override {
+	int write(SendBuffer const* buffer, int limit, bool* hasDoneError = nullptr) override {
 		rollRandomClose();
 		ASSERT(limit > 0);
 

@@ -489,12 +489,17 @@ public:
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of
 	// bytes written (might be 0)
-	int write(SendBuffer const* data, int limit) override {
+	int write(SendBuffer const* data, int limit, bool* hasDoneError = nullptr) override {
 		boost::system::error_code err;
 		++g_net2->countWrites;
 
 		size_t sent = socket.write_some(
 		    boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), err);
+
+		if (hasDoneError != nullptr && !(*hasDoneError)) {
+			*hasDoneError = true;
+			err = boost::system::error_code(boost::system::errc::operation_canceled, boost::system::generic_category());
+		}
 
 		if (err) {
 			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is
@@ -1124,7 +1129,7 @@ public:
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of
 	// bytes written (might be 0)
-	int write(SendBuffer const* data, int limit) override {
+	int write(SendBuffer const* data, int limit, bool* hasDoneError = nullptr) override {
 #ifdef __APPLE__
 		// For some reason, writing ssl_sock with more than 2016 bytes when socket is writeable sometimes results in a
 		// broken pipe error.
@@ -1135,6 +1140,11 @@ public:
 
 		size_t sent = ssl_sock.write_some(
 		    boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), err);
+
+		if (hasDoneError != nullptr && !(*hasDoneError)) {
+			*hasDoneError = true;
+			err = boost::system::error_code(boost::system::errc::operation_canceled, boost::system::generic_category());
+		}
 
 		if (err) {
 			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is
@@ -2296,7 +2306,7 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	return Void();
 }
 
-void net2_test(){
+void net2_test() {
 	/*
 	g_network = newNet2();  // for promise serialization below
 

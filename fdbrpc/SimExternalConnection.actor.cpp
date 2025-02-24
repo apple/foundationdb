@@ -100,7 +100,7 @@ int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
 	return toRead;
 }
 
-int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
+int SimExternalConnection::write(SendBuffer const* buffer, int limit, bool* hasDoneError) {
 	boost::system::error_code err;
 	bool triggerReaders = (socket.available() == 0);
 	int bytesSent = socket.write_some(
