@@ -1761,7 +1761,9 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), owners.begin());
 							for (const auto& ssid : servers) {
 								if (std::find(owners.begin(), owners.end(), ssid) != owners.end()) {
-									TraceEvent(SevWarn, "DDBulkLoadEngineTaskStartMoveShardsMoveInConflict")
+									TraceEvent(SevWarn, "DDBulkLoadTaskStartMoveShardsMoveInConflict")
+									    .setMaxEventLength(-1)
+									    .setMaxFieldLength(-1)
 									    .detail("BulkLoadTaskState", bulkLoadTaskState.get().toString())
 									    .detail("DestServerId", ssid)
 									    .detail("OwnerIds", describe(owners))
@@ -1893,7 +1895,9 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						                 bulkLoadTaskPrefix,
 						                 newBulkLoadTaskState.getRange(),
 						                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
-						TraceEvent(SevInfo, "DDBulkLoadEngineTaskRunningPersist", relocationIntervalId)
+						TraceEvent(SevInfo, "DDBulkLoadTaskSetRunningStateTransaction", relocationIntervalId)
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("BulkLoadTaskState", newBulkLoadTaskState.toString());
 						dataMove.bulkLoadTaskState = newBulkLoadTaskState;
@@ -1918,6 +1922,16 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				wait(waitForAll(actors));
 
 				wait(tr.commit());
+
+				if (currentKeys.end == keys.end && bulkLoadTaskState.present()) {
+					Version commitVersion = tr.getCommittedVersion();
+					TraceEvent(SevInfo, "DDBulkLoadTaskPersistRunningState", relocationIntervalId)
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("BulkLoadTaskState", bulkLoadTaskState.get().toString())
+					    .detail("CommitVersion", commitVersion);
+				}
 
 				TraceEvent(sevDm, "DataMoveMetaDataCommit", relocationIntervalId)
 				    .detail("DataMoveID", dataMoveId)
@@ -2332,7 +2346,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							                 bulkLoadTaskPrefix,
 							                 newBulkLoadTaskState.getRange(),
 							                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
-							TraceEvent(SevInfo, "DDBulkLoadEngineTaskCompletePersist", relocationIntervalId)
+							TraceEvent(SevInfo, "DDBulkLoadTaskSetCompleteTransaction", relocationIntervalId)
+							    .setMaxEventLength(-1)
+							    .setMaxFieldLength(-1)
 							    .detail("DataMoveID", dataMoveId)
 							    .detail("BulkLoadTaskState", newBulkLoadTaskState.toString());
 							dataMove.bulkLoadTaskState = newBulkLoadTaskState;
@@ -2353,6 +2369,16 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					}
 
 					wait(tr.commit());
+
+					if (range.end == dataMove.ranges.front().end && bulkLoadTaskState.present()) {
+						Version commitVersion = tr.getCommittedVersion();
+						TraceEvent(SevInfo, "DDBulkLoadTaskPersistCompleteState", relocationIntervalId)
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("BulkLoadTaskState", bulkLoadTaskState.get().toString())
+						    .detail("CommitVersion", commitVersion);
+					}
 
 					if (range.end == dataMove.ranges.front().end) {
 						// Post validate consistency of update of keyServers and serverKeys

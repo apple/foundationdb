@@ -861,7 +861,9 @@ public:
 				self->relocationProducer.send(rs);
 				// Cancel data move for old bulk loading
 				// Do not assign bulk load to rs so that this is a normal data move cancellation signal
-				TraceEvent("DDInitScheduledCancelOldBulkLoadDataMove", self->ddId).detail("DataMove", meta.toString());
+				TraceEvent(SevWarnAlways, "DDBulkLoadTaskCancelDataMove", self->ddId)
+				    .detail("Reason", "DDInit")
+				    .detail("DataMove", meta.toString());
 			} else if (dataMoveType == DataMoveType::LOGICAL_BULKLOAD ||
 			           dataMoveType == DataMoveType::PHYSICAL_BULKLOAD) {
 				// The metadata is from the old system
@@ -869,7 +871,8 @@ public:
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
 				self->relocationProducer.send(rs); // Cancal data move
-				TraceEvent("DDInitScheduledCancelDataMoveForWrongType", self->ddId)
+				TraceEvent(SevWarnAlways, "DDBulkLoadTaskCancelDataMoveForWrongType", self->ddId)
+				    .detail("Reason", "WrongTypeWhenDDInit")
 				    .detail("DataMove", meta.toString())
 				    .detail("DataMoveType", dataMoveType);
 			} else if (it.value()->isCancelled() ||
@@ -1087,7 +1090,7 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 
 // Trigger a task on range based on the current bulk load task metadata
 ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<DataDistributor> self,
-                                                                        KeyRange range,
+                                                                        KeyRange taskRange,
                                                                         UID taskId) {
 	loop {
 		Database cx = self->txnProcessor->context();
@@ -1102,7 +1105,7 @@ ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Referenc
 			wait(
 			    store(newBulkLoadTaskState,
 			          getBulkLoadTask(&tr,
-			                          range,
+			                          taskRange,
 			                          taskId,
 			                          { BulkLoadPhase::Submitted, BulkLoadPhase::Triggered, BulkLoadPhase::Running })));
 			newBulkLoadTaskState.phase = BulkLoadPhase::Triggered;
@@ -1115,7 +1118,9 @@ ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Referenc
 			                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
 			wait(tr.commit());
 			Version commitVersion = tr.getCommittedVersion();
-			TraceEvent(SevInfo, "DDBulkLoadEngineTaskTriggeredPersist", self->ddId)
+			TraceEvent(SevInfo, "DDBulkLoadTaskPersistTriggerState", self->ddId)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
 			    .detail("CommitVersion", commitVersion)
 			    .detail("BulkLoadTaskState", newBulkLoadTaskState.toString());
 			ASSERT(commitVersion != invalidVersion);
@@ -1123,7 +1128,9 @@ ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Referenc
 
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
-				TraceEvent(SevInfo, "DDBulkLoadEngineTaskTriggeredPersistError", self->ddId)
+				TraceEvent(SevInfo, "DDBulkLoadTaskPersistTriggerStateError", self->ddId)
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
 				    .errorUnsuppressed(e)
 				    .detail("BulkLoadTaskState", newBulkLoadTaskState.toString());
 			}
@@ -1134,7 +1141,7 @@ ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Referenc
 
 // TODO(BulkLoad): add reason to persist
 ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
-                                    KeyRange range,
+                                    KeyRange taskRange,
                                     UID taskId,
                                     int cancelledDataMovePriority) {
 	state Database cx = self->txnProcessor->context();
@@ -1146,16 +1153,29 @@ ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
 			wait(store(bulkLoadTaskState,
-			           getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running })));
+			           getBulkLoadTask(&tr, taskRange, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running })));
 			bulkLoadTaskState.phase = BulkLoadPhase::Error;
 			bulkLoadTaskState.setCancelledDataMovePriority(cancelledDataMovePriority);
-			ASSERT(range == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
-			ASSERT(normalKeys.contains(range));
+			ASSERT(taskRange == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
+			ASSERT(normalKeys.contains(taskRange));
 			wait(krmSetRange(
 			    &tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState)));
 			wait(tr.commit());
+			Version commitVersion = tr.getCommittedVersion();
+			TraceEvent(SevInfo, "DDBulkLoadTaskPersistErrorState", self->ddId)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("CommitVersion", commitVersion)
+			    .detail("BulkLoadTaskState", bulkLoadTaskState.toString());
 			break;
 		} catch (Error& e) {
+			if (e.code() != error_code_actor_cancelled) {
+				TraceEvent(SevInfo, "DDBulkLoadTaskPersistErrorStateError", self->ddId)
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .errorUnsuppressed(e)
+				    .detail("BulkLoadTaskState", bulkLoadTaskState.toString());
+			}
 			wait(tr.onError(e));
 		}
 	}
@@ -1177,9 +1197,10 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		std::pair<BulkLoadTaskState, Version> triggeredBulkLoadTask_ = wait(triggerBulkLoadTask(self, range, taskId));
 		triggeredBulkLoadTask = triggeredBulkLoadTask_.first;
 		commitVersion = triggeredBulkLoadTask_.second;
-		TraceEvent(SevInfo, "DDBulkLoadEngineDoBulkLoadTaskTriggered", self->ddId)
+		TraceEvent(SevInfo, "DDBulkLoadTaskDoTask", self->ddId)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
+		    .detail("Phase", "Triggered")
 		    .detail("Task", triggeredBulkLoadTask.toString())
 		    .detail("CommitVersion", commitVersion)
 		    .detail("Duration", now() - beginTime);
@@ -1197,44 +1218,51 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
 		state BulkLoadAck ack = wait(completeAck.getFuture()); // proceed when a data move completes with this task
 		if (ack.unretrievableError) {
-			TraceEvent(SevWarnAlways, "DDBulkLoadEngineTaskUnretrievableError", self->ddId)
+			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
+			    .detail("Phase", "See unretrievable error")
 			    .detail("CancelledDataMovePriority", ack.dataMovePriority)
 			    .detail("Range", range)
-			    .detail("TaskID", taskId);
+			    .detail("TaskID", taskId.toString())
+			    .detail("Duration", now() - beginTime);
 			try {
 				// Mark this task failed in system metadata
 				wait(failBulkLoadTask(self, range, taskId, ack.dataMovePriority));
-				TraceEvent(SevWarnAlways, "DDBulkLoadEngineFailTaskComplete", self->ddId)
+				TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
+				    .detail("Phase", "Marked as error")
 				    .detail("CancelledDataMovePriority", ack.dataMovePriority)
 				    .detail("Range", range)
-				    .detail("TaskID", taskId);
+				    .detail("TaskID", taskId.toString())
+				    .detail("Duration", now() - beginTime);
 			} catch (Error& failTaskError) {
 				if (failTaskError.code() == error_code_actor_cancelled) {
 					throw failTaskError;
 				}
-				TraceEvent(SevWarnAlways, "DDBulkLoadEngineFailTaskError", self->ddId)
+				TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
 				    .errorUnsuppressed(failTaskError)
+				    .detail("Phase", "Failed to mark task error. Error should be bulkload_task_outdated")
 				    .detail("CancelledDataMovePriority", ack.dataMovePriority)
 				    .detail("Range", range)
-				    .detail("TaskID", taskId);
+				    .detail("TaskID", taskId.toString())
+				    .detail("Duration", now() - beginTime);
 				ASSERT(failTaskError.code() == error_code_bulkload_task_outdated);
 				// sliently exits
 			}
 		} else {
-			TraceEvent(SevInfo, "DDBulkLoadEngineDoBulkLoadTaskComplete", self->ddId)
-			    .setMaxEventLength(-1)
-			    .setMaxFieldLength(-1)
-			    .detail("Task", triggeredBulkLoadTask.toString())
+			TraceEvent(SevInfo, "DDBulkLoadTaskDoTask", self->ddId)
+			    .detail("Phase", "Task complete")
+			    .detail("Range", range)
+			    .detail("TaskID", taskId.toString())
 			    .detail("Duration", now() - beginTime);
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		TraceEvent(SevWarn, "DDBulkLoadEngineDoBulkLoadTaskFailed", self->ddId)
+		TraceEvent(SevWarn, "DDBulkLoadTaskDoTask", self->ddId)
 		    .errorUnsuppressed(e)
+		    .detail("Phase", "Error")
 		    .detail("Range", range)
-		    .detail("TaskID", taskId)
+		    .detail("TaskID", taskId.toString())
 		    .detail("Duration", now() - beginTime);
 		if (e.code() == error_code_movekeys_conflict) {
 			throw e;
@@ -1245,7 +1273,7 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 	return Void();
 }
 
-ACTOR Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
+ACTOR Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange taskRange, UID taskId) {
 	state Database cx = self->txnProcessor->context();
 	state Transaction tr(cx);
 	state BulkLoadTaskState bulkLoadTask;
@@ -1253,10 +1281,15 @@ ACTOR Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange r
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(store(bulkLoadTask, getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Acknowledged })));
+			wait(store(bulkLoadTask, getBulkLoadTask(&tr, taskRange, taskId, { BulkLoadPhase::Acknowledged })));
 			wait(krmSetRangeCoalescing(
-			    &tr, bulkLoadTaskPrefix, range, normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState())));
+			    &tr, bulkLoadTaskPrefix, taskRange, normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState())));
 			wait(tr.commit());
+			Version commitVersion = tr.getCommittedVersion();
+			TraceEvent(SevInfo, "DDBulkLoadTaskEraseState", self->ddId)
+			    .detail("CommitVersion", commitVersion)
+			    .detail("TaskRange", taskRange)
+			    .detail("TaskId", taskId.toString());
 			self->bulkLoadTaskCollection->eraseTask(bulkLoadTask);
 			Optional<int> cancelledDataMovePriority = bulkLoadTask.getCancelledDataMovePriority();
 			if (cancelledDataMovePriority.present() &&
@@ -1264,9 +1297,18 @@ ACTOR Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange r
 				// When cancelledDataMovePriority is set, we want to issue a data move. For details, see comments at
 				// cancelledDataMovePriority of BulkLoadTaskState.
 				self->triggerShardBulkLoading.send(BulkLoadShardRequest(bulkLoadTask, cancelledDataMovePriority.get()));
+				TraceEvent(SevInfo, "DDBulkLoadTaskTriggerShardDatamove", self->ddId)
+				    .detail("CommitVersion", commitVersion)
+				    .detail("TaskRange", taskRange)
+				    .detail("TaskId", taskId.toString());
 			}
 			break;
 		} catch (Error& e) {
+			if (e.code() != error_code_actor_cancelled) {
+				TraceEvent(SevInfo, "DDBulkLoadTaskEraseStateError", self->ddId)
+				    .detail("TaskRange", taskRange)
+				    .detail("TaskId", taskId.toString());
+			}
 			if (e.code() == error_code_bulkload_task_outdated) {
 				// Silently exit
 				break;
@@ -1321,20 +1363,20 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 						}
 						wait(self->bulkLoadEngineParallelismLimitor.waitUntilCounterChanged());
 					}
-					TraceEvent(SevInfo, "DDBulkLoadEngineScheduleTask", self->ddId)
+					TraceEvent(SevInfo, "DDBulkLoadTaskSchedule", self->ddId)
 					    .detail("Range", bulkLoadTaskState.getRange())
 					    .detail("TaskID", bulkLoadTaskState.getTaskId())
 					    .detail("Phase", bulkLoadTaskState.phase);
 					bulkLoadActors.push_back(
 					    doBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId()));
 				} else if (bulkLoadTaskState.phase == BulkLoadPhase::Acknowledged) {
-					TraceEvent(SevInfo, "DDBulkLoadEngineClearTaskMetadata", self->ddId)
+					TraceEvent(SevInfo, "DDBulkLoadTaskClearMetadata", self->ddId)
 					    .detail("Range", bulkLoadTaskState.getRange())
 					    .detail("TaskID", bulkLoadTaskState.getTaskId());
 					bulkLoadActors.push_back(
 					    eraseBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId()));
 				} else if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
-					TraceEvent(SevWarnAlways, "DDBulkLoadEngineFindTaskUnretriableError", self->ddId)
+					TraceEvent(SevWarnAlways, "DDBulkLoadTaskUnretriableError", self->ddId)
 					    .detail("Range", bulkLoadTaskState.getRange())
 					    .detail("TaskID", bulkLoadTaskState.getTaskId());
 				} else {
@@ -1353,11 +1395,11 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	return Void();
 }
 
-ACTOR Future<Void> bulkLoadEngineCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
+ACTOR Future<Void> bulkLoadTaskCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
 	wait(readyToStart);
 	state Database cx = self->txnProcessor->context();
 	wait(registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad));
-	TraceEvent(SevInfo, "DDBulkLoadEngineCoreStart", self->ddId);
+	TraceEvent(SevInfo, "DDBulkLoadTaskCoreStart", self->ddId);
 	loop {
 		try {
 			wait(scheduleBulkLoadTasks(self));
@@ -1365,7 +1407,7 @@ ACTOR Future<Void> bulkLoadEngineCore(Reference<DataDistributor> self, Future<Vo
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			TraceEvent(SevInfo, "DDBulkLoadEngineCoreError", self->ddId).errorUnsuppressed(e);
+			TraceEvent(SevInfo, "DDBulkLoadTaskCoreError", self->ddId).errorUnsuppressed(e);
 			if (e.code() == error_code_movekeys_conflict) {
 				throw e;
 			}
@@ -1435,7 +1477,7 @@ ACTOR Future<Optional<BulkLoadTaskState>> bulkLoadJobFindTask(Reference<DataDist
 			KeyRange currentRange = Standalone(KeyRangeRef(result[0].key, result[1].key));
 			ASSERT(result[0].key != result[1].key);
 			if (bulkLoadTaskState.getRange() != currentRange) {
-				TraceEvent(SevError, "BulkLoadRangeMismatch", logId)
+				TraceEvent(SevError, "DDBulkLoadJobRangeMismatch", logId)
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("CurrentRange", currentRange)
@@ -1464,8 +1506,12 @@ ACTOR Future<BulkLoadTaskState> bulkLoadJobTriggerTask(Reference<DataDistributor
 			wait(setBulkLoadSubmissionTransaction(&tr, bulkLoadTask));
 			// setBulkLoadSubmissionTransaction shuts down traffic to the range
 			wait(tr.commit());
-			TraceEvent(SevDebug, "DDBulkLoadJobTriggerTaskMetadataUpdated", self->ddId)
-			    .detail("BulkLoadJob", bulkLoadTask.toString());
+			TraceEvent(SevInfo, "DDBulkLoadJobSubmitTask", self->ddId)
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("JobId", jobId.toString())
+			    .detail("Manifest", manifest.toString())
+			    .detail("BulkLoadTask", bulkLoadTask.toString());
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -1476,6 +1522,7 @@ ACTOR Future<BulkLoadTaskState> bulkLoadJobTriggerTask(Reference<DataDistributor
 
 // If the task reaches unretrievable error, return true; otherwise, return false.
 ACTOR Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistributor> self,
+                                                           UID jobId,
                                                            BulkLoadTaskState bulkLoadTask) {
 	ASSERT(bulkLoadTask.isValid());
 	state Database cx = self->txnProcessor->context();
@@ -1497,7 +1544,10 @@ ACTOR Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistrib
 				throw bulkload_task_outdated();
 			}
 			if (currentTask.phase == BulkLoadPhase::Error) {
-				TraceEvent(SevWarnAlways, "DDbulkLoadJobWaitUntilTaskCompleteOrErrorUnretrievableError", self->ddId)
+				TraceEvent(SevWarnAlways, "DDBulkLoadJobUnretrievableError", self->ddId)
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("JobId", jobId.toString())
 				    .detail("Task", currentTask.toString());
 				return Void();
 			}
@@ -1540,6 +1590,7 @@ ACTOR Future<Void> bulkLoadJobExecuteTask(Reference<DataDistributor> self,
 			TraceEvent(SevInfo, "DDBulkLoadJobExecuteNewTask", self->ddId)
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
+			    .detail("JobId", jobId.toString())
 			    .detail("Task", bulkLoadTask.toString())
 			    .detail("Duration", now() - beginTime);
 		} else {
@@ -1547,15 +1598,17 @@ ACTOR Future<Void> bulkLoadJobExecuteTask(Reference<DataDistributor> self,
 			TraceEvent(SevInfo, "DDBulkLoadJobExecuteTaskFound", self->ddId)
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
+			    .detail("JobId", jobId.toString())
 			    .detail("Task", bulkLoadTask.toString())
 			    .detail("Duration", now() - beginTime);
 		}
 
 		// Step 4: Monitor the bulkload completion
-		wait(bulkLoadJobWaitUntilTaskCompleteOrError(self, bulkLoadTask));
+		wait(bulkLoadJobWaitUntilTaskCompleteOrError(self, jobId, bulkLoadTask));
 		TraceEvent(SevInfo, "DDBulkLoadJobExecuteTaskEnd", self->ddId)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
+		    .detail("JobId", jobId.toString())
 		    .detail("Task", bulkLoadTask.toString())
 		    .detail("Duration", now() - beginTime);
 
@@ -1567,6 +1620,7 @@ ACTOR Future<Void> bulkLoadJobExecuteTask(Reference<DataDistributor> self,
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .errorUnsuppressed(e)
+		    .detail("JobId", jobId.toString())
 		    .detail("Task", bulkLoadTask.toString())
 		    .detail("Duration", now() - beginTime);
 		// Sliently exit for any error
@@ -1674,7 +1728,7 @@ ACTOR Future<bool> checkBulkLoadTaskCompleteOrError(Reference<DataDistributor> s
 				// When start loading a job, the old job metadata must be cleared at first.
 				// So, any existing bulkload job id must match the running job id.
 				if (existTask.getJobId() != jobState.getJobId()) {
-					TraceEvent(SevError, "JobIdMisMatch")
+					TraceEvent(SevError, "DDBulkLoadJobIdMisMatch", self->ddId)
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .detail("Task", existTask.toString())
@@ -1739,7 +1793,7 @@ ACTOR Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self, BulkLoad
 				// if no old metadata exists (the old job metadata has been cleared). So, we can stop at this point.
 				ASSERT(existTask.getJobId() == jobState.getJobId());
 				if (existTask.phase == BulkLoadPhase::Error) {
-					TraceEvent(SevWarnAlways, "DDBulkLoadClearMetadataStopSinceJobHasErrorTask", self->ddId)
+					TraceEvent(SevWarnAlways, "DDBulkLoadJobStopClearMetadata", self->ddId)
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .detail("Job", jobState.toString())
@@ -1748,7 +1802,7 @@ ACTOR Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self, BulkLoad
 					hasError = true;
 				} else {
 					if (existTask.phase != BulkLoadPhase::Complete && existTask.phase != BulkLoadPhase::Acknowledged) {
-						TraceEvent(SevError, "DDBulkLoadJobSeeWrongTaskPhase", self->ddId)
+						TraceEvent(SevError, "DDBulkLoadJobWrongTaskPhase", self->ddId)
 						    .setMaxEventLength(-1)
 						    .setMaxFieldLength(-1)
 						    .detail("Task", existTask.toString());
@@ -1770,11 +1824,13 @@ ACTOR Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self, BulkLoad
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
 			wait(krmSetRange(&tr, bulkLoadJobPrefix, jobCompleteRange, bulkLoadJobValue(jobState)));
 			wait(tr.commit());
+			Version commitVersion = tr.getCommittedVersion();
 			TraceEvent(SevInfo, "DDBulkLoadJobExecuteTaskFinalized", self->ddId)
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("JobCompleteRange", jobCompleteRange)
-			    .detail("Task", existTask.toString());
+			    .detail("Task", existTask.toString())
+			    .detail("CommitVersion", commitVersion);
 			beginKey = lastKey.get();
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -1831,9 +1887,6 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 			    .detail("JobId", jobId)
 			    .detail("JobRange", jobRange);
 			wait(finalizeBulkLoadJob(self, job.get()));
-			TraceEvent(SevInfo, "DDBulkLoadJobFinalized", self->ddId)
-			    .detail("JobId", jobId)
-			    .detail("JobRange", jobRange);
 			break;
 		}
 		wait(delay(SERVER_KNOBS->DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC));
@@ -1841,7 +1894,7 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 	return Void();
 }
 
-ACTOR Future<Void> bulkLoadingCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
+ACTOR Future<Void> bulkLoadJobCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
 	wait(readyToStart);
 	loop {
 		try {
@@ -2389,19 +2442,19 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(serveBlobMigratorRequests(self, self->context->tracker, self->context->ddQueue));
 			if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
-				TraceEvent(SevInfo, "DDBulkLoadEngineModeEnabled", self->ddId)
+				TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
 				    .detail("UsableRegions", self->configuration.usableRegions);
 				self->bulkLoadEnabled = true;
 				if (self->configuration.usableRegions > 1) {
 					// The core actor to handle bulkload tasks
 					actors.push_back(
-					    bulkLoadEngineCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
-					// The core actor to convert a bulkload job to tasks which are executed by bulkLoadEngineCore
+					    bulkLoadTaskCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+					// The core actor to convert a bulkload job to tasks which are executed by bulkLoadTaskCore
 					actors.push_back(
-					    bulkLoadingCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+					    bulkLoadJobCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
 				} else {
-					actors.push_back(bulkLoadEngineCore(self, self->initialized.getFuture()));
-					actors.push_back(bulkLoadingCore(self, self->initialized.getFuture()));
+					actors.push_back(bulkLoadTaskCore(self, self->initialized.getFuture()));
+					actors.push_back(bulkLoadJobCore(self, self->initialized.getFuture()));
 				}
 			}
 
