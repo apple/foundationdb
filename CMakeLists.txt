@@ -134,6 +134,14 @@ if (NO_MULTIREGION_TEST)
     message(STATUS "NO_MULTIREGION_TEST is ON")
 endif()
 
+set(RESTART_TEST TRUE)
+option(NO_RESTART_TEST "Disable restart simulation tests" OFF)
+if (NO_RESTART_TEST)
+    set(RESTART_TEST FALSE)
+    add_definitions(-DNO_RESTART_TEST)
+    message(STATUS "NO_RESTART_TEST is ON")
+endif()
+
 ################################################################################
 # Flow
 ################################################################################

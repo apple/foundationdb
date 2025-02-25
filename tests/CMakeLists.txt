@@ -53,6 +53,10 @@ if(WITH_PYTHON)
       list(APPEND MULTIREGION_IGNORE_PATTERNS "${CMAKE_CURRENT_SOURCE_DIR}/slow/DiskFailureCycle\\.toml$")
   endif()
 
+  if (NO_RESTART_TEST)
+      list(APPEND MULTIREGION_IGNORE_PATTERNS "${CMAKE_CURRENT_SOURCE_DIR}/restarting/.*")
+  endif()
+
   configure_testing(TEST_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       ERROR_ON_ADDITIONAL_FILES
       IGNORE_PATTERNS ".*/CMakeLists.txt" ".*/requirements.txt" ${MULTIREGION_IGNORE_PATTERNS})
@@ -336,141 +340,144 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/AllSimUnitTests.toml IGNORE)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.3.0/ClientTransactionProfilingCorrectness-1.txt
-    restarting/from_7.1.0_until_7.3.0/ClientTransactionProfilingCorrectness-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.3.0/CycleTestRestart-1.txt
-    restarting/from_7.1.0_until_7.3.0/CycleTestRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.3.0/StorefrontTestRestart-1.txt
-    restarting/from_7.1.0_until_7.3.0/StorefrontTestRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/DrUpgradeRestart-1.txt
-    restarting/from_7.1.0_until_7.2.0/DrUpgradeRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-1.toml
-    restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-1.txt
-    restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-1.toml
-    restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.63_until_7.2.0/ClientMetricRestart-1.toml
-    restarting/from_7.1.63_until_7.2.0/ClientMetricRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-1.toml
-    restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/from_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+
+  if (RESTART_TEST)
     add_fdb_test(
-      TEST_FILES restarting/from_7.2.0_until_7.3.0/DrUpgradeRestart-1.toml
-      restarting/from_7.2.0_until_7.3.0/DrUpgradeRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.2.4_until_7.3.0/UpgradeAndBackupRestore-1.toml
-    restarting/from_7.2.4_until_7.3.0/UpgradeAndBackupRestore-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/ConfigureTestRestart-1.toml
-    restarting/from_7.3.0/ConfigureTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+      TEST_FILES restarting/from_7.1.0_until_7.3.0/ClientTransactionProfilingCorrectness-1.txt
+      restarting/from_7.1.0_until_7.3.0/ClientTransactionProfilingCorrectness-2.txt)
     add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/DrUpgradeRestart-1.toml
-    restarting/from_7.3.0/DrUpgradeRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/UpgradeAndBackupRestore-1.toml
-    restarting/from_7.3.0/UpgradeAndBackupRestore-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/VersionVectorDisableRestart-1.toml
-    restarting/from_7.3.0/VersionVectorDisableRestart-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/VersionVectorEnableRestart-1.toml
-    restarting/from_7.3.0/VersionVectorEnableRestart-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCycle-1.toml
-    restarting/from_7.3.0/BlobGranuleRestartCycle-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/BlobGranuleRestartLarge-1.toml
-    restarting/from_7.3.0/BlobGranuleRestartLarge-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCorrectness-1.toml
-    restarting/from_7.3.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapCycleRestart-1.toml
-    restarting/from_7.3.0/SnapCycleRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapTestAttrition-1.toml
-    restarting/from_7.3.0/SnapTestAttrition-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapTestSimpleRestart-1.toml
-    restarting/from_7.3.0/SnapTestSimpleRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/SnapTestRestart-1.toml
-    restarting/from_7.3.0/SnapTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.49/ClientMetricRestart-1.toml
-    restarting/from_7.3.49/ClientMetricRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.5_until_7.3.29/ClientTransactionProfilingCorrectness-1.toml
-    restarting/from_7.3.5_until_7.3.29/ClientTransactionProfilingCorrectness-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.29/ClientTransactionProfilingCorrectness-1.toml
-    restarting/from_7.3.29/ClientTransactionProfilingCorrectness-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.5_until_7.3.29/CycleTestRestart-1.toml
-    restarting/from_7.3.5_until_7.3.29/CycleTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.29/CycleTestRestart-1.toml
-    restarting/from_7.3.29/CycleTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.0/StorefrontTestRestart-1.toml
-    restarting/from_7.3.0/StorefrontTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.1.0_until_7.2.0/CycleTestRestart-1.toml
-    restarting/to_7.1.0_until_7.2.0/CycleTestRestart-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.2.0_until_7.3.0/CycleTestRestart-1.toml
-    restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.3.0_until_7.3.51/BlobGranuleRestartCorrectness-1.toml
-    restarting/to_7.3.0_until_7.3.51/BlobGranuleRestartCorrectness-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.3.0_until_7.3.51/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.3.0_until_7.3.51/ConfigureStorageMigrationTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.3.0_until_7.3.51/CycleTestRestart-1.toml
-    restarting/to_7.3.0_until_7.3.51/CycleTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.3.51_until_7.4.0/BlobGranuleRestartCorrectness-1.toml
-    restarting/to_7.3.51_until_7.4.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.3.51_until_7.4.0/CycleTestRestart-1.toml
-    restarting/to_7.3.51_until_7.4.0/CycleTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.4.0/BlobGranuleRestartCorrectness-1.toml
-    restarting/to_7.4.0/BlobGranuleRestartCorrectness-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/to_7.4.0/CycleTestRestart-1.toml
-    restarting/to_7.4.0/CycleTestRestart-2.toml)
+      TEST_FILES restarting/from_7.1.0_until_7.3.0/CycleTestRestart-1.txt
+      restarting/from_7.1.0_until_7.3.0/CycleTestRestart-2.txt)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.1.0_until_7.3.0/StorefrontTestRestart-1.txt
+      restarting/from_7.1.0_until_7.3.0/StorefrontTestRestart-2.txt)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.1.0_until_7.2.0/DrUpgradeRestart-1.txt
+      restarting/from_7.1.0_until_7.2.0/DrUpgradeRestart-2.txt)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-1.toml
+      restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-1.txt
+      restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-2.txt)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-1.toml
+      restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.1.63_until_7.2.0/ClientMetricRestart-1.toml
+      restarting/from_7.1.63_until_7.2.0/ClientMetricRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-1.toml
+      restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/from_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+      add_fdb_test(
+        TEST_FILES restarting/from_7.2.0_until_7.3.0/DrUpgradeRestart-1.toml
+        restarting/from_7.2.0_until_7.3.0/DrUpgradeRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.2.4_until_7.3.0/UpgradeAndBackupRestore-1.toml
+      restarting/from_7.2.4_until_7.3.0/UpgradeAndBackupRestore-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/ConfigureTestRestart-1.toml
+      restarting/from_7.3.0/ConfigureTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+      add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/DrUpgradeRestart-1.toml
+      restarting/from_7.3.0/DrUpgradeRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/UpgradeAndBackupRestore-1.toml
+      restarting/from_7.3.0/UpgradeAndBackupRestore-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/VersionVectorDisableRestart-1.toml
+      restarting/from_7.3.0/VersionVectorDisableRestart-2.toml IGNORE)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/VersionVectorEnableRestart-1.toml
+      restarting/from_7.3.0/VersionVectorEnableRestart-2.toml IGNORE)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCycle-1.toml
+      restarting/from_7.3.0/BlobGranuleRestartCycle-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/BlobGranuleRestartLarge-1.toml
+      restarting/from_7.3.0/BlobGranuleRestartLarge-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCorrectness-1.toml
+      restarting/from_7.3.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/SnapCycleRestart-1.toml
+      restarting/from_7.3.0/SnapCycleRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/SnapTestAttrition-1.toml
+      restarting/from_7.3.0/SnapTestAttrition-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/SnapTestSimpleRestart-1.toml
+      restarting/from_7.3.0/SnapTestSimpleRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/SnapTestRestart-1.toml
+      restarting/from_7.3.0/SnapTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.49/ClientMetricRestart-1.toml
+      restarting/from_7.3.49/ClientMetricRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.5_until_7.3.29/ClientTransactionProfilingCorrectness-1.toml
+      restarting/from_7.3.5_until_7.3.29/ClientTransactionProfilingCorrectness-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.29/ClientTransactionProfilingCorrectness-1.toml
+      restarting/from_7.3.29/ClientTransactionProfilingCorrectness-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.5_until_7.3.29/CycleTestRestart-1.toml
+      restarting/from_7.3.5_until_7.3.29/CycleTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.29/CycleTestRestart-1.toml
+      restarting/from_7.3.29/CycleTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.3.0/StorefrontTestRestart-1.toml
+      restarting/from_7.3.0/StorefrontTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.1.0_until_7.2.0/CycleTestRestart-1.toml
+      restarting/to_7.1.0_until_7.2.0/CycleTestRestart-2.toml IGNORE)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.2.0_until_7.3.0/CycleTestRestart-1.toml
+      restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml IGNORE)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.3.0_until_7.3.51/BlobGranuleRestartCorrectness-1.toml
+      restarting/to_7.3.0_until_7.3.51/BlobGranuleRestartCorrectness-2.toml IGNORE)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.3.0_until_7.3.51/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/to_7.3.0_until_7.3.51/ConfigureStorageMigrationTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.3.0_until_7.3.51/CycleTestRestart-1.toml
+      restarting/to_7.3.0_until_7.3.51/CycleTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.3.51_until_7.4.0/BlobGranuleRestartCorrectness-1.toml
+      restarting/to_7.3.51_until_7.4.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.3.51_until_7.4.0/CycleTestRestart-1.toml
+      restarting/to_7.3.51_until_7.4.0/CycleTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.4.0/BlobGranuleRestartCorrectness-1.toml
+      restarting/to_7.4.0/BlobGranuleRestartCorrectness-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/to_7.4.0/CycleTestRestart-1.toml
+      restarting/to_7.4.0/CycleTestRestart-2.toml)
+  endif()
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
