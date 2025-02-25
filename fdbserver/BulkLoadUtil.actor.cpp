@@ -69,7 +69,7 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
 					continue;
 				}
 			}
-			TraceEvent(SevWarnAlways, "SSBulkLoadDataMoveIdNotExist", logId)
+			TraceEvent(SevWarnAlways, "SSBulkLoadTaskDataMoveIdNotExist", logId)
 			    .detail("Message", "This fetchKey is blocked and will be cancelled later")
 			    .detail("DataMoveID", dataMoveId)
 			    .detail("ReadVersion", tr.getReadVersion().get())
@@ -246,7 +246,7 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 				UNREACHABLE();
 			}
 			// TODO(BulkLoad): Check file checksum
-			TraceEvent(SevInfo, "SSBulkLoadDownloadTaskFileSet", logId)
+			TraceEvent(SevInfo, "SSBulkLoadTaskDownloadFileSet", logId)
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("FromRemoteFileSet", fromRemoteFileSet.toString())
@@ -260,7 +260,7 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			TraceEvent(SevWarn, "SSBulkLoadDownloadTaskFileSetError", logId)
+			TraceEvent(SevWarn, "SSBulkLoadTaskDownloadFileSetError", logId)
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .errorUnsuppressed(e)
@@ -294,7 +294,7 @@ ACTOR Future<Void> downloadManifestFile(BulkLoadTransportMethod transportMethod,
 			if (!fileExists(abspath(toLocalPath))) {
 				throw retry();
 			}
-			TraceEvent(SevInfo, "DownloadManifestFile", logId)
+			TraceEvent(SevInfo, "BulkLoadDownloadManifestFile", logId)
 			    .detail("FromRemotePath", fromRemotePath)
 			    .detail("ToLocalPath", toLocalPath)
 			    .detail("Duration", now() - startTime)
@@ -304,7 +304,7 @@ ACTOR Future<Void> downloadManifestFile(BulkLoadTransportMethod transportMethod,
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			TraceEvent(SevWarnAlways, "DownloadManifestFileError", logId)
+			TraceEvent(SevWarnAlways, "BulkLoadDownloadManifestFileError", logId)
 			    .errorUnsuppressed(e)
 			    .detail("TransportMethod", transportMethod)
 			    .detail("FromRemotePath", fromRemotePath)

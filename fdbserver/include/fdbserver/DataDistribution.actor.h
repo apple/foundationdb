@@ -618,7 +618,7 @@ public:
 			throw bulkload_task_outdated();
 		}
 		DDBulkLoadEngineTask task(bulkLoadTaskState, commitVersion, completeAck);
-		TraceEvent(SevDebug, "DDBulkLoadEngineCollectionPublishTask", ddId)
+		TraceEvent(SevDebug, "DDBulkLoadTaskCollectionPublishTask", ddId)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("Range", bulkLoadTaskState.getRange())
@@ -637,7 +637,7 @@ public:
 			}
 			if (it->value().get().completeAck.canBeSet()) {
 				it->value().get().completeAck.sendError(bulkload_task_outdated());
-				TraceEvent(SevInfo, "DDBulkLoadEngineCollectionPublishTaskOverwriteTask", ddId)
+				TraceEvent(SevInfo, "DDBulkLoadTaskCollectionPublishTaskOverwriteTask", ddId)
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("NewRange", bulkLoadTaskState.getRange())
@@ -656,7 +656,7 @@ public:
 			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadTaskState.getTaskId()) {
 				throw bulkload_task_outdated();
 			}
-			TraceEvent(SevDebug, "DDBulkLoadEngineCollectionStartTask", ddId)
+			TraceEvent(SevDebug, "DDBulkLoadTaskCollectionStartTask", ddId)
 			    .detail("Range", bulkLoadTaskState.getRange())
 			    .detail("TaskRange", it->range())
 			    .detail("Task", it->value().get().toString());
@@ -673,7 +673,7 @@ public:
 			// It is possible that the task has been completed by a past data move
 			if (it->value().get().completeAck.canBeSet()) {
 				it->value().get().completeAck.send(BulkLoadAck());
-				TraceEvent(SevDebug, "DDBulkLoadEngineCollectionTerminateTask", ddId)
+				TraceEvent(SevDebug, "DDBulkLoadTaskCollectionTerminateTask", ddId)
 				    .detail("Range", bulkLoadTaskState.getRange())
 				    .detail("TaskRange", it->range())
 				    .detail("Task", it->value().get().toString());
@@ -689,7 +689,7 @@ public:
 			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadTaskState.getTaskId()) {
 				continue;
 			}
-			TraceEvent(SevDebug, "DDBulkLoadEngineCollectionEraseTaskdata", ddId)
+			TraceEvent(SevDebug, "DDBulkLoadTaskCollectionEraseTaskdata", ddId)
 			    .detail("Range", bulkLoadTaskState.getRange())
 			    .detail("TaskRange", it->range())
 			    .detail("Task", it->value().get().toString());
@@ -710,7 +710,7 @@ public:
 				continue;
 			}
 			DDBulkLoadEngineTask bulkLoadTask = it->value().get();
-			TraceEvent(SevDebug, "DDBulkLoadEngineCollectionGetPublishedTaskEach", ddId)
+			TraceEvent(SevDebug, "DDBulkLoadTaskCollectionGetPublishedTaskEach", ddId)
 			    .detail("Range", range)
 			    .detail("TaskRange", it->range())
 			    .detail("Task", bulkLoadTask.toString());
@@ -719,7 +719,7 @@ public:
 				res = bulkLoadTask;
 			}
 		}
-		TraceEvent(SevDebug, "DDBulkLoadEngineCollectionGetPublishedTask", ddId)
+		TraceEvent(SevDebug, "DDBulkLoadTaskCollectionGetPublishedTask", ddId)
 		    .detail("Range", range)
 		    .detail("Task", res.present() ? describe(res.get()) : "");
 		return res;
