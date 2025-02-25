@@ -1808,7 +1808,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			RangeResult result;
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
+				result.more = false;
 				a.result.send(result);
+				return;
 			}
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
