@@ -45,8 +45,10 @@ def is_unknown_option(output):
 
 
 def is_unknown_knob(output):
-    return output.startswith("WARNING: Invalid knob option")
+    return output.startswith("ERROR: Invalid knob option")
 
+def is_invalid_knob_value(output):
+    return output.startswith("ERROR: Invalid value")
 
 def is_cli_usage(output):
     return output.startswith("FoundationDB CLI")
@@ -61,6 +63,7 @@ def test_fdbserver(build_dir):
     check(not is_unknown_option(run_command(command, ["--cluster_file", "foo"])))
 
     check(is_unknown_knob(run_command(command, ["--knob-fake-knob", "foo"])))
+    check(is_invalid_knob_value(run_command(command, ["--knob_commit_batches_mem_bytes_hard_limit", "4GiB"])))
 
     check(not is_unknown_knob(run_command(command, ["--knob-min-trace-severity", "5"])))
     check(not is_unknown_knob(run_command(command, ["--knob-min_trace_severity", "5"])))
