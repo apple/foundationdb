@@ -71,24 +71,6 @@ ACTOR Future<Void> getBulkLoadTaskStateByRange(Database cx,
 	return Void();
 }
 
-ACTOR Future<bool> getOngoingBulkLoadJob(Database cx) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			Optional<BulkLoadJobState> job = wait(getAliveBulkLoadJob(&tr));
-			if (job.present()) {
-				fmt::println("Running bulk loading job: {}", job.get().getJobId().toString());
-				return true;
-			} else {
-				fmt::println("No bulk loading job is running");
-				return false;
-			}
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<Void> getBulkLoadCompleteRanges(Database cx, KeyRange rangeToRead) {
 	try {
 		size_t finishCount = wait(getBulkLoadCompleteTaskCount(cx, rangeToRead));
@@ -263,8 +245,8 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			return UID();
 		}
 		state UID jobId = UID::fromString(tokens[2].toString());
-		wait(clearBulkLoadJob(cx, jobId));
 		fmt::println("Job {} has been cleared. No task will be spawned.", jobId.toString());
+		// TODO(Zhe)
 		return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
@@ -272,10 +254,12 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			printUsage(tokens[0]);
 			return UID();
 		}
-		bool anyJob = wait(getOngoingBulkLoadJob(cx));
-		if (!anyJob) {
+		Optional<BulkLoadJobState> job = wait(getRunningBulkLoadJob(cx));
+		if (!job.present()) {
+			fmt::println("No bulk loading job is running");
 			return UID();
 		}
+		fmt::println("Running bulk loading job: {}", job.get().getJobId().toString());
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
 		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {

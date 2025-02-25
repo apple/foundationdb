@@ -23,10 +23,8 @@
 #include "fdbcli/fdbcli.actor.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
-#include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/Arena.h"
-#include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -36,7 +34,7 @@ ACTOR Future<bool> getOngoingBulkDumpJob(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			Optional<UID> jobId = wait(getAliveBulkDumpJob(&tr));
+			Optional<UID> jobId = wait(getSubmittedBulkDumpJob(&tr));
 			if (jobId.present()) {
 				fmt::println("Running bulk dumping job: {}", jobId.get().toString());
 				return true;
