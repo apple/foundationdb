@@ -563,16 +563,9 @@ Version ILogSystem::ServerPeekCursor::popped() const {
 	return poppedVersion;
 }
 
-ILogSystem::MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
-                                               Version begin)
-  : serverCursors(serverCursors), tag(invalidTag), bestServer(-1), currentCursor(0), readQuorum(serverCursors.size()),
-    messageVersion(begin), hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
-    tLogReplicationFactor(0) {
-	sortedVersions.resize(serverCursors.size());
-}
-
 ILogSystem::MergedPeekCursor::MergedPeekCursor(
     std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
+    std::vector<int>&& pushLocations,
     int bestServer,
     int readQuorum,
     Tag tag,
@@ -584,7 +577,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
     int tLogReplicationFactor)
   : tag(tag), bestServer(bestServer), currentCursor(0), readQuorum(readQuorum), messageVersion(begin),
     hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
-    tLogReplicationFactor(tLogReplicationFactor) {
+    tLogReplicationFactor(tLogReplicationFactor), pushLocations(pushLocations) {
 	if (tLogPolicy) {
 		logSet = makeReference<LogSet>();
 		logSet->tLogPolicy = tLogPolicy;
@@ -599,6 +592,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
 		//TraceEvent("MPC_Starting", randomID).detail("Cursor", cursor->randomID).detail("End", end);
 		serverCursors.push_back(cursor);
 	}
+
 	sortedVersions.resize(serverCursors.size());
 }
 
@@ -842,8 +836,15 @@ Optional<UID> ILogSystem::MergedPeekCursor::getCurrentPeekLocation() const {
 
 Version ILogSystem::MergedPeekCursor::popped() const {
 	Version poppedVersion = 0;
-	for (auto& c : serverCursors)
-		poppedVersion = std::max(poppedVersion, c->popped());
+	if (pushLocations.empty()) {
+		for (auto& c : serverCursors) {
+			poppedVersion = std::max(poppedVersion, c->popped());
+		}
+	} else {
+		for (const int pushLocation : pushLocations) {
+			poppedVersion = std::max(poppedVersion, serverCursors[pushLocation]->popped());
+		}
+	}
 	return poppedVersion;
 }
 

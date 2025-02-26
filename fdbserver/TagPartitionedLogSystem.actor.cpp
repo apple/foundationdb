@@ -1005,7 +1005,10 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 		    .detail("BestSetStart", tLogs[bestSet]->startVersion)
 		    .detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)]->get().id());
 		if (useMergePeekCursors) {
+			std::vector<int> pushLocations;
+			tLogs[bestSet]->getPushLocations(VectorRef<Tag>(&tag, 1), pushLocations, 0);
 			return makeReference<ILogSystem::MergedPeekCursor>(tLogs[bestSet]->logServers,
+			                                                   std::move(pushLocations),
 			                                                   tLogs[bestSet]->bestLocationFor(tag),
 			                                                   tLogs[bestSet]->logServers.size() + 1 -
 			                                                       tLogs[bestSet]->tLogReplicationFactor,
@@ -1033,7 +1036,10 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 			    .detail("BestSetStart", tLogs[bestSet]->startVersion)
 			    .detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)]->get().id());
 			if (useMergePeekCursors) {
+				std::vector<int> pushLocations;
+				tLogs[bestSet]->getPushLocations(VectorRef<Tag>(&tag, 1), pushLocations, 0);
 				cursors.push_back(makeReference<ILogSystem::MergedPeekCursor>(tLogs[bestSet]->logServers,
+				                                                              std::move(pushLocations),
 				                                                              tLogs[bestSet]->bestLocationFor(tag),
 				                                                              tLogs[bestSet]->logServers.size() + 1 -
 				                                                                  tLogs[bestSet]->tLogReplicationFactor,
@@ -1131,8 +1137,11 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 					// detail("LogId",
 					// oldLogData[i].tLogs[bestOldSet]->logServers[tLogs[bestOldSet]->bestLocationFor( tag
 					// )]->get().id());
+					std::vector<int> pushLocations;
+					oldLogData[i].tLogs[bestOldSet]->getPushLocations(VectorRef<Tag>(&tag, 1), pushLocations, 0);
 					cursors.push_back(makeReference<ILogSystem::MergedPeekCursor>(
 					    oldLogData[i].tLogs[bestOldSet]->logServers,
+					    std::move(pushLocations),
 					    oldLogData[i].tLogs[bestOldSet]->bestLocationFor(tag),
 					    oldLogData[i].tLogs[bestOldSet]->logServers.size() + 1 -
 					        oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor,
