@@ -206,6 +206,7 @@ function build_and_push_images () {
             --target "${image}" .
         if [ "${image}" == 'foundationdb' ] || \
               [ "${image}" == 'foundationdb-kubernetes-sidecar' ] || \
+              [ "${image}" == 'fdb-aws-s3-credentials-fetcher-sidecar' ] || \
               [ "${image}" == 'ycsb' ] || \
               [ "${image}" == 'fdb-kubernetes-monitor' ]; then
             tags_to_push+=("${image_tag}")
@@ -258,6 +259,7 @@ image_list=(
     'foundationdb-base'
     'foundationdb'
     'fdb-kubernetes-monitor'
+    'fdb-aws-s3-credentials-fetcher-sidecar'
     'foundationdb-kubernetes-sidecar'
     'ycsb'
 )

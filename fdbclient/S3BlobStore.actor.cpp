@@ -700,6 +700,9 @@ ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 	for (auto& f : reads) {
 		// If value not present then the credentials file wasn't readable or valid.  Continue to check other results.
 		if (!f.get().present()) {
+			TraceEvent(SevWarn, "S3BlobStoreAuthMissingNotPresent")
+			    .detail("Endpoint", b->host)
+			    .detail("Service", b->service);
 			++invalid;
 			continue;
 		}
@@ -729,15 +732,27 @@ ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 					creds.securityToken = token;
 				b->credentials = creds;
 				return Void();
+			} else {
+				TraceEvent(SevWarn, "S3BlobStoreAuthFoundAccountFAILED")
+				    .detail("CredentialFileKey", credentialsFileKey);
 			}
 		}
 	}
 
 	// If any sources were invalid
-	if (invalid > 0)
+	if (invalid > 0) {
+		TraceEvent(SevWarn, "S3BlobStoreInvalidCredentials")
+		    .detail("Endpoint", b->host)
+		    .detail("Service", b->service)
+		    .detail("Invalid", invalid);
 		throw backup_auth_unreadable();
+	}
 
 	// All sources were valid but didn't contain the desired info
+	TraceEvent(SevWarn, "S3BlobStoreAuthMissing")
+	    .detail("Endpoint", b->host)
+	    .detail("Service", b->service)
+	    .detail("Reason", "No valid credentials found");
 	throw backup_auth_missing();
 }
 
@@ -1089,7 +1104,9 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 					dryrunR = _dryrunR;
 					std::string s3Error = parseErrorCodeFromS3(dryrunR->data.content);
 					if (dryrunR->code == badRequestCode && isS3TokenError(s3Error)) {
-						// authentication fails and s3 token error persists, retry in the hope token is corrected
+						// authentication fails and s3 token error persists, retry with a HEAD dryrun request
+						// to avoid sending duplicate data indefinitly to save network bandwidth
+						// because it might be due to expired or invalid S3 token from the disk
 						wait(delay(bstore->knobs.max_delay_retryable_error));
 					} else if (dryrunR->code == 200 || dryrunR->code == 404) {
 						// authentication has passed, and bucket existence has been verified(200 or 404)

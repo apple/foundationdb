@@ -254,7 +254,7 @@ if [[ "${USE_S3}" == "true" ]]; then
     exit 1
   fi
   readonly TEST_SCRATCH_DIR
-  if ! readarray -t configs < <(aws_setup "${TEST_SCRATCH_DIR}"); then
+  if ! readarray -t configs < <(aws_setup "${build_dir}" "${TEST_SCRATCH_DIR}"); then
     err "Failed aws_setup"
     exit 1
   fi
