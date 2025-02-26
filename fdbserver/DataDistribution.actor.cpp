@@ -1317,6 +1317,7 @@ ACTOR Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange t
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
 				TraceEvent(SevInfo, "DDBulkLoadTaskEraseStateError", self->ddId)
+				    .errorUnsuppressed(e)
 				    .detail("TaskRange", taskRange)
 				    .detail("TaskId", taskId.toString());
 			}
@@ -1384,8 +1385,8 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 					TraceEvent(SevInfo, "DDBulkLoadTaskClearMetadata", self->ddId)
 					    .detail("Range", bulkLoadTaskState.getRange())
 					    .detail("TaskID", bulkLoadTaskState.getTaskId());
-					bulkLoadActors.push_back(
-					    eraseBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId()));
+					// We do one metadata erase at a time to aviod unnecessary transaction conflicts
+					wait(eraseBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId()));
 				} else if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
 					TraceEvent(SevWarnAlways, "DDBulkLoadTaskUnretriableError", self->ddId)
 					    .detail("Range", bulkLoadTaskState.getRange())
