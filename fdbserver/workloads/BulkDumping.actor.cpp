@@ -36,6 +36,7 @@ struct BulkDumping : TestWorkload {
 	const bool enabled;
 	bool pass;
 	bool cancelled;
+	bool enableCancellation;
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -52,7 +53,9 @@ struct BulkDumping : TestWorkload {
 		             "BulkLoading" });
 	}
 
-	BulkDumping(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true), cancelled(false) {}
+	BulkDumping(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), enabled(true), pass(true), cancelled(false),
+	    enableCancellation(deterministicRandom()->random01() < 0.2) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -259,7 +262,7 @@ struct BulkDumping : TestWorkload {
 		loop {
 			KeyRange completeRange = wait(self->getBulkLoadJobCompleteRange(cx, jobId, jobRange));
 			if (completeRange != jobRange) {
-				if (!self->cancelled && deterministicRandom()->random01() < 0.1) {
+				if (self->enableCancellation && !self->cancelled && deterministicRandom()->random01() < 0.1) {
 					wait(cancelBulkLoadJob(cx, jobId));
 					self->cancelled = true; // Inject cancellation. Then the bulkload job should run again.
 					return std::vector<BulkLoadTaskState>();
