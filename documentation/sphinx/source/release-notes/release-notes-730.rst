@@ -4,6 +4,14 @@
 Release Notes
 #############
 
+7.3.63
+======
+* Same as 7.3.62 release with AVX enabled.
+
+7.3.62
+======
+* Reverted backup agents dry run request changes since 7.3.49 release. `(PR #11965) <https://github.com/apple/foundationdb/pull/11965>`_
+
 7.3.61
 ======
 * Same as 7.3.60 release with AVX enabled.
