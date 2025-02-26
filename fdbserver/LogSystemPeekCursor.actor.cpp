@@ -577,7 +577,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
     int tLogReplicationFactor)
   : tag(tag), bestServer(bestServer), currentCursor(0), readQuorum(readQuorum), messageVersion(begin),
     hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
-    tLogReplicationFactor(tLogReplicationFactor), pushLocations(pushLocations) {
+    tLogReplicationFactor(tLogReplicationFactor), pushLocations(std::move(pushLocations)) {
 	if (tLogPolicy) {
 		logSet = makeReference<LogSet>();
 		logSet->tLogPolicy = tLogPolicy;
