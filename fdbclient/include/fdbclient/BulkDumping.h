@@ -34,6 +34,7 @@ enum class BulkDumpPhase : uint8_t {
 
 // Definition of bulkdump metadata
 struct BulkDumpState {
+public:
 	constexpr static FileIdentifier file_identifier = 1384498;
 
 	BulkDumpState() = default;

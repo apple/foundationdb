@@ -3045,14 +3045,14 @@ ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
 	loop {
 		try {
 			// There is at most one bulkLoad job or bulkDump job at a time globally
-			Optional<UID> aliveBulkDumpJob = wait(getSubmittedBulkDumpJob(&tr));
+			Optional<BulkDumpState> aliveBulkDumpJob = wait(getSubmittedBulkDumpJob(&tr));
 			if (aliveBulkDumpJob.present()) {
 				TraceEvent(SevInfo, "SubmitBulkLoadJobFailed")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("Reason", "Conflict to a running BulkDump job")
 				    .detail("SubmitBulkLoadJob", jobState.toString())
-				    .detail("ExistBulkDumpJob", aliveBulkDumpJob.get());
+				    .detail("ExistBulkDumpJob", aliveBulkDumpJob.get().toString());
 				throw bulkload_task_failed();
 			}
 			Optional<BulkLoadJobState> aliveJob = wait(getSubmittedBulkLoadJob(&tr));
@@ -3281,45 +3281,11 @@ ACTOR Future<int> getBulkDumpMode(Database cx) {
 	}
 }
 
-ACTOR Future<Optional<BulkDumpState>> getRunningBulkDumpJob(Database cx) {
-	state Key beginKey = normalKeys.begin;
-	state Key endKey = normalKeys.end;
-	state RangeResult bulkDumpResult;
-	state BulkDumpState bulkDumpState;
-	state KeyRange rangeToRead;
-	state Transaction tr(cx);
-	while (beginKey < endKey) {
-		try {
-			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-			bulkDumpResult.clear();
-			wait(store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead)));
-			for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
-				if (bulkDumpResult[i].value.empty()) {
-					continue;
-				}
-				bulkDumpState = decodeBulkDumpState(bulkDumpResult[i].value);
-				if (!bulkDumpState.isValid()) {
-					continue;
-				}
-				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
-					continue;
-				}
-				ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
-				return bulkDumpState;
-			}
-			beginKey = bulkDumpResult.back().key;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Optional<BulkDumpState>();
-}
-
 // Return job Id if existing any bulk dump job globally.
 // There is at most one bulk dump job at any time on the entire key space.
 // A job of a range can spawn multiple tasks according to the shard boundary.
 // Those tasks share the same job Id (aka belonging to the same job).
-ACTOR Future<Optional<UID>> getSubmittedBulkDumpJob(Transaction* tr) {
+ACTOR Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
 	state RangeResult rangeResult;
 	wait(store(rangeResult,
 	           krmGetRanges(tr,
@@ -3337,9 +3303,9 @@ ACTOR Future<Optional<UID>> getSubmittedBulkDumpJob(Transaction* tr) {
 		if (!bulkDumpState.isValid()) {
 			continue;
 		}
-		return bulkDumpState.getJobId();
+		return bulkDumpState;
 	}
-	return Optional<UID>();
+	return Optional<BulkDumpState>();
 }
 
 ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
@@ -3359,16 +3325,16 @@ ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
 				    .detail("NewJob", bulkDumpJob.toString());
 				throw bulkdump_task_failed();
 			}
-			Optional<UID> aliveJobId = wait(getSubmittedBulkDumpJob(&tr));
-			if (aliveJobId.present()) {
-				if (aliveJobId.get() == bulkDumpJob.getJobId()) {
+			Optional<BulkDumpState> aliveJob = wait(getSubmittedBulkDumpJob(&tr));
+			if (aliveJob.present()) {
+				if (aliveJob.get().getJobId() == bulkDumpJob.getJobId()) {
 					return Void(); // The job has been persisted
 				}
 				TraceEvent(SevWarn, "SubmitBulkDumpJobFailed")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("Reason", "Conflict to a running BulkDump job")
-				    .detail("AliveJobId", aliveJobId.get().toString())
+				    .detail("AliveJob", aliveJob.get().toString())
 				    .detail("NewJob", bulkDumpJob.toString());
 				throw bulkdump_task_failed();
 			}
@@ -3415,6 +3381,9 @@ ACTOR Future<Void> clearBulkDumpJob(Database cx, UID jobId) {
 					continue;
 				}
 				existJob = decodeBulkDumpState(bulkDumpResult[i].value);
+				if (!existJob.isValid()) {
+					continue;
+				}
 				// We only clear the metadata if it has the same jobId as the input Id.
 				// When there is a new jobId persisted different than the input Id,
 				// a new job has been submitted successfully. Since a new job can be submitted successfully if and only

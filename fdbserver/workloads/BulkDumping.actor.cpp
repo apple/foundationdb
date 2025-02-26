@@ -123,7 +123,7 @@ struct BulkDumping : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<UID> aliveJob = wait(getSubmittedBulkDumpJob(&tr));
+				Optional<BulkDumpState> aliveJob = wait(getSubmittedBulkDumpJob(&tr));
 				if (!aliveJob.present()) {
 					break;
 				}

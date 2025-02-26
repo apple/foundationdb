@@ -1937,10 +1937,10 @@ ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 	state double beginTime = now();
 	ASSERT(self->bulkDumpParallelismLimitor.canStart());
 	self->bulkDumpParallelismLimitor.incrementTaskCounter();
-	TraceEvent(SevInfo, "DDBulkDumpPhase", self->ddId)
+	TraceEvent(SevInfo, "DDBulkDumpDoTaskStart", self->ddId)
 	    .setMaxEventLength(-1)
 	    .setMaxFieldLength(-1)
-	    .detail("Phase", "Task: start")
+	    .detail("TaskId", bulkDumpState.getTaskId())
 	    .detail("TargetSS", ssi.id())
 	    .detail("BulkDumpState", bulkDumpState.toString());
 	try {
@@ -1949,10 +1949,10 @@ ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 		if (vResult.isError()) {
 			throw vResult.getError();
 		}
-		TraceEvent(SevInfo, "DDBulkDumpPhase", self->ddId)
+		TraceEvent(SevInfo, "DDBulkDumpDoTaskComplete", self->ddId)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
-		    .detail("Phase", "Task: complete")
+		    .detail("TaskId", bulkDumpState.getTaskId())
 		    .detail("TargetSS", ssi.id())
 		    .detail("BulkDumpState", bulkDumpState.toString())
 		    .detail("Duration", now() - beginTime);
@@ -1960,11 +1960,11 @@ ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
-		TraceEvent(SevInfo, "DDBulkDumpPhase", self->ddId)
+		TraceEvent(SevInfo, "DDBulkDumpDoTaskError", self->ddId)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .errorUnsuppressed(e)
-		    .detail("Phase", "Task: error")
+		    .detail("TaskId", bulkDumpState.getTaskId())
 		    .detail("TargetSS", ssi.id())
 		    .detail("BulkDumpState", bulkDumpState.toString())
 		    .detail("Duration", now() - beginTime);
@@ -1976,10 +1976,7 @@ ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	state UID jobId = self->bulkDumpJobManager.jobState.getJobId();
 	state KeyRange jobRange = self->bulkDumpJobManager.jobState.getJobRange();
-	TraceEvent(SevInfo, "DDBulkDumpJobPhase", self->ddId)
-	    .detail("JobId", jobId)
-	    .detail("JobRange", jobRange)
-	    .detail("Phase", "Schedule: Start");
+	TraceEvent(SevInfo, "DDBulkDumpJobScheduleStart", self->ddId).detail("JobId", jobId).detail("JobRange", jobRange);
 	state Database cx = self->txnProcessor->context();
 	state Key beginKey = jobRange.begin;
 	state Key endKey = jobRange.end;
@@ -2008,11 +2005,10 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 				bulkDumpRange = Standalone(
 				    KeyRangeRef(bulkDumpResult[bulkDumpResultIndex].key, bulkDumpResult[bulkDumpResultIndex + 1].key));
 				bulkDumpState = decodeBulkDumpState(bulkDumpResult[bulkDumpResultIndex].value);
-				if (bulkDumpState.getJobId() != jobId) {
-					TraceEvent(SevInfo, "DDBulkDumpJobPhase", self->ddId)
+				if (!bulkDumpState.isValid() || bulkDumpState.getJobId() != jobId) {
+					TraceEvent(SevInfo, "DDBulkDumpJobScheduleJobOutdated", self->ddId)
 					    .detail("JobId", jobId)
-					    .detail("CurrentJob", bulkDumpState.getJobId())
-					    .detail("Phase", "Schedule: Job Outdated");
+					    .detail("CurrentJob", bulkDumpState.getJobId());
 					throw bulkdump_task_outdated();
 				}
 				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
@@ -2021,14 +2017,13 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 				ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
 				// Partition the job in the unit of shard
 				wait(store(rangeLocations, self->txnProcessor->getSourceServerInterfacesForRange(bulkDumpRange)));
-				TraceEvent(SevInfo, "DDBulkDumpJobPhase", self->ddId)
+				TraceEvent(SevInfo, "DDBulkDumpJobScheduleJobPartition", self->ddId)
 				    .detail("JobId", jobId)
 				    .detail("NumShard", rangeLocations.size())
 				    .detail("RangeToRead", rangeToRead)
 				    .detail("BulkDumpRange", bulkDumpRange)
 				    .detail("BeginKey", bulkDumpResult[bulkDumpResultIndex].key)
-				    .detail("EndKey", rangeLocations.back().range.end)
-				    .detail("Phase", "Schedule: Partition Job into Shards");
+				    .detail("EndKey", rangeLocations.back().range.end);
 				rangeLocationIndex = 0;
 				for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
 					// Spawn task per shard
@@ -2044,12 +2039,11 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
 					                                        bulkDumpState.generateRangeTask(taskRange));
 					// Issue task
-					TraceEvent(SevInfo, "DDBulkDumpJobPhase", self->ddId)
+					TraceEvent(SevInfo, "DDBulkDumpJobSpawnRange", self->ddId)
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .detail("JobId", jobId)
-					    .detail("Task", task.toString())
-					    .detail("Phase", "Schedule: Spawn Task");
+					    .detail("Task", task.toString());
 					actors.push_back(doBulkDumpTask(self, task.targetServer, task.bulkDumpState, task.checksumServers));
 				}
 				beginKey = rangeLocations.back().range.end;
@@ -2063,10 +2057,7 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 		}
 	}
 	wait(waitForAll(actors));
-	TraceEvent(SevInfo, "DDBulkDumpJobPhase", self->ddId)
-	    .detail("JobId", jobId)
-	    .detail("JobRange", jobRange)
-	    .detail("Phase", "Schedule: End");
+	TraceEvent(SevInfo, "DDBulkDumpJobScheduleEnd", self->ddId).detail("JobId", jobId).detail("JobRange", jobRange);
 	return Void();
 }
 
@@ -2088,7 +2079,7 @@ ACTOR Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 			for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
 				ASSERT(!bulkDumpResult[i].value.empty());
 				bulkDumpState = decodeBulkDumpState(bulkDumpResult[i].value);
-				if (bulkDumpState.getJobId() != jobId) {
+				if (!bulkDumpState.isValid() || bulkDumpState.getJobId() != jobId) {
 					throw bulkdump_task_outdated();
 				}
 				if (bulkDumpState.getPhase() != BulkDumpPhase::Complete) {
@@ -2148,20 +2139,16 @@ ACTOR Future<Void> getBulkLoadJobManifestData(Reference<DataDistributor> self) {
 				if (bulkDumpState.getJobId() != jobId) {
 					throw bulkdump_task_outdated();
 				}
-				ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Complete);
-				if (bulkDumpState.getManifest().beginKey != bulkDumpResult[i].key ||
-				    bulkDumpState.getManifest().endKey != bulkDumpResult[i + 1].key) {
-					ASSERT(false);
-				}
-				ASSERT(bulkDumpState.getManifest().getRange() ==
-				       KeyRangeRef(bulkDumpResult[i].key, bulkDumpResult[i + 1].key));
+				ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Complete &&
+				       bulkDumpState.getManifest().getRange() ==
+				           KeyRangeRef(bulkDumpResult[i].key, bulkDumpResult[i + 1].key));
 				// Important! This is how to build job manifest file.
-				// The job manifest is a sorted map. Each item is a manifest. The key of the item is the begin key of
-				// the manifest.
+				// The job manifest is a sorted map. Each item is a manifest. The key of the item is the beginkey of
+				// the manifest. The endkey of the manifest must be the map key of the next item.
 				// When doing bulkload job, we decode the map in the same way. Please check scheduleBulkLoadJob where
 				// we decode the job manifest file.
 				auto res = self->bulkDumpJobManager.jobManifest.insert(
-				    { bulkDumpState.getManifest().beginKey, bulkDumpState.getManifest() });
+				    { bulkDumpState.getManifest().getBeginKey(), bulkDumpState.getManifest() });
 				ASSERT(res.second);
 			}
 			beginKey = bulkDumpResult.back().key;
@@ -2173,61 +2160,55 @@ ACTOR Future<Void> getBulkLoadJobManifestData(Reference<DataDistributor> self) {
 		}
 	}
 	ASSERT(!self->bulkDumpJobManager.jobManifest.empty());
-	TraceEvent(SevInfo, "DDBulkDumpJobPhase", self->ddId)
-	    .detail("JobId", jobId)
-	    .detail("NumManifest", self->bulkDumpJobManager.jobManifest.size())
-	    .detail("Phase", "Job Manifest Generated");
 	return Void();
 }
 
-ACTOR Future<Void> finalizeBulkDumpJob(Reference<DataDistributor> self) {
-	state UID jobId = self->bulkDumpJobManager.jobState.getJobId();
-	state Database cx = self->txnProcessor->context();
-	// Any failure during this process will retry by DD.
-	// Generate the file at a local folder at first and then upload the file to the remote
-	// The local file path:
-	//	<self->bulkDumpFolder>/<jobId>/<jobId>-job-manifest.txt
-	// The remote file path:
-	//	<jobRoot>/<jobId>/<jobId>-job-manifest.txt
-	wait(bulkDumpUploadJobManifestFile(self));
-	TraceEvent(SevInfo, "DDBulkDumpJobPhase", self->ddId)
-	    .detail("JobId", jobId)
-	    .detail("Phase", "Finalize: Job Manifest Upload");
-
-	// clear all bulkdump metadata
-	wait(clearBulkDumpJob(cx, jobId));
-	TraceEvent(SevInfo, "DDBulkDumpJobPhase", self->ddId)
-	    .detail("JobId", jobId)
-	    .detail("Phase", "Finalize: Job Metadata Cleared");
-	return Void();
+ACTOR Future<Optional<BulkDumpState>> getAliveBulkDumpJob(Database cx) {
+	state Transaction tr(cx);
+	state Optional<BulkDumpState> res;
+	loop {
+		try {
+			wait(store(res, getSubmittedBulkDumpJob(&tr)));
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return res;
 }
 
 ACTOR Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 	state Database cx = self->txnProcessor->context();
-	state bool allComplete = false;
-	Optional<BulkDumpState> job = wait(getRunningBulkDumpJob(cx));
+	state Optional<BulkDumpState> job;
+	wait(store(job, getAliveBulkDumpJob(cx)));
 	if (!job.present()) {
-		TraceEvent(SevInfo, "DDBulkDumpNoJobExist", self->ddId);
 		return Void();
 	}
-	TraceEvent(SevInfo, "DDBulkDumpJobPhase", self->ddId)
+	state UID jobId = job.get().getJobId();
+	TraceEvent(SevInfo, "DDBulkDumpManagerGotJob", self->ddId)
 	    .setMaxEventLength(-1)
 	    .setMaxFieldLength(-1)
-	    .detail("Phase", "Got Submitted Job to Run")
 	    .detail("Job", job.get().toString());
 	self->bulkDumpJobManager = DDBulkDumpJobManager(job.get());
 	loop {
 		bool allComplete = wait(checkBulkDumpJobComplete(self));
 		if (allComplete) {
+			TraceEvent(SevInfo, "DDBulkDumpManagerJobNotComplete", self->ddId).detail("JobId", jobId);
 			// Generate the job manifest file for bulkload.
 			// The job manifest file is the global map between ranges and their corresponding manifest file.
 			// When bulkload job loads a range, the job relies on this map to find the correct
 			// manifest file set to get the necessary information to perform the bulk load.
 			wait(getBulkLoadJobManifestData(self));
+			TraceEvent(SevInfo, "DDBulkDumpManagerJobManifestGenerated", self->ddId)
+			    .detail("JobId", jobId)
+			    .detail("NumManifest", self->bulkDumpJobManager.jobManifest.size());
 			// At this point, we have all manifest data to generate the job manifest file.
 			// Generate the file at a local folder at first and then upload the file to the remote.
-			// Finally clear all bulkdump metadata.
-			wait(finalizeBulkDumpJob(self));
+			wait(bulkDumpUploadJobManifestFile(self));
+			TraceEvent(SevInfo, "DDBulkDumpManagerJobManifestUpload", self->ddId).detail("JobId", jobId);
+			// Finally, clear all bulkdump metadata
+			wait(clearBulkDumpJob(cx, jobId));
+			TraceEvent(SevInfo, "DDBulkDumpManagerMetadataCleared", self->ddId).detail("JobId", jobId);
 			break; // end
 		} else {
 			// Schedule the job

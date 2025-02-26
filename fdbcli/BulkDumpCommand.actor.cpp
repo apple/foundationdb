@@ -34,9 +34,9 @@ ACTOR Future<bool> getOngoingBulkDumpJob(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			Optional<UID> jobId = wait(getSubmittedBulkDumpJob(&tr));
-			if (jobId.present()) {
-				fmt::println("Running bulk dumping job: {}", jobId.get().toString());
+			Optional<BulkDumpState> job = wait(getSubmittedBulkDumpJob(&tr));
+			if (job.present()) {
+				fmt::println("Running bulk dumping job: {}", job.get().getJobId().toString());
 				return true;
 			} else {
 				fmt::println("No bulk dumping job is running");

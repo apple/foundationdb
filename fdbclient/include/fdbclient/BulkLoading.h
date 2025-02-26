@@ -310,6 +310,7 @@ private:
 // The manifest file stores the ground true of metadata of dumped data file, such as range and version.
 // The manifest file is uploaded along with the data file.
 struct BulkLoadManifest {
+public:
 	constexpr static FileIdentifier file_identifier = 1384502;
 
 	BulkLoadManifest() = default;
@@ -469,6 +470,8 @@ struct BulkLoadManifest {
 
 	bool hasDataFile() const { return fileSet.hasDataFile(); }
 
+	bool hasByteSampleFile() const { return fileSet.hasByteSampleFile(); }
+
 	void setRange(const KeyRange& range) {
 		ASSERT(!range.empty() && beginKey.empty() && endKey.empty());
 		beginKey = range.begin;
@@ -501,6 +504,7 @@ struct BulkLoadManifest {
 		           transportMethod);
 	}
 
+private:
 	int formatVersion = -1;
 	BulkLoadFileSet fileSet;
 	Key beginKey;
@@ -524,6 +528,7 @@ enum class BulkLoadPhase : uint8_t {
 };
 
 struct BulkLoadTaskState {
+public:
 	constexpr static FileIdentifier file_identifier = 1384499;
 
 	BulkLoadTaskState() = default;
