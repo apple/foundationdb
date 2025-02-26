@@ -3038,6 +3038,47 @@ ACTOR Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr
 	return Optional<BulkLoadJobState>();
 }
 
+ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
+	state Transaction tr(cx);
+	state Optional<BulkLoadJobState> aliveJob;
+	loop {
+		try {
+			wait(store(aliveJob, getSubmittedBulkLoadJob(&tr)));
+			if (!aliveJob.present()) {
+				return Void(); // Has been cancelled
+			}
+			if (aliveJob.get().getJobId() != jobId) {
+				throw bulkload_task_outdated(); // jobId is outdated
+			}
+			// Change DD key to trigger DD restarts
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << dataDistributionModeLock;
+			tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+			BinaryWriter wrLastWrite(Unversioned());
+			wrLastWrite << deterministicRandom()->randomUniqueID();
+			tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
+			// Clear all metadata of the job
+			ASSERT(!aliveJob.get().getJobRange().empty());
+			wait(krmSetRangeCoalescing(&tr,
+			                           bulkLoadJobPrefix,
+			                           aliveJob.get().getJobRange(),
+			                           normalKeys,
+			                           bulkLoadJobValue(BulkLoadJobState())));
+			// Clear all metadata of the task. The task and the job is guaranteed to be consistent.
+			wait(krmSetRangeCoalescing(&tr,
+			                           bulkLoadTaskPrefix,
+			                           aliveJob.get().getJobRange(),
+			                           normalKeys,
+			                           bulkLoadTaskStateValue(BulkLoadTaskState())));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
 // TODO(Zhe): clear bulkload task metadata within the input range
 ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
 	ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);

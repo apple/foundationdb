@@ -247,14 +247,18 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 		wait(submitBulkLoadJob(cx, bulkLoadJob));
 		return bulkLoadJob.getJobId();
 
-	} else if (tokencmp(tokens[1], "clear")) {
+	} else if (tokencmp(tokens[1], "cancel")) {
 		if (tokens.size() != 3) {
 			printUsage(tokens[0]);
 			return UID();
 		}
-		state UID jobId = UID::fromString(tokens[2].toString());
-		fmt::println("Job {} has been cleared. No task will be spawned.", jobId.toString());
-		// TODO(Zhe)
+		UID jobId = UID::fromString(tokens[2].toString());
+		if (!jobId.isValid()) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		fmt::println("Job {} has been cancelled.", jobId.toString());
+		wait(cancelBulkLoadJob(cx, jobId));
 		return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {

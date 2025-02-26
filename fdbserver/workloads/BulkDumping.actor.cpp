@@ -24,8 +24,10 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
+#include "flow/IRandom.h"
 #include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/flow.h"
 
 const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkdump");
 
@@ -33,6 +35,7 @@ struct BulkDumping : TestWorkload {
 	static constexpr auto NAME = "BulkDumpingWorkload";
 	const bool enabled;
 	bool pass;
+	bool cancelled;
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -49,7 +52,7 @@ struct BulkDumping : TestWorkload {
 		             "BulkLoading" });
 	}
 
-	BulkDumping(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {}
+	BulkDumping(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true), cancelled(false) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -256,6 +259,11 @@ struct BulkDumping : TestWorkload {
 		loop {
 			KeyRange completeRange = wait(self->getBulkLoadJobCompleteRange(cx, jobId, jobRange));
 			if (completeRange != jobRange) {
+				if (!self->cancelled && deterministicRandom()->random01() < 0.1) {
+					wait(cancelBulkLoadJob(cx, jobId));
+					self->cancelled = true; // Inject cancellation. Then the bulkload job should run again.
+					return std::vector<BulkLoadTaskState>();
+				}
 				wait(delay(10.0));
 				continue;
 			}
@@ -347,29 +355,44 @@ struct BulkDumping : TestWorkload {
 		// Submit a bulk load job
 		state int oldBulkLoadMode = 0;
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoad
-		state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
-		    newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), BulkLoadTransportMethod::CP);
-		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
-		wait(submitBulkLoadJob(cx, bulkLoadJob));
+		self->cancelled = false;
+		loop {
+			state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
+			    newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), BulkLoadTransportMethod::CP);
+			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
+			wait(submitBulkLoadJob(cx, bulkLoadJob));
 
-		// Wait until the load job complete
-		state std::vector<KeyRange> errorRanges;
-		std::vector<BulkLoadTaskState> errorTasks =
-		    wait(self->waitUntilLoadJobCompleteOrError(self, cx, newJob.getJobId(), newJob.getJobRange()));
-		for (const auto& errorTask : errorTasks) {
-			errorRanges.push_back(errorTask.getRange());
+			// Wait until the load job complete
+			state std::vector<KeyRange> errorRanges;
+			state std::vector<BulkLoadTaskState> errorTasks =
+			    wait(self->waitUntilLoadJobCompleteOrError(self, cx, newJob.getJobId(), newJob.getJobRange()));
+			// waitUntilLoadJobCompleteOrError can cancel the job and set self->cancelled to true.
+			// If this happens, the current job is intentionally cancelled and we should retry the job.
+			if (self->cancelled) {
+				wait(delay(deterministicRandom()->random01() * 10.0));
+				self->cancelled = false;
+				continue;
+			}
+			for (const auto& errorTask : errorTasks) {
+				errorRanges.push_back(errorTask.getRange());
+			}
+			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Complete").detail("Job", newJob.toString());
+
+			// Check the loaded data in DB is same as the data in DB before dumping
+			std::map<Key, Value> newKvs = wait(self->getAllKVSFromDB(cx));
+			if (!self->checkSame(self, kvs, newKvs, errorRanges)) {
+				TraceEvent(SevError, "BulkDumpingWorkLoadError")
+				    .detail("KVS", kvs.size())
+				    .detail("NewKVS", newKvs.size());
+				ASSERT(false);
+			}
+
+			// Acknowledge any error task of the job
+			wait(acknowledgeAllErrorBulkLoadTasks(cx, bulkLoadJob.getJobId(), bulkLoadJob.getJobRange()));
+			if (!self->cancelled) {
+				break;
+			}
 		}
-		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Complete").detail("Job", newJob.toString());
-
-		// Check the loaded data in DB is same as the data in DB before dumping
-		std::map<Key, Value> newKvs = wait(self->getAllKVSFromDB(cx));
-		if (!self->checkSame(self, kvs, newKvs, errorRanges)) {
-			TraceEvent(SevError, "BulkDumpingWorkLoadError").detail("KVS", kvs.size()).detail("NewKVS", newKvs.size());
-			ASSERT(false);
-		}
-
-		// Acknowledge any error task of the job
-		wait(acknowledgeAllErrorBulkLoadTasks(cx, bulkLoadJob.getJobId(), bulkLoadJob.getJobRange()));
 
 		return Void();
 	}
