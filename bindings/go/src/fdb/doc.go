@@ -46,7 +46,7 @@ import (
 
 func main() {
     // Different API versions may expose different runtime behaviors.
-    fdb.MustAPIVersion(740)
+    fdb.MustAPIVersion(800)
 
     // Open the default database from the system cluster
     db := fdb.MustOpenDefault()

@@ -9,7 +9,7 @@ This package requires:
 - [Mono](http://www.mono-project.com/) (macOS or Linux) or [Visual Studio](https://www.visualstudio.com/) (Windows)  (build-time only)
 - FoundationDB C API 2.0.x-6.1.x (part of the [FoundationDB client packages](https://apple.github.io/foundationdb/downloads.html#c))
 
-Use of this package requires the selection of a FoundationDB API version at runtime. This package currently supports FoundationDB API versions 200-740.
+Use of this package requires the selection of a FoundationDB API version at runtime. This package currently supports FoundationDB API versions 200-800.
 
 To install this package, you can run the "fdb-go-install.sh" script (for versions 5.0.x and greater):
 

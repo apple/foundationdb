@@ -31,7 +31,7 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 )
 
-const API_VERSION int = 740
+const API_VERSION int = 800
 
 func ExampleOpenDefault() {
 	var err error
