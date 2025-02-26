@@ -2157,10 +2157,10 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 	int replicationFactor = std::get<0>(logGroupResults);
 	for (auto& tLogResult : std::get<1>(logGroupResults)) {
 		uint16_t tLogLocId = tLogLocIds[tLogIdx++];
+		availableTLogs.set(tLogLocId);
 		if (tLogResult.unknownCommittedVersions.empty()) {
 			continue;
 		}
-		availableTLogs.set(tLogLocId);
 		for (auto& unknownCommittedVersion : tLogResult.unknownCommittedVersions) {
 			Version k = unknownCommittedVersion.version;
 			if (k > maxKCV) {
@@ -2176,6 +2176,7 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 			}
 		}
 	}
+	ASSERT(availableTLogs.count() == (std::get<1>(logGroupResults)).size());
 
 	if (versionAllTLogs.empty()) {
 		return std::make_tuple(maxKCV, maxKCV);
