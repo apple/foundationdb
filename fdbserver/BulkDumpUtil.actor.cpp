@@ -327,7 +327,7 @@ ACTOR Future<Void> uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transpo
 
 ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState) {
 	state Transaction tr(cx);
-	ASSERT(bulkDumpState.isValid());
+	ASSERT(bulkDumpState.isMetadataValid());
 	state Key beginKey = bulkDumpState.getRange().begin;
 	state Key endKey = bulkDumpState.getRange().end;
 	state KeyRange rangeToPersist;

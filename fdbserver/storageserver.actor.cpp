@@ -14689,6 +14689,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(BulkDumpRequest req = waitNext(ssi.bulkdump.getFuture())) {
+				TraceEvent(SevInfo, "SSBulkDumpRequestReceived", self->thisServerID)
+				    .detail("BulkDumpRequest", req.toString());
 				self->actors.add(bulkDumpQ(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {

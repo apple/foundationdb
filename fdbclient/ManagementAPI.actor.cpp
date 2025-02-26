@@ -3025,12 +3025,17 @@ ACTOR Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr
 	state RangeResult rangeResult;
 	// At most one job at a time, so looking at the first returned range is sufficient
 	wait(store(rangeResult, krmGetRanges(tr, bulkLoadJobPrefix, normalKeys)));
-	ASSERT(rangeResult.size() >= 2);
-	ASSERT(rangeResult[0].key == normalKeys.begin);
-	if (rangeResult[0].value.empty()) {
-		return Optional<BulkLoadJobState>();
+	for (int i = 0; i < rangeResult.size() - 1; ++i) {
+		if (rangeResult[i].value.empty()) {
+			continue;
+		}
+		BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
+		if (!jobState.isValid()) {
+			continue;
+		}
+		return jobState;
 	}
-	return decodeBulkLoadJobState(rangeResult[0].value);
+	return Optional<BulkLoadJobState>();
 }
 
 // TODO(Zhe): clear bulkload task metadata within the input range
@@ -3160,6 +3165,7 @@ ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx) {
 				    jobState.getPhase() == BulkLoadJobPhase::Error) {
 					continue;
 				}
+				ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);
 				return jobState;
 			}
 			beginKey = rangeResult.back().key;
@@ -3275,6 +3281,40 @@ ACTOR Future<int> getBulkDumpMode(Database cx) {
 	}
 }
 
+ACTOR Future<Optional<BulkDumpState>> getRunningBulkDumpJob(Database cx) {
+	state Key beginKey = normalKeys.begin;
+	state Key endKey = normalKeys.end;
+	state RangeResult bulkDumpResult;
+	state BulkDumpState bulkDumpState;
+	state KeyRange rangeToRead;
+	state Transaction tr(cx);
+	while (beginKey < endKey) {
+		try {
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			bulkDumpResult.clear();
+			wait(store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead)));
+			for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
+				if (bulkDumpResult[i].value.empty()) {
+					continue;
+				}
+				bulkDumpState = decodeBulkDumpState(bulkDumpResult[i].value);
+				if (!bulkDumpState.isValid()) {
+					continue;
+				}
+				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
+					continue;
+				}
+				ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
+				return bulkDumpState;
+			}
+			beginKey = bulkDumpResult.back().key;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Optional<BulkDumpState>();
+}
+
 // Return job Id if existing any bulk dump job globally.
 // There is at most one bulk dump job at any time on the entire key space.
 // A job of a range can spawn multiple tasks according to the shard boundary.
@@ -3294,6 +3334,9 @@ ACTOR Future<Optional<UID>> getSubmittedBulkDumpJob(Transaction* tr) {
 			continue;
 		}
 		BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+		if (!bulkDumpState.isValid()) {
+			continue;
+		}
 		return bulkDumpState.getJobId();
 	}
 	return Optional<UID>();
@@ -3385,7 +3428,8 @@ ACTOR Future<Void> clearBulkDumpJob(Database cx, UID jobId) {
 					throw bulkload_task_outdated();
 				}
 			}
-			wait(krmSetRangeCoalescing(&tr, bulkDumpPrefix, rangeToRead, normalKeys, StringRef()));
+			wait(krmSetRangeCoalescing(
+			    &tr, bulkDumpPrefix, rangeToRead, normalKeys, bulkDumpStateValue(BulkDumpState())));
 			wait(tr.commit());
 			tr.reset();
 

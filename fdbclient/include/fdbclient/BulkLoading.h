@@ -675,9 +675,7 @@ public:
 	                 const KeyRange& jobRange,
 	                 const BulkLoadTransportMethod& transportMethod)
 	  : jobId(jobId), jobRoot(jobRoot), jobRange(jobRange), phase(BulkLoadJobPhase::Submitted),
-	    transportMethod(transportMethod) {
-		ASSERT(isValid());
-	}
+	    transportMethod(transportMethod) {}
 
 	std::string toString() const {
 		std::string res = "[BulkLoadJobState]: [JobId]: " + jobId.toString() + ", [JobRoot]: " + jobRoot +
@@ -699,7 +697,7 @@ public:
 
 	void setPhase(BulkLoadJobPhase inputPhase) { phase = inputPhase; }
 
-	bool isValid() const {
+	bool isMetadataValid() const {
 		if (!jobId.isValid()) {
 			return false;
 		}
@@ -714,6 +712,8 @@ public:
 		}
 		return true;
 	}
+
+	bool isValid() const { return jobId.isValid(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
