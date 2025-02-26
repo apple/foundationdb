@@ -232,8 +232,8 @@ ACTOR Future<Void> clearBulkDumpJob(Database cx, UID jobId);
 // If there is any existing BulkLoad or BulkDump job, reject the new job.
 ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob);
 
-// Return the existing Job ID
-ACTOR Future<Optional<UID>> getSubmittedBulkDumpJob(Transaction* tr);
+// Return the existing job metadata
+ACTOR Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr);
 
 // Get total number of completed tasks within the input range
 ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);

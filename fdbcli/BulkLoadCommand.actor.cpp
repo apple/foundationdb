@@ -207,6 +207,10 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			return UID();
 		}
 		UID jobId = UID::fromString(tokens[2].toString());
+		if (!jobId.isValid()) {
+			printUsage(tokens[0]);
+			return UID();
+		}
 		Key rangeBegin = tokens[3];
 		Key rangeEnd = tokens[4];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
@@ -226,6 +230,10 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			return UID();
 		}
 		UID jobId = UID::fromString(tokens[2].toString());
+		if (!jobId.isValid()) {
+			printUsage(tokens[0]);
+			return UID();
+		}
 		Key rangeBegin = tokens[3];
 		Key rangeEnd = tokens[4];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
@@ -283,7 +291,7 @@ CommandFactory bulkLoadFactory(
         "bulkload commands",
         "To set bulkload mode: `bulkload mode [on|off]'\n"
         "To load a range from SST files: `bulkload [local|blobstore] <BeginKey> <EndKey> dumpFolder`\n"
-        "To clear current bulkload job: `bulkload clear <JobID>`\n"
+        "To clear current bulkload job: `bulkload clear <Non-Zero JobID>`\n"
         "To get completed bulkload ranges: `bulkload status <BeginKey> <EndKey>`\n"
         "BulkLoad tasks are operated when setting unittest.\n"
         "To acknowledge completed tasks within a range: `bulkload unittest acknowledge <TaskID> <BeginKey> <EndKey>'\n"

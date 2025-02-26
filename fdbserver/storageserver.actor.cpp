@@ -6184,25 +6184,25 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			    .detail("RelativeFolder", relativeFolder)
 			    .detail("DataKeyCount", rangeDumpData.kvs.size())
 			    .detail("DataBytes", rangeDumpData.kvsBytes)
-			    .detail("RemoteFileSet", manifest.fileSet.toString())
+			    .detail("RemoteFileSet", manifest.getFileSet().toString())
 			    .detail("BatchNum", batchNum);
 
 			// Upload Files
 			state BulkLoadFileSet localFileSet = localFileSetSetting;
-			if (!manifest.fileSet.hasDataFile()) {
+			if (!manifest.hasDataFile()) {
 				localFileSet.removeDataFile();
 			}
-			if (!manifest.fileSet.hasByteSampleFile()) {
+			if (!manifest.hasByteSampleFile()) {
 				localFileSet.removeByteSampleFile();
 			}
 			wait(uploadBulkDumpFileSet(
-			    req.bulkDumpState.getTransportMethod(), localFileSet, manifest.fileSet, data->thisServerID));
+			    req.bulkDumpState.getTransportMethod(), localFileSet, manifest.getFileSet(), data->thisServerID));
 
 			// Progressively set metadata of the data range as complete phase
 			// Persist remoteFilePaths to the corresponding range
 			if (!dataRange.empty()) {
 				// The persisting range (dataRange) must be exactly same as the range presented in the manifest file
-				ASSERT(dataRange == KeyRangeRef(manifest.beginKey, manifest.endKey));
+				ASSERT(dataRange == manifest.getRange());
 				wait(persistCompleteBulkDumpRange(data->cx,
 				                                  req.bulkDumpState.generateBulkDumpMetadataToPersist(manifest)));
 			}
@@ -14689,6 +14689,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(BulkDumpRequest req = waitNext(ssi.bulkdump.getFuture())) {
+				TraceEvent(SevInfo, "SSBulkDumpRequestReceived", self->thisServerID)
+				    .detail("BulkDumpRequest", req.toString());
 				self->actors.add(bulkDumpQ(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {

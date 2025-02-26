@@ -34,6 +34,7 @@ enum class BulkDumpPhase : uint8_t {
 
 // Definition of bulkdump metadata
 struct BulkDumpState {
+public:
 	constexpr static FileIdentifier file_identifier = 1384498;
 
 	BulkDumpState() = default;
@@ -46,6 +47,7 @@ struct BulkDumpState {
 	              std::string jobRoot)
 	  : jobId(deterministicRandom()->randomUniqueID()), jobRange(jobRange), phase(BulkDumpPhase::Submitted) {
 		manifest = BulkLoadManifest(loadType, transportMethod, jobRoot);
+		ASSERT(isValid());
 	}
 
 	bool operator==(const BulkDumpState& rhs) const {
@@ -79,7 +81,7 @@ struct BulkDumpState {
 
 	BulkLoadType getType() const { return manifest.getLoadType(); }
 
-	bool isValid() const {
+	bool isMetadataValid() const {
 		if (!jobId.isValid()) {
 			return false;
 		}
@@ -97,6 +99,8 @@ struct BulkDumpState {
 		}
 		return true;
 	}
+
+	bool isValid() const { return jobId.isValid(); }
 
 	// The user job spawns a series of ranges tasks based on shard boundary to cover the user task range.
 	// Those spawned tasks are sent to SSes and executed by the SSes.
@@ -131,7 +135,7 @@ struct BulkDumpState {
 		BulkDumpState res = *this;
 		res.phase = BulkDumpPhase::Complete;
 		res.manifest = manifest;
-		ASSERT(res.isValid());
+		ASSERT(res.isMetadataValid());
 		return res;
 	}
 
