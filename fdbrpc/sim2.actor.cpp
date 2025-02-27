@@ -71,6 +71,7 @@
 
 ISimulator* g_simulator = nullptr;
 thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
+thread_local bool ISimulator::isMainThread = false;
 
 ISimulator::ISimulator()
   : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
@@ -1401,6 +1402,7 @@ public:
 
 	static void runLoop(Sim2* self) {
 		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
+		ISimulator::isMainThread = true;
 		int lastPrintTime = 0;
 		while (!self->isStopped) {
 			if (self->taskQueue.canSleep()) {
@@ -2666,7 +2668,7 @@ public:
 		PromiseTask* p = new PromiseTask(getCurrentProcess(), std::move(signal));
 		taskQueue.addReadyThreadSafe(isOnMainThread(), taskID, p);
 	}
-	bool isOnMainThread() const override { return net2->isOnMainThread(); }
+	bool isOnMainThread() const override { return ISimulator::isMainThread; }
 	Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
 		return delay(0, taskID, process);
 	}
