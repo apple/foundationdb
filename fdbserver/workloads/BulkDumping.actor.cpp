@@ -265,6 +265,7 @@ struct BulkDumping : TestWorkload {
 				if (self->enableCancellation && !self->cancelled && deterministicRandom()->random01() < 0.1) {
 					wait(cancelBulkLoadJob(cx, jobId));
 					self->cancelled = true; // Inject cancellation. Then the bulkload job should run again.
+					TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Job Cancelled").detail("Job", jobId.toString());
 					return std::vector<BulkLoadTaskState>();
 				}
 				wait(delay(10.0));

@@ -1255,6 +1255,9 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 				    .detail("Range", range)
 				    .detail("TaskID", taskId.toString())
 				    .detail("Duration", now() - beginTime);
+				if (failTaskError.code() == error_code_movekeys_conflict) {
+					throw failTaskError;
+				}
 				ASSERT(failTaskError.code() == error_code_bulkload_task_outdated);
 				// sliently exits
 			}
@@ -1276,7 +1279,7 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		    .detail("TaskID", taskId.toString())
 		    .detail("Duration", now() - beginTime);
 		if (e.code() == error_code_movekeys_conflict) {
-			throw e;
+			throw e; // trigger DD restarts, which resets bulkLoadEngineParallelismLimitor
 		}
 		// sliently exits
 	}
@@ -1635,6 +1638,9 @@ ACTOR Future<Void> bulkLoadJobExecuteTask(Reference<DataDistributor> self,
 		    .detail("JobId", jobId.toString())
 		    .detail("Task", bulkLoadTask.toString())
 		    .detail("Duration", now() - beginTime);
+		if (e.code() == error_code_movekeys_conflict) {
+			throw e; // trigger DD restarts, which resets bulkLoadParallelismLimitor
+		}
 		// Sliently exit for any error
 		// Currently, all errors here come from the bulkload job mechanism.
 		// BulkLoad task is guaranteed to be completed by the engine given a task metadata is persisted.
@@ -1969,6 +1975,10 @@ ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 		    .detail("TargetSS", ssi.id())
 		    .detail("BulkDumpState", bulkDumpState.toString())
 		    .detail("Duration", now() - beginTime);
+		if (e.code() == error_code_movekeys_conflict) {
+			throw e; // trigger DD restarts, which resets bulkDumpParallelismLimitor
+		}
+		// Sliently exit for other errors
 	}
 	self->bulkDumpParallelismLimitor.decrementTaskCounter();
 	return Void();
