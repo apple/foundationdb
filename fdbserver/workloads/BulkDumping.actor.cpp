@@ -76,13 +76,12 @@ struct BulkDumping : TestWorkload {
 			Standalone<StringRef> keyB = self->getRandomStringRef();
 			if (!scope.contains(keyA) || !scope.contains(keyB)) {
 				continue;
-			} else if (keyA < keyB) {
-				return Standalone(KeyRangeRef(keyA, keyB));
-			} else if (keyA > keyB) {
-				return Standalone(KeyRangeRef(keyB, keyA));
-			} else {
+			}
+			KeyRange range = keyA < keyB ? KeyRangeRef(keyA, keyB) : KeyRangeRef(keyB, keyA);
+			if (range.empty() || range.singleKeyRange()) {
 				continue;
 			}
+			return range;
 		}
 	}
 
