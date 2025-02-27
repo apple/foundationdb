@@ -31,10 +31,10 @@ const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkdump");
 
 struct BulkDumping : TestWorkload {
 	static constexpr auto NAME = "BulkDumpingWorkload";
-	const bool enabled;
-	bool pass;
-	bool cancelled;
-	bool enableCancellation;
+	const bool enabled = true;
+	bool pass = true;
+	int cancelTimes = 0;
+	int maxCancelTimes = 0;
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -52,8 +52,8 @@ struct BulkDumping : TestWorkload {
 	}
 
 	BulkDumping(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), enabled(true), pass(true), cancelled(false),
-	    enableCancellation(deterministicRandom()->random01() < 0.2) {}
+	  : TestWorkload(wcx), enabled(true), pass(true), cancelTimes(0),
+	    maxCancelTimes(deterministicRandom()->randomInt(0, 2)) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -259,9 +259,9 @@ struct BulkDumping : TestWorkload {
 		loop {
 			KeyRange completeRange = wait(self->getBulkLoadJobCompleteRange(cx, jobId, jobRange));
 			if (completeRange != jobRange) {
-				if (self->enableCancellation && !self->cancelled && deterministicRandom()->random01() < 0.1) {
+				if (self->cancelTimes < self->maxCancelTimes && deterministicRandom()->random01() < 0.1) {
 					wait(cancelBulkLoadJob(cx, jobId));
-					self->cancelled = true; // Inject cancellation. Then the bulkload job should run again.
+					self->cancelTimes++; // Inject cancellation. Then the bulkload job should run again.
 					TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Job Cancelled").detail("Job", jobId.toString());
 					return std::vector<BulkLoadTaskState>();
 				}
@@ -356,8 +356,10 @@ struct BulkDumping : TestWorkload {
 		// Submit a bulk load job
 		state int oldBulkLoadMode = 0;
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoad
-		self->cancelled = false;
 		loop {
+			// We injects the job cancellation when waiting for the job completion.
+			// If the job is cancelled, we should re-submit the job.
+			state int oldCancelTimes = self->cancelTimes;
 			state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
 			    newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), BulkLoadTransportMethod::CP);
 			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
@@ -369,9 +371,10 @@ struct BulkDumping : TestWorkload {
 			    wait(self->waitUntilLoadJobCompleteOrError(self, cx, newJob.getJobId(), newJob.getJobRange()));
 			// waitUntilLoadJobCompleteOrError can cancel the job and set self->cancelled to true.
 			// If this happens, the current job is intentionally cancelled and we should retry the job.
-			if (self->cancelled) {
+			ASSERT(self->cancelTimes >= oldCancelTimes);
+			if (self->cancelTimes > oldCancelTimes) {
+				// self->cancelTimes increments when waitUntilLoadJobCompleteOrError injects job cancellation
 				wait(delay(deterministicRandom()->random01() * 10.0));
-				self->cancelled = false;
 				continue;
 			}
 			for (const auto& errorTask : errorTasks) {
@@ -390,9 +393,7 @@ struct BulkDumping : TestWorkload {
 
 			// Acknowledge any error task of the job
 			wait(acknowledgeAllErrorBulkLoadTasks(cx, bulkLoadJob.getJobId(), bulkLoadJob.getJobRange()));
-			if (!self->cancelled) {
-				break;
-			}
+			break;
 		}
 
 		return Void();

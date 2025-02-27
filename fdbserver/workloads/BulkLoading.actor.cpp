@@ -55,8 +55,8 @@ struct BulkLoadTaskTestUnit {
 
 struct BulkLoading : TestWorkload {
 	static constexpr auto NAME = "BulkLoadingWorkload";
-	const bool enabled;
-	bool pass;
+	const bool enabled = true;
+	bool pass = true;
 	bool debugging = false;
 	bool backgroundTrafficEnabled = deterministicRandom()->coinflip();
 	UID jobId = deterministicRandom()->randomUniqueID();
