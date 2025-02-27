@@ -2730,7 +2730,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state bool enableDD = false;
 	state TesterConsistencyScanState consistencyScanState;
 
-	// Gives change for g_network->run() to let this run inside event loop and hence let
+	// Gives chance for g_network->run() to run inside event loop and hence let
 	// the tests see correct value for `isOnMainThread()`.
 	wait(yield());
 
