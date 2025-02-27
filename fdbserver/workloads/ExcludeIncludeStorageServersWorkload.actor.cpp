@@ -30,8 +30,8 @@
 // This test creates a scenario that large number of SS join the cluster, by excluding and including a random
 // SS consistently for many times.
 // this test would quit early in two scenarios:
-// 		1. QuitEarlyNoEligibleSSToExclude: All storage servers are running alongside with a TLog, thus we cannot
-//			exclude a SS, otherwise DB would be unavailable. (this is due to simulation uses UNSET process class)
+// 		1. QuitEarlyNoEligibleSSToExclude: All storage servers are running alongside with a TLog or LogRouter, thus we
+//          cannot exclude a SS, otherwise DB would be unavailable. (this is due to simulation uses UNSET process class)
 //		2. QuitEarlyNotCompleteServerExclude: Sometimes it takes too long for a SS exclusion to finish(disappear from
 //			serverListKeys), there is a timeout_error when that happens, and we quit if it never succeeded( i.e.)
 // It makes sense because the purpose of this test is to :
@@ -107,13 +107,25 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 					}
 				}
 
-				// get all TLogs
+				// get all TLogs and remove from SS candidate set
 				Optional<Standalone<StringRef>> value = wait(tr.get(logsKey));
 				ASSERT(value.present());
 				auto logs = decodeLogsValue(value.get());
 				for (auto const& log : logs.first) {
 					servers.erase(AddressExclusion(log.second.ip, log.second.port));
 				}
+
+				// get all log routers and remove from SS candidate set
+				for (const auto& tLogSet : self->dbInfo->get().logSystemConfig.tLogs) {
+					for (const auto& logRouter : tLogSet.logRouters) {
+						if (logRouter.present()) {
+							const auto& logRouterInterf = logRouter.interf();
+							servers.erase(
+							    AddressExclusion(logRouterInterf.address().ip, logRouterInterf.address().port));
+						}
+					}
+				}
+
 				if (servers.empty()) {
 					// sometimes all SS are running alongside a TLog, cannot exclude any of them, so quit
 					TraceEvent("QuitEarlyNoEligibleSSToExclude").log();
