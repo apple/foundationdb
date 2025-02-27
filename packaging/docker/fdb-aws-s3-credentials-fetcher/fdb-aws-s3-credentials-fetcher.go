@@ -84,12 +84,7 @@ func refreshCredentials(bucket, region, credFile string) error {
         return fmt.Errorf("failed to get credentials: %v", err)
     }
 
-    // Write credentials to file
-    if err := writeCredentialsFile(bucket, region, credFile, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken); err != nil {
-        return fmt.Errorf("failed to write credentials: %v", err)
-    }
-
-    return nil
+    return writeCredentialsFile(bucket, region, credFile, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken)
 }
 
 func main() {
