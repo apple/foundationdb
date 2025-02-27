@@ -1680,6 +1680,7 @@ ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>> fetchBulkLoa
 	    .detail("JobTransportMethod", jobTransportMethod)
 	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
 	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
+	    .detail("TaskCount", manifestEntryMap.size())
 	    .detail("Duration", now() - beginTime);
 	return manifestEntryMap;
 }
@@ -2110,20 +2111,26 @@ ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self
 	if (self->folder.empty()) {
 		return Void();
 	}
-	UID jobId = self->bulkDumpJobManager.jobState.getJobId();
-	std::string jobRoot = self->bulkDumpJobManager.jobState.getJobRoot();
+	state UID jobId = self->bulkDumpJobManager.jobState.getJobId();
+	state std::string jobRoot = self->bulkDumpJobManager.jobState.getJobRoot();
 	BulkLoadTransportMethod transportMethod = self->bulkDumpJobManager.jobState.getTransportMethod();
 	// Upload job manifest file
 	std::string content = generateBulkLoadJobManifestFileContent(self->bulkDumpJobManager.jobManifest);
 	ASSERT(!content.empty() && !self->bulkDumpFolder.empty());
 	state std::string localFolder = getBulkLoadJobRoot(self->bulkDumpFolder, jobId);
-	std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
-	std::string jobManifestFileName = getBulkLoadJobManifestFileName();
+	state std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
+	state std::string jobManifestFileName = getBulkLoadJobManifestFileName();
 	std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
 	generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, content, self->ddId);
 	wait(uploadBulkDumpJobManifestFile(
 	    transportMethod, localJobManifestFilePath, remoteFolder, jobManifestFileName, self->ddId));
 	clearFileFolder(localFolder, self->ddId, /*ignoreError=*/true); // best effort to clear the local folder
+	TraceEvent(SevInfo, "DDBulkDumpJobManifestUploaded", self->ddId)
+	    .detail("JobId", jobId)
+	    .detail("JobRoot", jobRoot)
+	    .detail("RemoteFolder", remoteFolder)
+	    .detail("JobManifestFileName", jobManifestFileName)
+	    .detail("TaskCount", self->bulkDumpJobManager.jobManifest.size());
 	return Void();
 }
 
