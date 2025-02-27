@@ -2,7 +2,10 @@ module fdb-aws-s3-credentials-fetcher
 
 go 1.22.5
 
-require github.com/aws/aws-sdk-go-v2/config v1.29.6
+require (
+	github.com/aws/aws-sdk-go-v2/config v1.29.6
+	github.com/spf13/pflag v1.0.6
+)
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.36.1 // indirect

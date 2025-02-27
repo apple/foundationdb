@@ -1,17 +1,31 @@
+// fdb-aws-s3-credentials-fetcher.go
+//   Copyright 2024 Apple Inc.
+//
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//
+//       http://www.apache.org/licenses/LICENSE-2.0
+//
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
+
 package main
 
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/spf13/pflag"
 )
 
 type BlobCredentials struct {
@@ -67,9 +81,7 @@ func writeCredentialsFile(bucket, region, credFile string, accessKey, secretKey,
     return nil
 }
 
-func refreshCredentials(bucket, region, credFile string) error {
-    ctx := context.Background()
-    
+func refreshCredentials(ctx context.Context, bucket, region, credFile string) error {
     // Load the AWS SDK configuration - this will automatically use IRSA when running in EKS
     cfg, err := config.LoadDefaultConfig(ctx, 
         config.WithRegion(region),
@@ -88,28 +100,36 @@ func refreshCredentials(bucket, region, credFile string) error {
 }
 
 func main() {
+    // Create a context for the lifetime of the program
+    ctx := context.Background()
+
     // Add usage message
-    flag.Usage = func() {
+    pflag.Usage = func() {
         fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
         fmt.Fprintf(os.Stderr, "A credential fetcher for AWS S3 that continuously refreshes credentials for FDB blob storage.\n")
+        fmt.Fprintf(os.Stderr, "Requires AWS credentials to be configured in ~/.aws/credentials file.\n\n")
         fmt.Fprintf(os.Stderr, "Options:\n")
-        flag.PrintDefaults()
+        pflag.PrintDefaults()
     }
 
+    help := pflag.BoolP("help", "h", false, "Print this help message")
+    
     defaultRegion := "us-west-2"
     if envRegion := os.Getenv("AWS_REGION"); envRegion != "" {
         defaultRegion = envRegion
     }
     
-    region := flag.String("region", defaultRegion, "AWS region for S3 endpoint (default from AWS_REGION env var)")
-    dir := flag.String("dir", "", "Directory path where credentials file will be stored")
+    region := pflag.String("region", defaultRegion, "AWS region for S3 endpoint; default from AWS_REGION env var")
+    dir := pflag.String("dir", "", "Directory path where credentials file will be stored (required)")
     defaultBucket := fmt.Sprintf("backup-112664522426-%s", defaultRegion)
-    bucket := flag.String("bucket", defaultBucket, "S3 bucket name")
-    daemon := flag.Bool("daemon", false, "Run perpetually updating credentials on a period.")
-    flag.Parse()
+    bucket := pflag.String("bucket", defaultBucket, "S3 bucket name")
+    runOnce := pflag.Bool("run-once", false, "Generate credentials once and exit")
+    pflag.Parse()
 
-    if *dir == "" {
-        log.Fatal("--dir is required")
+    // If help requested or no dir specified, print usage and exit
+    if *help || *dir == "" {
+        pflag.Usage()
+        os.Exit(1)
     }
 
     // Ensure config directory exists
@@ -120,8 +140,8 @@ func main() {
     credFile := filepath.Join(*dir, "s3_blob_credentials.json")
 
     // If run-once is true, just generate credentials and exit
-    if !*daemon {
-        if err := refreshCredentials(*bucket, *region, credFile); err != nil {
+    if *runOnce {
+        if err := refreshCredentials(ctx, *bucket, *region, credFile); err != nil {
             log.Fatalf("Failed to refresh credentials: %v", err)
         }
         log.Printf("Credentials written successfully to %s", credFile)
@@ -130,17 +150,24 @@ func main() {
 
     // Main credential refresh loop
     log.Printf("Starting credential refresh loop")
-    for {
-        if err := refreshCredentials(*bucket, *region, credFile); err != nil {
-            log.Printf("Failed to refresh credentials: %v", err)
-            log.Printf("Will retry in 1 minute...")
-            time.Sleep(time.Minute)
-            continue
-        }
+    ticker := time.NewTicker(5 * time.Minute)
+    defer ticker.Stop()
 
-        // Sleep for a random duration between 3-5 minutes
-        sleepTime := time.Duration(180+rand.Intn(121)) * time.Second
-        log.Printf("Credentials refreshed successfully, sleeping for %v", sleepTime)
-        time.Sleep(sleepTime)
+    // Do first refresh immediately
+    if err := refreshCredentials(ctx, *bucket, *region, credFile); err != nil {
+        log.Printf("Failed to refresh credentials: %v", err)
+    }
+
+    for {
+        select {
+        case <-ticker.C:
+            if err := refreshCredentials(ctx, *bucket, *region, credFile); err != nil {
+                log.Printf("Failed to refresh credentials: %v", err)
+                continue
+            }
+            log.Printf("Credentials refreshed successfully")
+        case <-ctx.Done():
+            return
+        }
     }
 }

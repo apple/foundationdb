@@ -80,9 +80,11 @@ function write_blob_credentials {
     echo "${dir}/s3_blob_credentials.json"
   else
     # No go so fall back to old way of writing blob credentials.
-    if ! credentials=$( curl -H "X-aws-ec2-metadata-token: ${token}" \
-        http://169.254.169.254/latest/meta-data/iam/security-credentials/foundationdb-dev_node_instance_role ); then
-      echo "ERROR: Failed reading credentials"
+    # Use environment variable AWS_IAM_ROLE if set, otherwise use default
+    IAM_ROLE=${AWS_IAM_ROLE:-"foundationdb-dev_node_instance_role"}
+    if ! credentials=$( curl -f -s \
+            "http://169.254.169.254/latest/meta-data/iam/security-credentials/${IAM_ROLE}" ); then
+      echo "ERROR: Failed reading credentials for role ${IAM_ROLE}"
       return 1
     fi
     if ! blob_credentials_str=$( echo "${credentials}" | jq --arg host_arg "${local_host}" \
