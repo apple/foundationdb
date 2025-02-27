@@ -61,7 +61,7 @@ func writeCredentialsFile(bucket, region, credFile string, accessKey, secretKey,
     }
 
     if err := os.WriteFile(credFile, data, 0644); err != nil {
-        return fmt.Errorf("failed to write credentials file: %v", err)
+        return fmt.Errorf("failed to write credentials file: %w", err)
     }
 
     return nil
