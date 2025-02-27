@@ -81,7 +81,7 @@ func writeCredentialsFile(bucket, region, credFile string, accessKey, secretKey,
     return nil
 }
 
-func refreshCredentials(ctx context.Context, bucket, region, credFile string) error {
+func refreshCredentials(ctx context.Context, bucket, region, credFile string, expiryThreshold time.Duration) error {
     // Load the AWS SDK configuration - this will automatically use IRSA when running in EKS
     cfg, err := config.LoadDefaultConfig(ctx, 
         config.WithRegion(region),
@@ -94,6 +94,16 @@ func refreshCredentials(ctx context.Context, bucket, region, credFile string) er
     creds, err := cfg.Credentials.Retrieve(ctx)
     if err != nil {
         return fmt.Errorf("failed to get credentials: %v", err)
+    }
+
+    // Check if credentials are expired or will expire soon
+    if !creds.Expires.IsZero() {
+        timeUntilExpiry := time.Until(creds.Expires)
+        if timeUntilExpiry > expiryThreshold {
+            log.Printf("Current credentials valid for %v, skipping refresh", timeUntilExpiry.Round(time.Second))
+            return nil
+        }
+        log.Printf("Credentials expire in %v, refreshing", timeUntilExpiry.Round(time.Second))
     }
 
     return writeCredentialsFile(bucket, region, credFile, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken)
@@ -124,6 +134,7 @@ func main() {
     defaultBucket := fmt.Sprintf("backup-112664522426-%s", defaultRegion)
     bucket := pflag.String("bucket", defaultBucket, "S3 bucket name")
     runOnce := pflag.Bool("run-once", false, "Generate credentials once and exit")
+    expiryThreshold := pflag.Duration("expiry-threshold", 5*time.Minute, "Refresh credentials when they expire within this duration")
     pflag.Parse()
 
     // If help requested or no dir specified, print usage and exit
@@ -141,7 +152,7 @@ func main() {
 
     // If run-once is true, just generate credentials and exit
     if *runOnce {
-        if err := refreshCredentials(ctx, *bucket, *region, credFile); err != nil {
+        if err := refreshCredentials(ctx, *bucket, *region, credFile, *expiryThreshold); err != nil {
             log.Fatalf("Failed to refresh credentials: %v", err)
         }
         log.Printf("Credentials written successfully to %s", credFile)
@@ -154,14 +165,14 @@ func main() {
     defer ticker.Stop()
 
     // Do first refresh immediately
-    if err := refreshCredentials(ctx, *bucket, *region, credFile); err != nil {
+    if err := refreshCredentials(ctx, *bucket, *region, credFile, *expiryThreshold); err != nil {
         log.Printf("Failed to refresh credentials: %v", err)
     }
 
     for {
         select {
         case <-ticker.C:
-            if err := refreshCredentials(ctx, *bucket, *region, credFile); err != nil {
+            if err := refreshCredentials(ctx, *bucket, *region, credFile, *expiryThreshold); err != nil {
                 log.Printf("Failed to refresh credentials: %v", err)
                 continue
             }
