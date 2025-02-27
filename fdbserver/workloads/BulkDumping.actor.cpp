@@ -259,6 +259,10 @@ struct BulkDumping : TestWorkload {
 		loop {
 			KeyRange completeRange = wait(self->getBulkLoadJobCompleteRange(cx, jobId, jobRange));
 			if (completeRange != jobRange) {
+				// During the wait for the job completion, we may inject the job cancellation.
+				// We varies the timing of the job cancellation, we trigger the job cancellation with 10% probability at
+				// each time. Throughout the entire test, we inject the job cancellation at most maxCancelTimes times to
+				// ensure the job can complete fast.
 				if (self->cancelTimes < self->maxCancelTimes && deterministicRandom()->random01() < 0.1) {
 					wait(cancelBulkLoadJob(cx, jobId));
 					self->cancelTimes++; // Inject cancellation. Then the bulkload job should run again.
@@ -357,8 +361,8 @@ struct BulkDumping : TestWorkload {
 		state int oldBulkLoadMode = 0;
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoad
 		loop {
-			// We injects the job cancellation when waiting for the job completion.
-			// If the job is cancelled, we should re-submit the job.
+			// We randomly injects the job cancellation when waiting for the job completion to test the job
+			// cancellation. If the job is cancelled, we should re-submit the job.
 			state int oldCancelTimes = self->cancelTimes;
 			state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
 			    newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), BulkLoadTransportMethod::CP);
