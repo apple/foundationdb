@@ -247,7 +247,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 		wait(submitBulkLoadJob(cx, bulkLoadJob));
 		return bulkLoadJob.getJobId();
 
-	} else if (tokencmp(tokens[1], "cancel")) {
+	} else if (tokencmp(tokens[1], "clear")) {
 		if (tokens.size() != 3) {
 			printUsage(tokens[0]);
 			return UID();
@@ -257,7 +257,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			printUsage(tokens[0]);
 			return UID();
 		}
-		fmt::println("Job {} has been cancelled.", jobId.toString());
+		fmt::println("Job {} has been cleared.", jobId.toString());
 		wait(cancelBulkLoadJob(cx, jobId));
 		return UID();
 
@@ -291,7 +291,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 CommandFactory bulkLoadFactory(
     "bulkload",
     CommandHelp(
-        "bulkload [mode|local|blobstore|status|unittest] [ARGs]",
+        "bulkload [mode|local|blobstore|status|clear|unittest] [ARGs]",
         "bulkload commands",
         "To set bulkload mode: `bulkload mode [on|off]'\n"
         "To load a range from SST files: `bulkload [local|blobstore] <BeginKey> <EndKey> dumpFolder`\n"
