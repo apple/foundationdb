@@ -247,14 +247,18 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 		wait(submitBulkLoadJob(cx, bulkLoadJob));
 		return bulkLoadJob.getJobId();
 
-	} else if (tokencmp(tokens[1], "clear")) {
+	} else if (tokencmp(tokens[1], "cancel")) {
 		if (tokens.size() != 3) {
 			printUsage(tokens[0]);
 			return UID();
 		}
 		state UID jobId = UID::fromString(tokens[2].toString());
-		fmt::println("Job {} has been cleared. No task will be spawned.", jobId.toString());
-		// TODO(Zhe)
+		if (!jobId.isValid()) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		wait(cancelBulkLoadJob(cx, jobId));
+		fmt::println("Job {} has been cancelled.", jobId.toString());
 		return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
@@ -287,11 +291,11 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 CommandFactory bulkLoadFactory(
     "bulkload",
     CommandHelp(
-        "bulkload [mode|local|blobstore|status|unittest] [ARGs]",
+        "bulkload [mode|local|blobstore|status|cancel|unittest] [ARGs]",
         "bulkload commands",
         "To set bulkload mode: `bulkload mode [on|off]'\n"
         "To load a range from SST files: `bulkload [local|blobstore] <BeginKey> <EndKey> dumpFolder`\n"
-        "To clear current bulkload job: `bulkload clear <Non-Zero JobID>`\n"
+        "To cancel current bulkload job: `bulkload cancel <Non-Zero JobID>`\n"
         "To get completed bulkload ranges: `bulkload status <BeginKey> <EndKey>`\n"
         "BulkLoad tasks are operated when setting unittest.\n"
         "To acknowledge completed tasks within a range: `bulkload unittest acknowledge <TaskID> <BeginKey> <EndKey>'\n"

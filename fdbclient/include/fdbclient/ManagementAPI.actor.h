@@ -204,6 +204,9 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 // Get the current running bulk load job
 ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx);
 
+// Cancel bulkLoad job for the given jobId
+ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId);
+
 // Acknowledge all bulk load tasks that are in the Error phase.
 // After acknowledge, the write traffic to the task's range is turned on and the task's metadata is cleared by the bulk
 // load engine.

@@ -55,8 +55,8 @@ struct BulkLoadTaskTestUnit {
 
 struct BulkLoading : TestWorkload {
 	static constexpr auto NAME = "BulkLoadingWorkload";
-	const bool enabled;
-	bool pass;
+	const bool enabled = true;
+	bool pass = true;
 	bool debugging = false;
 	bool backgroundTrafficEnabled = deterministicRandom()->coinflip();
 	UID jobId = deterministicRandom()->randomUniqueID();
@@ -325,13 +325,12 @@ struct BulkLoading : TestWorkload {
 			Standalone<StringRef> keyB = self->getRandomStringRef();
 			if (!scope.contains(keyA) || !scope.contains(keyB)) {
 				continue;
-			} else if (keyA < keyB) {
-				return Standalone(KeyRangeRef(keyA, keyB));
-			} else if (keyA > keyB) {
-				return Standalone(KeyRangeRef(keyB, keyA));
-			} else {
+			}
+			KeyRange range = keyA < keyB ? KeyRangeRef(keyA, keyB) : KeyRangeRef(keyB, keyA);
+			if (range.empty() || range.singleKeyRange()) {
 				continue;
 			}
+			return range;
 		}
 	}
 

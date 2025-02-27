@@ -1255,6 +1255,9 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 				    .detail("Range", range)
 				    .detail("TaskID", taskId.toString())
 				    .detail("Duration", now() - beginTime);
+				if (failTaskError.code() == error_code_movekeys_conflict) {
+					throw failTaskError;
+				}
 				ASSERT(failTaskError.code() == error_code_bulkload_task_outdated);
 				// sliently exits
 			}
@@ -1276,7 +1279,7 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		    .detail("TaskID", taskId.toString())
 		    .detail("Duration", now() - beginTime);
 		if (e.code() == error_code_movekeys_conflict) {
-			throw e;
+			throw e; // trigger DD restarts, which resets bulkLoadEngineParallelismLimitor
 		}
 		// sliently exits
 	}
@@ -1635,6 +1638,9 @@ ACTOR Future<Void> bulkLoadJobExecuteTask(Reference<DataDistributor> self,
 		    .detail("JobId", jobId.toString())
 		    .detail("Task", bulkLoadTask.toString())
 		    .detail("Duration", now() - beginTime);
+		if (e.code() == error_code_movekeys_conflict) {
+			throw e; // trigger DD restarts, which resets bulkLoadParallelismLimitor
+		}
 		// Sliently exit for any error
 		// Currently, all errors here come from the bulkload job mechanism.
 		// BulkLoad task is guaranteed to be completed by the engine given a task metadata is persisted.
@@ -1674,6 +1680,7 @@ ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>> fetchBulkLoa
 	    .detail("JobTransportMethod", jobTransportMethod)
 	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
 	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
+	    .detail("TaskCount", manifestEntryMap.size())
 	    .detail("Duration", now() - beginTime);
 	return manifestEntryMap;
 }
@@ -1969,6 +1976,10 @@ ACTOR Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 		    .detail("TargetSS", ssi.id())
 		    .detail("BulkDumpState", bulkDumpState.toString())
 		    .detail("Duration", now() - beginTime);
+		if (e.code() == error_code_movekeys_conflict) {
+			throw e; // trigger DD restarts, which resets bulkDumpParallelismLimitor
+		}
+		// Sliently exit for other errors
 	}
 	self->bulkDumpParallelismLimitor.decrementTaskCounter();
 	return Void();
@@ -2100,20 +2111,26 @@ ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self
 	if (self->folder.empty()) {
 		return Void();
 	}
-	UID jobId = self->bulkDumpJobManager.jobState.getJobId();
-	std::string jobRoot = self->bulkDumpJobManager.jobState.getJobRoot();
+	state UID jobId = self->bulkDumpJobManager.jobState.getJobId();
+	state std::string jobRoot = self->bulkDumpJobManager.jobState.getJobRoot();
 	BulkLoadTransportMethod transportMethod = self->bulkDumpJobManager.jobState.getTransportMethod();
 	// Upload job manifest file
 	std::string content = generateBulkLoadJobManifestFileContent(self->bulkDumpJobManager.jobManifest);
 	ASSERT(!content.empty() && !self->bulkDumpFolder.empty());
 	state std::string localFolder = getBulkLoadJobRoot(self->bulkDumpFolder, jobId);
-	std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
-	std::string jobManifestFileName = getBulkLoadJobManifestFileName();
+	state std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
+	state std::string jobManifestFileName = getBulkLoadJobManifestFileName();
 	std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
 	generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, content, self->ddId);
 	wait(uploadBulkDumpJobManifestFile(
 	    transportMethod, localJobManifestFilePath, remoteFolder, jobManifestFileName, self->ddId));
 	clearFileFolder(localFolder, self->ddId, /*ignoreError=*/true); // best effort to clear the local folder
+	TraceEvent(SevInfo, "DDBulkDumpJobManifestUploaded", self->ddId)
+	    .detail("JobId", jobId)
+	    .detail("JobRoot", jobRoot)
+	    .detail("RemoteFolder", remoteFolder)
+	    .detail("JobManifestFileName", jobManifestFileName)
+	    .detail("TaskCount", self->bulkDumpJobManager.jobManifest.size());
 	return Void();
 }
 
