@@ -9,9 +9,9 @@
 #                                                          xyzdev
 #                                                          vvvv
 set(FDB_PV_DEFAULT_VERSION                      "0x0FDB00B074000000LL")
-set(FDB_PV_FUTURE_VERSION                       "0x0FDB00B075000000LL")
+set(FDB_PV_FUTURE_VERSION                       "0x0FDB00B080000000LL")
 set(FDB_PV_MIN_COMPATIBLE_VERSION               "0x0FDB00B073000000LL")
-set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00B076000000LL")
+set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00B081000000LL")
 set(FDB_PV_LEFT_MOST_CHECK                      "0x0FDB00B100000000LL")
 set(FDB_PV_LSB_MASK                             "0xF0FFFFLL")
 
