@@ -304,6 +304,33 @@ TEST_CASE("/fdbrpc/grpc/file_transfer_fail_random") {
 	return Void();
 }
 
+TEST_CASE("/fdbrpc/grpc/basic_thread_pool") {
+	using namespace std;
+
+	AsyncTaskExecutor pool(4);
+	unordered_map<string, size_t> state;
+	mutex m;
+
+	Future<string> f = pool.post([&]() -> string {
+		this_thread::sleep_for(chrono::seconds(1));
+		auto id = std::hash<std::thread::id>{}(std::this_thread::get_id());
+		lock_guard<mutex> lg(m);
+		state["thread"] = id;
+		return "done";
+	});
+	{
+		auto id = std::hash<std::thread::id>{}(std::this_thread::get_id());
+		lock_guard<mutex> lg(m);
+		state["main"] = id;
+	}
+
+	auto r = co_await f;
+	ASSERT(state["main"] != state["thread"]);
+	ASSERT_EQ(r, "done");
+}
+
+//--- THREAD POOL TESTS --//
+
 } // namespace fdbrpc_test
 
 #endif
