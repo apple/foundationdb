@@ -30,20 +30,20 @@
 void forceLinkGrpcTests() {}
 
 namespace fdbrpc_test {
-namespace asio = boost::asio;
 
 TEST_CASE("/fdbrpc/grpc/basic_sync_client") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50001"));
 	state GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	state Future<Void> server_actor = server.run();
+	wait(server.onRunning());
 
 	EchoClient client(grpc::CreateChannel(addr.toString(), grpc::InsecureChannelCredentials()));
 	std::string reply = client.Echo("Ping!");
 	std::cout << "Echo received: " << reply << std::endl;
 	ASSERT_EQ(reply, "Echo: Ping!");
 
-	server.shutdown();
+	wait(server.shutdown());
 	wait(server_actor);
 	return Void();
 }
@@ -53,8 +53,9 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client") {
 	state GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	state Future<Void> _ = server.run();
+	wait(server.onRunning());
 
-	state shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+	state shared_ptr<AsyncTaskExecutor> pool = make_shared<AsyncTaskExecutor>(4);
 	state AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
 
 	try {
@@ -73,7 +74,7 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client") {
 
 TEST_CASE("/fdbrpc/grpc/no_server_running") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50004"));
-	state shared_ptr<asio::thread_pool> pool(make_shared<asio::thread_pool>(4));
+	state shared_ptr<AsyncTaskExecutor> pool = make_shared<AsyncTaskExecutor>(4);
 	state AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
 
 	try {
@@ -93,6 +94,7 @@ TEST_CASE("/fdbrpc/grpc/destroy_server_without_shutdown") {
 	state GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	state Future<Void> _ = server.run();
+	wait(server.onRunning());
 	return Void();
 }
 
