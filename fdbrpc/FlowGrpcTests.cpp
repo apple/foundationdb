@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include <sstream>
 #ifdef FLOW_GRPC_ENABLED
-#include <ctime>
+#include <chrono>
+#include <thread>
+#include <mutex>
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/FlowGrpcTests.h"
 #include "fdbrpc/FileTransfer.h"
@@ -30,16 +33,13 @@
 void forceLinkGrpcTests2() {}
 
 namespace fdbrpc_test {
-namespace asio = boost::asio;
 
-std::string generate_random_string(int size) {
+void generate_random_string(std::string* buffer, int size) {
+	buffer->clear();
 	const std::string characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-	std::string random_string;
 	for (int i = 0; i < size; ++i) {
-		random_string += characters[deterministicRandom()->randomInt(0, characters.size())];
+		buffer->push_back(characters[deterministicRandom()->randomInt(0, characters.size())]);
 	}
-
-	return random_string;
 }
 
 TEST_CASE("/fdbrpc/grpc/basic_coro") {
@@ -47,8 +47,9 @@ TEST_CASE("/fdbrpc/grpc/basic_coro") {
 	GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	Future<Void> _ = server.run();
+	co_await server.onRunning();
 
-	shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+	auto pool = make_shared<AsyncTaskExecutor>(4);
 	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
 
 	try {
@@ -68,8 +69,9 @@ TEST_CASE("/fdbrpc/grpc/basic_stream_server") {
 	GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	Future<Void> _ = server.run();
+	co_await server.onRunning();
 
-	shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+	auto pool = make_shared<AsyncTaskExecutor>(4);
 	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
 
 	int count = 0;
@@ -97,8 +99,9 @@ TEST_CASE("/fdbrpc/grpc/future_destroy") {
 	GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	Future<Void> _ = server.run();
+	co_await server.onRunning();
 
-	shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+	auto pool = make_shared<AsyncTaskExecutor>(4);
 	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
 
 	try {
@@ -120,8 +123,9 @@ TEST_CASE("/fdbrpc/grpc/stream_destroy") {
 	GrpcServer server(addr);
 	server.registerService(make_shared<TestEchoServiceImpl>());
 	Future<Void> _ = server.run();
+	co_await server.onRunning();
 
-	shared_ptr<asio::thread_pool> pool = make_shared<asio::thread_pool>(4);
+	auto pool = make_shared<AsyncTaskExecutor>(4);
 	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
 
 	int count = 0;
@@ -173,6 +177,31 @@ TEST_CASE("/fdbrpc/grpc/stream_destroy") {
 // 	co_return;
 // }
 
+int WriteTestFile(platform::TmpFile* file, int size) {
+	std::cout << "Writing random to source file of size = " << size << " bytes\n";
+	int block_size = 1024 * 1024 * 4; // 4MB at a time.
+	int iterations = size / block_size;
+	int bytes_written = 0;
+	std::string buffer;
+	buffer.reserve(block_size + 1);
+	for (int i = 0; i <= iterations; ++i) {
+		int to_write = block_size;
+		if (i == iterations && size % block_size == 0) {
+			break;
+		} else if (i == iterations) {
+			to_write = size % block_size;
+		}
+		generate_random_string(&buffer, to_write);
+		file->append((const uint8_t*)buffer.c_str(), to_write);
+		bytes_written += to_write;
+	}
+	std::cout << "Finished writing " << bytes_written << " bytes.\n";
+	ASSERT_EQ(bytes_written, size);
+	return bytes_written;
+}
+
+const int GPRC_FILE_TRANSFER_TEST_FILE_SIZE = 1024 * 1024 * 40;
+
 TEST_CASE("/fdbrpc/grpc/file_transfer") {
 	using platform::TmpFile;
 
@@ -192,15 +221,7 @@ TEST_CASE("/fdbrpc/grpc/file_transfer") {
 	auto client = FileTransferClient(channel);
 	TmpFile src;
 	TmpFile dest;
-	std::cout << "Writing 1GB random bytes to source file.\n";
-	int bytes_written = 0;
-	for (int i = 0; i < 1024; ++i) {
-		const int size = i < 1023 ? 1024 * 1024 : (1024 * 1024) / 2; // Make last block smaller.
-		auto rand_str = generate_random_string(size);
-		src.append((const uint8_t*)rand_str.c_str(), size);
-		bytes_written += size;
-	}
-	std::cout << "Finished writing " << bytes_written << " bytes.\n";
+	int bytes_written = WriteTestFile(&src, GPRC_FILE_TRANSFER_TEST_FILE_SIZE);
 
 	// -- Start file transfer --
 	std::cout << "Invoking gRPC File Transfer call.\n";
@@ -241,14 +262,7 @@ TEST_CASE("/fdbrpc/grpc/file_transfer_byte_flip") {
 	TmpFile src;
 	TmpFile dest;
 	std::cout << "Writing 1GB random bytes to source file.\n";
-	int bytes_written = 0;
-	for (int i = 0; i < 1024; ++i) {
-		const int size = i < 1023 ? 1024 * 1024 : (1024 * 1024) / 2; // Make last block smaller.
-		auto rand_str = generate_random_string(size);
-		src.append((const uint8_t*)rand_str.c_str(), size);
-		bytes_written += size;
-	}
-	std::cout << "Finished writing " << bytes_written << " bytes.\n";
+	WriteTestFile(&src, GPRC_FILE_TRANSFER_TEST_FILE_SIZE);
 
 	// -- Start file transfer --
 	std::cout << "Invoking gRPC File Transfer call.\n";
@@ -282,15 +296,7 @@ TEST_CASE("/fdbrpc/grpc/file_transfer_fail_random") {
 	auto client = FileTransferClient(channel);
 	TmpFile src;
 	TmpFile dest;
-	std::cout << "Writing 1GB random bytes to source file.\n";
-	int bytes_written = 0;
-	for (int i = 0; i < 1024; ++i) {
-		const int size = i < 1023 ? 1024 * 1024 : (1024 * 1024) / 2; // Make last block smaller.
-		auto rand_str = generate_random_string(size);
-		src.append((const uint8_t*)rand_str.c_str(), size);
-		bytes_written += size;
-	}
-	std::cout << "Finished writing " << bytes_written << " bytes.\n";
+	WriteTestFile(&src, GPRC_FILE_TRANSFER_TEST_FILE_SIZE);
 
 	// -- Start file transfer --
 	std::cout << "Invoking gRPC File Transfer call.\n";
@@ -327,6 +333,89 @@ TEST_CASE("/fdbrpc/grpc/basic_thread_pool") {
 	auto r = co_await f;
 	ASSERT(state["main"] != state["thread"]);
 	ASSERT_EQ(r, "done");
+}
+
+TEST_CASE("/fdbrpc/grpc/server_lifecycle_basic") {
+	// Server
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50507"));
+	GrpcServer server(addr);
+
+	std::cout << "Start gRPC server\n";
+	Future<Void> _ = server.run();
+
+	std::cout << "Register TestEchoService\n";
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	co_await server.onNextStart();
+	ASSERT(server.hasStarted());
+	ASSERT_EQ(server.numStarts(), 1);
+
+	std::cout << "Deregister TestEchoService\n";
+	co_await server.deregisterRoleServices(UID());
+	ASSERT(!server.hasStarted());
+
+	std::cout << "Register FileTransferService\n";
+	server.registerService(make_shared<FileTransferServiceImpl>());
+	co_await server.onNextStart();
+	ASSERT(server.hasStarted());
+	ASSERT_EQ(server.numStarts(), 2);
+
+	// Client
+	auto pool = make_shared<AsyncTaskExecutor>(1);
+	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+	auto make_request = [&]() {
+		EchoRequest request;
+		request.set_message("Ping!");
+		return client.call(&TestEchoService::Stub::Echo, request);
+	};
+
+	std::cout << "Make EchoRequest to server without service\n";
+	try {
+		co_await make_request();
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_grpc_error); // Service was deregistered.
+	}
+
+	std::cout << "Register EchoService\n";
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	co_await server.onNextStart();
+	ASSERT_EQ(server.numStarts(), 3);
+	std::cout << "Make EchoRequest to server withservice\n";
+	try {
+		auto res = co_await make_request();
+		ASSERT_EQ(res.message(), "Echo: Ping!");
+	} catch (Error& e) {
+		ASSERT(false);
+	}
+}
+
+TEST_CASE("/fdbrpc/grpc/server_lifecycle_combine_register_into_one_start") {
+	// Server
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50508"));
+	GrpcServer server(addr);
+
+	Future<Void> _ = server.run();
+
+	std::cout << "Register TestEchoService\n";
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	co_await delay(0.1);
+	server.registerService(make_shared<FileTransferServiceImpl>());
+	co_await server.onNextStart();
+	ASSERT(server.hasStarted());
+	ASSERT_EQ(server.numStarts(), 1);
+
+	// Client
+	auto pool = make_shared<AsyncTaskExecutor>(1);
+	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+	try {
+		EchoRequest request;
+		request.set_message("Ping!");
+		co_await client.call(&TestEchoService::Stub::Echo, request);
+	} catch (Error& e) {
+		ASSERT(false);
+	}
 }
 
 //--- THREAD POOL TESTS --//
