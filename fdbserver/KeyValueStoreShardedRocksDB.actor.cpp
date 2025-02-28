@@ -993,6 +993,7 @@ struct PhysicalShard {
 		const CheckpointFormat format = checkpoint.getFormat();
 		rocksdb::Status status;
 		if (format == DataMoveRocksCF) {
+			ASSERT(cf == nullptr);
 			rocksdb::ExportImportFilesMetaData metaData = getMetaData(checkpoint);
 			if (metaData.files.empty()) {
 				TraceEvent(SevInfo, "RocksDBRestoreEmptyShard")
@@ -2737,7 +2738,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				if (!metadata.files.empty() && SERVER_KNOBS->ROCKSDB_ENABLE_CHECKPOINT_VALIDATION) {
 					rocksdb::ImportColumnFamilyOptions importOptions;
 					importOptions.move_files = false;
-					rocksdb::ColumnFamilyHandle* handle;
+					rocksdb::ColumnFamilyHandle* handle{ nullptr };
 					const std::string cfName = deterministicRandom()->randomAlphaNumeric(8);
 					s = a.shardManager->getDb()->CreateColumnFamilyWithImport(
 					    rocksdb::ColumnFamilyOptions(), cfName, importOptions, metadata, &handle);

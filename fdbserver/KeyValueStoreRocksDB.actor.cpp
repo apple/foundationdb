@@ -2579,6 +2579,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 			ASSERT(db->DropColumnFamily(cf).ok());
 			db->DestroyColumnFamilyHandle(cf);
 			cfHandles.erase(cf);
+			cf = nullptr;
 		}
 
 		rocksdb::ExportImportFilesMetaData metaData = getMetaData(a.checkpoints[0]);
