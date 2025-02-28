@@ -11,8 +11,8 @@ Overview
 ========
 In a FoundationDB (FDB) key-value cluster, every key-value pair is replicated across multiple storage servers.
 The location of key-value pairs is decided by the data distribution system (DD). 
-When DD relocates a range, DD update the location metadata accordingly.
-The location metadata stores the ground true of the range location. Therefore, the location metadata consistency is crucial for the correctness of the system.
+When DD relocates a range, DD updates the location metadata accordingly.
+The location metadata stores the ground truth of the range location. Therefore, the location metadata consistency is crucial for the correctness of the system.
 The AuditStorage tool can be used to validate the consistency of all replicas for each key-value pair. Moreover, it can also be used to validate the location metadata consistency. 
 If any data inconsistency is detected, the tool generates Error trace events. 
 
@@ -23,13 +23,13 @@ For the replica consistency check, the auditstorage has a different implementati
 checking process. We will introduce the design in the following sections.
 AuditStorage tool also checks the consistency of the location metadata. 
 In particular, the tool checks if KeyServer and ServerKey are consistent: a range is assigned to a set of servers in the KeyServer if and only if the servers have the range in the ServerKey.
-The tool also checks if the ServerKeys are consistent to StorageServer location shard mapping.
-Note that ServerKeys is a part of the system key space while the StorageServer location shard mapping is stored in the storage server locally.
+The tool also checks if the ServerKeys are consistent to StorageServer (SS) location shard mapping.
+Note that ServerKeys is a part of the system key space while the SS location shard mapping is stored in the storage server locally.
 The tool checks a range is assigned to the SS in ServerKeys if and only if the range is owned by the SS in the local shard mapping.
 
 The AuditStorage tool has following features:
 
-* End-to-end completeness check --- The checker continues until all ranges are marked as complete. AuditStorage persists progress to the metadata. This is a major difference from the Consistency Checker Urgent tool.
+* End-to-end completeness check --- The checker continues until all ranges are marked as complete. AuditStorage persists progress to a metadata. This is a major difference from the Consistency Checker Urgent tool.
 * Scalability --- Adding more parallelism results in nearly linear speedup. This is controlled by the knob CONCURRENT_AUDIT_TASK_COUNT_MAX.
 * Progress monitoring --- Providing FDBCLI command to check the progress of the checking.
 * Fault tolerance --- Failures do not impact the checker process. Checking failures are automatically retried.
@@ -63,7 +63,7 @@ AuditStorage design
 ======================================
 The AuditStorage system conducts consistency checks in a distributed, client-server manner. 
 In the system, DD serves as a centralized leader to monitor the progress and dispatch tasks. 
-SSes are agents to performa actual checking. The Checking progress is shared between DD and SSes on system metadata.
+SSes are agents to performa actual checking. The checking progress is shared between DD and SSes on system metadata.
 When a SS completes a range, the SS marks the range as completed in the metadata using a transaction.
 Then, the DD will know this range has been completed and does not schedule task to check this range again.
 
@@ -75,13 +75,12 @@ This mechanism implicitly balances the workload among storage servers because th
 
 KeyServer and ServerKey consistency check (locationmetadata)
 ------------------------------------------------------------
-The AuditStorage tool checks the consistency of between KeyServer and ServerKey.
+The AuditStorage tool checks the consistency between KeyServer and ServerKey.
 This job is conduct by DD only since the workload is small. It only needs to read all KeyServer and ServerKey metadata.
 
 ServerKey and SS shard mapping consistency check (ssshard)
 ----------------------------------------------------------
-The AuditStorage tool checks the consistency of between ServerKey and SS local shard mapping.
+The AuditStorage tool checks the consistency between ServerKey and SS local shard mapping.
 In this job, the tool needs to check each storage server to see each SS has the shard mapping consistent with ServerKey.
 For each SS, DD partitions the job range in the unit of shards. Given a shard, DD requests the SS to check the consistency between the shard mapping and the ServerKey.
 The SS reads the shard mapping and compares it with the ServerKey.
-
