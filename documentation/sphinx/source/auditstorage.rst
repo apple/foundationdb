@@ -79,7 +79,7 @@ The AuditStorage tool checks the consistency of between KeyServer and ServerKey.
 This job is conduct by DD only since the workload is small. It only needs to read all KeyServer and ServerKey metadata.
 
 ServerKey and SS shard mapping consistency check (ssshard)
--------------------------------------------------
+----------------------------------------------------------
 The AuditStorage tool checks the consistency of between ServerKey and SS local shard mapping.
 In this job, the tool needs to check each storage server to see each SS has the shard mapping consistent with ServerKey.
 For each SS, DD partitions the job range in the unit of shards. Given a shard, DD requests the SS to check the consistency between the shard mapping and the ServerKey.
