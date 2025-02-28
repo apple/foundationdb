@@ -28,7 +28,7 @@ import (
 	"testing"
 )
 
-const API_VERSION int = 800
+const API_VERSION int = 740
 
 func TestErrorWrapping(t *testing.T) {
 	MustAPIVersion(API_VERSION)
