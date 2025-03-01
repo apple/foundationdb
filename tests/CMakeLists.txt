@@ -460,23 +460,23 @@ if(WITH_PYTHON)
       TEST_FILES restarting/to_7.3.0_until_7.3.51/CycleTestRestart-1.toml
       restarting/to_7.3.0_until_7.3.51/CycleTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_7.3.51_until_8.0.0/BlobGranuleRestartCorrectness-1.toml
-      restarting/to_7.3.51_until_8.0.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
+      TEST_FILES restarting/to_7.3.51_until_7.4.0/BlobGranuleRestartCorrectness-1.toml
+      restarting/to_7.3.51_until_7.4.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
     add_fdb_test(
-      TEST_FILES restarting/to_7.3.51_until_8.0.0/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/to_7.3.51_until_8.0.0/ConfigureStorageMigrationTestRestart-2.toml)
+      TEST_FILES restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_7.3.51_until_8.0.0/CycleTestRestart-1.toml
-      restarting/to_7.3.51_until_8.0.0/CycleTestRestart-2.toml)
+      TEST_FILES restarting/to_7.3.51_until_7.4.0/CycleTestRestart-1.toml
+      restarting/to_7.3.51_until_7.4.0/CycleTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_8.0.0/BlobGranuleRestartCorrectness-1.toml
-      restarting/to_8.0.0/BlobGranuleRestartCorrectness-2.toml)
+      TEST_FILES restarting/to_7.4.0/BlobGranuleRestartCorrectness-1.toml
+      restarting/to_7.4.0/BlobGranuleRestartCorrectness-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_8.0.0/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/to_8.0.0/ConfigureStorageMigrationTestRestart-2.toml)
+      TEST_FILES restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_8.0.0/CycleTestRestart-1.toml
-      restarting/to_8.0.0/CycleTestRestart-2.toml)
+      TEST_FILES restarting/to_7.4.0/CycleTestRestart-1.toml
+      restarting/to_7.4.0/CycleTestRestart-2.toml)
   endif()
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
