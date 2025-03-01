@@ -96,8 +96,12 @@ func refreshCredentials(ctx context.Context, bucket, region, credFile string, ex
         return fmt.Errorf("failed to get credentials: %v", err)
     }
 
+    // Check if the credentials file exists
+    _, err = os.Stat(credFile)
+    fileExists := !os.IsNotExist(err)
+
     // Check if credentials are expired or will expire soon
-    if !creds.Expires.IsZero() {
+    if fileExists && !creds.Expires.IsZero() {
         timeUntilExpiry := time.Until(creds.Expires)
         if timeUntilExpiry > expiryThreshold {
             log.Printf("Current credentials valid for %v, skipping refresh", timeUntilExpiry.Round(time.Second))

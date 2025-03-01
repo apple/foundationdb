@@ -72,7 +72,7 @@ function write_blob_credentials {
       return 1
     fi
     readonly fetcher="${fetcher_dir}/fdb-aws-s3-credentials-fetcher"
-    if ! $( "${fetcher}"  -dir "${dir}" ); then
+    if ! $( "${fetcher}"  --run-once --dir "${dir}" ); then
       echo "ERROR: Failed running ${fetcher}."
       return 1
     fi
