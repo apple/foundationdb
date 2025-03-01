@@ -9,7 +9,8 @@ FoundationDB Per-Range Lock (WiP)
 
 Overview
 ========
-Per-Range Lock is a feature that allows users to shut down write traffic to a specific range of keys in FoundationDB (FDB).
+Per-Range Lock is a feature that allows to shut down write traffic to a specific range of keys in FoundationDB (FDB).
+The locked range must be within the user key space, aka ``"" ~ \xff``.
 If a user/app grabs a lock on a range, other user/app can read the range but cannot write to the range. Essentially, this lock type is
 a readLock. The read lock is not exclusive --- A range can have multiple locks by different users. 
 
@@ -48,7 +49,7 @@ Register a rangeLock owner to database metadata.
 
 ``ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description);``
 
-Remove an owner form the database metadata
+Remove an owner from the database metadata
 
 ``ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId);``
 
