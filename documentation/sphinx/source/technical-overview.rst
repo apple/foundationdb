@@ -38,6 +38,8 @@ These documents explain the engineering design of FoundationDB, with detailed in
 
 * :doc:`bulkdump` describes how to do snapshot data dump to blobstore or local file system.
 
+* :doc:`auditstorage` describes how to do data replica consistency check and location metadata consistency check efficiently.
+
 .. toctree::
    :maxdepth: 1
    :titlesonly:
@@ -60,3 +62,4 @@ These documents explain the engineering design of FoundationDB, with detailed in
    ha-write-path
    consistency-check-urgent
    bulkdump
+   auditstorage
