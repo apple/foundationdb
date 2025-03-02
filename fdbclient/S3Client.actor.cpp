@@ -455,12 +455,118 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
                                        std::string objectName,
                                        std::string filepath,
                                        PartConfig config = PartConfig()) {
+<<<<<<< Updated upstream
 	state int64_t size = wait(endpoint->objectSize(bucket, objectName));
 	state std::map<std::string, std::string> tags = wait(endpoint->getObjectTags(bucket, objectName));
 	state std::string expectedChecksum;
 	auto it = tags.find(S3_CHECKSUM_TAG_NAME);
 	if (it != tags.end()) {
 		expectedChecksum = it->second;
+=======
+	state double startTime = now();
+	state Reference<IAsyncFile> file;
+	state std::vector<Future<PartState>> downloadFutures;
+	state std::vector<PartState> parts;
+	state int64_t fileSize = 0;
+	state int64_t offset = 0;
+	state int partNumber = 1;
+	state int64_t partSize;
+	state Optional<std::string> md5;
+
+	try {
+		TraceEvent("S3ClientCopyDownFileStart")
+		    .detail("Bucket", bucket)
+		    .detail("Object", objectName)
+		    .detail("FilePath", filepath);
+
+		int64_t s = wait(endpoint->objectSize(bucket, objectName));
+		if (s <= 0) {
+			TraceEvent(SevWarnAlways, "S3ClientCopyDownFileEmptyFile")
+			    .detail("Bucket", bucket)
+			    .detail("Object", objectName);
+			throw file_not_found();
+		}
+		fileSize = s;
+
+		// Create parent directory if it doesn't exist
+		std::string dirPath = filepath.substr(0, filepath.find_last_of("/"));
+		if (!dirPath.empty()) {
+			platform::createDirectory(dirPath);
+		}
+
+		// Pre-allocate vectors to avoid reallocations
+		int numParts = (fileSize + config.partSizeBytes - 1) / config.partSizeBytes;
+		parts.reserve(numParts);
+		downloadFutures.reserve(numParts);
+		Reference<IAsyncFile> f = wait(
+		    IAsyncFileSystem::filesystem()->open(filepath, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0644));
+		file = f;
+		// Pre-allocate file size to avoid fragmentation
+		wait(file->truncate(fileSize));
+
+		while (offset < fileSize) {
+			partSize = std::min(config.partSizeBytes, fileSize - offset);
+
+			parts.emplace_back(partNumber, offset, partSize, "");
+
+			downloadFutures.push_back(
+			    downloadPartWithRetry(endpoint, bucket, objectName, file, parts.back(), config.retryDelayMs));
+
+			offset += partSize;
+			partNumber++;
+		}
+
+		parts = wait(getAll(downloadFutures));
+
+		// Clear futures to free memory
+		downloadFutures.clear();
+
+		// Verify all parts completed
+		for (const auto& part : parts) {
+			if (!part.completed) {
+				TraceEvent(SevError, "S3ClientCopyDownFilePartNotCompleted").detail("PartNumber", part.partNumber);
+				throw operation_failed();
+			}
+		}
+
+		// Set exact file size: without this, file has padding on the end.
+		wait(file->truncate(fileSize));
+		// Ensure all data is written to disk
+		wait(file->sync());
+
+		// Close file properly
+		file = Reference<IAsyncFile>();
+
+		// TODO(Bulkload): Check integrity of downloaded file.
+		TraceEvent("S3ClientCopyDownFileEnd")
+		    .detail("Bucket", bucket)
+		    .detail("Object", objectName)
+		    .detail("FileSize", fileSize)
+		    .detail("TimeTaken", now() - startTime)
+		    .detail("Parts", parts.size());
+
+		return Void();
+	} catch (Error& e) {
+		state Error err = e;
+		TraceEvent(SevWarnAlways, "S3ClientCopyDownFileError")
+		    .error(e)
+		    .detail("Bucket", bucket)
+		    .detail("Object", objectName)
+		    .detail("FilePath", filepath);
+
+		// Clean up the file in case of error
+		if (file) {
+			try {
+				wait(file->sync());
+				file = Reference<IAsyncFile>();
+				IAsyncFileSystem::filesystem()->deleteFile(filepath, false);
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "S3ClientCopyDownFileCleanupError").error(e).detail("FilePath", filepath);
+			}
+		}
+
+		throw err;
+>>>>>>> Stashed changes
 	}
 
 	// Create parent directory if it doesn't exist
