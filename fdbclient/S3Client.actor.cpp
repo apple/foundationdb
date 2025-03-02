@@ -56,9 +56,10 @@ struct PartConfig {
 	int retryDelayMs = 1000;
 };
 
+// Calculate hash of a file.
+// Uses xxhash library because it's fast (supposedly) and used elsewhere in fdb.
 ACTOR static Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size = -1) {
 	state int64_t pos = 0;
-	// Using this xxhash library because it's fast (supposedly) and used elsewhere in fdb.
 	state XXH64_state_t* hashState = XXH64_createState();
 	state std::vector<uint8_t> buffer(65536);
 
@@ -284,6 +285,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 		    .detail("bucket", bucket)
 		    .detail("objectName", objectName)
 		    .detail("fileSize", size)
+		    .detail("checksum", checksum)
 		    .detail("time", now() - startTime);
 
 		return Void();
