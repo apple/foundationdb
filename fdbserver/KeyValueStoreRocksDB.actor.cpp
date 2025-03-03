@@ -1119,6 +1119,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "BlockCacheUsage", rocksdb::DB::Properties::kBlockCacheUsage },
 		{ "BlockCachePinnedUsage", rocksdb::DB::Properties::kBlockCachePinnedUsage },
 		{ "LiveSstFilesSize", rocksdb::DB::Properties::kLiveSstFilesSize },
+		{ "ObsoleteSstFilesSize", rocksdb::DB::Properties::kObsoleteSstFilesSize },
 	};
 
 	state std::vector<std::pair<const char*, std::string>> strPropertyStats = {
@@ -2344,14 +2345,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	StorageBytes getStorageBytes() const override {
-		uint64_t live = 0;
-		ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
+		uint64_t liveFilesSize = 0;
+		uint64_t obsoleteFilesSize = 0;
+		ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &liveFilesSize));
+		ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kObsoleteSstFilesSize, &obsoleteFilesSize));
 
 		int64_t free;
 		int64_t total;
 		g_network->getDiskBytes(path, free, total);
 
-		return StorageBytes(free, total, live, free);
+		return StorageBytes(free, total, liveFilesSize + obsoleteFilesSize, free);
 	}
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
@@ -2474,7 +2477,7 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	const std::string& checkpointDir = abspath(a.request.checkpointDir);
 
 	if (a.request.format == DataMoveRocksCF) {
-		rocksdb::ExportImportFilesMetaData* pMetadata;
+		rocksdb::ExportImportFilesMetaData* pMetadata{ nullptr };
 		platform::eraseDirectoryRecursive(checkpointDir);
 		s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
 		if (!s.ok()) {
@@ -2545,6 +2548,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 			ASSERT(db->DropColumnFamily(cf).ok());
 			db->DestroyColumnFamilyHandle(cf);
 			cfHandles.erase(cf);
+			cf = nullptr;
 		}
 
 		rocksdb::ExportImportFilesMetaData metaData = getMetaData(a.checkpoints[0]);
