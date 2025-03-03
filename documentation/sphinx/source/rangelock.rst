@@ -64,11 +64,9 @@ Get the owner of a rangeLock
 
 Example usage
 -------------
-Turn off user traffic for bulk load based on range lock
+Turn on/off user traffic for bulk load based on range lock. Note that ideally, we want to use the write lock to achieve this, now we use the read lock as a temporarily solution.
 
 ``ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range);``
-
-Turn on user traffic for bulk load based on range lock
 
 ``ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range);``
 
