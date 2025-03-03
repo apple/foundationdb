@@ -59,6 +59,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	bool unseedCheck{ true };
+	bool skipSetup{ false }; // Useful for restarting tests
 	Key keyPrefix;
 
 	std::vector<Future<Void>> clients;
@@ -76,6 +77,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 		unseedCheck = getOption(options, "unseedCheck"_sr, true);
+		skipSetup = getOption(options, "skipSetup"_sr, false);
 		if constexpr (MultiTenancy) {
 			ASSERT(g_network->isSimulated());
 			this->useToken = getOption(options, "useToken"_sr, true);
@@ -87,6 +89,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	Future<Void> setup(Database const& cx) override {
 		if (!unseedCheck) {
 			noUnseed = true;
+		}
+		if (skipSetup) {
+			return Void();
 		}
 		Future<Void> prepare;
 		if constexpr (MultiTenancy) {
