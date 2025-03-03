@@ -221,7 +221,7 @@ fi
 if (( $# < 1 )) || (( $# > 2 )); then
     echo "ERROR: ${0} requires the fdb build directory -- CMAKE_BUILD_DIR -- as its"
     echo "first argument and then, optionally, a directory into which we write scratch"
-    echo "test data and logs (otherwise we'll write to subdirs under $TMPDIR)."
+    echo "test data and logs (otherwise we'll write to subdirs under ${TMPDIR:-TMPDIR}."
     echo "Example: ${0} ./build_output ./scratch_dir"
     exit 1
 fi
@@ -254,7 +254,7 @@ if [[ "${USE_S3}" == "true" ]]; then
     exit 1
   fi
   readonly TEST_SCRATCH_DIR
-  if ! readarray -t configs < <(aws_setup "${TEST_SCRATCH_DIR}"); then
+  if ! readarray -t configs < <(aws_setup "${build_dir}" "${TEST_SCRATCH_DIR}"); then
     err "Failed aws_setup"
     exit 1
   fi

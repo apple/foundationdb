@@ -52,34 +52,59 @@ function create_aws_dir {
 # Write out blob_credentials
 # $1 The token to use querying credentials
 # $2 Hostname going to aws
-# $3 The scratch dir to write the blob credentials file into
+# $3 region
+# $4 bucket
+# $5 The scratch dir to write the blob credentials file into
+# $6 Build dir.
 # Echos the blob_credentials file path.
 function write_blob_credentials {
   local token="${1}"
   local local_host="${2}"
-  local dir="${3}"
-  if ! credentials=$( curl -H "X-aws-ec2-metadata-token: ${token}" \
-      http://169.254.169.254/latest/meta-data/iam/security-credentials/foundationdb-dev_node_instance_role ); then
-    echo "ERROR: Failed reading credentials"
-    return 1
+  local local_region="${3}"
+  local local_bucket="${4}"
+  local dir="${5}"
+  local local_build_dir="${6}"
+  # Is go available? If so, build our little go program and use it writing blob credentials.
+  if command -v go &> /dev/null; then
+    readonly fetcher_dir="${local_build_dir}/packages/docker/fdb-aws-s3-credentials-fetcher"
+    if ! $( cd "${fetcher_dir}"; go build -o fdb-aws-s3-credentials-fetcher *.go ); then
+      echo "ERROR: Failed go compile."
+      return 1
+    fi
+    readonly fetcher="${fetcher_dir}/fdb-aws-s3-credentials-fetcher"
+    if ! $( "${fetcher}"  --run-once --dir "${dir}" ); then
+      echo "ERROR: Failed running ${fetcher}."
+      return 1
+    fi
+    # The sript writes a file whose name is s3_blob_credentials.json
+    echo "${dir}/s3_blob_credentials.json"
+  else
+    # No go so fall back to old way of writing blob credentials.
+    # Use environment variable AWS_IAM_ROLE if set, otherwise use default
+    IAM_ROLE=${AWS_IAM_ROLE:-"foundationdb-dev_node_instance_role"}
+    if ! credentials=$( curl -f -s \
+            "http://169.254.169.254/latest/meta-data/iam/security-credentials/${IAM_ROLE}" ); then
+      echo "ERROR: Failed reading credentials for role ${IAM_ROLE}"
+      return 1
+    fi
+    if ! blob_credentials_str=$( echo "${credentials}" | jq --arg host_arg "${local_host}" \
+        '{"accounts": { ($host_arg): {"api_key": .AccessKeyId, "secret": .SecretAccessKey, "token": .Token}}}'); then
+      echo "ERROR: Failed jq'ing ${blob_credentials_str}"
+      return 1
+    fi
+    readonly blob_credentials_file="${dir}/blob_credentials.json"
+    echo "${blob_credentials_str}" > "${blob_credentials_file}"
+    echo "${blob_credentials_file}"
   fi
-  if ! blob_credentials_str=$( echo "${credentials}" | jq --arg host_arg "${local_host}" \
-      '{"accounts": { ($host_arg): {"api_key": .AccessKeyId, "secret": .SecretAccessKey, "token": .Token}}}'); then
-    echo "ERROR: Failed jq'ing ${blob_credentials_str}"
-    return 1
-  fi
-  readonly blob_credentials_file="${dir}/blob_credentials.json"
-  echo "${blob_credentials_str}" > "${blob_credentials_file}"
-  echo "${blob_credentials_file}"
 }
-
 
 # Set up s3 access.
 # $1 aws_dir (This is what is returned when you call create_aws_dir
 # so call it first).
 # Returns array of configurations to use contacting s3.
 function aws_setup {
-  local local_aws_dir="${1}"
+  local local_build_dir="${1}"
+  local local_aws_dir="${2}"
   # Fetch token, region, etc. from our aws environment.
   # On 169.254.169.254, see
   # https://www.baeldung.com/linux/cloud-ip-meaning#169254169254-and-other-link-local-addresses-on-the-cloud
@@ -104,7 +129,7 @@ function aws_setup {
   # Add the '@' in front so we force reading of credentials file when s3
   # When we do lookup for credentials, we don't expect a port but it is expected later going via proxy.
   readonly host="@s3.${region}.amazonaws.com"
-  if ! blob_credentials_file=$(write_blob_credentials "${imdsv2_token}" "${host}" "${local_aws_dir}"); then
+  if ! blob_credentials_file=$(write_blob_credentials "${imdsv2_token}" "${host}" "${region}" "${bucket}" "${local_aws_dir}" "${local_build_dir}"); then
     err "Failed to write credentials file"
     exit 1
   fi
