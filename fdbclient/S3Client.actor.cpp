@@ -482,7 +482,6 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 
 	// Pre-allocate vectors to avoid reallocations
 	int numParts = (size + config.partSizeBytes - 1) / config.partSizeBytes;
-	std::vector<PartState> completedParts(numParts);
 	downloadFutures.resize(numParts);
 
 	// Pre-allocate file size to avoid fragmentation
