@@ -37,7 +37,7 @@ ACTOR Future<Void> printPastBulkLoadJob(Database cx) {
 	for (const auto& job : jobs) {
 		ASSERT(job.getPhase() == BulkLoadJobPhase::Complete || job.getPhase() == BulkLoadJobPhase::Error ||
 		       job.getPhase() == BulkLoadJobPhase::Cancelled);
-		fmt::println("Job {} submitted at {} for range {}. The job ends by {} mins for {} status",
+		fmt::println("Job {} submitted at {} for range {}. The job ran for {} mins and exited with status {}.",
 		             job.getJobId().toString(),
 		             std::to_string(job.getSubmitTime()),
 		             job.getJobRange().toString(),

@@ -3021,8 +3021,8 @@ ACTOR Future<Void> finalizeBulkLoadTask(Database cx, KeyRange range, UID taskId)
 	return Void();
 }
 
-// This is the only place to update job history map. So, we check the number of job history entries here is suffient
-// to maintain the number of job in the history is no more than BULKLOAD_JOB_HISTORY_COUNT_MAX.
+// This is the only place to update job history map. So, we check the number of job history entries here is sufficient
+// to maintain that the number of jobs in the history is no more than BULKLOAD_JOB_HISTORY_COUNT_MAX.
 ACTOR Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState) {
 	state Key newJobKey = bulkLoadJobHistoryKeyFor(jobState.getJobId());
 	state RangeResult jobHistoryResult;
@@ -3050,7 +3050,7 @@ ACTOR Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState job
 			}
 			if (jobStateInHistory.getJobId() == jobState.getJobId()) {
 				tr->set(newJobKey, bulkLoadJobValue(jobState));
-				// BulkLoad job with the same jobId can run for multiple times, we only kept the latest one
+				// BulkLoad job with the same jobId can run for multiple times, we only keep the latest one
 				// in the history.
 				return Void();
 			}

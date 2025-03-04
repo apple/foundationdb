@@ -1239,7 +1239,7 @@ BulkLoadJobState decodeBulkLoadJobState(const ValueRef& value) {
 const KeyRangeRef bulkLoadJobHistoryKeys = KeyRangeRef("\xff/bulkLoadJobHistory/"_sr, "\xff/bulkLoadJobHistory0"_sr);
 const KeyRef bulkLoadJobHistoryPrefix = bulkLoadJobHistoryKeys.begin;
 
-// BulkLoad job with the same jobId can run for multiple times, we only kept the latest one
+// BulkLoad job with the same jobId can run for multiple times, we only keep the latest one
 // in the history.
 const Key bulkLoadJobHistoryKeyFor(const UID& jobId) {
 	BinaryWriter wr(Unversioned());
