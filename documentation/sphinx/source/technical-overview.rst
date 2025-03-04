@@ -36,7 +36,7 @@ These documents explain the engineering design of FoundationDB, with detailed in
 
 * :doc:`consistency-check-urgent` describes how to complete a consistency scan of the entire database in a fast way.
 
-* :doc:`rangelock` describes how to do lock range to turn off write traffic to the range.
+* :doc:`rangelock` describes how to do range locks block write traffic to key ranges.
 
 * :doc:`bulkdump` describes how to do snapshot data dump to blobstore or local file system.
 

@@ -3708,7 +3708,7 @@ ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange 
 	if (range.end > normalKeys.end) {
 		throw bulkload_task_failed();
 	}
-	tr->addWriteConflictRange(normalKeys);
+	tr->addWriteConflictRange(range);
 	// Validate
 	state Key beginKey = range.begin;
 	state Key endKey = range.end;
@@ -3781,7 +3781,7 @@ ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange r
 	return Void();
 }
 
-// Not transactional
+// Not transactional. The input range is partioned into small ranges and each small range is locked separately.
 ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID) {
 	if (range.end > normalKeys.end) {
 		throw range_lock_failed();
@@ -3794,7 +3794,7 @@ ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string 
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.addWriteConflictRange(normalKeys);
+			tr.addWriteConflictRange(rangeToLock);
 
 			// Step 1: Check owner
 			state Optional<Value> ownerValue = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
@@ -3837,7 +3837,7 @@ ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string 
 	return Void();
 }
 
-// Not transactional
+// Not transactional. The input range is partioned into small ranges and each small range is unlocked separately.
 ACTOR Future<Void> releaseReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID) {
 	if (range.end > normalKeys.end) {
 		throw range_lock_failed();
