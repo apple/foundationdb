@@ -33,6 +33,7 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include "flow/flow.h"
 
 ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
                                                                  UID dataMoveId,
@@ -334,34 +335,98 @@ ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod trans
 // Get manifest within the input range
 ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>>
 getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestFilePath, KeyRange range, UID logId) {
+	state double startTime = now();
 	ASSERT(fileExists(abspath(localJobManifestFilePath)));
 	state std::unordered_map<Key, BulkLoadJobFileManifestEntry> res;
-	const std::string jobManifestRawString =
-	    readFileBytes(abspath(localJobManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
-	state std::vector<std::string> lines = splitString(jobManifestRawString, "\n");
-	state BulkLoadJobManifestFileHeader header(lines[0]);
-	state size_t lineIdx = 1; // skip the first line which is the header
-	while (lineIdx < lines.size()) {
-		if (lines[lineIdx].empty()) {
-			ASSERT(lineIdx == lines.size() - 1);
-			break;
-		}
-		BulkLoadJobFileManifestEntry manifestEntry(lines[lineIdx]);
-		KeyRange overlappingRange = range & manifestEntry.getRange();
-		if (overlappingRange.empty()) {
-			// Ignore the manifest entry if no overlapping range
-			lineIdx = lineIdx + 1;
-			// Here we do not do break here because we always scan the entire file assuming the manifest entry is not
-			// sorted by beginKey in the file.
-			continue;
-		}
-		auto returnV = res.insert({ manifestEntry.getBeginKey(), manifestEntry });
-		ASSERT(returnV.second);
-		if (lineIdx % 1000 == 0) {
-			wait(delay(0.1)); // yield per batch
-		}
-		lineIdx = lineIdx + 1;
+
+	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+	    abspath(localJobManifestFilePath), IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0666));
+
+	state int64_t fileSize = wait(file->size());
+	if (fileSize > SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX) {
+		TraceEvent(SevError, "ManifestFileTooBig", logId)
+		    .detail("FileSize", fileSize)
+		    .detail("MaxSize", SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
+		throw file_too_large();
 	}
+
+	state int64_t chunkSize = 64 * 1024; // 64KB chunks
+	state std::string buffer;
+	state int64_t offset = 0;
+	state std::string leftover;
+	state bool headerProcessed = false;
+
+	try {
+		while (offset < fileSize) {
+			state int64_t bytesToRead = std::min(chunkSize, fileSize - offset);
+			buffer.resize(bytesToRead);
+
+			state int bytesRead = wait(file->read(&buffer[0], bytesToRead, offset));
+			if (bytesRead != bytesToRead) {
+				TraceEvent(SevError, "ReadFileError", logId)
+				    .detail("BytesRead", bytesRead)
+				    .detail("BytesExpected", bytesToRead);
+				throw io_error();
+			}
+
+			// Process the chunk line by line
+			state std::string chunk = leftover + buffer;
+			state size_t pos = 0;
+			state size_t lineStart = 0;
+
+			while ((pos = chunk.find('\n', lineStart)) != std::string::npos) {
+				state std::string line = chunk.substr(lineStart, pos - lineStart);
+				if (!line.empty()) {
+					if (!headerProcessed) {
+						// First line is header
+						BulkLoadJobManifestFileHeader header(line);
+						headerProcessed = true;
+					} else {
+						BulkLoadJobFileManifestEntry manifestEntry(line);
+						KeyRange overlappingRange = range & manifestEntry.getRange();
+						if (!overlappingRange.empty()) {
+							auto returnV = res.insert({ manifestEntry.getBeginKey(), manifestEntry });
+							ASSERT(returnV.second);
+						}
+					}
+				}
+				lineStart = pos + 1;
+
+				// Yield every 100 entries
+				if (res.size() % 100 == 0) {
+					wait(yield());
+				}
+			}
+
+			// Save any partial line for the next chunk
+			leftover = chunk.substr(lineStart);
+			offset += bytesRead;
+			wait(yield());
+		}
+
+		// Process the last line if it didn't end with a newline
+		if (!leftover.empty()) {
+			if (!headerProcessed) {
+				// If we somehow only have one line and it's the header
+				BulkLoadJobManifestFileHeader header(leftover);
+			} else {
+				BulkLoadJobFileManifestEntry manifestEntry(leftover);
+				KeyRange overlappingRange = range & manifestEntry.getRange();
+				if (!overlappingRange.empty()) {
+					auto returnV = res.insert({ manifestEntry.getBeginKey(), manifestEntry });
+					ASSERT(returnV.second);
+				}
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "BulkLoadJobFileManifestEntryError", logId)
+		    .errorUnsuppressed(e)
+		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+		    .detail("Duration", now() - startTime)
+		    .detail("Offset", offset);
+		throw e;
+	}
+
 	return res;
 }
 
