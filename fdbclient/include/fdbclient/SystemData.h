@@ -541,6 +541,10 @@ extern const KeyRef bulkLoadJobPrefix;
 const Value bulkLoadJobValue(const BulkLoadJobState& bulkLoadJobState);
 BulkLoadJobState decodeBulkLoadJobState(const ValueRef& value);
 
+extern const KeyRangeRef bulkLoadJobHistoryKeys;
+extern const KeyRef bulkLoadJobHistoryPrefix;
+const Key bulkLoadJobHistoryKeyFor(const UID& jobId);
+
 extern const KeyRef bulkDumpModeKey;
 extern const KeyRangeRef bulkDumpKeys;
 extern const KeyRef bulkDumpPrefix;

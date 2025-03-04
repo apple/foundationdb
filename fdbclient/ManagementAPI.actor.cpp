@@ -3021,6 +3021,112 @@ ACTOR Future<Void> finalizeBulkLoadTask(Database cx, KeyRange range, UID taskId)
 	return Void();
 }
 
+// This is the only place to update job history map. So, we check the number of job history entries here is suffient
+// to maintain the number of job in the history is no more than BULKLOAD_JOB_HISTORY_COUNT_MAX.
+ACTOR Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState) {
+	state Key newJobKey = bulkLoadJobHistoryKeyFor(jobState.getJobId());
+	state RangeResult jobHistoryResult;
+	state Optional<BulkLoadJobState> oldestJobState; // Set to remove when the job history is full.
+	state Key beginKey = bulkLoadJobHistoryKeys.begin;
+	state Key endKey = bulkLoadJobHistoryKeys.end;
+	loop {
+		jobHistoryResult.clear();
+		wait(store(jobHistoryResult,
+		           tr->getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX * 2)));
+		// Set limit twice the max count to check the number of jobs in the history is no more than the max
+		// count.
+		for (int i = 0; i < jobHistoryResult.size(); i++) {
+			ASSERT_WE_THINK(!jobHistoryResult[i].value.empty());
+			if (jobHistoryResult[i].value.empty()) {
+				TraceEvent(SevError, "DDBulkLoadJobHistoryHasEmptyValue", jobState.getJobId());
+				continue;
+			}
+			BulkLoadJobState jobStateInHistory = decodeBulkLoadJobState(jobHistoryResult[i].value);
+			ASSERT_WE_THINK(jobStateInHistory.isValid());
+			if (!jobStateInHistory.isValid()) {
+				TraceEvent(SevError, "DDBulkLoadJobHistoryInvalidState", jobState.getJobId())
+				    .detail("JobState", jobStateInHistory.toString());
+				continue;
+			}
+			if (jobStateInHistory.getJobId() == jobState.getJobId()) {
+				tr->set(newJobKey, bulkLoadJobValue(jobState));
+				// BulkLoad job with the same jobId can run for multiple times, we only kept the latest one
+				// in the history.
+				return Void();
+			}
+			if (jobHistoryResult.size() > CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX) {
+				TraceEvent(SevError, "DDBulkLoadJobHistoryCountExceed", jobState.getJobId())
+				    .detail("JobHistoryCount", jobHistoryResult.size())
+				    .detail("More", jobHistoryResult.more);
+			}
+			if (jobHistoryResult.size() >= CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX && oldestJobState.present() &&
+			    jobStateInHistory.getSubmitTime() < oldestJobState.get().getSubmitTime()) {
+				oldestJobState = jobStateInHistory;
+			}
+		}
+		if (jobHistoryResult.more) {
+			beginKey = keyAfter(jobHistoryResult.back().key);
+		} else {
+			break;
+		}
+	}
+	if (oldestJobState.present()) {
+		tr->clear(bulkLoadJobHistoryKeyFor(oldestJobState.get().getJobId()));
+	}
+	tr->set(newJobKey, bulkLoadJobValue(jobState));
+	return Void();
+}
+
+ACTOR Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
+	state RangeResult jobHistoryResult;
+	state Key beginKey = bulkLoadJobHistoryKeys.begin;
+	state Key endKey = bulkLoadJobHistoryKeys.end;
+	state Transaction tr(cx);
+	state std::vector<BulkLoadJobState> res;
+	loop {
+		try {
+			jobHistoryResult.clear();
+			wait(store(jobHistoryResult,
+			           tr.getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX)));
+			for (int i = 0; i < jobHistoryResult.size(); i++) {
+				BulkLoadJobState jobState = decodeBulkLoadJobState(jobHistoryResult[i].value);
+				ASSERT_WE_THINK(jobState.isValid());
+				if (!jobState.isValid()) {
+					TraceEvent(SevError, "DDBulkLoadJobHistoryInvalidState").detail("JobState", jobState.toString());
+					continue;
+				}
+				res.push_back(jobState);
+			}
+			if (jobHistoryResult.more) {
+				beginKey = keyAfter(jobHistoryResult.back().key);
+			} else {
+				break;
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return res;
+}
+
+ACTOR Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			if (jobId.present()) {
+				tr.clear(bulkLoadJobHistoryKeyFor(jobId.get()));
+			} else {
+				tr.clear(bulkLoadJobHistoryKeys);
+			}
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
 	state RangeResult rangeResult;
 	// At most one job at a time, so looking at the first returned range is sufficient
@@ -3070,6 +3176,10 @@ ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 			                           aliveJob.get().getJobRange(),
 			                           normalKeys,
 			                           bulkLoadTaskStateValue(BulkLoadTaskState())));
+			// Add cancelled job to history
+			aliveJob.get().setEndTime(now());
+			aliveJob.get().setPhase(BulkLoadJobPhase::Cancelled);
+			wait(addBulkLoadJobToHistory(&tr, aliveJob.get()));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -3141,48 +3251,6 @@ ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
 		}
 	}
 	return Void();
-}
-
-ACTOR Future<size_t> getBulkLoadCompleteTaskCount(Database cx, KeyRange rangeToRead) {
-	state Transaction tr(cx);
-	state Key readBegin = rangeToRead.begin;
-	state Key readEnd = rangeToRead.end;
-	state RangeResult rangeResult;
-	state size_t completeTaskCount = 0;
-	while (readBegin < readEnd) {
-		state int retryCount = 0;
-		loop {
-			try {
-				rangeResult.clear();
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(store(rangeResult,
-				           krmGetRanges(&tr,
-				                        bulkLoadJobPrefix,
-				                        KeyRangeRef(readBegin, readEnd),
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
-				break;
-			} catch (Error& e) {
-				if (retryCount > 30) {
-					throw timed_out();
-				}
-				wait(tr.onError(e));
-				retryCount++;
-			}
-		}
-		for (int i = 0; i < rangeResult.size() - 1; ++i) {
-			if (rangeResult[i].value.empty()) {
-				continue;
-			}
-			BulkLoadJobState bulkLoadJobState = decodeBulkLoadJobState(rangeResult[i].value);
-			if (bulkLoadJobState.getPhase() == BulkLoadJobPhase::Complete) {
-				completeTaskCount++;
-			}
-		}
-		readBegin = rangeResult.back().key;
-	}
-	return completeTaskCount;
 }
 
 ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx) {

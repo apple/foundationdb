@@ -19,162 +19,77 @@
  */
 
 #include <fmt/core.h>
-
 #include "fdbcli/fdbcli.actor.h"
-
-#include "fdbclient/IClientApi.h"
-
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/BulkLoading.h"
-
 #include "flow/Arena.h"
-#include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
-ACTOR Future<Void> getBulkLoadTaskStateByRange(Database cx,
-                                               KeyRange rangeToRead,
-                                               size_t countLimit,
-                                               Optional<BulkLoadPhase> phase) {
-	try {
-		std::vector<BulkLoadTaskState> res = wait(getBulkLoadTasksWithinRange(cx, rangeToRead, countLimit, phase));
-		int64_t finishCount = 0;
-		int64_t unfinishedCount = 0;
-		for (const auto& bulkLoadTaskState : res) {
-			if (bulkLoadTaskState.phase == BulkLoadPhase::Complete) {
-				fmt::println("[Complete]: {}", bulkLoadTaskState.toString());
-				++finishCount;
-			} else if (bulkLoadTaskState.phase == BulkLoadPhase::Running) {
-				fmt::println("[Running]: {}", bulkLoadTaskState.toString());
-				++unfinishedCount;
-			} else if (bulkLoadTaskState.phase == BulkLoadPhase::Triggered) {
-				fmt::println("[Triggered]: {}", bulkLoadTaskState.toString());
-				++unfinishedCount;
-			} else if (bulkLoadTaskState.phase == BulkLoadPhase::Submitted) {
-				fmt::println("[Submitted] {}", bulkLoadTaskState.toString());
-				++unfinishedCount;
-			} else if (bulkLoadTaskState.phase == BulkLoadPhase::Acknowledged) {
-				fmt::println("[Acknowledge] {}", bulkLoadTaskState.toString());
-				++finishCount;
-			} else {
-				UNREACHABLE();
+ACTOR Future<Void> printPastBulkLoadJob(Database cx) {
+	std::vector<BulkLoadJobState> jobs = wait(getBulkLoadJobFromHistory(cx));
+	if (jobs.empty()) {
+		fmt::println("No bulk loading job in the history");
+		return Void();
+	}
+	for (const auto& job : jobs) {
+		ASSERT(job.getPhase() == BulkLoadJobPhase::Complete || job.getPhase() == BulkLoadJobPhase::Error ||
+		       job.getPhase() == BulkLoadJobPhase::Cancelled);
+		fmt::println("Job {} submitted at {} for range {}. The job ends by {} mins for {} status",
+		             job.getJobId().toString(),
+		             std::to_string(job.getSubmitTime()),
+		             job.getJobRange().toString(),
+		             std::to_string((job.getEndTime() - job.getSubmitTime()) / 60.0),
+		             convertBulkLoadJobPhaseToString(job.getPhase()));
+	}
+	return Void();
+}
+
+ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
+	state Transaction tr(cx);
+	state Key readBegin = job.getJobRange().begin;
+	state Key readEnd = job.getJobRange().end;
+	state UID jobId = job.getJobId();
+	state RangeResult rangeResult;
+	state size_t completeTaskCount = 0;
+	state size_t submitTaskCount = 0;
+	state size_t errorTaskCount = 0;
+	while (readBegin < readEnd) {
+		try {
+			rangeResult.clear();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			wait(store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd))));
+			for (int i = 0; i < rangeResult.size() - 1; ++i) {
+				if (rangeResult[i].value.empty()) {
+					continue;
+				}
+				BulkLoadTaskState bulkLoadTask = decodeBulkLoadTaskState(rangeResult[i].value);
+				if (bulkLoadTask.getJobId() != jobId) {
+					fmt::println("Submitted {} tasks", submitTaskCount);
+					fmt::println("Finished {} tasks", completeTaskCount);
+					fmt::println("Error {} tasks", errorTaskCount);
+					fmt::println("Job {} has been cancelled or completed", jobId.toString());
+					return Void();
+				}
+				if (bulkLoadTask.phase == BulkLoadPhase::Complete) {
+					completeTaskCount++;
+				} else if (bulkLoadTask.phase == BulkLoadPhase::Error) {
+					errorTaskCount++;
+				}
+				submitTaskCount++;
 			}
-		}
-		fmt::println("Finished task count {} of total {} tasks", finishCount, finishCount + unfinishedCount);
-	} catch (Error& e) {
-		if (e.code() == error_code_timed_out) {
-			fmt::println("timed out");
+			readBegin = rangeResult.back().key;
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
 	}
+	fmt::println("Submitted {} tasks", submitTaskCount);
+	fmt::println("Finished {} tasks", completeTaskCount);
+	fmt::println("Error {} tasks", errorTaskCount);
 	return Void();
-}
-
-ACTOR Future<Void> getBulkLoadCompleteRanges(Database cx, KeyRange rangeToRead) {
-	try {
-		size_t finishCount = wait(getBulkLoadCompleteTaskCount(cx, rangeToRead));
-		fmt::println("Finished {} tasks", finishCount);
-	} catch (Error& e) {
-		if (e.code() == error_code_timed_out) {
-			fmt::println("timed out");
-		}
-	}
-	return Void();
-}
-
-ACTOR Future<UID> bulkLoadUnitTestCommandActor(Database cx, std::vector<StringRef> tokens) {
-	if (tokencmp(tokens[2], "acknowledge")) {
-		// Acknowledge any completed bulk loading task and clear the corresponding metadata
-		if (tokens.size() != 6) {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		state UID taskId = UID::fromString(tokens[2].toString());
-		Key rangeBegin = tokens[4];
-		Key rangeEnd = tokens[5];
-		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		wait(finalizeBulkLoadTask(cx, range, taskId));
-		return taskId;
-
-	} else if (tokencmp(tokens[2], "local")) {
-		// Generate spec of bulk loading local files and submit the bulk loading task.
-		// This is used for testing of bulkload task engine.
-		// Therefore, some information of manifest is ignored.
-		if (tokens.size() < 8) {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		Key rangeBegin = tokens[3];
-		Key rangeEnd = tokens[4];
-		// Bulk load can only inject data to normal key space, aka "" ~ \xff
-		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		std::string folder = tokens[5].toString();
-		std::string dataFile = tokens[6].toString();
-		std::string byteSampleFile = tokens[7].toString();
-		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		BulkLoadFileSet fileSet =
-		    BulkLoadFileSet(folder, "", generateEmptyManifestFileName(), dataFile, byteSampleFile, BulkLoadChecksum());
-		state BulkLoadTaskState bulkLoadTask =
-		    createBulkLoadTask(deterministicRandom()->randomUniqueID(),
-		                       range,
-		                       fileSet,
-		                       BulkLoadByteSampleSetting(0, "hashlittle2", 0, 0, 0), // We fake it here
-		                       /*snapshotVersion=*/invalidVersion,
-		                       /*bytes=*/-1,
-		                       /*keyCount=*/-1,
-		                       BulkLoadType::SST,
-		                       BulkLoadTransportMethod::CP);
-		wait(submitBulkLoadTask(cx, bulkLoadTask));
-		return bulkLoadTask.getTaskId();
-
-	} else if (tokencmp(tokens[2], "status")) {
-		// Get progress of existing bulk loading tasks intersecting the input range
-		if (tokens.size() < 7) {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		Key rangeBegin = tokens[3];
-		Key rangeEnd = tokens[4];
-		// Bulk load can only inject data to normal key space, aka "" ~ \xff
-		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		std::string inputPhase = tokens[5].toString();
-		Optional<BulkLoadPhase> phase;
-		if (inputPhase == "all") {
-			phase = Optional<BulkLoadPhase>();
-		} else if (inputPhase == "submitted") {
-			phase = BulkLoadPhase::Submitted;
-		} else if (inputPhase == "triggered") {
-			phase = BulkLoadPhase::Triggered;
-		} else if (inputPhase == "running") {
-			phase = BulkLoadPhase::Running;
-		} else if (inputPhase == "complete") {
-			phase = BulkLoadPhase::Complete;
-		} else if (inputPhase == "acknowledged") {
-			phase = BulkLoadPhase::Acknowledged;
-		} else {
-			printUsage(tokens[0]);
-			return UID();
-		}
-		int countLimit = std::stoi(tokens[6].toString());
-		wait(getBulkLoadTaskStateByRange(cx, range, countLimit, phase));
-		return UID();
-
-	} else {
-		printUsage(tokens[0]);
-		return UID();
-	}
 }
 
 ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
@@ -196,11 +111,6 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			printUsage(tokens[0]);
 			return UID();
 		}
-	} else if (tokencmp(tokens[1], "unittest")) {
-		// For internal unit test only
-		UID taskId = wait(bulkLoadUnitTestCommandActor(cx, tokens));
-		return taskId;
-
 	} else if (tokencmp(tokens[1], "local")) {
 		if (tokens.size() != 6) {
 			printUsage(tokens[0]);
@@ -272,15 +182,45 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			return UID();
 		}
 		fmt::println("Running bulk loading job: {}", job.get().getJobId().toString());
-		Key rangeBegin = tokens[2];
-		Key rangeEnd = tokens[3];
-		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
+		fmt::println("Job information: {}", job.get().toString());
+		wait(printBulkLoadJobProgress(cx, job.get()));
+		return UID();
+
+	} else if (tokencmp(tokens[1], "history")) {
+		if (tokens.size() != 2) {
 			printUsage(tokens[0]);
 			return UID();
 		}
-		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		wait(getBulkLoadCompleteRanges(cx, range));
+		wait(printPastBulkLoadJob(cx));
 		return UID();
+
+	} else if (tokencmp(tokens[1], "clearhistory")) {
+		if (tokens.size() > 4) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		if (tokens.size() == 3) {
+			if (!tokencmp(tokens[2], "all")) {
+				printUsage(tokens[0]);
+				return UID();
+			}
+			wait(clearBulkLoadJobHistory(cx));
+			fmt::println("All bulkload job history has been cleared");
+			return UID();
+		}
+		ASSERT(tokens.size() == 4);
+		if (!tokencmp(tokens[2], "id")) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		UID jobId = UID::fromString(tokens[3].toString());
+		if (!jobId.isValid()) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		wait(clearBulkLoadJobHistory(cx, jobId));
+		fmt::println("Bulkload job {} has been cleared from history", jobId.toString());
+		return jobId;
 
 	} else {
 		printUsage(tokens[0]);
@@ -290,17 +230,12 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 
 CommandFactory bulkLoadFactory(
     "bulkload",
-    CommandHelp(
-        "bulkload [mode|local|blobstore|status|cancel|unittest] [ARGs]",
-        "bulkload commands",
-        "To set bulkload mode: `bulkload mode [on|off]'\n"
-        "To load a range from SST files: `bulkload [local|blobstore] <BeginKey> <EndKey> dumpFolder`\n"
-        "To cancel current bulkload job: `bulkload cancel <Non-Zero JobID>`\n"
-        "To get completed bulkload ranges: `bulkload status <BeginKey> <EndKey>`\n"
-        "BulkLoad tasks are operated when setting unittest.\n"
-        "To acknowledge completed tasks within a range: `bulkload unittest acknowledge <TaskID> <BeginKey> <EndKey>'\n"
-        "To trigger a task injecting a SST file from local file system: `bulkload unittest local <BeginKey> <EndKey> "
-        "<Folder> <DataFile> <ByteSampleFile>'\n"
-        "To get progress of tasks within a range: `bulkload unittest status <BeginKey> <EndKey> "
-        "[all|submitted|triggered|running|complete] <limit>'\n"));
+    CommandHelp("bulkload [mode|local|blobstore|status|cancel|history|historyclear] [ARGs]",
+                "bulkload commands",
+                "To set bulkload mode: `bulkload mode [on|off]'\n"
+                "To load a range from SST files: `bulkload [local|blobstore] <BeginKey> <EndKey> dumpFolder`\n"
+                "To cancel current bulkload job: `bulkload cancel <Non-Zero JobID>`\n"
+                "To get completed bulkload ranges: `bulkload status <BeginKey> <EndKey>`\n"
+                "To print bulkload job history: `bulkload history`\n"
+                "To clear bulkload job history: `bulkload clearhistory [all|id]`\n"));
 } // namespace fdb_cli

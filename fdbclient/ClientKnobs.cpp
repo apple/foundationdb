@@ -201,6 +201,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH, false );
 	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS, true );
 	init( CONSISTENCY_CHECK_REQUIRED_REPLICAS,      -2 ); // Do consistency check based on all available storage replicas
+	init( BULKLOAD_JOB_HISTORY_COUNT_MAX,           10 ); if (randomize && BUGGIFY) BULKLOAD_JOB_HISTORY_COUNT_MAX = deterministicRandom()->randomInt(1, 10);
 
 	// Configuration
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );

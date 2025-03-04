@@ -160,46 +160,6 @@ struct BulkDumping : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<KeyRange> getBulkLoadJobCompleteRange(Database cx, UID jobId, KeyRange jobRange) {
-		state RangeResult rangeResult;
-		state Key beginKey = jobRange.begin;
-		state Key endKey = jobRange.end;
-		state KeyRange completeRange;
-		state Transaction tr(cx);
-		while (beginKey < endKey) {
-			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				rangeResult.clear();
-				wait(store(rangeResult, krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey))));
-				for (int i = 0; i < rangeResult.size() - 1; i++) {
-					if (rangeResult[i].value.empty()) {
-						throw bulkload_task_outdated();
-					}
-					BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
-					if (!jobState.isValid()) {
-						throw bulkload_task_outdated();
-					}
-					if (jobState.getJobId() != jobId) {
-						throw bulkload_task_outdated();
-					}
-					if (jobState.getPhase() == BulkLoadJobPhase::Complete ||
-					    jobState.getPhase() == BulkLoadJobPhase::Error) {
-						if (completeRange.empty()) {
-							completeRange = Standalone(KeyRangeRef(rangeResult[i].key, rangeResult[i + 1].key));
-						} else {
-							completeRange = Standalone(KeyRangeRef(completeRange.begin, rangeResult[i + 1].key));
-						}
-					}
-				}
-				beginKey = rangeResult.back().key;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-		return completeRange;
-	}
-
 	// Return error tasks
 	ACTOR Future<std::vector<BulkLoadTaskState>> validateAllBulkLoadTaskAcknowledgedOrError(Database cx,
 	                                                                                        UID jobId,
@@ -257,8 +217,9 @@ struct BulkDumping : TestWorkload {
 	                                                                             UID jobId,
 	                                                                             KeyRange jobRange) {
 		loop {
-			KeyRange completeRange = wait(self->getBulkLoadJobCompleteRange(cx, jobId, jobRange));
-			if (completeRange != jobRange) {
+			Optional<BulkLoadJobState> runningJob = wait(getRunningBulkLoadJob(cx));
+			if (runningJob.present()) {
+				ASSERT(runningJob.get().getJobId() == jobId);
 				// During the wait for the job completion, we may inject the job cancellation.
 				// We varies the timing of the job cancellation, we trigger the job cancellation with 10% probability at
 				// each time. Throughout the entire test, we inject the job cancellation at most maxCancelTimes times to
@@ -276,6 +237,24 @@ struct BulkDumping : TestWorkload {
 			    wait(self->validateAllBulkLoadTaskAcknowledgedOrError(cx, jobId, jobRange));
 			return errorTasks;
 		}
+	}
+
+	ACTOR Future<Void> validateBulkLoadJobHistory(Database cx, UID jobId, bool hasError) {
+		std::vector<BulkLoadJobState> jobHistory = wait(getBulkLoadJobFromHistory(cx));
+		Optional<BulkLoadJobState> jobInHistory;
+		for (const auto& job : jobHistory) {
+			ASSERT(job.isValid());
+			ASSERT(job.getJobId() == jobId);
+			ASSERT(!jobInHistory.present());
+			jobInHistory = job;
+		}
+		ASSERT(jobInHistory.present());
+		if (hasError) {
+			ASSERT(jobInHistory.get().getPhase() == BulkLoadJobPhase::Error);
+		} else {
+			ASSERT(jobInHistory.get().getPhase() == BulkLoadJobPhase::Complete);
+		}
+		return Void();
 	}
 
 	ACTOR Future<std::map<Key, Value>> getAllKVSFromDB(Database cx) {
@@ -363,6 +342,7 @@ struct BulkDumping : TestWorkload {
 		loop {
 			// We randomly injects the job cancellation when waiting for the job completion to test the job
 			// cancellation. If the job is cancelled, we should re-submit the job.
+			state bool hasError = false;
 			state int oldCancelTimes = self->cancelTimes;
 			state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
 			    newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), BulkLoadTransportMethod::CP);
@@ -383,6 +363,7 @@ struct BulkDumping : TestWorkload {
 			}
 			for (const auto& errorTask : errorTasks) {
 				errorRanges.push_back(errorTask.getRange());
+				hasError = true;
 			}
 			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Complete").detail("Job", newJob.toString());
 
@@ -397,6 +378,7 @@ struct BulkDumping : TestWorkload {
 
 			// Acknowledge any error task of the job
 			wait(acknowledgeAllErrorBulkLoadTasks(cx, bulkLoadJob.getJobId(), bulkLoadJob.getJobRange()));
+			wait(self->validateBulkLoadJobHistory(cx, bulkLoadJob.getJobId(), hasError));
 			break;
 		}
 
