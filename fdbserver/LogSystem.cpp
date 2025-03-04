@@ -217,7 +217,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
                               std::vector<int>& locations,
                               int locationOffset,
                               bool allLocations,
-                              Optional<Reference<LocalitySet>> restrictedLogSet) {
+                              const Optional<Reference<LocalitySet>>& restrictedLogSet) {
 	if (locality == tagLocalitySatellite) {
 		for (auto& t : tags) {
 			if (t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter) {

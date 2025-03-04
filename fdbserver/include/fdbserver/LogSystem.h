@@ -102,11 +102,12 @@ public:
 
 	bool satisfiesPolicy(const std::vector<LocalityEntry>& locations);
 
-	void getPushLocations(VectorRef<Tag> tags,
-	                      std::vector<int>& locations,
-	                      int locationOffset,
-	                      bool allLocations = false,
-	                      Optional<Reference<LocalitySet>> restrictedLogSet = Optional<Reference<LocalitySet>>());
+	void getPushLocations(
+	    VectorRef<Tag> tags,
+	    std::vector<int>& locations,
+	    int locationOffset,
+	    bool allLocations = false,
+	    const Optional<Reference<LocalitySet>>& restrictedLogSet = Optional<Reference<LocalitySet>>());
 
 private:
 	std::vector<LocalityEntry> alsoServers, resultEntries;
