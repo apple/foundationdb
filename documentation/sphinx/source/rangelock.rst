@@ -24,7 +24,7 @@ BulkLoad is developed to load a large amount of data into a FDB range without go
 As a result, BulkLoad must ensure the correctness during the data injection in the presence of user traffic. 
 To achieve this, BulkLoad locks the range to prevent user traffic from writing to the database, and then loads the range data directly into storage servers.
 After the data injection is done, BulkLoad releases the lock.
-Note that ideally, we want to use the write lock to achieve this, now we use the read lock as a temporarily solution.
+Ideally, we would use the write lock to achieve this; however, we are currently using the read lock as a temporary solution.
 
 How to use?
 -----------
