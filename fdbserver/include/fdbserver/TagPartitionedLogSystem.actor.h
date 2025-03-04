@@ -306,7 +306,12 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	Version getPeekEnd() const;
 
-	void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations) const final;
+	void getPushLocations(VectorRef<Tag> tags,
+	                      std::vector<int>& locations,
+	                      bool allLocations,
+	                      Optional<std::vector<Reference<LocalitySet>>> fromLocations) const final;
+
+	std::vector<Reference<LocalitySet>> getPushLocationsForTags(std::vector<int>& fromLocations) const final;
 
 	bool hasRemoteLogs() const final;
 

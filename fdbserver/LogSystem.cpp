@@ -213,7 +213,11 @@ bool LogSet::satisfiesPolicy(const std::vector<LocalityEntry>& locations) {
 	return resultEntries.size() == 0;
 }
 
-void LogSet::getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, int locationOffset, bool allLocations) {
+void LogSet::getPushLocations(VectorRef<Tag> tags,
+                              std::vector<int>& locations,
+                              int locationOffset,
+                              bool allLocations,
+                              const Optional<Reference<LocalitySet>>& restrictedLogSet) {
 	if (locality == tagLocalitySatellite) {
 		for (auto& t : tags) {
 			if (t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter) {
@@ -256,7 +260,12 @@ void LogSet::getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, 
 	}
 
 	// Run the policy, assert if unable to satisfy
-	bool result = logServerSet->selectReplicas(tLogPolicy, alsoServers, resultEntries);
+	bool result;
+	if (restrictedLogSet.present()) {
+		result = restrictedLogSet.get()->selectReplicas(tLogPolicy, alsoServers, resultEntries);
+	} else {
+		result = logServerSet->selectReplicas(tLogPolicy, alsoServers, resultEntries);
+	}
 	ASSERT(result);
 
 	// Add the new servers to the location array

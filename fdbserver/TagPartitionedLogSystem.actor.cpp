@@ -638,6 +638,7 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 				if (tpcvMap.get().contains(location)) {
 					prevVersion = tpcvMap.get()[location];
 				} else {
+					ASSERT(!msg.size());
 					location++;
 					continue;
 				}
@@ -1797,14 +1798,52 @@ Version TagPartitionedLogSystem::getPeekEnd() const {
 		return std::numeric_limits<Version>::max();
 }
 
-void TagPartitionedLogSystem::getPushLocations(VectorRef<Tag> tags,
-                                               std::vector<int>& locations,
-                                               bool allLocations) const {
+/**
+ * This function identifies the locality sets corresponding to a provided list of
+ * numeric locations (a subset of the tLogs), effectively creating a set of restricted
+ * locality sets.
+ *
+ * "fromLocations" is a vector of unique numeric locations representing tLogs.
+ * Returns a vector of Reference<LocalitySet> objects, where each LocalitySet is
+ * restricted to the provided locations that fall within its range.
+ */
+std::vector<Reference<LocalitySet>> TagPartitionedLogSystem::getPushLocationsForTags(
+    std::vector<int>& fromLocations) const {
+	std::vector<Reference<LocalitySet>> restrictedLogSets;
 	int locationOffset = 0;
 	for (auto& log : tLogs) {
-		if (log->isLocal && log->logServers.size()) {
-			log->getPushLocations(tags, locations, locationOffset, allLocations);
+		if (!log->isLocal || !log->logServers.size()) {
 			locationOffset += log->logServers.size();
+			continue;
+		}
+		std::vector<LocalityEntry> e;
+		for (int i : fromLocations) {
+			// check if provided location falls within the local logSet's range
+			if (i >= locationOffset && i < locationOffset + log->logServers.size()) {
+				e.emplace_back(LocalityEntry(i));
+			}
+		}
+		restrictedLogSets.push_back(log->logServerSet->restrict(e));
+		locationOffset += log->logServers.size();
+	}
+	return restrictedLogSets;
+}
+
+void TagPartitionedLogSystem::getPushLocations(VectorRef<Tag> tags,
+                                               std::vector<int>& locations,
+                                               bool allLocations,
+                                               Optional<std::vector<Reference<LocalitySet>>> fromLocations) const {
+	int locationOffset = 0;
+	int setIndex = 0;
+	for (auto& logSet : tLogs) {
+		if (logSet->isLocal && logSet->logServers.size()) {
+			if (fromLocations.present()) {
+				logSet->getPushLocations(tags, locations, locationOffset, allLocations, fromLocations.get()[setIndex]);
+				setIndex++;
+			} else {
+				logSet->getPushLocations(tags, locations, locationOffset, allLocations);
+			}
+			locationOffset += logSet->logServers.size();
 		}
 	}
 }

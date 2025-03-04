@@ -1775,6 +1775,15 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			// TraceEvent("ResolverReturn").detail("ReturnTags",reply.writtenTags).detail("TPCVsize",reply.tpcvMap.size()).detail("ReqTags",self->writtenTagsPreResolution);
 			self->tpcvMap = reply.tpcvMap;
+
+			// extract push locations from tpcv
+			std::vector<int> fromLocations;
+			fromLocations.reserve(reply.tpcvMap.size());
+			for (const auto& pair : self->tpcvMap) {
+				fromLocations.push_back(pair.first);
+			}
+			// save push locations for each tag
+			self->toCommit.setPushLocationsForTags(fromLocations);
 		}
 		self->toCommit.addWrittenTags(reply.writtenTags);
 	}

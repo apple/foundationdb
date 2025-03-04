@@ -102,10 +102,12 @@ public:
 
 	bool satisfiesPolicy(const std::vector<LocalityEntry>& locations);
 
-	void getPushLocations(VectorRef<Tag> tags,
-	                      std::vector<int>& locations,
-	                      int locationOffset,
-	                      bool allLocations = false);
+	void getPushLocations(
+	    VectorRef<Tag> tags,
+	    std::vector<int>& locations,
+	    int locationOffset,
+	    bool allLocations = false,
+	    const Optional<Reference<LocalitySet>>& restrictedLogSet = Optional<Reference<LocalitySet>>());
 
 private:
 	std::vector<LocalityEntry> alsoServers, resultEntries;
@@ -670,11 +672,19 @@ struct ILogSystem {
 
 	virtual void getPushLocations(VectorRef<Tag> tags,
 	                              std::vector<int>& locations,
-	                              bool allLocations = false) const = 0;
+	                              bool allLocations = false,
+	                              Optional<std::vector<Reference<LocalitySet>>> fromLocations =
+	                                  Optional<std::vector<Reference<LocalitySet>>>()) const = 0;
 
-	void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations = false) {
-		getPushLocations(VectorRef<Tag>((Tag*)&tags.front(), tags.size()), locations, allLocations);
+	void getPushLocations(
+	    std::vector<Tag> const& tags,
+	    std::vector<int>& locations,
+	    bool allLocations = false,
+	    Optional<std::vector<Reference<LocalitySet>>> fromLocations = Optional<std::vector<Reference<LocalitySet>>>()) {
+		getPushLocations(VectorRef<Tag>((Tag*)&tags.front(), tags.size()), locations, allLocations, fromLocations);
 	}
+
+	virtual std::vector<Reference<LocalitySet>> getPushLocationsForTags(std::vector<int>& fromLocations) const = 0;
 
 	virtual bool hasRemoteLogs() const = 0;
 
@@ -790,6 +800,10 @@ struct LogPushData : NonCopyable {
 
 	void writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations);
 
+	void setPushLocationsForTags(std::vector<int> fromLocationsVec) {
+		fromLocations = logSystem->getPushLocationsForTags(fromLocationsVec);
+	}
+
 	template <class T>
 	void writeTypedMessage(T const& item, bool metadataMessage = false, bool allLocations = false);
 
@@ -825,6 +839,7 @@ private:
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<bool> messagesWritten; // if messagesWriter has written anything
 	std::vector<int> msg_locations;
+	Optional<std::vector<Reference<LocalitySet>>> fromLocations;
 	// Stores message locations that have had span information written to them
 	// for the current transaction. Adding transaction info will reset this
 	// field.
@@ -854,7 +869,7 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 		prev_tags.push_back(tag);
 	}
 	msg_locations.clear();
-	logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
+	logSystem->getPushLocations(prev_tags, msg_locations, allLocations, fromLocations);
 
 	BinaryWriter bw(AssumeVersion(g_network->protocolVersion()));
 
