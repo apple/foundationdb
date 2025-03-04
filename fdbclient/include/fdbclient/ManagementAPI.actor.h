@@ -257,6 +257,7 @@ ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId);
 // Get all registered rangeLock owner
 ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
 
+// Get a rangeLock owner by uniqueId
 ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId);
 
 // Turn off user traffic for bulk load based on range lock

@@ -11,11 +11,11 @@ Overview
 Range Lock is a feature that blocks write traffic to a specific key range in FoundationDB (FDB).
 The locked range must be within the user key space, aka ``"" ~ \xff``.
 If a user/app grabs a lock on a range, other user/app can read the range but cannot write to the range. Essentially, this lock type is
-a readLock. The read lock is not exclusive --- A range can have multiple locks by different users. 
+a read lock. The read lock is not exclusive --- A range can have multiple locks by different users. 
 
-On the other hand, there is a concept of write lock in the context of FDB range lock --- If a user/app takes a writeLock on a range, 
-other user/app cannot do any read nor write. The write lock is exclusive, if a user/app takes the writeLock on a range, the range must have not any other lock.
-Currently, we only implemented the readLock. The writeLock is currently not implemented. we will implement the writeLock later on demand. 
+On the other hand, there is a concept of write lock in the context of FDB range lock --- If a user/app takes a write lock on a range, 
+other user/app cannot do any read nor write. The write lock is exclusive, if a user/app takes the write lock on a range, the range must have not any other lock.
+Currently, we only implemented the read lock. The write lock is currently not implemented. we will implement the write lock later on demand. 
 
 Example use cases
 -----------------
@@ -33,11 +33,11 @@ Before a user can lock a range, the user must register its identity to the datab
 A range can only be locked by a registered owner.
 The user can use the following API to register an identity and lock a range.
 
-Lock a range
+Put a read lock on a range. The range must be within the user key space, aka ``"" ~ \xff``.
 
 ``ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);``
 
-Unlock a user range
+Release a read lock on a range. The range must be within the user key space, aka ``"" ~ \xff``.
 
 ``ACTOR Future<Void> releaseReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);``
 
@@ -49,11 +49,11 @@ What will happen when two users runs the takeReadLockOnRange for an overlapped r
 Since the read range lock is not exclusive, the range can be locked by both users at the same time. 
 Therefore, both users can retry to lock/unlock the range separately.
 
-Get locked ranges within the input range
+Get read locks on the input range
 
 ``ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange range);``
 
-Register a rangeLock owner to database metadata.
+Register a range lock owner to database metadata.
 
 ``ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description);``
 
@@ -65,7 +65,7 @@ Get all registered range lock owners
 
 ``ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);``
 
-Get the owner of a range lock
+Get a range lock owner by uniqueId
 
 ``ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId);``
 
