@@ -106,6 +106,7 @@ struct ResolveTransactionBatchReply {
 
 	std::unordered_map<uint16_t, Version> tpcvMap;
 	std::set<Tag> writtenTags;
+	Version lastShardMove;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -118,6 +119,7 @@ struct ResolveTransactionBatchReply {
 		           privateMutationCount,
 		           tpcvMap,
 		           writtenTags,
+		           lastShardMove,
 		           arena);
 	}
 };
@@ -135,6 +137,7 @@ struct ResolveTransactionBatchRequest : TimedRequest {
 	    txnStateTransactions; // Offsets of elements of transactions that have (transaction subsystem state) mutations
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
+	Version lastShardMove;
 
 	std::set<Tag> writtenTags;
 
@@ -150,6 +153,7 @@ struct ResolveTransactionBatchRequest : TimedRequest {
 		           debugID,
 		           writtenTags,
 		           spanContext,
+		           lastShardMove,
 		           arena);
 	}
 };

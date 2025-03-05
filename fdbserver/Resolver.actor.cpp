@@ -88,8 +88,7 @@ public:
 		// sends this request has them and will apply them via applyMetadataToCommittedTransactions();
 		// and other proxies will get this version's state txns as a prior version.
 		for (; stateTransactionItr != endItr; ++stateTransactionItr) {
-			shardChangedOrStateTxn =
-			    shardChangedOrStateTxn || stateTransactionItr->value.first || stateTransactionItr->value.second.size();
+			shardChangedOrStateTxn = shardChangedOrStateTxn || stateTransactionItr->value.first;
 			reply->stateMutations.push_back(reply->arena, stateTransactionItr->value.second);
 			reply->arena.dependsOn(stateTransactionItr->value.second.arena());
 		}
@@ -189,6 +188,8 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	EncryptionAtRestMode encryptMode;
 
+	Version lastShardMove;
+
 	Resolver(UID dbgid, int commitProxyCount, int resolverCount, EncryptionAtRestMode encryptMode)
 	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), encryptMode(encryptMode),
 	    version(-1), conflictSet(newConflictSet()), iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE),
@@ -206,7 +207,8 @@ struct Resolver : ReferenceCounted<Resolver> {
 	    queueWaitLatencyDist(Histogram::getHistogram("Resolver"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)),
 	    computeTimeDist(Histogram::getHistogram("Resolver"_sr, "ComputeTime"_sr, Histogram::Unit::milliseconds)),
 	    // Distribution of queue depths, with knowledge that Histogram has 32 buckets, and each bucket will have size 1.
-	    queueDepthDist(Histogram::getHistogram("Resolver"_sr, "QueueDepth"_sr, Histogram::Unit::countLinear, 0, 31)) {
+	    queueDepthDist(Histogram::getHistogram("Resolver"_sr, "QueueDepth"_sr, Histogram::Unit::countLinear, 0, 31)),
+	    lastShardMove(invalidVersion) {
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "NeededVersion", [this]() { return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this]() { return this->totalStateBytes.get(); });
@@ -483,9 +485,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
-				if (shardChangedOrStateTxn || req.txnStateTransactions.size() || !req.writtenTags.size()) {
+				if (req.lastShardMove < self->lastShardMove || shardChangedOrStateTxn ||
+				    req.txnStateTransactions.size() || !req.writtenTags.size()) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
+					}
+					if (shardChangedOrStateTxn) {
+						self->lastShardMove = req.version;
 					}
 				} else {
 					toCommit->getLocations(reply.writtenTags, writtenTLogs);
