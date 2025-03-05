@@ -22,6 +22,7 @@
 
 #include "fdbclient/ClientKnobs.h"
 #include "fdbclient/Knobs.h"
+#include "flow/FastRef.h"
 #include "flow/IConnection.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
@@ -2169,6 +2170,75 @@ Future<Void> S3BlobStoreEndpoint::abortMultiPartUpload(std::string const& bucket
                                                        std::string const& object,
                                                        std::string const& uploadID) {
 	return abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID);
+}
+
+ACTOR Future<Void> putObjectTags_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                      std::string bucket,
+                                      std::string object,
+                                      std::map<std::string, std::string> tags) {
+	state UnsentPacketQueue tagXml;
+	wait(bstore->requestRateWrite->getAllowance(1));
+	state std::string resource = constructResourcePath(bstore, bucket, object);
+	resource += "?tagging";
+
+	std::string manifest = "<Tagging><TagSet>";
+	for (const auto& tag : tags) {
+		manifest += format("<Tag><Key>%s</Key><Value>%s</Value></Tag>", tag.first.c_str(), tag.second.c_str());
+	}
+	manifest += "</TagSet></Tagging>";
+
+	PacketWriter pw(tagXml.getWriteBuffer(manifest.size()), nullptr, Unversioned());
+	pw.serializeBytes(manifest);
+
+	HTTP::Headers headers;
+	headers["Content-Type"] = "application/xml";
+	headers["Content-Length"] = format("%d", manifest.size());
+
+	// 'r' is unused. Compiler complains if removed.
+	Reference<HTTP::IncomingResponse> r =
+	    wait(bstore->doRequest("PUT", resource, headers, &tagXml, manifest.size(), { 200 }));
+	return Void();
+}
+
+Future<Void> S3BlobStoreEndpoint::putObjectTags(std::string const& bucket,
+                                                std::string const& object,
+                                                std::map<std::string, std::string> const& tags) {
+	return putObjectTags_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, tags);
+}
+
+ACTOR Future<std::map<std::string, std::string>> getObjectTags_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                                    std::string bucket,
+                                                                    std::string object) {
+	wait(bstore->requestRateRead->getAllowance(1));
+
+	state std::string resource = constructResourcePath(bstore, bucket, object);
+	resource += "?tagging";
+	state HTTP::Headers headers;
+
+	Reference<HTTP::IncomingResponse> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200 }));
+
+	rapidxml::xml_document<> doc;
+	doc.parse<rapidxml::parse_declaration_node | rapidxml::parse_no_data_nodes>((char*)r->data.content.c_str());
+
+	std::map<std::string, std::string> tags;
+
+	if (auto* tagging = doc.first_node("Tagging")) {
+		if (auto* tagSet = tagging->first_node("TagSet")) {
+			for (auto* tag = tagSet->first_node("Tag"); tag; tag = tag->next_sibling("Tag")) {
+				if (auto* keyNode = tag->first_node("Key")) {
+					if (auto* valueNode = tag->first_node("Value")) {
+						tags[keyNode->value()] = valueNode->value();
+					}
+				}
+			}
+		}
+	}
+	return tags;
+}
+
+Future<std::map<std::string, std::string>> S3BlobStoreEndpoint::getObjectTags(std::string const& bucket,
+                                                                              std::string const& object) {
+	return getObjectTags_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
 TEST_CASE("/backup/s3/v4headers") {
