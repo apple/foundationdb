@@ -230,7 +230,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 
 CommandFactory bulkLoadFactory(
     "bulkload",
-    CommandHelp("bulkload [mode|local|blobstore|status|cancel|history|historyclear] [ARGs]",
+    CommandHelp("bulkload [mode|local|blobstore|status|cancel|history|clearhistory] [ARGs]",
                 "bulkload commands",
                 "To set bulkload mode: `bulkload mode [on|off]'\n"
                 "To load a range from SST files: `bulkload [local|blobstore] <BeginKey> <EndKey> dumpFolder`\n"
