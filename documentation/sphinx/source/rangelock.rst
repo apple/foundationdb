@@ -79,7 +79,7 @@ Unblocking user write traffic for bulk load based on range lock.
 ``ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);``
 
 Range Lock Design (Exclusive Read Lock)
-=============================
+=======================================
 The range lock information is persisted in ``\xff/rangeLock/`` system key space.
 Users specify ranges to lock in ``\xff/rangeLock/`` system key space via a transaction. 
 The range lock can be only within user key space, aka ``"" ~ \xff``.
