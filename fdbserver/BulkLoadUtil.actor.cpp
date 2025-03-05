@@ -29,11 +29,87 @@
 #include <cstddef>
 #include <fmt/format.h>
 #include "flow/Error.h"
+#include "flow/IAsyncFile.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 #include "flow/flow.h"
+
+ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength) {
+	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+	    path, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0640));
+
+	state int64_t fileSize = wait(file->size());
+	if (fileSize > maxLength) {
+		TraceEvent(SevError, "ReadBulkFileBytesTooLarge").detail("FileSize", fileSize).detail("MaxLength", maxLength);
+		throw file_too_large();
+	}
+
+	state std::string content;
+	state int64_t offset = 0;
+	state int64_t remaining = fileSize;
+	state int64_t chunkSize = 64 * 1024; // 64KB chunks
+
+	content.reserve(fileSize); // Pre-allocate the full size
+
+	while (remaining > 0) {
+		state int64_t bytesToRead = std::min(chunkSize, remaining);
+		state std::string chunk;
+		chunk.resize(bytesToRead);
+
+		state int bytesRead = wait(file->read(&chunk[0], bytesToRead, offset));
+		if (bytesRead != bytesToRead) {
+			TraceEvent(SevError, "ReadBulkFileBytesError")
+			    .detail("BytesRead", bytesRead)
+			    .detail("BytesExpected", bytesToRead);
+			throw io_error();
+		}
+
+		content.append(chunk);
+		offset += bytesRead;
+		remaining -= bytesRead;
+		wait(yield());
+	}
+	TraceEvent(SevInfo, "ReadBulkFileBytesComplete")
+	    .setMaxEventLength(-1)
+	    .setMaxFieldLength(-1)
+	    .detail("Content", content)
+	    .detail("FileSize", fileSize)
+	    .detail("MaxLength", maxLength);
+	return content;
+}
+
+ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef content) {
+	state Reference<IAsyncFile> file = wait(
+	    IAsyncFileSystem::filesystem()->open(path,
+	                                         IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
+	                                             IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_NO_AIO,
+	                                         0644));
+
+	state int64_t chunkSize = 64 * 1024; // 64KB chunks
+	state int64_t offset = 0;
+	state int64_t remaining = content.size();
+
+	while (remaining > 0) {
+		state int64_t bytesToWrite = std::min(chunkSize, remaining);
+		wait(file->write(content.begin() + offset, bytesToWrite, offset));
+		offset += bytesToWrite;
+		remaining -= bytesToWrite;
+		wait(yield());
+	}
+
+	wait(file->truncate(content.size()));
+	wait(file->sync());
+
+	return Void();
+}
+
+ACTOR Future<Void> copyBulkFile(std::string fromFile, std::string toFile, size_t fileBytesMax) {
+	state std::string content = wait(readBulkFileBytes(abspath(fromFile), fileBytesMax));
+	wait(writeBulkFileBytes(toFile, StringRef(content)));
+	return Void();
+}
 
 ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
                                                                  UID dataMoveId,
@@ -146,12 +222,6 @@ ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // in
 	return res;
 }
 
-void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax) {
-	std::string content = readFileBytes(abspath(fromFile), fileBytesMax);
-	writeFile(abspath(toFile), content);
-	return;
-}
-
 // TODO(BulkLoad): slow task
 void clearFileFolder(const std::string& folderPath, const UID& logId, bool ignoreError) {
 	try {
@@ -177,23 +247,23 @@ void resetFileFolder(const std::string& folderPath) {
 	return;
 }
 
-void bulkLoadTransportCP_impl(BulkLoadFileSet fromRemoteFileSet,
-                              BulkLoadFileSet toLocalFileSet,
-                              size_t fileBytesMax,
-                              UID logId) {
+ACTOR Future<Void> bulkLoadTransportCP_impl(BulkLoadFileSet fromRemoteFileSet,
+                                            BulkLoadFileSet toLocalFileSet,
+                                            size_t fileBytesMax,
+                                            UID logId) {
 	// Clear existing local folder
 	resetFileFolder(abspath(toLocalFileSet.getFolder()));
 	// Copy data file
-	bulkLoadFileCopy(
-	    abspath(fromRemoteFileSet.getDataFileFullPath()), abspath(toLocalFileSet.getDataFileFullPath()), fileBytesMax);
+	wait(copyBulkFile(
+	    abspath(fromRemoteFileSet.getDataFileFullPath()), abspath(toLocalFileSet.getDataFileFullPath()), fileBytesMax));
 	// Copy byte sample file if exists
 	if (fromRemoteFileSet.hasByteSampleFile()) {
-		bulkLoadFileCopy(abspath(fromRemoteFileSet.getBytesSampleFileFullPath()),
-		                 abspath(toLocalFileSet.getBytesSampleFileFullPath()),
-		                 fileBytesMax);
+		wait(copyBulkFile(abspath(fromRemoteFileSet.getBytesSampleFileFullPath()),
+		                  abspath(toLocalFileSet.getBytesSampleFileFullPath()),
+		                  fileBytesMax));
 	}
 	// TODO(BulkLoad): Throw error if the date/bytesample file does not exist while the filename is not empty
-	return;
+	return Void();
 }
 
 ACTOR Future<Void> bulkLoadTransportBlobstore_impl(BulkLoadFileSet fromRemoteFileSet,
@@ -236,8 +306,8 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 				ASSERT(fromRemoteFileSet.hasDataFile());
 				// Copy the data file and the sample file from remote folder to a local folder specified by
 				// fromRemoteFileSet.
-				bulkLoadTransportCP_impl(
-				    fromRemoteFileSet, toLocalFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
+				wait(bulkLoadTransportCP_impl(
+				    fromRemoteFileSet, toLocalFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
 			} else if (transportMethod == BulkLoadTransportMethod::BLOBSTORE) {
 				// Copy the data file and the sample file from remote folder to a local folder specified by
 				// fromRemoteFileSet.
@@ -284,7 +354,8 @@ ACTOR Future<Void> downloadManifestFile(BulkLoadTransportMethod transportMethod,
 	loop {
 		try {
 			if (transportMethod == BulkLoadTransportMethod::CP) {
-				bulkLoadFileCopy(abspath(fromRemotePath), abspath(toLocalPath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
+				wait(
+				    copyBulkFile(abspath(fromRemotePath), abspath(toLocalPath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX));
 				wait(delay(0.1));
 			} else if (transportMethod == BulkLoadTransportMethod::BLOBSTORE) {
 				// TODO: Make use of fileBytesMax
@@ -440,8 +511,8 @@ ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobF
 	    joinPath(manifestLocalTempFolder,
 	             deterministicRandom()->randomUniqueID().toString() + "-" + basename(getPath(remoteManifestFilePath)));
 	wait(downloadManifestFile(transportMethod, remoteManifestFilePath, localManifestFilePath, logId));
-	const std::string manifestRawString =
-	    readFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
+	std::string manifestRawString =
+	    wait(readBulkFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX));
 	ASSERT(!manifestRawString.empty());
 	return BulkLoadManifest(manifestRawString);
 }
