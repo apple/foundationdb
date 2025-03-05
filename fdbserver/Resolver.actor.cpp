@@ -88,8 +88,7 @@ public:
 		// sends this request has them and will apply them via applyMetadataToCommittedTransactions();
 		// and other proxies will get this version's state txns as a prior version.
 		for (; stateTransactionItr != endItr; ++stateTransactionItr) {
-			shardChangedOrStateTxn =
-			    shardChangedOrStateTxn || stateTransactionItr->value.first;
+			shardChangedOrStateTxn = shardChangedOrStateTxn || stateTransactionItr->value.first;
 			reply->stateMutations.push_back(reply->arena, stateTransactionItr->value.second);
 			reply->arena.dependsOn(stateTransactionItr->value.second.arena());
 		}
@@ -486,9 +485,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
-				if (shardChangedOrStateTxn || req.txnStateTransactions.size() || !req.writtenTags.size()) {
+				if (req.lastShardMove < self->lastShardMove || shardChangedOrStateTxn ||
+				    req.txnStateTransactions.size() || !req.writtenTags.size()) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
+					}
+					if (shardChangedOrStateTxn) {
+						self->lastShardMove = req.version;
 					}
 				} else {
 					toCommit->getLocations(reply.writtenTags, writtenTLogs);
