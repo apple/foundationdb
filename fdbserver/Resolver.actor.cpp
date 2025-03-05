@@ -89,7 +89,7 @@ public:
 		// and other proxies will get this version's state txns as a prior version.
 		for (; stateTransactionItr != endItr; ++stateTransactionItr) {
 			shardChangedOrStateTxn =
-			    shardChangedOrStateTxn || stateTransactionItr->value.first || stateTransactionItr->value.second.size();
+			    shardChangedOrStateTxn || stateTransactionItr->value.first;
 			reply->stateMutations.push_back(reply->arena, stateTransactionItr->value.second);
 			reply->arena.dependsOn(stateTransactionItr->value.second.arena());
 		}
