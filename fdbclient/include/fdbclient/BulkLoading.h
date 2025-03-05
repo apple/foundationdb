@@ -663,10 +663,13 @@ private:
 
 enum class BulkLoadJobPhase : uint8_t {
 	Invalid = 0,
-	Submitted = 1,
-	Complete = 2,
-	Error = 3,
+	Submitted = 1, // Update by ManagementAPI when submit a job. See submitBulkLoadJob for more details.
+	Complete = 2, // Update by DD when DD completes all tasks of the job.
+	Error = 3, // Updated by DD when DD sees any task of the job is in the BulkLoadPhase::Error state.
+	Cancelled = 4, // Updated by ManagementAPI when cancel a job. See cancelBulkLoadJob for more details.
 };
+
+std::string convertBulkLoadJobPhaseToString(const BulkLoadJobPhase& phase);
 
 struct BulkLoadJobState {
 public:
@@ -680,13 +683,15 @@ public:
 	                 const KeyRange& jobRange,
 	                 const BulkLoadTransportMethod& transportMethod)
 	  : jobId(jobId), jobRoot(jobRoot), jobRange(jobRange), phase(BulkLoadJobPhase::Submitted),
-	    transportMethod(transportMethod) {}
+	    transportMethod(transportMethod), submitTime(now()) {}
 
 	std::string toString() const {
 		std::string res = "[BulkLoadJobState]: [JobId]: " + jobId.toString() + ", [JobRoot]: " + jobRoot +
 		                  ", [JobRange]: " + jobRange.toString() +
-		                  ", [Phase]: " + std::to_string(static_cast<uint8_t>(phase)) +
+		                  ", [Phase]: " + convertBulkLoadJobPhaseToString(phase) +
 		                  ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod));
+		res = res + ", [SubmitTime]: " + std::to_string(submitTime);
+		res = res + ", [SinceSubmitMins]: " + std::to_string((now() - submitTime) / 60.0);
 		return res;
 	}
 
@@ -701,6 +706,12 @@ public:
 	BulkLoadJobPhase getPhase() const { return phase; }
 
 	void setPhase(BulkLoadJobPhase inputPhase) { phase = inputPhase; }
+
+	double getSubmitTime() const { return submitTime; }
+
+	void setEndTime(double time) { endTime = time; }
+
+	double getEndTime() const { return endTime; }
 
 	bool isMetadataValid() const {
 		if (!jobId.isValid()) {
@@ -722,7 +733,7 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase);
+		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase, submitTime, endTime);
 	}
 
 private:
@@ -734,6 +745,8 @@ private:
 	// Given the job manifest file is stored in the jobFolder, the
 	// jobFolder = getBulkLoadJobRoot(jobRoot, jobId).
 	BulkLoadJobPhase phase;
+	double submitTime = 0;
+	double endTime = 0;
 };
 
 // Define the bulkload job manifest file header

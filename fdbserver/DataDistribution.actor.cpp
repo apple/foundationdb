@@ -1793,6 +1793,7 @@ ACTOR Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self, BulkLoad
 	state KeyRange jobCompleteRange;
 	state bool hasError = false;
 	state int i = 0;
+	state bool allFinish = false;
 	while (beginKey < endKey) {
 		try {
 			tr.reset();
@@ -1844,7 +1845,15 @@ ACTOR Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self, BulkLoad
 			ASSERT(lastKey.present());
 			jobCompleteRange = KeyRangeRef(jobState.getJobRange().begin, lastKey.get());
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
-			wait(krmSetRange(&tr, bulkLoadJobPrefix, jobCompleteRange, bulkLoadJobValue(jobState)));
+			allFinish = jobCompleteRange == jobState.getJobRange();
+			if (allFinish) {
+				// Move the complete job from job range map to the history map
+				jobState.setEndTime(now());
+				wait(krmSetRange(&tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(BulkLoadJobState())));
+				wait(addBulkLoadJobToHistory(&tr, jobState));
+			} else {
+				wait(krmSetRange(&tr, bulkLoadJobPrefix, jobCompleteRange, bulkLoadJobValue(jobState)));
+			}
 			wait(tr.commit());
 			Version commitVersion = tr.getCommittedVersion();
 			TraceEvent(SevInfo, "DDBulkLoadJobExecuteTaskFinalized", self->ddId)
@@ -1852,7 +1861,8 @@ ACTOR Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self, BulkLoad
 			    .setMaxFieldLength(-1)
 			    .detail("JobCompleteRange", jobCompleteRange)
 			    .detail("Task", existTask.toString())
-			    .detail("CommitVersion", commitVersion);
+			    .detail("CommitVersion", commitVersion)
+			    .detail("AllFinish", allFinish);
 			beginKey = lastKey.get();
 		} catch (Error& e) {
 			wait(tr.onError(e));

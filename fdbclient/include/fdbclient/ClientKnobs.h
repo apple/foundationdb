@@ -201,6 +201,9 @@ public:
 	bool BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH;
 	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS;
 	int CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+	int BULKLOAD_JOB_HISTORY_COUNT_MAX; // the max number of bulk load job history to keep. The oldest job history will
+	                                    // be removed when the count exceeds this value. Set to 0 to disable history.
+	                                    // Do not set the value to a large number, e.g. <= 10.
 
 	// Configuration
 	int32_t DEFAULT_AUTO_COMMIT_PROXIES;

@@ -201,6 +201,15 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
                                                 UID taskId,
                                                 std::vector<BulkLoadPhase> phases);
 
+// Add bulkLoad job to history map
+ACTOR Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState);
+
+// Get all past bulkLoad jobs from history map
+ACTOR Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx);
+
+// Erase all bulkLoad job history metadata if jobId is not provided. Otherwise, erase the job with the given jobId.
+ACTOR Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId = Optional<UID>());
+
 // Get the current running bulk load job
 ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx);
 
@@ -216,9 +225,6 @@ ACTOR Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyR
 // There is at most one BulkLoad or one BulkDump job at a time.
 // If there is any existing BulkLoad or BulkDump job, reject the new job.
 ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState);
-
-// Get total number of completed tasks within the input range
-ACTOR Future<size_t> getBulkLoadCompleteTaskCount(Database cx, KeyRange rangeToRead);
 
 // Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
 // the metadata.

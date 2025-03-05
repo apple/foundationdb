@@ -89,6 +89,22 @@ std::string generateEmptyManifestFileName() {
 	return "manifest-empty.sst";
 }
 
+std::string convertBulkLoadJobPhaseToString(const BulkLoadJobPhase& phase) {
+	if (phase == BulkLoadJobPhase::Invalid) {
+		return "Invalid";
+	} else if (phase == BulkLoadJobPhase::Submitted) {
+		return "Submitted";
+	} else if (phase == BulkLoadJobPhase::Complete) {
+		return "Complete";
+	} else if (phase == BulkLoadJobPhase::Error) {
+		return "Error";
+	} else if (phase == BulkLoadJobPhase::Cancelled) {
+		return "Cancelled";
+	} else {
+		UNREACHABLE();
+	}
+}
+
 // Generate the bulkload job manifest file. Here is an example.
 // Assuming the job manifest file is in the folder: "/tmp".
 // Row 0: [FormatVersion]: 1, [ManifestCount]: 3;
