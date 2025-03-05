@@ -29,10 +29,11 @@
 #include "fdbrpc/fdbrpc.h"
 
 using RangeLockOwnerName = std::string;
+using RangeLockUniqueString = std::string;
 
 enum class RangeLockType : uint8_t {
 	Invalid = 0,
-	ReadLockOnRange = 1, // reject all commits to the locked range
+	ExclusiveReadLock = 1, // reject all commits to the locked range
 };
 
 // The app/user that owns the lock.
@@ -42,24 +43,24 @@ struct RangeLockOwner {
 
 public:
 	RangeLockOwner() = default;
-	RangeLockOwner(const std::string& uniqueId, const std::string& description)
-	  : uniqueId(uniqueId), description(description), logId(deterministicRandom()->randomUniqueID()),
+	RangeLockOwner(const std::string& ownerUniqueId, const std::string& description)
+	  : ownerUniqueId(ownerUniqueId), description(description), logId(deterministicRandom()->randomUniqueID()),
 	    creationTime(now()) {
 		if (!isValid()) {
 			throw range_lock_failed();
 		}
 	}
 
-	bool isValid() const { return !uniqueId.empty() && !description.empty(); }
+	bool isValid() const { return !ownerUniqueId.empty() && !description.empty(); }
 
 	std::string toString() const {
-		return "RangeLockOwner: [UniqueId]: " + uniqueId + ", [Description]: " + description +
+		return "RangeLockOwner: [OwnerUniqueId]: " + ownerUniqueId + ", [Description]: " + description +
 		       ", [LogId]: " + logId.toString() + ", [CreationTime]: " + std::to_string(creationTime);
 	}
 
-	bool operator==(RangeLockOwner const& r) const { return uniqueId == r.uniqueId; }
+	bool operator==(RangeLockOwner const& r) const { return ownerUniqueId == r.ownerUniqueId; }
 
-	RangeLockOwnerName getUniqueId() const { return uniqueId; }
+	RangeLockOwnerName getOwnerUniqueId() const { return ownerUniqueId; }
 
 	void setDescription(const std::string& inputDescription) {
 		description = inputDescription;
@@ -70,11 +71,11 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, uniqueId, description, logId, creationTime);
+		serializer(ar, ownerUniqueId, description, logId, creationTime);
 	}
 
 private:
-	RangeLockOwnerName uniqueId; // The owner's unique ID and the owner is free to use as many times as needed.
+	RangeLockOwnerName ownerUniqueId; // The owner's unique ID and the owner is free to use as many times as needed.
 	std::string description; // More details about the owner
 	UID logId; // For logging purpose
 	double creationTime; // Indicate when the data structure is created
@@ -97,15 +98,15 @@ public:
 	static std::string rangeLockTypeString(const RangeLockType& type) {
 		if (type == RangeLockType::Invalid) {
 			return "invalid";
-		} else if (type == RangeLockType::ReadLockOnRange) {
-			return "ReadLockOnRange";
+		} else if (type == RangeLockType::ExclusiveReadLock) {
+			return "ExclusiveReadLock";
 		} else {
 			UNREACHABLE();
 		}
 	}
 
 	std::string toString() const {
-		return "RangeLockState: [lockType]: " + rangeLockTypeString(lockType) + " [Owner]: " + ownerUniqueId;
+		return "RangeLockState: [LockType]: " + rangeLockTypeString(lockType) + " [Owner]: " + ownerUniqueId;
 	}
 
 	bool isLockedFor(RangeLockType inputLockType) const { return lockType == inputLockType; }
@@ -114,7 +115,7 @@ public:
 		return lockType == r.lockType && ownerUniqueId == r.ownerUniqueId;
 	}
 
-	std::string getLockUniqueString() const { return ownerUniqueId + rangeLockTypeString(lockType); }
+	RangeLockUniqueString getLockUniqueString() const { return ownerUniqueId + rangeLockTypeString(lockType); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -156,15 +157,15 @@ public:
 
 	std::string toString() const { return "RangeLockStateSet: " + describe(getAllLockStats()); }
 
-	const std::map<RangeLockOwnerName, RangeLockState>& getLocks() const { return locks; }
+	const std::map<RangeLockUniqueString, RangeLockState>& getLocks() const { return locks; }
 
 	bool operator==(RangeLockStateSet const& r) const {
 		auto rLocks = r.getLocks();
 		if (locks.size() != rLocks.size()) {
 			return false;
 		}
-		std::map<RangeLockOwnerName, RangeLockState>::const_iterator iterator = locks.begin();
-		std::map<RangeLockOwnerName, RangeLockState>::const_iterator rIterator = rLocks.begin();
+		std::map<RangeLockUniqueString, RangeLockState>::const_iterator iterator = locks.begin();
+		std::map<RangeLockUniqueString, RangeLockState>::const_iterator rIterator = rLocks.begin();
 		while (iterator != locks.end() && rIterator != rLocks.end()) {
 			if (iterator->first != rIterator->first || iterator->second != rIterator->second) {
 				return false;
@@ -177,6 +178,10 @@ public:
 
 	void insertIfNotExist(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());
+		if (inputLock.isLockedFor(RangeLockType::ExclusiveReadLock) &&
+		    locks.find(inputLock.getLockUniqueString()) == locks.end()) {
+			throw range_lock_failed();
+		}
 		locks.insert({ inputLock.getLockUniqueString(), inputLock });
 		return;
 	}
@@ -203,7 +208,7 @@ public:
 	}
 
 private:
-	std::map<RangeLockOwnerName, RangeLockState> locks;
+	std::map<RangeLockUniqueString, RangeLockState> locks;
 };
 
 #endif
