@@ -101,7 +101,7 @@ When a locking mutation arrives at a commit proxy,
 the lock takes effect on all mutations that arrive at any commit proxy after this locking mutation. 
 Note that it is possible that this locking mutation is batched with other mutations with the same commit version. 
 The locking mutation takes effect on all mutations after the locking mutation in the same batch.
-To achieve this, the locking transaction adds a write_conflict_range on the entire user key space (``"" ~ \xff``).
+To achieve this, the locking transaction adds a write_conflict_range on the lock range.
 As a result, any following transactions in the batch that writes to the locked range will be marked as ``Conflict``.
 
 Support multiple range lock users
