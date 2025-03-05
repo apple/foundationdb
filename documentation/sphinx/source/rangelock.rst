@@ -10,11 +10,14 @@ Overview
 ========
 Range Lock is a feature that blocks write traffic to a specific key range in FoundationDB (FDB).
 The locked range must be within the user key space, aka ``"" ~ \xff``.
-If a user/app grabs a lock on a range, other user/app can read the range but cannot write to the range. Essentially, this lock type is
-a read lock. The read lock is exclusive --- A range can have at most one lock by one user. 
+If a user/app grabs a lock on a range, other user/app can read the range but cannot write to the range. 
+A range can have at most one lock by one user. 
 
-Note that normally, the read lock is not exclusive. Multiple users can read the same range at the same time. However, in the context of FDB range lock,
-the current read lock is exclusive according to our use case.
+Note that the range lock is similar to a "read lock" --- when a user wants to do read, the grabs a read lock which prevents others
+to write to the locked data while the lock does not block the read operation to the data. 
+However, the range lock is different from a "read lock". 
+Normally, the read lock is not exclusive. Multiple users can read the same range at the same time. However, in the context of FDB range lock,
+the current read lock is exclusive. We will implement the non-exclusive read lock later on demand.
 
 On the other hand, there is a concept of write lock in the context of FDB range lock --- If a user/app takes a write lock on a range, 
 other user/app cannot do any read nor write. The write lock is exclusive, if a user/app takes the write lock on a range, the range must have not any other lock.
@@ -46,6 +49,7 @@ Release an exclusive read lock on a range. The range must be within the user key
 
 Note that takeExclusiveReadLockOnRange and releaseExclusiveReadLockOnRange are transactional. 
 If the execution of the API is successful, all ranges are guaranteed to be locked/unlocked at a single version.
+If the execution is failed, no range is locked/unlocked.
 
 Get exclusive read locks on the input range
 
@@ -53,11 +57,11 @@ Get exclusive read locks on the input range
 
 Register a range lock owner to database metadata.
 
-``ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description);``
+``ACTOR Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);``
 
 Remove an owner from the database metadata
 
-``ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId);``
+``ACTOR Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
 
 Get all registered range lock owners
 
@@ -65,16 +69,16 @@ Get all registered range lock owners
 
 Get a range lock owner by uniqueId
 
-``ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId);``
+``ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);``
 
 
 Example usage
 -------------
-Blocking user write traffic for bulk load based on range lock.
+When submitting a bulk load task on a range, we block user write traffic to the range.
 
 ``ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);``
 
-Unblocking user write traffic for bulk load based on range lock.
+Upon a bulk load task completes on a range, we unblock user write traffic on the range.
 
 ``ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);``
 
