@@ -340,7 +340,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                     Reference<AsyncVar<bool>> failed);
 
 	// returns the log group's knownComittedVersion, DV, and a vector of TLogLockResults for each tLog in the group.
-	Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> static getDurableVersion(
+	Optional<std::tuple<Version, Version, std::vector<TLogLockResult>, bool>> static getDurableVersion(
 	    UID dbgid,
 	    LogLockInfo lockInfo,
 	    std::vector<Reference<AsyncVar<bool>>> failed = std::vector<Reference<AsyncVar<bool>>>(),
