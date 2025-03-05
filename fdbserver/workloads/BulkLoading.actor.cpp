@@ -756,6 +756,8 @@ struct BulkLoading : TestWorkload {
 			}
 		}
 
+		wait(registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad));
+
 		// Run test
 		if (deterministicRandom()->coinflip()) {
 			// Inject data to three non-overlapping ranges
@@ -765,6 +767,9 @@ struct BulkLoading : TestWorkload {
 			wait(self->complexTest(self, cx));
 		}
 		// self->produceLargeData(self, cx); // Produce data set that is used in loop back cluster test
+
+		wait(removeRangeLockOwner(cx, rangeLockNameForBulkLoad));
+
 		return Void();
 	}
 };
