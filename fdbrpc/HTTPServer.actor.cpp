@@ -335,7 +335,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldReq(Reference<IConne
 	pw.serializeBytes(hello);
 
 	Reference<HTTP::IncomingResponse> response =
-	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0));
+	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate, nullptr), 30.0));
 
 	std::string expectedContent = "Hello World Response!";
 
@@ -367,7 +367,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldErrorReq(Reference<I
 	req->data.contentLen = 0;
 
 	Reference<HTTP::IncomingResponse> response =
-	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0));
+	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate, nullptr), 30.0));
 
 	ASSERT(response->code == 500);
 
@@ -393,7 +393,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloBadMD5Req(Reference<IConn
 	pw.serializeBytes(hello);
 
 	Reference<HTTP::IncomingResponse> response =
-	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0));
+	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate, nullptr), 30.0));
 
 	// should have gotten error
 	ASSERT(false);

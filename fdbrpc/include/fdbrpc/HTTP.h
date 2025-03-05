@@ -120,7 +120,8 @@ Future<Reference<IncomingResponse>> doRequest(Reference<IConnection> conn,
                                               Reference<OutgoingRequest> request,
                                               Reference<IRateControl> sendRate,
                                               int64_t* pSent,
-                                              Reference<IRateControl> recvRate);
+                                              Reference<IRateControl> recvRate,
+                                              bool* hasDoneError = nullptr);
 
 // Connect to proxy, send CONNECT command, and connect to the remote host.
 Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
