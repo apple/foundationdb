@@ -700,7 +700,7 @@ struct BulkLoading : TestWorkload {
 		ASSERT(self->checkSame(self, kvs, dbkvs));
 
 		// Clear all range lock
-		wait(releaseReadLockOnRange(cx, normalKeys, "BulkLoad"));
+		wait(releaseExclusiveReadLockOnRange(cx, normalKeys, "BulkLoad"));
 
 		// Clear metadata
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));

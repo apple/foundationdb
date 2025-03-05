@@ -163,10 +163,10 @@ struct RangeLocking : TestWorkload {
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(!value.present());
 
-		wait(takeReadLockOnRange(cx, rangeLock, self->rangeLockOwnerName));
+		wait(takeExclusiveReadLockOnRange(cx, rangeLock, self->rangeLockOwnerName));
 		TraceEvent("RangeLockWorkLoadLockRange").detail("Range", rangeLock);
 
-		wait(store(lockedRanges, getReadLockOnRange(cx, normalKeys)));
+		wait(store(lockedRanges, getExclusiveReadLockOnRange(cx, normalKeys)));
 		TraceEvent("RangeLockWorkLoadGetLockedRange")
 		    .detail("Range", rangeLock)
 		    .detail("LockState", describe(lockedRanges));
@@ -188,11 +188,11 @@ struct RangeLocking : TestWorkload {
 		wait(store(value, self->getKey(cx, keyUpdate)));
 		ASSERT(!value.present());
 
-		wait(releaseReadLockOnRange(cx, rangeLock, self->rangeLockOwnerName));
+		wait(releaseExclusiveReadLockOnRange(cx, rangeLock, self->rangeLockOwnerName));
 		TraceEvent("RangeLockWorkLoadUnlockRange").detail("Range", rangeLock);
 
 		lockedRanges.clear();
-		wait(store(lockedRanges, getReadLockOnRange(cx, normalKeys)));
+		wait(store(lockedRanges, getExclusiveReadLockOnRange(cx, normalKeys)));
 		TraceEvent("RangeLockWorkLoadGetLockedRange")
 		    .detail("Range", rangeLock)
 		    .detail("LockState", describe(lockedRanges));
@@ -272,14 +272,26 @@ struct RangeLocking : TestWorkload {
 			state KeyRange range = self->getRandomRange();
 			state bool lock = deterministicRandom()->coinflip();
 			if (lock) {
-				wait(takeReadLockOnRange(cx, range, self->rangeLockOwnerName));
-				if (self->verboseLogging) {
-					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Lock").detail("Range", range);
+				try {
+					wait(takeExclusiveReadLockOnRange(cx, range, self->rangeLockOwnerName));
+					if (self->verboseLogging) {
+						TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Lock").detail("Range", range);
+					}
+				} catch (Error& e) {
+					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "LockFailed").detail("Range", range);
+					ASSERT(e.code() == error_code_range_lock_failed);
+					continue; // Do not add the operation to lockRangeOperations.
 				}
 			} else {
-				wait(releaseReadLockOnRange(cx, range, self->rangeLockOwnerName));
-				if (self->verboseLogging) {
-					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Unlock").detail("Range", range);
+				try {
+					wait(releaseExclusiveReadLockOnRange(cx, range, self->rangeLockOwnerName));
+					if (self->verboseLogging) {
+						TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Unlock").detail("Range", range);
+					}
+				} catch (Error& e) {
+					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "UnlockFailed").detail("Range", range);
+					ASSERT(e.code() == error_code_range_lock_failed);
+					continue; // Do not add the operation to lockRangeOperations.
 				}
 			}
 			self->lockRangeOperations.push_back(LockRangeOperation(range, lock));
@@ -361,7 +373,7 @@ struct RangeLocking : TestWorkload {
 
 	ACTOR Future<std::vector<KeyRange>> getLockedRangesFromDB(Database cx) {
 		state std::vector<KeyRange> res;
-		wait(store(res, getReadLockOnRange(cx, normalKeys)));
+		wait(store(res, getExclusiveReadLockOnRange(cx, normalKeys)));
 		return coalesceRangeList(res);
 	}
 
@@ -507,7 +519,7 @@ struct RangeLocking : TestWorkload {
 			    .detail("Phase", "CheckDBCorrectness");
 			iteration++;
 		}
-		wait(releaseReadLockOnRange(cx, normalKeys, self->rangeLockOwnerName));
+		wait(releaseExclusiveReadLockOnRange(cx, normalKeys, self->rangeLockOwnerName));
 		TraceEvent("RangeLockWorkloadProgress").detail("Phase", "End");
 		return Void();
 	}
