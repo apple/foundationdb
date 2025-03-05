@@ -178,7 +178,7 @@ public:
 
 	void insertIfNotExist(const RangeLockState& inputLock) {
 		ASSERT(inputLock.isValid());
-		if (inputLock.isLockedFor(RangeLockType::ExclusiveReadLock) &&
+		if (inputLock.isLockedFor(RangeLockType::ExclusiveReadLock) && !locks.empty() &&
 		    locks.find(inputLock.getLockUniqueString()) == locks.end()) {
 			throw range_lock_failed();
 		}
