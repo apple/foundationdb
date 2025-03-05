@@ -102,32 +102,36 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		try {
 			Optional<RangeLockOwner> owner = wait(getRangeLockOwner(cx, rangeLockOwnerName));
 			ASSERT(owner.present());
-			ASSERT(owner.get().getUniqueId() == rangeLockOwnerName);
-			wait(takeReadLockOnRange(cx, range, rangeLockOwnerName));
+			ASSERT(owner.get().getOwnerUniqueId() == rangeLockOwnerName);
+			wait(takeExclusiveReadLockOnRange(cx, range, rangeLockOwnerName));
 			TraceEvent(SevWarnAlways, "InjectRangeLocked")
 			    .detail("RangeLockOwnerName", rangeLockOwnerName)
 			    .detail("Range", range)
 			    .detail("LockTime", testDuration);
 			ASSERT(range.end <= normalKeys.end);
 		} catch (Error& e) {
-			if (e.code() != error_code_range_lock_failed) {
-				throw e;
-			} else {
+			if (e.code() == error_code_range_lock_failed) {
 				ASSERT(range.end > normalKeys.end);
+			} else if (e.code() == error_code_range_locked_by_different_user) {
+				// pass
+			} else {
+				throw e;
 			}
 		}
 		wait(delay(testDuration));
 		try {
-			wait(releaseReadLockOnRange(cx, range, rangeLockOwnerName));
+			wait(releaseExclusiveReadLockOnRange(cx, range, rangeLockOwnerName));
 			TraceEvent(SevWarnAlways, "InjectRangeUnlocked")
 			    .detail("RangeLockOwnerName", rangeLockOwnerName)
 			    .detail("Range", range);
 			ASSERT(range.end <= normalKeys.end);
 		} catch (Error& e) {
-			if (e.code() != error_code_range_lock_failed) {
-				throw e;
-			} else {
+			if (e.code() == error_code_range_lock_failed) {
 				ASSERT(range.end > normalKeys.end);
+			} else if (e.code() == error_code_range_locked_by_different_user) {
+				// pass
+			} else {
+				throw e;
 			}
 		}
 		return Void();

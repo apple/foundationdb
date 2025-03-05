@@ -249,30 +249,31 @@ ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToR
 
 // Persist a rangeLock owner to database metadata
 // A range can only be locked by a registered owner
-ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description);
+ACTOR Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);
 
 // Remove an owner form the database metadata
-ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId);
+ACTOR Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
 
 // Get all registered rangeLock owner
 ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
 
-ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId);
+// Get a rangeLock owner by ownerUniqueID
+ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
 
-// Turn off user traffic for bulk load based on range lock
-ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range);
+// Block write traffic to a user range (the input range must be within normalKeys).
+// One transaction can call releaseExclusiveReadLockOnRange at most for one time.
+ACTOR Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
-// Turn on user traffic for bulk load based on range lock
-ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range);
+ACTOR Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
-// Lock a user range (the input range must be within normalKeys)
-ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);
+// Unblock a user range (the input range must be within normalKeys).
+// One transaction can call releaseExclusiveReadLockOnRange at most for one time.
+ACTOR Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
-// Unlock a user range (the input range must be within normalKeys)
-ACTOR Future<Void> releaseReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);
+ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
 // Get locked ranges within the input range (the input range must be within normalKeys)
-ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange range);
+ACTOR Future<std::vector<KeyRange>> getExclusiveReadLockOnRange(Database cx, KeyRange range);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
