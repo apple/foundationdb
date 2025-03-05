@@ -10,17 +10,22 @@ Overview
 ========
 Range Lock is a feature that blocks write traffic to a specific key range in FoundationDB (FDB).
 The locked range must be within the user key space, aka ``"" ~ \xff``.
-If a user/app grabs a lock on a range, other user/app can read the range but cannot write to the range. 
+If a user grabs a lock on a range, other users can read the range but cannot write to the range. 
 A range can have at most one lock by one user. 
+Note that the "user" here is not an user of the database, but an application or a feature that uses the range lock.
+In this document, we use "user" to represent the application or feature that uses the range lock.
 
-Note that the range lock is similar to a "read lock" --- when a user wants to do read, the grabs a read lock which prevents others
-to write to the locked data while the lock does not block the read operation to the data. 
+Comparison with general locking concepts
+----------------------------------------
+The range lock is similar to a "read lock" --- when a user wants to do read, the user grabs a read lock which prevents other users
+to write to the locked data while the lock does not block any read operation from other users. 
 However, the range lock is different from a "read lock". 
 Normally, the read lock is not exclusive. Multiple users can read the same range at the same time. However, in the context of FDB range lock,
-the current read lock is exclusive. We will implement the non-exclusive read lock later on demand.
+the current read lock is exclusive. A range can have at most one lock of a user. 
+We will implement the non-exclusive read lock later on demand.
 
-On the other hand, there is a concept of write lock in the context of FDB range lock --- If a user/app takes a write lock on a range, 
-other user/app cannot do any read nor write. The write lock is exclusive, if a user/app takes the write lock on a range, the range must have not any other lock.
+On the other hand, there is a concept of write lock in the context of FDB range lock --- If a user takes a write lock on a range, 
+other users cannot do any read nor write. The write lock is exclusive, if a user takes the write lock on a range, the range must have not any other lock.
 Currently, we only implemented the read lock. The write lock is currently not implemented. we will implement the write lock later on demand. 
 
 Example use cases
@@ -89,7 +94,7 @@ Users specify ranges to lock in ``\xff/rangeLock/`` system key space via a trans
 The range lock can be only within user key space, aka ``"" ~ \xff``.
 The value within the key space is either empty or a set of locks.
 Note that the design is specific to the exclusive read lock, however the metadata is extensible to the non-exclusive read lock and the write lock.
-If a range has an exclusive read lock, the cluster will block any transaction that writes to the range. 
+If a range has a lock, the cluster will block any transaction that writes to the range. 
 If the range value is empty, the cluster does not reject the traffic as the range is unlocked.
 
 The range lock API issues transactions to update the ``\xff/rangeLock/`` system metadata. 
