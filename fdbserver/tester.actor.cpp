@@ -59,6 +59,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "flow/Platform.h"
 
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 WorkloadContext::WorkloadContext() {}
@@ -966,20 +967,26 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 			} else if (work.title == "ConsistencyCheckUrgent") {
 				// The workload is a consistency checker urgent workload
 				if (work.sharedRandomNumber == consistencyCheckerUrgentTester.first) {
-					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterDuplicatedRequest", interf.id())
+					// A single req can be sent for multiple times. In this case, the sharedRandomNumber is same as
+					// the existing one. For this scenario, we reply an error. This case should be rare.
+					TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterDuplicatedRequest", interf.id())
 					    .detail("ConsistencyCheckerId", work.sharedRandomNumber)
 					    .detail("ClientId", work.clientId)
 					    .detail("ClientCount", work.clientCount);
 					work.reply.sendError(consistency_check_urgent_duplicate_request());
-				} else if (consistencyCheckerUrgentTester.second.isValid() &&
-				           !consistencyCheckerUrgentTester.second.isReady()) {
-					TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_TesterWorkloadConflict", interf.id())
-					    .detail("ExistingConsistencyCheckerId", consistencyCheckerUrgentTester.first)
-					    .detail("ArrivingConsistencyCheckerId", work.sharedRandomNumber)
-					    .detail("ClientId", work.clientId)
-					    .detail("ClientCount", work.clientCount);
-					work.reply.sendError(consistency_check_urgent_conflicting_request());
 				} else {
+					// When the req.sharedRandomNumber is different from the existing one, the cluster has muiltiple
+					// consistencycheckurgent roles at the same time. Evenutally, the cluster will have only one
+					// consistencycheckurgent role in a stable state. So, in this case, we simply let the new request to
+					// overwrite the old request. After the work is destroyed, the broken_promise will be replied.
+					if (consistencyCheckerUrgentTester.second.isValid() &&
+					    !consistencyCheckerUrgentTester.second.isReady()) {
+						TraceEvent(SevWarnAlways, "ConsistencyCheckUrgent_TesterWorkloadConflict", interf.id())
+						    .detail("ExistingConsistencyCheckerId", consistencyCheckerUrgentTester.first)
+						    .detail("ArrivingConsistencyCheckerId", work.sharedRandomNumber)
+						    .detail("ClientId", work.clientId)
+						    .detail("ClientCount", work.clientCount);
+					}
 					consistencyCheckerUrgentTester = std::make_pair(
 					    work.sharedRandomNumber, testerServerConsistencyCheckerUrgentWorkload(work, ccr, dbInfo));
 					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterWorkloadInitialized", interf.id())
