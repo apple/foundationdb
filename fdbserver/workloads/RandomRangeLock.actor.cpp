@@ -110,10 +110,12 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			    .detail("LockTime", testDuration);
 			ASSERT(range.end <= normalKeys.end);
 		} catch (Error& e) {
-			if (e.code() != error_code_range_lock_failed) {
-				throw e;
-			} else {
+			if (e.code() == error_code_range_lock_failed) {
 				ASSERT(range.end > normalKeys.end);
+			} else if (e.code() == error_code_range_locked_by_different_user) {
+				// pass
+			} else {
+				throw e;
 			}
 		}
 		wait(delay(testDuration));
@@ -124,10 +126,12 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			    .detail("Range", range);
 			ASSERT(range.end <= normalKeys.end);
 		} catch (Error& e) {
-			if (e.code() != error_code_range_lock_failed) {
-				throw e;
-			} else {
+			if (e.code() == error_code_range_lock_failed) {
 				ASSERT(range.end > normalKeys.end);
+			} else if (e.code() == error_code_range_locked_by_different_user) {
+				// pass
+			} else {
+				throw e;
 			}
 		}
 		return Void();

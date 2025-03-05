@@ -279,7 +279,7 @@ struct RangeLocking : TestWorkload {
 					}
 				} catch (Error& e) {
 					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "LockFailed").detail("Range", range);
-					ASSERT(e.code() == error_code_range_lock_failed);
+					ASSERT(e.code() == error_code_range_locked_by_different_user);
 					continue; // Do not add the operation to lockRangeOperations.
 				}
 			} else {
@@ -290,7 +290,7 @@ struct RangeLocking : TestWorkload {
 					}
 				} catch (Error& e) {
 					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "UnlockFailed").detail("Range", range);
-					ASSERT(e.code() == error_code_range_lock_failed);
+					ASSERT(e.code() == error_code_range_locked_by_different_user);
 					continue; // Do not add the operation to lockRangeOperations.
 				}
 			}
