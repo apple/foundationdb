@@ -162,6 +162,73 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 	return Void();
 }
 
+TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream_DestroyPromise") {
+	{
+		std::cout << "ThreadReturnPromiseStream with future > 0, promise == 0, end_of_stream sent\n";
+		// After all references to PromiseStream are gone, FutureStream should still be able to get
+		// all the values if PromiseStream had reached end_of_stream.
+		state FutureStream<int> fs1 = ([]() {
+			ThreadReturnPromiseStream<int> p;
+			auto ret = p.getFuture();
+			for (int i = 0; i < 10; i++) {
+				p.send(i);
+			}
+			p.sendError(end_of_stream());
+			ASSERT(p.getFutureReferenceCount() == 1);
+			return ret;
+		})();
+
+		wait(delay(1));
+
+		state int recvd = 0;
+		try {
+			while (true) {
+				int _ = waitNext(fs1);
+				recvd += 1;
+			}
+		} catch (Error& err) {
+			if (err.code() == error_code_end_of_stream) {
+				ASSERT_EQ(recvd, 10);
+			} else {
+				ASSERT(false);
+			}
+		}
+	}
+
+	std::cout << "ThreadReturnPromiseStream with future > 0,  promise == 0, no end_of_stream\n";
+	{
+		// After all references to PromiseStream are gone, but the stream was not ended cleanly
+		// by sending end_of_stream, we should instead get broken_promise.
+		state FutureStream<int> fs2 = ([]() {
+			ThreadReturnPromiseStream<int> p;
+			auto ret = p.getFuture();
+			for (int i = 0; i < 10; i++) {
+				p.send(i);
+			}
+			ASSERT(p.getFutureReferenceCount() == 1);
+			return ret;
+		})();
+
+		wait(delay(1));
+
+		try {
+			while (true) {
+				choose {
+					when(int _ = waitNext(fs2)) {}
+					when(wait(delay(1))) {
+						ASSERT(false); // shouldn't hangup if end_of_stream is not sent.
+						break;
+					}
+				}
+			}
+		} catch (Error& err) {
+			ASSERT(err.code() == error_code_broken_promise);
+		}
+	}
+
+	return Void();
+}
+
 #else
 void forceLinkIThreadPoolTests() {}
 #endif
