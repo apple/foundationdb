@@ -2115,7 +2115,7 @@ ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self
 	state std::string jobRoot = self->bulkDumpJobManager.jobState.getJobRoot();
 	state BulkLoadTransportMethod transportMethod = self->bulkDumpJobManager.jobState.getTransportMethod();
 	// Upload job manifest file
-	std::string content = generateBulkLoadJobManifestFileContent(self->bulkDumpJobManager.jobManifest);
+	state std::string content = generateBulkLoadJobManifestFileContent(self->bulkDumpJobManager.jobManifest);
 	ASSERT(!content.empty() && !self->bulkDumpFolder.empty());
 	state std::string localFolder = getBulkLoadJobRoot(self->bulkDumpFolder, jobId);
 	state std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
