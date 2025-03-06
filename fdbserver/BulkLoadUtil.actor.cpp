@@ -37,70 +37,109 @@
 #include "flow/flow.h"
 
 ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength) {
-	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
-	    path, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0644));
+	try {
+		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+		    abspath(path), IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0644));
 
-	state int64_t fileSize = wait(file->size());
-	if (fileSize > maxLength) {
-		TraceEvent(SevError, "ReadBulkFileBytesTooLarge").detail("FileSize", fileSize).detail("MaxLength", maxLength);
-		throw file_too_large(); // TODO(BulkLoad): handle this unretrievable error
-	}
-
-	state std::string content;
-	state int64_t offset = 0;
-	state int64_t remaining = fileSize;
-	state int64_t chunkSize = 64 * 1024; // 64KB chunks
-
-	content.reserve(fileSize); // Pre-allocate the full size
-
-	while (remaining > 0) {
-		state int64_t bytesToRead = std::min(chunkSize, remaining);
-		state std::string chunk;
-		chunk.resize(bytesToRead);
-
-		state int bytesRead = wait(file->read(&chunk[0], bytesToRead, offset));
-		if (bytesRead != bytesToRead) {
-			TraceEvent(SevError, "ReadBulkFileBytesError")
-			    .detail("BytesRead", bytesRead)
-			    .detail("BytesExpected", bytesToRead);
-			throw io_error(); // TODO(BulkLoad): handle this unretrievable error
+		state int64_t fileSize = wait(file->size());
+		if (fileSize > maxLength) {
+			TraceEvent(SevError, "ReadBulkFileBytesTooLarge")
+			    .detail("FileSize", fileSize)
+			    .detail("MaxLength", maxLength);
+			throw file_too_large();
 		}
 
-		content.append(chunk);
-		offset += bytesRead;
-		remaining -= bytesRead;
-		wait(yield());
+		state std::string content;
+		content.reserve(fileSize); // Pre-allocate the full size
+
+		// For small files (< 1MB), do a single read
+		if (fileSize < 1024 * 1024) {
+			content.resize(fileSize);
+			int bytesRead = wait(file->read(&content[0], fileSize, 0));
+			if (bytesRead != fileSize) {
+				TraceEvent(SevError, "ReadBulkFileBytesError")
+				    .detail("BytesRead", bytesRead)
+				    .detail("BytesExpected", fileSize);
+				throw io_error();
+			}
+		} else {
+			// For large files, read in chunks to avoid memory pressure
+			state int64_t chunkSize = 1024 * 1024; // 1MB chunks
+			state int64_t offset = 0;
+			state int64_t remaining = fileSize;
+
+			while (remaining > 0) {
+				state int64_t bytesToRead = std::min(chunkSize, remaining);
+				state std::string chunk;
+				chunk.resize(bytesToRead);
+
+				state int bytesRead = wait(file->read(&chunk[0], bytesToRead, offset));
+				if (bytesRead != bytesToRead) {
+					TraceEvent(SevError, "ReadBulkFileBytesError")
+					    .detail("BytesRead", bytesRead)
+					    .detail("BytesExpected", bytesToRead);
+					throw io_error();
+				}
+
+				content.append(chunk);
+				offset += bytesRead;
+				remaining -= bytesRead;
+
+				// Yield every 4MB to allow other actors to run
+				if (offset % (4 * 1024 * 1024) == 0) {
+					wait(yield());
+				}
+			}
+		}
+
+		return content;
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "ReadBulkFileBytesError").error(e).detail("Path", path).detail("MaxLength", maxLength);
+		throw;
 	}
-	TraceEvent(SevInfo, "ReadBulkFileBytesComplete")
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("Path", path)
-	    .detail("FileSize", fileSize)
-	    .detail("MaxLength", maxLength);
-	return content;
 }
 
 ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef content) {
-	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
-	    path, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0644));
+	try {
+		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+		    abspath(path),
+		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
+		    0644));
 
-	state int64_t chunkSize = 64 * 1024; // 64KB chunks
-	state int64_t offset = 0;
-	state int64_t remaining = content.size();
+		// For small files (< 1MB), do a single write
+		if (content.size() < 1024 * 1024) {
+			wait(file->write(content.begin(), content.size(), 0));
+		} else {
+			// For large files, write in chunks to avoid memory pressure
+			state int64_t chunkSize = 1024 * 1024; // 1MB chunks
+			state int64_t offset = 0;
+			state int64_t remaining = content.size();
 
-	while (remaining > 0) {
-		state int64_t bytesToWrite = std::min(chunkSize, remaining);
-		wait(file->write(content.begin() + offset, bytesToWrite, offset));
-		offset += bytesToWrite;
-		remaining -= bytesToWrite;
-		wait(yield());
+			while (remaining > 0) {
+				state int64_t bytesToWrite = std::min(chunkSize, remaining);
+				wait(file->write(content.begin() + offset, bytesToWrite, offset));
+				offset += bytesToWrite;
+				remaining -= bytesToWrite;
+
+				// Yield every 4MB to allow other actors to run
+				if (offset % (4 * 1024 * 1024) == 0) {
+					wait(yield());
+				}
+			}
+		}
+
+		// Ensure the file size is correct and data is synced
+		wait(file->truncate(content.size()));
+		wait(file->sync());
+
+		return Void();
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "WriteBulkFileBytesError")
+		    .error(e)
+		    .detail("Path", path)
+		    .detail("ContentSize", content.size());
+		throw;
 	}
-
-	wait(file->truncate(content.size()));
-	wait(file->sync());
-
-	TraceEvent(SevInfo, "WriteBulkFileBytesComplete").detail("Path", path).detail("FileSize", content.size());
-	return Void();
 }
 
 ACTOR Future<Void> copyBulkFile(std::string fromFile, std::string toFile, size_t fileBytesMax) {
