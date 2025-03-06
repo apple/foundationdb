@@ -30,6 +30,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
+#include "flow/Error.h"
 #include "flow/Knobs.h"
 
 #include "fdbrpc/FailureMonitor.h"
@@ -386,6 +387,10 @@ Future<Void> replicaComparison(Req req,
 							}
 						}
 					}
+				}
+
+				if (replicaErrorCode == error_code_wrong_shard_server) {
+					throw Error(replicaErrorCode);
 				}
 			}
 
