@@ -60,7 +60,7 @@ public:
 		ASSERT_WE_THINK(g_network->isOnMainThread());
 		auto promise = std::make_shared<ThreadReturnPromise<grpc::Status>>();
 
-		pool_->post([this, promise, rpc, request, response]() {
+		pool_->post([this, promise, rpc, request, response]() noexcept {
 			grpc::ClientContext context;
 			auto status = (stub_.get()->*rpc)(&context, request, response);
 			if (promise->getFutureReferenceCount() == 0) {
@@ -79,7 +79,7 @@ public:
 		ASSERT_WE_THINK(g_network->isOnMainThread());
 		auto promise = std::make_shared<ThreadReturnPromise<ResponseType>>();
 
-		pool_->post([this, promise, rpc, request]() {
+		pool_->post([this, promise, rpc, request]() noexcept {
 			if (promise->getFutureReferenceCount() == 0) {
 				return;
 			}
@@ -109,13 +109,12 @@ public:
 		ASSERT_WE_THINK(g_network->isOnMainThread());
 		auto promise = std::make_shared<ThreadReturnPromiseStream<ResponseType>>();
 
-		pool_->post([this, promise, rpc, request]() {
+		pool_->post([this, promise, rpc, request]() noexcept {
 			grpc::ClientContext context;
 			ResponseType response;
 			auto reader = (stub_.get()->*rpc)(&context, request);
 			while (reader->Read(&response)) {
 				if (promise->getFutureReferenceCount() == 0) {
-					// std::cout << "Stream cancelled.\n";
 					context.TryCancel();
 					return;
 				}
@@ -127,7 +126,6 @@ public:
 			if (status.ok()) {
 				promise->sendError(end_of_stream());
 			} else {
-				// std::cout << "Error: " << status.error_message() << std::endl;
 				promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
 			}
 		});

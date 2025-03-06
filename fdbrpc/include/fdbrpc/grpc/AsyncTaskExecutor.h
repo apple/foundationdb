@@ -76,7 +76,8 @@ public:
 	// execution. The task must return a non-void type. This function must be called from
 	// main thread.
 	//
-	// Returns a `Future<R>` object representing the return value of task.
+	// Returns a `Future<R>` object representing the return value of task. Exceptions thrown
+	// by task are rethrown as `Error` when caller waits on the Future.
 	template <typename Func>
 	    requires(!IsVoidReturn<Func>)
 	[[nodiscard]] auto post(Func&& task) -> Future<typename std::invoke_result<Func>::type> {
@@ -91,11 +92,11 @@ public:
 	// This function posts a callable task (function, lambda, function) to a thread pool for
 	// execution. Unlike the other overload, this version is intended for tasks that do not return a
 	// result, when the caller does not need the result, or when the caller prefers to use custom
-	// primitives to interact with the underlying task (e.g., streaming).
+	// primitives to interact with the underlying task (e.g., streaming). `task` must be noexcept.
 	//
 	// Returns a `Future<R>` object representing the return value of task.
 	template <typename Func>
-	    requires(IsVoidReturn<Func>)
+	    requires(IsVoidReturn<Func> && std::is_nothrow_invocable_v<Func>)
 	void post(Func&& task) {
 		ASSERT_WE_THINK(g_network->isOnMainThread());
 		auto action = new Action<Func>(std::forward<Func>(task));
@@ -124,7 +125,18 @@ struct AsyncTaskExecutor::Action<Func, typename std::enable_if_t<!IsVoidReturn<F
 	Action(Func&& fn) : fn_(std::forward<Func>(fn)) {}
 
 	void operator()(IThreadPoolReceiver* action) override {
-		promise_.send(fn_());
+		// TODO: Should we abort if there are no future references?
+		//   futures can stil be destoyed after `fn_` is called however.
+		try {
+			promise_.send(fn_());
+		} catch (Error& err) {
+			promise_.sendError(err);
+		} catch (...) {
+			// TODO: Ideally we should propagate it to the caller by creating a custom wrapped Error
+			//       type? Currently, this is the behaviour for rest of the codebase however
+			//       (including C++ coroutines).
+			promise_.sendError(unknown_error());
+		}
 		delete this;
 	}
 
