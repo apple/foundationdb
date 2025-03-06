@@ -96,20 +96,9 @@ func refreshCredentials(ctx context.Context, bucket, region, credFile string, ex
         return fmt.Errorf("failed to get credentials: %v", err)
     }
 
-    // Check if the credentials file exists
-    _, err = os.Stat(credFile)
-    fileExists := !os.IsNotExist(err)
-
-    // Check if credentials are expired or will expire soon
-    if fileExists && !creds.Expires.IsZero() {
-        timeUntilExpiry := time.Until(creds.Expires)
-        if timeUntilExpiry > expiryThreshold {
-            log.Printf("Current credentials valid for %v, skipping refresh", timeUntilExpiry.Round(time.Second))
-            return nil
-        }
-        log.Printf("Credentials expire in %v, refreshing", timeUntilExpiry.Round(time.Second))
-    }
-
+    // Just write the credentials file each time. I was checking the expiry time, but
+    // looking at it and then the blob_credentials.json file, comparing, and then
+    // updating made the script more complicated than it needed to be.
     return writeCredentialsFile(bucket, region, credFile, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken)
 }
 

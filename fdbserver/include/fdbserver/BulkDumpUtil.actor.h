@@ -31,6 +31,12 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// Add this declaration
+ACTOR Future<Void> bulkDumpTransportCP_impl(Reference<BulkLoadFileSet> srcFileSet,
+                                            Reference<BulkLoadFileSet> destFileSet,
+                                            size_t fileBytesMax,
+                                            UID logId);
+
 struct SSBulkDumpTask {
 	SSBulkDumpTask(const StorageServerInterface& targetServer,
 	               const std::vector<UID>& checksumServers,
@@ -87,25 +93,28 @@ std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId);
 // dataVersion should be always valid. dataBytes can be 0 in case of an empty range.
 std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
 
+// Generate key-value data, byte sampling data, and manifest file.
+// Return BulkLoadManifest metadata (equivalent to content of the manifest file).
+// TODO(BulkDump): can cause slow tasks, do the task in a separate thread in the future.
 // The size of sortedData is defined at the place of generating the data (getRangeDataToDump).
 // The size is configured by MOVE_SHARD_KRM_ROW_LIMIT.
-BulkLoadManifest dumpDataFileToLocalDirectory(UID logId,
-                                              const std::map<Key, Value>& sortedData,
-                                              const std::map<Key, Value>& sortedSample,
-                                              const BulkLoadFileSet& localFileSet,
-                                              const BulkLoadFileSet& remoteFileSet,
-                                              const BulkLoadByteSampleSetting& byteSampleSetting,
-                                              Version dumpVersion,
-                                              const KeyRange& dumpRange,
-                                              int64_t dumpBytes,
-                                              int64_t dumpKeyCount,
-                                              BulkLoadType dumpType,
-                                              BulkLoadTransportMethod transportMethod);
+ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
+                                                            std::map<Key, Value> sortedData,
+                                                            std::map<Key, Value> sortedSample,
+                                                            BulkLoadFileSet localFileSet,
+                                                            BulkLoadFileSet remoteFileSet,
+                                                            BulkLoadByteSampleSetting byteSampleSetting,
+                                                            Version dumpVersion,
+                                                            KeyRange dumpRange,
+                                                            int64_t dumpBytes,
+                                                            int64_t dumpKeyCount,
+                                                            BulkLoadType dumpType,
+                                                            BulkLoadTransportMethod transportMethod);
 
-void generateBulkDumpJobManifestFile(const std::string& workFolder,
-                                     const std::string& localJobManifestFilePath,
-                                     const std::string& content,
-                                     const UID& logId);
+ACTOR Future<Void> generateBulkDumpJobManifestFile(std::string workFolder,
+                                                   std::string localJobManifestFilePath,
+                                                   StringRef content,
+                                                   UID logId);
 
 // Upload manifest file for bulkdump job
 // Each job has one manifest file including manifest paths of all tasks.

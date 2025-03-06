@@ -34,6 +34,15 @@ void clearFileFolder(const std::string& folderPath, const UID& logId = UID(), bo
 // Erase and recreate file folder
 void resetFileFolder(const std::string& folderPath);
 
+// Asynchronously copy file from one path to another.
+ACTOR Future<Void> copyBulkFile(std::string fromFile, std::string toFile, size_t fileBytesMax);
+
+// Asynchronously read file bytes from local file.
+ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength);
+
+// Asynchronously write file bytes to local file.
+ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef content);
+
 // Get the bulkLoadTask metadata of the dataMoveMetadata since the atLeastVersion given the dataMoveId
 // This actor is stuck if the actor is failed to read the dataMoveMetadata.
 ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,

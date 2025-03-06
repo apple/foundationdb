@@ -6160,18 +6160,18 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// Write to SST file
 			state KeyRange dataRange = rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey));
 			state BulkLoadManifest manifest =
-			    dumpDataFileToLocalDirectory(data->thisServerID,
-			                                 rangeDumpData.kvs,
-			                                 rangeDumpData.sampled,
-			                                 localFileSetSetting,
-			                                 remoteFileSetSetting,
-			                                 byteSampleSetting,
-			                                 versionToDump,
-			                                 dataRange, // the actual range of the rangeDumpData.kvs
-			                                 rangeDumpData.kvsBytes,
-			                                 rangeDumpData.kvs.size(),
-			                                 dumpType,
-			                                 transportMethod);
+			    wait(dumpDataFileToLocalDirectory(data->thisServerID,
+			                                      rangeDumpData.kvs,
+			                                      rangeDumpData.sampled,
+			                                      localFileSetSetting,
+			                                      remoteFileSetSetting,
+			                                      byteSampleSetting,
+			                                      versionToDump,
+			                                      dataRange, // the actual range of the rangeDumpData.kvs
+			                                      rangeDumpData.kvsBytes,
+			                                      rangeDumpData.kvs.size(),
+			                                      dumpType,
+			                                      transportMethod));
 			readBytes = readBytes + rangeDumpData.kvsBytes;
 			TraceEvent(SevInfo, "SSBulkDumpDataFileGenerated", data->thisServerID)
 			    .setMaxEventLength(-1)
