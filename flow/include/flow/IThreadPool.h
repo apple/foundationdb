@@ -83,6 +83,9 @@ template <class T>
 class ThreadReturnPromise : NonCopyable {
 public:
 	ThreadReturnPromise() {}
+	ThreadReturnPromise(const ThreadReturnPromise& p) = delete;
+	ThreadReturnPromise(ThreadReturnPromise&& other) : promise(std::move(other.promise)) {}
+
 	~ThreadReturnPromise() {
 		if (promise.isValid())
 			sendError(broken_promise());
@@ -121,6 +124,9 @@ template <class T>
 class ThreadReturnPromiseStream : NonCopyable {
 public:
 	ThreadReturnPromiseStream() {}
+	ThreadReturnPromiseStream(const ThreadReturnPromiseStream& p) = delete;
+	ThreadReturnPromiseStream(ThreadReturnPromiseStream&& other) : promiseStream(std::move(other.promiseStream)) {}
+
 	~ThreadReturnPromiseStream() {}
 
 	FutureStream<T> getFuture() { // Call only on the originating thread!
