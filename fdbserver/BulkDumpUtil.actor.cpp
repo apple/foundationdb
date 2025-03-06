@@ -90,10 +90,9 @@ std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version
 	return std::make_pair(fileSetLocal, fileSetRemote);
 }
 
-// Generate SST file given the input sortedKVS to the input filePath
-// TODO(BulkDump): This copy of sortedKVS can be baaaaadddd if data is large. Fix.
-// Tried using a Reference to a map but flow doesn't like that.
-void writeKVSToSSTFile(std::string filePath, std::map<Key, Value> sortedKVS, UID logId) {
+// Generate SST file given the input sortedKVS to the input filePath.
+// TODO(BulkDump): This copy of sortedKVS can be a slow task if data is large.
+void writeKVSToSSTFile(std::string filePath, std::map<Key, Value>& sortedKVS, UID logId) {
 	const std::string absFilePath = abspath(filePath);
 	// Check file
 	if (fileExists(absFilePath)) {
@@ -181,7 +180,8 @@ ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 	                                byteSampleSetting,
 	                                dumpType,
 	                                transportMethod);
-	wait(writeBulkFileBytes(abspath(localFileSet.getManifestFileFullPath()), StringRef(manifest.toString())));
+	state std::string manifestStr = manifest.toString();
+	wait(writeBulkFileBytes(abspath(localFileSet.getManifestFileFullPath()), StringRef(manifestStr)));
 	return manifest;
 }
 

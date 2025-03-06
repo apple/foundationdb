@@ -38,12 +38,12 @@
 
 ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength) {
 	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
-	    path, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0640));
+	    path, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0644));
 
 	state int64_t fileSize = wait(file->size());
 	if (fileSize > maxLength) {
 		TraceEvent(SevError, "ReadBulkFileBytesTooLarge").detail("FileSize", fileSize).detail("MaxLength", maxLength);
-		throw file_too_large();
+		throw file_too_large(); // TODO(BulkLoad): handle this unretrievable error
 	}
 
 	state std::string content;
@@ -63,7 +63,7 @@ ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength)
 			TraceEvent(SevError, "ReadBulkFileBytesError")
 			    .detail("BytesRead", bytesRead)
 			    .detail("BytesExpected", bytesToRead);
-			throw io_error();
+			throw io_error(); // TODO(BulkLoad): handle this unretrievable error
 		}
 
 		content.append(chunk);
@@ -74,18 +74,15 @@ ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength)
 	TraceEvent(SevInfo, "ReadBulkFileBytesComplete")
 	    .setMaxEventLength(-1)
 	    .setMaxFieldLength(-1)
-	    .detail("Content", content)
+	    .detail("Path", path)
 	    .detail("FileSize", fileSize)
 	    .detail("MaxLength", maxLength);
 	return content;
 }
 
 ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef content) {
-	state Reference<IAsyncFile> file = wait(
-	    IAsyncFileSystem::filesystem()->open(path,
-	                                         IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
-	                                             IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_NO_AIO,
-	                                         0644));
+	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+	    path, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0644));
 
 	state int64_t chunkSize = 64 * 1024; // 64KB chunks
 	state int64_t offset = 0;
@@ -102,6 +99,7 @@ ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef content) {
 	wait(file->truncate(content.size()));
 	wait(file->sync());
 
+	TraceEvent(SevInfo, "WriteBulkFileBytesComplete").detail("Path", path).detail("FileSize", content.size());
 	return Void();
 }
 
@@ -411,14 +409,16 @@ getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestF
 	state std::unordered_map<Key, BulkLoadJobFileManifestEntry> res;
 
 	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
-	    abspath(localJobManifestFilePath), IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0666));
+	    abspath(localJobManifestFilePath),
+	    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
+	    0644));
 
 	state int64_t fileSize = wait(file->size());
 	if (fileSize > SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX) {
 		TraceEvent(SevError, "ManifestFileTooBig", logId)
 		    .detail("FileSize", fileSize)
 		    .detail("MaxSize", SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
-		throw file_too_large();
+		throw file_too_large(); // TODO(BulkLoad): handle this unretrievable error
 	}
 
 	state int64_t chunkSize = 64 * 1024; // 64KB chunks
@@ -437,7 +437,7 @@ getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestF
 				TraceEvent(SevError, "ReadFileError", logId)
 				    .detail("BytesRead", bytesRead)
 				    .detail("BytesExpected", bytesToRead);
-				throw io_error();
+				throw io_error(); // TODO(BulkLoad): handle this unretrievable error
 			}
 
 			// Process the chunk line by line
