@@ -18,10 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ClientKnobs.h"
-#include "fdbclient/Knobs.h"
-#include <algorithm>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -29,22 +25,19 @@
 #include <io.h>
 #endif
 
-#include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/BackupTLSConfig.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/S3Client.actor.h"
-#include "fdbclient/BulkLoading.h"
-#include "flow/Platform.h"
-#include "flow/FastRef.h"
-#include "flow/Trace.h"
-#include "flow/flow.h"
-#include "flow/network.h"
-#include <boost/url/url.hpp>
-#include <boost/url/parse.hpp>
-#include "flow/TLSConfig.actor.h"
 #include "flow/IAsyncFile.h"
+#include "flow/Trace.h"
+#include "flow/Traceable.h"
+#include "flow/flow.h"
+#include "flow/xxhash.h"
+#include "flow/Error.h"
 
 #include "flow/actorcompiler.h" // has to be last include
+//
+#define S3_CHECKSUM_TAG_NAME "xxhash64"
+
+typedef XXH64_state_t XXHashState;
 
 // State for a part of a multipart upload.
 struct PartState {
@@ -68,6 +61,32 @@ struct PartConfig {
 	// TODO: Make this settable via knobs.
 	int retryDelayMs = 1000;
 };
+
+// Calculate hash of a file.
+// Uses xxhash library because it's fast (supposedly) and used elsewhere in fdb.
+ACTOR static Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size = -1) {
+	state int64_t pos = 0;
+	state XXH64_state_t* hashState = XXH64_createState();
+	state std::vector<uint8_t> buffer(65536);
+
+	XXH64_reset(hashState, 0);
+
+	if (size == -1) {
+		int64_t s = wait(file->size());
+		size = s;
+	}
+
+	while (pos < size) {
+		int readSize = std::min<int64_t>(buffer.size(), size - pos);
+		int bytesRead = wait(file->read(buffer.data(), readSize, pos));
+		XXH64_update(hashState, buffer.data(), bytesRead);
+		pos += bytesRead;
+	}
+
+	uint64_t hash = XXH64_digest(hashState);
+	XXH64_freeState(hashState);
+	return format("%016llx", hash);
+}
 
 // Get the endpoint for the given s3url.
 // Populates parameters and resource with parse of s3url.
@@ -113,7 +132,7 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
 		return endpoint;
 
 	} catch (Error& e) {
-		TraceEvent(SevError, "S3ClientGetEndpointFailed").error(e).detail("URL", s3url);
+		TraceEvent(SevError, "S3ClientGetEndpointFailed").detail("URL", s3url).detail("Error", e.what());
 		throw;
 	}
 }
@@ -129,7 +148,7 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 	state double startTime = now();
 	state PartState resultPart = part;
 	state UnsentPacketQueue packets;
-	TraceEvent("S3ClientUploadPartStart")
+	TraceEvent(SevDebug, "S3ClientUploadPartStart")
 	    .detail("Bucket", bucket)
 	    .detail("Object", objectName)
 	    .detail("PartNumber", part.partNumber)
@@ -145,7 +164,7 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 
 		resultPart.etag = etag;
 		resultPart.completed = true;
-		TraceEvent("S3ClientUploadPartEnd")
+		TraceEvent(SevDebug, "S3ClientUploadPartEnd")
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
 		    .detail("PartNumber", part.partNumber)
@@ -154,11 +173,11 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 		    .detail("Size", resultPart.size);
 		return resultPart;
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "S3ClientUploadPartError")
-		    .error(e)
+		TraceEvent(SevWarn, "S3ClientUploadPartError")
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
-		    .detail("PartNumber", part.partNumber);
+		    .detail("PartNumber", part.partNumber)
+		    .detail("ErrorCode", e.code());
 		throw;
 	}
 }
@@ -178,19 +197,24 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	state int64_t size = fileSize(filepath);
 
 	try {
-		TraceEvent("S3ClientCopyUpFileStart")
+		TraceEvent(SevInfo, "S3ClientCopyUpFileStart")
 		    .detail("Filepath", filepath)
 		    .detail("Bucket", bucket)
 		    .detail("ObjectName", objectName)
 		    .detail("FileSize", size);
 
+		// Open file once with UNCACHED for both checksum and upload.
+		// TODO: Fix this double read. Check what the sdk does.
+		Reference<IAsyncFile> f = wait(
+		    IAsyncFileSystem::filesystem()->open(filepath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
+		file = f;
+
+		// Calculate checksum using the same file handle
+		state std::string checksum = wait(calculateFileChecksum(file, size));
+
 		// Start multipart upload
 		std::string id = wait(endpoint->beginMultiPartUpload(bucket, objectName));
 		uploadID = id;
-
-		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
-		    filepath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0666));
-		file = f;
 
 		state int64_t offset = 0;
 		state int partNumber = 1;
@@ -254,24 +278,29 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 		parts.clear();
 		partDatas.clear();
 
-		TraceEvent("S3ClientCopyUpFileEnd")
+		// Add the checksum as a tag after successful upload
+		state std::map<std::string, std::string> tags;
+		tags[S3_CHECKSUM_TAG_NAME] = checksum;
+		wait(endpoint->putObjectTags(bucket, objectName, tags));
+
+		TraceEvent(SevInfo, "S3ClientCopyUpFileEnd")
 		    .detail("Bucket", bucket)
 		    .detail("ObjectName", objectName)
 		    .detail("FileSize", size)
 		    .detail("Parts", parts.size())
+		    .detail("Checksum", checksum)
 		    .detail("Duration", now() - startTime);
 
 		return Void();
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "S3ClientCopyUpFileError")
-		    .error(e)
-		    .detail("Bucket", bucket)
-		    .detail("Object", objectName);
 		state Error err = e;
-
+		TraceEvent(SevWarnAlways, "S3ClientCopyUpFileError")
+		    .detail("Filepath", filepath)
+		    .detail("Bucket", bucket)
+		    .detail("ObjectName", objectName)
+		    .detail("Error", err.what());
 		// Close file before abort attempt
 		file = Reference<IAsyncFile>();
-
 		// Attempt to abort the upload but don't wait for it
 		try {
 			wait(endpoint->abortMultiPartUpload(bucket, objectName, uploadID));
@@ -363,7 +392,7 @@ ACTOR static Future<PartState> downloadPartWithRetry(Reference<S3BlobStoreEndpoi
 	state PartState resultPart = part;
 
 	try {
-		TraceEvent("S3ClientDownloadPartStart")
+		TraceEvent(SevDebug, "S3ClientDownloadPartStart")
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
 		    .detail("PartNumber", part.partNumber)
@@ -405,7 +434,7 @@ ACTOR static Future<PartState> downloadPartWithRetry(Reference<S3BlobStoreEndpoi
 		wait(file->write(buffer.data(), bytesRead, resultPart.offset));
 
 		resultPart.completed = true;
-		TraceEvent("S3ClientDownloadPartEnd")
+		TraceEvent(SevDebug, "S3ClientDownloadPartEnd")
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
 		    .detail("PartNumber", part.partNumber)
@@ -414,9 +443,9 @@ ACTOR static Future<PartState> downloadPartWithRetry(Reference<S3BlobStoreEndpoi
 		return resultPart;
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "S3ClientDownloadPartError")
-		    .error(e)
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
+		    .detail("Error", e.what())
 		    .detail("PartNumber", part.partNumber);
 		throw;
 	}
@@ -436,10 +465,11 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 	state int64_t offset = 0;
 	state int partNumber = 1;
 	state int64_t partSize;
-	state Optional<std::string> md5;
+	state std::map<std::string, std::string> tags;
+	state std::string expectedChecksum;
 
 	try {
-		TraceEvent("S3ClientCopyDownFileStart")
+		TraceEvent(SevInfo, "S3ClientCopyDownFileStart")
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
 		    .detail("FilePath", filepath);
@@ -463,8 +493,8 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 		int numParts = (fileSize + config.partSizeBytes - 1) / config.partSizeBytes;
 		parts.reserve(numParts);
 		downloadFutures.reserve(numParts);
-		Reference<IAsyncFile> f = wait(
-		    IAsyncFileSystem::filesystem()->open(filepath, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0644));
+		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
+		    filepath, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED, 0644));
 		file = f;
 		// Pre-allocate file size to avoid fragmentation
 		wait(file->truncate(fileSize));
@@ -498,24 +528,41 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 		// Ensure all data is written to disk
 		wait(file->sync());
 
+		// Get and verify checksum before closing the file
+		std::map<std::string, std::string> t = wait(endpoint->getObjectTags(bucket, objectName));
+		tags = t;
+		auto it = tags.find(S3_CHECKSUM_TAG_NAME);
+		if (it != tags.end()) {
+			expectedChecksum = it->second;
+			if (!expectedChecksum.empty()) {
+				state std::string actualChecksum = wait(calculateFileChecksum(file));
+				if (actualChecksum != expectedChecksum) {
+					TraceEvent(SevWarnAlways, "S3ClientCopyDownFileChecksumMismatch")
+					    .detail("Expected", expectedChecksum)
+					    .detail("Calculated", actualChecksum);
+					throw checksum_failed();
+				}
+			}
+		}
+
 		// Close file properly
 		file = Reference<IAsyncFile>();
 
-		// TODO(Bulkload): Check integrity of downloaded file.
-		TraceEvent("S3ClientCopyDownFileEnd")
+		TraceEvent(SevInfo, "S3ClientCopyDownFileEnd")
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
 		    .detail("FileSize", fileSize)
 		    .detail("Duration", now() - startTime)
+		    .detail("Checksum", expectedChecksum)
 		    .detail("Parts", parts.size());
 
 		return Void();
 	} catch (Error& e) {
 		state Error err = e;
 		TraceEvent(SevWarnAlways, "S3ClientCopyDownFileError")
-		    .error(e)
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
+		    .detail("Error", err.what())
 		    .detail("FilePath", filepath);
 
 		// Clean up the file in case of error
@@ -525,10 +572,11 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 				file = Reference<IAsyncFile>();
 				IAsyncFileSystem::filesystem()->deleteFile(filepath, false);
 			} catch (Error& e) {
-				TraceEvent(SevWarnAlways, "S3ClientCopyDownFileCleanupError").error(e).detail("FilePath", filepath);
+				TraceEvent(SevWarnAlways, "S3ClientCopyDownFileCleanupError")
+				    .detail("FilePath", filepath)
+				    .detail("Error", e.what());
 			}
 		}
-
 		throw err;
 	}
 }
@@ -548,7 +596,7 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 	state std::string bucket = parameters["bucket"];
 	S3BlobStoreEndpoint::ListResult items = wait(endpoint->listObjects(bucket, resource));
 	state std::vector<S3BlobStoreEndpoint::ObjectInfo> objects = items.objects;
-	TraceEvent("S3ClientDownDirecotryStart")
+	TraceEvent("S3ClientDownDirectoryStart")
 	    .detail("Filecount", objects.size())
 	    .detail("Bucket", bucket)
 	    .detail("Resource", resource);
