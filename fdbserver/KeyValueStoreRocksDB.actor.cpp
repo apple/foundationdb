@@ -94,6 +94,25 @@ rocksdb::WALRecoveryMode getWalRecoveryMode() {
 		return rocksdb::WALRecoveryMode::kPointInTimeRecovery;
 	}
 }
+
+rocksdb::CompactionPri getCompactionPriority() {
+	switch (SERVER_KNOBS->ROCKSDB_COMPACTION_PRI) {
+	case 0:
+		return rocksdb::CompactionPri::kByCompensatedSize;
+	case 1:
+		return rocksdb::CompactionPri::kOldestLargestSeqFirst;
+	case 2:
+		return rocksdb::CompactionPri::kOldestSmallestSeqFirst;
+	case 3:
+		return rocksdb::CompactionPri::kMinOverlappingRatio;
+	case 4:
+		return rocksdb::CompactionPri::kRoundRobin;
+	default:
+		TraceEvent(SevWarn, "InvalidCompactionPriority").detail("KnobValue", SERVER_KNOBS->ROCKSDB_COMPACTION_PRI);
+		return rocksdb::CompactionPri::kMinOverlappingRatio;
+	}
+}
+
 class SharedRocksDBState {
 public:
 	SharedRocksDBState(UID id);
@@ -139,18 +158,19 @@ rocksdb::FlushOptions SharedRocksDBState::initialFlushOptions() {
 rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	rocksdb::ColumnFamilyOptions options;
 	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
-	if (SERVER_KNOBS->ROCKSDB_LEVEL_STYLE_COMPACTION) {
-		options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
-	} else {
-		options.OptimizeUniversalStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
-	}
+	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
 
 	if (SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS) {
 		options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
 	}
-
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+	}
+	if (SERVER_KNOBS->ROCKSDB_TTL_COMPACTION_SECONDS > 0) {
+		options.ttl = SERVER_KNOBS->ROCKSDB_TTL_COMPACTION_SECONDS;
+	}
+	if (SERVER_KNOBS->ROCKSDB_MAX_COMPACTION_BYTES > 0) {
+		options.max_compaction_bytes = SERVER_KNOBS->ROCKSDB_MAX_COMPACTION_BYTES;
 	}
 	if (SERVER_KNOBS->ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
 		options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT;
@@ -239,6 +259,8 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
+
+	options.compaction_pri = getCompactionPriority();
 
 	return options;
 }
