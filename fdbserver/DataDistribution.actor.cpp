@@ -42,6 +42,7 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/TLogInterface.h"
@@ -2117,6 +2118,45 @@ ACTOR Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 	return true;
 }
 
+// Generate the bulkload job manifest file. Here is an example.
+// Assuming the job manifest file is in the folder: "/tmp".
+// Row 0: [FormatVersion]: 1, [ManifestCount]: 3;
+// Row 1: "", "01", 100, 9000, "range1", "manifest1.txt"
+// Row 2: "01", "02 ff", 200, 0, "range2", "manifest2.txt"
+// Row 3: "02 ff", "ff", 300, 8100, "range3", "manifest3.txt"
+// In this example, the job manifest file is in the format of version 1.
+// The file contains three ranges: "" ~ "\x01", "\x01" ~ "\x02\xff", and "\x02\xff" ~ "\xff".
+// For the first range, the data version is at 100, the data size is 9KB, the manifest file path is
+// "/tmp/range1/manifest1.txt". For the second range, the data version is at 200, the data size is 0 indicating this is
+// an empty range. The manifest file path is "/tmp/range2/manifest2.txt". For the third range, the data version is at
+// 300, the data size is 8.1KB, the manifest file path is "/tmp/range1/manifest3.txt".
+ACTOR Future<Void> generateLocalBulkDumpJobManifestFile(Reference<DataDistributor> self,
+                                                        std::string workFolder,
+                                                        std::string localJobManifestFilePath) {
+	state uint64_t counter = 0;
+	state std::string content;
+	content.append(
+	    BulkLoadJobManifestFileHeader(bulkLoadManifestFormatVersion, self->bulkDumpJobManager.jobManifest.size())
+	        .toString());
+	content.append(bulkLoadJobManifestLineTerminator);
+	state std::map<Key, BulkLoadManifest>::iterator iter = self->bulkDumpJobManager.jobManifest.begin();
+	for (; iter != self->bulkDumpJobManager.jobManifest.end(); iter++) {
+		content.append(BulkLoadJobFileManifestEntry(iter->second).toString());
+		content.append(bulkLoadJobManifestLineTerminator);
+		counter++;
+		if (counter % SERVER_KNOBS->DD_BULKDUMP_BUILD_JOB_MANIFEST_BATCH_SIZE) {
+			wait(yield());
+		}
+	}
+	ASSERT(!content.empty());
+	resetFileFolder(workFolder);
+	wait(writeBulkFileBytes(localJobManifestFilePath, StringRef(content)));
+	TraceEvent(SevInfo, "GenerateBulkDumpJobManifestWriteLocal", self->ddId)
+	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+	    .detail("ContentSize", content.size());
+	return Void();
+}
+
 ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self) {
 	if (self->folder.empty()) {
 		return Void();
@@ -2125,13 +2165,12 @@ ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self
 	state std::string jobRoot = self->bulkDumpJobManager.jobState.getJobRoot();
 	state BulkLoadTransportMethod transportMethod = self->bulkDumpJobManager.jobState.getTransportMethod();
 	// Upload job manifest file
-	state std::string content = generateBulkLoadJobManifestFileContent(self->bulkDumpJobManager.jobManifest);
-	ASSERT(!content.empty() && !self->bulkDumpFolder.empty());
+	ASSERT(!self->bulkDumpFolder.empty());
 	state std::string localFolder = getBulkLoadJobRoot(self->bulkDumpFolder, jobId);
 	state std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
 	state std::string jobManifestFileName = getBulkLoadJobManifestFileName();
 	state std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
-	wait(generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, StringRef(content), self->ddId));
+	wait(generateLocalBulkDumpJobManifestFile(self, localFolder, localJobManifestFilePath));
 	wait(uploadBulkDumpJobManifestFile(
 	    transportMethod, localJobManifestFilePath, remoteFolder, jobManifestFileName, self->ddId));
 	clearFileFolder(localFolder, self->ddId, /*ignoreError=*/true); // best effort to clear the local folder

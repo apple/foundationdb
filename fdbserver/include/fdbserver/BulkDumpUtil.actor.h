@@ -115,11 +115,6 @@ ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
                                                             BulkLoadType dumpType,
                                                             BulkLoadTransportMethod transportMethod);
 
-ACTOR Future<Void> generateBulkDumpJobManifestFile(std::string workFolder,
-                                                   std::string localJobManifestFilePath,
-                                                   StringRef content,
-                                                   UID logId);
-
 // Upload manifest file for bulkdump job
 // Each job has one manifest file including manifest paths of all tasks.
 // The local file path:	<localRootLocal>/<jobId>-manifest.txt

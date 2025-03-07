@@ -265,18 +265,6 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod
 	return Void();
 }
 
-ACTOR Future<Void> generateBulkDumpJobManifestFile(std::string workFolder,
-                                                   std::string localJobManifestFilePath,
-                                                   StringRef content,
-                                                   UID logId) {
-	resetFileFolder(workFolder);
-	wait(writeBulkFileBytes(localJobManifestFilePath, content));
-	TraceEvent(SevInfo, "GenerateBulkDumpJobManifestWriteLocal", logId)
-	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-	    .detail("Content", content);
-	return Void();
-}
-
 ACTOR Future<Void> uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transportMethod,
                                                  std::string localJobManifestFilePath,
                                                  std::string remoteFolder,

@@ -481,7 +481,7 @@ getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestF
 			state size_t pos = 0;
 			state size_t lineStart = 0;
 
-			while ((pos = chunk.find('\n', lineStart)) != std::string::npos) {
+			while ((pos = chunk.find(bulkLoadJobManifestLineTerminator, lineStart)) != std::string::npos) {
 				state std::string line = chunk.substr(lineStart, pos - lineStart);
 				if (!line.empty()) {
 					if (!headerProcessed) {
