@@ -889,7 +889,7 @@ struct SSBulkLoadMetadata {
 public:
 	constexpr static FileIdentifier file_identifier = 1384506;
 
-	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false){};
+	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false) {};
 
 	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId) {
 		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
@@ -937,6 +937,10 @@ std::string generateEmptyManifestFileName();
 // Define human readable BulkLoad job manifest content in the following format:
 // Head: Manifest count: <count>, Root: <root>
 // Rows: BeginKey, EndKey, Version, Bytes, ManifestPath
+// The content based on job's all BulkLoadManifest.
+// Each row is a range sorted by the beginKey. Any two ranges do not have overlapping.
+// dataVersion should be always valid. dataBytes can be 0 in case of an empty range.
+// TODO(Zhe): big task
 std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
 
 // Return path.

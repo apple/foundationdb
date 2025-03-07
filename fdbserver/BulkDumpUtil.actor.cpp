@@ -34,6 +34,7 @@
 #include "flow/Trace.h"
 #include "fdbclient/S3Client.actor.h" // include the header for S3Client
 #include "flow/flow.h"
+#include <memory>
 #include <string>
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -119,18 +120,13 @@ void writeKVSToSSTFile(std::string filePath, std::map<Key, Value>& sortedKVS, UI
 	return;
 }
 
-// TODO(BulkDump): This copy of sortedData and sortedSample can be baaaaadddd if data is large. Fix.
-// Tried using a Reference to a map but flow doesn't like that.
 ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
-                                                            std::map<Key, Value> sortedData,
-                                                            std::map<Key, Value> sortedSample,
+                                                            std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
                                                             BulkLoadFileSet localFileSet,
                                                             BulkLoadFileSet remoteFileSet,
                                                             BulkLoadByteSampleSetting byteSampleSetting,
                                                             Version dumpVersion,
                                                             KeyRange dumpRange,
-                                                            int64_t dumpBytes,
-                                                            int64_t dumpKeyCount,
                                                             BulkLoadType dumpType,
                                                             BulkLoadTransportMethod transportMethod) {
 	// Step 1: Clean up local folder
@@ -138,20 +134,18 @@ ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 
 	// Step 2: Dump data to file
 	bool containDataFile = false;
-	if (sortedData.size() > 0) {
-		// TODO(BulkDump): This copy of sortedData can be baaaaadddd if data is large. Fix.
-		writeKVSToSSTFile(abspath(localFileSet.getDataFileFullPath()), sortedData, logId);
+	if (rangeDumpRawData->kvs.size() > 0) {
+		writeKVSToSSTFile(abspath(localFileSet.getDataFileFullPath()), rangeDumpRawData->kvs, logId);
 		containDataFile = true;
 	} else {
-		ASSERT(sortedSample.empty());
+		ASSERT(rangeDumpRawData->sampled.empty());
 		containDataFile = false;
 	}
 
 	// Step 3: Dump sample to file
 	bool containByteSampleFile = false;
-	if (sortedSample.size() > 0) {
-		// TODO(BulkDump): This copy of sortedSample can be baaaaadddd if data is large. Fix.
-		writeKVSToSSTFile(abspath(localFileSet.getBytesSampleFileFullPath()), sortedSample, logId);
+	if (rangeDumpRawData->sampled.size() > 0) {
+		writeKVSToSSTFile(abspath(localFileSet.getBytesSampleFileFullPath()), rangeDumpRawData->sampled, logId);
 		containByteSampleFile = true;
 	} else {
 		containByteSampleFile = false;
@@ -175,8 +169,8 @@ ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 	                                dumpRange.begin,
 	                                dumpRange.end,
 	                                dumpVersion,
-	                                dumpBytes,
-	                                dumpKeyCount,
+	                                rangeDumpRawData->kvsBytes,
+	                                rangeDumpRawData->kvs.size(),
 	                                byteSampleSetting,
 	                                dumpType,
 	                                transportMethod);

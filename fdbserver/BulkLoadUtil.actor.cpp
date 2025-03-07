@@ -34,9 +34,8 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
-#include "flow/flow.h"
 
-ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength) {
+ACTOR UNCANCELLABLE Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength) {
 	try {
 		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
 		    abspath(path), IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0644));
@@ -91,7 +90,6 @@ ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength)
 				}
 			}
 		}
-
 		return content;
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "ReadBulkFileBytesError").error(e).detail("Path", path).detail("MaxLength", maxLength);
@@ -99,13 +97,12 @@ ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength)
 	}
 }
 
-ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef content) {
+ACTOR UNCANCELLABLE Future<Void> writeBulkFileBytes(std::string path, StringRef content) {
 	try {
 		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
 		    abspath(path),
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
 		    0644));
-
 		// For small files (< 1MB), do a single write
 		if (content.size() < 1024 * 1024) {
 			wait(file->write(content.begin(), content.size(), 0));
