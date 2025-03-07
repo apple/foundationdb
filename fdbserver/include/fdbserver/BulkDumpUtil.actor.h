@@ -44,12 +44,6 @@ struct RangeDumpRawData {
 	  : kvs(kvs), sampled(sampled), lastKey(lastKey), kvsBytes(kvsBytes) {}
 };
 
-// Add this declaration
-ACTOR Future<Void> bulkDumpTransportCP_impl(Reference<BulkLoadFileSet> srcFileSet,
-                                            Reference<BulkLoadFileSet> destFileSet,
-                                            size_t fileBytesMax,
-                                            UID logId);
-
 struct SSBulkDumpTask {
 	SSBulkDumpTask(const StorageServerInterface& targetServer,
 	               const std::vector<UID>& checksumServers,
