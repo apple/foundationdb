@@ -700,7 +700,7 @@ struct BulkLoading : TestWorkload {
 		ASSERT(self->checkSame(self, kvs, dbkvs));
 
 		// Clear all range lock
-		wait(releaseReadLockOnRange(cx, normalKeys, "BulkLoad"));
+		wait(releaseExclusiveReadLockOnRange(cx, normalKeys, "BulkLoad"));
 
 		// Clear metadata
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
@@ -756,6 +756,8 @@ struct BulkLoading : TestWorkload {
 			}
 		}
 
+		wait(registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad));
+
 		// Run test
 		if (deterministicRandom()->coinflip()) {
 			// Inject data to three non-overlapping ranges
@@ -765,6 +767,9 @@ struct BulkLoading : TestWorkload {
 			wait(self->complexTest(self, cx));
 		}
 		// self->produceLargeData(self, cx); // Produce data set that is used in loop back cluster test
+
+		wait(removeRangeLockOwner(cx, rangeLockNameForBulkLoad));
+
 		return Void();
 	}
 };
