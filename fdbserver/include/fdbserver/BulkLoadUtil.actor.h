@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <memory>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BULKLOADUTIL_ACTOR_G_H)
 #define FDBSERVER_BULKLOADUTIL_ACTOR_G_H
 #include "fdbserver/BulkLoadUtil.actor.g.h"
@@ -38,7 +39,7 @@ void resetFileFolder(const std::string& folderPath);
 ACTOR Future<Void> copyBulkFile(std::string fromFile, std::string toFile, size_t fileBytesMax);
 
 // Asynchronously read file bytes from local file.
-ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength);
+ACTOR Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::shared_ptr<std::string> output);
 
 // Asynchronously write file bytes to local file.
 ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef content);

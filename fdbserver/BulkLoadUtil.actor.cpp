@@ -28,6 +28,7 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include <cstddef>
 #include <fmt/format.h>
+#include <memory>
 #include "flow/Error.h"
 #include "flow/IAsyncFile.h"
 #include "flow/IRandom.h"
@@ -35,8 +36,11 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR UNCANCELLABLE Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength) {
+ACTOR UNCANCELLABLE Future<Void> readBulkFileBytes(std::string path,
+                                                   int64_t maxLength,
+                                                   std::shared_ptr<std::string> output) {
 	try {
+		output->clear();
 		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
 		    abspath(path), IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0644));
 
@@ -48,13 +52,12 @@ ACTOR UNCANCELLABLE Future<std::string> readBulkFileBytes(std::string path, int6
 			throw file_too_large();
 		}
 
-		state std::string content;
-		content.reserve(fileSize); // Pre-allocate the full size
+		output->reserve(fileSize); // Pre-allocate the full size
 
 		// For small files (< 1MB), do a single read
 		if (fileSize < 1024 * 1024) {
-			content.resize(fileSize);
-			int bytesRead = wait(file->read(&content[0], fileSize, 0));
+			output->resize(fileSize);
+			int bytesRead = wait(file->read(output->data(), fileSize, 0));
 			if (bytesRead != fileSize) {
 				TraceEvent(SevError, "ReadBulkFileBytesError")
 				    .detail("BytesRead", bytesRead)
@@ -80,7 +83,7 @@ ACTOR UNCANCELLABLE Future<std::string> readBulkFileBytes(std::string path, int6
 					throw io_error();
 				}
 
-				content.append(chunk);
+				output->append(chunk);
 				offset += bytesRead;
 				remaining -= bytesRead;
 
@@ -90,7 +93,7 @@ ACTOR UNCANCELLABLE Future<std::string> readBulkFileBytes(std::string path, int6
 				}
 			}
 		}
-		return content;
+		return Void();
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "ReadBulkFileBytesError").error(e).detail("Path", path).detail("MaxLength", maxLength);
 		throw;
@@ -140,8 +143,9 @@ ACTOR UNCANCELLABLE Future<Void> writeBulkFileBytes(std::string path, StringRef 
 }
 
 ACTOR Future<Void> copyBulkFile(std::string fromFile, std::string toFile, size_t fileBytesMax) {
-	state std::string content = wait(readBulkFileBytes(abspath(fromFile), fileBytesMax));
-	wait(writeBulkFileBytes(toFile, StringRef(content)));
+	state std::shared_ptr<std::string> content = std::make_shared<std::string>();
+	wait(readBulkFileBytes(abspath(fromFile), fileBytesMax, /*output=*/content));
+	wait(writeBulkFileBytes(toFile, StringRef(reinterpret_cast<const uint8_t*>(content->data()), content->size())));
 	return Void();
 }
 
@@ -547,8 +551,8 @@ ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobF
 	    joinPath(manifestLocalTempFolder,
 	             deterministicRandom()->randomUniqueID().toString() + "-" + basename(getPath(remoteManifestFilePath)));
 	wait(downloadManifestFile(transportMethod, remoteManifestFilePath, localManifestFilePath, logId));
-	std::string manifestRawString =
-	    wait(readBulkFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX));
-	ASSERT(!manifestRawString.empty());
-	return BulkLoadManifest(manifestRawString);
+	state std::shared_ptr<std::string> manifestRawString = std::make_shared<std::string>();
+	wait(readBulkFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, manifestRawString));
+	ASSERT(!manifestRawString->empty());
+	return BulkLoadManifest(*manifestRawString);
 }
