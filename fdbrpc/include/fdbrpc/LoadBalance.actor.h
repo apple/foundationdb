@@ -30,6 +30,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
+#include "flow/Error.h"
 #include "flow/Knobs.h"
 
 #include "fdbrpc/FailureMonitor.h"
@@ -386,6 +387,12 @@ Future<Void> replicaComparison(Req req,
 							}
 						}
 					}
+				}
+
+				// We must always propagate wrong_shard_server to the caller because it is signal to
+				// perform critical operations like invalidating the shard mapping cache.
+				if (replicaErrorCode == error_code_wrong_shard_server) {
+					throw wrong_shard_server();
 				}
 			}
 
