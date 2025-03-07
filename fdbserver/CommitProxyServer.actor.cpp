@@ -813,6 +813,7 @@ inline bool shouldBackup(MutationRef const& m) {
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 	std::set<Tag> transactionTags;
 	std::vector<Tag> cacheVector = { cacheTag };
+	lastShardMove = pProxyCommitData->lastShardMove;
 	if (pProxyCommitData->txnStateStore->getReplaceContent()) {
 		// return empty set if txnStateStore will snapshot.
 		// empty sets are sent to all logs.
@@ -865,7 +866,6 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 		toCommit.storeRandomRouterTag();
 		transactionTags.insert(toCommit.savedRandomRouterTag.get());
 	}
-	lastShardMove = pProxyCommitData->lastShardMove;
 
 	return transactionTags;
 }
@@ -1784,6 +1784,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			// TraceEvent("ResolverReturn").detail("ReturnTags",reply.writtenTags).detail("TPCVsize",reply.tpcvMap.size()).detail("ReqTags",self->writtenTagsPreResolution);
 			self->tpcvMap = reply.tpcvMap;
+			self->pProxyCommitData->lastShardMove = reply.lastShardMove;
 
 			// extract push locations from tpcv
 			std::vector<int> fromLocations;

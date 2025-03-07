@@ -81,18 +81,18 @@ public:
 	                                              Version firstUnseenVersion,
 	                                              Version commitVersion,
 	                                              bool initialShardChanged) {
-		bool shardChangedOrStateTxn = initialShardChanged;
+		bool shardChanged = initialShardChanged;
 		auto stateTransactionItr = recentStateTransactions.lower_bound(firstUnseenVersion);
 		auto endItr = recentStateTransactions.lower_bound(commitVersion);
 		// Resolver only sends back prior state txns back, because the proxy
 		// sends this request has them and will apply them via applyMetadataToCommittedTransactions();
 		// and other proxies will get this version's state txns as a prior version.
 		for (; stateTransactionItr != endItr; ++stateTransactionItr) {
-			shardChangedOrStateTxn = shardChangedOrStateTxn || stateTransactionItr->value.first;
+			shardChanged = shardChanged || stateTransactionItr->value.first;
 			reply->stateMutations.push_back(reply->arena, stateTransactionItr->value.second);
 			reply->arena.dependsOn(stateTransactionItr->value.second.arena());
 		}
-		return shardChangedOrStateTxn;
+		return shardChanged;
 	}
 
 	bool empty() const { return recentStateTransactionSizes.empty(); }
@@ -433,7 +433,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		// If shardChanged at or before this commit version, the proxy may have computed
 		// the wrong set of groups. Then we need to broadcast to all groups below.
 		stateTransactionsPair.first = toCommit && toCommit->isShardChanged();
-		bool shardChangedOrStateTxn = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
+		bool shardChanged = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
 		    &reply, firstUnseenVersion, req.version, toCommit && toCommit->isShardChanged());
 
 		// Adds private mutation messages to the reply message.
@@ -485,12 +485,12 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
-				if (req.lastShardMove < self->lastShardMove || shardChangedOrStateTxn ||
-				    req.txnStateTransactions.size() || !req.writtenTags.size()) {
+				if (req.lastShardMove < self->lastShardMove || shardChanged || req.txnStateTransactions.size() ||
+				    !req.writtenTags.size()) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
 					}
-					if (shardChangedOrStateTxn) {
+					if (shardChanged) {
 						self->lastShardMove = req.version;
 					}
 				} else {
@@ -504,6 +504,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 					self->tpcvVector[tLog] = req.version;
 				}
 			}
+			reply.lastShardMove = self->lastShardMove;
 		}
 		self->version.set(req.version);
 		bool breachedLimit = self->totalStateBytes.get() <= SERVER_KNOBS->RESOLVER_STATE_MEMORY_LIMIT &&
