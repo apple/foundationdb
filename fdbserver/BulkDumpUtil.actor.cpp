@@ -165,18 +165,19 @@ ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 	                              containDataFile ? remoteFileSet.getDataFileName() : std::string(),
 	                              containByteSampleFile ? remoteFileSet.getByteSampleFileName() : std::string(),
 	                              BulkLoadChecksum());
-	state BulkLoadManifest manifest(fileSetRemote,
-	                                dumpRange.begin,
-	                                dumpRange.end,
-	                                dumpVersion,
-	                                rangeDumpRawData->kvsBytes,
-	                                rangeDumpRawData->kvs.size(),
-	                                byteSampleSetting,
-	                                dumpType,
-	                                transportMethod);
-	state std::string manifestStr = manifest.toString();
-	wait(writeBulkFileBytes(abspath(localFileSet.getManifestFileFullPath()), StringRef(manifestStr)));
-	return manifest;
+	state BulkLoadManifest manifestMetadata(fileSetRemote,
+	                                        dumpRange.begin,
+	                                        dumpRange.end,
+	                                        dumpVersion,
+	                                        rangeDumpRawData->kvsBytes,
+	                                        rangeDumpRawData->kvs.size(),
+	                                        byteSampleSetting,
+	                                        dumpType,
+	                                        transportMethod);
+	state std::string manifestStr = manifestMetadata.toString();
+	state std::shared_ptr<std::string> manifest = std::make_shared<std::string>(std::move(manifestStr));
+	wait(writeBulkFileBytes(abspath(localFileSet.getManifestFileFullPath()), manifest));
+	return manifestMetadata;
 }
 
 // Validate the invariant of filenames. Source is the file stored locally. Destination is the file going to move to.

@@ -42,7 +42,7 @@ ACTOR Future<Void> copyBulkFile(std::string fromFile, std::string toFile, size_t
 ACTOR Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::shared_ptr<std::string> output);
 
 // Asynchronously write file bytes to local file.
-ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef content);
+ACTOR Future<Void> writeBulkFileBytes(std::string path, std::shared_ptr<std::string> content);
 
 // Get the bulkLoadTask metadata of the dataMoveMetadata since the atLeastVersion given the dataMoveId
 // This actor is stuck if the actor is failed to read the dataMoveMetadata.

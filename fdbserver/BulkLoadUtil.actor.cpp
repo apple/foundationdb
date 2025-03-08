@@ -100,24 +100,24 @@ ACTOR UNCANCELLABLE Future<Void> readBulkFileBytes(std::string path,
 	}
 }
 
-ACTOR UNCANCELLABLE Future<Void> writeBulkFileBytes(std::string path, StringRef content) {
+ACTOR UNCANCELLABLE Future<Void> writeBulkFileBytes(std::string path, std::shared_ptr<std::string> content) {
 	try {
 		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
 		    abspath(path),
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
 		    0644));
 		// For small files (< 1MB), do a single write
-		if (content.size() < 1024 * 1024) {
-			wait(file->write(content.begin(), content.size(), 0));
+		if (content->size() < 1024 * 1024) {
+			wait(file->write(content->data(), content->size(), 0));
 		} else {
 			// For large files, write in chunks to avoid memory pressure
 			state int64_t chunkSize = 1024 * 1024; // 1MB chunks
 			state int64_t offset = 0;
-			state int64_t remaining = content.size();
+			state int64_t remaining = content->size();
 
 			while (remaining > 0) {
 				state int64_t bytesToWrite = std::min(chunkSize, remaining);
-				wait(file->write(content.begin() + offset, bytesToWrite, offset));
+				wait(file->write(content->data() + offset, bytesToWrite, offset));
 				offset += bytesToWrite;
 				remaining -= bytesToWrite;
 
@@ -129,7 +129,7 @@ ACTOR UNCANCELLABLE Future<Void> writeBulkFileBytes(std::string path, StringRef 
 		}
 
 		// Ensure the file size is correct and data is synced
-		wait(file->truncate(content.size()));
+		wait(file->truncate(content->size()));
 		wait(file->sync());
 
 		return Void();
@@ -137,7 +137,7 @@ ACTOR UNCANCELLABLE Future<Void> writeBulkFileBytes(std::string path, StringRef 
 		TraceEvent(SevWarn, "WriteBulkFileBytesError")
 		    .error(e)
 		    .detail("Path", path)
-		    .detail("ContentSize", content.size());
+		    .detail("ContentSize", content->size());
 		throw;
 	}
 }
@@ -145,7 +145,7 @@ ACTOR UNCANCELLABLE Future<Void> writeBulkFileBytes(std::string path, StringRef 
 ACTOR Future<Void> copyBulkFile(std::string fromFile, std::string toFile, size_t fileBytesMax) {
 	state std::shared_ptr<std::string> content = std::make_shared<std::string>();
 	wait(readBulkFileBytes(abspath(fromFile), fileBytesMax, /*output=*/content));
-	wait(writeBulkFileBytes(toFile, StringRef(reinterpret_cast<const uint8_t*>(content->data()), content->size())));
+	wait(writeBulkFileBytes(toFile, content));
 	return Void();
 }
 
