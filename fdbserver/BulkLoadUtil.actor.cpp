@@ -28,11 +28,14 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include <cstddef>
 #include <fmt/format.h>
+#include <memory>
+#include "flow/Coroutines.h"
 #include "flow/Error.h"
 #include "flow/IAsyncFile.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
+#include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength) {
@@ -48,13 +51,13 @@ ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength)
 			throw file_too_large();
 		}
 
-		state std::string content;
-		content.reserve(fileSize); // Pre-allocate the full size
+		state std::shared_ptr<std::string> content = std::make_shared<std::string>();
+		content->reserve(fileSize); // Pre-allocate the full size
 
 		// For small files (< 1MB), do a single read
 		if (fileSize < 1024 * 1024) {
-			content.resize(fileSize);
-			int bytesRead = wait(file->read(&content[0], fileSize, 0));
+			content->resize(fileSize);
+			int bytesRead = wait(uncancellable(holdWhile(content, file->read(content->data(), fileSize, 0))));
 			if (bytesRead != fileSize) {
 				TraceEvent(SevError, "ReadBulkFileBytesError")
 				    .detail("BytesRead", bytesRead)
@@ -69,10 +72,11 @@ ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength)
 
 			while (remaining > 0) {
 				state int64_t bytesToRead = std::min(chunkSize, remaining);
-				state std::string chunk;
-				chunk.resize(bytesToRead);
+				state std::shared_ptr<std::string> chunk = std::make_shared<std::string>();
+				chunk->resize(bytesToRead);
 
-				state int bytesRead = wait(file->read(&chunk[0], bytesToRead, offset));
+				state int bytesRead =
+				    wait(uncancellable(holdWhile(chunk, file->read(chunk->data(), bytesToRead, offset))));
 				if (bytesRead != bytesToRead) {
 					TraceEvent(SevError, "ReadBulkFileBytesError")
 					    .detail("BytesRead", bytesRead)
@@ -80,7 +84,7 @@ ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength)
 					throw io_error();
 				}
 
-				content.append(chunk);
+				content->append(*chunk);
 				offset += bytesRead;
 				remaining -= bytesRead;
 
@@ -91,32 +95,34 @@ ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength)
 			}
 		}
 
-		return content;
+		return *content;
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "ReadBulkFileBytesError").error(e).detail("Path", path).detail("MaxLength", maxLength);
 		throw;
 	}
 }
 
-ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef content) {
+ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef contentIn) {
 	try {
+		state std::string contentString = contentIn.toString();
+		state std::shared_ptr<std::string> content = std::make_shared<std::string>(std::move(contentString));
 		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
 		    abspath(path),
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
 		    0644));
 
 		// For small files (< 1MB), do a single write
-		if (content.size() < 1024 * 1024) {
-			wait(file->write(content.begin(), content.size(), 0));
+		if (content->size() < 1024 * 1024) {
+			wait(uncancellable(holdWhile(content, file->write(content->data(), content->size(), 0))));
 		} else {
 			// For large files, write in chunks to avoid memory pressure
 			state int64_t chunkSize = 1024 * 1024; // 1MB chunks
 			state int64_t offset = 0;
-			state int64_t remaining = content.size();
+			state int64_t remaining = content->size();
 
 			while (remaining > 0) {
 				state int64_t bytesToWrite = std::min(chunkSize, remaining);
-				wait(file->write(content.begin() + offset, bytesToWrite, offset));
+				wait(file->write(content->data() + offset, bytesToWrite, offset));
 				offset += bytesToWrite;
 				remaining -= bytesToWrite;
 
@@ -128,15 +134,15 @@ ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef content) {
 		}
 
 		// Ensure the file size is correct and data is synced
-		wait(file->truncate(content.size()));
-		wait(file->sync());
+		wait(uncancellable(file->truncate(content->size())));
+		wait(uncancellable(file->sync()));
 
 		return Void();
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "WriteBulkFileBytesError")
 		    .error(e)
 		    .detail("Path", path)
-		    .detail("ContentSize", content.size());
+		    .detail("ContentSize", content->size());
 		throw;
 	}
 }
