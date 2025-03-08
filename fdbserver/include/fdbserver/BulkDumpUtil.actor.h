@@ -41,7 +41,7 @@ struct RangeDumpRawData {
 	                 const std::map<Key, Value>& sampled,
 	                 const Key& lastKey,
 	                 int64_t kvsBytes)
-	  : kvs(kvs), sampled(sampled), lastKey(lastKey), kvsBytes(kvsBytes){}
+	  : kvs(kvs), sampled(sampled), lastKey(lastKey), kvsBytes(kvsBytes) {}
 };
 
 struct SSBulkDumpTask {
