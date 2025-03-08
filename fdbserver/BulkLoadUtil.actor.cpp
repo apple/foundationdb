@@ -34,7 +34,6 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
-#include "flow/flow.h"
 
 ACTOR Future<std::string> readBulkFileBytes(std::string path, int64_t maxLength) {
 	try {
