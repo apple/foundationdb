@@ -58,18 +58,19 @@ public:
 	                          const RequestType& request,
 	                          ResponseType* response) {
 		ASSERT_WE_THINK(g_network->isOnMainThread());
-		auto promise = std::make_shared<ThreadReturnPromise<grpc::Status>>();
+		auto promise = ThreadReturnPromise<grpc::Status>();
+		auto future = promise.getFuture();
 
-		pool_->post([this, promise, rpc, request, response]() {
+		pool_->post([this, promise = std::move(promise), rpc, request, response]() mutable noexcept {
 			grpc::ClientContext context;
 			auto status = (stub_.get()->*rpc)(&context, request, response);
-			if (promise->getFutureReferenceCount() == 0) {
+			if (promise.getFutureReferenceCount() == 0) {
 				return;
 			}
-			promise->send(status);
+			promise.send(status);
 		});
 
-		return promise->getFuture();
+		return future;
 	}
 
 	// NOTE: Must be called from network thread. This is because the underlying primitive used
@@ -77,10 +78,11 @@ public:
 	template <class RequestType, class ResponseType>
 	Future<ResponseType> call(UnaryRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
 		ASSERT_WE_THINK(g_network->isOnMainThread());
-		auto promise = std::make_shared<ThreadReturnPromise<ResponseType>>();
+		auto promise = ThreadReturnPromise<ResponseType>();
+		auto future = promise.getFuture();
 
-		pool_->post([this, promise, rpc, request]() {
-			if (promise->getFutureReferenceCount() == 0) {
+		pool_->post([this, promise = std::move(promise), rpc, request]() mutable noexcept {
+			if (promise.getFutureReferenceCount() == 0) {
 				return;
 			}
 
@@ -88,51 +90,51 @@ public:
 			ResponseType response;
 			auto status = (stub_.get()->*rpc)(&context, request, &response);
 
-			if (promise->getFutureReferenceCount() == 0) {
+			if (promise.getFutureReferenceCount() == 0) {
 				return;
 			}
 
 			if (status.ok()) {
-				promise->send(response);
+				promise.send(response);
 			} else {
 				// std::cout << "Error: " << status.error_message() << std::endl;
-				promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
+				promise.sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
 			}
 		});
 
-		return promise->getFuture();
+		return future;
 	}
 	// NOTE: Must be called from network thread. This is because the underlying primitive used
 	//   is ThreadReturnPromise.
 	template <class RequestType, class ResponseType>
 	FutureStream<ResponseType> call(ServerStreamingRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
 		ASSERT_WE_THINK(g_network->isOnMainThread());
-		auto promise = std::make_shared<ThreadReturnPromiseStream<ResponseType>>();
+		auto promise = ThreadReturnPromiseStream<ResponseType>();
+		auto future = promise.getFuture();
 
-		pool_->post([this, promise, rpc, request]() {
+		pool_->post([this, promise = std::move(promise), rpc, request]() mutable noexcept {
 			grpc::ClientContext context;
 			ResponseType response;
 			auto reader = (stub_.get()->*rpc)(&context, request);
 			while (reader->Read(&response)) {
-				if (promise->getFutureReferenceCount() == 0) {
-					// std::cout << "Stream cancelled.\n";
+				if (promise.getFutureReferenceCount() == 0) {
 					context.TryCancel();
 					return;
 				}
 
-				promise->send(response);
+				promise.send(response);
 			}
 
 			auto status = reader->Finish();
 			if (status.ok()) {
-				promise->sendError(end_of_stream());
+				std::cout << "sent end of stream from client.\n";
+				promise.sendError(end_of_stream());
 			} else {
-				// std::cout << "Error: " << status.error_message() << std::endl;
-				promise->sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
+				promise.sendError(grpc_error()); // TODO (Vishesh): Propogate the gRPC error codes.
 			}
 		});
 
-		return promise->getFuture();
+		return future;
 	}
 
 	// template <class RequestType, class ResponseType>

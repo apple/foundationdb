@@ -85,6 +85,7 @@ TEST_CASE("/fdbrpc/grpc/basic_stream_server") {
 			count += 1;
 		}
 	} catch (Error& e) {
+		std::cout << "Error: " << e.name() << std::endl;
 		if (e.code() == error_code_end_of_stream) {
 			ASSERT_EQ(count, 10); // Should send 10 reponses.
 			co_return;
@@ -317,22 +318,55 @@ TEST_CASE("/fdbrpc/grpc/basic_thread_pool") {
 	unordered_map<string, size_t> state;
 	mutex m;
 
-	Future<string> f = pool.post([&]() -> string {
-		this_thread::sleep_for(chrono::seconds(1));
-		auto id = std::hash<std::thread::id>{}(std::this_thread::get_id());
-		lock_guard<mutex> lg(m);
-		state["thread"] = id;
-		return "done";
-	});
+	// Check Void return.
 	{
-		auto id = std::hash<std::thread::id>{}(std::this_thread::get_id());
-		lock_guard<mutex> lg(m);
-		state["main"] = id;
+
+		Future<Void> f = pool.post([]() -> Void {
+			this_thread::sleep_for(100ms);
+			return Void();
+		});
+		co_await f;
 	}
 
-	auto r = co_await f;
-	ASSERT(state["main"] != state["thread"]);
-	ASSERT_EQ(r, "done");
+	// Check return T where T != Void.
+	{
+		Future<string> f = pool.post([&]() -> string {
+			this_thread::sleep_for(1s);
+			auto id = std::hash<std::thread::id>{}(std::this_thread::get_id());
+			lock_guard<mutex> lg(m);
+			state["thread"] = id;
+			return "done";
+		});
+		{
+			auto id = std::hash<std::thread::id>{}(std::this_thread::get_id());
+			lock_guard<mutex> lg(m);
+			state["main"] = id;
+		}
+
+		auto r = co_await f;
+		ASSERT(state["main"] != state["thread"]);
+		ASSERT_EQ(r, "done");
+	}
+
+	// Check void return where we don't care about result.
+	{
+		pool.post([]() noexcept { this_thread::sleep_for(100ms); });
+	}
+
+	// Forward Flow errors.
+	{
+		try {
+			co_await pool.post([]() -> Void {
+				throw task_interrupted();
+				ASSERT(false);
+				return Void();
+			});
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_task_interrupted);
+		}
+	}
+
+	this_thread::sleep_for(200ms);
 }
 
 TEST_CASE("/fdbrpc/grpc/server_lifecycle_basic") {

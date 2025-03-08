@@ -19,6 +19,8 @@
  */
 
 #include "fdbrpc/FlowGrpc.h"
+#include "flow/Error.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #ifdef FLOW_GRPC_ENABLED
@@ -40,11 +42,14 @@ Future<Void> GrpcServer::run() {
 		run_actor_ = run_internal();
 		co_await run_actor_;
 	} catch (Error& err) {
-		if (state_ == State::Shutdown) {
-			run_actor_.cancel();
-		} else {
-			throw err;
+		if (err.code() != error_code_operation_cancelled) {
+			TraceEvent(SevError, "GrpcServerRunError").detail("Endpoint", address_).detail("Error", err.name());
+			throw;
 		}
+	}
+
+	if (state_ != State::Shutdown) {
+		co_await shutdown();
 	}
 }
 
@@ -81,11 +86,19 @@ Future<Void> GrpcServer::run_internal() {
 		}
 
 		server_ = builder.BuildAndStart();
-		ASSERT(server_ != nullptr);
+		if (server_ == nullptr) {
+			TraceEvent(SevError, "GrpcServerBuildStartError")
+			    .detail("Endpoint", address_)
+			    .detail("Reason", "Error starting server.");
+			co_await shutdown();
+			co_return;
+		}
+
 		++num_starts_;
 		state_ = State::Running;
 		on_next_start_.trigger();
 		next = on_services_changed_.onTrigger();
+		co_await yield();
 	}
 }
 

@@ -72,6 +72,37 @@ TEST_CASE("/fdbrpc/grpc/basic_async_client") {
 	return Void();
 }
 
+TEST_CASE("/fdbrpc/grpc/actor_basic_stream_server") {
+	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50002"));
+	state GrpcServer server(addr);
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	state Future<Void> _ = server.run();
+	wait(server.onRunning());
+
+	state shared_ptr<AsyncTaskExecutor> pool = make_shared<AsyncTaskExecutor>(4);
+	state AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+	state int count = 0;
+	try {
+		EchoRequest request;
+		request.set_message("Ping!");
+		state FutureStream<EchoResponse> stream = client.call(&TestEchoService::Stub::EchoRecvStream10, request);
+		while (true) {
+			EchoResponse response = waitNext(stream);
+			ASSERT_EQ(response.message(), "Echo: Ping!");
+			count += 1;
+		}
+	} catch (Error& e) {
+		std::cout << "Error: " << e.name() << std::endl;
+		if (e.code() == error_code_end_of_stream) {
+			ASSERT_EQ(count, 10); // Should send 10 reponses.
+			return Void();
+		}
+		ASSERT(false);
+	}
+	return Void();
+}
+
 TEST_CASE("/fdbrpc/grpc/no_server_running") {
 	state NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50004"));
 	state shared_ptr<AsyncTaskExecutor> pool = make_shared<AsyncTaskExecutor>(4);
