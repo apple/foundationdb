@@ -537,9 +537,10 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 			if (!expectedChecksum.empty()) {
 				state std::string actualChecksum = wait(calculateFileChecksum(file));
 				if (actualChecksum != expectedChecksum) {
-					TraceEvent(SevWarnAlways, "S3ClientCopyDownFileChecksumMismatch")
+					TraceEvent(SevError, "S3ClientCopyDownFileChecksumMismatch")
 					    .detail("Expected", expectedChecksum)
 					    .detail("Calculated", actualChecksum);
+					// TODO(BulkLoad): Non-retryable error.
 					throw checksum_failed();
 				}
 			}
