@@ -139,10 +139,7 @@ ACTOR Future<Void> writeBulkFileBytes(std::string path, StringRef contentIn) {
 
 		return Void();
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "WriteBulkFileBytesError")
-		    .error(e)
-		    .detail("Path", path)
-		    .detail("ContentSize", content->size());
+		TraceEvent(SevWarn, "WriteBulkFileBytesError").error(e).detail("Path", path);
 		throw;
 	}
 }
