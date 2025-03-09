@@ -527,7 +527,7 @@ struct BulkLoading : TestWorkload {
 				Key beginKey = StringRef(indexStr);
 				Key endKey = StringRef(indexStrNext);
 				std::string folderPath = joinPath(simulationBulkLoadFolder, indexStr);
-				int dataSize = deterministicRandom()->randomInt(2, 5);
+				int dataSize = std::pow(10, deterministicRandom()->randomInt(0, 4));
 				BulkLoadTaskTestUnit taskUnit =
 				    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
 				bulkLoadTaskStates.push_back(taskUnit.bulkLoadTask);
@@ -625,7 +625,7 @@ struct BulkLoading : TestWorkload {
 		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		for (; i < 3; i++) {
 			std::string folderPath = joinPath(simulationBulkLoadFolder, std::to_string(i));
-			int dataSize = deterministicRandom()->randomInt(2, 5);
+			int dataSize = std::pow(10, deterministicRandom()->randomInt(0, 4));
 			taskUnit = self->generateBulkLoadTaskUnit(self, folderPath, dataSize);
 			ASSERT(normalKeys.contains(taskUnit.bulkLoadTask.getRange()));
 			taskMap.insert(taskUnit.bulkLoadTask.getRange(), taskUnit);
