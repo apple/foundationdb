@@ -1,18 +1,39 @@
+/*
+ * acac.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "flow/ActorContext.h"
+
 #ifdef WITH_ACAC
 
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
+#include <numeric>
 #include <sstream>
 #include <string>
 
-#include <boost/algorithm/string.hpp>
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/variables_map.hpp>
 #include <boost/program_options.hpp>
-
-#include "flow/ActorContext.h"
 
 std::unordered_map<UID, std::string> loadUIDActorMapping(const std::string& build_directory_path) {
 	std::unordered_map<UID, std::string> identifierToActor;
@@ -51,13 +72,13 @@ void dumpActorContextTree(std::ostream& stream,
                           const std::unordered_map<UID, std::string>& identifierToActor) {
 
 	std::unordered_map<ActorID, std::vector<ActorID>> spawnInfo;
-	for (const auto& [actorID, _1, parentID] : decoded.context) {
-		spawnInfo[parentID].push_back(actorID);
+	for (const auto& item : decoded.context) {
+		spawnInfo[item.spawner].push_back(item.id);
 	}
 
 	std::unordered_map<ActorID, std::string> actorNames;
-	for (const auto& [actorID, actorIdentifier, _1] : decoded.context) {
-		actorNames[actorID] = identifierToActor.at(actorIdentifier);
+	for (const auto& item : decoded.context) {
+		actorNames[item.id] = identifierToActor.at(item.identifier);
 	}
 
 	// 2-space indentation
@@ -86,11 +107,17 @@ void dumpActorContextTree(std::ostream& stream,
 void dumpActorContextStack(std::ostream& stream,
                            const DecodedActorContext& decoded,
                            const std::unordered_map<UID, std::string>& identifierToActor) {
-	for (const auto& [actorID, actorIdentifier, spawnerActorID] : decoded.context) {
-		const std::string& actorName = identifierToActor.at(actorIdentifier);
-		stream << std::setw(12) << actorID << " " << actorName
-		       << (actorID == decoded.currentRunningActor ? "  <ACTIVE>" : "") << std::endl;
+	for (const auto& item : decoded.context) {
+		const std::string& actorName = identifierToActor.at(item.identifier);
+		stream << std::setw(12) << item.id << " " << actorName
+		       << (item.id == decoded.currentRunningActor ? "  <ACTIVE>" : "") << std::endl;
 	}
+}
+
+auto decodeFromStream(std::istream& stream) {
+	using istream_iterator = std::istream_iterator<std::string>;
+	std::string encoded = std::accumulate(istream_iterator(stream), istream_iterator(), std::string());
+	return decodeActorContext(encoded);
 }
 
 void decodeClass(std::ostream& stream,
@@ -100,13 +127,27 @@ void decodeClass(std::ostream& stream,
 	stream << classIdentifier << " -- " << identifierToActor.at(uid) << std::endl;
 }
 
+class StuckActorDetector {
+	std::unordered_map<UID, std::string> identifierToActor;
+	std::unordered_map<ActorID, DecodedActorContext::ActorInfo> aliveActors;
+
+public:
+	StuckActorDetector(std::unordered_map<UID, std::string> identifierToActor_)
+	  : identifierToActor(std::move(identifierToActor_)) {}
+};
+
+void detectStuckActor(const std::unordered_map<UID, std::string>& identifierToActor) {
+	StuckActorDetector sad(identifierToActor);
+}
+
 namespace bpo = boost::program_options;
 
 int main(int argc, char* argv[]) {
 	bpo::options_description desc("Options");
 	desc.add_options()("help",
 	                   "Print help message")("fdb-build-directory", bpo::value<std::string>(), "Build directory")(
-	    "decode-class", bpo::value<std::string>(), "Decode a class key");
+	    "decode-class", bpo::value<std::string>(), "Decode a class key")("stuck-actors",
+	                                                                     "Try to identify the ACTOR that is stucked");
 
 	bpo::variables_map varMap;
 	bpo::store(bpo::parse_command_line(argc, argv, desc), varMap);
@@ -129,18 +170,8 @@ int main(int argc, char* argv[]) {
 		return 0;
 	}
 
-	std::string encodedContext;
-	while (std::cin) {
-		std::string line;
-		std::getline(std::cin, line);
-		boost::trim(line);
-		// libb64 will generate newline every 72 characters, which will be encoded as "\0xa"
-		// in the TraceEvent log file.
-		boost::replace_all(line, "\\x0a", "\n");
-		encodedContext += line;
-	}
+	const auto decodedActorContext = decodeFromStream(std::cin);
 
-	const auto decodedActorContext = decodeActorContext(encodedContext);
 	switch (decodedActorContext.dumpType) {
 	case ActorContextDumpType::FULL_CONTEXT:
 		dumpActorContextTree(std::cout, decodedActorContext, lib);
