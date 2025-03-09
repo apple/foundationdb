@@ -407,8 +407,11 @@ public:
 	                                              // between two rounds
 	double DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk dump scheduler has to wait
 	                                              // between two rounds
-	bool CC_ENFORCE_USE_UNFIT_DD_IN_SIM; // Set for CC to enforce to use an unfit DD in the simulation. This knob
-	                                     // takes effect only in the simulation.
+	int DD_BULKDUMP_BUILD_JOB_MANIFEST_BATCH_SIZE; // the number of lines in a batch when generating bulkload job
+	                                               // manifest file
+	int BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE; // the block size when performing async read/write for bulkload
+	bool CC_ENFORCE_USE_UNFIT_DD_IN_SIM; // Set for CC to enforce to use an unfit DD in the simulation. This knob takes
+	                                     // effect only in the simulation.
 	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the
 	                                                       // simulation.
 	int DD_BULKDUMP_PARALLELISM; // the max number of concurrent bulk dump tasks in DD

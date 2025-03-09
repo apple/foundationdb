@@ -5982,27 +5982,19 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	return Void();
 }
 
-struct RangeDumpData {
-	std::map<Key, Value> kvs;
-	std::map<Key, Value> sampled;
-	Key lastKey;
-	int64_t kvsBytes;
-	RangeDumpData() = default;
-	RangeDumpData(const std::map<Key, Value>& kvs,
-	              const std::map<Key, Value>& sampled,
-	              const Key& lastKey,
-	              int64_t kvsBytes)
-	  : kvs(kvs), sampled(sampled), lastKey(lastKey), kvsBytes(kvsBytes) {}
-};
-
-ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange range, Version version) {
+ACTOR Future<Void> getRangeDataToDump(StorageServer* data,
+                                      KeyRange range,
+                                      Version version,
+                                      std::shared_ptr<RangeDumpRawData> output) {
 	state std::map<Key, Value> kvsToDump;
+	output->kvs.clear();
+	output->sampled.clear();
 	state std::map<Key, Value> sample;
-	state int64_t currentExpectedBytes = 0;
+	output->kvsBytes = 0;
 	state Key beginKey = range.begin;
-	state Key lastKey = range.begin;
+	output->lastKey = range.begin;
 	state bool immediateError = true;
-	// Accumulate data read from local storage to kvsToDump and make sampling until any error presents
+	// Accumulate data read from local storage to output->kvs and make sampling until any error presents
 	loop {
 		// Read data and stop for any error
 		state ErrorOr<GetKeyValuesReply> rep;
@@ -6034,39 +6026,38 @@ ACTOR Future<RangeDumpData> getRangeDataToDump(StorageServer* data, KeyRange ran
 
 		// Given the data, create KVS and sample. Stop if the accumulated data size is too large.
 		for (const auto& kv : rep.get().data) { // TODO(BulkDump): directly read from special key space.
-			lastKey = kv.key;
-			auto res = kvsToDump.insert({ kv.key, kv.value });
+			output->lastKey = kv.key;
+			auto res = output->kvs.insert({ kv.key, kv.value });
 			ASSERT(res.second);
 			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(kv.key, kv.value));
 			if (sampleInfo.inSample) {
 				auto resSample =
-				    sample.insert({ kv.key, BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned()) });
+				    output->sampled.insert({ kv.key, BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned()) });
 				ASSERT(resSample.second);
 			}
-			currentExpectedBytes = currentExpectedBytes + kv.expectedSize();
-			if (currentExpectedBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
+			output->kvsBytes = output->kvsBytes + kv.expectedSize();
+			if (output->kvsBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
 				break;
 			}
 		}
 
 		// Stop if no more data or having too large bytes
-		if (currentExpectedBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
+		if (output->kvsBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
 			break;
 		} else if (!rep.get().more) {
-			lastKey = range.end; // Use the range end as the lastKey
+			output->lastKey = range.end; // Use the range end as the output->lastKey
 			break;
 		}
 
 		// Yield and go to the next round
 		wait(delay(0.1));
-		beginKey = keyAfter(lastKey);
+		beginKey = keyAfter(output->lastKey);
 	}
 
 	if (immediateError) {
 		throw retry();
 	}
-
-	return RangeDumpData(kvsToDump, sample, lastKey, currentExpectedBytes);
+	return Void();
 }
 
 // The SS actor handling bulk dump task sent from DD.
@@ -6099,7 +6090,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 	state int retryCount = 0;
 	state uint64_t batchNum = 0;
 	state Version versionToDump;
-	state RangeDumpData rangeDumpData;
+	state std::shared_ptr<RangeDumpRawData> rangeDumpRawData;
 	state UID jobId = req.bulkDumpState.getJobId();
 	state std::string rootFolderLocal = data->bulkDumpFolder;
 	state std::string rootFolderRemote = req.bulkDumpState.getJobRoot();
@@ -6111,6 +6102,9 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 
 	loop {
 		try {
+			// Reset data buffer
+			rangeDumpRawData = std::make_shared<RangeDumpRawData>();
+
 			// Clear local files
 			clearFileFolder(abspath(joinPath(rootFolderLocal, taskFolder)));
 
@@ -6127,7 +6121,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 
 			// Read data
 			// TODO(BulkDump): Read data from other servers at the versionToDump as much as possible
-			wait(store(rangeDumpData, getRangeDataToDump(data, rangeToDump, versionToDump)));
+			wait(getRangeDataToDump(data, rangeToDump, versionToDump, /*output=*/rangeDumpRawData));
 
 			// Generate local file paths and remote file paths
 			// The data in KVStore is dumped to the local folder at first and then
@@ -6151,21 +6145,18 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			                                            SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
 
 			// Write to SST file
-			state KeyRange dataRange = rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey));
+			state KeyRange dataRange = rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpRawData->lastKey));
 			state BulkLoadManifest manifest =
 			    wait(dumpDataFileToLocalDirectory(data->thisServerID,
-			                                      rangeDumpData.kvs,
-			                                      rangeDumpData.sampled,
+			                                      rangeDumpRawData,
 			                                      localFileSetSetting,
 			                                      remoteFileSetSetting,
 			                                      byteSampleSetting,
 			                                      versionToDump,
-			                                      dataRange, // the actual range of the rangeDumpData.kvs
-			                                      rangeDumpData.kvsBytes,
-			                                      rangeDumpData.kvs.size(),
+			                                      dataRange, // the actual range of the rangeDumpRawData.kvs
 			                                      dumpType,
 			                                      transportMethod));
-			readBytes = readBytes + rangeDumpData.kvsBytes;
+			readBytes = readBytes + rangeDumpRawData->kvsBytes;
 			TraceEvent(SevInfo, "SSBulkDumpDataFileGenerated", data->thisServerID)
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
@@ -6175,8 +6166,8 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			    .detail("DataRange", dataRange)
 			    .detail("RootFolderLocal", rootFolderLocal)
 			    .detail("RelativeFolder", relativeFolder)
-			    .detail("DataKeyCount", rangeDumpData.kvs.size())
-			    .detail("DataBytes", rangeDumpData.kvsBytes)
+			    .detail("DataKeyCount", rangeDumpRawData->kvs.size())
+			    .detail("DataBytes", rangeDumpRawData->kvsBytes)
 			    .detail("RemoteFileSet", manifest.getFileSet().toString())
 			    .detail("BatchNum", batchNum);
 
@@ -6201,7 +6192,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			}
 
 			// Move to the next range
-			rangeBegin = keyAfter(rangeDumpData.lastKey);
+			rangeBegin = keyAfter(rangeDumpRawData->lastKey);
 			if (rangeBegin >= rangeEnd) {
 				req.reply.send(req.bulkDumpState);
 				break;

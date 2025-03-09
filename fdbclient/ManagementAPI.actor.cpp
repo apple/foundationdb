@@ -2894,7 +2894,7 @@ ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTas
 	try {
 		wait(takeExclusiveReadLockOnRange(tr, bulkLoadTask.getRange(), rangeLockNameForBulkLoad));
 	} catch (Error& e) {
-		ASSERT(e.code() != error_code_range_lock_failed); // Currently, only bulkload uses the range lock.
+		ASSERT(e.code() != error_code_range_locked_by_different_user); // Currently, only bulkload uses the range lock.
 		throw e;
 	}
 	bulkLoadTask.submitTime = now();
@@ -3008,7 +3008,7 @@ ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange rang
 	try {
 		wait(releaseExclusiveReadLockOnRange(tr, bulkLoadTaskState.getRange(), rangeLockNameForBulkLoad));
 	} catch (Error& e) {
-		ASSERT(e.code() != error_code_range_lock_failed); // Currently, only bulkload uses the range lock.
+		ASSERT(e.code() != error_code_range_locked_by_different_user); // Currently, only bulkload uses the range lock.
 		throw e;
 	}
 	return Void();
