@@ -2004,8 +2004,10 @@ void addAccumulativeChecksumMutations(CommitBatchContext* self) {
 			    .detail("AcsIndex", acsIndex)
 			    .detail("AcsToSend", acsToSend.toString())
 			    .detail("Mutation", acsMutation)
+			    .detail("Version", self->commitVersion)
 			    .detail("CommitProxyIndex", self->pProxyCommitData->commitProxyIndex);
 		}
+		DEBUG_MUTATION("ProxyCommit", self->commitVersion, acsMutation, self->pProxyCommitData->dbgid);
 		self->toCommit.addTag(tag);
 		self->toCommit.writeTypedMessage(acsMutation);
 	}

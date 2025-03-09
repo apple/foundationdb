@@ -1,6 +1,9 @@
 [configuration]
 minimumRegions = 2
 
+[[knobs]]
+max_read_transaction_life_versions = 5000000
+
 [[test]]
 testTitle = 'KillRegionCycle'
 clearAfterTest = false
