@@ -64,7 +64,7 @@ function upload_download {
     # Run this rm only if s3. In seaweed, it would fail because
     # bucket doesn't exist yet (they are lazily created).
     if ! "${s3client}" \
-        --knob_http_verbose_level=10 \
+        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
         --knob_blobstore_encryption_type=aws:kms \
         --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
         --tls-ca-file "${TLS_CA_FILE}" \
@@ -76,7 +76,7 @@ function upload_download {
     fi
   fi
   if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
       --knob_blobstore_encryption_type=aws:kms \
       --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
       --tls-ca-file "${TLS_CA_FILE}" \
@@ -87,7 +87,7 @@ function upload_download {
     return 1
   fi
   if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
       --knob_blobstore_encryption_type=aws:kms \
       --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
       --tls-ca-file "${TLS_CA_FILE}" \
@@ -98,7 +98,7 @@ function upload_download {
     return 1
   fi
   if ! "${s3client}" \
-      --knob_http_verbose_level=10 \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
       --knob_blobstore_encryption_type=aws:kms \
       --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
       --tls-ca-file "${TLS_CA_FILE}" \
@@ -197,6 +197,7 @@ set -o noclobber
 TEST_SCRATCH_DIR=
 TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
 readonly TLS_CA_FILE
+readonly HTTP_VERBOSE_LEVEL=2
 # Should we use S3? If USE_S3 is not defined, then check if
 # OKTETO_NAMESPACE is defined (It is defined on the okteto
 # internal apple dev environments where S3 is available).

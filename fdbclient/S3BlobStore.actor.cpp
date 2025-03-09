@@ -22,6 +22,7 @@
 
 #include "fdbclient/ClientKnobs.h"
 #include "fdbclient/Knobs.h"
+#include "flow/FastRef.h"
 #include "flow/IConnection.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
@@ -2169,6 +2170,145 @@ Future<Void> S3BlobStoreEndpoint::abortMultiPartUpload(std::string const& bucket
                                                        std::string const& object,
                                                        std::string const& uploadID) {
 	return abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID);
+}
+
+// Forward declarations
+ACTOR Future<std::map<std::string, std::string>> getObjectTags_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                                    std::string bucket,
+                                                                    std::string object);
+
+ACTOR Future<Void> putObjectTags_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                      std::string bucket,
+                                      std::string object,
+                                      std::map<std::string, std::string> tags) {
+	state UnsentPacketQueue packets;
+	wait(bstore->requestRateWrite->getAllowance(1));
+	state std::string resource = constructResourcePath(bstore, bucket, object);
+	resource += "?tagging";
+	state int maxRetries = 5;
+	state int retryCount = 0;
+	state double backoff = 1.0;
+	state double maxBackoff = 8.0;
+
+	loop {
+		try {
+			std::string manifest = "<Tagging xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><TagSet>";
+			for (auto itr = tags.begin(); itr != tags.end(); ++itr) {
+				manifest += "<Tag><Key>" + itr->first + "</Key><Value>" + itr->second + "</Value></Tag>";
+			}
+			manifest += "</TagSet></Tagging>";
+
+			PacketWriter pw(packets.getWriteBuffer(manifest.size()), nullptr, Unversioned());
+			pw.serializeBytes(manifest);
+
+			HTTP::Headers headers;
+			headers["Content-Type"] = "application/xml";
+			headers["Content-Length"] = format("%d", manifest.size());
+
+			Reference<HTTP::IncomingResponse> r =
+			    wait(bstore->doRequest("PUT", resource, headers, &packets, manifest.size(), { 200 }));
+
+			// Verify tags were written correctly
+			std::map<std::string, std::string> verifyTags = wait(getObjectTags_impl(bstore, bucket, object));
+			if (verifyTags == tags) {
+				return Void();
+			}
+
+			if (++retryCount >= maxRetries) {
+				TraceEvent(SevWarn, "S3BlobStorePutTagsMaxRetriesExceeded")
+				    .detail("Bucket", bucket)
+				    .detail("Object", object);
+				throw operation_failed();
+			}
+
+			// Implement exponential backoff with jitter
+			wait(delay(backoff * (0.9 + 0.2 * deterministicRandom()->random01())));
+			backoff = std::min(backoff * 2, maxBackoff);
+
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
+			TraceEvent(SevWarn, "S3BlobStorePutTagsError")
+			    .error(e)
+			    .detail("Bucket", bucket)
+			    .detail("Object", object)
+			    .detail("RetryCount", retryCount);
+
+			if (++retryCount >= maxRetries) {
+				throw;
+			}
+
+			// Implement exponential backoff with jitter for errors
+			wait(delay(backoff * (0.9 + 0.2 * deterministicRandom()->random01())));
+			backoff = std::min(backoff * 2, maxBackoff);
+		}
+	}
+}
+
+Future<Void> S3BlobStoreEndpoint::putObjectTags(std::string const& bucket,
+                                                std::string const& object,
+                                                std::map<std::string, std::string> const& tags) {
+	return putObjectTags_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, tags);
+}
+
+ACTOR Future<std::map<std::string, std::string>> getObjectTags_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                                    std::string bucket,
+                                                                    std::string object) {
+	wait(bstore->requestRateRead->getAllowance(1));
+
+	state std::string resource = constructResourcePath(bstore, bucket, object);
+	resource += "?tagging";
+	state HTTP::Headers headers;
+
+	Reference<HTTP::IncomingResponse> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200 }));
+
+	rapidxml::xml_document<> doc;
+	doc.parse<rapidxml::parse_default>((char*)r->data.content.c_str());
+
+	std::map<std::string, std::string> tags;
+
+	// Find the Tagging node (with or without namespace)
+	rapidxml::xml_node<>* tagging = doc.first_node();
+	while (tagging && strcmp(tagging->name(), "Tagging") != 0) {
+		tagging = tagging->next_sibling();
+	}
+
+	if (tagging) {
+		// Find TagSet node
+		rapidxml::xml_node<>* tagSet = tagging->first_node();
+		while (tagSet && strcmp(tagSet->name(), "TagSet") != 0) {
+			tagSet = tagSet->next_sibling();
+		}
+
+		if (tagSet) {
+			// Iterate through Tag nodes
+			for (rapidxml::xml_node<>* tag = tagSet->first_node(); tag; tag = tag->next_sibling()) {
+				if (strcmp(tag->name(), "Tag") == 0) {
+					std::string key, value;
+					// Find Key and Value nodes
+					for (rapidxml::xml_node<>* node = tag->first_node(); node; node = node->next_sibling()) {
+						if (strcmp(node->name(), "Key") == 0) {
+							key = node->value();
+						} else if (strcmp(node->name(), "Value") == 0) {
+							value = node->value();
+						}
+					}
+					if (!key.empty()) {
+						tags[key] = value;
+					}
+				}
+			}
+		}
+	}
+
+	return tags;
+}
+
+Future<std::map<std::string, std::string>> S3BlobStoreEndpoint::getObjectTags(std::string const& bucket,
+                                                                              std::string const& object) {
+	return getObjectTags_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
 TEST_CASE("/backup/s3/v4headers") {
