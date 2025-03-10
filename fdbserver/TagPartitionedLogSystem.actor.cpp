@@ -1398,9 +1398,9 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 Version TagPartitionedLogSystem::getKnownCommittedVersion() {
 	Version result = invalidVersion;
 	for (auto& it : lockResults) {
-		auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
-		if (versions.present()) {
-			result = std::max(result, std::get<0>(versions.get()));
+		auto versionInfo = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
+		if (versionInfo.present()) {
+			result = std::max(result, versionInfo.get().knownCommittedVersion);
 		}
 	}
 	return result;
@@ -1976,11 +1976,10 @@ ACTOR Future<Void> TagPartitionedLogSystem::monitorLog(Reference<AsyncVar<Option
 	}
 }
 
-Optional<std::tuple<Version, Version, std::vector<TLogLockResult>, bool>> TagPartitionedLogSystem::getDurableVersion(
-    UID dbgid,
-    LogLockInfo lockInfo,
-    std::vector<Reference<AsyncVar<bool>>> failed,
-    Optional<Version> lastEnd) {
+Optional<DurableVersionInfo> TagPartitionedLogSystem::getDurableVersion(UID dbgid,
+                                                                        LogLockInfo lockInfo,
+                                                                        std::vector<Reference<AsyncVar<bool>>> failed,
+                                                                        Optional<Version> lastEnd) {
 
 	Reference<LogSet> logSet = lockInfo.logSet;
 	// To ensure consistent recovery, the number of servers NOT in the write quorum plus the number of servers NOT
@@ -2082,7 +2081,7 @@ Optional<std::tuple<Version, Version, std::vector<TLogLockResult>, bool>> TagPar
 			// as choosing any other version may result in not copying the correct version range to the
 			// log servers in the latest epoch and also will invalidate the changes that we made to the
 			// peek logic in the context of version vector.
-			return std::make_tuple(
+			return DurableVersionInfo(
 			    knownCommittedVersion, results[new_safe_range_begin].end, results, failedLogsCompletePolicy);
 		}
 	}
@@ -2090,7 +2089,7 @@ Optional<std::tuple<Version, Version, std::vector<TLogLockResult>, bool>> TagPar
 	    .detail("Required", requiredCount)
 	    .detail("Present", results.size())
 	    .detail("ServerState", sServerState);
-	return Optional<std::tuple<Version, Version, std::vector<TLogLockResult>, bool>>();
+	return Optional<DurableVersionInfo>();
 }
 
 ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo lockInfo,
@@ -2245,16 +2244,20 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 			break;
 		}
 		// If the commit proxy sent this version to "N" log servers then at least
-		// (N - replicationFactor + 1) log servers must be available, or the set
-		// of nonavailable log servers doesn't complete the replication policy.
-		// @note The replication policy check we do here is more restrictive than
-		// what it needs to be - it is checking whether the entire nonavailable log
-		// server set (and not whether the nonavailable log servers from among the
-		// set of log servers that the version was sent to) meets the replication
-		// policy. We are doing it this way as checking it this way is more efficient
-		// than checking on an individual version basis (which would require us to
-		// build the nonavailable log server set for each version in the unavaialble
-		// version list).
+		// (N - replicationFactor + 1) log servers must be available. Otherwise, the
+		// unavailable log servers alone would not be sufficient to satisfy the
+		// replication policy.
+		//
+		// @note This check is intentionally more restrictive than necessary.
+		// Instead of verifying whether the unavailable log servers within the
+		// specific set that received the version satisfy the replication policy,
+		// we check whether the entire set of unavailable log servers meets the
+		// policy.
+		//
+		// This approach is chosen because it is computationally more efficient.
+		// Checking availability on a per-version basis would require constructing
+		// a unique set of unavailable log servers for each version in the unavailable
+		// version list, which would add significant overhead.
 		if (!((versionAvailableTLogs[version].count() >= tLogs.count() - replicationFactor + 1) ||
 		      !nonAvailableTLogsCompletePolicy)) {
 			break;
@@ -2501,13 +2504,13 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		state int maxRecoveryIndex = 0;
 		while (lockNum < allLockResults.size()) {
 
-			auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, allLockResults[lockNum]);
-			if (versions.present()) {
-				if (std::get<1>(versions.get()) > maxRecoveryVersion) {
+			auto versionInfo = TagPartitionedLogSystem::getDurableVersion(dbgid, allLockResults[lockNum]);
+			if (versionInfo.present()) {
+				if (versionInfo.get().minimumDurableVersion > maxRecoveryVersion) {
 					TraceEvent("HigherRecoveryVersion", dbgid)
 					    .detail("Idx", lockNum)
-					    .detail("Ver", std::get<1>(versions.get()));
-					maxRecoveryVersion = std::get<1>(versions.get());
+					    .detail("Ver", versionInfo.get().minimumDurableVersion);
+					maxRecoveryVersion = versionInfo.get().minimumDurableVersion;
 					maxRecoveryIndex = lockNum;
 				}
 				lockNum++;
@@ -2544,16 +2547,17 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			if (!logServers[log]->isLocal) {
 				continue;
 			}
-			auto versions =
+			auto versionInfo =
 			    TagPartitionedLogSystem::getDurableVersion(dbgid, lockResults[log], logFailed[log], lastEnd);
-			if (versions.present()) {
-				logGroupResults.emplace_back(
-				    logServers[log]->tLogReplicationFactor, std::get<2>(versions.get()), std::get<3>(versions.get()));
-				minDV = std::min(minDV, std::get<1>(versions.get()));
+			if (versionInfo.present()) {
+				logGroupResults.emplace_back(logServers[log]->tLogReplicationFactor,
+				                             versionInfo.get().lockResults,
+				                             versionInfo.get().policyResult);
+				minDV = std::min(minDV, versionInfo.get().minimumDurableVersion);
 				if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-					knownCommittedVersion = std::max(knownCommittedVersion, std::get<0>(versions.get()));
-					maxEnd = std::max(maxEnd, std::get<1>(versions.get()));
-					minEnd = std::min(minEnd, std::get<1>(versions.get()));
+					knownCommittedVersion = std::max(knownCommittedVersion, versionInfo.get().knownCommittedVersion);
+					maxEnd = std::max(maxEnd, versionInfo.get().minimumDurableVersion);
+					minEnd = std::min(minEnd, versionInfo.get().minimumDurableVersion);
 				} else {
 					auto unicastVersions = getRecoverVersionUnicast(logServers, logGroupResults.back(), minDV);
 					knownCommittedVersion = std::max(knownCommittedVersion, std::get<0>(unicastVersions.get()));
@@ -2819,12 +2823,12 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		if (oldLogSystem->lockResults[lockNum].logSet->locality == remoteLocality) {
 
 			loop {
-				auto versions =
+				auto versionInfo =
 				    TagPartitionedLogSystem::getDurableVersion(self->dbgid, oldLogSystem->lockResults[lockNum]);
-				if (versions.present()) {
-					logSet->startVersion =
-					    std::min(std::min(std::get<0>(versions.get()) + 1, oldLogSystem->lockResults[lockNum].epochEnd),
-					             logSet->startVersion);
+				if (versionInfo.present()) {
+					logSet->startVersion = std::min(std::min(versionInfo.get().knownCommittedVersion + 1,
+					                                         oldLogSystem->lockResults[lockNum].epochEnd),
+					                                logSet->startVersion);
 					break;
 				}
 				wait(TagPartitionedLogSystem::getDurableVersionChanged(oldLogSystem->lockResults[lockNum]));
@@ -3100,12 +3104,12 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			}
 			state Future<Void> stalledAfter = setAfter(recruitmentStalled, SERVER_KNOBS->MAX_RECOVERY_TIME, true);
 			loop {
-				auto versions =
+				auto versionInfo =
 				    TagPartitionedLogSystem::getDurableVersion(logSystem->dbgid, oldLogSystem->lockResults[lockNum]);
-				if (versions.present()) {
-					logSystem->tLogs[0]->startVersion =
-					    std::min(std::min(std::get<0>(versions.get()) + 1, oldLogSystem->lockResults[lockNum].epochEnd),
-					             logSystem->tLogs[0]->startVersion);
+				if (versionInfo.present()) {
+					logSystem->tLogs[0]->startVersion = std::min(std::min(versionInfo.get().knownCommittedVersion + 1,
+					                                                      oldLogSystem->lockResults[lockNum].epochEnd),
+					                                             logSystem->tLogs[0]->startVersion);
 					break;
 				}
 				wait(TagPartitionedLogSystem::getDurableVersionChanged(oldLogSystem->lockResults[lockNum]));
