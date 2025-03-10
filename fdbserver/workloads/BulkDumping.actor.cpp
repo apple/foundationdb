@@ -320,6 +320,9 @@ struct BulkDumping : TestWorkload {
 		state std::map<Key, Value> kvs = self->generateOrderedKVS(self, normalKeys, 1000);
 		wait(self->setKeys(cx, kvs));
 
+		// BulkLoad uses range lock
+		wait(registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad));
+
 		// Submit a bulk dump job
 		state int oldBulkDumpMode = 0;
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
@@ -381,6 +384,8 @@ struct BulkDumping : TestWorkload {
 			wait(self->validateBulkLoadJobHistory(cx, bulkLoadJob.getJobId(), hasError));
 			break;
 		}
+
+		wait(removeRangeLockOwner(cx, rangeLockNameForBulkLoad));
 
 		return Void();
 	}
