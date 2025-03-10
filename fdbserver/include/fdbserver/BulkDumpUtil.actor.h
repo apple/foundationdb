@@ -31,11 +31,18 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-// Add this declaration
-ACTOR Future<Void> bulkDumpTransportCP_impl(Reference<BulkLoadFileSet> srcFileSet,
-                                            Reference<BulkLoadFileSet> destFileSet,
-                                            size_t fileBytesMax,
-                                            UID logId);
+struct RangeDumpRawData {
+	std::map<Key, Value> kvs;
+	std::map<Key, Value> sampled;
+	Key lastKey;
+	int64_t kvsBytes;
+	RangeDumpRawData() = default;
+	RangeDumpRawData(const std::map<Key, Value>& kvs,
+	                 const std::map<Key, Value>& sampled,
+	                 const Key& lastKey,
+	                 int64_t kvsBytes)
+	  : kvs(kvs), sampled(sampled), lastKey(lastKey), kvsBytes(kvsBytes) {}
+};
 
 struct SSBulkDumpTask {
 	SSBulkDumpTask(const StorageServerInterface& targetServer,
@@ -87,34 +94,20 @@ std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId);
 // Define job root folder.
 std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId);
 
-// Define job manifest file content based on job's all BulkLoadManifest.
-// Each row is a range sorted by the beginKey. Any two ranges do not have overlapping.
-// Col: beginKey, endKey, dataVersion, dataBytes, manifestPath.
-// dataVersion should be always valid. dataBytes can be 0 in case of an empty range.
-std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
-
 // Generate key-value data, byte sampling data, and manifest file.
 // Return BulkLoadManifest metadata (equivalent to content of the manifest file).
 // TODO(BulkDump): can cause slow tasks, do the task in a separate thread in the future.
 // The size of sortedData is defined at the place of generating the data (getRangeDataToDump).
 // The size is configured by MOVE_SHARD_KRM_ROW_LIMIT.
 ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
-                                                            std::map<Key, Value> sortedData,
-                                                            std::map<Key, Value> sortedSample,
+                                                            std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
                                                             BulkLoadFileSet localFileSet,
                                                             BulkLoadFileSet remoteFileSet,
                                                             BulkLoadByteSampleSetting byteSampleSetting,
                                                             Version dumpVersion,
                                                             KeyRange dumpRange,
-                                                            int64_t dumpBytes,
-                                                            int64_t dumpKeyCount,
                                                             BulkLoadType dumpType,
                                                             BulkLoadTransportMethod transportMethod);
-
-ACTOR Future<Void> generateBulkDumpJobManifestFile(std::string workFolder,
-                                                   std::string localJobManifestFilePath,
-                                                   StringRef content,
-                                                   UID logId);
 
 // Upload manifest file for bulkdump job
 // Each job has one manifest file including manifest paths of all tasks.

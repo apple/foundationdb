@@ -31,6 +31,8 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
+const std::string bulkLoadJobManifestLineTerminator = "\n";
+
 // Remove the input prefix from the input str. Throw bulkload_manifest_decode_error if no prefix found in str.
 std::string stringRemovePrefix(std::string str, const std::string& prefix);
 
@@ -933,11 +935,6 @@ std::string generateBulkLoadBytesSampleFileNameFromDataFileName(const std::strin
 // Return a manifest filename as a place holder when testing bulkload feature, where we issue bulkload tasks without
 // providing a manifest file. So, this manifest file is never read in this scenario.
 std::string generateEmptyManifestFileName();
-
-// Define human readable BulkLoad job manifest content in the following format:
-// Head: Manifest count: <count>, Root: <root>
-// Rows: BeginKey, EndKey, Version, Bytes, ManifestPath
-std::string generateBulkLoadJobManifestFileContent(const std::map<Key, BulkLoadManifest>& manifests);
 
 // Return path.
 // If the input is a filesystem path, return the path.

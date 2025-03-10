@@ -22,19 +22,12 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/S3Client.actor.h"
 #include "fdbserver/BulkDumpUtil.actor.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
-#include "flow/Error.h"
-#include "flow/IRandom.h"
-#include "flow/Optional.h"
-#include "flow/Platform.h"
-#include "flow/Trace.h"
-#include "fdbclient/S3Client.actor.h" // include the header for S3Client
-#include "flow/flow.h"
-#include <string>
 #include "flow/actorcompiler.h" // has to be last include
 
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
@@ -119,18 +112,13 @@ void writeKVSToSSTFile(std::string filePath, std::map<Key, Value>& sortedKVS, UI
 	return;
 }
 
-// TODO(BulkDump): This copy of sortedData and sortedSample can be baaaaadddd if data is large. Fix.
-// Tried using a Reference to a map but flow doesn't like that.
 ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
-                                                            std::map<Key, Value> sortedData,
-                                                            std::map<Key, Value> sortedSample,
+                                                            std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
                                                             BulkLoadFileSet localFileSet,
                                                             BulkLoadFileSet remoteFileSet,
                                                             BulkLoadByteSampleSetting byteSampleSetting,
                                                             Version dumpVersion,
                                                             KeyRange dumpRange,
-                                                            int64_t dumpBytes,
-                                                            int64_t dumpKeyCount,
                                                             BulkLoadType dumpType,
                                                             BulkLoadTransportMethod transportMethod) {
 	// Step 1: Clean up local folder
@@ -138,20 +126,18 @@ ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 
 	// Step 2: Dump data to file
 	bool containDataFile = false;
-	if (sortedData.size() > 0) {
-		// TODO(BulkDump): This copy of sortedData can be baaaaadddd if data is large. Fix.
-		writeKVSToSSTFile(abspath(localFileSet.getDataFileFullPath()), sortedData, logId);
+	if (rangeDumpRawData->kvs.size() > 0) {
+		writeKVSToSSTFile(abspath(localFileSet.getDataFileFullPath()), rangeDumpRawData->kvs, logId);
 		containDataFile = true;
 	} else {
-		ASSERT(sortedSample.empty());
+		ASSERT(rangeDumpRawData->sampled.empty());
 		containDataFile = false;
 	}
 
 	// Step 3: Dump sample to file
 	bool containByteSampleFile = false;
-	if (sortedSample.size() > 0) {
-		// TODO(BulkDump): This copy of sortedSample can be baaaaadddd if data is large. Fix.
-		writeKVSToSSTFile(abspath(localFileSet.getBytesSampleFileFullPath()), sortedSample, logId);
+	if (rangeDumpRawData->sampled.size() > 0) {
+		writeKVSToSSTFile(abspath(localFileSet.getBytesSampleFileFullPath()), rangeDumpRawData->sampled, logId);
 		containByteSampleFile = true;
 	} else {
 		containByteSampleFile = false;
@@ -171,18 +157,19 @@ ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 	                              containDataFile ? remoteFileSet.getDataFileName() : std::string(),
 	                              containByteSampleFile ? remoteFileSet.getByteSampleFileName() : std::string(),
 	                              BulkLoadChecksum());
-	state BulkLoadManifest manifest(fileSetRemote,
-	                                dumpRange.begin,
-	                                dumpRange.end,
-	                                dumpVersion,
-	                                dumpBytes,
-	                                dumpKeyCount,
-	                                byteSampleSetting,
-	                                dumpType,
-	                                transportMethod);
-	state std::string manifestStr = manifest.toString();
-	wait(writeBulkFileBytes(abspath(localFileSet.getManifestFileFullPath()), StringRef(manifestStr)));
-	return manifest;
+	state BulkLoadManifest manifestMetadata(fileSetRemote,
+	                                        dumpRange.begin,
+	                                        dumpRange.end,
+	                                        dumpVersion,
+	                                        rangeDumpRawData->kvsBytes,
+	                                        rangeDumpRawData->kvs.size(),
+	                                        byteSampleSetting,
+	                                        dumpType,
+	                                        transportMethod);
+	state std::string manifestStr = manifestMetadata.toString();
+	state std::shared_ptr<std::string> manifest = std::make_shared<std::string>(std::move(manifestStr));
+	wait(writeBulkFileBytes(abspath(localFileSet.getManifestFileFullPath()), manifest));
+	return manifestMetadata;
 }
 
 // Validate the invariant of filenames. Source is the file stored locally. Destination is the file going to move to.
@@ -268,18 +255,6 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod
 		    .detail("TransportMethod", transportMethod);
 		ASSERT(false);
 	}
-	return Void();
-}
-
-ACTOR Future<Void> generateBulkDumpJobManifestFile(std::string workFolder,
-                                                   std::string localJobManifestFilePath,
-                                                   StringRef content,
-                                                   UID logId) {
-	resetFileFolder(workFolder);
-	wait(writeBulkFileBytes(localJobManifestFilePath, content));
-	TraceEvent(SevInfo, "GenerateBulkDumpJobManifestWriteLocal", logId)
-	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-	    .detail("Content", content);
 	return Void();
 }
 
