@@ -429,7 +429,7 @@ public:
 			return false;
 		}
 		for (auto lockRange : coreMap.intersectingRanges(range)) {
-			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ReadLockOnRange)) {
+			if (lockRange.value().isValid() && lockRange.value().isLockedFor(RangeLockType::ExclusiveReadLock)) {
 				/*TraceEvent(SevDebug, "RangeLockRangeOps")
 				    .detail("Ops", "Check")
 				    .detail("Range", range)

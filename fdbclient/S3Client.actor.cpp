@@ -126,6 +126,7 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
                                           PartState part, // Pass by value for state management
                                           std::string partData,
                                           int retryDelayMs) {
+	state double startTime = now();
 	state PartState resultPart = part;
 	state UnsentPacketQueue packets;
 	TraceEvent("S3ClientUploadPartStart")
@@ -149,6 +150,7 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 		    .detail("Object", objectName)
 		    .detail("PartNumber", part.partNumber)
 		    .detail("Offset", resultPart.offset)
+		    .detail("Duration", now() - startTime)
 		    .detail("Size", resultPart.size);
 		return resultPart;
 	} catch (Error& e) {
@@ -177,10 +179,10 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 
 	try {
 		TraceEvent("S3ClientCopyUpFileStart")
-		    .detail("filepath", filepath)
-		    .detail("bucket", bucket)
-		    .detail("objectName", objectName)
-		    .detail("fileSize", size);
+		    .detail("Filepath", filepath)
+		    .detail("Bucket", bucket)
+		    .detail("ObjectName", objectName)
+		    .detail("FileSize", size);
 
 		// Start multipart upload
 		std::string id = wait(endpoint->beginMultiPartUpload(bucket, objectName));
@@ -253,10 +255,11 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 		partDatas.clear();
 
 		TraceEvent("S3ClientCopyUpFileEnd")
-		    .detail("bucket", bucket)
-		    .detail("objectName", objectName)
-		    .detail("fileSize", size)
-		    .detail("time", now() - startTime);
+		    .detail("Bucket", bucket)
+		    .detail("ObjectName", objectName)
+		    .detail("FileSize", size)
+		    .detail("Parts", parts.size())
+		    .detail("Duration", now() - startTime);
 
 		return Void();
 	} catch (Error& e) {
@@ -300,15 +303,15 @@ ACTOR Future<Void> copyUpDirectory(std::string dirpath, std::string s3url) {
 	state std::vector<std::string> files;
 	platform::findFilesRecursively(dirpath, files);
 	TraceEvent("S3ClientUploadDirStart")
-	    .detail("filecount", files.size())
-	    .detail("bucket", bucket)
-	    .detail("resource", resource);
+	    .detail("Filecount", files.size())
+	    .detail("Bucket", bucket)
+	    .detail("Resource", resource);
 	for (const auto& file : files) {
 		std::string filepath = file;
 		std::string s3path = resource + "/" + file.substr(dirpath.size() + 1);
 		wait(copyUpFile(endpoint, bucket, s3path, filepath));
 	}
-	TraceEvent("S3ClientUploadDirEnd").detail("bucket", bucket).detail("resource", resource);
+	TraceEvent("S3ClientUploadDirEnd").detail("Bucket", bucket).detail("Resource", resource);
 	return Void();
 }
 
@@ -320,9 +323,9 @@ ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
 	state Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
 	state std::string bucket = parameters["bucket"];
 	TraceEvent("S3ClientCopyUpBulkDumpFileSetStart")
-	    .detail("bucket", bucket)
-	    .detail("sourceFileSet", sourceFileSet.toString())
-	    .detail("destinationFileSet", destinationFileSet.toString());
+	    .detail("Bucket", bucket)
+	    .detail("SourceFileSet", sourceFileSet.toString())
+	    .detail("DestinationFileSet", destinationFileSet.toString());
 	state int pNumDeleted = 0;
 	state int64_t pBytesDeleted = 0;
 	state std::string batch_dir = joinPath(getPath(s3url), destinationFileSet.getRelativePath());
@@ -503,7 +506,7 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
 		    .detail("FileSize", fileSize)
-		    .detail("TimeTaken", now() - startTime)
+		    .detail("Duration", now() - startTime)
 		    .detail("Parts", parts.size());
 
 		return Void();
@@ -546,15 +549,15 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 	S3BlobStoreEndpoint::ListResult items = wait(endpoint->listObjects(bucket, resource));
 	state std::vector<S3BlobStoreEndpoint::ObjectInfo> objects = items.objects;
 	TraceEvent("S3ClientDownDirecotryStart")
-	    .detail("filecount", objects.size())
-	    .detail("bucket", bucket)
-	    .detail("resource", resource);
+	    .detail("Filecount", objects.size())
+	    .detail("Bucket", bucket)
+	    .detail("Resource", resource);
 	for (const auto& object : objects) {
 		std::string filepath = dirpath + "/" + object.name.substr(resource.size());
 		std::string s3path = object.name;
 		wait(copyDownFile(endpoint, bucket, s3path, filepath));
 	}
-	TraceEvent("S3ClientDownDirectoryEnd").detail("bucket", bucket).detail("resource", resource);
+	TraceEvent("S3ClientDownDirectoryEnd").detail("Bucket", bucket).detail("Resource", resource);
 	return Void();
 }
 

@@ -551,14 +551,6 @@ public:
 		// TODO: Complete this.
 	}
 
-	SSBulkLoadMetadata getSSBulkLoadMetadata() const {
-		if (adding) {
-			return adding->getSSBulkLoadMetadata();
-		} else {
-			return SSBulkLoadMetadata();
-		}
-	}
-
 	bool isReadable() const { return readWrite != nullptr; }
 	bool notAssigned() const { return !readWrite && !adding && !moveInShard; }
 	bool assigned() const { return readWrite || adding || moveInShard; }
@@ -1311,6 +1303,7 @@ public:
 	StorageServerDisk storage;
 
 	KeyRangeMap<Reference<ShardInfo>> shards;
+	KeyRangeMap<SSBulkLoadMetadata> ssBulkLoadMetadataMap; // store the latest bulkload task on ranges
 	std::unordered_map<int64_t, SSPhysicalShard> physicalShards;
 	uint64_t shardChangeCounter; // max( shards->changecounter )
 
@@ -6160,18 +6153,18 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			// Write to SST file
 			state KeyRange dataRange = rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpData.lastKey));
 			state BulkLoadManifest manifest =
-			    dumpDataFileToLocalDirectory(data->thisServerID,
-			                                 rangeDumpData.kvs,
-			                                 rangeDumpData.sampled,
-			                                 localFileSetSetting,
-			                                 remoteFileSetSetting,
-			                                 byteSampleSetting,
-			                                 versionToDump,
-			                                 dataRange, // the actual range of the rangeDumpData.kvs
-			                                 rangeDumpData.kvsBytes,
-			                                 rangeDumpData.kvs.size(),
-			                                 dumpType,
-			                                 transportMethod);
+			    wait(dumpDataFileToLocalDirectory(data->thisServerID,
+			                                      rangeDumpData.kvs,
+			                                      rangeDumpData.sampled,
+			                                      localFileSetSetting,
+			                                      remoteFileSetSetting,
+			                                      byteSampleSetting,
+			                                      versionToDump,
+			                                      dataRange, // the actual range of the rangeDumpData.kvs
+			                                      rangeDumpData.kvsBytes,
+			                                      rangeDumpData.kvs.size(),
+			                                      dumpType,
+			                                      transportMethod));
 			readBytes = readBytes + rangeDumpData.kvsBytes;
 			TraceEvent(SevInfo, "SSBulkDumpDataFileGenerated", data->thisServerID)
 			    .setMaxEventLength(-1)
@@ -9115,6 +9108,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					if (conductBulkLoad) {
 						TraceEvent(SevInfo, "SSBulkLoadTaskFetchKey", data->thisServerID)
+						    .detail("FKID", interval.pairID)
 						    .detail("DataMoveId", dataMoveId.toString())
 						    .detail("Range", keys)
 						    .detail("BlockRange", blockRange)
@@ -9186,6 +9180,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						    data, KeyRangeRef(blockBegin, keys.end), shard->reason, shard->getSSBulkLoadMetadata()));
 						if (conductBulkLoad) {
 							TraceEvent(SevInfo, "SSBulkLoadTaskFetchKey", data->thisServerID)
+							    .detail("FKID", interval.pairID)
 							    .detail("DataMoveId", dataMoveId.toString())
 							    .detail("Range", keys)
 							    .detail("NewSplitBeginKey", blockBegin)
@@ -10679,7 +10674,7 @@ void changeServerKeys(StorageServer* data,
 		else {
 			ASSERT(ranges[i].value->adding);
 			data->addShard(ShardInfo::newAdding(
-			    data, ranges[i], ranges[i].value->adding->reason, ranges[i].value->getSSBulkLoadMetadata()));
+			    data, ranges[i], ranges[i].value->adding->reason, ranges[i].value->adding->getSSBulkLoadMetadata()));
 			CODE_PROBE(true, "ChangeServerKeys reFetchKeys");
 		}
 	}
@@ -11300,13 +11295,6 @@ private:
 				} else {
 					// add changes in shard assignment to the mutation log
 					setAssignedStatus(data, keys, nowAssigned);
-					if (conductBulkLoad) {
-						ASSERT(!emptyRange && dataMoveIdIsValidForBulkLoad(dataMoveId));
-						ASSERT(nowAssigned);
-					}
-					if (!nowAssigned) {
-						ASSERT(!conductBulkLoad);
-					}
 					SSBulkLoadMetadata bulkLoadMetadata(dataMoveId, conductBulkLoad);
 					setRangeBasedBulkLoadStatus(data, keys, bulkLoadMetadata);
 
@@ -13235,17 +13223,16 @@ void setRangeBasedBulkLoadStatus(StorageServer* self, KeyRangeRef keys, const SS
 	Version logV = self->data().getLatestVersion();
 	auto& mLV = self->addVersionToMutationLog(logV);
 	KeyRange dataMoveKeys = keys.withPrefix(persistBulkLoadTaskKeys.begin);
-	//TraceEvent("SetRangeBasedBulkLoadStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", dataMoveKeys.begin).detail("RangeEnd", dataMoveKeys.end);
 	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, dataMoveKeys.begin, dataMoveKeys.end));
 	++self->counters.kvSystemClearRanges;
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::SetValue, dataMoveKeys.begin, ssBulkLoadMetadataValue(ssBulkLoadMetadata)));
 	if (keys.end != allKeys.end) {
-		SSBulkLoadMetadata endBulkLoadMetadata =
-		    self->shards.rangeContaining(keys.end)->value()->getSSBulkLoadMetadata();
+		SSBulkLoadMetadata endBulkLoadMetadata = self->ssBulkLoadMetadataMap.rangeContaining(keys.end)->value();
 		self->addMutationToMutationLog(
 		    mLV, MutationRef(MutationRef::SetValue, dataMoveKeys.end, ssBulkLoadMetadataValue(endBulkLoadMetadata)));
 	}
+	self->ssBulkLoadMetadataMap.insert(keys, ssBulkLoadMetadata);
 	if (BUGGIFY) {
 		self->maybeInjectTargetedRestart(logV);
 	}

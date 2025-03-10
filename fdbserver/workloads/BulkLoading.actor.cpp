@@ -527,7 +527,7 @@ struct BulkLoading : TestWorkload {
 				Key beginKey = StringRef(indexStr);
 				Key endKey = StringRef(indexStrNext);
 				std::string folderPath = joinPath(simulationBulkLoadFolder, indexStr);
-				int dataSize = deterministicRandom()->randomInt(2, 5);
+				int dataSize = std::pow(10, deterministicRandom()->randomInt(0, 4));
 				BulkLoadTaskTestUnit taskUnit =
 				    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
 				bulkLoadTaskStates.push_back(taskUnit.bulkLoadTask);
@@ -625,7 +625,7 @@ struct BulkLoading : TestWorkload {
 		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		for (; i < 3; i++) {
 			std::string folderPath = joinPath(simulationBulkLoadFolder, std::to_string(i));
-			int dataSize = deterministicRandom()->randomInt(2, 5);
+			int dataSize = std::pow(10, deterministicRandom()->randomInt(0, 4));
 			taskUnit = self->generateBulkLoadTaskUnit(self, folderPath, dataSize);
 			ASSERT(normalKeys.contains(taskUnit.bulkLoadTask.getRange()));
 			taskMap.insert(taskUnit.bulkLoadTask.getRange(), taskUnit);
@@ -700,7 +700,7 @@ struct BulkLoading : TestWorkload {
 		ASSERT(self->checkSame(self, kvs, dbkvs));
 
 		// Clear all range lock
-		wait(releaseReadLockOnRange(cx, normalKeys, "BulkLoad"));
+		wait(releaseExclusiveReadLockOnRange(cx, normalKeys, "BulkLoad"));
 
 		// Clear metadata
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
@@ -756,6 +756,8 @@ struct BulkLoading : TestWorkload {
 			}
 		}
 
+		wait(registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad));
+
 		// Run test
 		if (deterministicRandom()->coinflip()) {
 			// Inject data to three non-overlapping ranges
@@ -765,6 +767,9 @@ struct BulkLoading : TestWorkload {
 			wait(self->complexTest(self, cx));
 		}
 		// self->produceLargeData(self, cx); // Produce data set that is used in loop back cluster test
+
+		wait(removeRangeLockOwner(cx, rangeLockNameForBulkLoad));
+
 		return Void();
 	}
 };

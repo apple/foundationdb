@@ -1559,6 +1559,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    .detail("DataMoveID", rd.dataMoveId.toString())
 				    .detail("TrackID", rd.randomId)
 				    .detail("Range", rd.keys)
+				    .detail("Priority", rd.priority)
 				    .detail("Reason", rd.reason.toString())
 				    .detail("DataMoveType", dataMoveType)
 				    .detail("DoBulkLoading", doBulkLoading)
@@ -1908,6 +1909,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString())
 						    .detail("DataMoveID", rd.dataMoveId)
 						    .detail("Reason", rd.reason.toString())
+						    .detail("Priority", rd.priority)
 						    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
 						if (rd.bulkLoadTask.get().completeAck.canBeSet()) {
 							// Unretriable error. So, we give up the task at this time.

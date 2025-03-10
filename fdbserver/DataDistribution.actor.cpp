@@ -2123,15 +2123,15 @@ ACTOR Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self
 	}
 	state UID jobId = self->bulkDumpJobManager.jobState.getJobId();
 	state std::string jobRoot = self->bulkDumpJobManager.jobState.getJobRoot();
-	BulkLoadTransportMethod transportMethod = self->bulkDumpJobManager.jobState.getTransportMethod();
+	state BulkLoadTransportMethod transportMethod = self->bulkDumpJobManager.jobState.getTransportMethod();
 	// Upload job manifest file
-	std::string content = generateBulkLoadJobManifestFileContent(self->bulkDumpJobManager.jobManifest);
+	state std::string content = generateBulkLoadJobManifestFileContent(self->bulkDumpJobManager.jobManifest);
 	ASSERT(!content.empty() && !self->bulkDumpFolder.empty());
 	state std::string localFolder = getBulkLoadJobRoot(self->bulkDumpFolder, jobId);
 	state std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
 	state std::string jobManifestFileName = getBulkLoadJobManifestFileName();
-	std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
-	generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, content, self->ddId);
+	state std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
+	wait(generateBulkDumpJobManifestFile(localFolder, localJobManifestFilePath, StringRef(content), self->ddId));
 	wait(uploadBulkDumpJobManifestFile(
 	    transportMethod, localJobManifestFilePath, remoteFolder, jobManifestFileName, self->ddId));
 	clearFileFolder(localFolder, self->ddId, /*ignoreError=*/true); // best effort to clear the local folder
