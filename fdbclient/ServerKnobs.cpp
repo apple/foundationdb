@@ -394,6 +394,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_BULKDUMP_BUILD_JOB_MANIFEST_BATCH_SIZE,           10000 ); if( isSimulated ) DD_BULKDUMP_BUILD_JOB_MANIFEST_BATCH_SIZE = deterministicRandom()->randomInt(1, 100);
 	init( SS_SERVE_BULKDUMP_PARALLELISM,                           1 ); // TODO(BulkDump): Do not set to 1 after SS can resolve the file folder conflict
 	init( SS_BULKDUMP_BATCH_BYTES,                     100*1024*1024 ); if( isSimulated ) SS_BULKDUMP_BATCH_BYTES = deterministicRandom()->randomInt(1000, 10000);
+	init( SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST,                10 ); if( isSimulated ) SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST = deterministicRandom()->randomInt(1, 10);
 
 	// TeamRemover
 	init( TR_LOW_SPACE_PIVOT_DELAY_SEC,                            0 ); if (isSimulated) TR_LOW_SPACE_PIVOT_DELAY_SEC = deterministicRandom()->randomInt(0, 3);
