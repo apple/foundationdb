@@ -206,14 +206,13 @@ struct RestoreWorkload : TestWorkload {
 				                              Verbose::True,
 				                              Key(),
 				                              Key(),
-				                              LockDB::True, // self->locked,
+				                              self->locked,
 				                              UnlockDB::True,
 				                              OnlyApplyMutationLogs::False,
 				                              InconsistentSnapshotOnly::False,
 				                              ::invalidVersion,
 				                              self->encryptionKeyFileName,
-				                              {},
-				                              TransformPartitionedLog::True);
+				                              {});
 
 				wait(success(restore));
 				ASSERT(!restore.isError());
