@@ -25,8 +25,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/IRandom.h"
-#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RangeLocking : TestWorkload {
@@ -278,7 +276,13 @@ struct RangeLocking : TestWorkload {
 						TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Lock").detail("Range", range);
 					}
 				} catch (Error& e) {
-					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "LockFailed").detail("Range", range);
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+					TraceEvent("RangeLockWorkLoadHistory")
+					    .errorUnsuppressed(e)
+					    .detail("Ops", "LockFailed")
+					    .detail("Range", range);
 					ASSERT(e.code() == error_code_range_locked_by_different_user);
 					continue; // Do not add the operation to lockRangeOperations.
 				}
@@ -289,7 +293,13 @@ struct RangeLocking : TestWorkload {
 						TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "Unlock").detail("Range", range);
 					}
 				} catch (Error& e) {
-					TraceEvent("RangeLockWorkLoadHistory").detail("Ops", "UnlockFailed").detail("Range", range);
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+					TraceEvent("RangeLockWorkLoadHistory")
+					    .errorUnsuppressed(e)
+					    .detail("Ops", "UnlockFailed")
+					    .detail("Range", range);
 					ASSERT(e.code() == error_code_range_locked_by_different_user);
 					continue; // Do not add the operation to lockRangeOperations.
 				}

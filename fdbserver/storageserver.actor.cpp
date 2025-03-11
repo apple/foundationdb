@@ -6049,8 +6049,7 @@ ACTOR Future<Void> getRangeDataToDump(StorageServer* data,
 			break;
 		}
 
-		// Yield and go to the next round
-		wait(delay(0.1));
+		// Go to the next round
 		beginKey = keyAfter(output->lastKey);
 	}
 
@@ -6193,7 +6192,7 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 
 			// Move to the next range
 			rangeBegin = keyAfter(rangeDumpRawData->lastKey);
-			if (rangeBegin >= rangeEnd) {
+			if (rangeBegin >= rangeEnd || batchNum >= SERVER_KNOBS->SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST) {
 				req.reply.send(req.bulkDumpState);
 				break;
 			}

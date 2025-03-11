@@ -2024,6 +2024,7 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 			bulkDumpResultIndex = 0;
 			for (; bulkDumpResultIndex < bulkDumpResult.size() - 1; bulkDumpResultIndex++) {
 				if (bulkDumpResult[bulkDumpResultIndex].value.empty()) {
+					beginKey = bulkDumpResult[bulkDumpResultIndex + 1].key;
 					continue;
 				}
 				bulkDumpRange = Standalone(
@@ -2036,6 +2037,16 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					throw bulkdump_task_outdated();
 				}
 				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
+					TraceEvent(SevDebug, "DDBulkDumpJobScheduleJobSeeCompleteTask", self->ddId)
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("JobId", jobId)
+					    .detail("NumShard", rangeLocations.size())
+					    .detail("RangeToRead", rangeToRead)
+					    .detail("BulkDumpRange", bulkDumpRange)
+					    .detail("DumpState", bulkDumpState.toString())
+					    .detail("BeginKey", bulkDumpResult[bulkDumpResultIndex].key);
+					beginKey = bulkDumpResult[bulkDumpResultIndex + 1].key;
 					continue;
 				}
 				ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);

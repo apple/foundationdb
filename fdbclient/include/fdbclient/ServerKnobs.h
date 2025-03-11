@@ -409,6 +409,7 @@ public:
 	                                              // between two rounds
 	int DD_BULKDUMP_BUILD_JOB_MANIFEST_BATCH_SIZE; // the number of lines in a batch when generating bulkload job
 	                                               // manifest file
+	int SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST; // the max number of batch count per bulkdump request to a SS
 	int BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE; // the block size when performing async read/write for bulkload
 	bool CC_ENFORCE_USE_UNFIT_DD_IN_SIM; // Set for CC to enforce to use an unfit DD in the simulation. This knob takes
 	                                     // effect only in the simulation.
