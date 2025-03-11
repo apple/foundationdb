@@ -61,11 +61,6 @@ ACTOR Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::s
 			output->append(*chunk);
 			offset += bytesRead;
 			remaining -= bytesRead;
-
-			// Yield every 4 chunks to allow other actors to run
-			if (offset % (4 * chunkSize) == 0) {
-				wait(yield());
-			}
 		}
 		return Void();
 	} catch (Error& e) {
@@ -91,11 +86,6 @@ ACTOR Future<Void> writeBulkFileBytes(std::string path, std::shared_ptr<std::str
 			wait(uncancellable(holdWhile(content, file->write(content->data() + offset, bytesToWrite, offset))));
 			offset += bytesToWrite;
 			remaining -= bytesToWrite;
-
-			// Yield every 4 chunks to allow other actors to run
-			if (offset % (4 * chunkSize) == 0) {
-				wait(yield());
-			}
 		}
 
 		// Ensure the file size is correct and data is synced
