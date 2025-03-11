@@ -6049,8 +6049,7 @@ ACTOR Future<Void> getRangeDataToDump(StorageServer* data,
 			break;
 		}
 
-		// Yield and go to the next round
-		wait(delay(0.1));
+		// Go to the next round
 		beginKey = keyAfter(output->lastKey);
 	}
 
