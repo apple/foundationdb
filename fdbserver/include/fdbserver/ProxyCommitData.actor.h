@@ -277,6 +277,8 @@ struct ProxyCommitData {
 	std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder = nullptr;
 	LogEpoch epoch;
 
+	Version lastShardMove;
+
 	std::shared_ptr<RangeLock> rangeLock = nullptr;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
@@ -376,7 +378,7 @@ struct ProxyCommitData {
 	                   ? std::make_shared<AccumulativeChecksumBuilder>(
 	                         getCommitProxyAccumulativeChecksumIndex(commitProxyIndex))
 	                   : nullptr),
-	    epoch(epoch) {
+	    lastShardMove(invalidVersion), epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

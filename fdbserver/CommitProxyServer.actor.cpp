@@ -124,6 +124,7 @@ struct ResolutionRequestBuilder {
 	                         Version version,
 	                         Version prevVersion,
 	                         Version lastReceivedVersion,
+	                         Version lastShardMove,
 	                         Span& parentSpan)
 	  : self(self), requests(self->resolvers.size()) {
 		for (auto& req : requests) {
@@ -131,6 +132,7 @@ struct ResolutionRequestBuilder {
 			req.prevVersion = prevVersion;
 			req.version = version;
 			req.lastReceivedVersion = lastReceivedVersion;
+			req.lastShardMove = lastShardMove;
 		}
 	}
 
@@ -728,6 +730,8 @@ struct CommitBatchContext {
 
 	bool rangeLockEnabled();
 
+	Version lastShardMove;
+
 private:
 	void evaluateBatchSize();
 };
@@ -809,6 +813,7 @@ inline bool shouldBackup(MutationRef const& m) {
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 	std::set<Tag> transactionTags;
 	std::vector<Tag> cacheVector = { cacheTag };
+	lastShardMove = pProxyCommitData->lastShardMove;
 	if (pProxyCommitData->txnStateStore->getReplaceContent()) {
 		// return empty set if txnStateStore will snapshot.
 		// empty sets are sent to all logs.
@@ -1017,7 +1022,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	self->commitVersion = versionReply.version;
 	self->prevVersion = versionReply.prevVersion;
 
-	//TraceEvent("CPGetVersion", pProxyCommitData->dbgid).detail("Master", pProxyCommitData->master.id().toString()).detail("CommitVersion", self->commitVersion).detail("PrvVersion", self->prevVersion);
+	// TraceEvent("CPGetVersion", pProxyCommitData->dbgid).detail("Master", pProxyCommitData->master.id().toString()).detail("CommitVersion", self->commitVersion).detail("PrvVersion", self->prevVersion);
 
 	for (auto it : versionReply.resolverChanges) {
 		auto rs = pProxyCommitData->keyResolvers.modify(it.range);
@@ -1093,8 +1098,12 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	state Span span("MP:getResolution"_loc, self->span.context);
 
-	ResolutionRequestBuilder requests(
-	    pProxyCommitData, self->commitVersion, self->prevVersion, pProxyCommitData->version.get(), span);
+	ResolutionRequestBuilder requests(pProxyCommitData,
+	                                  self->commitVersion,
+	                                  self->prevVersion,
+	                                  pProxyCommitData->version.get(),
+	                                  self->lastShardMove,
+	                                  span);
 	int conflictRangeCount = 0;
 	self->maxTransactionBytes = 0;
 	for (int t = 0; t < trs.size(); t++) {
@@ -1775,6 +1784,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			// TraceEvent("ResolverReturn").detail("ReturnTags",reply.writtenTags).detail("TPCVsize",reply.tpcvMap.size()).detail("ReqTags",self->writtenTagsPreResolution);
 			self->tpcvMap = reply.tpcvMap;
+			self->pProxyCommitData->lastShardMove = reply.lastShardMove;
 
 			// extract push locations from tpcv
 			std::vector<int> fromLocations;

@@ -81,19 +81,18 @@ public:
 	                                              Version firstUnseenVersion,
 	                                              Version commitVersion,
 	                                              bool initialShardChanged) {
-		bool shardChangedOrStateTxn = initialShardChanged;
+		bool shardChanged = initialShardChanged;
 		auto stateTransactionItr = recentStateTransactions.lower_bound(firstUnseenVersion);
 		auto endItr = recentStateTransactions.lower_bound(commitVersion);
 		// Resolver only sends back prior state txns back, because the proxy
 		// sends this request has them and will apply them via applyMetadataToCommittedTransactions();
 		// and other proxies will get this version's state txns as a prior version.
 		for (; stateTransactionItr != endItr; ++stateTransactionItr) {
-			shardChangedOrStateTxn =
-			    shardChangedOrStateTxn || stateTransactionItr->value.first || stateTransactionItr->value.second.size();
+			shardChanged = shardChanged || stateTransactionItr->value.first;
 			reply->stateMutations.push_back(reply->arena, stateTransactionItr->value.second);
 			reply->arena.dependsOn(stateTransactionItr->value.second.arena());
 		}
-		return shardChangedOrStateTxn;
+		return shardChanged;
 	}
 
 	bool empty() const { return recentStateTransactionSizes.empty(); }
@@ -189,6 +188,8 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	EncryptionAtRestMode encryptMode;
 
+	Version lastShardMove;
+
 	Resolver(UID dbgid, int commitProxyCount, int resolverCount, EncryptionAtRestMode encryptMode)
 	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), encryptMode(encryptMode),
 	    version(-1), conflictSet(newConflictSet()), iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE),
@@ -206,7 +207,8 @@ struct Resolver : ReferenceCounted<Resolver> {
 	    queueWaitLatencyDist(Histogram::getHistogram("Resolver"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)),
 	    computeTimeDist(Histogram::getHistogram("Resolver"_sr, "ComputeTime"_sr, Histogram::Unit::milliseconds)),
 	    // Distribution of queue depths, with knowledge that Histogram has 32 buckets, and each bucket will have size 1.
-	    queueDepthDist(Histogram::getHistogram("Resolver"_sr, "QueueDepth"_sr, Histogram::Unit::countLinear, 0, 31)) {
+	    queueDepthDist(Histogram::getHistogram("Resolver"_sr, "QueueDepth"_sr, Histogram::Unit::countLinear, 0, 31)),
+	    lastShardMove(invalidVersion) {
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "NeededVersion", [this]() { return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this]() { return this->totalStateBytes.get(); });
@@ -431,7 +433,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		// If shardChanged at or before this commit version, the proxy may have computed
 		// the wrong set of groups. Then we need to broadcast to all groups below.
 		stateTransactionsPair.first = toCommit && toCommit->isShardChanged();
-		bool shardChangedOrStateTxn = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
+		bool shardChanged = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
 		    &reply, firstUnseenVersion, req.version, toCommit && toCommit->isShardChanged());
 
 		// Adds private mutation messages to the reply message.
@@ -483,9 +485,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
-				if (shardChangedOrStateTxn || req.txnStateTransactions.size() || !req.writtenTags.size()) {
+				if (req.lastShardMove < self->lastShardMove || shardChanged || req.txnStateTransactions.size() ||
+				    !req.writtenTags.size()) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
+					}
+					if (shardChanged) {
+						self->lastShardMove = req.version;
 					}
 				} else {
 					toCommit->getLocations(reply.writtenTags, writtenTLogs);
@@ -498,6 +504,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 					self->tpcvVector[tLog] = req.version;
 				}
 			}
+			reply.lastShardMove = self->lastShardMove;
 		}
 		self->version.set(req.version);
 		bool breachedLimit = self->totalStateBytes.get() <= SERVER_KNOBS->RESOLVER_STATE_MEMORY_LIMIT &&
