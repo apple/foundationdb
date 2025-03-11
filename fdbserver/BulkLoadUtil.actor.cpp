@@ -47,9 +47,10 @@ ACTOR Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::s
 		// Read in chunks to avoid memory pressure
 		state int64_t offset = 0;
 		state int64_t remaining = fileSize;
+		state std::shared_ptr<std::string> chunk = std::make_shared<std::string>();
 		while (remaining > 0) {
 			state int64_t bytesToRead = std::min(chunkSize, remaining);
-			state std::shared_ptr<std::string> chunk = std::make_shared<std::string>();
+			chunk->clear();
 			chunk->resize(bytesToRead);
 			state int bytesRead = wait(uncancellable(holdWhile(chunk, file->read(chunk->data(), bytesToRead, offset))));
 			if (bytesRead != bytesToRead) {
