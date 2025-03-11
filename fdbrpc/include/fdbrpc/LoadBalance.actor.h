@@ -392,6 +392,10 @@ Future<Void> replicaComparison(Req req,
 				// We must always propagate wrong_shard_server to the caller because it is signal to
 				// perform critical operations like invalidating the shard mapping cache.
 				if (replicaErrorCode == error_code_wrong_shard_server) {
+					TraceEvent(SevWarnAlways, "ReplicaComparisonReadError")
+					    .detail("TeamSize", restOfTeamFutures.size() + 1)
+					    .detail("RequiredReplies", requiredReplicas)
+					    .detail("SSError", error_code_wrong_shard_server);
 					throw wrong_shard_server();
 				}
 			}
