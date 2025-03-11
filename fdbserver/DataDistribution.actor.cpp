@@ -2235,7 +2235,7 @@ ACTOR Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 			wait(bulkDumpUploadJobManifestFile(self));
 			TraceEvent(SevInfo, "DDBulkDumpManagerJobManifestUpload", self->ddId).detail("JobId", jobId);
 			// Finally, clear all bulkdump metadata
-			wait(clearBulkDumpJob(cx, jobId));
+			wait(cancelBulkDumpJob(cx, jobId));
 			TraceEvent(SevInfo, "DDBulkDumpManagerMetadataCleared", self->ddId).detail("JobId", jobId);
 			break; // end
 		} else {

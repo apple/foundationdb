@@ -234,7 +234,7 @@ ACTOR Future<int> setBulkDumpMode(Database cx, int mode);
 ACTOR Future<int> getBulkDumpMode(Database cx);
 
 // TODO(BulkDump): Cancel or clear the BulkDump job
-ACTOR Future<Void> clearBulkDumpJob(Database cx, UID jobId);
+ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId);
 
 // Submit a bulkdump job: dumping data to a remote folder by storage servers.
 // There is at most one BulkLoad or one BulkDump job at a time.

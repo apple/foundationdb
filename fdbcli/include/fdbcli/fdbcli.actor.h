@@ -147,6 +147,8 @@ ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 bool tokencmp(StringRef token, const char* command);
 // print the usage of the specified command
 void printUsage(StringRef command);
+// print the long description of the specified command
+void printLongDesc(StringRef command);
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);

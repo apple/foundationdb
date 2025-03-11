@@ -3483,7 +3483,7 @@ ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
 	return Void();
 }
 
-ACTOR Future<Void> clearBulkDumpJob(Database cx, UID jobId) {
+ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 	state Transaction tr(cx);
 	state Key beginKey = normalKeys.begin;
 	state Key endKey = normalKeys.end;

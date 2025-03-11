@@ -46,6 +46,15 @@ void printUsage(StringRef command) {
 		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
 }
 
+void printLongDesc(StringRef command) {
+	const auto& helpMap = CommandFactory::commands();
+	auto i = helpMap.find(command.toString());
+	if (i != helpMap.end())
+		printf("%s\n", i->second.long_desc.c_str());
+	else
+		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
+}
+
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
 	// hold the returned standalone object's memory
 	state ThreadFuture<Optional<Value>> errorMsgF = tr->get(fdb_cli::errorMsgSpecialKey);
