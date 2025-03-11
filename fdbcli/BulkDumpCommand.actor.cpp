@@ -64,7 +64,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 	state BulkDumpState bulkDumpJob;
 	if (tokencmp(tokens[1], "mode")) {
 		if (tokens.size() != 2 && tokens.size() != 3) {
-			printUsage(tokens[0]);
+			printLongDesc(tokens[0]);
 			return UID();
 		}
 		if (tokens.size() == 2) {
@@ -88,20 +88,20 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 			TraceEvent("SetBulkDumpModeCommand").detail("OldValue", old).detail("NewValue", 0);
 			return UID();
 		} else {
-			printUsage(tokens[0]);
+			printLongDesc(tokens[0]);
 			return UID();
 		}
 
 	} else if (tokencmp(tokens[1], "local")) {
 		if (tokens.size() != 5) {
-			printUsage(tokens[0]);
+			printLongDesc(tokens[0]);
 			return UID();
 		}
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
 		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
-			printUsage(tokens[0]);
+			printLongDesc(tokens[0]);
 			return UID();
 		}
 		std::string jobRoot = tokens[4].toString();
@@ -112,14 +112,14 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 
 	} else if (tokencmp(tokens[1], "blobstore")) {
 		if (tokens.size() != 5) {
-			printUsage(tokens[0]);
+			printLongDesc(tokens[0]);
 			return UID();
 		}
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
 		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
-			printUsage(tokens[0]);
+			printLongDesc(tokens[0]);
 			return UID();
 		}
 		std::string jobRoot = tokens[4].toString();
@@ -128,19 +128,19 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 		wait(submitBulkDumpJob(cx, bulkDumpJob));
 		return bulkDumpJob.getJobId();
 
-	} else if (tokencmp(tokens[1], "clear")) {
+	} else if (tokencmp(tokens[1], "cancel")) {
 		if (tokens.size() != 3) {
-			printUsage(tokens[0]);
+			printLongDesc(tokens[0]);
 			return UID();
 		}
 		state UID jobId = UID::fromString(tokens[2].toString());
-		wait(clearBulkDumpJob(cx, jobId));
-		fmt::println("Job {} has been cleared. No task will be spawned.", jobId.toString());
+		wait(cancelBulkDumpJob(cx, jobId));
+		fmt::println("Job {} has been cancelled. No new tasks will be spawned.", jobId.toString());
 		return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
 		if (tokens.size() != 4) {
-			printUsage(tokens[0]);
+			printLongDesc(tokens[0]);
 			return UID();
 		}
 		bool anyJob = wait(getOngoingBulkDumpJob(cx));
@@ -150,7 +150,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
 		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
-			printUsage(tokens[0]);
+			printLongDesc(tokens[0]);
 			return UID();
 		}
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
@@ -165,10 +165,16 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 
 CommandFactory bulkDumpFactory(
     "bulkdump",
-    CommandHelp("bulkdump [mode|local|blobstore|clear|status] [ARGs]",
+    CommandHelp("bulkdump [mode|local|blobstore|status|cancel] [ARGs]",
                 "bulkdump commands",
                 "To set bulkdump mode: `bulkdump mode [on|off]'\n"
-                "To dump a range to SST files: `bulkdump [local|blobstore] <BeginKey> <EndKey> jobRoot`\n"
-                "To clear current bulkdump job: `bulkdump clear <JobID>`\n"
-                "To get completed bulkdump ranges: `bulkdump status <BeginKey> <EndKey>`\n"));
+                "To dump a range to a local dir: `bulkdump local <BEGINKEY> <ENDKEY> <DIR>`\n"
+                " where <DIR> is the local directory to write SST files and <BEGINKEY>\n"
+                " to <ENDKEY> denotes the key/value range to dump.\n"
+                "To dump a range to s3: `bulkdump blobstore <JOBID> <BEGINKEY> <ENDKEY> <URL>`\n"
+                " where <URL> is the 'bloblstore' url of the s3 bucket to write the SST files\n"
+                " to -- see https://apple.github.io/foundationdb/backups.html#backup-urls --\n"
+                " and <BEGINKEY> to <ENDKEY> denotes the keyvalue range to dump.\n"
+                "To cancel current bulkdump job: `bulkdump cancel <JOBID>`\n"
+                "To get completed bulkdump ranges: `bulkdump status <BEGINKEY> <ENDKEY>`\n"));
 } // namespace fdb_cli
