@@ -38,7 +38,6 @@ struct BackupWorkload : TestWorkload {
 	Key backupTag;
 	bool differentialBackup, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
-	static int backupAgentRequests;
 	LockDB locked{ false };
 	bool allowPauses;
 	Optional<std::string> encryptionKeyFileName;
@@ -67,7 +66,6 @@ struct BackupWorkload : TestWorkload {
 		                                           (restoreAfter - std::max(abortAndRestartAfter, backupAfter)) +
 		                                       std::max(abortAndRestartAfter, backupAfter)
 		                                 : 0.0);
-		agentRequest = getOption(options, "simBackupAgents"_sr, true);
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 
 		std::vector<std::string> restorePrefixesToInclude =
@@ -95,7 +93,6 @@ struct BackupWorkload : TestWorkload {
 		    .detail("AbortAndRestartAfter", abortAndRestartAfter)
 		    .detail("DifferentialBackup", differentialBackup)
 		    .detail("StopDifferentialAfter", stopDifferentialAfter)
-		    .detail("AgentRequest", agentRequest)
 		    .detail("Encrypted", encryptionKeyFileName.present());
 
 		return _start(cx, this);
@@ -306,11 +303,6 @@ struct BackupWorkload : TestWorkload {
 			state Future<Void> cp = changePaused(cx, &backupAgent);
 		}
 
-		// Increment the backup agent requests
-		if (self->agentRequest) {
-			BackupWorkload::backupAgentRequests++;
-		}
-
 		if (self->encryptionKeyFileName.present()) {
 			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
 		}
@@ -341,16 +333,8 @@ struct BackupWorkload : TestWorkload {
 
 			wait(startRestore);
 
-			// Decrement the backup agent requets
-			if (self->agentRequest) {
-				BackupWorkload::backupAgentRequests--;
-			}
-
-			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
-			    (!BackupWorkload::backupAgentRequests)) {
-				g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
-			}
+			// We can't remove after backup agents since the restore also needs them.
+			// I.e., g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupCorrectness").error(e).GetLastError();
 			throw;
@@ -358,7 +342,5 @@ struct BackupWorkload : TestWorkload {
 		return Void();
 	}
 };
-
-int BackupWorkload::backupAgentRequests = 0;
 
 WorkloadFactory<BackupWorkload> BackupWorkloadFactory;
