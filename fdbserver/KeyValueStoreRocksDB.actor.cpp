@@ -164,10 +164,14 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 		options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
 	}
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
-		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+		// Adding two days range of jitter.
+		int64_t jitter = 2 * 24 * 60 * 60 * deterministicRandom()->random01();
+		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS + jitter;
 	}
 	if (SERVER_KNOBS->ROCKSDB_TTL_COMPACTION_SECONDS > 0) {
-		options.ttl = SERVER_KNOBS->ROCKSDB_TTL_COMPACTION_SECONDS;
+		// Adding two days range of jitter.
+		int64_t jitter = 2 * 24 * 60 * 60 * deterministicRandom()->random01();
+		options.ttl = SERVER_KNOBS->ROCKSDB_TTL_COMPACTION_SECONDS + jitter;
 	}
 	if (SERVER_KNOBS->ROCKSDB_MAX_COMPACTION_BYTES > 0) {
 		options.max_compaction_bytes = SERVER_KNOBS->ROCKSDB_MAX_COMPACTION_BYTES;
@@ -433,6 +437,8 @@ const StringRef ROCKSDB_READVALUE_GET_HISTOGRAM = "RocksDBReadValueGet"_sr;
 const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = "RocksDBReadPrefixGet"_sr;
 const StringRef ROCKSDB_READ_RANGE_BYTES_RETURNED_HISTOGRAM = "RocksDBReadRangeBytesReturned"_sr;
 const StringRef ROCKSDB_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM = "RocksDBReadRangeKVPairsReturned"_sr;
+const StringRef ROCKSDB_DELETES_PER_COMMIT_HISTOGRAM = "RocksDBDeletesPerCommit"_sr;
+const StringRef ROCKSDB_DELETE_RANGES_PER_COMMIT_HISTOGRAM = "RocksDBDeleteRangesPerCommit"_sr;
 
 rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
@@ -1918,7 +1924,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
-	    errorListener(std::make_shared<RocksDBErrorListener>(id)), errorFuture(errorListener->getFuture()) {
+	    errorListener(std::make_shared<RocksDBErrorListener>(id)), errorFuture(errorListener->getFuture()),
+	    deletesPerCommitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+	                                                      ROCKSDB_DELETES_PER_COMMIT_HISTOGRAM,
+	                                                      Histogram::Unit::countLinear,
+	                                                      0,
+	                                                      10000)),
+	    deleteRangesPerCommitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+	                                                           ROCKSDB_DELETE_RANGES_PER_COMMIT_HISTOGRAM,
+	                                                           Histogram::Unit::countLinear,
+	                                                           0,
+	                                                           10000)) {
 		eventListener = std::make_shared<RocksDBEventListener>(sharedState);
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
@@ -2128,6 +2144,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    0 /* default_cf_ts_sz default:0 */));
 			keysSet.clear();
 			maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
+			deletesPerCommit = 0;
+			deleteRangesPerCommit = 0;
 		}
 		ASSERT(defaultFdbCF != nullptr);
 		writeBatch->Put(defaultFdbCF, toSlice(kv.key), toSlice(kv.value));
@@ -2145,6 +2163,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    0 /* default_cf_ts_sz default:0 */));
 			keysSet.clear();
 			maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
+			deletesPerCommit = 0;
+			deleteRangesPerCommit = 0;
 		}
 
 		ASSERT(defaultFdbCF != nullptr);
@@ -2154,6 +2174,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
 			++counters.deleteKeyReqs;
 			--maxDeletes;
+			++deletesPerCommit;
 		} else {
 			++counters.deleteRangeReqs;
 			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE &&
@@ -2170,11 +2191,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					writeBatch->Delete(defaultFdbCF, cursor->key());
 					++counters.convertedDeleteKeyReqs;
 					--maxDeletes;
+					++deletesPerCommit;
 					cursor->Next();
 				}
 				if (!cursor->status().ok() || maxDeletes <= 0) {
 					// if readrange iteration fails, then do a deleteRange.
 					writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
+					++deleteRangesPerCommit;
 				} else {
 					auto it = keysSet.lower_bound(keyRange.begin);
 					while (it != keysSet.end() && *it < keyRange.end) {
@@ -2182,6 +2205,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						++counters.convertedDeleteKeyReqs;
 						--maxDeletes;
 						it++;
+						++deletesPerCommit;
 					}
 					it = previousCommitKeysSet.lower_bound(keyRange.begin);
 					while (it != previousCommitKeysSet.end() && *it < keyRange.end) {
@@ -2189,10 +2213,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						++counters.convertedDeleteKeyReqs;
 						--maxDeletes;
 						it++;
+						++deletesPerCommit;
 					}
 				}
 			} else {
 				writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
+				++deleteRangesPerCommit;
 			}
 		}
 	}
@@ -2231,6 +2257,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		a->batchToCommit = std::move(self->writeBatch);
 		self->previousCommitKeysSet = std::move(self->keysSet);
 		self->maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
+		self->deletesPerCommitHistogram->sampleRecordCounter(self->deletesPerCommit);
+		self->deleteRangesPerCommitHistogram->sampleRecordCounter(self->deleteRangesPerCommit);
+		if (self->deletesPerCommit > 1000 || self->deleteRangesPerCommit > 1000)
+			TraceEvent("RocksDBDeletesCount", self->id)
+			    .detail("DeletesPerCommit", self->deletesPerCommit)
+			    .detail("DeleteRangesPerCommit", self->deleteRangesPerCommit);
+		self->deletesPerCommit = 0;
+		self->deleteRangesPerCommit = 0;
 		state Future<Void> fut = a->done.getFuture();
 		self->writeThread->post(a);
 		wait(fut);
@@ -2446,6 +2480,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	std::set<Key> previousCommitKeysSet;
 	// maximum number of single key deletes in a commit, if ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled.
 	int maxDeletes;
+	int deletesPerCommit;
+	int deleteRangesPerCommit;
+	Reference<Histogram> deletesPerCommitHistogram;
+	Reference<Histogram> deleteRangesPerCommitHistogram;
 	Optional<Future<Void>> metrics;
 	FlowLock readSemaphore;
 	int numReadWaiters;
