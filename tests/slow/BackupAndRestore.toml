@@ -26,7 +26,6 @@ simBackupAgents = 'BackupToFile'
 testTitle = 'RestorePartitioned'
 simBackupAgents = 'BackupToFile'
 clearAfterTest = false
-disabledFailureInjectionWorkloads = 'Attrition,Rollback'
 
     [[test.workload]]
     testName = 'Restore'
