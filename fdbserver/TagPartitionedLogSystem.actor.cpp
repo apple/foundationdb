@@ -1398,9 +1398,9 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 Version TagPartitionedLogSystem::getKnownCommittedVersion() {
 	Version result = invalidVersion;
 	for (auto& it : lockResults) {
-		auto versionInfo = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
-		if (versionInfo.present()) {
-			result = std::max(result, versionInfo.get().knownCommittedVersion);
+		auto durableVersionInfo = TagPartitionedLogSystem::getDurableVersion(dbgid, it);
+		if (durableVersionInfo.present()) {
+			result = std::max(result, durableVersionInfo.get().knownCommittedVersion);
 		}
 	}
 	return result;
@@ -2504,13 +2504,13 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		state int maxRecoveryIndex = 0;
 		while (lockNum < allLockResults.size()) {
 
-			auto versionInfo = TagPartitionedLogSystem::getDurableVersion(dbgid, allLockResults[lockNum]);
-			if (versionInfo.present()) {
-				if (versionInfo.get().minimumDurableVersion > maxRecoveryVersion) {
+			auto durableVersionInfo = TagPartitionedLogSystem::getDurableVersion(dbgid, allLockResults[lockNum]);
+			if (durableVersionInfo.present()) {
+				if (durableVersionInfo.get().minimumDurableVersion > maxRecoveryVersion) {
 					TraceEvent("HigherRecoveryVersion", dbgid)
 					    .detail("Idx", lockNum)
-					    .detail("Ver", versionInfo.get().minimumDurableVersion);
-					maxRecoveryVersion = versionInfo.get().minimumDurableVersion;
+					    .detail("Ver", durableVersionInfo.get().minimumDurableVersion);
+					maxRecoveryVersion = durableVersionInfo.get().minimumDurableVersion;
 					maxRecoveryIndex = lockNum;
 				}
 				lockNum++;
@@ -2547,17 +2547,18 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			if (!logServers[log]->isLocal) {
 				continue;
 			}
-			auto versionInfo =
+			auto durableVersionInfo =
 			    TagPartitionedLogSystem::getDurableVersion(dbgid, lockResults[log], logFailed[log], lastEnd);
-			if (versionInfo.present()) {
+			if (durableVersionInfo.present()) {
 				logGroupResults.emplace_back(logServers[log]->tLogReplicationFactor,
-				                             versionInfo.get().lockResults,
-				                             versionInfo.get().policyResult);
-				minDV = std::min(minDV, versionInfo.get().minimumDurableVersion);
+				                             durableVersionInfo.get().lockResults,
+				                             durableVersionInfo.get().policyResult);
+				minDV = std::min(minDV, durableVersionInfo.get().minimumDurableVersion);
 				if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-					knownCommittedVersion = std::max(knownCommittedVersion, versionInfo.get().knownCommittedVersion);
-					maxEnd = std::max(maxEnd, versionInfo.get().minimumDurableVersion);
-					minEnd = std::min(minEnd, versionInfo.get().minimumDurableVersion);
+					knownCommittedVersion =
+					    std::max(knownCommittedVersion, durableVersionInfo.get().knownCommittedVersion);
+					maxEnd = std::max(maxEnd, durableVersionInfo.get().minimumDurableVersion);
+					minEnd = std::min(minEnd, durableVersionInfo.get().minimumDurableVersion);
 				} else {
 					auto unicastVersions = getRecoverVersionUnicast(logServers, logGroupResults.back(), minDV);
 					knownCommittedVersion = std::max(knownCommittedVersion, std::get<0>(unicastVersions.get()));
@@ -2823,10 +2824,10 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		if (oldLogSystem->lockResults[lockNum].logSet->locality == remoteLocality) {
 
 			loop {
-				auto versionInfo =
+				auto durableVersionInfo =
 				    TagPartitionedLogSystem::getDurableVersion(self->dbgid, oldLogSystem->lockResults[lockNum]);
-				if (versionInfo.present()) {
-					logSet->startVersion = std::min(std::min(versionInfo.get().knownCommittedVersion + 1,
+				if (durableVersionInfo.present()) {
+					logSet->startVersion = std::min(std::min(durableVersionInfo.get().knownCommittedVersion + 1,
 					                                         oldLogSystem->lockResults[lockNum].epochEnd),
 					                                logSet->startVersion);
 					break;
@@ -3104,12 +3105,13 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			}
 			state Future<Void> stalledAfter = setAfter(recruitmentStalled, SERVER_KNOBS->MAX_RECOVERY_TIME, true);
 			loop {
-				auto versionInfo =
+				auto durableVersionInfo =
 				    TagPartitionedLogSystem::getDurableVersion(logSystem->dbgid, oldLogSystem->lockResults[lockNum]);
-				if (versionInfo.present()) {
-					logSystem->tLogs[0]->startVersion = std::min(std::min(versionInfo.get().knownCommittedVersion + 1,
-					                                                      oldLogSystem->lockResults[lockNum].epochEnd),
-					                                             logSystem->tLogs[0]->startVersion);
+				if (durableVersionInfo.present()) {
+					logSystem->tLogs[0]->startVersion =
+					    std::min(std::min(durableVersionInfo.get().knownCommittedVersion + 1,
+					                      oldLogSystem->lockResults[lockNum].epochEnd),
+					             logSystem->tLogs[0]->startVersion);
 					break;
 				}
 				wait(TagPartitionedLogSystem::getDurableVersionChanged(oldLogSystem->lockResults[lockNum]));

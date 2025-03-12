@@ -84,6 +84,9 @@ struct DurableVersionInfo {
 	Version minimumDurableVersion; // mimimum of the durable versions of available tLogs
 	std::vector<TLogLockResult> lockResults; // replies from various tLogs
 	bool policyResult; // unavailable tLogs meet the replication policy or not
+
+	DurableVersionInfo(Version kcv, Version dv, std::vector<TLogLockResult>& replies, bool meetsPolicy)
+	  : knownCommittedVersion(kcv), minimumDurableVersion(dv), lockResults(replies), policyResult(meetsPolicy) {}
 };
 
 struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
