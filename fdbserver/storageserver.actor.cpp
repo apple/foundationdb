@@ -2465,8 +2465,12 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 
 static Error dataMoveConflictError(const bool isTss) {
 	if (isTss && g_network->isSimulated()) {
-		// Tss data move conflicts are expected in simulation, and can be safely ignored
-		// by restarting the server.
+		// TSS data move conflicts can happen in both sim and prod, but in sim,
+		// the sev40s it causes fails Joshua tests. We have been using please_reboot
+		// as means to avoid sev40s, but semantically this is undesired because rebooting
+		// will not fix/heal the TSS.
+		// TODO: think of a proper TSS move conflict error that does not trigger
+		// reboot but also avoids sev40. And throw that error regardless of sim or prod.
 		return please_reboot();
 	}
 	return data_move_conflict();
