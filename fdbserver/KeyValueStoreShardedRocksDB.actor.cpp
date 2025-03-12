@@ -441,7 +441,7 @@ struct Counters {
 };
 
 rocksdb::CompactionPri getCompactionPriority() {
-	switch (SERVER_KNOBS->ROCKSDB_COMPACTION_PRI) {
+	switch (SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PRI) {
 	case 0:
 		return rocksdb::CompactionPri::kByCompensatedSize;
 	case 1:
@@ -453,7 +453,8 @@ rocksdb::CompactionPri getCompactionPriority() {
 	case 4:
 		return rocksdb::CompactionPri::kRoundRobin;
 	default:
-		TraceEvent(SevWarn, "InvalidCompactionPriority").detail("KnobValue", SERVER_KNOBS->ROCKSDB_COMPACTION_PRI);
+		TraceEvent(SevWarn, "InvalidCompactionPriority")
+		    .detail("KnobValue", SERVER_KNOBS->SHARDED_ROCKSDB_COMPACTION_PRI);
 		return rocksdb::CompactionPri::kMinOverlappingRatio;
 	}
 }
