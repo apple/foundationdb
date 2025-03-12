@@ -393,6 +393,7 @@ Future<Void> replicaComparison(Req req,
 				// perform critical operations like invalidating the shard mapping cache.
 				if (replicaErrorCode == error_code_wrong_shard_server) {
 					TraceEvent(SevWarnAlways, "ReplicaComparisonReadError")
+					    .suppressFor(1.0)
 					    .detail("TeamSize", restOfTeamFutures.size() + 1)
 					    .detail("RequiredReplies", requiredReplicas)
 					    .detail("SSError", error_code_wrong_shard_server);
