@@ -1149,6 +1149,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "BlockCacheUsage", rocksdb::DB::Properties::kBlockCacheUsage },
 		{ "BlockCachePinnedUsage", rocksdb::DB::Properties::kBlockCachePinnedUsage },
 		{ "LiveSstFilesSize", rocksdb::DB::Properties::kLiveSstFilesSize },
+		{ "ObsoleteSstFilesSize", rocksdb::DB::Properties::kObsoleteSstFilesSize },
 	};
 
 	state std::vector<std::pair<const char*, std::string>> strPropertyStats = {
@@ -2394,20 +2395,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	StorageBytes getStorageBytes() const override {
-		uint64_t live = 0;
-		ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
+		uint64_t liveFilesSize = 0;
+		uint64_t obsoleteFilesSize = 0;
+		ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &liveFilesSize));
+		ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kObsoleteSstFilesSize, &obsoleteFilesSize));
 
 		int64_t free;
 		int64_t total;
 		g_network->getDiskBytes(path, free, total);
 
-		// Rocksdb metadata kLiveSstFilesSize is not deterministic so don't rely on it for simulation. Instead, we pick
-		// a sane value that is deterministically random.
+		// Rocksdb metadata kLiveSstFilesSize and kObsoleteSstFilesSize are not deterministic so don't rely on it for
+		// simulation. Instead, we pick a sane value that is deterministically random.
 		if (g_network->isSimulated()) {
-			live = (total - free) * deterministicRandom()->random01();
+			liveFilesSize = (total - free) * deterministicRandom()->random01();
+			obsoleteFilesSize = 0;
 		}
 
-		return StorageBytes(free, total, live, free);
+		return StorageBytes(free, total, liveFilesSize + obsoleteFilesSize, free);
 	}
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
