@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2025 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,32 @@
 
 #ifdef FLOW_GRPC_ENABLED
 
-GrpcServer::GrpcServer(const NetworkAddress& addr) : pool_(1), address_(addr) {}
+// ---- FlowGrpc definitions ------
+
+void FlowGrpc::init(TLSConfig* tls_config, const std::optional<NetworkAddress>& server_addr) {
+	FlowGrpc* fg = new FlowGrpc();
+	g_network->setGlobal(INetwork::enGrpcState, (flowGlobalType)fg);
+
+	if (!tls_config) {
+		fg->credentials_ = std::make_shared<GrpcInsecureCredentialProvider>();
+	} else {
+		fg->credentials_ = std::make_shared<GrpcTlsCredentialProvider>(tls_config);
+	}
+
+	if (server_addr) {
+		fg->server_ = std::make_shared<GrpcServer>(*server_addr, fg->credentials_);
+	}
+}
+
+// ---- GrpcServer definitions ------
+
+GrpcServer::GrpcServer(const NetworkAddress& addr, std::shared_ptr<GrpcCredentialProvider> provider)
+  : pool_(1), address_(addr), credential_provider_(provider) {
+
+	if (provider == nullptr) {
+		credential_provider_ = std::make_shared<GrpcInsecureCredentialProvider>();
+	}
+}
 
 GrpcServer::~GrpcServer() {
 	if (!server_)
@@ -39,7 +64,7 @@ GrpcServer::~GrpcServer() {
 
 Future<Void> GrpcServer::run() {
 	try {
-		run_actor_ = run_internal();
+		run_actor_ = runInternal();
 		co_await run_actor_;
 	} catch (Error& err) {
 		if (err.code() != error_code_operation_cancelled) {
@@ -53,7 +78,7 @@ Future<Void> GrpcServer::run() {
 	}
 }
 
-Future<Void> GrpcServer::run_internal() {
+Future<Void> GrpcServer::runInternal() {
 	ASSERT(state_ == State::Stopped);
 	ASSERT(server_ == nullptr);
 	ASSERT(g_network->isOnMainThread());
@@ -78,7 +103,7 @@ Future<Void> GrpcServer::run_internal() {
 
 		// Even if service list is changed after stopServer(), we'll have those here.
 		grpc::ServerBuilder builder;
-		builder.AddListeningPort(address_.toString(), grpc::InsecureServerCredentials());
+		builder.AddListeningPort(address_.toString(), credential_provider_->serverCredentials());
 		for (auto& [_, services] : registered_services_) {
 			for (auto& service : services) {
 				builder.RegisterService(service.get());

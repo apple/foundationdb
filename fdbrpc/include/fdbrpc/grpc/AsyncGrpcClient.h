@@ -29,6 +29,7 @@
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
 #include "fdbrpc/grpc/AsyncTaskExecutor.h"
+#include "fdbrpc/grpc/Credentials.h"
 
 template <class ServiceType>
 class AsyncGrpcClient {
@@ -46,9 +47,18 @@ class AsyncGrpcClient {
 public:
 	using Rpc = typename ServiceType::Stub;
 
-	AsyncGrpcClient() {}
+	AsyncGrpcClient() {
+		// Isn't necessary unless initialized mid-block using Flow actor compiler.
+	}
+
 	AsyncGrpcClient(const std::string& endpoint, std::shared_ptr<AsyncTaskExecutor> pool)
 	  : pool_(pool), channel_(grpc::CreateChannel(endpoint, grpc::InsecureChannelCredentials())),
+	    stub_(ServiceType::NewStub(channel_)) {}
+
+	AsyncGrpcClient(const std::string& endpoint,
+	                std::shared_ptr<GrpcCredentialProvider> credentials_provider,
+	                std::shared_ptr<AsyncTaskExecutor> pool)
+	  : pool_(pool), channel_(grpc::CreateChannel(endpoint, credentials_provider->clientCredentials())),
 	    stub_(ServiceType::NewStub(channel_)) {}
 
 	// NOTE: Must be called from network thread. This is because the underlying primitive used
