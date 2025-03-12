@@ -694,6 +694,9 @@ public:
 		                  ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod));
 		res = res + ", [SubmitTime]: " + std::to_string(submitTime);
 		res = res + ", [SinceSubmitMins]: " + std::to_string((now() - submitTime) / 60.0);
+		if (taskCount.present()) {
+			res = res + ", [TaskCount]: " + std::to_string(taskCount.get());
+		}
 		return res;
 	}
 
@@ -715,6 +718,10 @@ public:
 
 	double getEndTime() const { return endTime; }
 
+	void setTaskCount(uint64_t count) { taskCount = count; }
+
+	Optional<uint64_t> getTaskCount() const { return taskCount; }
+
 	bool isMetadataValid() const {
 		if (!jobId.isValid()) {
 			return false;
@@ -735,7 +742,7 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase, submitTime, endTime);
+		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase, submitTime, endTime, taskCount);
 	}
 
 private:
@@ -749,6 +756,7 @@ private:
 	BulkLoadJobPhase phase;
 	double submitTime = 0;
 	double endTime = 0;
+	Optional<uint64_t> taskCount;
 };
 
 // Define the bulkload job manifest file header
@@ -877,6 +885,8 @@ private:
 	Version version;
 	size_t bytes;
 };
+
+using BulkLoadManifestFileMap = std::unordered_map<Key, BulkLoadJobFileManifestEntry>;
 
 bool dataMoveIdIsValidForBulkLoad(const UID& dataMoveId);
 
