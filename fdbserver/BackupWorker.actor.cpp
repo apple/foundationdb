@@ -349,6 +349,10 @@ struct BackupData {
 		}
 		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
+		DisabledTraceEvent("BackupWorkerPop", myId)
+		    .detail("Tag", popTag)
+		    .detail("SavedVersion", savedVersion)
+		    .detail("PopVersion", popVersion);
 		logSystem.get()->pop(std::max(popVersion, savedVersion), popTag);
 	}
 
@@ -476,6 +480,7 @@ struct BackupData {
 				// Save the noop pop version, which sets min version for
 				// the next backup job. Note this version may change after the wait.
 				state Version popVersion = self->popTrigger.get();
+				ASSERT(self->popVersion < popVersion);
 				wait(_saveNoopVersion(self, popVersion));
 				self->popVersion = popVersion;
 				TraceEvent("BackupWorkerNoopPop", self->myId)
@@ -1030,6 +1035,8 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	    .detail("Tag", self->tag)
 	    .detail("Version", tagAt)
 	    .detail("PopVersion", self->popVersion)
+	    .detail("TriggerVersion", self->popTrigger.get())
+	    .detail("StartVersion", self->startVersion)
 	    .detail("SavedVersion", self->savedVersion);
 	loop {
 		while (self->paused.get()) {
@@ -1148,7 +1155,14 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 						    std::max({ self->popVersion, self->savedVersion, committedVersion.get() });
 						self->minKnownCommittedVersion =
 						    std::max(committedVersion.get(), self->minKnownCommittedVersion);
-						self->popTrigger.set(newPopVersion);
+						if (newPopVersion < self->popTrigger.get()) {
+							// this can happen if a different GRV proxy replies
+							DisabledTraceEvent("BackupWorkerNoopPop", self->myId)
+							    .detail("Version", newPopVersion)
+							    .detail("OldPop", self->popTrigger.get());
+						} else {
+							self->popTrigger.set(newPopVersion);
+						}
 						committedVersion = Never();
 					} else {
 						committedVersion = self->getMinKnownCommittedVersion();
