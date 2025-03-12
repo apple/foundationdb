@@ -79,6 +79,16 @@ struct LogLockInfo {
 	LogLockInfo() : epochEnd(std::numeric_limits<Version>::max()), isCurrent(false) {}
 };
 
+struct DurableVersionInfo {
+	Version knownCommittedVersion; // maximum of the known committed versions of available tLogs
+	Version minimumDurableVersion; // mimimum of the durable versions of available tLogs
+	std::vector<TLogLockResult> lockResults; // replies from various tLogs
+	bool policyResult; // unavailable tLogs meet the replication policy or not
+
+	DurableVersionInfo(Version kcv, Version dv, std::vector<TLogLockResult>& replies, bool meetsPolicy)
+	  : knownCommittedVersion(kcv), minimumDurableVersion(dv), lockResults(replies), policyResult(meetsPolicy) {}
+};
+
 struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
 	const UID dbgid;
 	LogSystemType logSystemType;
@@ -339,8 +349,11 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer,
 	                                     Reference<AsyncVar<bool>> failed);
 
-	// returns the log group's knownComittedVersion, DV, and a vector of TLogLockResults for each tLog in the group.
-	Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> static getDurableVersion(
+	// returns the log group's knownComittedVersion, DV, a vector of TLogLockResults for
+	// each tLog in the group, and the result of applying the replication policy check over
+	// unavailable tLogs from the group
+	// Optional<std::tuple<Version, Version, std::vector<TLogLockResult>, bool>>
+	Optional<DurableVersionInfo> static getDurableVersion(
 	    UID dbgid,
 	    LogLockInfo lockInfo,
 	    std::vector<Reference<AsyncVar<bool>>> failed = std::vector<Reference<AsyncVar<bool>>>(),
