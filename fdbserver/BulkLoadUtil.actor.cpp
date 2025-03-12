@@ -398,12 +398,16 @@ ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod trans
 	return Void();
 }
 
-// Get manifest within the input range
-ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>>
-getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestFilePath, KeyRange range, UID logId) {
+// Get manifest within the input range.
+// manifestEntryMap is the output
+ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
+    std::string localJobManifestFilePath,
+    KeyRange range,
+    UID logId,
+    std::shared_ptr<BulkLoadManifestFileMap> manifestEntryMap) {
 	state double startTime = now();
 	ASSERT(fileExists(abspath(localJobManifestFilePath)));
-	state std::unordered_map<Key, BulkLoadJobFileManifestEntry> res;
+	ASSERT(manifestEntryMap->empty());
 
 	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
 	    abspath(localJobManifestFilePath),
@@ -453,7 +457,7 @@ getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestF
 						BulkLoadJobFileManifestEntry manifestEntry(line);
 						KeyRange overlappingRange = range & manifestEntry.getRange();
 						if (!overlappingRange.empty()) {
-							auto returnV = res.insert({ manifestEntry.getBeginKey(), manifestEntry });
+							auto returnV = manifestEntryMap->insert({ manifestEntry.getBeginKey(), manifestEntry });
 							ASSERT(returnV.second);
 						}
 					}
@@ -461,7 +465,7 @@ getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestF
 				lineStart = pos + 1;
 
 				// Yield every 100 entries
-				if (res.size() % 100 == 0) {
+				if (manifestEntryMap->size() % 100 == 0) {
 					wait(yield());
 				}
 			}
@@ -481,7 +485,7 @@ getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestF
 				BulkLoadJobFileManifestEntry manifestEntry(leftover);
 				KeyRange overlappingRange = range & manifestEntry.getRange();
 				if (!overlappingRange.empty()) {
-					auto returnV = res.insert({ manifestEntry.getBeginKey(), manifestEntry });
+					auto returnV = manifestEntryMap->insert({ manifestEntry.getBeginKey(), manifestEntry });
 					ASSERT(returnV.second);
 				}
 			}
@@ -495,7 +499,7 @@ getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestF
 		throw e;
 	}
 
-	return res;
+	return Void();
 }
 
 ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobFileManifestEntry manifestEntry,

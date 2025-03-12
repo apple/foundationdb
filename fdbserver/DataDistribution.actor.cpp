@@ -18,13 +18,6 @@
  * limitations under the License.
  */
 
-#include <memory>
-#include <set>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/BulkDumping.h"
@@ -384,14 +377,14 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self);
 struct DDBulkLoadJobManager {
 	BulkLoadJobState jobState;
 	BulkLoadTransportMethod jobTransportMethod;
-	std::unordered_map<Key, BulkLoadJobFileManifestEntry> manifestEntryMap;
+	std::shared_ptr<BulkLoadManifestFileMap> manifestEntryMap;
 	std::string manifestLocalTempFolder;
 
 	DDBulkLoadJobManager() = default;
-	DDBulkLoadJobManager(const BulkLoadJobState& jobState,
-	                     const std::unordered_map<Key, BulkLoadJobFileManifestEntry>& manifestEntryMap,
-	                     const std::string& manifestLocalTempFolder)
-	  : jobState(jobState), manifestEntryMap(manifestEntryMap), manifestLocalTempFolder(manifestLocalTempFolder) {}
+	DDBulkLoadJobManager(const BulkLoadJobState& jobState, const std::string& manifestLocalTempFolder)
+	  : jobState(jobState), manifestLocalTempFolder(manifestLocalTempFolder) {
+		manifestEntryMap = std::make_shared<BulkLoadManifestFileMap>();
+	}
 
 	bool isValid() const { return jobState.isValid(); }
 };
@@ -1651,13 +1644,54 @@ ACTOR Future<Void> bulkLoadJobExecuteTask(Reference<DataDistributor> self,
 	return Void();
 }
 
-ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>> fetchBulkLoadTaskManifestEntryMap(
-    BulkLoadTransportMethod jobTransportMethod,
-    std::string localJobManifestFilePath,
-    std::string remoteJobManifestFilePath,
-    KeyRange jobRange,
-    UID logId) {
-	state std::unordered_map<Key, BulkLoadJobFileManifestEntry> manifestEntryMap;
+ACTOR Future<Void> persistBulkLoadJobTaskCount(Reference<DataDistributor> self, UID logId) {
+	state Database cx = self->txnProcessor->context();
+	state Transaction tr(cx);
+	state UID jobId = self->bulkLoadJobManager.jobState.getJobId();
+	state KeyRange jobRange = self->bulkLoadJobManager.jobState.getJobRange();
+	ASSERT(self->bulkLoadJobManager.jobState.getTaskCount().present());
+	state uint64_t taskCount = self->bulkLoadJobManager.jobState.getTaskCount().get();
+	state BulkLoadJobState currentJobState;
+	loop {
+		try {
+			wait(store(currentJobState, getBulkLoadJob(&tr, jobId)));
+			if (currentJobState.getTaskCount().present()) {
+				if (currentJobState.getTaskCount().get() != taskCount) {
+					TraceEvent(SevError, "DDBulkLoadJobTaskCountMismatch", logId)
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
+					    .detail("JobID", jobId.toString())
+					    .detail("JobRange", jobRange)
+					    .detail("InputTaskCount", taskCount)
+					    .detail("CurrentJob", currentJobState.toString());
+					ASSERT(false);
+				}
+				return Void();
+			}
+			currentJobState.setTaskCount(taskCount);
+			wait(krmSetRange(&tr, bulkLoadJobPrefix, jobRange, bulkLoadJobValue(currentJobState)));
+			wait(tr.commit());
+			Version commitVersion = tr.getCommittedVersion();
+			TraceEvent(SevInfo, "DDBulkLoadJobPersistTaskCountToJobMetadata", logId)
+			    .detail("JobID", jobId.toString())
+			    .detail("JobRange", jobRange)
+			    .detail("CommitVersion", commitVersion)
+			    .detail("TaskCount", taskCount);
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(BulkLoadTransportMethod jobTransportMethod,
+                                                     std::string localJobManifestFilePath,
+                                                     std::string remoteJobManifestFilePath,
+                                                     KeyRange jobRange,
+                                                     UID logId,
+                                                     std::shared_ptr<BulkLoadManifestFileMap> manifestEntryMap) {
+	ASSERT(manifestEntryMap->empty());
 	state double beginTime = now();
 	if (!fileExists(abspath(localJobManifestFilePath))) {
 		// TODO(BulkLoad): check if the file complete
@@ -1676,15 +1710,15 @@ ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>> fetchBulkLoa
 	// At this point, we have the global job manifest file stored locally at localJobManifestFilePath.
 	// This job manifest file stores all remote manifest filepath per range.
 	// Here, we want to get all manifest entries of the file with in the range specified by jobRange.
-	wait(store(manifestEntryMap,
-	           getBulkLoadJobFileManifestEntryFromJobManifestFile(localJobManifestFilePath, jobRange, logId)));
+	wait(getBulkLoadJobFileManifestEntryFromJobManifestFile(
+	    localJobManifestFilePath, jobRange, logId, /*output=*/manifestEntryMap));
 	TraceEvent(SevInfo, "DDBulkLoadJobExecutorManifestEntryMapGot", logId)
 	    .detail("JobTransportMethod", jobTransportMethod)
 	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
 	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
-	    .detail("TaskCount", manifestEntryMap.size())
+	    .detail("TaskCount", manifestEntryMap->size())
 	    .detail("Duration", now() - beginTime);
-	return manifestEntryMap;
+	return Void();
 }
 
 ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, BulkLoadJobState jobState) {
@@ -1695,8 +1729,8 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, BulkLoad
 	// The job manifest is organized in a sorted map. The key is the beginKey of the manifest.
 	// The value is the manifest. For details, please see comments in getBulkLoadJobManifestData.
 	loop {
-		auto it = self->bulkLoadJobManager.manifestEntryMap.find(beginKeyToDispatch);
-		ASSERT(it != self->bulkLoadJobManager.manifestEntryMap.end());
+		auto it = self->bulkLoadJobManager.manifestEntryMap->find(beginKeyToDispatch);
+		ASSERT(it != self->bulkLoadJobManager.manifestEntryMap->end());
 		manifestEntry = it->second;
 		// Limit parallelism
 		loop {
@@ -1902,9 +1936,15 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 		std::string jobManifestFileName = getBulkLoadJobManifestFileName();
 		std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
 		std::string remoteJobManifestFilePath = appendToPath(remoteFolder, jobManifestFileName);
-		std::unordered_map<Key, BulkLoadJobFileManifestEntry> manifestEntryMap = wait(fetchBulkLoadTaskManifestEntryMap(
-		    jobTransportMethod, localJobManifestFilePath, remoteJobManifestFilePath, jobRange, self->ddId));
-		self->bulkLoadJobManager = DDBulkLoadJobManager(job.get(), manifestEntryMap, manifestLocalTempFolder);
+		self->bulkLoadJobManager = DDBulkLoadJobManager(job.get(), manifestLocalTempFolder);
+		wait(fetchBulkLoadTaskManifestEntryMap(jobTransportMethod,
+		                                       localJobManifestFilePath,
+		                                       remoteJobManifestFilePath,
+		                                       jobRange,
+		                                       self->ddId,
+		                                       /*output=*/self->bulkLoadJobManager.manifestEntryMap));
+		self->bulkLoadJobManager.jobState.setTaskCount(self->bulkLoadJobManager.manifestEntryMap->size());
+		wait(persistBulkLoadJobTaskCount(self, self->ddId));
 	}
 
 	// Check if all bulkload tasks are marked as complete or error.

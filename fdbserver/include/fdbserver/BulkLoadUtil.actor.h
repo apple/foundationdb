@@ -67,8 +67,11 @@ ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod trans
                                                    UID logId);
 
 // Extract manifest entries from job manifest file with the input range
-ACTOR Future<std::unordered_map<Key, BulkLoadJobFileManifestEntry>>
-getBulkLoadJobFileManifestEntryFromJobManifestFile(std::string localJobManifestFilePath, KeyRange range, UID logId);
+ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
+    std::string localJobManifestFilePath,
+    KeyRange range,
+    UID logId,
+    std::shared_ptr<BulkLoadManifestFileMap> manifestMap);
 
 // Get BulkLoad manifest metadata from the entry in the job manifest file
 ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobFileManifestEntry manifestEntry,
