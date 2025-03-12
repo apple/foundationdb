@@ -50,6 +50,8 @@ enum class BulkLoadTransportMethod : uint8_t {
 	BLOBSTORE = 2, // Upload/download to remote blob store. Used by real clusters.
 };
 
+std::string convertBulkLoadTransportMethodToString(BulkLoadTransportMethod method);
+
 // Specifying the format version of the bulkload job manifest metadata (the global manifest and range manifests).
 // The number should increase by 1 when we change the metadata in a release.
 const int bulkLoadManifestFormatVersion = 1;
@@ -691,11 +693,14 @@ public:
 		std::string res = "[BulkLoadJobState]: [JobId]: " + jobId.toString() + ", [JobRoot]: " + jobRoot +
 		                  ", [JobRange]: " + jobRange.toString() +
 		                  ", [Phase]: " + convertBulkLoadJobPhaseToString(phase) +
-		                  ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod));
+		                  ", [TransportMethod]: " + convertBulkLoadTransportMethodToString(transportMethod);
 		res = res + ", [SubmitTime]: " + std::to_string(submitTime);
 		res = res + ", [SinceSubmitMins]: " + std::to_string((now() - submitTime) / 60.0);
 		if (taskCount.present()) {
 			res = res + ", [TaskCount]: " + std::to_string(taskCount.get());
+		}
+		if (errorMessage.present()) {
+			res = res + ", [ErrorMessage]: " + errorMessage.get();
 		}
 		return res;
 	}
@@ -710,7 +715,17 @@ public:
 
 	BulkLoadJobPhase getPhase() const { return phase; }
 
-	void setPhase(BulkLoadJobPhase inputPhase) { phase = inputPhase; }
+	void setErrorPhase(const std::string& message) {
+		phase = BulkLoadJobPhase::Error;
+		errorMessage = message;
+		return;
+	}
+
+	Optional<std::string> getErrorMessage() const { return errorMessage; }
+
+	void setCompletePhase() { phase = BulkLoadJobPhase::Complete; }
+
+	void setCancelledPhase() { phase = BulkLoadJobPhase::Cancelled; }
 
 	double getSubmitTime() const { return submitTime; }
 
@@ -742,7 +757,7 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase, submitTime, endTime, taskCount);
+		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase, submitTime, endTime, taskCount, errorMessage);
 	}
 
 private:
@@ -757,6 +772,7 @@ private:
 	double submitTime = 0;
 	double endTime = 0;
 	Optional<uint64_t> taskCount;
+	Optional<std::string> errorMessage;
 };
 
 // Define the bulkload job manifest file header

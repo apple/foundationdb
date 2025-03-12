@@ -43,6 +43,10 @@ ACTOR Future<Void> printPastBulkLoadJob(Database cx) {
 		             job.getJobRange().toString(),
 		             std::to_string((job.getEndTime() - job.getSubmitTime()) / 60.0),
 		             convertBulkLoadJobPhaseToString(job.getPhase()));
+		if (job.getPhase() == BulkLoadJobPhase::Error) {
+			Optional<std::string> errorMessage = job.getErrorMessage();
+			fmt::println("Error message: {}", errorMessage.present() ? errorMessage.get() : "Not provided.");
+		}
 	}
 	return Void();
 }

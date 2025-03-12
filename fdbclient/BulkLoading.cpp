@@ -153,6 +153,16 @@ std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId) {
 	return appendToPath(root, jobId.toString());
 }
 
+std::string convertBulkLoadTransportMethodToString(BulkLoadTransportMethod method) {
+	if (method == BulkLoadTransportMethod::CP) {
+		return "Local file copy";
+	} else if (method == BulkLoadTransportMethod::BLOBSTORE) {
+		return "Blob store";
+	} else {
+		UNREACHABLE();
+	}
+}
+
 // For submitting a task manually (for testing)
 BulkLoadTaskState createBulkLoadTask(const UID& jobId,
                                      const KeyRange& range,
