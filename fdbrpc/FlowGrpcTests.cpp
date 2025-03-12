@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include <sstream>
 #ifdef FLOW_GRPC_ENABLED
 #include <chrono>
 #include <thread>
@@ -27,6 +26,7 @@
 #include "fdbrpc/FlowGrpcTests.h"
 #include "fdbrpc/FileTransfer.h"
 #include "flow/UnitTest.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/flow.h"
 
 // So that tests are not optimized out. :/
@@ -450,6 +450,225 @@ TEST_CASE("/fdbrpc/grpc/server_lifecycle_combine_register_into_one_start") {
 	} catch (Error& e) {
 		ASSERT(false);
 	}
+}
+
+// Generate key/cert pairs.
+// # Generate Root CA
+// openssl genpkey -algorithm RSA -out ca.key # Private Key
+// openssl req -new -x509 -key ca.key -out ca.crt -days 3650 -subj "/CN=Test Root CA" # Self-signed CA certificate
+//
+// # Generate Server Certificate
+// openssl genpkey -algorithm RSA -out server.key # Private Key
+// openssl req -new -key server.key -out server.csr -subj "/CN=localhost" # Certificate Signing Request (CSR)
+// openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 3650 -sha256
+//
+// # Generate Client Certificate (for mTLS)
+// openssl genpkey -algorithm RSA -out client.key # Private Key
+// openssl req -new -key client.key -out client.csr -subj "/CN=Test Client" # Certificate Signing Request (CSR)
+// openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out client.crt -days 3650 -sha256
+TEST_CASE("/fdbrpc/grpc/basic_tls") {
+	struct TLSCreds {
+		std::string cert;
+		std::string key;
+		std::string ca;
+	};
+
+	// TODO: Generate certs automatically.
+	auto serverCreds = TLSCreds{
+		R"(-----BEGIN CERTIFICATE-----
+MIICsjCCAZoCFGH6xUKDCe/xv11Ra6F2xKvmd+gUMA0GCSqGSIb3DQEBCwUAMBcx
+FTATBgNVBAMMDFRlc3QgUm9vdCBDQTAeFw0yNTAzMTIyMDExNDNaFw0zNTAzMTAy
+MDExNDNaMBQxEjAQBgNVBAMMCWxvY2FsaG9zdDCCASIwDQYJKoZIhvcNAQEBBQAD
+ggEPADCCAQoCggEBALpsEnX/jRWq6FWa65ywZ1NGXtPVPjaw7oJvs2NSrtsoRaYx
+ZCxwbl0nM6tAnKnHoG7BKeRq9jYaumtf9e9437TeRyh3KO3wXgGnmeXshXKIQzx+
+Nzif7NDXn2qu4Ak6ywOp163rPJh5v0k+Jai3b6dZnYTECokYk+8/UbDqodevMN/y
+Z4NLHY5jWoFx0swai53/3YVSoHH1LSvYXysZmR2TlsXFC3CfNSFu+uzGuwHCzqIn
+UbDHao+iW8n5yHQjmEfh41gyVic26fAenpkCtQJufESPx3PgxkWOBAEKIZ2123Sr
+NM7A5u4/h56BXHLcBKY5KzbyMLw7CLiKO0NtcXcCAwEAATANBgkqhkiG9w0BAQsF
+AAOCAQEAYu0Qr0eN9lnOyWiKQMAjPIMgGtJ85TvYK2tMZbFWYZTM+JZ2fd9lqz8o
+H8MwAELYzho6QrMoibErmr7BUjeTXSM9HBVqumomAammmneMy/qh2xsemNp0Hqgk
+Sv6bxw8g8SGmzURmiWfzqZV3UOqQDNVS93o0MV/Z9gp2TGsP9aqYaAyUhZv3e9QL
+SvOJ93H/fkpJ980FlGIrqe/pwjhDrCPzsT1b2msdolWJgCThNQd49cGB7FDMqe5y
+l6cALt6HLWwqC36Cu104eQmC6wjLYySt8wzYpeJb+7DdQb5k5+D/OkK0gwp/+DY/
+7ZWe8mDOVuuSUgJOJOxJK2fBxxDlUQ==
+-----END CERTIFICATE-----)",
+		R"(-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC6bBJ1/40VquhV
+muucsGdTRl7T1T42sO6Cb7NjUq7bKEWmMWQscG5dJzOrQJypx6BuwSnkavY2Grpr
+X/XveN+03kcodyjt8F4Bp5nl7IVyiEM8fjc4n+zQ159qruAJOssDqdet6zyYeb9J
+PiWot2+nWZ2ExAqJGJPvP1Gw6qHXrzDf8meDSx2OY1qBcdLMGoud/92FUqBx9S0r
+2F8rGZkdk5bFxQtwnzUhbvrsxrsBws6iJ1Gwx2qPolvJ+ch0I5hH4eNYMlYnNunw
+Hp6ZArUCbnxEj8dz4MZFjgQBCiGdtdt0qzTOwObuP4eegVxy3ASmOSs28jC8Owi4
+ijtDbXF3AgMBAAECggEAXoSk54bmNXIt0hl2FD+sY6BuO+EGZhxXEXMo9NbbKOrG
+RXkNXSq0Ci7yF4Xu6HX6da0iXFmO8+ehVQeWXhBe/Akm8vFXoywXvacIdHbzQhqs
+XGNyBBexrkFk5mY72PIiNH1MiTWXx4cS4UPNPDmlNqhNIR90aAY6GzdzZ8vOuteO
+tyLm9LRlWUsuu0QxuHkmLFfvpOzVRQG2wiX53302nUB+b0ZnB7CjLiBEo/fUFyy4
+cXz6nNhXUdjY5wKoxE9Dn1ng0w8ZEkKemZK2rsRVHs+zNgT+zX2evYOz4Bl0Mi66
+/Whlm5GI3BJOb5kVmyonSkVLWBl1JZL1606UQeVrgQKBgQDirQV+I3HCMuk0kK/f
+6YckSl1tF/XdkM7x3x9jT3tq/95dNQVNrvESS3huFiEUn1brZcOS8cGvLGhOkI9B
+io6NP/pN6rhFleeRWYLLi2A9bsmuQxW8OPDgW3scf8T0j08/9fwRWrGcB0QsSBS+
+XweksN0rYeTxq1LQiMEEkuvf5wKBgQDSifD2oQCCi0VTt1plDu5DgWHQsa5Jgadz
+Y23pmkrFqC1iXpJkH5053avzZZr0svjJo/S1lFFLgO71lqRfeWA4/YHyVbebJJau
+gXU1UYhtYf2a1e4gadaAt3vTqPvMK1DXXzlsdcLkm2Sr2UdRtcbboBVKtS4uN2Wu
+UrLASRHv8QKBgQDU9kFm1N4X2cUHwbe64qg5DDTiPdScqWQEEeBnaVFGocXERAAL
+kASlb4phwyCpQ1piJmWsNL4HWe1VgrNUnFx5kFYVxiQCHGhHQpWDrhppHSEWO6i8
+AbMs1kW/7LqaGdoW+YAsvcyIDruZ7s6uXJHNxOzFyV9TPea8TP8q0O4SmQKBgQDJ
+l4tCm6cBWJlpL4c+fK1ntdsTGQ7pE1xjADGeHD68Q+ww5J0Hgb3qSnb6968H3taZ
+PIRz2TB+O1aTkUqSoIWiDBsBD1JfGwmszgiMpSUcl1ddiroYDz90wDuwz31KYa9m
+iadSUu/qNWCPq9y+QG/Im9/HSPSPDDwwTr8Znt2uAQKBgEYpUTAnBg0ps11Kz3Yd
+0eOMc/42CugzvIvubBGaaIwItqA7gotk3l9rrvi5HUFJXTp/xteOi4t7U2chD0qz
+1PnvQMK9NG5iAEsP6M4eLLim/Yb83cuE9RBPPdaeXCsjO/qEkWDfhvq3Pg+v9Uqz
+0IiSeXnAnliSzXUPGoV8drB+
+-----END PRIVATE KEY-----)",
+		R"(-----BEGIN CERTIFICATE-----
+MIIDDzCCAfegAwIBAgIUYZs4XIcYkT9NaTuVJSRJWFxwqiAwDQYJKoZIhvcNAQEL
+BQAwFzEVMBMGA1UEAwwMVGVzdCBSb290IENBMB4XDTI1MDMxMjIwMTE0M1oXDTM1
+MDMxMDIwMTE0M1owFzEVMBMGA1UEAwwMVGVzdCBSb290IENBMIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2XAfdLc4APgRqjGI1w1+mi3LCNsC5Ymby/Y0
+lsi0L3Kuu5CPPjBeOtf8IKZbDKqRkNWi6KeBI/+BCWBDk+mCRFS8IQ+icTP/ZpGz
+lr7efIK0GN37cyYYtftv2F4L9bklsTbGZ0hbVy7wzVggiJzEt0yyiWfU95kxuMuO
+zFT7aZshVmvz8MopP/gI0CWpi/bX0Qt0c6kbJL//rhRSD5tO6r6wet1Dgge38KDb
+7zddcaR8arlnnGqbw6R8me/bmAlugwA1RXqSlvSz7LqWosuOB54iYivN4aC6TG05
+ul/X0fG0fi2w+K+pI1dLHvCDefa7fiHPgvqfdKHYxSafnaHe/wIDAQABo1MwUTAd
+BgNVHQ4EFgQUKl6kB14nQDhmQHEOK9030m1Phn8wHwYDVR0jBBgwFoAUKl6kB14n
+QDhmQHEOK9030m1Phn8wDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
+AQEAzWnx7xgCJrJDzxy+H8cl0q86FlUdhGroqdBfswXzLPtLYWKouAhN7thy7bUJ
+v+Nn0WE2vFl8wS9244k5U5bQUlmlFyWBFgc7aRiqSyff1teIRI0xX6iuN4KKAYiT
+lppeuHDNCi1E1fRGTSIy6Pq07KfQ4jHd574EOGG2P56vYko4JHWph500Y2vj9mnK
+Vw31eZuD0KTL0rLubXvwUgSXVw/wKmBTgGQKH9ZDJcxlzr9QDIvVtSDqiQrYFHfH
+l8+2ue5YUrcuvaBHuYv7qpYWrU51BJmznyt0QO94E1f1R9YVdfCNnFdlFaIAb6Nr
+b1qkb+bH9VO0emLeRx9/hhdbCw==
+-----END CERTIFICATE-----)"
+	};
+
+	auto clientCreds = TLSCreds{
+		R"(-----BEGIN CERTIFICATE-----
+MIICtDCCAZwCFGH6xUKDCe/xv11Ra6F2xKvmd+gVMA0GCSqGSIb3DQEBCwUAMBcx
+FTATBgNVBAMMDFRlc3QgUm9vdCBDQTAeFw0yNTAzMTIyMDExNDNaFw0zNTAzMTAy
+MDExNDNaMBYxFDASBgNVBAMMC1Rlc3QgQ2xpZW50MIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEA6yxN7pTFABIURggGPtNUueEqKDRn5AYVJQeBHuKgP58L
+MPeAZCIrQQyyu/IP2lBEEw7xpDvTJtwIp/g46D19CVLTTm5ium4dZrl9oQ9sZyCY
+e51S9WD3W+zPAzb7WJOGZjm0vdixqwTdL6GNf78DjQ0BrOR5K63M/vF6aI3T5BSx
+jspA17bfo2b+GIP1AqAD71wV7QdyS3RrD/k0DaEpd6zmjIUJAg52K909AVpmPmHl
+4Q3jWqk2wvzmJKatyVpKGoLgH4zxv7lTGD4jndUExaLDLP8KeV3OeAbPDQ9f24Bz
+SHrNKHsroSFFLJsWxhnnl73Vbd7NHvg87mr2DyY9QQIDAQABMA0GCSqGSIb3DQEB
+CwUAA4IBAQALO3GMtuccIqAK7bRO33cPWIke9F+O6vOse9uIIadw3atCsG6LPPMQ
+DfI8ddKgEbLLz0mQRxGgSFSjrFYBXYWXdOddrvtUZIEuWjY9+/Nj6pydprybLSIL
+cT0hO3RkyyA2t7nXBxNSDCDC4i5dMxYS6z3y2puzi1PZw4igBjbA6hQwTo6cJOt/
+t6Z2t7Sxis9O7Gf8WVx5oIYB0VJVy8DO1ZEdEY8i566EwCmG2EyZD1aotugtte+e
+Rw0VoJwswwMNYhYMiS/RRMardtxuThYvi681yXLvzYDrg4Hv+lGZMifiozB+Aium
+IlFaW1sDwY3c6PPdO4ifiuxpGEgElub+
+-----END CERTIFICATE-----)",
+		R"(-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDrLE3ulMUAEhRG
+CAY+01S54SooNGfkBhUlB4Ee4qA/nwsw94BkIitBDLK78g/aUEQTDvGkO9Mm3Ain
++DjoPX0JUtNObmK6bh1muX2hD2xnIJh7nVL1YPdb7M8DNvtYk4ZmObS92LGrBN0v
+oY1/vwONDQGs5Hkrrcz+8XpojdPkFLGOykDXtt+jZv4Yg/UCoAPvXBXtB3JLdGsP
++TQNoSl3rOaMhQkCDnYr3T0BWmY+YeXhDeNaqTbC/OYkpq3JWkoaguAfjPG/uVMY
+PiOd1QTFosMs/wp5Xc54Bs8ND1/bgHNIes0oeyuhIUUsmxbGGeeXvdVt3s0e+Dzu
+avYPJj1BAgMBAAECggEBAIeQ85/LzMBcq6kvKQKAan/4h4fDpfvxcbD14X3/YCcs
+tJPWqQGQHOUTv9jOEktkJ8ngvHVTM0ZcYvUJBy0BfRmp0DuPMISNw48a8Iuuy2ur
+g5sGtvLSoeUw3qjYwg1uhXRaYZFq4AhY9nRlqZ7xasedrtCOqDcAqoJwi4LH91Sr
+aiNGskpuk55bUEbeUqHaT5Zup3euRByju0diIA6ABdmmEBdzHi8TUItfMV5n47EY
+LhT/SgfZmCWkkhWRMhedTgZ0bE1sYwfiGT0r34/s8sz224l4uR0228V/x3S2RBKC
+CDv4eN2C8Hj3W95zio3cs+dL8S5xOz1sxg0lnb+uKBECgYEA/VUAV6wJ9Rn804v3
+Ts22/iXOu/Q5ipkEZ11xi0oDY3X6I7Iw7ssdK75pOZMvrDMxoJ+M67t0G6HhENc+
+cdGShKKwVSlVNToGLgnU5BmRA6VWPw/3sCCKvsaq42iDXEsb4nBtBXtpk6JWb6QT
+chHT6F1TWzGSjhZ1sI3mVQTPff0CgYEA7aZYaxc+9uB0xEmRohehZQd+Ar0rF+5X
+NsMu5qJDV45TkDeb5jZc+Ycru55L/1nvrZhrlMvN83yVUBuBRJ2c5Mhh2vvL80XF
+kYyM32dXVQYF3QypjVT4DY5NQckx3TgAsT97U3Mse2Szlf5i7D7AS94apmaJxthf
+EkozCXQhXZUCgYAbtTBUZnywUidU+/oQpG9fXMM/y3Z/sjzJEW9ZzL6SIlU5kkPH
+2m9WWX0ozvBn5TGIX+sJ3XbVjt8O+Hvb9xAPcbvXlK29JJuIbYrbZ/B0daD5RMXS
+fbyvIQuP096KOazTF3jVIKpre1X43/lAgLKst4hmcQWWhN5acSrAIcaQAQKBgEBE
+WubjC3EB9DHc31hhYZELvKUK+StolgdGM1nFicaUw75de3h/PRdx2X7MaSrt7GYa
+sQU1NEXjbBGUzpl6siIgmm346Aeq16nrw3Dq5nAkx9MmiHejAc3QrM3clfKIIY/N
+ZhGENQRNkE9A0wmmUqRxtO1JD3tJqjQtAq5MzHUdAoGBAL/PzcesK980B/LF1zZj
+YHK0jToNO/eBzmq1m0dyNFNLD//HmRsLnEWRbRel7WnzWxG9v9y52BgP5L8A8IC6
+UpY13mkgCZZknppjHSCvBCUIebKx+mY0lsVyuICG4xhDKia+G13vKv8ak24zsOuD
+sUaLXDnl86zauNGS63nyQ8Y9
+-----END PRIVATE KEY-----)",
+		R"(-----BEGIN CERTIFICATE-----
+MIIDDzCCAfegAwIBAgIUYZs4XIcYkT9NaTuVJSRJWFxwqiAwDQYJKoZIhvcNAQEL
+BQAwFzEVMBMGA1UEAwwMVGVzdCBSb290IENBMB4XDTI1MDMxMjIwMTE0M1oXDTM1
+MDMxMDIwMTE0M1owFzEVMBMGA1UEAwwMVGVzdCBSb290IENBMIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2XAfdLc4APgRqjGI1w1+mi3LCNsC5Ymby/Y0
+lsi0L3Kuu5CPPjBeOtf8IKZbDKqRkNWi6KeBI/+BCWBDk+mCRFS8IQ+icTP/ZpGz
+lr7efIK0GN37cyYYtftv2F4L9bklsTbGZ0hbVy7wzVggiJzEt0yyiWfU95kxuMuO
+zFT7aZshVmvz8MopP/gI0CWpi/bX0Qt0c6kbJL//rhRSD5tO6r6wet1Dgge38KDb
+7zddcaR8arlnnGqbw6R8me/bmAlugwA1RXqSlvSz7LqWosuOB54iYivN4aC6TG05
+ul/X0fG0fi2w+K+pI1dLHvCDefa7fiHPgvqfdKHYxSafnaHe/wIDAQABo1MwUTAd
+BgNVHQ4EFgQUKl6kB14nQDhmQHEOK9030m1Phn8wHwYDVR0jBBgwFoAUKl6kB14n
+QDhmQHEOK9030m1Phn8wDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
+AQEAzWnx7xgCJrJDzxy+H8cl0q86FlUdhGroqdBfswXzLPtLYWKouAhN7thy7bUJ
+v+Nn0WE2vFl8wS9244k5U5bQUlmlFyWBFgc7aRiqSyff1teIRI0xX6iuN4KKAYiT
+lppeuHDNCi1E1fRGTSIy6Pq07KfQ4jHd574EOGG2P56vYko4JHWph500Y2vj9mnK
+Vw31eZuD0KTL0rLubXvwUgSXVw/wKmBTgGQKH9ZDJcxlzr9QDIvVtSDqiQrYFHfH
+l8+2ue5YUrcuvaBHuYv7qpYWrU51BJmznyt0QO94E1f1R9YVdfCNnFdlFaIAb6Nr
+b1qkb+bH9VO0emLeRx9/hhdbCw==
+-----END CERTIFICATE-----)"
+	};
+
+	auto provider =
+	    std::make_shared<GrpcTlsCredentialStaticProvider>(serverCreds.key, serverCreds.cert, serverCreds.ca);
+	ASSERT(provider->validate());
+
+	std::string addr_with_host = "localhost:50509";
+	NetworkAddress addr(NetworkAddress::parse("127.0.0.1:50509"));
+	GrpcServer server(addr, provider);
+	server.registerService(make_shared<TestEchoServiceImpl>());
+	Future<Void> _ = server.run();
+	co_await server.onRunning();
+
+	auto pool = make_shared<AsyncTaskExecutor>(4);
+
+	// Invoke RPC from client without using any credentials.
+	{
+		AsyncGrpcClient<TestEchoService> client(addr_with_host, pool);
+
+		try {
+			EchoRequest request;
+			request.set_message("Ping!");
+			EchoResponse response = co_await client.call(&TestEchoService::Stub::Echo, request);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_grpc_error);
+		}
+	}
+
+	// Invoke RPC from client with correct credentials.
+	{
+		auto provider =
+		    std::make_shared<GrpcTlsCredentialStaticProvider>(clientCreds.key, clientCreds.cert, clientCreds.ca);
+		AsyncGrpcClient<TestEchoService> client(addr_with_host, provider, pool);
+
+		try {
+			EchoRequest request;
+			request.set_message("Ping!");
+			EchoResponse response = co_await client.call(&TestEchoService::Stub::Echo, request);
+			std::cout << "Echo received: " << response.message() << std::endl;
+			ASSERT_EQ(response.message(), "Echo: Ping!");
+		} catch (Error& e) {
+			std::cout << "Echo not received. " << e.name() << std::endl;
+			ASSERT_EQ(e.code(), error_code_grpc_error);
+			ASSERT(false);
+		}
+	}
+
+	// Invoke RPC from client with incorrect credentials.
+	// {
+	// 	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+
+	// 	try {
+	// 		EchoRequest request;
+	// 		request.set_message("Ping!");
+	// 		EchoResponse response = co_await client.call(&TestEchoService::Stub::Echo, request);
+	// 		std::cout << "Echo received: " << response.message() << std::endl;
+	// 		ASSERT_EQ(response.message(), "Echo: Ping!");
+	// 	} catch (Error& e) {
+	// 		ASSERT_EQ(e.code(), error_code_grpc_error);
+	// 		ASSERT(false);
+	// 	}
+	// }
 }
 
 //--- THREAD POOL TESTS --//
