@@ -480,7 +480,7 @@ struct BackupData {
 				// Save the noop pop version, which sets min version for
 				// the next backup job. Note this version may change after the wait.
 				state Version popVersion = self->popTrigger.get();
-				ASSERT(self->popVersion < popVersion);
+				ASSERT(self->popVersion <= popVersion);
 				wait(_saveNoopVersion(self, popVersion));
 				self->popVersion = popVersion;
 				TraceEvent("BackupWorkerNoopPop", self->myId)
@@ -1157,7 +1157,7 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 						    std::max(committedVersion.get(), self->minKnownCommittedVersion);
 						if (newPopVersion < self->popTrigger.get()) {
 							// this can happen if a different GRV proxy replies
-							DisabledTraceEvent("BackupWorkerNoopPop", self->myId)
+							DisabledTraceEvent("BackupWorkerSkipTrigger", self->myId)
 							    .detail("Version", newPopVersion)
 							    .detail("OldPop", self->popTrigger.get());
 						} else {
