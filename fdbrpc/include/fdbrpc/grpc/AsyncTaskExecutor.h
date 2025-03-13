@@ -137,7 +137,7 @@ struct AsyncTaskExecutor::Action<Func, typename std::enable_if_t<!IsVoidReturn<F
 			//       (including C++ coroutines).
 			promise_.sendError(unknown_error());
 		}
-		delete this;
+		// delete this;
 	}
 
 	// Returns `Future` representing the value returned by `fn_`.

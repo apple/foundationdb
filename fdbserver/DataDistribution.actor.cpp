@@ -2362,7 +2362,7 @@ ACTOR Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 	loop {
 		bool allComplete = wait(checkBulkDumpJobComplete(self));
 		if (allComplete) {
-			TraceEvent(SevInfo, "DDBulkDumpManagerJobNotComplete", self->ddId).detail("JobId", jobId);
+			TraceEvent(SevInfo, "DDBulkDumpManagerJobAllTaskComplete", self->ddId).detail("JobId", jobId);
 			// Generate the job manifest file for bulkload.
 			// The job manifest file is the global map between ranges and their corresponding manifest file.
 			// When bulkload job loads a range, the job relies on this map to find the correct
