@@ -64,7 +64,7 @@ function bulkdump {
   fi
   if ! "${local_build_dir}"/bin/fdbcli \
     -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
-    --exec "bulkdump blobstore \"\" \xff \"${url}\"" > /dev/null
+    --exec "bulkdump dump \"\" \xff \"${url}\"" > /dev/null
   then
     err "Bulkdump start failed"
     return 1
@@ -134,7 +134,7 @@ function bulkload {
   fi
   if ! "${local_build_dir}"/bin/fdbcli \
     -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
-    --exec "bulkload blobstore ${jobid} \"\" \xff \"${url}\""
+    --exec "bulkload load ${jobid} \"\" \xff \"${url}\""
   then
     err "Bulkload start failed"
     return 1
