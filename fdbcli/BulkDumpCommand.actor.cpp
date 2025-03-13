@@ -31,15 +31,15 @@
 namespace fdb_cli {
 
 static const char* BULK_DUMP_MODE_USAGE = "To set bulkdump mode: bulkdump mode [on|off]\n";
-static const char* BULK_DUMP_DUMP_USAGE = "To dump a range of key/values: bulkdump dump <BEGINKEY> <ENDKEY> <DIR>\n";
-static const char* BULK_DUMP_DUMP_DETAIL = " where <BEGINKEY> to <ENDKEY> denotes the key/value range and <DIR> is\n"
-                                           " a local directory OR blobstore url to dump SST files to.\n";
+static const char* BULK_DUMP_DUMP_USAGE = "To dump a range of key/values: bulkdump dump <BEGINKEY> <ENDKEY> <DIR>\n"
+                                          " where <BEGINKEY> to <ENDKEY> denotes the key/value range and <DIR> is\n"
+                                          " a local directory OR blobstore url to dump SST files to.\n";
 static const char* BULK_DUMP_STATUS_USAGE = "To get status: bulkdump status\n";
 static const char* BULK_DUMP_CANCEL_USAGE = "To cancel current bulkdump job: bulkdump cancel <JOBID>\n";
 
 static const std::string BULK_DUMP_HELP_MESSAGE =
-    std::string(BULK_DUMP_MODE_USAGE) + std::string(BULK_DUMP_DUMP_USAGE) + std::string(BULK_DUMP_DUMP_DETAIL) +
-    std::string(BULK_DUMP_STATUS_USAGE) + std::string(BULK_DUMP_CANCEL_USAGE);
+    std::string(BULK_DUMP_MODE_USAGE) + std::string(BULK_DUMP_DUMP_USAGE) + std::string(BULK_DUMP_STATUS_USAGE) +
+    std::string(BULK_DUMP_CANCEL_USAGE);
 
 ACTOR Future<bool> getOngoingBulkDumpJob(Database cx) {
 	state Transaction tr(cx);

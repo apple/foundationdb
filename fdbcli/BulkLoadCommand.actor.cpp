@@ -230,20 +230,39 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			wait(printPastBulkLoadJob(cx));
 			return UID();
 		}
+		if (tokens.size() == 3) {
+			if (tokencmp(tokens[2], "clear")) {
+				fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
+				return UID();
+			} else {
+				fmt::println("ERROR: Invalid history option {}", tokens[2].toString());
+				fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
+				return UID();
+			}
+		}
 		if (tokens.size() == 4) {
 			if (tokencmp(tokens[2], "clear")) {
 				if (tokencmp(tokens[3], "all")) {
 					wait(clearBulkLoadJobHistory(cx));
 					fmt::println("All bulkload job history has been cleared");
 					return UID();
+				} else {
+					fmt::println("ERROR: Invalid history clear option {}", tokens[3].toString());
+					fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
+					return UID();
 				}
+			} else {
+				fmt::println("ERROR: Invalid history clear option {}", tokens[2].toString());
+				fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
+				return UID();
 			}
 		}
 		if (tokens.size() == 5) {
 			if (tokencmp(tokens[2], "clear") && tokencmp(tokens[3], "id")) {
 				UID jobId = UID::fromString(tokens[4].toString());
 				if (!jobId.isValid()) {
-					printLongDesc(tokens[0]);
+					fmt::println("ERROR: Invalid job id {}", tokens[4].toString());
+					fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
 					return UID();
 				}
 				wait(clearBulkLoadJobHistory(cx, jobId));
