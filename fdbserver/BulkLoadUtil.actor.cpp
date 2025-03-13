@@ -311,7 +311,6 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 			} else {
 				UNREACHABLE();
 			}
-			// TODO(BulkLoad): Check file checksum
 			TraceEvent(SevInfo, "SSBulkLoadTaskDownloadFileSet", logId)
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
@@ -419,7 +418,7 @@ ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 		TraceEvent(SevError, "ManifestFileTooBig", logId)
 		    .detail("FileSize", fileSize)
 		    .detail("MaxSize", SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
-		throw file_too_large(); // TODO(BulkLoad): handle this unretrievable error
+		throw file_too_large();
 	}
 
 	state int64_t chunkSize = 64 * 1024; // 64KB chunks
@@ -438,7 +437,7 @@ ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 				TraceEvent(SevError, "ReadFileError", logId)
 				    .detail("BytesRead", bytesRead)
 				    .detail("BytesExpected", bytesToRead);
-				throw io_error(); // TODO(BulkLoad): handle this unretrievable error
+				throw io_error();
 			}
 
 			// Process the chunk line by line

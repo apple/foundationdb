@@ -66,8 +66,7 @@ std::string appendToPath(const std::string& path, const std::string& append);
 // Here are important metadata: (1) BulkLoadTaskState; (2) BulkDumpState; (3) BulkLoadManifest. BulkLoadTaskState is
 // only used for bulkload core engine which persists the metadata for each unit bulkload range (aka. task).
 // BulkDumpState is used for bulk dumping. BulkLoadManifest is the metadata for persisting core information of the
-// load/dumped range. TODO(BulkLoad): In the next PR, there will be a BulkLoadState metadata which is used for the
-// bulkload job. (aka loading a folder).
+// load/dumped range.
 
 // Define the configuration of bytes sampling
 // Use for setting manifest file
@@ -803,6 +802,9 @@ public:
 				throw bulkload_manifest_decode_error();
 			}
 			manifestCount = std::stoull(stringRemovePrefix(parts[1], "[ManifestCount]: "));
+			if (!isValid()) {
+				throw bulkload_manifest_decode_error();
+			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "DecodeBulkLoadJobManifestFileHeaderError")
 			    .setMaxEventLength(-1)
@@ -810,10 +812,8 @@ public:
 			    .errorUnsuppressed(e)
 			    .detail("CurrentVersion", bulkLoadManifestFormatVersion)
 			    .detail("RawString", rawString);
-			ASSERT(false);
-			// TODO(BulkLoad): cancel bulkload job for this case. The job is not retriable.
+			throw bulkload_manifest_decode_error();
 		}
-		ASSERT(isValid());
 	}
 
 	bool isValid() const { return formatVersion > 0 && manifestCount > 0; }
@@ -854,7 +854,9 @@ public:
 			manifestRelativePath = stringRemovePrefix(parts[2], "[ManifestRelativePath]: ");
 			version = std::stoll(stringRemovePrefix(parts[3], "[Version]: "));
 			bytes = std::stoull(stringRemovePrefix(parts[4], "[Bytes]: "));
-			ASSERT(isValid());
+			if (!isValid()) {
+				throw bulkload_manifest_decode_error();
+			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "DecodeBulkLoadJobManifestFileEntryError")
 			    .setMaxEventLength(-1)
@@ -862,8 +864,7 @@ public:
 			    .errorUnsuppressed(e)
 			    .detail("CurrentVersion", bulkLoadManifestFormatVersion)
 			    .detail("RawString", rawString);
-			ASSERT(false);
-			// TODO(BulkLoad): cancel bulkload job for this case. The job is not retriable.
+			throw bulkload_manifest_decode_error();
 		}
 	}
 

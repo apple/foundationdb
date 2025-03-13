@@ -1103,7 +1103,6 @@ ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Referenc
 		state Transaction tr(cx);
 		state BulkLoadTaskState newBulkLoadTaskState;
 		try {
-			// TODO(BulkLoad): make sure the range has been locked
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
@@ -1719,13 +1718,12 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 	ASSERT(self->bulkLoadJobManager.isValid() && self->bulkLoadJobManager.manifestEntryMap->empty());
 	state double beginTime = now();
 	state KeyRange jobRange = self->bulkLoadJobManager.jobState.getJobRange();
-	if (!fileExists(abspath(localJobManifestFilePath))) {
-		// TODO(BulkLoad): check if the file complete
-		TraceEvent(SevDebug, "DDBulkLoadJobDownloadJobManifest", self->ddId)
-		    .detail("JobTransportMethod", jobTransportMethod)
-		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-		    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
-		try {
+	try {
+		if (!fileExists(abspath(localJobManifestFilePath))) {
+			TraceEvent(SevDebug, "DDBulkLoadJobDownloadJobManifest", self->ddId)
+			    .detail("JobTransportMethod", jobTransportMethod)
+			    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+			    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
 			wait(downloadBulkLoadJobManifestFile(
 			    jobTransportMethod, localJobManifestFilePath, remoteJobManifestFilePath, self->ddId));
 			TraceEvent(SevInfo, "DDBulkLoadJobManifestDownloaded", self->ddId)
@@ -1733,44 +1731,44 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 			    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
 			    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
 			    .detail("Duration", now() - beginTime);
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-			state Error err = e;
-			TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorDownloadUnretrievableError", self->ddId)
-			    .errorUnsuppressed(err)
-			    .detail("JobTransportMethod", jobTransportMethod)
-			    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-			    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
-			    .detail("Duration", now() - beginTime);
-			std::string errorMessage = "Failed to download job-manifest file with error code " +
-			                           std::to_string(err.code()) + ". The remote file path is " +
-			                           remoteJobManifestFilePath + ". The local file path is " +
-			                           localJobManifestFilePath + ". The transport method is " +
-			                           convertBulkLoadTransportMethodToString(jobTransportMethod) + ".";
-			wait(moveErrorBulkLoadJobToHistory(self, errorMessage));
-			TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorDownloadUnretrievableErrorPersisted", self->ddId)
-			    .errorUnsuppressed(err)
-			    .detail("JobTransportMethod", jobTransportMethod)
-			    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-			    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
-			    .detail("Duration", now() - beginTime);
-			throw err;
 		}
+		// At this point, we have the global job manifest file stored locally at localJobManifestFilePath.
+		// This job manifest file stores all remote manifest filepath per range.
+		// Here, we want to get all manifest entries of the file with in the range specified by jobRange.
+		wait(getBulkLoadJobFileManifestEntryFromJobManifestFile(
+		    localJobManifestFilePath, jobRange, self->ddId, /*output=*/self->bulkLoadJobManager.manifestEntryMap));
+		self->bulkLoadJobManager.jobState.setTaskCount(self->bulkLoadJobManager.manifestEntryMap->size());
+		TraceEvent(SevInfo, "DDBulkLoadJobManifestMapBuilt", self->ddId)
+		    .detail("JobTransportMethod", jobTransportMethod)
+		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+		    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
+		    .detail("TaskCount", self->bulkLoadJobManager.manifestEntryMap->size())
+		    .detail("Duration", now() - beginTime);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		state Error err = e;
+		TraceEvent(SevWarnAlways, "DDBulkLoadJobManifestUnretrievableError", self->ddId)
+		    .errorUnsuppressed(err)
+		    .detail("JobTransportMethod", jobTransportMethod)
+		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+		    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
+		    .detail("Duration", now() - beginTime);
+		std::string errorMessage = "Failed to build job-manifest map with error code " + std::to_string(err.code()) +
+		                           ". The remote file path is " + remoteJobManifestFilePath +
+		                           ". The local file path is " + localJobManifestFilePath +
+		                           ". The transport method is " +
+		                           convertBulkLoadTransportMethodToString(jobTransportMethod) + ".";
+		wait(moveErrorBulkLoadJobToHistory(self, errorMessage));
+		TraceEvent(SevWarnAlways, "DDBulkLoadJobManifestUnretrievableErrorPersisted", self->ddId)
+		    .errorUnsuppressed(err)
+		    .detail("JobTransportMethod", jobTransportMethod)
+		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+		    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
+		    .detail("Duration", now() - beginTime);
+		throw err;
 	}
-	// At this point, we have the global job manifest file stored locally at localJobManifestFilePath.
-	// This job manifest file stores all remote manifest filepath per range.
-	// Here, we want to get all manifest entries of the file with in the range specified by jobRange.
-	wait(getBulkLoadJobFileManifestEntryFromJobManifestFile(
-	    localJobManifestFilePath, jobRange, self->ddId, /*output=*/self->bulkLoadJobManager.manifestEntryMap));
-	self->bulkLoadJobManager.jobState.setTaskCount(self->bulkLoadJobManager.manifestEntryMap->size());
-	TraceEvent(SevInfo, "DDBulkLoadJobExecutorManifestEntryMapGot", self->ddId)
-	    .detail("JobTransportMethod", jobTransportMethod)
-	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
-	    .detail("TaskCount", self->bulkLoadJobManager.manifestEntryMap->size())
-	    .detail("Duration", now() - beginTime);
 	return Void();
 }
 
@@ -1966,6 +1964,7 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 	state Optional<BulkLoadJobState> job = wait(getRunningBulkLoadJob(cx));
 	if (!job.present()) {
 		TraceEvent(SevInfo, "DDBulkLoadJobNoJobExist", self->ddId);
+		self->bulkLoadJobManager = DDBulkLoadJobManager(); // set to empty
 		return Void();
 	}
 	state UID jobId = job.get().getJobId();
@@ -1973,7 +1972,7 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 	state std::string jobRoot = job.get().getJobRoot();
 	state BulkLoadTransportMethod jobTransportMethod = job.get().getTransportMethod();
 
-	// If a bulkload job is not finished, run scheduleBulkLoadJob
+	// If a bulkload job is not finished, create bulkLoadJobManager and run scheduleBulkLoadJob
 	if (job.get().getPhase() != BulkLoadJobPhase::Complete && job.get().getPhase() != BulkLoadJobPhase::Error) {
 		TraceEvent(SevInfo, "DDBulkLoadFoundJobToRun", self->ddId)
 		    .detail("JobId", jobId)
