@@ -42,6 +42,9 @@
 
 #define SevDebugMemory SevVerbose
 
+// Based on TagsAndMessage::getHeaderSize(): assume 6 tags.
+#define MessageOverheadBytes (sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint16_t) + 6 * sizeof(Tag))
+
 struct VersionedMessage {
 	LogMessageVersion version;
 	StringRef message;
@@ -53,6 +56,7 @@ struct VersionedMessage {
 	  : version(v), message(m), tags(t), arena(a) {}
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
+	size_t getEstimatedSize() const { return message.size() + MessageOverheadBytes; }
 
 	// Returns true if the message is a mutation that could be backed up (normal keys, system key backup ranges, or the
 	// metadata version key)
@@ -374,12 +378,14 @@ struct BackupData {
 			return;
 		}
 
-		// keep track of each arena and accumulate their sizes
+		// Accumulate erased message sizes
 		int64_t bytes = 0;
 		for (int i = 0; i < num; i++) {
-			bytes += messages[i].message.size();
+			bytes += messages[i].getEstimatedSize();
 		}
-		TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("Release", bytes);
+		TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId)
+		    .detail("Release", bytes)
+		    .detail("Total", lock->activePermits());
 		lock->release(bytes);
 		messages.erase(messages.begin(), messages.begin() + num);
 	}
@@ -389,6 +395,9 @@ struct BackupData {
 		const Version ver = endVersion.get();
 		while (!messages.empty()) {
 			if (messages.back().getVersion() > ver) {
+				size_t bytes = messages.back().getEstimatedSize();
+				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("Release", bytes);
+				lock->release(bytes);
 				messages.pop_back();
 			} else {
 				return;
@@ -1080,13 +1089,15 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		while (r->hasMessage()) {
 			StringRef msg = r->getMessage();
 			self->messages.emplace_back(r->version(), msg, r->getTags(), r->arena());
-			peekedBytes += msg.size();
+			peekedBytes += self->messages.back().getEstimatedSize();
 			r->nextMessage();
 		}
-		TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
-		    .detail("Take", peekedBytes)
-		    .detail("Current", self->lock->activePermits());
-		wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
+		if (peekedBytes > 0) {
+			TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
+			    .detail("Take", peekedBytes)
+			    .detail("Current", self->lock->activePermits());
+			wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
+		}
 
 		tagAt = r->version().version;
 		self->pulledVersion.set(tagAt);
