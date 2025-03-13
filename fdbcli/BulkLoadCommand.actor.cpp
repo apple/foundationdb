@@ -23,10 +23,25 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/BulkLoading.h"
 #include "flow/Arena.h"
+#include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
+
+static const std::string BULK_LOAD_MODE_USAGE = "To set bulkload mode: bulkload mode [on|off]\n";
+static const std::string BULK_LOAD_LOAD_USAGE =
+    "To load a range of key/values: bulkload load <JOBID> <BEGINKEY> <ENDKEY> <DIR>\n"
+    " where <JOBID> is the id of the bulkdumped job to load, <BEGINKEY> to <ENDKEY>\n"
+    " denotes the key/value range to load, and <DIR> is a local directory OR \n"
+    " blobstore url to load SST files from.\n";
+static const std::string BULK_LOAD_STATUS_USAGE = "To get status: bulkload status\n";
+static const std::string BULK_LOAD_CANCEL_USAGE = "To cancel current bulkload job: bulkload cancel <JOBID>\n";
+static const std::string BULK_LOAD_HISTORY_USAGE = "To print bulkload job history: bulkload history\n";
+static const std::string BULK_LOAD_HISTORY_CLEAR_USAGE = "To clear history: bulkload history clear [all|id]\n";
+static const std::string BULK_LOAD_HELP_MESSAGE = BULK_LOAD_MODE_USAGE + BULK_LOAD_LOAD_USAGE + BULK_LOAD_STATUS_USAGE +
+                                                  BULK_LOAD_CANCEL_USAGE + BULK_LOAD_HISTORY_USAGE +
+                                                  BULK_LOAD_HISTORY_CLEAR_USAGE;
 
 ACTOR Future<Void> printPastBulkLoadJob(Database cx) {
 	std::vector<BulkLoadJobState> jobs = wait(getBulkLoadJobFromHistory(cx));
@@ -75,7 +90,10 @@ ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 					fmt::println("Submitted {} tasks", submitTaskCount);
 					fmt::println("Finished {} tasks", completeTaskCount);
 					fmt::println("Error {} tasks", errorTaskCount);
-					fmt::println("Job {} has been cancelled or completed", jobId.toString());
+					if (bulkLoadTask.phase == BulkLoadPhase::Submitted &&
+					    bulkLoadTask.getJobId() != UID::fromString("00000000-0000-0000-0000-000000000000")) {
+						fmt::println("Job {} has been cancelled or has completed", jobId.toString());
+					}
 					return Void();
 				}
 				if (bulkLoadTask.phase == BulkLoadPhase::Complete) {
@@ -96,11 +114,42 @@ ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 	return Void();
 }
 
+ACTOR Future<int> getBulkLoadMode(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state int oldMode = 0;
+			Optional<Value> oldModeValue = wait(tr.get(bulkLoadModeKey));
+			if (oldModeValue.present()) {
+				BinaryReader rd(oldModeValue.get(), Unversioned());
+				rd >> oldMode;
+			}
+			return oldMode;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 	if (tokencmp(tokens[1], "mode")) {
+		if (tokens.size() == 2) {
+			int mode = wait(getBulkLoadMode(cx));
+			if (mode == 0) {
+				fmt::println("Bulkload mode is disabled");
+			} else if (mode == 1) {
+				fmt::println("Bulkload mode is enabled");
+			} else {
+				fmt::println("Invalid bulkload mode value {}", mode);
+			}
+			return UID();
+		}
 		// Set bulk loading mode
 		if (tokens.size() != 3) {
-			printLongDesc(tokens[0]);
+			fmt::println("{}", BULK_LOAD_MODE_USAGE);
 			return UID();
 		}
 		if (tokencmp(tokens[2], "on")) {
@@ -112,63 +161,53 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			TraceEvent("SetBulkLoadModeCommand").detail("OldValue", old).detail("NewValue", 0);
 			return UID();
 		} else {
-			printLongDesc(tokens[0]);
+			fmt::println("ERROR: Invalid bulkload mode value {}", tokens[2].toString());
+			fmt::println("{}", BULK_LOAD_MODE_USAGE);
 			return UID();
 		}
-	} else if (tokencmp(tokens[1], "local")) {
+	} else if (tokencmp(tokens[1], "load")) {
+		int mode = wait(getBulkLoadMode(cx));
+		if (mode == 0) {
+			fmt::println("ERROR: Bulkload mode must be enabled to load data");
+			return UID();
+		}
 		if (tokens.size() != 6) {
-			printLongDesc(tokens[0]);
+			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
 			return UID();
 		}
 		UID jobId = UID::fromString(tokens[2].toString());
 		if (!jobId.isValid()) {
-			printLongDesc(tokens[0]);
+			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
+			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
 			return UID();
 		}
 		Key rangeBegin = tokens[3];
 		Key rangeEnd = tokens[4];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
 		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
-			printLongDesc(tokens[0]);
+			fmt::println(
+			    "ERROR: Invalid range: {} to {}, normal key space only", rangeBegin.toString(), rangeEnd.toString());
+			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
 			return UID();
 		}
 		std::string jobRoot = tokens[5].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		state BulkLoadJobState bulkLoadJob = createBulkLoadJob(jobId, range, jobRoot, BulkLoadTransportMethod::CP);
+		state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
+		    jobId,
+		    range,
+		    jobRoot,
+		    jobRoot.find("blobstore://") == 0 ? BulkLoadTransportMethod::BLOBSTORE : BulkLoadTransportMethod::CP);
 		wait(submitBulkLoadJob(cx, bulkLoadJob));
 		return bulkLoadJob.getJobId();
-
-	} else if (tokencmp(tokens[1], "blobstore")) {
-		if (tokens.size() != 6) {
-			printLongDesc(tokens[0]);
-			return UID();
-		}
-		UID jobId = UID::fromString(tokens[2].toString());
-		if (!jobId.isValid()) {
-			printLongDesc(tokens[0]);
-			return UID();
-		}
-		Key rangeBegin = tokens[3];
-		Key rangeEnd = tokens[4];
-		// Bulk load can only inject data to normal key space, aka "" ~ \xff
-		if (rangeBegin >= rangeEnd || rangeEnd > normalKeys.end) {
-			printLongDesc(tokens[0]);
-			return UID();
-		}
-		std::string jobRoot = tokens[5].toString();
-		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		BulkLoadJobState bulkLoadJob = createBulkLoadJob(jobId, range, jobRoot, BulkLoadTransportMethod::BLOBSTORE);
-		wait(submitBulkLoadJob(cx, bulkLoadJob));
-		return bulkLoadJob.getJobId();
-
 	} else if (tokencmp(tokens[1], "cancel")) {
 		if (tokens.size() != 3) {
-			printLongDesc(tokens[0]);
+			fmt::println("{}", BULK_LOAD_CANCEL_USAGE);
 			return UID();
 		}
 		state UID jobId = UID::fromString(tokens[2].toString());
 		if (!jobId.isValid()) {
-			printLongDesc(tokens[0]);
+			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
+			fmt::println("{}", BULK_LOAD_CANCEL_USAGE);
 			return UID();
 		}
 		wait(cancelBulkLoadJob(cx, jobId));
@@ -176,8 +215,8 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 		return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
-		if (tokens.size() != 4) {
-			printLongDesc(tokens[0]);
+		if (tokens.size() != 2) {
+			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
 			return UID();
 		}
 		Optional<BulkLoadJobState> job = wait(getRunningBulkLoadJob(cx));
@@ -191,61 +230,62 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 		return UID();
 
 	} else if (tokencmp(tokens[1], "history")) {
-		if (tokens.size() != 2) {
-			printLongDesc(tokens[0]);
-			return UID();
-		}
-		wait(printPastBulkLoadJob(cx));
-		return UID();
-
-	} else if (tokencmp(tokens[1], "clearhistory")) {
-		if (tokens.size() > 4) {
-			printLongDesc(tokens[0]);
+		if (tokens.size() == 2) {
+			wait(printPastBulkLoadJob(cx));
 			return UID();
 		}
 		if (tokens.size() == 3) {
-			if (!tokencmp(tokens[2], "all")) {
-				printLongDesc(tokens[0]);
+			if (tokencmp(tokens[2], "clear")) {
+				fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
+				return UID();
+			} else {
+				fmt::println("ERROR: Invalid history option {}", tokens[2].toString());
+				fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
 				return UID();
 			}
-			wait(clearBulkLoadJobHistory(cx));
-			fmt::println("All bulkload job history has been cleared");
-			return UID();
 		}
-		ASSERT(tokens.size() == 4);
-		if (!tokencmp(tokens[2], "id")) {
-			printLongDesc(tokens[0]);
-			return UID();
+		if (tokens.size() == 4) {
+			if (tokencmp(tokens[2], "clear")) {
+				if (tokencmp(tokens[3], "all")) {
+					wait(clearBulkLoadJobHistory(cx));
+					fmt::println("All bulkload job history has been cleared");
+					return UID();
+				} else {
+					fmt::println("ERROR: Invalid history clear option {}", tokens[3].toString());
+					fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
+					return UID();
+				}
+			} else {
+				fmt::println("ERROR: Invalid history clear option {}", tokens[2].toString());
+				fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
+				return UID();
+			}
 		}
-		UID jobId = UID::fromString(tokens[3].toString());
-		if (!jobId.isValid()) {
-			printLongDesc(tokens[0]);
-			return UID();
+		if (tokens.size() == 5) {
+			if (tokencmp(tokens[2], "clear") && tokencmp(tokens[3], "id")) {
+				UID jobId = UID::fromString(tokens[4].toString());
+				if (!jobId.isValid()) {
+					fmt::println("ERROR: Invalid job id {}", tokens[4].toString());
+					fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
+					return UID();
+				}
+				wait(clearBulkLoadJobHistory(cx, jobId));
+				fmt::println("Bulkload job {} has been cleared from history", jobId.toString());
+				return jobId;
+			}
 		}
-		wait(clearBulkLoadJobHistory(cx, jobId));
-		fmt::println("Bulkload job {} has been cleared from history", jobId.toString());
-		return jobId;
+		printLongDesc(tokens[0]);
+		return UID();
 
 	} else {
 		printUsage(tokens[0]);
+		printLongDesc(tokens[0]);
 		return UID();
 	}
 }
 
-CommandFactory bulkLoadFactory(
-    "bulkload",
-    CommandHelp("bulkload [mode|local|blobstore|status|cancel|history|clearhistory] [ARGs]",
-                "bulkload commands",
-                "To set bulkload mode: `bulkload mode [on|off]'\n"
-                "To load a range from a dir: `bulkload local <JOBID><BEGINKEY> <ENDKEY> <DIR>`\n"
-                " where <DIR> is the local directory to read SST files from and <BEGINKEY>\n"
-                " to <ENDKEY> denotes the key/value range to load.\n"
-                "To load a range from s3: `bulkload blobstore <JOBID> <BEGINKEY> <ENDKEY> <URL>`\n"
-                " where <URL> is the 'bloblstore' url of the s3 bucket to read the SST files\n"
-                " from -- see https://apple.github.io/foundationdb/backups.html#backup-urls\n"
-                " -- and <BEGINKEY> to <ENDKEY> denotes the key/value range to load.\n"
-                "To cancel current bulkload job: `bulkload cancel <JOBID>`\n"
-                "To get completed bulkload ranges: `bulkload status <BEGINKEY> <ENDKEY>`\n"
-                "To print bulkload job history: `bulkload history`\n"
-                "To clear bulkload job history: `bulkload clearhistory [all|id]`\n"));
+CommandFactory bulkLoadFactory("bulkload",
+                               CommandHelp("bulkload [mode|load|status|cancel|history] [ARGs]",
+                                           "bulkload commands",
+                                           BULK_LOAD_HELP_MESSAGE.c_str()));
 } // namespace fdb_cli
