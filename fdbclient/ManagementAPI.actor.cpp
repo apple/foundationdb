@@ -3188,7 +3188,7 @@ ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 			                           bulkLoadTaskStateValue(BulkLoadTaskState())));
 			// Add cancelled job to history
 			aliveJob.get().setEndTime(now());
-			aliveJob.get().setPhase(BulkLoadJobPhase::Cancelled);
+			aliveJob.get().setCancelledPhase();
 			wait(addBulkLoadJobToHistory(&tr, aliveJob.get()));
 			wait(tr.commit());
 			break;

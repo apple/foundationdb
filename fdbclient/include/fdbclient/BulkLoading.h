@@ -50,6 +50,8 @@ enum class BulkLoadTransportMethod : uint8_t {
 	BLOBSTORE = 2, // Upload/download to remote blob store. Used by real clusters.
 };
 
+std::string convertBulkLoadTransportMethodToString(BulkLoadTransportMethod method);
+
 // Specifying the format version of the bulkload job manifest metadata (the global manifest and range manifests).
 // The number should increase by 1 when we change the metadata in a release.
 const int bulkLoadManifestFormatVersion = 1;
@@ -64,8 +66,7 @@ std::string appendToPath(const std::string& path, const std::string& append);
 // Here are important metadata: (1) BulkLoadTaskState; (2) BulkDumpState; (3) BulkLoadManifest. BulkLoadTaskState is
 // only used for bulkload core engine which persists the metadata for each unit bulkload range (aka. task).
 // BulkDumpState is used for bulk dumping. BulkLoadManifest is the metadata for persisting core information of the
-// load/dumped range. TODO(BulkLoad): In the next PR, there will be a BulkLoadState metadata which is used for the
-// bulkload job. (aka loading a folder).
+// load/dumped range.
 
 // Define the configuration of bytes sampling
 // Use for setting manifest file
@@ -691,11 +692,14 @@ public:
 		std::string res = "[BulkLoadJobState]: [JobId]: " + jobId.toString() + ", [JobRoot]: " + jobRoot +
 		                  ", [JobRange]: " + jobRange.toString() +
 		                  ", [Phase]: " + convertBulkLoadJobPhaseToString(phase) +
-		                  ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod));
+		                  ", [TransportMethod]: " + convertBulkLoadTransportMethodToString(transportMethod);
 		res = res + ", [SubmitTime]: " + std::to_string(submitTime);
 		res = res + ", [SinceSubmitMins]: " + std::to_string((now() - submitTime) / 60.0);
 		if (taskCount.present()) {
 			res = res + ", [TaskCount]: " + std::to_string(taskCount.get());
+		}
+		if (errorMessage.present()) {
+			res = res + ", [ErrorMessage]: " + errorMessage.get();
 		}
 		return res;
 	}
@@ -710,7 +714,17 @@ public:
 
 	BulkLoadJobPhase getPhase() const { return phase; }
 
-	void setPhase(BulkLoadJobPhase inputPhase) { phase = inputPhase; }
+	void setErrorPhase(const std::string& message) {
+		phase = BulkLoadJobPhase::Error;
+		errorMessage = message;
+		return;
+	}
+
+	Optional<std::string> getErrorMessage() const { return errorMessage; }
+
+	void setCompletePhase() { phase = BulkLoadJobPhase::Complete; }
+
+	void setCancelledPhase() { phase = BulkLoadJobPhase::Cancelled; }
 
 	double getSubmitTime() const { return submitTime; }
 
@@ -742,7 +756,7 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase, submitTime, endTime, taskCount);
+		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase, submitTime, endTime, taskCount, errorMessage);
 	}
 
 private:
@@ -757,6 +771,7 @@ private:
 	double submitTime = 0;
 	double endTime = 0;
 	Optional<uint64_t> taskCount;
+	Optional<std::string> errorMessage;
 };
 
 // Define the bulkload job manifest file header
@@ -787,6 +802,9 @@ public:
 				throw bulkload_manifest_decode_error();
 			}
 			manifestCount = std::stoull(stringRemovePrefix(parts[1], "[ManifestCount]: "));
+			if (!isValid()) {
+				throw bulkload_manifest_decode_error();
+			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "DecodeBulkLoadJobManifestFileHeaderError")
 			    .setMaxEventLength(-1)
@@ -794,10 +812,8 @@ public:
 			    .errorUnsuppressed(e)
 			    .detail("CurrentVersion", bulkLoadManifestFormatVersion)
 			    .detail("RawString", rawString);
-			ASSERT(false);
-			// TODO(BulkLoad): cancel bulkload job for this case. The job is not retriable.
+			throw bulkload_manifest_decode_error();
 		}
-		ASSERT(isValid());
 	}
 
 	bool isValid() const { return formatVersion > 0 && manifestCount > 0; }
@@ -838,7 +854,9 @@ public:
 			manifestRelativePath = stringRemovePrefix(parts[2], "[ManifestRelativePath]: ");
 			version = std::stoll(stringRemovePrefix(parts[3], "[Version]: "));
 			bytes = std::stoull(stringRemovePrefix(parts[4], "[Bytes]: "));
-			ASSERT(isValid());
+			if (!isValid()) {
+				throw bulkload_manifest_decode_error();
+			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "DecodeBulkLoadJobManifestFileEntryError")
 			    .setMaxEventLength(-1)
@@ -846,8 +864,7 @@ public:
 			    .errorUnsuppressed(e)
 			    .detail("CurrentVersion", bulkLoadManifestFormatVersion)
 			    .detail("RawString", rawString);
-			ASSERT(false);
-			// TODO(BulkLoad): cancel bulkload job for this case. The job is not retriable.
+			throw bulkload_manifest_decode_error();
 		}
 	}
 

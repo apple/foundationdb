@@ -259,7 +259,6 @@ public:
 					for (const auto& serverId : serverIds) {
 						if (serverId == srcId) {
 							ok = false; // Do not select a team that has a server owning the bulk loading range.
-							// TODO(BulkLoad): remove this later. Require the support in SS.
 							break;
 						}
 					}
