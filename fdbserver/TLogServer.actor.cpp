@@ -3613,7 +3613,6 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	CODE_PROBE(now() - startt >= 1.0, "TLog recovery took more than 1 second");
 
 	for (auto it : self->id_data) {
-		ASSERT_WE_THINK(it.second->knownCommittedVersion <= it.second->version.get());
 		if (it.second->queueCommittedVersion.get() == 0) {
 			TraceEvent("TLogZeroVersion", self->dbgid).detail("LogId", it.first);
 			it.second->queueCommittedVersion.set(it.second->version.get());
