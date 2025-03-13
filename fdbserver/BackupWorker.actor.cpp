@@ -48,10 +48,9 @@ struct VersionedMessage {
 	VectorRef<Tag> tags;
 	Arena arena; // Keep a reference to the memory containing the message
 	Arena decryptArena; // Arena used for decrypt buffer.
-	size_t bytes; // arena's size when inserted, which can grow afterwards
 
-	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a, size_t n)
-	  : version(v), message(m), tags(t), arena(a), bytes(n) {}
+	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
+	  : version(v), message(m), tags(t), arena(a) {}
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
 
@@ -376,15 +375,11 @@ struct BackupData {
 		}
 
 		// keep track of each arena and accumulate their sizes
-		int64_t bytes = messages[0].bytes;
-		for (int i = 1; i < num; i++) {
-			const Arena& a = messages[i].arena;
-			const Arena& b = messages[i - 1].arena;
-			if (!a.sameArena(b)) {
-				bytes += messages[i].bytes;
-				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("Release", messages[i].bytes);
-			}
+		int64_t bytes = 0;
+		for (int i = 0; i < num; i++) {
+			bytes += messages[i].message.size();
 		}
+		TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("Release", bytes);
 		lock->release(bytes);
 		messages.erase(messages.begin(), messages.begin() + num);
 	}
@@ -1021,7 +1016,6 @@ ACTOR static Future<Version> getNoopVersion(BackupData* self) {
 ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
-	state Arena prev;
 
 	// Going out of noop mode, the popVersion could be larger than
 	// savedVersion or ongoing pop version, i.e., popTrigger.get(),
@@ -1082,20 +1076,17 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
+		int64_t peekedBytes = 0;
 		while (r->hasMessage()) {
-			state size_t takeBytes = 0;
-			if (!prev.sameArena(r->arena())) {
-				TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
-				    .detail("Take", r->arena().getSize())
-				    .detail("Current", self->lock->activePermits());
-
-				takeBytes = r->arena().getSize(); // more bytes can be allocated after the wait.
-				wait(self->lock->take(TaskPriority::DefaultYield, takeBytes));
-				prev = r->arena();
-			}
-			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena(), takeBytes);
+			StringRef msg = r->getMessage();
+			self->messages.emplace_back(r->version(), msg, r->getTags(), r->arena());
+			peekedBytes += msg.size();
 			r->nextMessage();
 		}
+		TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
+		    .detail("Take", peekedBytes)
+		    .detail("Current", self->lock->activePermits());
+		wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
 
 		tagAt = r->version().version;
 		self->pulledVersion.set(tagAt);
