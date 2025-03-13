@@ -1335,7 +1335,7 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> s
 		req.prevVersion = -1;
 		req.version = self->lastEpochEnd;
 		req.lastReceivedVersion = -1;
-
+		req.lastShardMove = -1;
 		replies.push_back(brokenPromiseToNever(r.resolve.getReply(req)));
 	}
 
