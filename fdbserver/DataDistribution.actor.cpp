@@ -1710,7 +1710,8 @@ ACTOR Future<Void> moveErrorBulkLoadJobToHistory(Reference<DataDistributor> self
 }
 
 // Download the job manifest file from the remoteJobManifestFilePath to the localJobManifestFilePath.
-// If the download failed, we mark the job metadata as error and move the metadata to the history.
+// Build the bulkload manifest range map based on the localJobManifestFilePath file content.
+// For any failure, we mark the job metadata as error and move the metadata to the history.
 ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> self,
                                                      BulkLoadTransportMethod jobTransportMethod,
                                                      std::string localJobManifestFilePath,
