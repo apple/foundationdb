@@ -75,7 +75,7 @@ function bulkdump {
   while true; do
     if ! output=$( "${local_build_dir}"/bin/fdbcli \
       -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
-      --exec "bulkdump status \"\" \xff " )
+      --exec "bulkdump status" )
     then
       err "Bulkdump status 1 failed"
       return 1
@@ -93,7 +93,7 @@ function bulkdump {
   while true; do
     if ! output=$( "${local_build_dir}"/bin/fdbcli \
       -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
-      --exec "bulkdump status \"\" \xff " )
+      --exec "bulkdump status" )
     then
       err "Bulkdump status 2 failed"
       return 1
@@ -143,7 +143,7 @@ function bulkload {
   while true; do
     if ! output=$( "${local_build_dir}"/bin/fdbcli \
       -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
-      --exec "bulkload status \"\" \xff " )
+      --exec "bulkload status" )
     then
       err "Bulkload status 1 failed"
       return 1
@@ -156,7 +156,7 @@ function bulkload {
   while true; do
     if ! output=$( "${local_build_dir}"/bin/fdbcli \
       -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
-      --exec "bulkload status \"\" \xff " )
+      --exec "bulkload status" )
     then
       err "Bulkload status 2 failed"
       return 1
