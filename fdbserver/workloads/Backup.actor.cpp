@@ -36,14 +36,17 @@ struct BackupWorkload : TestWorkload {
 	double minBackupAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
 	Key backupTag;
-	bool differentialBackup, agentRequest;
+	bool differentialBackup;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	LockDB locked{ false };
+	UsePartitionedLog usePartitionedLog{ true };
 	bool allowPauses;
 	Optional<std::string> encryptionKeyFileName;
 
 	BackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
+		bool partitioned = getOption(options, "usePartitionedLog"_sr, true);
+		usePartitionedLog.set(partitioned);
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
 		double minBackupAfter = getOption(options, "minBackupAfter"_sr, backupAfter);
 		if (backupAfter > minBackupAfter) {
@@ -167,7 +170,7 @@ struct BackupWorkload : TestWorkload {
 			                               backupRanges,
 			                               false,
 			                               StopWhenDone{ !stopDifferentialDelay },
-			                               UsePartitionedLog::True, // enable partitioned log here
+			                               self->usePartitionedLog,
 			                               IncrementalBackupOnly::False,
 			                               self->encryptionKeyFileName));
 		} catch (Error& e) {
