@@ -767,7 +767,7 @@ private:
 	// jobRoot is the root path of data store used by bulkload/dump funcationality.
 	// Given the job manifest file is stored in the jobFolder, the
 	// jobFolder = getBulkLoadJobRoot(jobRoot, jobId).
-	BulkLoadJobPhase phase;
+	BulkLoadJobPhase phase = BulkLoadJobPhase::Invalid;
 	double submitTime = 0;
 	double endTime = 0;
 	Optional<uint64_t> taskCount;

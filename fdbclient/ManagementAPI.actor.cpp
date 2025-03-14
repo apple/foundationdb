@@ -3280,11 +3280,8 @@ ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx) {
 				if (!jobState.isValid()) {
 					continue;
 				}
-				if (jobState.getPhase() == BulkLoadJobPhase::Complete ||
-				    jobState.getPhase() == BulkLoadJobPhase::Error) {
-					continue;
-				}
-				ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);
+				// If a job is fully completed, the metadata should be removed from bulkLoadJobKeys
+				// The metadata is added to bulkload history.
 				return jobState;
 			}
 			beginKey = rangeResult.back().key;

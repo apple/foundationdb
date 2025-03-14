@@ -100,7 +100,8 @@ std::string convertBulkLoadJobPhaseToString(const BulkLoadJobPhase& phase) {
 	} else if (phase == BulkLoadJobPhase::Cancelled) {
 		return "Cancelled";
 	} else {
-		UNREACHABLE();
+		TraceEvent(SevError, "UnexpectedBulkLoadJobPhase").detail("Val", phase);
+		return "";
 	}
 }
 
@@ -154,12 +155,15 @@ std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId) {
 }
 
 std::string convertBulkLoadTransportMethodToString(BulkLoadTransportMethod method) {
-	if (method == BulkLoadTransportMethod::CP) {
-		return "Local file copy";
+	if (method == BulkLoadTransportMethod::Invalid) {
+		return "Invalid";
+	} else if (method == BulkLoadTransportMethod::CP) {
+		return "LocalFileCopy";
 	} else if (method == BulkLoadTransportMethod::BLOBSTORE) {
-		return "Blob store";
+		return "BlobStore";
 	} else {
-		UNREACHABLE();
+		TraceEvent(SevError, "UnexpectedBulkLoadTransportMethod").detail("Val", method);
+		return "";
 	}
 }
 

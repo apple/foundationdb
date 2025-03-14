@@ -68,6 +68,15 @@ ACTOR Future<Void> printPastBulkLoadJob(Database cx) {
 	return Void();
 }
 
+void printBulkLoadJobTotalTaskCount(Optional<uint64_t> count) {
+	if (count.present()) {
+		fmt::println("Total {} tasks", count.get());
+	} else {
+		fmt::println("Total task count is unknown");
+	}
+	return;
+}
+
 ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 	state Transaction tr(cx);
 	state Key readBegin = job.getJobRange().begin;
@@ -93,11 +102,7 @@ ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 					fmt::println("Submitted {} tasks", submitTaskCount);
 					fmt::println("Finished {} tasks", completeTaskCount);
 					fmt::println("Error {} tasks", errorTaskCount);
-					if (totalTaskCount.present()) {
-						fmt::println("Total {} tasks", totalTaskCount.get());
-					} else {
-						fmt::println("Total task count is unknown");
-					}
+					printBulkLoadJobTotalTaskCount(totalTaskCount);
 					if (bulkLoadTask.phase == BulkLoadPhase::Submitted &&
 					    bulkLoadTask.getJobId() != UID::fromString("00000000-0000-0000-0000-000000000000")) {
 						fmt::println("Job {} has been cancelled or has completed", jobId.toString());
@@ -119,11 +124,7 @@ ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 	fmt::println("Submitted {} tasks", submitTaskCount);
 	fmt::println("Finished {} tasks", completeTaskCount);
 	fmt::println("Error {} tasks", errorTaskCount);
-	if (totalTaskCount.present()) {
-		fmt::println("Total {} tasks", totalTaskCount.get());
-	} else {
-		fmt::println("Total task count is unknown");
-	}
+	printBulkLoadJobTotalTaskCount(totalTaskCount);
 	return Void();
 }
 
