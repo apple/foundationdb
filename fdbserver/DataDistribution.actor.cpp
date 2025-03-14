@@ -1983,8 +1983,7 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 		// Set up all metadata and information required to run the job.
 		std::string localFolder = getBulkLoadJobRoot(self->bulkLoadFolder, jobId);
 		state std::string manifestLocalTempFolder = abspath(joinPath(localFolder, "manifest-temp"));
-		platform::eraseDirectoryRecursive(abspath(manifestLocalTempFolder));
-		ASSERT(platform::createDirectory(abspath(manifestLocalTempFolder)));
+		resetFileFolder(manifestLocalTempFolder);
 		std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
 		std::string jobManifestFileName = getBulkLoadJobManifestFileName();
 		std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
@@ -1998,15 +1997,15 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 	// Check if all bulkload tasks are marked as complete or error.
 	// If yes, acknowledge complete tasks and leave error tasks there.
 	loop {
-		bool complete = wait(checkBulkLoadTaskCompleteOrError(self, job.get()));
+		bool complete = wait(checkBulkLoadTaskCompleteOrError(self, self->bulkLoadJobManager.jobState));
 		if (complete) {
 			TraceEvent(SevInfo, "DDBulkLoadJobAllComplete", self->ddId)
 			    .detail("JobId", jobId)
 			    .detail("JobRange", jobRange);
-			wait(finalizeBulkLoadJob(self, job.get()));
+			wait(finalizeBulkLoadJob(self, self->bulkLoadJobManager.jobState));
 			break; // end
 		} else {
-			wait(scheduleBulkLoadJob(self, job.get()));
+			wait(scheduleBulkLoadJob(self, self->bulkLoadJobManager.jobState));
 			TraceEvent(SevInfo, "DDBulkLoadJobJobDispatched", self->ddId)
 			    .detail("JobId", jobId)
 			    .detail("JobRange", jobRange);
@@ -2362,7 +2361,7 @@ ACTOR Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 	loop {
 		bool allComplete = wait(checkBulkDumpJobComplete(self));
 		if (allComplete) {
-			TraceEvent(SevInfo, "DDBulkDumpManagerJobNotComplete", self->ddId).detail("JobId", jobId);
+			TraceEvent(SevInfo, "DDBulkDumpManagerJobAllTaskComplete", self->ddId).detail("JobId", jobId);
 			// Generate the job manifest file for bulkload.
 			// The job manifest file is the global map between ranges and their corresponding manifest file.
 			// When bulkload job loads a range, the job relies on this map to find the correct
