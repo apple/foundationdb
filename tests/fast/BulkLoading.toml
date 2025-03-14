@@ -20,6 +20,7 @@ enable_read_lock_on_range = true
 # Do not support version vector
 enable_version_vector = false
 enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
 
 # Set high enough sample rate to test bytes sampling
 min_byte_sampling_probability = 0.5

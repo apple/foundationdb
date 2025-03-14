@@ -7,6 +7,7 @@ enable_read_lock_on_range = true
 transaction_lock_rejection_retriable = false
 enable_version_vector = false
 enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
 
 [[test]]
 testTitle = 'RangeLocking'
