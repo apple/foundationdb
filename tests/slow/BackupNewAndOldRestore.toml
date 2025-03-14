@@ -1,7 +1,6 @@
 testClass = "Backup"
 
 [configuration]
-buggify = false
 tenantModes = ['disabled'] # Do not support tenant
 encryptModes = ['disabled'] # Do not support encryption
 
