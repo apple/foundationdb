@@ -25,6 +25,7 @@
 
 #include "fdbserver/DataDistributionTeam.h"
 #include "flow/ActorCollection.h"
+#include "flow/Buggify.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "fdbrpc/sim_validation.h"
@@ -1052,7 +1053,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		// for unhealthy. Make the bulk load task visible on the global task map
 		bool doBulkLoading = runPendingBulkLoadTaskWithRelocateData(this, rd);
 		if (doBulkLoading) {
-			TraceEvent(SevInfo, "DDBulkLoadTaskLaunchingDataMove", this->distributorId)
+			TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskLaunchingDataMove", this->distributorId)
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("NewDataMoveId", rd.dataMoveId)
@@ -1522,7 +1523,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						                         rd.bulkLoadTask.get().coreState.getRange(),
 						                         rd.bulkLoadTask.get().coreState.getTaskId(),
 						                         { BulkLoadPhase::Triggered, BulkLoadPhase::Running }));
-						TraceEvent(SevInfo, "DDBulkLoadTaskDataMoveLaunched", self->distributorId)
+						TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskDataMoveLaunched", self->distributorId)
 						    .setMaxEventLength(-1)
 						    .setMaxFieldLength(-1)
 						    .detail("BulkLoadTask", rd.bulkLoadTask.get().coreState.toString())
@@ -1555,7 +1556,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				DataMoveType dataMoveType = newDataMoveType(doBulkLoading);
 				rd.dataMoveId = newDataMoveId(
 				    deterministicRandom()->randomUInt64(), AssignEmptyRange::False, dataMoveType, rd.dmReason);
-				TraceEvent(SevInfo, "DDBulkLoadTaskNewDataMoveID", self->distributorId)
+				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskNewDataMoveID", self->distributorId)
 				    .detail("DataMoveID", rd.dataMoveId.toString())
 				    .detail("TrackID", rd.randomId)
 				    .detail("Range", rd.keys)
@@ -1652,7 +1653,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						anyHealthy = true;
 						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 						if (doBulkLoading) {
-							TraceEvent(SevInfo, "DDBulkLoadTaskSelectDestTeam", self->distributorId)
+							TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskSelectDestTeam", self->distributorId)
 							    .setMaxEventLength(-1)
 							    .setMaxFieldLength(-1)
 							    .detail("Context", "Restore")
@@ -1730,7 +1731,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						bestTeamReady = fbestTeam.isReady();
 						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
 						if (doBulkLoading) {
-							TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorBestTeamReceived", self->distributorId)
+							TraceEvent(bulkLoadVerboseEventSev(),
+							           "DDBulkLoadTaskRelocatorBestTeamReceived",
+							           self->distributorId)
 							    .detail("DataMoveID", rd.dataMoveId)
 							    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString())
 							    .detail("BestTeamReady", bestTeamReady);
@@ -1832,7 +1835,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						} else {
 							bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 							if (doBulkLoading) {
-								TraceEvent(SevInfo, "DDBulkLoadTaskSelectDestTeam", self->distributorId)
+								TraceEvent(
+								    bulkLoadVerboseEventSev(), "DDBulkLoadTaskSelectDestTeam", self->distributorId)
 								    .detail("Context", "New")
 								    .detail("SrcIds", describe(rd.src))
 								    .detail("DestIds", bestTeam.first.get()->getServerIDs())
@@ -2264,7 +2268,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					if (doBulkLoading) {
 						try {
 							self->bulkLoadTaskCollection->terminateTask(rd.bulkLoadTask.get().coreState);
-							TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorComplete", self->distributorId)
+							TraceEvent(
+							    bulkLoadVerboseEventSev(), "DDBulkLoadTaskRelocatorComplete", self->distributorId)
 							    .setMaxEventLength(-1)
 							    .setMaxFieldLength(-1)
 							    .detail("Dests", describe(destIds))
@@ -2274,7 +2279,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							if (bulkLoadError.code() != error_code_bulkload_task_outdated) {
 								throw bulkLoadError;
 							}
-							TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorCompleteButOutdated", self->distributorId)
+							TraceEvent(bulkLoadVerboseEventSev(),
+							           "DDBulkLoadTaskRelocatorCompleteButOutdated",
+							           self->distributorId)
 							    .setMaxEventLength(-1)
 							    .setMaxFieldLength(-1)
 							    .detail("Dests", describe(destIds))
@@ -2284,7 +2291,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					return Void();
 				} else {
 					if (doBulkLoading) {
-						TraceEvent(SevInfo, "DDBulkLoadTaskRelocatorError")
+						TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskRelocatorError")
 						    .setMaxEventLength(-1)
 						    .setMaxFieldLength(-1)
 						    .errorUnsuppressed(error)

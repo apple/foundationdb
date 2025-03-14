@@ -993,8 +993,9 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 	KeyRange keys = bulkLoadTaskState.getRange();
 	ASSERT(!keys.empty());
 	bool issueDataMoveForCancel = cancelledDataMovePriority.present();
-	TraceEvent e(
-	    issueDataMoveForCancel ? SevWarnAlways : SevInfo, "DDBulkLoadEngineCreateShardToBulkLoad", self->distributorId);
+	TraceEvent e(issueDataMoveForCancel ? SevWarnAlways : bulkLoadVerboseEventSev(),
+	             "DDBulkLoadEngineCreateShardToBulkLoad",
+	             self->distributorId);
 	e.detail("TaskId", bulkLoadTaskState.getTaskId());
 	e.detail("BulkLoadRange", keys);
 	// Create shards at the two ends and do not data move for those shards

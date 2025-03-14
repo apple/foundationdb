@@ -199,7 +199,7 @@ public:
 	// Random selection for load balance
 	ACTOR static Future<Void> getTeamForBulkLoad(DDTeamCollection* self, GetTeamRequest req) {
 		try {
-			TraceEvent(SevInfo, "DDBulkLoadEngineTaskGetTeamReqReceived", self->distributorId)
+			TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadEngineTaskGetTeamReqReceived", self->distributorId)
 			    .detail("TCReady", self->readyToStart.isReady())
 			    .detail("TeamBuilderValid", self->teamBuilder.isValid())
 			    .detail("TeamBuilderReady", self->teamBuilder.isValid() ? self->teamBuilder.isReady() : false)
@@ -208,7 +208,7 @@ public:
 			    .detail("TeamSize", self->teams.size());
 			wait(self->checkBuildTeams());
 
-			TraceEvent(SevInfo, "DDBulkLoadEngineTaskGetTeamCheckBuildTeamDone", self->distributorId)
+			TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadEngineTaskGetTeamCheckBuildTeamDone", self->distributorId)
 			    .detail("TCReady", self->readyToStart.isReady())
 			    .detail("TeamBuilderValid", self->teamBuilder.isValid())
 			    .detail("TeamBuilderReady", self->teamBuilder.isValid() ? self->teamBuilder.isReady() : false)
@@ -275,7 +275,7 @@ public:
 			Optional<Reference<IDataDistributionTeam>> res;
 			if (candidateTeams.size() >= 1) {
 				res = deterministicRandom()->randomChoice(candidateTeams);
-				TraceEvent(SevInfo, "DDBulkLoadEngineTaskGetTeamReply", self->distributorId)
+				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadEngineTaskGetTeamReply", self->distributorId)
 				    .detail("TCReady", self->readyToStart.isReady())
 				    .detail("SrcIds", describe(req.src))
 				    .detail("Primary", self->isPrimary())

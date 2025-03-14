@@ -8745,7 +8745,7 @@ ACTOR Future<BulkLoadFileSet> bulkLoadFetchKeyValueFileToLoad(StorageServer* dat
                                                               std::string dir,
                                                               BulkLoadTaskState bulkLoadTaskState) {
 	ASSERT(bulkLoadTaskState.getLoadType() == BulkLoadType::SST);
-	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFile", data->thisServerID)
+	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchSSTFile", data->thisServerID)
 	    .setMaxEventLength(-1)
 	    .setMaxFieldLength(-1)
 	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
@@ -8758,7 +8758,7 @@ ACTOR Future<BulkLoadFileSet> bulkLoadFetchKeyValueFileToLoad(StorageServer* dat
 	// Do not need byte sampling locally in fetchKeys
 	const double duration = now() - fetchStartTime;
 	const int64_t totalBytes = bulkLoadTaskState.getTotalBytes();
-	TraceEvent(SevInfo, "SSBulkLoadTaskFetchSSTFileFetched", data->thisServerID)
+	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchSSTFileFetched", data->thisServerID)
 	    .setMaxEventLength(-1)
 	    .setMaxFieldLength(-1)
 	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
@@ -8829,7 +8829,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	    {}, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
 	if (conductBulkLoad) {
-		TraceEvent(SevInfo, "SSBulkLoadTaskFetchKey", data->thisServerID)
+		TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 		    .detail("DataMoveId", dataMoveId.toString())
 		    .detail("Range", keys)
 		    .detail("Phase", "Begin");
@@ -9015,7 +9015,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					rangeEnd = keys.end;
 				}
 			} else if (conductBulkLoad) {
-				TraceEvent(SevInfo, "SSBulkLoadTaskFetchKey", data->thisServerID)
+				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
 				    .detail("Range", keys)
 				    .detail("Phase", "Read task metadata");
@@ -9031,7 +9031,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// getBulkLoadTaskStateFromDataMove get stuck, this fetchKeys is guaranteed to be cancelled.
 				BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
 				    data->cx, dataMoveId, /*atLeastVersion=*/data->version.get(), data->thisServerID));
-				TraceEvent(SevInfo, "SSBulkLoadTaskFetchKey", data->thisServerID)
+				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
 				    .detail("Range", keys)
 				    .detail("Phase", "Got task metadata");
@@ -9110,7 +9110,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					wait(data->storage.replaceRange(blockRange, blockData));
 
 					if (conductBulkLoad) {
-						TraceEvent(SevInfo, "SSBulkLoadTaskFetchKey", data->thisServerID)
+						TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 						    .detail("FKID", interval.pairID)
 						    .detail("DataMoveId", dataMoveId.toString())
 						    .detail("Range", keys)
@@ -9182,7 +9182,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						shard->server->addShard(ShardInfo::newAdding(
 						    data, KeyRangeRef(blockBegin, keys.end), shard->reason, shard->getSSBulkLoadMetadata()));
 						if (conductBulkLoad) {
-							TraceEvent(SevInfo, "SSBulkLoadTaskFetchKey", data->thisServerID)
+							TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 							    .detail("FKID", interval.pairID)
 							    .detail("DataMoveId", dataMoveId.toString())
 							    .detail("Range", keys)
@@ -9562,7 +9562,7 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
                                                 std::string localRoot,
                                                 BulkLoadTaskState bulkLoadTaskState) {
 	ASSERT(bulkLoadTaskState.getLoadType() == BulkLoadType::SST);
-	TraceEvent(SevInfo, "SSBulkLoadTaskFetchShardFile", data->thisServerID)
+	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardFile", data->thisServerID)
 	    .setMaxEventLength(-1)
 	    .setMaxFieldLength(-1)
 	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
@@ -9588,7 +9588,7 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	// Download data file and byte sample file from fromRemoteFileSet to toLocalFileSet
 	state BulkLoadFileSet toLocalFileSet = wait(bulkLoadDownloadTaskFileSet(
 	    bulkLoadTaskState.getTransportMethod(), fromRemoteFileSet, localRoot, data->thisServerID));
-	TraceEvent(SevInfo, "SSBulkLoadTaskFetchShardSSTFileFetched", data->thisServerID)
+	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardSSTFileFetched", data->thisServerID)
 	    .setMaxEventLength(-1)
 	    .setMaxFieldLength(-1)
 	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
@@ -9598,7 +9598,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 
 	// Step 2: Do byte sampling locally if the remote byte sampling file is not valid nor existing
 	if (!toLocalFileSet.hasByteSampleFile()) {
-		TraceEvent(SevInfo, "SSBulkLoadTaskFetchShardSSTFileValidByteSampleNotFound", data->thisServerID)
+		TraceEvent(
+		    bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardSSTFileValidByteSampleNotFound", data->thisServerID)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())
@@ -9612,7 +9613,7 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 			toLocalFileSet.setByteSampleFileName(byteSampleFileName);
 		}
 	}
-	TraceEvent(SevInfo, "SSBulkLoadTaskFetchShardByteSampled", data->thisServerID)
+	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardByteSampled", data->thisServerID)
 	    .setMaxEventLength(-1)
 	    .setMaxFieldLength(-1)
 	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
@@ -9653,7 +9654,7 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 
 	const double duration = now() - fetchStartTime;
 	const int64_t totalBytes = getTotalFetchedBytes(moveInShard->meta->checkpoints);
-	TraceEvent(SevInfo, "SSBulkLoadTaskFetchShardSSTFileBuildMetadata", data->thisServerID)
+	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardSSTFileBuildMetadata", data->thisServerID)
 	    .setMaxEventLength(-1)
 	    .setMaxFieldLength(-1)
 	    .detail("BulkLoadTask", bulkLoadTaskState.toString())

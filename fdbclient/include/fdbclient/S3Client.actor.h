@@ -45,6 +45,16 @@
 // TODO: Handle prefix as a parameter on the URL so can strip the first part
 // of the resource from the blobstore URL.
 
+// For all trace events for s3 client operations
+inline Severity s3VerboseEventSev() {
+	return !g_network->isSimulated() && CLIENT_KNOBS->S3CLIENT_VERBOSE_LEVEL >= 10 ? SevInfo : SevDebug;
+}
+
+// For all trace events measuring the performance of s3 client operations
+inline Severity s3PerfEventSev() {
+	return !g_network->isSimulated() && CLIENT_KNOBS->S3CLIENT_VERBOSE_LEVEL >= 5 ? SevInfo : SevDebug;
+}
+
 const std::string BLOBSTORE_PREFIX = "blobstore://";
 
 // Copy the directory content from the local filesystem up to s3.

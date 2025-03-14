@@ -1895,7 +1895,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						                 bulkLoadTaskPrefix,
 						                 newBulkLoadTaskState.getRange(),
 						                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
-						TraceEvent(SevInfo, "DDBulkLoadTaskSetRunningStateTransaction", relocationIntervalId)
+						TraceEvent(
+						    bulkLoadVerboseEventSev(), "DDBulkLoadTaskSetRunningStateTransaction", relocationIntervalId)
 						    .setMaxEventLength(-1)
 						    .setMaxFieldLength(-1)
 						    .detail("DataMoveID", dataMoveId)
@@ -1925,7 +1926,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 				if (currentKeys.end == keys.end && bulkLoadTaskState.present()) {
 					Version commitVersion = tr.getCommittedVersion();
-					TraceEvent(SevInfo, "DDBulkLoadTaskPersistRunningState", relocationIntervalId)
+					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistRunningState", relocationIntervalId)
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .detail("DataMoveID", dataMoveId)
@@ -2346,7 +2347,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							                 bulkLoadTaskPrefix,
 							                 newBulkLoadTaskState.getRange(),
 							                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
-							TraceEvent(SevInfo, "DDBulkLoadTaskSetCompleteTransaction", relocationIntervalId)
+							TraceEvent(
+							    bulkLoadVerboseEventSev(), "DDBulkLoadTaskSetCompleteTransaction", relocationIntervalId)
 							    .setMaxEventLength(-1)
 							    .setMaxFieldLength(-1)
 							    .detail("DataMoveID", dataMoveId)
@@ -2372,7 +2374,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 					if (range.end == dataMove.ranges.front().end && bulkLoadTaskState.present()) {
 						Version commitVersion = tr.getCommittedVersion();
-						TraceEvent(SevInfo, "DDBulkLoadTaskPersistCompleteState", relocationIntervalId)
+						TraceEvent(
+						    bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistCompleteState", relocationIntervalId)
 						    .setMaxEventLength(-1)
 						    .setMaxFieldLength(-1)
 						    .detail("DataMoveID", dataMoveId)

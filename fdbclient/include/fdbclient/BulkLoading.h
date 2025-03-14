@@ -29,7 +29,18 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/fdbrpc.h"
+
+// For all trace events for bulkload/dump operations
+inline Severity bulkLoadVerboseEventSev() {
+	return !g_network->isSimulated() && CLIENT_KNOBS->BULKLOAD_VERBOSE_LEVEL >= 10 ? SevInfo : SevDebug;
+}
+
+// For all trace events measuring the performance of bulkload/dump operations
+inline Severity bulkLoadPerfEventSev() {
+	return !g_network->isSimulated() && CLIENT_KNOBS->BULKLOAD_VERBOSE_LEVEL >= 5 ? SevInfo : SevDebug;
+}
 
 const std::string bulkLoadJobManifestLineTerminator = "\n";
 
@@ -269,7 +280,7 @@ public:
 			    .detail("FileSet", toString());
 			throw bulkload_fileset_invalid_filepath();
 		} else {
-			TraceEvent(SevInfo, "BulkLoadFileSetProvideDataFile")
+			TraceEvent(bulkLoadVerboseEventSev(), "BulkLoadFileSetProvideDataFile")
 			    .detail("DataFile", dataFileName)
 			    .detail("Relative", getRelativePath())
 			    .detail("Folder", getFolder());

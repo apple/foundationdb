@@ -2822,7 +2822,9 @@ ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
 				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
 				tr.set(bulkLoadModeKey, wr.toValue());
 				wait(tr.commit());
-				TraceEvent("DDBulkLoadEngineModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
+				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadEngineModeKeyChanged")
+				    .detail("NewMode", mode)
+				    .detail("OldMode", oldMode);
 			}
 			return oldMode;
 		} catch (Error& e) {
@@ -2928,7 +2930,7 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	RangeResult result = wait(krmGetRanges(tr, bulkLoadTaskPrefix, range));
 	if (result.size() > 2) {
-		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
 		    .detail("Reason", "TooManyRanges")
 		    .detail("Range", printable(range))
 		    .detail("Size", result.size())
@@ -2936,7 +2938,7 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 		    .backtrace();
 		throw bulkload_task_outdated();
 	} else if (result[0].value.empty()) {
-		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
 		    .detail("Reason", "EmptyValue")
 		    .detail("Range", printable(range))
 		    .detail("TaskId", taskId.toString())
@@ -2946,7 +2948,7 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 	ASSERT(result.size() == 2);
 	bulkLoadTaskState = decodeBulkLoadTaskState(result[0].value);
 	if (!bulkLoadTaskState.isValid()) {
-		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
 		    .detail("Reason", "HasBeenCleared")
 		    .detail("Range", printable(range))
 		    .detail("TaskId", taskId.toString())
@@ -2956,7 +2958,7 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 	ASSERT(bulkLoadTaskState.getTaskId().isValid());
 	if (taskId != bulkLoadTaskState.getTaskId()) {
 		// This task is overwritten by a newer task
-		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
 		    .detail("Reason", "TaskIdMismatch")
 		    .detail("Range", printable(range))
 		    .detail("TaskId", taskId.toString())
@@ -2968,7 +2970,7 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 	if (bulkLoadTaskState.getRange() != currentRange) {
 		// This task is partially overwritten by a newer task
 		ASSERT(bulkLoadTaskState.getRange().contains(currentRange));
-		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
 		    .detail("Reason", "RangeMismatch")
 		    .detail("Range", printable(range))
 		    .detail("TaskId", taskId.toString())
@@ -2978,7 +2980,7 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 		throw bulkload_task_outdated();
 	}
 	if (phases.size() > 0 && !bulkLoadTaskState.onAnyPhase(phases)) {
-		TraceEvent(SevInfo, "GetBulkLoadTaskError")
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
 		    .detail("Reason", "PhaseMismatch")
 		    .detail("Range", printable(range))
 		    .detail("TaskId", taskId.toString())
@@ -3208,7 +3210,7 @@ ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
 			// There is at most one bulkLoad job or bulkDump job at a time globally
 			Optional<BulkDumpState> aliveBulkDumpJob = wait(getSubmittedBulkDumpJob(&tr));
 			if (aliveBulkDumpJob.present()) {
-				TraceEvent(SevInfo, "SubmitBulkLoadJobFailed")
+				TraceEvent(SevWarn, "SubmitBulkLoadJobFailed")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("Reason", "Conflict to a running BulkDump job")
@@ -3221,7 +3223,7 @@ ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
 				if (aliveJob.get().getJobId() == jobState.getJobId()) {
 					return Void(); // The job has been submitted.
 				}
-				TraceEvent(SevInfo, "SubmitBulkLoadJobFailed")
+				TraceEvent(SevWarn, "SubmitBulkLoadJobFailed")
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("Reason", "Conflict to a running BulkLoad job")
@@ -3368,7 +3370,7 @@ ACTOR Future<int> setBulkDumpMode(Database cx, int mode) {
 				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
 				tr.set(bulkDumpModeKey, wr.toValue());
 				wait(tr.commit());
-				TraceEvent("DDBulkDumpModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
+				TraceEvent(SevInfo, "DDBulkDumpModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
 			}
 			return oldMode;
 		} catch (Error& e) {
