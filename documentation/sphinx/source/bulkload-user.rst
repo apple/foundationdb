@@ -61,7 +61,7 @@ To cancel a running job::
 
 BulkLoad
 ==========
-:command:`BulkLoad` is the inverse of :command:`BulkLoad` but then adds a history dimension so you can see status or previous :command:`BulkLoad` runs.
+:command:`BulkLoad` is the inverse of :command:`BulkDump` but then adds a history dimension so you can see status or previous :command:`BulkLoad` runs.
 
 Type :command:`help bulkload` for usage::
 
@@ -151,5 +151,6 @@ Troubleshooting
 
 :command:`BulkLoad` and :command:`BulkDump` require '--knob_shard_encode_location_metadata=1'.
 
-As for backup, enable '--knob_http_verbose_level 10' to debug connection issues.
+As for backup, enable '--knob_http_verbose_level 10' to debug connection issues: the http request/response will be dumped on STDOUT.
 
+To watch your job in operation, search 'DDBulkLoad*', 'SSBulkLoad*', 'DDBulkDump*', 'SSBulkDump*', 'S3Client*' in trace events to see more details. 
