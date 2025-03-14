@@ -1998,15 +1998,15 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 	// Check if all bulkload tasks are marked as complete or error.
 	// If yes, acknowledge complete tasks and leave error tasks there.
 	loop {
-		bool complete = wait(checkBulkLoadTaskCompleteOrError(self, job.get()));
+		bool complete = wait(checkBulkLoadTaskCompleteOrError(self, self->bulkLoadJobManager.jobState));
 		if (complete) {
 			TraceEvent(SevInfo, "DDBulkLoadJobAllComplete", self->ddId)
 			    .detail("JobId", jobId)
 			    .detail("JobRange", jobRange);
-			wait(finalizeBulkLoadJob(self, job.get()));
+			wait(finalizeBulkLoadJob(self, self->bulkLoadJobManager.jobState));
 			break; // end
 		} else {
-			wait(scheduleBulkLoadJob(self, job.get()));
+			wait(scheduleBulkLoadJob(self, self->bulkLoadJobManager.jobState));
 			TraceEvent(SevInfo, "DDBulkLoadJobJobDispatched", self->ddId)
 			    .detail("JobId", jobId)
 			    .detail("JobRange", jobRange);
