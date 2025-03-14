@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2025 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,22 +35,23 @@
 // A workload which test the correctness of backup and restore process
 struct RestoreWorkload : TestWorkload {
 	static constexpr auto NAME = "Restore";
-	Key backupTag;
-	bool differentialBackup, performRestore, agentRequest;
+	Key backupTag, backupTag1, backupTag2;
+	bool performRestore, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges, restoreRanges;
 	static int backupAgentRequests;
 	LockDB locked{ false };
 	bool allowPauses;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
-	bool defaultBackup;
 	Optional<std::string> encryptionKeyFileName;
 	UID randomID;
 
 	RestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		performRestore = getOption(options, "performRestore"_sr, true);
-		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
+		backupTag1 = getOption(options, "backupTag1"_sr, BackupAgentBase::getDefaultTag());
+		backupTag2 = getOption(options, "backupTag2"_sr, BackupAgentBase::getDefaultTag());
+		backupTag = deterministicRandom()->coinflip() ? backupTag1 : backupTag2;
 		agentRequest = getOption(options, "simBackupAgents"_sr, true);
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
@@ -108,7 +109,6 @@ struct RestoreWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, RestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
-		state bool extraTasks = false;
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		TraceEvent("RW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
