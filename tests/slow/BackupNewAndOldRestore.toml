@@ -6,7 +6,7 @@ tenantModes = ['disabled'] # Do not support tenant
 encryptModes = ['disabled'] # Do not support encryption
 
 [[test]]
-testTitle = 'BackupPartitioned'
+testTitle = 'NewBackup'
 clearAfterTest = false
 simBackupAgents = 'BackupToFile'
 
@@ -20,16 +20,40 @@ simBackupAgents = 'BackupToFile'
     [[test.workload]]
     testName = 'Backup'
     usePartitionedLog = true
+    backupTag = 'newBackup'
     backupAfter = 10.0
     restoreAfter = 60.0
 
 [[test]]
-testTitle = 'RestorePartitioned'
+testTitle = 'OldBackup'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    skipSetup = true
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'Backup'
+    usePartitionedLog = false
+    backupTag = 'oldBackup'
+    backupAfter = 10.0
+    restoreAfter = 60.0
+
+# Randomly pick one of the backup tag and restore it.
+[[test]]
+testTitle = 'RestoreRandomBackup'
 simBackupAgents = 'BackupToFile'
 clearAfterTest = false
 
     [[test.workload]]
     testName = 'Restore'
+    backupTag1 = 'newBackup'
+    backupTag2 = 'oldBackup'
 
 # check consistency after restore
 [[test]]
