@@ -83,8 +83,9 @@ public:
 	[[nodiscard]] auto post(Func&& task) -> Future<typename std::invoke_result<Func>::type> {
 		ASSERT_WE_THINK(g_network->isOnMainThread());
 		auto action = new Action<Func>(std::forward<Func>(task));
+		auto future = action->getFuture();
 		pool_->post(action);
-		return action->getFuture();
+		return future;
 	}
 
 	// Schedules a function that returns void for asynchronous execution in a thread pool.
@@ -122,7 +123,7 @@ template <typename Func>
 struct AsyncTaskExecutor::Action<Func, typename std::enable_if_t<!IsVoidReturn<Func>>> : ThreadAction {
 	using Ret = std::invoke_result<Func>::type;
 
-	Action(Func&& fn) : fn_(std::forward<Func>(fn)) {}
+	Action(Func&& fn) : fn_(std::move(fn)) {}
 
 	void operator()(IThreadPoolReceiver* action) override {
 		// TODO: Should we abort if there are no future references?
@@ -159,7 +160,7 @@ template <typename Func>
 struct AsyncTaskExecutor::Action<Func, typename std::enable_if_t<IsVoidReturn<Func>>> : ThreadAction {
 	using Ret = std::invoke_result<Func>::type;
 
-	Action(Func&& fn) : fn_(std::forward<Func>(fn)) {}
+	Action(Func&& fn) : fn_(std::move(fn)) {}
 
 	void operator()(IThreadPoolReceiver* action) override {
 		fn_();

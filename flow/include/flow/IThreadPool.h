@@ -91,7 +91,12 @@ public:
 			sendError(broken_promise());
 	}
 
-	Future<T> getFuture() const { // Call only on the originating thread!
+	// NOTE:
+	// - Call only on the originating thread.
+	// - Must be called before `send` or `sendError`. Will result into crash otherwise, since
+	//   tagAndForward() will take ownership of underlying promise.
+	Future<T> getFuture() const {
+		ASSERT(isValid());
 		return promise.getFuture();
 	}
 

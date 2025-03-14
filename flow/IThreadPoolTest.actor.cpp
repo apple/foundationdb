@@ -229,6 +229,18 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream_DestroyPromise") {
 	return Void();
 }
 
+// FIXME: Someday fix ThreadReturnPromise for this testcase.
+// TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseGetFutureAfterSend") {
+// 	auto get_f = [&]() {
+// 		ThreadReturnPromise<int> p;
+// 		p.send(1234);
+// 		return p.getFuture();
+// 	};
+// 	int res = wait(get_f());
+// 	ASSERT_EQ(res, 1234);
+// 	return Void();
+// }
+
 #else
 void forceLinkIThreadPoolTests() {}
 #endif
