@@ -13,6 +13,9 @@ Administration
    moving-a-cluster
    tls
    authorization
+   bulkload-user
+   bulkdump
+   
 
 This document covers the administration of an existing FoundationDB cluster. We recommend you read this document before setting up a cluster for performance testing or production use.
 
@@ -763,6 +766,15 @@ Remove old client library versions
 ----------------------------------
 
 You can now remove old client library versions from your clients. This is only to stop creating unnecessary connections.
+
+
+.. _bulkload_admin:
+
+BulkDump and BulkLoad
+=====================
+
+For how to use :command:`BulkDump` and :command:`BulkLoad`, see :doc:`bulkload-user`.
+For how :command:`BulkDump` works, see :doc:`bulkdump`.
 
 .. _version-specific-upgrading:
 
