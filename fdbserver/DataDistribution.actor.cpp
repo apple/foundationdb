@@ -1983,8 +1983,7 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 		// Set up all metadata and information required to run the job.
 		std::string localFolder = getBulkLoadJobRoot(self->bulkLoadFolder, jobId);
 		state std::string manifestLocalTempFolder = abspath(joinPath(localFolder, "manifest-temp"));
-		platform::eraseDirectoryRecursive(abspath(manifestLocalTempFolder));
-		ASSERT(platform::createDirectory(abspath(manifestLocalTempFolder)));
+		resetFileFolder(manifestLocalTempFolder);
 		std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
 		std::string jobManifestFileName = getBulkLoadJobManifestFileName();
 		std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
