@@ -1796,6 +1796,16 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 		auto it = self->bulkLoadJobManager.get().manifestEntryMap->find(beginKeyToDispatch);
 		ASSERT(it != self->bulkLoadJobManager.get().manifestEntryMap->end());
 		manifestEntry = it->second;
+
+		Optional<BulkLoadTaskState> bulkLoadTask =
+		    wait(bulkLoadJobFindTask(self, manifestEntry.getRange(), jobState.getJobId(), self->ddId));
+		if (bulkLoadTask.present() &&
+		    bulkLoadTask.get().onAnyPhase(
+		        { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })) {
+			beginKeyToDispatch = manifestEntry.getEndKey();
+			continue;
+		}
+
 		// Limit parallelism
 		loop {
 			if (self->bulkLoadParallelismLimitor.canStart()) {
@@ -1820,7 +1830,6 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 			break;
 		} else {
 			beginKeyToDispatch = manifestEntry.getEndKey();
-			wait(delay(0.1));
 		}
 	}
 	wait(waitForAll(actors));
