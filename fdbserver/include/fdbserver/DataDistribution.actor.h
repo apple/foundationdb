@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/Knobs.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_G_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_G_H
 #include "fdbserver/DataDistribution.actor.g.h"
