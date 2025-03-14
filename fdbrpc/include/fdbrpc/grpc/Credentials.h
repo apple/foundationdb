@@ -41,7 +41,7 @@ namespace ge = grpc::experimental;
 // provide secure or insecure credentials based on the underlying configuration.
 class GrpcCredentialProvider {
 public:
-	virtual ~GrpcCredentialProvider() {};
+	virtual ~GrpcCredentialProvider(){};
 
 	virtual std::shared_ptr<grpc::ServerCredentials> serverCredentials() const = 0;
 	virtual std::shared_ptr<grpc::ChannelCredentials> clientCredentials() const = 0;
@@ -118,8 +118,8 @@ private:
 //
 // Unlike `GrpcTlsCredentialProvider`, this implementation does not watch the filesystem for
 // updates. Instead, it loads TLS certificates from static data at initialization. This is useful
-// for embedding credentials in a secure environment where dynamic updates are not required.
-// For now, its just used in tests.
+// for embedding credentials in a secure environment where dynamic updates are not required. For
+// now, its just used in tests.
 class GrpcTlsCredentialStaticProvider : public GrpcCredentialProvider {
 public:
 	GrpcTlsCredentialStaticProvider(const std::string& key, const std::string& cert, const std::string& ca)
