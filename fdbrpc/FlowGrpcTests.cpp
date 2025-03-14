@@ -608,6 +608,73 @@ b1qkb+bH9VO0emLeRx9/hhdbCw==
 -----END CERTIFICATE-----)"
 	};
 
+	auto clientCredsDiffRoot = TLSCreds{
+		R"(-----BEGIN CERTIFICATE-----
+MIICtDCCAZwCFEvBIX6p+QGfL6iHL5so0kpiVsy5MA0GCSqGSIb3DQEBCwUAMBcx
+FTATBgNVBAMMDFRlc3QgUm9vdCBDQTAeFw0yNTAzMTQxODU5MzhaFw0zNTAzMTIx
+ODU5MzhaMBYxFDASBgNVBAMMC1Rlc3QgQ2xpZW50MIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEAuZAuPS1V9ZMJUyJqr4PcRDS8S2mNmZZdtisfdNiajEuw
+Czf8NnyWlcNdIhqgQE3Yjs8lNea8YlGJy3EKJY56l3Otv3uke5zUBBPvMmCcoC08
+RDhvxuiKV6ezKr+v9J5h/v9oyAv1DhuMJfONaJiBpsy+wb6sDbxZ1IXMRqZ0F9Kj
+LYZvdfNwdDJf4zOWtOhwwAddi9kvH1doUWBhXCW9kmip0SnQFiNR7Ye9ZQsF0MGL
+mE5tmdl23YtYq6BJnIz3r332pLpQ7TY23zjjcHN2JhoRQrzorjCFEN5MLRL0YCxA
+O/5OtXDccHzcGHJ00B5+4fWsUGNfns5Ab/YkVMpo6QIDAQABMA0GCSqGSIb3DQEB
+CwUAA4IBAQCcPftM/lF4ayg2cGRBXK9i5tsb6KMj7uSSt0yyHBH8P6Vt8aQNIOGl
+0/SeTeaGitmizP+hAg27wLDrTnhonwT0/05PLlLDVo+Th0fmt8nDaU9msABipiwE
+7AMhEQmJBoqBHtNLUTIcnccJ3cBwhanew4EhavJLb9qg6fjXV9Yf46otadoVtc7g
+OyYLUfJLKXYkUtqFFPWT1Ko0E45KxUoYXHpQvFbtB4qjr/WgNnD8f9N2M77CTNxa
+t1dCQA8s/UStzX1tFgJbe9cS9HSTZlN/iQ5cX9ru/PW1bS8nYxTK1FD0/diV5CN5
+GFkfHVhCAS3/qFqyYQmqJF5phbWRGy7F
+-----END CERTIFICATE-----)",
+		R"(-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC5kC49LVX1kwlT
+Imqvg9xENLxLaY2Zll22Kx902JqMS7ALN/w2fJaVw10iGqBATdiOzyU15rxiUYnL
+cQoljnqXc62/e6R7nNQEE+8yYJygLTxEOG/G6IpXp7Mqv6/0nmH+/2jIC/UOG4wl
+841omIGmzL7BvqwNvFnUhcxGpnQX0qMthm9183B0Ml/jM5a06HDAB12L2S8fV2hR
+YGFcJb2SaKnRKdAWI1Hth71lCwXQwYuYTm2Z2Xbdi1iroEmcjPevffakulDtNjbf
+OONwc3YmGhFCvOiuMIUQ3kwtEvRgLEA7/k61cNxwfNwYcnTQHn7h9axQY1+ezkBv
+9iRUymjpAgMBAAECggEAF+2quMLW2dL7GdhPT5C+X6E5QrQ6yTplnS8UYFnqG/tK
+mTe/8zq/pFJL+TDbx08ChO/bSYcWdcsz7KMH/u3PiyYkmpOUE0iW4mu7pZBlwhXz
+NozchRbJeCIs7W9Ifk/KLTq8RUedcxNEUESG0J0R4vN2Cb/PqfnGz6vtOpMOV1/e
+iev+buETtcZxlNsEQ4JrbmkTOmtLu8+smht6uDJEe0Xh/R3siS4MenHID7CqAZBL
+WSZzl3GurMjOW2sh9S8lXp0vPPa4T0qaHqYj9DT+8WRIYk3pu9N0qUVNPu07wPd1
+cWy10Ge8vKP4ixgTJWIdWIW0dEGloEzPbBPMM0mgfQKBgQD0wXRYJusDmiMhuQbr
+173+k938QhTUO/Mi5uyfvSqDisULHhZF9tqwgzjRE4F+93ZUGheBkKXt6F4S74gH
+KD2KjAygge751cC+hCramSYIESsI/hR0Ykx5Bm1VoyqpuvxAY9n3XcskvvkTtsTz
+nYcPKDcj2J54bG7ttEPtGCz9nwKBgQDCFpHaZRH6zk0uAoi419BMSDJrBvyp6uRN
+1/yPvU3nb82gm6H7/NqejYfEMn72xZhAsDuvi6GskTpiea3kW2BnTJ+Y5UWfL9jJ
+OnuVWzoRlnTmkL5DeSRIPWTcW/hD6hDQ9JTuKgKuI9D9/zWKPbswhD8f3qs/xeHr
+7LPQFsj8dwKBgQDwblWW/uwghrr6NqN47F8EhUcstdF2R0npwEU0CgSIYbp82Fpy
+8jMT8GPQ5sNv8TH5HgR3T5vgYEKBgXHz7fC+eCMzTVBvdi44OOdMA+PbStompEl9
+ps6OmOSwmm+fekKwEiadHDMhbsSJPCKvWdDB7/RyrynFDGfP9CRB9VzE6wKBgDjX
+FUXpXZee/VlhIptHkNgWOLXBaRN2GAB4JZ4O6ZbC1myXx5udlITknAMoaqhoe8tO
+EVy6vtFkAr4+Nl/vJs950C+dzYLuJ0XfW7wE6H+oGXpAn4fxHWAOotAqGw4AqYYY
+atlI8ln/YUBRkmN26rAturLhqjNWB3DpdEuXsKrHAoGBAMJdyAP5k6dXvaEirjY+
+wlwIrEoUeHCLEBncnPo5LKvqncmeUDJuPWoOlzzZQW6rdsYKyNPwdM8JP41nLdSG
+/HTPmg8ZSLMDtReSPqxlTNSzif1/a3A6xqz4LrD3KQAxm2mDRTAUPo07Z0AanyMq
+FnVUsGvf3ougWXZMs5PL6kfZ
+-----END PRIVATE KEY-----)",
+		R"(-----BEGIN CERTIFICATE-----
+MIIDDzCCAfegAwIBAgIUYE0u33FGPYmGtIoekRc8GPhZgdswDQYJKoZIhvcNAQEL
+BQAwFzEVMBMGA1UEAwwMVGVzdCBSb290IENBMB4XDTI1MDMxNDE4NTkxMVoXDTM1
+MDMxMjE4NTkxMVowFzEVMBMGA1UEAwwMVGVzdCBSb290IENBMIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuGajedenzUAOW+vmp64sYnsiashUuBD7jZ0+
+0ZUwkk/tZBvu4VP+/MC35p/dQZLyH9PkQkX8flWd5zMepDjmvLU7uJhpb8ZhDzbh
+k3PV/UwsTUMyc3eZKgHejc4yTfV9SB663mhh+FfT320MPXab6Mpfa1ZksbbZu/Fi
+XePu9LypxIrgGNxIpt1AkEExh/VVJokImaPyMp0OsH1wP2krxybJ/dt5E5YaOSn8
+62iG3pUqfSbuOH/5MNOhNKMAldcVUOENbGlL0pH6EgjS5bF86U6z+71L+4oY83jo
+xPK6PbbwKuSIENRLfl4wyLna/WBXNtPKKDA7Yjn5vX/9UZtMJQIDAQABo1MwUTAd
+BgNVHQ4EFgQUxL6PWSMSGY0A00Y41AuxJHzVvhUwHwYDVR0jBBgwFoAUxL6PWSMS
+GY0A00Y41AuxJHzVvhUwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
+AQEAYUNqgbF54QpK1EVRKBZoZsjrKKnDf3Z/SlSLg7UQ/s1GR7stJRXyxta/ty+B
+PZ/xuKZoiPp2aO8ZuOUTLPlgUMlIv0uMJTmyjmYZgES2iol5u9Wfg01WfHlX3Jlm
+MO3ZdWmpySmUKSNPw22N/eQqYGMyUhADy8deV39C9NZlQ4F/1LUcbwVyWqtwSatA
+Tvge+a6zM/DZAS4V6oKg1Dbues5Pgu1S6IznPFkeWbVNuVs2bFB5pNk6LXEQjQ2s
+S70C3DaU2iJgFTuG+ZySAJmLL35jOGH+JUk+c22ZHYw7u1D8kSmlCNX/LzPHFb/D
+/d6RoBi35uQcyHM3CnRPrhmT6A==
+-----END CERTIFICATE-----)"
+	};
+
 	auto provider =
 	    std::make_shared<GrpcTlsCredentialStaticProvider>(serverCreds.key, serverCreds.cert, serverCreds.ca);
 	ASSERT(provider->validate());
@@ -655,20 +722,36 @@ b1qkb+bH9VO0emLeRx9/hhdbCw==
 	}
 
 	// Invoke RPC from client with incorrect credentials.
-	// {
-	// 	AsyncGrpcClient<TestEchoService> client(addr.toString(), pool);
+	{
+		auto provider =
+		    std::make_shared<GrpcTlsCredentialStaticProvider>(clientCreds.key, serverCreds.cert, clientCreds.ca);
+		AsyncGrpcClient<TestEchoService> client(addr_with_host, provider, pool);
+		try {
+			EchoRequest request;
+			request.set_message("Ping!");
+			EchoResponse response = co_await client.call(&TestEchoService::Stub::Echo, request);
+			std::cout << "Echo received: " << response.message() << std::endl;
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_grpc_error);
+		}
+	}
 
-	// 	try {
-	// 		EchoRequest request;
-	// 		request.set_message("Ping!");
-	// 		EchoResponse response = co_await client.call(&TestEchoService::Stub::Echo, request);
-	// 		std::cout << "Echo received: " << response.message() << std::endl;
-	// 		ASSERT_EQ(response.message(), "Echo: Ping!");
-	// 	} catch (Error& e) {
-	// 		ASSERT_EQ(e.code(), error_code_grpc_error);
-	// 		ASSERT(false);
-	// 	}
-	// }
+	// Invoke RPC from client with credentials signed by different root.
+	{
+		auto provider = std::make_shared<GrpcTlsCredentialStaticProvider>(
+		    clientCredsDiffRoot.key, clientCredsDiffRoot.cert, clientCredsDiffRoot.ca);
+		AsyncGrpcClient<TestEchoService> client(addr_with_host, provider, pool);
+		try {
+			EchoRequest request;
+			request.set_message("Ping!");
+			EchoResponse response = co_await client.call(&TestEchoService::Stub::Echo, request);
+			std::cout << "Echo received: " << response.message() << std::endl;
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_grpc_error);
+		}
+	}
 }
 
 //--- THREAD POOL TESTS --//
