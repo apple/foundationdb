@@ -19,12 +19,15 @@
  */
 
 #include <cinttypes>
+#include <cstdint>
 #include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <type_traits>
 #include <unordered_map>
+#include <thread>
+#include <chrono>
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
@@ -75,6 +78,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
+#include "fdbrpc/grpc/AsyncTaskExecutor.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/BulkDumpUtil.actor.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
@@ -1393,6 +1397,8 @@ public:
 	std::string bulkDumpFolder;
 	std::string bulkLoadFolder;
 
+	AsyncTaskExecutor bulkLoadBackgroundTaskPool;
+
 	// defined only during splitMutations()/addMutation()
 	UpdateEagerReadInfo* updateEagerReads;
 
@@ -1743,7 +1749,8 @@ public:
 	                          /*maxTagsTracked=*/SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED,
 	                          /*minRateTracked=*/SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE *
 	                              CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE),
-	    busiestWriteTagContext(ssi.id()), getEncryptCipherKeysMonitor(encryptionMonitor), counters(this),
+	    bulkLoadBackgroundTaskPool(SERVER_KNOBS->SS_BULKLOAD_BACKGROUND_TASK_COUNT), busiestWriteTagContext(ssi.id()),
+	    getEncryptCipherKeysMonitor(encryptionMonitor), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")),
 	    tenantData(db),
@@ -8770,18 +8777,37 @@ ACTOR Future<BulkLoadFileSet> bulkLoadFetchKeyValueFileToLoad(StorageServer* dat
 	return toLocalFileSet;
 }
 
-ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results, KeyRange keys, std::string dataPath) {
+ACTOR Future<Void> tryGetRangeForBulkLoad(StorageServer* data,
+                                          PromiseStream<RangeResult> results,
+                                          KeyRange keys,
+                                          std::string dataPath) {
 	try {
 		// TODO(BulkLoad): what if the data file is empty but the totalKeyCount is not zero
 		state Key beginKey = keys.begin;
 		state Key endKey = keys.end;
-		state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
+		state std::shared_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
 		    keys, SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 		// TODO(BulkLoad): this can be a slow task. We will make this as async call.
 		reader->open(abspath(dataPath));
+		state RangeResult rep;
 		loop {
-			// TODO(BulkLoad): this is a blocking call. We will make this as async call.
-			RangeResult rep = reader->getRange(KeyRangeRef(beginKey, endKey));
+			rep.clear();
+			/*if (SERVER_KNOBS->SS_BULKLOAD_BACKGROUND_TASK_COUNT > 0) {
+			    RangeResult rep_ = wait(data->bulkLoadBackgroundTaskPool.post(
+			        [=]() { return reader->getRange(KeyRangeRef(beginKey, endKey)); }));
+			    rep = rep_;
+			} else {
+			    rep = reader->getRange(KeyRangeRef(beginKey, endKey));
+			}*/
+			wait(data->bulkLoadBackgroundTaskPool.post([=]() {
+				int64_t s = 0;
+				for (int64_t i = 0; i < 999999; i++) {
+					s += i;
+				}
+				std::cout << s;
+				return Void();
+			}));
+			rep = reader->getRange(KeyRangeRef(beginKey, endKey));
 			results.send(rep);
 			if (!rep.more) {
 				results.sendError(end_of_stream());
@@ -9041,7 +9067,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// We download the data file to local disk and pass the data file path to read in the next step.
 				BulkLoadFileSet localFileSet =
 				    wait(bulkLoadFetchKeyValueFileToLoad(data, bulkLoadLocalDir, bulkLoadTaskState));
-				hold = tryGetRangeForBulkLoad(results, keys, localFileSet.getDataFileFullPath());
+				hold = tryGetRangeForBulkLoad(data, results, keys, localFileSet.getDataFileFullPath());
 				rangeEnd = keys.end;
 			} else {
 				hold = tryGetRange(results, &tr, keys);
