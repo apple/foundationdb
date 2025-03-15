@@ -2418,8 +2418,8 @@ int main(int argc, char* argv[]) {
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 #ifdef FLOW_GRPC_ENABLED
 				if (opts.grpcAddressStrs.size() > 0) {
-					auto grpcServer = GrpcServer::initInstance(NetworkAddress::parse(opts.grpcAddressStrs[0]));
-					actors.push_back(grpcServer->run());
+					FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
+					actors.push_back(GrpcServer::instance()->run());
 				}
 #endif
 				f = stopAfter(waitForAll(actors));
