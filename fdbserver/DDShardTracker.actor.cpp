@@ -952,7 +952,7 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
-	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->overlappingTask(nextRange)) {
+	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->onBulkLoading(nextRange)) {
 		TraceEvent(SevWarn, "ShardCanForwardMergeButUnderBulkLoading", self->distributorId)
 		    .suppressFor(5.0)
 		    .detail("ShardMerging", keys)
@@ -972,7 +972,7 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 		return false;
 	}
 
-	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->overlappingTask(prevRange)) {
+	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->onBulkLoading(prevRange)) {
 		TraceEvent(SevWarn, "ShardCanBackwardMergeButUnderBulkLoading", self->distributorId)
 		    .suppressFor(5.0)
 		    .detail("ShardMerging", keys)
@@ -1256,15 +1256,6 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
 	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
 	bool shouldSplit = sizeSplit || writeSplit;
-	bool onBulkLoading = self->bulkLoadEnabled && self->bulkLoadTaskCollection->overlappingTask(keys);
-	if (onBulkLoading && shouldSplit) {
-		TraceEvent(SevWarn, "ShardWantToSplitButUnderBulkLoading", self->distributorId)
-		    .suppressFor(5.0)
-		    .detail("KeyRange", keys);
-		shouldSplit = false;
-		// Bulk loading will delay shard boundary change until the loading completes
-		onChange = onChange || delay(SERVER_KNOBS->DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC);
-	}
 
 	auto prevIter = self->shards->rangeContaining(keys.begin);
 	if (keys.begin > allKeys.begin)
@@ -1277,14 +1268,6 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes && bandwidthStatus == BandwidthStatusLow &&
 	                   (shardForwardMergeFeasible(self, keys, nextIter.range()) ||
 	                    shardBackwardMergeFeasible(self, keys, prevIter.range()));
-	if (onBulkLoading && shouldMerge) {
-		TraceEvent(SevWarn, "ShardWantToMergeButUnderBulkLoading", self->distributorId)
-		    .suppressFor(5.0)
-		    .detail("KeyRange", keys);
-		shouldMerge = false;
-		// Bulk loading will delay shard boundary change until the loading completes
-		onChange = onChange || delay(SERVER_KNOBS->DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC);
-	}
 
 	// Every invocation must set this or clear it
 	if (shouldMerge && !self->anyZeroHealthyTeams->get()) {
@@ -1350,6 +1333,14 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 
 	try {
 		loop {
+			while (self()->bulkLoadEnabled && self()->bulkLoadTaskCollection->onBulkLoading(keys)) {
+				TraceEvent(SevWarn, "ShardBoundaryChangeDisabledForBulkLoad", self()->distributorId)
+				    .suppressFor(60.0)
+				    .detail("KeyRange", keys);
+				wait(delay(SERVER_KNOBS->DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC *
+				               deterministicRandom()->random01() +
+				           60));
+			}
 			// Use the current known size to check for (and start) splits and merges.
 			wait(shardEvaluator(self(), keys, shardSize, wantsToMerge));
 
