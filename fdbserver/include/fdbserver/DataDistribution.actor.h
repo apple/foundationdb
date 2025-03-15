@@ -583,8 +583,18 @@ class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
 public:
 	BulkLoadTaskCollection(UID ddId) : ddId(ddId) { bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadEngineTask>()); }
 
-	// Return true if there exists a bulk load task
-	bool overlappingTask(KeyRange range) {
+	// Return true if there exists a bulk load job/task or the collection has not been initialized.
+	// This takes effect only when DDBulkLoad Mode is enabled.
+	bool onBulkLoading(KeyRange range) {
+		if (!initialized) {
+			return true;
+		}
+		if (bulkLoadJobRange.present()) {
+			KeyRange jobOverlap = bulkLoadJobRange.get() & range;
+			if (!jobOverlap.empty()) {
+				return true;
+			}
+		}
 		for (auto it : bulkLoadTaskMap.intersectingRanges(range)) {
 			if (!it->value().present()) {
 				continue;
@@ -592,6 +602,18 @@ public:
 			return true;
 		}
 		return false;
+	}
+
+	void setBulkLoadJobRange(const KeyRange& range) {
+		bulkLoadJobRange = range;
+		initialized = true;
+		return;
+	}
+
+	void removeBulkLoadJobRange() {
+		bulkLoadJobRange.reset();
+		initialized = true;
+		return;
 	}
 
 	// Return true if there exists a bulk load task since the given commit version
@@ -728,6 +750,8 @@ public:
 private:
 	KeyRangeMap<Optional<DDBulkLoadEngineTask>> bulkLoadTaskMap;
 	UID ddId;
+	Optional<KeyRange> bulkLoadJobRange;
+	bool initialized = false;
 };
 
 #ifndef __INTEL_COMPILER

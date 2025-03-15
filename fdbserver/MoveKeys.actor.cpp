@@ -3399,7 +3399,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		const UID shardId = newDataMoveId(deterministicRandom()->randomUInt64(),
 		                                  AssignEmptyRange(false),
-		                                  DataMoveType::PHYSICAL,
+		                                  DataMoveType::LOGICAL,
 		                                  DataMovementReason::SEED_SHARD_SERVER,
 		                                  UnassignShard(false));
 		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), shardId, UID());

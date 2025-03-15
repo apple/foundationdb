@@ -2004,12 +2004,14 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 	if (!job.present()) {
 		TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadJobManagerNoJobExist", self->ddId);
 		self->bulkLoadJobManager.reset(); // set to empty
+		self->bulkLoadTaskCollection->removeBulkLoadJobRange();
 		return Void();
 	}
 	state UID jobId = job.get().getJobId();
 	state KeyRange jobRange = job.get().getJobRange();
 	state std::string jobRoot = job.get().getJobRoot();
 	state BulkLoadTransportMethod jobTransportMethod = job.get().getTransportMethod();
+	self->bulkLoadTaskCollection->setBulkLoadJobRange(jobRange);
 
 	// Build up bulkLoadJobManager if a new job starts or the bulkLoadJobManager has not been set up.
 	if (!self->bulkLoadJobManager.present() || self->bulkLoadJobManager.get().jobState.getJobId() != jobId) {
@@ -2713,6 +2715,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 					actors.push_back(bulkLoadTaskCore(self, self->initialized.getFuture()));
 					actors.push_back(bulkLoadJobCore(self, self->initialized.getFuture()));
 				}
+			} else {
+				self->bulkLoadTaskCollection->removeBulkLoadJobRange();
 			}
 
 			if (bulkDumpIsEnabled(self->initData->bulkDumpMode)) {
