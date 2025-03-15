@@ -11,16 +11,16 @@ Overview
 ========
 In a FoundationDB (FDB) key-value cluster, every key-value pair is replicated across multiple storage servers. 
 The BulkDump tool is developed to dump all key-value pairs within the input range to files.
-Note that when the input range is large, the range splits into smaller ranges.
-Each subrange of data is dumped to a file at a version. All data within a file is at the same version. However, file versions can differ.
+Note that when the input range is large, the range is split into smaller subranges.
+Each subrange of data is dumped to a file at a version. All data within a file is at the same version. However, versions can differ across files.
 
 Input and output
 ----------------
 When a user wants to start a bulkdump job, the user provides the range to dump and the path root of where to dump the data.
 The range can be any subrange within the user key space (i.e. " " ~ "\\xff").
 Dumping the data of the system key space and special key space (i.e. "\\xff" ~ "\\xff\\xff\\xff") is not allowed.
-The path root can be either a blobstore url or a path of a file system.
-Given the input range, if the range is large, the range splits into smaller ranges.
+The path root can be either a `blobstore url <https://apple.github.io/foundationdb/backups.html#backup-urls>`_ or a path on the file system.
+Given the input range, if the range is large, the range is split into smaller subranges.
 Each subrange is dumped at a version to a folder. In particular, the folder is organized as following:
 
 1. (rootLocal)/(relativeFolder)/(dumpVersion)-manifest.txt (must have)
@@ -29,25 +29,25 @@ Each subrange is dumped at a version to a folder. In particular, the folder is o
 
 The (relativeFolder) is defined as (JobId)/(TaskId)/(BatchId). 
 The (dumpVersion) is the version of the data stored in the (dumpVersion)-data.sst file.
-At any time, a FDB cluster can have at most one bulkdump job. 
-A bulkdump job is partitioned into tasks by range and aligned to the shard boundary.
-When dumping the range of a task, the data is collected in batches. All key-value pairs of a batch are collected at the same version.
+At any time, a FDB cluster can have at most one bulkdump job running. 
+A bulkdump job is partitioned into tasks per subrange and subranges never span a shard boundary.
+When dumping the subrange of a task, the data is collected in batches. All key-value pairs of a batch are collected at the same version.
 Above all, (JobId) is the unique ID of a job. (TaskId) is the unique ID of a task. (BatchId) is the unique ID of a batch.
-All tasks's data files of the same job locates at the same Job folder named by the JobId.
+All tasks's data files of the same job are located at the same Job folder named by the JobId.
 A task can consist of multiple batches, where each batch has a distinct version. However, all the data within a single batch shares the same version.
 
 Each (relativeFolder) corresponds to exactly one subrange with exactly one manifest file. 
 The manifest file includes all necessary information for loading the data from the folder to a FDB cluster.
-The manifest file content includes following information:
+The manifest file content includes the following information:
 
 1. File paths (full path root)
 2. Key Range of the dumped data in the folder
-3. Version when the data of the range is collected
+3. Version of the data when the subrange was collected
 4. Checksum of the data
 5. Datasize of the data in bytes
 6. Bytes sampling setting (when a cluster loads the folder, if the setting mismatches, the loading cluster does bytes sampling by itself; Otherwise, the loading cluster directly uses the sample file of the folder).
 
-In the job folder, there is a global manifest file including all ranges and their corresponding manifest files.
+In the job folder, there is a global manifest file named 'job-manifest.txt' that lists all ranges and their corresponding manifest files.
 When loading a cluster, users can use this global manifest to rebuild the data.
 
 How to use?
@@ -60,7 +60,7 @@ Clearing a job is achieved by erasing the entire user range space of the bulkdum
 
 FDBCLI provides following interfaces to do the operations:
 
-1. Submit a job: bulkdump local|blobstore (BeginKey) (EndKey) (RootFolder) // Supply 'local' or 'blobstore' -- "local" indicates dump the data to a local folder. Will support dumping to a blob storage.
+1. Submit a job: bulkdump dump (BeginKey) (EndKey) (RootFolder) // ...where RootFolder is a local directory on the filesystem or a blobstore URL. 
 2. Clear a job: bulkdump clear (JobID)
 3. Enable the feature: bulkdump mode on \| off // "bulkdump mode" command prints the current value (on or off) of the mode.
 
@@ -78,17 +78,17 @@ Workflow
 --------
 - Users input a range by a transaction and this range is persisted to bulkdump metadata (with "\\xff/bulkDump/" prefix).
 - Bulkdump metadata is range-based.
-- DD observes this range to dump by reading from the metadata.
-- DD partitions the range into smaller ranges according to the shard boundary.
-- DD randomly chooses one storage server which owns the range as the agent to do the dump. DD holds outstanding promise with this SS. The task assigned to a SS is stateless.
+- DD observes this range to dump by reading from metadata.
+- DD partitions the range into smaller subranges according.
+- DD randomly chooses one storage server which owns the range as the agent to do the dump. DD holds an outstanding promise with this SS. The task assigned to a SS is stateless.
 - DD sends the range dump request to the storage server. DD spawns a dedicated actor waiting on the call. If any failure happens at SS side, DD will know this.
 - DD sends the range dump request within the max parallelism specified by the knob DD_BULKDUMP_PARALLELISM.
-- SS recieves the request and read the data from local storage. If the range has been moved away or splitted, the SS replies failure to the DD and DD will retry the remaining range later. If the range is there, SS read the data and upload the data to external storage. This PR only implements to dump the data to local disk. There will be a PR to dump the data to S3.
+- SS receives the request and reads the data from local storage. If the range has been moved away or split, the SS replies failure to the DD and DD will retry the remaining range later. If the range is there, SS reads the data and uploads the data to external storage.
 - When SS completes, the SS marks this range as completed in the metadata.
 
 Invariant
 ---------
-- At any time, FDB cluster accepts at most one bulkdump job. When user issuing a bulk dump job, the client will check if there is an existing bulk load job. If yes, reject the request.
+- At any time, FDB cluster accepts at most one bulkdump job. When user issues a bulk dump job, the client will check if there is an existing bulk load job. If yes, reject the request.
 - DD partitions the range into subranges according to the shard boundary. For a subrange, the data is guaranteed to put into the same folder --- same as task ID. 
 - Each data filename is the version indicating the version of the data read by the SS.
 - Each subrange always has one manifest file indicating the metadata information of the data, such as Range, Checksum (to be implemented later in a separate PR), and FilePath. 
