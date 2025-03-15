@@ -253,7 +253,7 @@ Version TagPartitionedLogSystem::popPseudoLocalityTag(Tag tag, Version upTo) {
 	for (const int8_t locality : pseudoLocalities) {
 		minVersion = std::min(minVersion, pseudoLocalityPopVersion[Tag(locality, tag.id)]);
 	}
-	// TraceEvent("TLogPopPseudoTag", dbgid).detail("Tag", tag.toString()).detail("Version", upTo).detail("PopVersion", minVersion);
+	// TraceEvent("TLogPopPseudoTag", dbgid).detail("Tag", tag).detail("Version", upTo).detail("PopVersion", minVersion);
 	return minVersion;
 }
 

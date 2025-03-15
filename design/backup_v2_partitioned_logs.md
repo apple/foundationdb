@@ -168,7 +168,7 @@ From an end-to-end perspective, the new backup system works in the following ste
 4. Periodically, backup workers upload mutations to the requested blob storage, and save the progress into the database;
 5. The backup is restorable when backup workers have saved versions that are larger than the complete snapshot’s end version, and the backup is stopped if a stop on restorable flag is set in the request.
 
-The new backup has four major components: 1) backup workers; 2) recruitment of backup workers; 3) extension of tag partitioned log system to support pseudo tags; 4) integration with existing `TaskBucket` based backup command interface; and 5) integration with the Performant Restore System.
+The new backup has the following major components: 1) backup workers; 2) recruitment of backup workers; 3) extension of tag partitioned log system to support pseudo tags; 4) integration with existing `TaskBucket` based backup command interface; and 5) integration with the existing `TaskBucket` based restore system to read partitioned mutation logs.
 
 ### Backup workers
 
