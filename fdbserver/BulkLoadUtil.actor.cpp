@@ -209,7 +209,7 @@ ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // in
 			retryCount++;
 		}
 	}
-	TraceEvent(SevInfo, "SSBulkLoadTaskSamplingComplete", logId)
+	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskSamplingComplete", logId)
 	    .detail("DataFileFullPath", dataFileFullPath)
 	    .detail("ByteSampleFileFullPath", byteSampleFileFullPath)
 	    .detail("Duration", now() - startTime)
@@ -311,7 +311,7 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 			} else {
 				UNREACHABLE();
 			}
-			TraceEvent(SevInfo, "SSBulkLoadTaskDownloadFileSet", logId)
+			TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskDownloadFileSet", logId)
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("FromRemoteFileSet", fromRemoteFileSet.toString())
@@ -360,7 +360,7 @@ ACTOR Future<Void> downloadManifestFile(BulkLoadTransportMethod transportMethod,
 			if (!fileExists(abspath(toLocalPath))) {
 				throw retry();
 			}
-			TraceEvent(SevInfo, "BulkLoadDownloadManifestFile", logId)
+			TraceEvent(bulkLoadVerboseEventSev(), "BulkLoadDownloadManifestFile", logId)
 			    .detail("FromRemotePath", fromRemotePath)
 			    .detail("ToLocalPath", toLocalPath)
 			    .detail("Duration", now() - startTime)

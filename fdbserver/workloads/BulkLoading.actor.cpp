@@ -109,13 +109,13 @@ struct BulkLoading : TestWorkload {
 			loop {
 				try {
 					wait(submitBulkLoadTask(cx, tasks[i]));
-					TraceEvent("BulkLoadingSubmitBulkLoadTask")
+					TraceEvent(bulkLoadVerboseEventSev(), "BulkLoadingSubmitBulkLoadTask")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .detail("BulkLoadTaskState", tasks[i].toString());
 					break;
 				} catch (Error& e) {
-					TraceEvent("BulkLoadingSubmitBulkLoadTaskError")
+					TraceEvent(SevWarn, "BulkLoadingSubmitBulkLoadTaskError")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .errorUnsuppressed(e)
@@ -133,13 +133,13 @@ struct BulkLoading : TestWorkload {
 			loop {
 				try {
 					wait(finalizeBulkLoadTask(cx, tasks[i].getRange(), tasks[i].getTaskId()));
-					TraceEvent("BulkLoadingAcknowledgeBulkLoadTask")
+					TraceEvent(bulkLoadVerboseEventSev(), "BulkLoadingAcknowledgeBulkLoadTask")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .detail("BulkLoadTaskState", tasks[i].toString());
 					break;
 				} catch (Error& e) {
-					TraceEvent("BulkLoadingAcknowledgeBulkLoadTaskError")
+					TraceEvent(SevWarn, "BulkLoadingAcknowledgeBulkLoadTaskError")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .errorUnsuppressed(e)

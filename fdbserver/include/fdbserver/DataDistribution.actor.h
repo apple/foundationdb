@@ -637,7 +637,7 @@ public:
 			}
 			if (it->value().get().completeAck.canBeSet()) {
 				it->value().get().completeAck.sendError(bulkload_task_outdated());
-				TraceEvent(SevInfo, "DDBulkLoadTaskCollectionPublishTaskOverwriteTask", ddId)
+				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskCollectionPublishTaskOverwriteTask", ddId)
 				    .setMaxEventLength(-1)
 				    .setMaxFieldLength(-1)
 				    .detail("NewRange", bulkLoadTaskState.getRange())

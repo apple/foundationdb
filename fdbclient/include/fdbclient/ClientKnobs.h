@@ -204,6 +204,9 @@ public:
 	int BULKLOAD_JOB_HISTORY_COUNT_MAX; // the max number of bulk load job history to keep. The oldest job history will
 	                                    // be removed when the count exceeds this value. Set to 0 to disable history.
 	                                    // Do not set the value to a large number, e.g. <= 10.
+	int BULKLOAD_VERBOSE_LEVEL; // Set to 1 to minimize the verbosity. Set to 5 to turn on all events for performance
+	                            // insights. Set to 10 to turn on all events.
+	int S3CLIENT_VERBOSE_LEVEL; // Similar to BULKLOAD_VERBOSE_LEVEL
 
 	// Configuration
 	int32_t DEFAULT_AUTO_COMMIT_PROXIES;

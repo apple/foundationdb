@@ -197,7 +197,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	state int64_t size = fileSize(filepath);
 
 	try {
-		TraceEvent(SevInfo, "S3ClientCopyUpFileStart")
+		TraceEvent(s3VerboseEventSev(), "S3ClientCopyUpFileStart")
 		    .detail("Filepath", filepath)
 		    .detail("Bucket", bucket)
 		    .detail("ObjectName", objectName)
@@ -283,7 +283,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 		tags[S3_CHECKSUM_TAG_NAME] = checksum;
 		wait(endpoint->putObjectTags(bucket, objectName, tags));
 
-		TraceEvent(SevInfo, "S3ClientCopyUpFileEnd")
+		TraceEvent(s3PerfEventSev(), "S3ClientCopyUpFileEnd")
 		    .detail("Bucket", bucket)
 		    .detail("ObjectName", objectName)
 		    .detail("FileSize", size)
@@ -331,7 +331,7 @@ ACTOR Future<Void> copyUpDirectory(std::string dirpath, std::string s3url) {
 	state std::string bucket = parameters["bucket"];
 	state std::vector<std::string> files;
 	platform::findFilesRecursively(dirpath, files);
-	TraceEvent("S3ClientUploadDirStart")
+	TraceEvent(s3VerboseEventSev(), "S3ClientUploadDirStart")
 	    .detail("Filecount", files.size())
 	    .detail("Bucket", bucket)
 	    .detail("Resource", resource);
@@ -340,7 +340,7 @@ ACTOR Future<Void> copyUpDirectory(std::string dirpath, std::string s3url) {
 		std::string s3path = resource + "/" + file.substr(dirpath.size() + 1);
 		wait(copyUpFile(endpoint, bucket, s3path, filepath));
 	}
-	TraceEvent("S3ClientUploadDirEnd").detail("Bucket", bucket).detail("Resource", resource);
+	TraceEvent(s3VerboseEventSev(), "S3ClientUploadDirEnd").detail("Bucket", bucket).detail("Resource", resource);
 	return Void();
 }
 
@@ -351,7 +351,7 @@ ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
 	S3BlobStoreEndpoint::ParametersT parameters;
 	state Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
 	state std::string bucket = parameters["bucket"];
-	TraceEvent("S3ClientCopyUpBulkDumpFileSetStart")
+	TraceEvent(s3VerboseEventSev(), "S3ClientCopyUpBulkDumpFileSetStart")
 	    .detail("Bucket", bucket)
 	    .detail("SourceFileSet", sourceFileSet.toString())
 	    .detail("DestinationFileSet", destinationFileSet.toString());
@@ -375,7 +375,7 @@ ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
 		auto destinationByteSamplePath = joinPath(batch_dir, destinationFileSet.getByteSampleFileName());
 		wait(copyUpFile(endpoint, bucket, destinationByteSamplePath, sourceFileSet.getBytesSampleFileFullPath()));
 	}
-	TraceEvent("S3ClientCopyUpBulkDumpFileSetEnd")
+	TraceEvent(s3VerboseEventSev(), "S3ClientCopyUpBulkDumpFileSetEnd")
 	    .detail("BatchDir", batch_dir)
 	    .detail("NumDeleted", pNumDeleted)
 	    .detail("BytesDeleted", pBytesDeleted);
@@ -469,7 +469,7 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 	state std::string expectedChecksum;
 
 	try {
-		TraceEvent(SevInfo, "S3ClientCopyDownFileStart")
+		TraceEvent(s3VerboseEventSev(), "S3ClientCopyDownFileStart")
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
 		    .detail("FilePath", filepath);
@@ -549,7 +549,7 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 		// Close file properly
 		file = Reference<IAsyncFile>();
 
-		TraceEvent(SevInfo, "S3ClientCopyDownFileEnd")
+		TraceEvent(s3VerboseEventSev(), "S3ClientCopyDownFileEnd")
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName)
 		    .detail("FileSize", fileSize)
@@ -597,7 +597,7 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 	state std::string bucket = parameters["bucket"];
 	S3BlobStoreEndpoint::ListResult items = wait(endpoint->listObjects(bucket, resource));
 	state std::vector<S3BlobStoreEndpoint::ObjectInfo> objects = items.objects;
-	TraceEvent("S3ClientDownDirectoryStart")
+	TraceEvent(s3VerboseEventSev(), "S3ClientDownDirectoryStart")
 	    .detail("Filecount", objects.size())
 	    .detail("Bucket", bucket)
 	    .detail("Resource", resource);
@@ -606,7 +606,7 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 		std::string s3path = object.name;
 		wait(copyDownFile(endpoint, bucket, s3path, filepath));
 	}
-	TraceEvent("S3ClientDownDirectoryEnd").detail("Bucket", bucket).detail("Resource", resource);
+	TraceEvent(s3VerboseEventSev(), "S3ClientDownDirectoryEnd").detail("Bucket", bucket).detail("Resource", resource);
 	return Void();
 }
 
