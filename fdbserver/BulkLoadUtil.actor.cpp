@@ -339,6 +339,26 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 	}
 }
 
+ACTOR Future<Void> bulkLoadDownloadTaskFileSets(BulkLoadTransportMethod transportMethod,
+                                                std::shared_ptr<BulkLoadFileSetKeyMap> fromRemoteFileSets,
+                                                std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets,
+                                                std::string toLocalRoot,
+                                                UID logId) {
+	state BulkLoadFileSetKeyMap::iterator iter = fromRemoteFileSets->begin();
+	state KeyRange keys;
+	for (; iter != fromRemoteFileSets->end(); iter++) {
+		keys = iter->first;
+		if (!iter->second.hasDataFile()) {
+			// Ignore the remote fileSet if it does not have data file
+			continue;
+		}
+		BulkLoadFileSet localFileSet =
+		    wait(bulkLoadDownloadTaskFileSet(transportMethod, iter->second, toLocalRoot, logId));
+		localFileSets->push_back(std::make_pair(keys, localFileSet));
+	}
+	return Void();
+}
+
 ACTOR Future<Void> downloadManifestFile(BulkLoadTransportMethod transportMethod,
                                         std::string fromRemotePath,
                                         std::string toLocalPath,
@@ -501,18 +521,26 @@ ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 	return Void();
 }
 
-ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobFileManifestEntry manifestEntry,
-                                                                    std::string manifestLocalTempFolder,
-                                                                    BulkLoadTransportMethod transportMethod,
-                                                                    std::string jobRoot,
-                                                                    UID logId) {
-	state std::string remoteManifestFilePath = appendToPath(jobRoot, manifestEntry.getManifestRelativePath());
-	state std::string localManifestFilePath =
-	    joinPath(manifestLocalTempFolder,
-	             deterministicRandom()->randomUniqueID().toString() + "-" + basename(getPath(remoteManifestFilePath)));
-	wait(downloadManifestFile(transportMethod, remoteManifestFilePath, localManifestFilePath, logId));
-	state std::shared_ptr<std::string> manifestRawString = std::make_shared<std::string>();
-	wait(readBulkFileBytes(abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, manifestRawString));
-	ASSERT(!manifestRawString->empty());
-	return BulkLoadManifest(*manifestRawString);
+ACTOR Future<BulkLoadManifestSet> getBulkLoadManifestMetadataFromEntry(
+    std::vector<BulkLoadJobFileManifestEntry> manifestEntries,
+    std::string manifestLocalTempFolder,
+    BulkLoadTransportMethod transportMethod,
+    std::string jobRoot,
+    UID logId) {
+	state BulkLoadManifestSet manifests(SERVER_KNOBS->MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK);
+	state int i = 0;
+	for (; i < manifestEntries.size(); i++) {
+		state std::string remoteManifestFilePath = appendToPath(jobRoot, manifestEntries[i].getManifestRelativePath());
+		state std::string localManifestFilePath = joinPath(manifestLocalTempFolder,
+		                                                   deterministicRandom()->randomUniqueID().toString() + "-" +
+		                                                       basename(getPath(remoteManifestFilePath)));
+		wait(downloadManifestFile(transportMethod, remoteManifestFilePath, localManifestFilePath, logId));
+		state std::shared_ptr<std::string> manifestRawString = std::make_shared<std::string>();
+		wait(readBulkFileBytes(
+		    abspath(localManifestFilePath), SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, manifestRawString));
+		ASSERT(!manifestRawString->empty());
+		BulkLoadManifest manifest(*manifestRawString);
+		ASSERT(manifests.addManifest(manifest));
+	}
+	return manifests;
 }

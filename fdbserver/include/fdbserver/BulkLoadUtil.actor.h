@@ -56,6 +56,12 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
                                                           std::string toLocalRoot,
                                                           UID logId);
 
+ACTOR Future<Void> bulkLoadDownloadTaskFileSets(BulkLoadTransportMethod transportMethod,
+                                                std::shared_ptr<BulkLoadFileSetKeyMap> fromRemoteFileSets,
+                                                std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets,
+                                                std::string toLocalRoot,
+                                                UID logId);
+
 ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath,
                                              std::string byteSampleFileFullPath,
                                              UID logId);
@@ -74,11 +80,12 @@ ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
     std::shared_ptr<BulkLoadManifestFileMap> manifestMap);
 
 // Get BulkLoad manifest metadata from the entry in the job manifest file
-ACTOR Future<BulkLoadManifest> getBulkLoadManifestMetadataFromEntry(BulkLoadJobFileManifestEntry manifestEntry,
-                                                                    std::string manifestLocalTempFolder,
-                                                                    BulkLoadTransportMethod transportMethod,
-                                                                    std::string jobRoot,
-                                                                    UID logId);
+ACTOR Future<BulkLoadManifestSet> getBulkLoadManifestMetadataFromEntry(
+    std::vector<BulkLoadJobFileManifestEntry> manifestEntries,
+    std::string manifestLocalTempFolder,
+    BulkLoadTransportMethod transportMethod,
+    std::string jobRoot,
+    UID logId);
 
 #include "flow/unactorcompiler.h"
 #endif

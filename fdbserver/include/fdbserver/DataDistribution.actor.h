@@ -585,7 +585,7 @@ public:
 
 	// Return true if there exists a bulk load job/task or the collection has not been initialized.
 	// This takes effect only when DDBulkLoad Mode is enabled.
-	bool onBulkLoading(KeyRange range) {
+	bool bulkLoading(const KeyRange& range) {
 		if (!initialized) {
 			return true;
 		}

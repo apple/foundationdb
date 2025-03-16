@@ -179,7 +179,9 @@ BulkLoadTaskState createBulkLoadTask(const UID& jobId,
                                      const BulkLoadTransportMethod& transportMethod) {
 	BulkLoadManifest manifest(
 	    fileSet, range.begin, range.end, snapshotVersion, bytes, keyCount, byteSampleSetting, type, transportMethod);
-	return BulkLoadTaskState(jobId, manifest);
+	BulkLoadManifestSet manifests(1);
+	manifests.addManifest(manifest);
+	return BulkLoadTaskState(jobId, manifests);
 }
 
 BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
