@@ -996,7 +996,7 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 	TraceEvent e(issueDataMoveForCancel ? SevWarnAlways : bulkLoadVerboseEventSev(),
 	             "DDBulkLoadEngineCreateShardToBulkLoad",
 	             self->distributorId);
-	e.detail("TaskId", bulkLoadTaskState.getTaskId());
+	e.detail("TaskID", bulkLoadTaskState.getTaskId());
 	e.detail("BulkLoadRange", keys);
 	// Create shards at the two ends and do not data move for those shards
 	// Create a new shard and trigger data move for bulk loading on the new shard

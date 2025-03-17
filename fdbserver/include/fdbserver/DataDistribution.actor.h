@@ -660,12 +660,14 @@ public:
 			if (it->value().get().completeAck.canBeSet()) {
 				it->value().get().completeAck.sendError(bulkload_task_outdated());
 				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskCollectionPublishTaskOverwriteTask", ddId)
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("NewRange", bulkLoadTaskState.getRange())
-				    .detail("NewTask", task.toString())
+				    .detail("NewTaskRange", bulkLoadTaskState.getRange())
+				    .detail("NewJobId", task.coreState.getJobId().toString())
+				    .detail("NewTaskId", task.coreState.getTaskId().toString())
+				    .detail("NewCommitVersion", task.commitVersion)
 				    .detail("OldTaskRange", it->range())
-				    .detail("OldTask", it->value().get().toString());
+				    .detail("OldJobId", it->value().get().coreState.getJobId().toString())
+				    .detail("OldTaskId", it->value().get().coreState.getTaskId().toString())
+				    .detail("OldCommitVersion", it->value().get().commitVersion);
 			}
 		}
 		bulkLoadTaskMap.insert(bulkLoadTaskState.getRange(), task);

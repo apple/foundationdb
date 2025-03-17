@@ -109,9 +109,7 @@ struct BulkLoading : TestWorkload {
 			loop {
 				try {
 					wait(submitBulkLoadTask(cx, tasks[i]));
-					TraceEvent(bulkLoadVerboseEventSev(), "BulkLoadingSubmitBulkLoadTask")
-					    .setMaxEventLength(-1)
-					    .setMaxFieldLength(-1)
+					TraceEvent(SevDebug, "BulkLoadingSubmitBulkLoadTask")
 					    .detail("BulkLoadTaskState", tasks[i].toString());
 					break;
 				} catch (Error& e) {
@@ -133,7 +131,7 @@ struct BulkLoading : TestWorkload {
 			loop {
 				try {
 					wait(finalizeBulkLoadTask(cx, tasks[i].getRange(), tasks[i].getTaskId()));
-					TraceEvent(bulkLoadVerboseEventSev(), "BulkLoadingAcknowledgeBulkLoadTask")
+					TraceEvent(SevDebug, "BulkLoadingAcknowledgeBulkLoadTask")
 					    .setMaxEventLength(-1)
 					    .setMaxFieldLength(-1)
 					    .detail("BulkLoadTaskState", tasks[i].toString());

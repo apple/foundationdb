@@ -312,8 +312,6 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 				UNREACHABLE();
 			}
 			TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskDownloadFileSet", logId)
-			    .setMaxEventLength(-1)
-			    .setMaxFieldLength(-1)
 			    .detail("FromRemoteFileSet", fromRemoteFileSet.toString())
 			    .detail("ToLocalRoot", toLocalRoot)
 			    .detail("Duration", now() - startTime)
@@ -326,8 +324,6 @@ ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMetho
 				throw e;
 			}
 			TraceEvent(SevWarn, "SSBulkLoadTaskDownloadFileSetError", logId)
-			    .setMaxEventLength(-1)
-			    .setMaxFieldLength(-1)
 			    .errorUnsuppressed(e)
 			    .detail("FromRemoteFileSet", fromRemoteFileSet.toString())
 			    .detail("ToLocalRoot", toLocalRoot)

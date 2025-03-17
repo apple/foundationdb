@@ -1897,10 +1897,9 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
 						TraceEvent(
 						    bulkLoadVerboseEventSev(), "DDBulkLoadTaskSetRunningStateTransaction", relocationIntervalId)
-						    .setMaxEventLength(-1)
-						    .setMaxFieldLength(-1)
 						    .detail("DataMoveID", dataMoveId)
-						    .detail("BulkLoadTaskState", newBulkLoadTaskState.toString());
+						    .detail("JobID", newBulkLoadTaskState.getJobId().toString())
+						    .detail("TaskID", newBulkLoadTaskState.getTaskId().toString());
 						dataMove.bulkLoadTaskState = newBulkLoadTaskState;
 					}
 					dataMove.setPhase(DataMoveMetaData::Running);
@@ -1927,10 +1926,10 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (currentKeys.end == keys.end && bulkLoadTaskState.present()) {
 					Version commitVersion = tr.getCommittedVersion();
 					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistRunningState", relocationIntervalId)
-					    .setMaxEventLength(-1)
-					    .setMaxFieldLength(-1)
-					    .detail("DataMoveID", dataMoveId)
-					    .detail("BulkLoadTaskState", bulkLoadTaskState.get().toString())
+					    .detail("JobID", bulkLoadTaskState.get().getJobId().toString())
+					    .detail("DataMoveID", dataMoveId.toString())
+					    .detail("TaskID", bulkLoadTaskState.get().getTaskId().toString())
+					    .detail("TaskRange", bulkLoadTaskState.get().getRange().toString())
 					    .detail("CommitVersion", commitVersion);
 				}
 
@@ -2349,10 +2348,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							                 bulkLoadTaskStateValue(newBulkLoadTaskState)));
 							TraceEvent(
 							    bulkLoadVerboseEventSev(), "DDBulkLoadTaskSetCompleteTransaction", relocationIntervalId)
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
 							    .detail("DataMoveID", dataMoveId)
-							    .detail("BulkLoadTaskState", newBulkLoadTaskState.toString());
+							    .detail("JobID", newBulkLoadTaskState.getJobId().toString())
+							    .detail("TaskID", newBulkLoadTaskState.getTaskId().toString());
 							dataMove.bulkLoadTaskState = newBulkLoadTaskState;
 						}
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
@@ -2376,10 +2374,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						Version commitVersion = tr.getCommittedVersion();
 						TraceEvent(
 						    bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistCompleteState", relocationIntervalId)
-						    .setMaxEventLength(-1)
-						    .setMaxFieldLength(-1)
-						    .detail("DataMoveID", dataMoveId)
-						    .detail("BulkLoadTaskState", bulkLoadTaskState.get().toString())
+						    .detail("JobID", bulkLoadTaskState.get().getJobId().toString())
+						    .detail("DataMoveID", dataMoveId.toString())
+						    .detail("TaskID", bulkLoadTaskState.get().getTaskId().toString())
+						    .detail("TaskRange", bulkLoadTaskState.get().getRange().toString())
 						    .detail("CommitVersion", commitVersion);
 					}
 

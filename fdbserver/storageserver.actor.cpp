@@ -8748,9 +8748,8 @@ ACTOR Future<Void> bulkLoadFetchKeyValueFileToLoad(StorageServer* data,
 	localFileSets->clear();
 	ASSERT(bulkLoadTaskState.getLoadType() == BulkLoadType::SST);
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchSSTFile", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("Dir", abspath(dir));
 	state double fetchStartTime = now();
 	// Download data file from fromRemoteFileSet to toLocalFileSet
@@ -8774,9 +8773,8 @@ ACTOR Future<Void> bulkLoadFetchKeyValueFileToLoad(StorageServer* data,
 		}
 	}
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchSSTFileFetched", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("Dir", abspath(dir))
 	    .detail("LocalFileSetMap", localFileSetString)
 	    .detail("Duration", duration)
@@ -9633,9 +9631,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
                                                 BulkLoadTaskState bulkLoadTaskState) {
 	ASSERT(bulkLoadTaskState.getLoadType() == BulkLoadType::SST);
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardFile", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("LocalRoot", abspath(localRoot));
 
@@ -9662,9 +9659,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	state BulkLoadFileSet toLocalFileSet = wait(bulkLoadDownloadTaskFileSet(
 	    bulkLoadTaskState.getTransportMethod(), fromRemoteFileSet, localRoot, data->thisServerID));
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardSSTFileFetched", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("RemoteFileSet", fromRemoteFileSet.toString())
 	    .detail("LocalFileSet", toLocalFileSet.toString());
@@ -9673,9 +9669,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	if (!toLocalFileSet.hasByteSampleFile()) {
 		TraceEvent(
 		    bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardSSTFileValidByteSampleNotFound", data->thisServerID)
-		    .setMaxEventLength(-1)
-		    .setMaxFieldLength(-1)
-		    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())
+		    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+		    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 		    .detail("LocalFileSet", toLocalFileSet.toString());
 		state std::string byteSampleFileName =
 		    generateBulkLoadBytesSampleFileNameFromDataFileName(toLocalFileSet.getDataFileName());
@@ -9687,9 +9682,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 		}
 	}
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardByteSampled", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("RemoteFileSet", fromRemoteFileSet.toString())
 	    .detail("LocalFileSet", toLocalFileSet.toString());
@@ -9728,9 +9722,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	const double duration = now() - fetchStartTime;
 	const int64_t totalBytes = getTotalFetchedBytes(moveInShard->meta->checkpoints);
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardSSTFileBuildMetadata", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("LocalRoot", abspath(localRoot))
 	    .detail("LocalFileSet", toLocalFileSet.toString())
