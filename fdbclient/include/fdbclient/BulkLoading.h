@@ -30,7 +30,6 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
-#include "fdbrpc/fdbrpc.h"
 
 // For all trace events for bulkload/dump operations
 inline Severity bulkLoadVerboseEventSev() {
@@ -199,16 +198,13 @@ public:
 
 	bool isValid() const {
 		if (rootPath.empty()) {
-			ASSERT(false);
 			return false;
 		}
 		if (!hasManifestFile()) {
-			ASSERT(false);
 			return false;
 		}
 		if (!hasDataFile() && hasByteSampleFile()) {
 			// If bytes sample file exists, the data file must exist.
-			ASSERT(false);
 			return false;
 		}
 		return true;
@@ -319,6 +315,8 @@ private:
 	std::string byteSampleFileName = "";
 	BulkLoadChecksum checksum;
 };
+
+using BulkLoadFileSetKeyMap = std::vector<std::pair<KeyRange, BulkLoadFileSet>>;
 
 // Define the metadata of bulkload manifest file.
 // The manifest file stores the ground true of metadata of dumped data file, such as range and version.
@@ -541,6 +539,129 @@ enum class BulkLoadPhase : uint8_t {
 	Error = 6, // Updated by DD when this task has unretriable error
 };
 
+struct BulkLoadManifestSet {
+public:
+	constexpr static FileIdentifier file_identifier = 1384493;
+
+	BulkLoadManifestSet() = default;
+
+	BulkLoadManifestSet(int inputMaxCount) { maxCount = inputMaxCount; }
+
+	bool isValid() const {
+		if (maxCount == 0) {
+			return false;
+		}
+		if (manifests.empty()) {
+			return false;
+		}
+		if (manifests.size() > maxCount) {
+			return false;
+		}
+		if (!minBeginKey.present()) {
+			return false;
+		}
+		if (!maxEndKey.present()) {
+			return false;
+		}
+		for (const auto& manifest : manifests) {
+			if (!manifest.isValid()) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// Return true if succeed
+	bool addManifest(const BulkLoadManifest& manifest) {
+		if (manifests.size() > maxCount) {
+			return false;
+		}
+		manifests.push_back(manifest);
+		if (transportMethod == BulkLoadTransportMethod::Invalid) {
+			transportMethod = manifest.getTransportMethod();
+		} else {
+			ASSERT(transportMethod == manifest.getTransportMethod());
+		}
+		if (loadType == BulkLoadType::Invalid) {
+			loadType = manifest.getLoadType();
+		} else {
+			ASSERT(loadType == manifest.getLoadType());
+		}
+		if (!byteSampleSetting.isValid()) {
+			byteSampleSetting = manifest.getByteSampleSetting();
+		} else {
+			ASSERT(byteSampleSetting == manifest.getByteSampleSetting());
+		}
+		if (!minBeginKey.present() || minBeginKey.get() > manifest.getBeginKey()) {
+			minBeginKey = manifest.getBeginKey();
+		}
+		if (!maxEndKey.present() || maxEndKey.get() < manifest.getEndKey()) {
+			maxEndKey = manifest.getEndKey();
+		}
+		return true;
+	}
+
+	bool isFull() const { return manifests.size() >= maxCount; }
+
+	bool hasEmptyData() const {
+		for (const auto& manifest : manifests) {
+			if (!manifest.hasEmptyData()) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	int64_t getTotalBytes() const {
+		int64_t res = 0;
+		for (const auto& manifest : manifests) {
+			res = res + manifest.getTotalBytes();
+		}
+		return res;
+	}
+
+	const std::vector<BulkLoadManifest>& getManifests() const { return manifests; }
+
+	BulkLoadTransportMethod getTransportMethod() const { return transportMethod; }
+
+	BulkLoadByteSampleSetting getByteSampleSetting() const { return byteSampleSetting; }
+
+	BulkLoadType getLoadType() const { return loadType; }
+
+	size_t size() const { return manifests.size(); }
+
+	bool empty() const { return manifests.empty(); }
+
+	Key getMinBeginKey() const {
+		ASSERT(minBeginKey.present());
+		return minBeginKey.get();
+	}
+
+	Key getMaxEndKey() const {
+		ASSERT(maxEndKey.present());
+		return maxEndKey.get();
+	}
+
+	std::string toString() const { return describe(manifests); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, maxCount, transportMethod, loadType, byteSampleSetting, minBeginKey, maxEndKey, manifests);
+	}
+
+private:
+	int maxCount = 0;
+
+	BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
+	BulkLoadType loadType = BulkLoadType::Invalid;
+	BulkLoadByteSampleSetting byteSampleSetting;
+
+	Optional<Key> minBeginKey;
+	Optional<Key> maxEndKey;
+
+	std::vector<BulkLoadManifest> manifests;
+};
+
 struct BulkLoadTaskState {
 public:
 	constexpr static FileIdentifier file_identifier = 1384499;
@@ -548,23 +669,23 @@ public:
 	BulkLoadTaskState() = default;
 
 	// For submitting a task by a job
-	BulkLoadTaskState(const UID& jobId, const BulkLoadManifest& manifest)
-	  : jobId(jobId), taskId(deterministicRandom()->randomUniqueID()), manifest(manifest) {
-		if (manifest.hasEmptyData()) {
+	BulkLoadTaskState(const UID& jobId, const BulkLoadManifestSet& manifests)
+	  : jobId(jobId), taskId(deterministicRandom()->randomUniqueID()), manifests(manifests) {
+		ASSERT(!manifests.empty());
+		if (manifests.hasEmptyData()) {
 			phase = BulkLoadPhase::Complete; // If no data to load, the task is complete.
 		} else {
 			phase = BulkLoadPhase::Submitted;
 		}
+		// We define the task range is the range of the min begin key and the max end key among all manifests
+		taskRange = Standalone(KeyRangeRef(manifests.getMinBeginKey(), manifests.getMaxEndKey()));
 	}
 
-	bool operator==(const BulkLoadTaskState& rhs) const {
-		return jobId == rhs.jobId && taskId == rhs.taskId && getRange() == rhs.getRange() &&
-		       getDataFileFullPath() == rhs.getDataFileFullPath();
-	}
+	bool operator==(const BulkLoadTaskState& rhs) const { return jobId == rhs.jobId && taskId == rhs.taskId; }
 
 	std::string toString() const {
 		std::string res = "BulkLoadTaskState: [JobId]: " + jobId.toString() + ", [TaskId]: " + taskId.toString() +
-		                  ", [Manifest]: " + manifest.toString();
+		                  ", [Manifests]: " + manifests.toString();
 		if (dataMoveId.present()) {
 			res = res + ", [DataMoveId]: " + dataMoveId.get().toString();
 		}
@@ -572,33 +693,23 @@ public:
 		return res;
 	}
 
-	KeyRange getRange() const { return manifest.getRange(); }
+	KeyRange getRange() const { return taskRange; }
 
 	UID getTaskId() const { return taskId; }
 
 	UID getJobId() const { return jobId; }
 
-	bool hasEmptyData() const { return manifest.hasEmptyData(); }
+	bool hasEmptyData() const { return manifests.hasEmptyData(); }
 
-	std::string getRootPath() const { return manifest.getRootPath(); }
+	BulkLoadTransportMethod getTransportMethod() const { return manifests.getTransportMethod(); }
 
-	BulkLoadTransportMethod getTransportMethod() const { return manifest.getTransportMethod(); }
+	int64_t getTotalBytes() const { return manifests.getTotalBytes(); }
 
-	std::string getDataFileFullPath() const { return manifest.getDataFileFullPath(); }
+	const std::vector<BulkLoadManifest>& getManifests() const { return manifests.getManifests(); }
 
-	std::string getBytesSampleFileFullPath() const { return manifest.getBytesSampleFileFullPath(); }
+	BulkLoadByteSampleSetting getByteSampleSetting() const { return manifests.getByteSampleSetting(); }
 
-	std::string getFolder() const { return manifest.getFolder(); }
-
-	int64_t getTotalBytes() const { return manifest.getTotalBytes(); }
-
-	int64_t getKeyCount() const { return manifest.getKeyCount(); }
-
-	BulkLoadFileSet getFileSet() const { return manifest.getFileSet(); }
-
-	BulkLoadByteSampleSetting getByteSampleSetting() const { return manifest.getByteSampleSetting(); }
-
-	BulkLoadType getLoadType() const { return manifest.getLoadType(); }
+	BulkLoadType getLoadType() const { return manifests.getLoadType(); }
 
 	void setCancelledDataMovePriority(int priority) { cancelledDataMovePriority = priority; }
 
@@ -633,7 +744,7 @@ public:
 		if (!taskId.isValid()) {
 			return false;
 		}
-		if (checkManifest && !manifest.isValid()) {
+		if (checkManifest && !manifests.isValid()) {
 			return false;
 		}
 		return true;
@@ -645,13 +756,14 @@ public:
 		           jobId,
 		           taskId,
 		           dataMoveId,
-		           manifest,
+		           manifests,
 		           phase,
 		           submitTime,
 		           triggerTime,
 		           startTime,
 		           completeTime,
 		           restartCount,
+		           taskRange,
 		           cancelledDataMovePriority);
 	}
 
@@ -670,7 +782,8 @@ private:
 	// Set by DD
 	Optional<UID> dataMoveId;
 	// Set by DD or users
-	BulkLoadManifest manifest;
+	BulkLoadManifestSet manifests;
+	KeyRange taskRange;
 	Optional<int> cancelledDataMovePriority; // Set when the task is failed for unretrievable error.
 	// In this case, we want to re-issue data move on the task range if the data move is team unhealthy related.
 };

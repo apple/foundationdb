@@ -411,6 +411,7 @@ public:
 	                                               // manifest file
 	int SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST; // the max number of batch count per bulkdump request to a SS
 	int BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE; // the block size when performing async read/write for bulkload
+	int MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK; // the max number of manifest that a bulkload task can process
 	bool CC_ENFORCE_USE_UNFIT_DD_IN_SIM; // Set for CC to enforce to use an unfit DD in the simulation. This knob takes
 	                                     // effect only in the simulation.
 	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the

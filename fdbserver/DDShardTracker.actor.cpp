@@ -952,7 +952,7 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
-	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->onBulkLoading(nextRange)) {
+	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->bulkLoading(nextRange)) {
 		TraceEvent(SevWarn, "ShardCanForwardMergeButUnderBulkLoading", self->distributorId)
 		    .suppressFor(5.0)
 		    .detail("ShardMerging", keys)
@@ -972,7 +972,7 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 		return false;
 	}
 
-	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->onBulkLoading(prevRange)) {
+	if (self->bulkLoadEnabled && self->bulkLoadTaskCollection->bulkLoading(prevRange)) {
 		TraceEvent(SevWarn, "ShardCanBackwardMergeButUnderBulkLoading", self->distributorId)
 		    .suppressFor(5.0)
 		    .detail("ShardMerging", keys)
@@ -996,7 +996,7 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 	TraceEvent e(issueDataMoveForCancel ? SevWarnAlways : bulkLoadVerboseEventSev(),
 	             "DDBulkLoadEngineCreateShardToBulkLoad",
 	             self->distributorId);
-	e.detail("TaskId", bulkLoadTaskState.getTaskId());
+	e.detail("TaskID", bulkLoadTaskState.getTaskId());
 	e.detail("BulkLoadRange", keys);
 	// Create shards at the two ends and do not data move for those shards
 	// Create a new shard and trigger data move for bulk loading on the new shard
@@ -1333,7 +1333,7 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 
 	try {
 		loop {
-			while (self()->bulkLoadEnabled && self()->bulkLoadTaskCollection->onBulkLoading(keys)) {
+			while (self()->bulkLoadEnabled && self()->bulkLoadTaskCollection->bulkLoading(keys)) {
 				TraceEvent(SevWarn, "ShardBoundaryChangeDisabledForBulkLoad", self()->distributorId)
 				    .suppressFor(60.0)
 				    .detail("KeyRange", keys);

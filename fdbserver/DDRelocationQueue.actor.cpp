@@ -1054,12 +1054,11 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		bool doBulkLoading = runPendingBulkLoadTaskWithRelocateData(this, rd);
 		if (doBulkLoading) {
 			TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskLaunchingDataMove", this->distributorId)
-			    .setMaxEventLength(-1)
-			    .setMaxFieldLength(-1)
 			    .detail("NewDataMoveId", rd.dataMoveId)
 			    .detail("NewDataMovePriority", rd.priority)
 			    .detail("NewDataMoveRange", rd.keys)
-			    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString());
+			    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId().toString())
+			    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId().toString());
 		}
 
 		// Check if there is an inflight shard that is overlapped with the queued relocateShard (rd)
@@ -1524,10 +1523,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						                         rd.bulkLoadTask.get().coreState.getTaskId(),
 						                         { BulkLoadPhase::Triggered, BulkLoadPhase::Running }));
 						TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskDataMoveLaunched", self->distributorId)
-						    .setMaxEventLength(-1)
-						    .setMaxFieldLength(-1)
-						    .detail("BulkLoadTask", rd.bulkLoadTask.get().coreState.toString())
-						    .detail("ExistState", currentBulkLoadTaskState.toString());
+						    .detail("TrackID", rd.randomId)
+						    .detail("DataMovePriority", rd.priority)
+						    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId().toString())
+						    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId().toString())
+						    .detail("TaskRange", rd.bulkLoadTask.get().coreState.getRange().toString())
+						    .detail("ExistingJobID", currentBulkLoadTaskState.getJobId().toString())
+						    .detail("ExistingTaskID", currentBulkLoadTaskState.getTaskId().toString())
+						    .detail("ExistingTaskRange", currentBulkLoadTaskState.getRange().toString());
 						break;
 					} catch (Error& e) {
 						if (e.code() == error_code_bulkload_task_outdated) {
@@ -1545,9 +1548,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							// TODO(BulkLoad): reset rd.bulkLoadTask here for the risk of overloading the source
 							// servers.
 							TraceEvent(SevWarn, "DDBulkLoadTaskFallbackToNormalDataMove", self->distributorId)
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
-							    .detail("BulkLoadTask", rd.bulkLoadTask.get().coreState.toString());
+							    .detail("TrackID", rd.randomId)
+							    .detail("DataMovePriority", rd.priority)
+							    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId().toString())
+							    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId().toString())
+							    .detail("TaskRange", rd.bulkLoadTask.get().coreState.getRange().toString());
 							break;
 						}
 						wait(tr.onError(e));
@@ -1561,7 +1566,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    .detail("TrackID", rd.randomId)
 				    .detail("Range", rd.keys)
 				    .detail("Priority", rd.priority)
-				    .detail("Reason", rd.reason.toString())
 				    .detail("DataMoveType", dataMoveType)
 				    .detail("DoBulkLoading", doBulkLoading)
 				    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
@@ -1654,8 +1658,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 						if (doBulkLoading) {
 							TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskSelectDestTeam", self->distributorId)
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
 							    .detail("Context", "Restore")
 							    .detail("SrcIds", describe(rd.src))
 							    .detail("DestIds", bestTeam.first.get()->getServerIDs())
@@ -1735,7 +1737,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							           "DDBulkLoadTaskRelocatorBestTeamReceived",
 							           self->distributorId)
 							    .detail("DataMoveID", rd.dataMoveId)
-							    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString())
+							    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId().toString())
+							    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId().toString())
 							    .detail("BestTeamReady", bestTeamReady);
 						}
 						if (tciIndex > 0 && !bestTeamReady) {
@@ -1841,7 +1844,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								    .detail("SrcIds", describe(rd.src))
 								    .detail("DestIds", bestTeam.first.get()->getServerIDs())
 								    .detail("DestTeam", bestTeam.first.get()->getTeamID())
-								    .detail("BulkLoadTask", rd.bulkLoadTask.get().toString())
+								    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId().toString())
+								    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId().toString())
 								    .detail("Priority", rd.priority)
 								    .detail("DataMoveId", rd.dataMoveId)
 								    .detail("Primary", tciIndex == 0);
@@ -2270,10 +2274,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							self->bulkLoadTaskCollection->terminateTask(rd.bulkLoadTask.get().coreState);
 							TraceEvent(
 							    bulkLoadVerboseEventSev(), "DDBulkLoadTaskRelocatorComplete", self->distributorId)
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
 							    .detail("Dests", describe(destIds))
-							    .detail("Task", rd.bulkLoadTask.get().toString());
+							    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId().toString())
+							    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId().toString());
 						} catch (Error& bulkLoadError) {
 							ASSERT_WE_THINK(bulkLoadError.code() == error_code_bulkload_task_outdated);
 							if (bulkLoadError.code() != error_code_bulkload_task_outdated) {
@@ -2282,20 +2285,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							TraceEvent(bulkLoadVerboseEventSev(),
 							           "DDBulkLoadTaskRelocatorCompleteButOutdated",
 							           self->distributorId)
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
 							    .detail("Dests", describe(destIds))
-							    .detail("Task", rd.bulkLoadTask.get().toString());
+							    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId().toString())
+							    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId().toString());
 						}
 					}
 					return Void();
 				} else {
 					if (doBulkLoading) {
 						TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskRelocatorError")
-						    .setMaxEventLength(-1)
-						    .setMaxFieldLength(-1)
 						    .errorUnsuppressed(error)
-						    .detail("Task", rd.bulkLoadTask.get().toString());
+						    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId().toString())
+						    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId().toString());
 					}
 					throw error;
 				}

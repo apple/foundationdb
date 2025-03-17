@@ -8741,51 +8741,79 @@ bool fetchKeyCanRetry(const Error& e) {
 	}
 }
 
-ACTOR Future<BulkLoadFileSet> bulkLoadFetchKeyValueFileToLoad(StorageServer* data,
-                                                              std::string dir,
-                                                              BulkLoadTaskState bulkLoadTaskState) {
+ACTOR Future<Void> bulkLoadFetchKeyValueFileToLoad(StorageServer* data,
+                                                   std::string dir,
+                                                   BulkLoadTaskState bulkLoadTaskState,
+                                                   std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
+	localFileSets->clear();
 	ASSERT(bulkLoadTaskState.getLoadType() == BulkLoadType::SST);
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchSSTFile", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("Dir", abspath(dir));
 	state double fetchStartTime = now();
 	// Download data file from fromRemoteFileSet to toLocalFileSet
-	state BulkLoadFileSet fromRemoteFileSet = bulkLoadTaskState.getFileSet();
-	state BulkLoadFileSet toLocalFileSet = wait(bulkLoadDownloadTaskFileSet(
-	    bulkLoadTaskState.getTransportMethod(), fromRemoteFileSet, dir, data->thisServerID));
+	state std::shared_ptr<BulkLoadFileSetKeyMap> fromRemoteFileSets = std::make_shared<BulkLoadFileSetKeyMap>();
+	for (const auto& manifest : bulkLoadTaskState.getManifests()) {
+		fromRemoteFileSets->push_back(std::make_pair(manifest.getRange(), manifest.getFileSet()));
+	}
+	wait(bulkLoadDownloadTaskFileSets(
+	    bulkLoadTaskState.getTransportMethod(), fromRemoteFileSets, localFileSets, dir, data->thisServerID));
 	// Do not need byte sampling locally in fetchKeys
 	const double duration = now() - fetchStartTime;
 	const int64_t totalBytes = bulkLoadTaskState.getTotalBytes();
+
+	std::string localFileSetString;
+	int count = 0;
+	for (auto iter = localFileSets->cbegin(); iter < localFileSets->cend(); iter++) {
+		localFileSetString = localFileSetString + iter->first.toString() + ", " + iter->second.toString();
+		count++;
+		if (count < localFileSets->size()) {
+			localFileSetString = localFileSetString + ", ";
+		}
+	}
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchSSTFileFetched", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("Dir", abspath(dir))
-	    .detail("LocalFileSet", toLocalFileSet.toString())
+	    .detail("LocalFileSetMap", localFileSetString)
 	    .detail("Duration", duration)
 	    .detail("TotalBytes", totalBytes)
 	    .detail("Rate", duration == 0 ? -1.0 : (double)totalBytes / duration);
-	return toLocalFileSet;
+	return Void();
 }
 
-ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results, KeyRange keys, std::string dataPath) {
+ACTOR Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> results,
+                                                 KeyRange keys,
+                                                 std::string sstFilePath,
+                                                 bool lastOne) {
+	state Key beginKey = keys.begin;
+	state Key endKey = keys.end;
 	try {
-		// TODO(BulkLoad): what if the data file is empty but the totalKeyCount is not zero
-		state Key beginKey = keys.begin;
-		state Key endKey = keys.end;
 		state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader(
 		    keys, SERVER_KNOBS->SS_BULKLOAD_GETRANGE_BATCH_SIZE, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 		// TODO(BulkLoad): this can be a slow task. We will make this as async call.
-		reader->open(abspath(dataPath));
+		reader->open(abspath(sstFilePath));
 		loop {
 			// TODO(BulkLoad): this is a blocking call. We will make this as async call.
 			RangeResult rep = reader->getRange(KeyRangeRef(beginKey, endKey));
-			results.send(rep);
 			if (!rep.more) {
-				results.sendError(end_of_stream());
-				return Void();
+				if (lastOne) {
+					rep.more = false;
+					results.send(rep);
+					results.sendError(end_of_stream());
+					return Void();
+				} else {
+					if (!rep.empty()) {
+						rep.more = true;
+						// Avoid breaking readThrough contract
+						// The reply cannot be empty of the more is true
+						results.send(rep);
+					}
+					return Void();
+				}
+			} else {
+				results.send(rep);
 			}
 			beginKey = keyAfter(rep.back().key);
 			wait(delay(0.1)); // context switch to avoid busy loop
@@ -8793,6 +8821,44 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results, Ke
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
+		}
+		results.sendError(bulkload_task_failed());
+		throw;
+	}
+}
+
+ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
+                                          KeyRange keys,
+                                          std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
+	try {
+		// Build bulkLoadFileSetsToLoad
+		state std::vector<std::pair<KeyRange, BulkLoadFileSet>> bulkLoadFileSetsToLoad;
+		KeyRangeMap<BulkLoadFileSet> localFileSetMap;
+		for (auto it = localFileSets->begin(); it < localFileSets->end(); it++) {
+			localFileSetMap.insert(it->first, it->second);
+		}
+		for (auto range : localFileSetMap.intersectingRanges(keys)) {
+			if (!range->value().isValid()) {
+				continue;
+			}
+			bulkLoadFileSetsToLoad.push_back(std::make_pair(range->range(), range->value()));
+		}
+		// Streaming results given the input keys using bulkLoadFileSetsToLoad
+		state int i = 0;
+		for (; i < bulkLoadFileSetsToLoad.size(); i++) {
+			std::string sstFilePath = bulkLoadFileSetsToLoad[i].second.getDataFileFullPath();
+			KeyRange rangeToLoad = bulkLoadFileSetsToLoad[i].first & keys;
+			ASSERT(!rangeToLoad.empty());
+			wait(tryGetRangeForBulkLoadFromSST(
+			    results, rangeToLoad, sstFilePath, i == bulkLoadFileSetsToLoad.size() - 1));
+		}
+		return Void();
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		if (e.code() == error_code_inverted_range) {
+			TraceEvent(SevError, "Zhe1").detail("Keys", keys);
 		}
 		results.sendError(bulkload_task_failed());
 		throw;
@@ -8812,6 +8878,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state ConductBulkLoad conductBulkLoad = ConductBulkLoad(shard->getSSBulkLoadMetadata().getConductBulkLoad());
 	state std::string bulkLoadLocalDir =
 	    joinPath(joinPath(data->bulkLoadFolder, dataMoveId.toString()), fetchKeysID.toString());
+	state std::shared_ptr<BulkLoadFileSetKeyMap> localBulkLoadFileSets;
 	// Since the fetchKey can split, so multiple fetchzkeys can have the same data move id. We want each fetchkey
 	// downloads its file without conflict, so we add fetchKeysID to the bulkLoadLocalDir.
 	state PromiseStream<Key> destroyedFeeds;
@@ -9015,10 +9082,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					rangeEnd = keys.end;
 				}
 			} else if (conductBulkLoad) {
-				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
-				    .detail("DataMoveId", dataMoveId.toString())
-				    .detail("Range", keys)
-				    .detail("Phase", "Read task metadata");
 				ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId)); // TODO(BulkLoad): remove dangerous assert
 				// Get the bulkload task metadata from the data move metadata. Note that a SS can receive a data move
 				// mutation before the bulkload task metadata is persisted. In this case, the SS will not be able to
@@ -9039,9 +9102,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// dataMoveId.
 				ASSERT(bulkLoadTaskState.getDataMoveId() == dataMoveId);
 				// We download the data file to local disk and pass the data file path to read in the next step.
-				BulkLoadFileSet localFileSet =
-				    wait(bulkLoadFetchKeyValueFileToLoad(data, bulkLoadLocalDir, bulkLoadTaskState));
-				hold = tryGetRangeForBulkLoad(results, keys, localFileSet.getDataFileFullPath());
+				localBulkLoadFileSets = std::make_shared<BulkLoadFileSetKeyMap>();
+				wait(bulkLoadFetchKeyValueFileToLoad(
+				    data, bulkLoadLocalDir, bulkLoadTaskState, /*output=*/localBulkLoadFileSets));
+				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+				    .detail("DataMoveId", dataMoveId.toString())
+				    .detail("Range", keys)
+				    .detail("Phase", "File download");
+				hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
 				rangeEnd = keys.end;
 			} else {
 				hold = tryGetRange(results, &tr, keys);
@@ -9563,16 +9631,18 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
                                                 BulkLoadTaskState bulkLoadTaskState) {
 	ASSERT(bulkLoadTaskState.getLoadType() == BulkLoadType::SST);
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardFile", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("LocalRoot", abspath(localRoot));
 
 	state double fetchStartTime = now();
 
 	// Step 1: Download files to localRoot
-	state BulkLoadFileSet fromRemoteFileSet = bulkLoadTaskState.getFileSet();
+	// TODO(BulkLoad): support bulkload task mutiple sst for sharded rocksdb.
+	ASSERT(SERVER_KNOBS->MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK == 1);
+	ASSERT(bulkLoadTaskState.getManifests().size() == 1);
+	state BulkLoadFileSet fromRemoteFileSet = bulkLoadTaskState.getManifests()[0].getFileSet();
 	BulkLoadByteSampleSetting currentClusterByteSampleSetting(
 	    0,
 	    "hashlittle2", // use function name to represent the method
@@ -9589,9 +9659,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	state BulkLoadFileSet toLocalFileSet = wait(bulkLoadDownloadTaskFileSet(
 	    bulkLoadTaskState.getTransportMethod(), fromRemoteFileSet, localRoot, data->thisServerID));
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardSSTFileFetched", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("RemoteFileSet", fromRemoteFileSet.toString())
 	    .detail("LocalFileSet", toLocalFileSet.toString());
@@ -9600,9 +9669,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	if (!toLocalFileSet.hasByteSampleFile()) {
 		TraceEvent(
 		    bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardSSTFileValidByteSampleNotFound", data->thisServerID)
-		    .setMaxEventLength(-1)
-		    .setMaxFieldLength(-1)
-		    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())
+		    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+		    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 		    .detail("LocalFileSet", toLocalFileSet.toString());
 		state std::string byteSampleFileName =
 		    generateBulkLoadBytesSampleFileNameFromDataFileName(toLocalFileSet.getDataFileName());
@@ -9614,9 +9682,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 		}
 	}
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardByteSampled", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("RemoteFileSet", fromRemoteFileSet.toString())
 	    .detail("LocalFileSet", toLocalFileSet.toString());
@@ -9655,9 +9722,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	const double duration = now() - fetchStartTime;
 	const int64_t totalBytes = getTotalFetchedBytes(moveInShard->meta->checkpoints);
 	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchShardSSTFileBuildMetadata", data->thisServerID)
-	    .setMaxEventLength(-1)
-	    .setMaxFieldLength(-1)
-	    .detail("BulkLoadTask", bulkLoadTaskState.toString())
+	    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("LocalRoot", abspath(localRoot))
 	    .detail("LocalFileSet", toLocalFileSet.toString())

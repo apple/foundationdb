@@ -387,6 +387,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM,    false ); 
 	init( SS_BULKLOAD_GETRANGE_BATCH_SIZE,                     10000 ); if (isSimulated) SS_BULKLOAD_GETRANGE_BATCH_SIZE = deterministicRandom()->randomInt(1, 10);
 	init( BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE,            1024*1024 ); if (isSimulated) BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE = deterministicRandom()->randomInt(1024, 10240);
+	init( MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK,                   10 ); if (isSimulated) MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK = deterministicRandom()->randomInt(1, 11);
 
 	// BulkDumping
 	init( DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC,                 5.0 ); if( randomize && BUGGIFY ) DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC = deterministicRandom()->random01() * 10 + 1;
