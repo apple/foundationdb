@@ -5572,6 +5572,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 };
 StringRef RestoreDispatchPartitionedTaskFunc::name = "restore_dispatch_partitioned"_sr;
 REGISTER_TASKFUNC(RestoreDispatchPartitionedTaskFunc);
+
 struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 	static StringRef name;
 	static constexpr uint32_t version = 1;
