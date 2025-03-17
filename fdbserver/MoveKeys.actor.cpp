@@ -1638,7 +1638,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 	TraceEvent(SevInfo, "StartMoveShardsBegin", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("TargetRange", describe(ranges))
-	    .detail("BulkLoadTaskState", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
+	    .detail("BulkLoadTaskID", bulkLoadTaskState.present() ? bulkLoadTaskState.get().getTaskId().toString() : "");
 
 	// TODO: make startMoveShards work with multiple ranges.
 	ASSERT(ranges.size() == 1);
@@ -1762,9 +1762,9 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							for (const auto& ssid : servers) {
 								if (std::find(owners.begin(), owners.end(), ssid) != owners.end()) {
 									TraceEvent(SevWarn, "DDBulkLoadTaskStartMoveShardsMoveInConflict")
-									    .setMaxEventLength(-1)
-									    .setMaxFieldLength(-1)
-									    .detail("BulkLoadTaskState", bulkLoadTaskState.get().toString())
+									    .detail("TaskID", bulkLoadTaskState.get().getTaskId())
+									    .detail("JobID", bulkLoadTaskState.get().getJobId())
+									    .detail("TaskRange", bulkLoadTaskState.get().getRange())
 									    .detail("DestServerId", ssid)
 									    .detail("OwnerIds", describe(owners))
 									    .detail("DataMove", dataMove.toString());
@@ -1898,16 +1898,16 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						TraceEvent(
 						    bulkLoadVerboseEventSev(), "DDBulkLoadTaskSetRunningStateTransaction", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
-						    .detail("JobID", newBulkLoadTaskState.getJobId().toString())
-						    .detail("TaskID", newBulkLoadTaskState.getTaskId().toString());
+						    .detail("JobID", newBulkLoadTaskState.getJobId())
+						    .detail("TaskID", newBulkLoadTaskState.getTaskId());
 						dataMove.bulkLoadTaskState = newBulkLoadTaskState;
 					}
 					dataMove.setPhase(DataMoveMetaData::Running);
 					TraceEvent(sevDm, "StartMoveShardsDataMoveComplete", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString())
-					    .detail("BulkLoadTaskState",
-					            bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
+					    .detail("BulkLoadTaskID",
+					            bulkLoadTaskState.present() ? bulkLoadTaskState.get().getTaskId().toString() : "");
 				} else {
 					dataMove.setPhase(DataMoveMetaData::Prepare);
 					TraceEvent(sevDm, "StartMoveShardsDataMovePartial", relocationIntervalId)
@@ -1926,10 +1926,10 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (currentKeys.end == keys.end && bulkLoadTaskState.present()) {
 					Version commitVersion = tr.getCommittedVersion();
 					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistRunningState", relocationIntervalId)
-					    .detail("JobID", bulkLoadTaskState.get().getJobId().toString())
+					    .detail("JobID", bulkLoadTaskState.get().getJobId())
 					    .detail("DataMoveID", dataMoveId.toString())
-					    .detail("TaskID", bulkLoadTaskState.get().getTaskId().toString())
-					    .detail("TaskRange", bulkLoadTaskState.get().getRange().toString())
+					    .detail("TaskID", bulkLoadTaskState.get().getTaskId())
+					    .detail("TaskRange", bulkLoadTaskState.get().getRange())
 					    .detail("CommitVersion", commitVersion);
 				}
 
@@ -1940,7 +1940,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				    .detail("DeltaRange", currentKeys.toString())
 				    .detail("Range", describe(dataMove.ranges))
 				    .detail("DataMove", dataMove.toString())
-				    .detail("BulkLoadTaskState", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "");
+				    .detail("BulkLoadTaskID",
+				            bulkLoadTaskState.present() ? bulkLoadTaskState.get().getTaskId().toString() : "");
 
 				dataMove = DataMoveMetaData();
 				if (currentKeys.end == keys.end) {
@@ -2349,8 +2350,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							TraceEvent(
 							    bulkLoadVerboseEventSev(), "DDBulkLoadTaskSetCompleteTransaction", relocationIntervalId)
 							    .detail("DataMoveID", dataMoveId)
-							    .detail("JobID", newBulkLoadTaskState.getJobId().toString())
-							    .detail("TaskID", newBulkLoadTaskState.getTaskId().toString());
+							    .detail("JobID", newBulkLoadTaskState.getJobId())
+							    .detail("TaskID", newBulkLoadTaskState.getTaskId());
 							dataMove.bulkLoadTaskState = newBulkLoadTaskState;
 						}
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
@@ -2374,10 +2375,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						Version commitVersion = tr.getCommittedVersion();
 						TraceEvent(
 						    bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistCompleteState", relocationIntervalId)
-						    .detail("JobID", bulkLoadTaskState.get().getJobId().toString())
-						    .detail("DataMoveID", dataMoveId.toString())
-						    .detail("TaskID", bulkLoadTaskState.get().getTaskId().toString())
-						    .detail("TaskRange", bulkLoadTaskState.get().getRange().toString())
+						    .detail("JobID", bulkLoadTaskState.get().getJobId())
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("TaskID", bulkLoadTaskState.get().getTaskId())
+						    .detail("TaskRange", bulkLoadTaskState.get().getRange())
 						    .detail("CommitVersion", commitVersion);
 					}
 
@@ -2426,7 +2427,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 	TraceEvent(SevInfo, "FinishMoveShardsEnd", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
-	    .detail("BulkLoadTaskState", bulkLoadTaskState.present() ? bulkLoadTaskState.get().toString() : "")
+	    .detail("BulkLoadTaskID", bulkLoadTaskState.present() ? bulkLoadTaskState.get().getTaskId().toString() : "")
 	    .detail("DataMove", dataMove.toString());
 	return Void();
 }

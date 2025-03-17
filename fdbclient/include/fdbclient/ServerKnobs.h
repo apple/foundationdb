@@ -407,6 +407,8 @@ public:
 	                                              // between two rounds
 	double DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk dump scheduler has to wait
 	                                              // between two rounds
+	double DD_BULKLOAD_JOB_MONITOR_PERIOD_SEC; // the seconds that the bulkload job monitor to read the task metadata
+	                                           // when monitoring the task progress
 	int DD_BULKDUMP_BUILD_JOB_MANIFEST_BATCH_SIZE; // the number of lines in a batch when generating bulkload job
 	                                               // manifest file
 	int SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST; // the max number of batch count per bulkdump request to a SS

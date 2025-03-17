@@ -6169,10 +6169,10 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			                                      dumpType,
 			                                      transportMethod));
 			readBytes = readBytes + rangeDumpRawData->kvsBytes;
-			TraceEvent(SevInfo, "SSBulkDumpDataFileGenerated", data->thisServerID)
-			    .setMaxEventLength(-1)
-			    .setMaxFieldLength(-1)
-			    .detail("Task", req.bulkDumpState.toString())
+			TraceEvent(bulkLoadVerboseEventSev(), "SSBulkDumpDataFileGenerated", data->thisServerID)
+			    .detail("TaskID", req.bulkDumpState.getTaskId())
+			    .detail("TaskRange", req.bulkDumpState.getRange())
+			    .detail("JobID", req.bulkDumpState.getJobId())
 			    .detail("ChecksumServers", describe(req.checksumServers))
 			    .detail("RangeToDump", rangeToDump)
 			    .detail("DataRange", dataRange)
@@ -6180,8 +6180,8 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			    .detail("RelativeFolder", relativeFolder)
 			    .detail("DataKeyCount", rangeDumpRawData->kvs.size())
 			    .detail("DataBytes", rangeDumpRawData->kvsBytes)
-			    .detail("RemoteFileSet", manifest.getFileSet().toString())
-			    .detail("BatchNum", batchNum);
+			    .detail("BatchNum", batchNum)
+			    .detail("RemoteFileSet", manifest.getFileSet().toString());
 
 			// Upload Files
 			state BulkLoadFileSet localFileSet = localFileSetSetting;
@@ -6214,9 +6214,11 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			TraceEvent(SevInfo, "SSBulkDumpError", data->thisServerID)
+			TraceEvent(SevWarn, "SSBulkDumpError", data->thisServerID)
 			    .errorUnsuppressed(e)
-			    .detail("Task", req.bulkDumpState.toString())
+			    .detail("TaskID", req.bulkDumpState.getTaskId())
+			    .detail("TaskRange", req.bulkDumpState.getRange())
+			    .detail("JobID", req.bulkDumpState.getJobId())
 			    .detail("RetryCount", retryCount)
 			    .detail("BatchNum", batchNum);
 			if (e.code() == error_code_bulkdump_task_outdated) {
@@ -9700,9 +9702,8 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	if (coalesceRanges.size() != 1) {
 		TraceEvent(SevError, "SSBulkLoadTaskFetchShardSSTFileError", data->thisServerID)
 		    .detail("Reason", "MoveInShard ranges unexpected, resulting in partially injecting data")
-		    .setMaxEventLength(-1)
-		    .setMaxFieldLength(-1)
-		    .detail("BulkLoadTaskState", bulkLoadTaskState.toString())
+		    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+		    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("LocalFileSet", toLocalFileSet.toString());
 	}
@@ -14745,7 +14746,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				}
 			}
 			when(BulkDumpRequest req = waitNext(ssi.bulkdump.getFuture())) {
-				TraceEvent(SevInfo, "SSBulkDumpRequestReceived", self->thisServerID)
+				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkDumpRequestReceived", self->thisServerID)
 				    .detail("BulkDumpRequest", req.toString());
 				self->actors.add(bulkDumpQ(self, req));
 			}

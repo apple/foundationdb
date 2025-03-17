@@ -572,6 +572,12 @@ public:
 	}
 
 	// Return true if succeed
+	// We do not need to specify the order of manifests. The SS will scan the
+	// manifests to build up the manifest key range map before loading it.
+	// See tryGetRangeForBulkLoad for details.
+	// After a task completes all addManifest()'s, the task range is decided as the range between the min begin key and
+	// the max end key among all manifests. So, it is the caller's responsibility to make sure that different tasks do
+	// not have overlapping ranges. See tryGetRangeForBulkLoad for details.
 	bool addManifest(const BulkLoadManifest& manifest) {
 		if (manifests.size() > maxCount) {
 			return false;
@@ -622,11 +628,20 @@ public:
 
 	const std::vector<BulkLoadManifest>& getManifests() const { return manifests; }
 
-	BulkLoadTransportMethod getTransportMethod() const { return transportMethod; }
+	BulkLoadTransportMethod getTransportMethod() const {
+		ASSERT(transportMethod != BulkLoadTransportMethod::Invalid);
+		return transportMethod;
+	}
 
-	BulkLoadByteSampleSetting getByteSampleSetting() const { return byteSampleSetting; }
+	BulkLoadByteSampleSetting getByteSampleSetting() const {
+		ASSERT(byteSampleSetting.isValid());
+		return byteSampleSetting;
+	}
 
-	BulkLoadType getLoadType() const { return loadType; }
+	BulkLoadType getLoadType() const {
+		ASSERT(loadType != BulkLoadType::Invalid);
+		return loadType;
+	}
 
 	size_t size() const { return manifests.size(); }
 
@@ -727,8 +742,10 @@ public:
 	void setDataMoveId(UID id) {
 		if (dataMoveId.present() && dataMoveId.get() != id) {
 			TraceEvent(SevWarn, "DDBulkLoadEngineTaskUpdateDataMoveId")
-			    .detail("NewId", id)
-			    .detail("BulkLoadTask", this->toString());
+			    .detail("NewID", id)
+			    .detail("OldID", this->getDataMoveId())
+			    .detail("TaskID", this->getTaskId())
+			    .detail("JobID", this->getJobId());
 		}
 		dataMoveId = id;
 	}

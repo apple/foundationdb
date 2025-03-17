@@ -195,7 +195,7 @@ struct DataMoveMetaData {
 		                  ", [Source Servers]: " + describe(src) + ", [Destination Servers]: " + describe(dest) +
 		                  ", [Checkpoints]: " + describe(checkpoints);
 		if (bulkLoadTaskState.present()) {
-			res = res + ", [BulkLoadTaskState]: " + bulkLoadTaskState.get().toString();
+			res = res + ", [BulkLoadTaskID]: " + bulkLoadTaskState.get().getTaskId().toString();
 		}
 		return res;
 	}
