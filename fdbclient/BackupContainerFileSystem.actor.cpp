@@ -411,6 +411,49 @@ public:
 		}
 	}
 
+	// Checks if list of sorted logfiles have the logs from snapshotBeginVersion to snapshotEndversion.
+	// Which means the sorted log files(have beginVersion and endVersion) should cover
+	// all the versions between snapshotBegingVersion and snapshotEndversion.
+	// Note: logs should be sorted
+	static bool hasContinuousLogsForSnapshot(const std::vector<LogFile>& logs,
+	                                         Version snapshotBeginVersion,
+	                                         Version snapshotEndVersion) {
+		auto it = logs.begin();
+
+		// find the first mutation log file that covers snapshotBeginVersion
+		while (it != logs.end()) {
+			if (it->beginVersion <= snapshotBeginVersion && it->endVersion > snapshotBeginVersion)
+				break;
+			++it;
+		}
+
+		// no log find found covering snaphostBeginVersion, return false
+		if (it == logs.end())
+			return false;
+
+		// If current log entry(it), covers the entire snapshot, return true
+		if (it->endVersion >= snapshotEndVersion)
+			return true;
+
+		// Iterate over the next logs, check if they are continuous and if
+		// the log file is covering the snapshot.
+		Version prevEnd = it->endVersion;
+		++it;
+
+		while (it != logs.end()) {
+			if (it->beginVersion == prevEnd &&
+			    it->endVersion >= snapshotEndVersion) // continuous logs until snapshot is covered
+				return true;
+			else if (it->beginVersion != prevEnd) // not continuous logs
+				return false;
+
+			prevEnd = it->endVersion;
+			++it;
+		} // comes out if the logs are not found until snapshotEndVersion.
+
+		return prevEnd >= snapshotEndVersion;
+	}
+
 	ACTOR static Future<BackupDescription> describeBackup(Reference<BackupContainerFileSystem> bc,
 	                                                      bool deepScan,
 	                                                      Version logStartVersionOverride) {
@@ -613,6 +656,14 @@ public:
 					s.restorable = false;
 				if (!desc.contiguousLogEnd.present() || desc.contiguousLogEnd.get() <= s.endVersion)
 					s.restorable = false;
+				// If there is logs gap after contiguousLogEnd, then check whether the current snapshot
+				// can be restored from the logs availale after contiguousLogEnd.
+				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() <= s.beginVersion) {
+					if (desc.partitioned)
+						s.restorable = isPartitionedLogsContinuous(logs, s.beginVersion, s.endVersion);
+					else
+						s.restorable = hasContinuousLogsForSnapshot(logs, s.beginVersion, s.endVersion);
+				}
 			}
 
 			desc.snapshotBytes += s.totalSize;
@@ -1955,6 +2006,235 @@ TEST_CASE("/backup/continuous") {
 	ASSERT(BackupContainerFileSystemImpl::getPartitionedLogsContinuousEndVersion(files, 99) == 399);
 	ASSERT(BackupContainerFileSystemImpl::getPartitionedLogsContinuousEndVersion(files, 250) == 399);
 
+	return Void();
+}
+
+TEST_CASE("/backup/logs_continuous") {
+	std::vector<LogFile> files;
+
+	// [10, 100)
+	files.push_back({ 10, 100, 10, "file1", 100 });
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 0, 5));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 50));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 105));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 100, 101));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 101, 150));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 99));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 100));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 101));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 150));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 70));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 100));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 11));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 100));
+
+	// [100, 200)
+	files.push_back({ 100, 200, 10, "file2", 100 });
+	std::sort(files.begin(), files.end());
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 0, 5));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 50));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 105));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 100, 101));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 101, 150));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 99));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 100));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 101));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 150));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 70));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 100));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 11));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 100));
+
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 150));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 205));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 200, 201));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 201, 250));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 199));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 200));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 201));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 70, 170));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 70, 200));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 199, 200));
+
+	// [300, 400)
+	files.push_back({ 300, 400, 10, "file3", 100 });
+	std::sort(files.begin(), files.end());
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 0, 5));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 50));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 105));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 100, 101));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 101, 150));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 99));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 100));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 101));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 150));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 70));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 11));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 100));
+
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 150));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 205));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 200, 201));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 201, 250));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 199));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 200));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 201));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 70, 170));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 199, 200));
+
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 250, 260));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 250, 310));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 250, 405));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 400, 401));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 401, 450));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 300, 399));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 300, 400));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 300, 401));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 300, 350));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 350, 370));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 350, 400));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 400));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 100, 400));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 200, 400));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 299, 400));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 399, 400));
+
+	return Void();
+}
+
+void printFileList(BackupFileList& backupFileList) {
+	printf("\nRangeFiles count:%lu", backupFileList.ranges.size());
+	for (auto r : backupFileList.ranges)
+		printf("\n%s", r.toString().c_str());
+
+	printf("\nLogFiles count:%lu", backupFileList.logs.size());
+	for (auto l : backupFileList.logs)
+		printf("\n%s", l.toString().c_str());
+
+	printf("\nSnapshotFiles count:%lu", backupFileList.snapshots.size());
+	for (auto s : backupFileList.snapshots)
+		printf("\n%lld, %lld, %s, %lld", s.beginVersion, s.endVersion, s.fileName.c_str(), s.totalSize);
+}
+
+// Intentionally missing some log range files and checking if the snapshot can be restored.
+ACTOR Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Optional<std::string> proxy) {
+	state FlowLock lock(100e6);
+	printf("BackupContainerTest URL %s\n", url.c_str());
+
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, proxy, {});
+	// Make sure container doesn't exist, then create it.
+	try {
+		wait(c->deleteContainer());
+	} catch (Error& e) {
+		if (e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist)
+			throw;
+	}
+	wait(c->create());
+
+	state Key begin = randomKeyBetween(normalKeys);
+	state Key end = randomKeyBetween(KeyRangeRef(begin, normalKeys.end));
+	state int blockSize = 3 * sizeof(uint32_t) + begin.size() + end.size() + 8;
+	state std::vector<Future<Void>> writes;
+	state std::pair<Key, Key> beginEndKeys = std::make_pair(begin, end);
+	state std::vector<bool> snapshotsMissingLogs;
+	state Version v = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max() / 2);
+	state Version tempLogEnd = 0;
+	state Version logStart = v;
+	state Version logEnd = v;
+	state Version snapshotBeginVersion = v;
+	state Version snapshotEndVersion = v;
+	state bool nextSnapshotMissingLogs = false;
+
+	// create a random number of snapshots
+	state int numSnapshots = deterministicRandom()->randomInt(1, 10);
+	while (numSnapshots) {
+		state std::vector<std::string> rangeFileNames;
+		state std::vector<std::pair<Key, Key>> snapshotBeginEndKeys;
+
+		// create a random number of range files per snapshot
+		state int numRangeFiles = deterministicRandom()->randomInt(2, 5);
+		snapshotBeginVersion = v;
+		while (numRangeFiles) {
+			state Reference<IBackupFile> range = wait(c->writeRangeFile(v, 0, v, blockSize));
+			writes.push_back(writeAndVerifyFile(c, range, deterministicRandom()->randomInt(0, 2e6), &lock));
+			rangeFileNames.push_back(range->getFileName());
+			snapshotBeginEndKeys.push_back(beginEndKeys);
+
+			logEnd = v;
+			v = nextVersion(v);
+			--numRangeFiles;
+		}
+		snapshotEndVersion = logEnd;
+
+		// writing the snapshot file
+		writes.push_back(c->writeKeyspaceSnapshotFile(rangeFileNames,
+		                                              snapshotBeginEndKeys,
+		                                              deterministicRandom()->randomInt(0, 2e6),
+		                                              IncludeKeyRangeMap(BUGGIFY)));
+
+		snapshotsMissingLogs.push_back(nextSnapshotMissingLogs);
+		nextSnapshotMissingLogs = false;
+
+		// creating log files for the snapshot range.
+		while (logStart < logEnd) {
+			tempLogEnd = nextVersion(logStart);
+			if (deterministicRandom()->random01() < 0.5) {
+				state Reference<IBackupFile> log = wait(c->writeLogFile(logStart, tempLogEnd, blockSize));
+				writes.push_back(writeAndVerifyFile(c, log, deterministicRandom()->randomInt(0, 2e6), &lock));
+			} else { // intentionally missing writing of some log files.
+				// If the missing log range falls in the current snapshot range, mark it.
+				if (!(tempLogEnd < snapshotBeginVersion || snapshotEndVersion < logStart))
+					snapshotsMissingLogs.back() = true;
+				if (tempLogEnd > v) // if it overlaps with the next snapshot, mark the next snapshot as well.
+					nextSnapshotMissingLogs = true;
+			}
+			logStart = tempLogEnd;
+		}
+
+		--numSnapshots;
+	}
+
+	wait(waitForAll(writes));
+	state BackupFileList listing = wait(c->dumpFileList());
+	printFileList(listing);
+
+	printf("\n\nSnapshots missing logs:");
+	state int i = 0;
+	for (; i < snapshotsMissingLogs.size(); ++i)
+		printf("\nSnapshot%d: %s", i, snapshotsMissingLogs[i] ? "true" : "false");
+
+	state BackupDescription desc = wait(c->describeBackup());
+	printf("\n\n%s\n", desc.toString().c_str());
+
+	for (i = 0; i < listing.snapshots.size(); ++i) {
+		// Ensure we can restore to the end version of snapshot i
+		Optional<RestorableFileSet> rest = wait(c->getRestoreSet(listing.snapshots[i].endVersion));
+		if (snapshotsMissingLogs[i])
+			ASSERT(!rest.present());
+		else
+			ASSERT(rest.present());
+	}
+
+	printf("DELETING\n");
+	wait(c->deleteContainer());
+
+	state Future<BackupDescription> d = c->describeBackup();
+	wait(ready(d));
+	ASSERT(d.isError() && d.getError().code() == error_code_backup_does_not_exist);
+
+	BackupFileList empty = wait(c->dumpFileList());
+	ASSERT_EQ(empty.ranges.size(), 0);
+	ASSERT_EQ(empty.logs.size(), 0);
+	ASSERT_EQ(empty.snapshots.size(), 0);
+
+	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
+
+	return Void();
+}
+
+TEST_CASE("/backup/containers/localdir/missingLogRangesRestorability") {
+	wait(testBackupContainerWithMissingLogRanges(
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}));
 	return Void();
 }
 
