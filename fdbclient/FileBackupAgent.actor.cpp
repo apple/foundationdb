@@ -5086,7 +5086,7 @@ struct LogInfo : public ReferenceCounted<LogInfo> {
 	Version endVersion;
 	int64_t offset;
 
-	LogInfo() : offset(0){};
+	LogInfo() : offset(0) {}
 };
 
 class FileBackupAgentImpl {
