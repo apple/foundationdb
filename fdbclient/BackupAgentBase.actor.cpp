@@ -352,7 +352,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			TraceEvent(SevError, "OffsetOutOfBoundary")
 			    .detail("TotalBytes", totalBytes)
 			    .detail("Offset", offset)
-			    .detail("Size", value.size());
+			    .detail("Version", version)
+			    .detail("ValueSize", value.size());
 			throw restore_missing_data();
 		}
 
@@ -676,7 +677,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 
 			// iterate on a version range, each key-value pair is (version, part)
 			for (auto& s : rangevalue) {
-				uint64_t groupKey = groupBy(s.key).first;
+				Version groupKey = groupBy(s.key).first; // mutation's commit version
 				// TraceEvent("Log_ReadCommitted")
 				//     .detail("GroupKey", groupKey)
 				//     .detail("SkipGroup", skipGroup)
@@ -761,10 +762,8 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
                                                 NotifiedVersion* committedVersion,
                                                 int* totalBytes,
                                                 int* mutationSize,
-                                                PromiseStream<Future<Void>> addActor,
                                                 FlowLock* commitLock,
-                                                PublicRequestStream<CommitTransactionRequest> commit,
-                                                bool tenantMapChanging) {
+                                                PublicRequestStream<CommitTransactionRequest> commit) {
 	Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
 	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
 	Key rangeEnd = getApplyKey(newBeginVersion, uid);
@@ -787,16 +786,18 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	*totalBytes += *mutationSize;
 	wait(commitLock->take(TaskPriority::DefaultYield, *mutationSize));
 	Future<Void> commitAndUnlock = commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize);
-	if (tenantMapChanging) {
-		// If tenant map is changing, we need to wait until it's committed before processing next mutations.
-		// Next muations need the updated tenant map for filtering.
-		wait(commitAndUnlock);
-	} else {
-		addActor.send(commitAndUnlock);
-	}
+	// If tenant map is changing, we need to wait until it's committed before processing next mutations.
+	// Next muations need the updated tenant map for filtering.
+	// Because we are bumping applyBegin version, we need to wait for the commit to be done.
+	// Otherwise, an update to the applyEnd key will trigger another applyMutation() which can
+	// have an overlapping range with the current applyMutation() and cause conflicts.
+	wait(commitAndUnlock);
 	return Void();
 }
 
+// Decodes the backup mutation log and send the mutations to the CommitProxy.
+// The mutation logs are grouped by version and passed in as a stream of RCGroup from readCommitted().
+// The mutations are then decoded and sent to the CommitProxy in a batch.
 ACTOR Future<int> kvMutationLogToTransactions(Database cx,
                                               PromiseStream<RCGroup> results,
                                               Reference<FlowLock> lock,
@@ -807,7 +808,6 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
                                               NotifiedVersion* committedVersion,
                                               Optional<Version> endVersion,
                                               Key rangeBegin,
-                                              PromiseStream<Future<Void>> addActor,
                                               FlowLock* commitLock,
                                               Reference<KeyRangeMap<Version>> keyVersion,
                                               std::map<int64_t, TenantName>* tenantMap,
@@ -872,10 +872,8 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 					                                  committedVersion,
 					                                  &totalBytes,
 					                                  &mutationSize,
-					                                  addActor,
 					                                  commitLock,
-					                                  commit,
-					                                  false));
+					                                  commit));
 					req = CommitTransactionRequest();
 					mutationSize = 0;
 				}
@@ -908,17 +906,9 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				throw;
 			}
 		}
-		wait(sendCommitTransactionRequest(req,
-		                                  uid,
-		                                  newBeginVersion,
-		                                  rangeBegin,
-		                                  committedVersion,
-		                                  &totalBytes,
-		                                  &mutationSize,
-		                                  addActor,
-		                                  commitLock,
-		                                  commit,
-		                                  tenantMapChanging));
+		// TraceEvent("MutationLogRestore").detail("BeginVersion", newBeginVersion);
+		wait(sendCommitTransactionRequest(
+		    req, uid, newBeginVersion, rangeBegin, committedVersion, &totalBytes, &mutationSize, commitLock, commit));
 		if (endOfStream) {
 			return totalBytes;
 		}
@@ -999,6 +989,7 @@ ACTOR Future<Void> applyMutations(Database cx,
 	try {
 		loop {
 			if (beginVersion >= *endVersion) {
+				// Why do we need to take a lock here?
 				wait(commitLock.take(TaskPriority::DefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES));
 				commitLock.release(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 				if (beginVersion >= *endVersion) {
@@ -1043,7 +1034,6 @@ ACTOR Future<Void> applyMutations(Database cx,
 				                                     committedVersion,
 				                                     idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
 				                                     ranges[idx].begin,
-				                                     addActor,
 				                                     &commitLock,
 				                                     keyVersion,
 				                                     tenantMap,

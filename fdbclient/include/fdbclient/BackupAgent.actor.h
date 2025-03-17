@@ -531,12 +531,13 @@ public:
 
 using RangeResultWithVersion = std::pair<RangeResult, Version>;
 
+// RCGroup contains the backup mutations for a commit version, i.e., groupKey.
 struct RCGroup {
 	RangeResult items;
 	Version version; // this is read version for this group
-	uint64_t groupKey; // this is the original version for this group
+	Version groupKey; // this is the original commit version for this group
 
-	RCGroup() : version(-1), groupKey(ULLONG_MAX){};
+	RCGroup() : version(-1), groupKey(ULLONG_MAX) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -580,6 +581,8 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  Terminator terminator = Terminator::True,
                                  AccessSystemKeys systemAccess = AccessSystemKeys::False,
                                  LockAware lockAware = LockAware::False);
+
+// Applies the mutations between the beginVersion and endVersion to the database during a restore.
 ACTOR Future<Void> applyMutations(Database cx,
                                   Key uid,
                                   Key addPrefix,
