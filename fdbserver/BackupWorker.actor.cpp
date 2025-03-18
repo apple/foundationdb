@@ -42,9 +42,6 @@
 
 #define SevDebugMemory SevVerbose
 
-// Based on TagsAndMessage::getHeaderSize(): assume 6 tags.
-#define MessageOverheadBytes (sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint16_t) + 6 * sizeof(Tag))
-
 struct VersionedMessage {
 	LogMessageVersion version;
 	StringRef message;
@@ -56,7 +53,8 @@ struct VersionedMessage {
 	  : version(v), message(m), tags(t), arena(a) {}
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
-	size_t getEstimatedSize() const { return message.size() + MessageOverheadBytes; }
+	// Returns the estimated size of the message in bytes, assuming 6 tags.
+	size_t getEstimatedSize() const { return message.size() + TagsAndMessage::getHeaderSize(6); }
 
 	// Returns true if the message is a mutation that could be backed up (normal keys, system key backup ranges, or the
 	// metadata version key)

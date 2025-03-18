@@ -186,11 +186,11 @@ struct TagsAndMessage {
 	}
 
 	// Returns the size of the header, including: msg_length, version.sub, tag_count, tags.
-	int32_t getHeaderSize() const {
-		return sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint16_t) + tags.size() * sizeof(Tag);
+	static int32_t getHeaderSize(int numTags) {
+		return sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint16_t) + numTags * sizeof(Tag);
 	}
 
-	StringRef getMessageWithoutTags() const { return message.substr(getHeaderSize()); }
+	StringRef getMessageWithoutTags() const { return message.substr(getHeaderSize(tags.size())); }
 
 	// Returns the message with the header.
 	StringRef getRawMessage() const { return message; }
