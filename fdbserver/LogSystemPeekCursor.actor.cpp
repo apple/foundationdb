@@ -149,7 +149,7 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 	DEBUG_TAGS_AND_MESSAGE("ServerPeekCursor", messageVersion.version, messageAndTags.getRawMessage(), this->randomID);
 	// Rewind and consume the header so that reader() starts from the message.
 	rd.rewind();
-	rd.readBytes(messageAndTags.getHeaderSize());
+	rd.readBytes(TagsAndMessage::getHeaderSize(messageAndTags.tags.size()));
 	hasMsg = true;
 	DebugLogTraceEvent("SPC_NextMessageB", randomID)
 	    .detail("Tag", tag.toString())
@@ -165,7 +165,8 @@ StringRef ILogSystem::ServerPeekCursor::getMessage() {
 
 StringRef ILogSystem::ServerPeekCursor::getMessageWithTags() {
 	StringRef rawMessage = messageAndTags.getRawMessage();
-	rd.readBytes(rawMessage.size() - messageAndTags.getHeaderSize()); // Consumes the message.
+	rd.readBytes(rawMessage.size() -
+	             TagsAndMessage::getHeaderSize(messageAndTags.tags.size())); // Consumes the message.
 	return rawMessage;
 }
 
