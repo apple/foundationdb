@@ -1571,7 +1571,7 @@ ACTOR Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistrib
 	}
 }
 
-// Given a list of manifestEntry, create a bulkload task and wait until the task is complete or error.
+// Given a list of manifestEntry, create a bulkload task.
 // There is an invariant by bulkload engine: if a task metadata is persisted, the task
 // is guaranteed to be eventually marked as complete or error.
 ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
@@ -1621,15 +1621,6 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 			TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorInjectDDRestart", self->ddId).detail("Context", "New");
 			throw movekeys_conflict(); // improve code coverage
 		}
-
-		// Step 4: Monitor the bulkload completion
-		wait(bulkLoadJobWaitUntilTaskCompleteOrError(self, jobId, bulkLoadTask));
-		TraceEvent(bulkLoadPerfEventSev(), "DDBulkLoadJobExecutorTask", self->ddId)
-		    .detail("Phase", "Task complete")
-		    .detail("JobID", jobId)
-		    .detail("TaskID", bulkLoadTask.getTaskId())
-		    .detail("TaskRange", bulkLoadTask.getRange())
-		    .detail("Duration", now() - beginTime);
 		self->bulkLoadParallelismLimitor.decrementTaskCounter();
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
