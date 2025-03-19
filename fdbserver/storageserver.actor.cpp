@@ -5698,7 +5698,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						    .detail("AuditRange", req.range)
 						    .detail("AuditType", req.type)
 						    .detail("ReplyIndex", i)
-						    .detail("RangeRead", rangeToRead);
+						    .detail("RangeRead", rangeToRead)
+						    .detail("TargetServers", describe(req.targetServers));
 						throw reps[i].getError();
 					}
 					if (reps[i].get().error.present()) {
@@ -5708,7 +5709,8 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						    .detail("AuditRange", req.range)
 						    .detail("AuditType", req.type)
 						    .detail("ReplyIndex", i)
-						    .detail("RangeRead", rangeToRead);
+						    .detail("RangeRead", rangeToRead)
+						    .detail("TargetServers", describe(req.targetServers));
 						throw reps[i].get().error.get();
 					}
 					readBytes = readBytes + reps[i].get().data.expectedSize();
