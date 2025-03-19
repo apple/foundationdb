@@ -369,22 +369,24 @@ struct BackupData {
 		if (num == 0)
 			return;
 
-		if (messages.size() == num) {
-			messages.clear();
-			TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("ReleaseAll", lock->activePermits());
-			lock->release(lock->activePermits());
-			return;
-		}
-
 		// Accumulate erased message sizes
 		int64_t bytes = 0;
 		for (int i = 0; i < num; i++) {
 			bytes += messages[i].getEstimatedSize();
 		}
+		// Because lock->take() is blocking, the memory may be larger than
+		// the lock->activePermits(). So, we release them in two steps if needed.
+		int64_t toRelease = std::min(bytes, lock->activePermits());
 		TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId)
-		    .detail("Release", bytes)
+		    .detail("Release", toRelease)
 		    .detail("Total", lock->activePermits());
-		lock->release(bytes);
+		lock->release(toRelease); // Unblocks lock->take()
+		if (bytes > toRelease) {
+			TraceEvent(SevDebugMemory, "BackupWorkerMemory2", myId)
+			    .detail("Release", bytes - toRelease)
+			    .detail("Total", lock->activePermits());
+			lock->release(bytes - toRelease);
+		}
 		messages.erase(messages.begin(), messages.begin() + num);
 	}
 
