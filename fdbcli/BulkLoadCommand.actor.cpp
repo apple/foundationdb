@@ -110,11 +110,11 @@ ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 					return Void();
 				}
 				if (bulkLoadTask.phase == BulkLoadPhase::Complete) {
-					completeTaskCount++;
+					completeTaskCount = completeTaskCount + bulkLoadTask.getManifests().size();
 				} else if (bulkLoadTask.phase == BulkLoadPhase::Error) {
-					errorTaskCount++;
+					errorTaskCount = errorTaskCount + bulkLoadTask.getManifests().size();
 				}
-				submitTaskCount++;
+				submitTaskCount = submitTaskCount + bulkLoadTask.getManifests().size();
 			}
 			readBegin = rangeResult.back().key;
 		} catch (Error& e) {

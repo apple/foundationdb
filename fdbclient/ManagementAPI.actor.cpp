@@ -3326,11 +3326,11 @@ ACTOR Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyR
 				}
 				if (existTask.phase == BulkLoadPhase::Error) {
 					TraceEvent(SevWarnAlways, "ManagementAPIAcknowledgeErrorBulkLoadTask")
-					    .setMaxEventLength(-1)
-					    .setMaxFieldLength(-1)
-					    .detail("JobId", jobId.toString())
+					    .detail("JobId", jobId)
 					    .detail("JobRange", jobRange)
-					    .detail("ExistTask", existTask.toString());
+					    .detail("ExistTaskID", existTask.getTaskId())
+					    .detail("ExistTaskRange", existTask.getRange())
+					    .detail("ExistTaskJobId", existTask.getJobId());
 					wait(setBulkLoadFinalizeTransaction(&tr, existTask.getRange(), existTask.getTaskId()));
 				}
 				lastKey = bulkLoadTaskResult[i + 1].key;
@@ -3508,10 +3508,8 @@ ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 				// if no old metadata exists (the old job metadata has been cleared). So, we can stop at this point.
 				if (existJob.getJobId() != jobId) {
 					TraceEvent(SevWarn, "DDBulkDumpJobHasChanged")
-					    .setMaxEventLength(-1)
-					    .setMaxFieldLength(-1)
-					    .detail("InputJobId", jobId)
-					    .detail("ExistJob", existJob.toString());
+					    .detail("InputJobID", jobId.toString())
+					    .detail("ExistJobID", existJob.getJobId().toString());
 					throw bulkload_task_outdated();
 				}
 			}

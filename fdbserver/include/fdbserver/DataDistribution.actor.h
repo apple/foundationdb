@@ -661,12 +661,12 @@ public:
 				it->value().get().completeAck.sendError(bulkload_task_outdated());
 				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskCollectionPublishTaskOverwriteTask", ddId)
 				    .detail("NewTaskRange", bulkLoadTaskState.getRange())
-				    .detail("NewJobId", task.coreState.getJobId().toString())
-				    .detail("NewTaskId", task.coreState.getTaskId().toString())
+				    .detail("NewJobId", task.coreState.getJobId())
+				    .detail("NewTaskId", task.coreState.getTaskId())
 				    .detail("NewCommitVersion", task.commitVersion)
 				    .detail("OldTaskRange", it->range())
-				    .detail("OldJobId", it->value().get().coreState.getJobId().toString())
-				    .detail("OldTaskId", it->value().get().coreState.getTaskId().toString())
+				    .detail("OldJobId", it->value().get().coreState.getJobId())
+				    .detail("OldTaskId", it->value().get().coreState.getTaskId())
 				    .detail("OldCommitVersion", it->value().get().commitVersion);
 			}
 		}
