@@ -374,19 +374,10 @@ struct BackupData {
 		for (int i = 0; i < num; i++) {
 			bytes += messages[i].getEstimatedSize();
 		}
-		// Because lock->take() is blocking, the memory may be larger than
-		// the lock->activePermits(). So, we release them in two steps if needed.
-		int64_t toRelease = std::min(bytes, lock->activePermits());
 		TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId)
-		    .detail("Release", toRelease)
+		    .detail("Release", bytes)
 		    .detail("Total", lock->activePermits());
-		lock->release(toRelease); // Unblocks lock->take()
-		if (bytes > toRelease && pulling) {
-			TraceEvent(SevDebugMemory, "BackupWorkerMemory2", myId)
-			    .detail("Release", bytes - toRelease)
-			    .detail("Total", lock->activePermits());
-			lock->release(bytes - toRelease);
-		}
+		lock->release(bytes);
 		messages.erase(messages.begin(), messages.begin() + num);
 	}
 
@@ -1085,11 +1076,14 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
-		int64_t peekedBytes = 0;
+		state int64_t peekedBytes = 0;
+		// Hold messages until we know how many we can take, self->messages always
+		// contains messages that have been reserved memory for. I.e., lock->release()
+		// will not encounter message that has not been reserved memory.
+		state std::vector<VersionedMessage> tmpMessages;
 		while (r->hasMessage()) {
-			StringRef msg = r->getMessage();
-			self->messages.emplace_back(r->version(), msg, r->getTags(), r->arena());
-			peekedBytes += self->messages.back().getEstimatedSize();
+			tmpMessages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
+			peekedBytes += tmpMessages.back().getEstimatedSize();
 			r->nextMessage();
 		}
 		if (peekedBytes > 0) {
@@ -1097,6 +1091,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			    .detail("Take", peekedBytes)
 			    .detail("Current", self->lock->activePermits());
 			wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
+			self->messages.insert(self->messages.end(),
+			                      std::make_move_iterator(tmpMessages.begin()),
+			                      std::make_move_iterator(tmpMessages.end()));
 		}
 
 		tagAt = r->version().version;
