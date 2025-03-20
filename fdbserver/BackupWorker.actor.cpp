@@ -381,7 +381,7 @@ struct BackupData {
 		    .detail("Release", toRelease)
 		    .detail("Total", lock->activePermits());
 		lock->release(toRelease); // Unblocks lock->take()
-		if (bytes > toRelease) {
+		if (bytes > toRelease && pulling) {
 			TraceEvent(SevDebugMemory, "BackupWorkerMemory2", myId)
 			    .detail("Release", bytes - toRelease)
 			    .detail("Total", lock->activePermits());
