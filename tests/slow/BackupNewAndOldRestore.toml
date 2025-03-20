@@ -19,6 +19,7 @@ simBackupAgents = 'BackupToFile'
     [[test.workload]]
     testName = 'Backup'
     usePartitionedLog = true
+    encrypted = false
     backupTag = 'newBackup'
     backupAfter = 10.0
     restoreAfter = 60.0
@@ -39,6 +40,7 @@ simBackupAgents = 'BackupToFile'
     [[test.workload]]
     testName = 'Backup'
     usePartitionedLog = false
+    encrypted = false
     backupTag = 'oldBackup'
     backupAfter = 10.0
     restoreAfter = 60.0
@@ -53,6 +55,7 @@ clearAfterTest = false
     testName = 'Restore'
     backupTag1 = 'newBackup'
     backupTag2 = 'oldBackup'
+    encrypted = false
 
 # check consistency after restore
 [[test]]
