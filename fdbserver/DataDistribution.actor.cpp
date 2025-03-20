@@ -4756,6 +4756,8 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 				remoteReadBytes = 0;
 
 				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				ASSERT(!rangeToRead.empty());
+
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				// Read KeyServers

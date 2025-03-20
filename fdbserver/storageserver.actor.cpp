@@ -4761,9 +4761,13 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		//"None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
 		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
-			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
-			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
-			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
+			/* TraceEvent(SevWarn, "WrongShardServer1", data->thisServerID)
+			    .detail("Begin", req.begin.toString())
+			    .detail("End", req.end.toString())
+			    .detail("Version", version)
+			    .detail("ShardBegin", shard.begin)
+			    .detail("ShardEnd", shard.end)
+			    .detail("In", "getKeyValues>checkShardExtents"); */
 			throw wrong_shard_server();
 		}
 
@@ -4797,7 +4801,17 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			// and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do anyway
 			// via its "slow path"), but we would have to add some flags to the response to encode whether we went off
 			// the beginning and the end, since it needs that information.
-			//TraceEvent("WrongShardServer2", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkOffsets").detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
+			/* TraceEvent(SevWarn, "WrongShardServer2", data->thisServerID)
+			    .detail("Begin", req.begin.toString())
+			    .detail("End", req.end.toString())
+			    .detail("Version", version)
+			    .detail("ShardBegin", shard.begin)
+			    .detail("ShardEnd", shard.end)
+			    .detail("In", "getKeyValues>checkOffsets")
+			    .detail("BeginKey", begin)
+			    .detail("EndKey", end)
+			    .detail("BeginOffset", offset1)
+			    .detail("EndOffset", offset2); */
 			throw wrong_shard_server();
 		}
 
@@ -5245,6 +5259,8 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 				ownRangesSeenByKeyServerMap.clear();
 				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
 
+				ASSERT(!rangeToRead.empty());
+
 				// At this point, shard assignment history guarantees to contain assignments
 				// from localShardInfoReadAtVersion
 				ownRangesLocalViewRes = getThisServerShardInfo(data, rangeToRead);
@@ -5398,7 +5414,6 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 				    .detail("ClaimRange", claimRange)
 				    .detail("ServerKeyAtVersion", serverKeyReadAtVersion)
 				    .detail("ShardInfoAtVersion", data->version.get());
-
 				// Log statistic
 				cumulatedValidatedLocalShardsNum = cumulatedValidatedLocalShardsNum + ownRangesLocalView.size();
 				cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + ownRangesSeenByServerKey.size();
@@ -5622,12 +5637,13 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 	state double rateLimiterTotalWaitTime = 0;
 	state Reference<IRateControl> rateLimiter =
 	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->AUDIT_STORAGE_RATE_PER_SERVER_MAX, 1));
-
 	try {
 		loop {
 			try {
 				readBytes = 0;
 				rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
+				ASSERT(!rangeToRead.empty());
+
 				TraceEvent(SevDebug, "SSAuditStorageShardReplicaNewRoundBegin", data->thisServerID)
 				    .suppressFor(10.0)
 				    .detail("AuditID", req.id)
@@ -5665,7 +5681,6 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						throw audit_storage_failed();
 					}
 					StorageServerInterface remoteServer = decodeServerListValue(v.get());
-
 					GetKeyValuesRequest req;
 					req.begin = firstGreaterOrEqual(rangeToRead.begin);
 					req.end = firstGreaterOrEqual(rangeToRead.end);
@@ -5874,6 +5889,10 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						errors.push_back(error);
 						continue; // check next remote server
 					}
+				}
+
+				if (claimRange.end >= req.range.end) {
+					complete = true;
 				}
 
 				TraceEvent(SevInfo, "SSAuditStorageStatisticValidateReplica", data->thisServerID)
