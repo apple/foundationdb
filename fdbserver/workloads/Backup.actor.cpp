@@ -108,8 +108,10 @@ struct BackupWorkload : TestWorkload {
 	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		loop {
 			wait(backupAgent->changePause(cx, true));
+			TraceEvent("BW_AgentPaused").log();
 			wait(delay(30 * deterministicRandom()->random01()));
 			wait(backupAgent->changePause(cx, false));
+			TraceEvent("BW_AgentResumed").log();
 			wait(delay(120 * deterministicRandom()->random01()));
 		}
 	}

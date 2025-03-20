@@ -101,9 +101,24 @@ struct RestoreWorkload : TestWorkload {
 	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		loop {
 			wait(backupAgent->changePause(cx, true));
-			wait(delay(30 * deterministicRandom()->random01()));
+			TraceEvent("RW_AgentPaused").log();
+			wait(delay(10 * deterministicRandom()->random01()));
 			wait(backupAgent->changePause(cx, false));
-			wait(delay(120 * deterministicRandom()->random01()));
+			TraceEvent("RW_AgentResumed").log();
+			wait(delay(20 * deterministicRandom()->random01()));
+		}
+	}
+
+	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
+		state FileBackupAgent agent;
+		loop {
+			bool active = wait(agent.checkActive(cx));
+			TraceEvent("RW_AgentActivityCheck").detail("IsActive", active);
+			std::string status = wait(agent.getStatus(cx, ShowErrors::True, tag));
+			puts(status.c_str());
+			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
+			puts(statusJSON.c_str());
+			wait(delay(10.0));
 		}
 	}
 
@@ -117,6 +132,7 @@ struct RestoreWorkload : TestWorkload {
 		if (self->allowPauses && BUGGIFY) {
 			state Future<Void> cp = changePaused(cx, &backupAgent);
 		}
+		state Future<Void> status = statusLoop(cx, self->backupTag.toString());
 
 		// Increment the backup agent requests
 		if (self->agentRequest) {
