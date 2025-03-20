@@ -663,6 +663,7 @@ ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 			wait(delay(1.0));
 		}
 
+		TraceEvent("SimBackupAgentsStopping").log();
 		for (auto it : agentFutures) {
 			it.cancel();
 		}
