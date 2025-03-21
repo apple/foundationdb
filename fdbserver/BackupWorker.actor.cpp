@@ -349,6 +349,10 @@ struct BackupData {
 		}
 		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
+		DisabledTraceEvent("BackupWorkerPop", myId)
+		    .detail("Tag", popTag)
+		    .detail("SavedVersion", savedVersion)
+		    .detail("PopVersion", popVersion);
 		logSystem.get()->pop(std::max(popVersion, savedVersion), popTag);
 	}
 
@@ -374,19 +378,10 @@ struct BackupData {
 		for (int i = 0; i < num; i++) {
 			bytes += messages[i].getEstimatedSize();
 		}
-		// Because lock->take() is blocking, the memory may be larger than
-		// the lock->activePermits(). So, we release them in two steps if needed.
-		int64_t toRelease = std::min(bytes, lock->activePermits());
 		TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId)
-		    .detail("Release", toRelease)
+		    .detail("Release", bytes)
 		    .detail("Total", lock->activePermits());
-		lock->release(toRelease); // Unblocks lock->take()
-		if (bytes > toRelease) {
-			TraceEvent(SevDebugMemory, "BackupWorkerMemory2", myId)
-			    .detail("Release", bytes - toRelease)
-			    .detail("Total", lock->activePermits());
-			lock->release(bytes - toRelease);
-		}
+		lock->release(bytes);
 		messages.erase(messages.begin(), messages.begin() + num);
 	}
 
@@ -485,6 +480,7 @@ struct BackupData {
 				// Save the noop pop version, which sets min version for
 				// the next backup job. Note this version may change after the wait.
 				state Version popVersion = self->popTrigger.get();
+				ASSERT(self->popVersion <= popVersion);
 				wait(_saveNoopVersion(self, popVersion));
 				self->popVersion = popVersion;
 				TraceEvent("BackupWorkerNoopPop", self->myId)
@@ -1039,6 +1035,8 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	    .detail("Tag", self->tag)
 	    .detail("Version", tagAt)
 	    .detail("PopVersion", self->popVersion)
+	    .detail("TriggerVersion", self->popTrigger.get())
+	    .detail("StartVersion", self->startVersion)
 	    .detail("SavedVersion", self->savedVersion);
 	loop {
 		while (self->paused.get()) {
@@ -1085,11 +1083,14 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
-		int64_t peekedBytes = 0;
+		state int64_t peekedBytes = 0;
+		// Hold messages until we know how many we can take, self->messages always
+		// contains messages that we have reserved memory for. Therefore, lock->release()
+		// will always encounter message with reserved memory.
+		state std::vector<VersionedMessage> tmpMessages;
 		while (r->hasMessage()) {
-			StringRef msg = r->getMessage();
-			self->messages.emplace_back(r->version(), msg, r->getTags(), r->arena());
-			peekedBytes += self->messages.back().getEstimatedSize();
+			tmpMessages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
+			peekedBytes += tmpMessages.back().getEstimatedSize();
 			r->nextMessage();
 		}
 		if (peekedBytes > 0) {
@@ -1097,6 +1098,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			    .detail("Take", peekedBytes)
 			    .detail("Current", self->lock->activePermits());
 			wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
+			self->messages.insert(self->messages.end(),
+			                      std::make_move_iterator(tmpMessages.begin()),
+			                      std::make_move_iterator(tmpMessages.end()));
 		}
 
 		tagAt = r->version().version;
@@ -1151,7 +1155,14 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 						    std::max({ self->popVersion, self->savedVersion, committedVersion.get() });
 						self->minKnownCommittedVersion =
 						    std::max(committedVersion.get(), self->minKnownCommittedVersion);
-						self->popTrigger.set(newPopVersion);
+						if (newPopVersion < self->popTrigger.get()) {
+							// this can happen if a different GRV proxy replies
+							DisabledTraceEvent("BackupWorkerSkipTrigger", self->myId)
+							    .detail("Version", newPopVersion)
+							    .detail("OldPop", self->popTrigger.get());
+						} else {
+							self->popTrigger.set(newPopVersion);
+						}
 						committedVersion = Never();
 					} else {
 						committedVersion = self->getMinKnownCommittedVersion();
