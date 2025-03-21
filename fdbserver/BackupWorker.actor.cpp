@@ -1085,8 +1085,8 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		state int64_t peekedBytes = 0;
 		// Hold messages until we know how many we can take, self->messages always
-		// contains messages that have been reserved memory for. I.e., lock->release()
-		// will not encounter message that has not been reserved memory.
+		// contains messages that we have reserved memory for. Therefore, lock->release()
+		// will always encounter message with reserved memory.
 		state std::vector<VersionedMessage> tmpMessages;
 		while (r->hasMessage()) {
 			tmpMessages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
