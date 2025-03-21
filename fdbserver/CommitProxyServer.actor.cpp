@@ -810,18 +810,24 @@ inline bool shouldBackup(MutationRef const& m) {
 	return false;
 }
 
+// Find the set of logs the batch is sent to. An empty set indicates it cannot be
+// determined. In version vector, this means the batch should be sent to all logs.
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 	std::set<Tag> transactionTags;
 	std::vector<Tag> cacheVector = { cacheTag };
 	lastShardMove = pProxyCommitData->lastShardMove;
 	if (pProxyCommitData->txnStateStore->getReplaceContent()) {
-		// return empty set if txnStateStore will snapshot.
-		// empty sets are sent to all logs.
-		return transactionTags;
+		return std::set<Tag>();
+	}
+	if (pProxyCommitData->idempotencyClears.size()) {
+		return std::set<Tag>();
 	}
 	for (int transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
 		int mutationNum = 0;
 		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
+		if (trs[transactionNum].idempotencyId.valid()) {
+			return std::set<Tag>();
+		}
 		for (; mutationNum < pMutations->size(); mutationNum++) {
 			auto& m = (*pMutations)[mutationNum];
 			// disable version vector's effect if any mutation in the batch is backed up.
@@ -2378,6 +2384,10 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                        &self->computeStart));
 	}
 
+	// When version vector is enabled, idempotency entries should only be created or cleared
+	// if the operation was detected at pre resolution time. This ensures that the
+	// operation is broadcast to all logs, and does not lead to logs being included
+	// that are not part of the expected tag set (tpcv).
 	buildIdempotencyIdMutations(
 	    self->trs,
 	    self->idempotencyKVBuilder,
@@ -2391,6 +2401,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    idempotencyIdSet.param1 = kv.key;
 		    idempotencyIdSet.param2 = kv.value;
 		    auto& tags = pProxyCommitData->tagsForKey(kv.key);
+		    ASSERT(!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST ||
+		           pProxyCommitData->db->get().logSystemConfig.numLogs() == self->tpcvMap.size());
 		    self->toCommit.addTags(tags);
 		    if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
 			    CODE_PROBE(true, "encrypting idempotency mutation", probe::decoration::rare);
@@ -2414,27 +2426,31 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			    self->toCommit.writeTypedMessage(idempotencyIdSet);
 		    }
 	    });
-	state int i = 0;
-	for (i = 0; i < pProxyCommitData->idempotencyClears.size(); i++) {
-		auto& tags = pProxyCommitData->tagsForKey(pProxyCommitData->idempotencyClears[i].param1);
-		self->toCommit.addTags(tags);
-		// We already have an arena with an appropriate lifetime handy
-		Arena& arena = pProxyCommitData->idempotencyClears.arena();
-		if (pProxyCommitData->acsBuilder != nullptr) {
-			updateMutationWithAcsAndAddMutationToAcsBuilder(
-			    pProxyCommitData->acsBuilder,
-			    pProxyCommitData->idempotencyClears[i],
-			    tags,
-			    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex),
-			    pProxyCommitData->epoch,
-			    self->commitVersion,
-			    pProxyCommitData->dbgid);
+
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST ||
+	    pProxyCommitData->db->get().logSystemConfig.numLogs() == self->tpcvMap.size()) {
+		state int i = 0;
+		for (i = 0; i < pProxyCommitData->idempotencyClears.size(); i++) {
+			auto& tags = pProxyCommitData->tagsForKey(pProxyCommitData->idempotencyClears[i].param1);
+			self->toCommit.addTags(tags);
+			// We already have an arena with an appropriate lifetime handy
+			Arena& arena = pProxyCommitData->idempotencyClears.arena();
+			if (pProxyCommitData->acsBuilder != nullptr) {
+				updateMutationWithAcsAndAddMutationToAcsBuilder(
+				    pProxyCommitData->acsBuilder,
+				    pProxyCommitData->idempotencyClears[i],
+				    tags,
+				    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex),
+				    pProxyCommitData->epoch,
+				    self->commitVersion,
+				    pProxyCommitData->dbgid);
+			}
+			WriteMutationRefVar var = wait(writeMutation(
+			    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));
+			ASSERT(std::holds_alternative<MutationRef>(var));
 		}
-		WriteMutationRefVar var = wait(writeMutation(
-		    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));
-		ASSERT(std::holds_alternative<MutationRef>(var));
+		pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
 	}
-	pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
 
 	self->toCommit.saveTags(self->writtenTags);
 
