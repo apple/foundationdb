@@ -3778,7 +3778,7 @@ ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerNam
 	state KeyRange rangeToRead;
 	state RangeLockStateSet currentRangeLockStateSet;
 	state KeyRange currentRange;
-	loop {
+	while (beginKey < endKey) {
 		rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3802,10 +3802,9 @@ ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerNam
 					tr.reset();
 					beginKey = currentRange.end;
 					break;
+				} else {
+					beginKey = currentRange.end;
 				}
-			}
-			if (beginKey == endKey) {
-				break;
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));

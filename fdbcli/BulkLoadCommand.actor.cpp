@@ -299,7 +299,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 		}
 		std::vector<std::pair<KeyRange, RangeLockState>> lockedRanges =
 		    wait(findExclusiveReadLockOnRange(cx, normalKeys));
-		fmt::println("Total {} locked ranges", std::to_string(lockedRanges.size()));
+		fmt::println("Total {} locked ranges", lockedRanges.size());
 		if (lockedRanges.size() > 10) {
 			fmt::println("First 10 locks are:");
 		}
@@ -308,7 +308,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			if (count > 10) {
 				break;
 			}
-			fmt::println("Lock {} on {} for {}", std::to_string(count), lock.first.toString(), lock.second.toString());
+			fmt::println("Lock {} on {} for {}", count, lock.first.toString(), lock.second.toString());
 			count++;
 		}
 		return UID();
