@@ -2896,7 +2896,8 @@ ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTas
 	try {
 		wait(takeExclusiveReadLockOnRange(tr, bulkLoadTask.getRange(), rangeLockNameForBulkLoad));
 	} catch (Error& e) {
-		ASSERT(e.code() != error_code_range_locked_by_different_user); // Currently, only bulkload uses the range lock.
+		ASSERT(e.code() != error_code_range_lock_reject); // Currently, only bulkload uses the range lock, and tasks
+		                                                  // have exclusive ranges
 		throw e;
 	}
 	bulkLoadTask.submitTime = now();
@@ -3010,7 +3011,8 @@ ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange rang
 	try {
 		wait(releaseExclusiveReadLockOnRange(tr, bulkLoadTaskState.getRange(), rangeLockNameForBulkLoad));
 	} catch (Error& e) {
-		ASSERT(e.code() != error_code_range_locked_by_different_user); // Currently, only bulkload uses the range lock.
+		ASSERT(e.code() != error_code_range_unlock_reject); // Currently, only bulkload uses the range lock, and tasks
+		                                                    // have exclusive ranges
 		throw e;
 	}
 	return Void();
@@ -3673,11 +3675,12 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 }
 
 // Not transactional
-ACTOR Future<std::vector<KeyRange>> getExclusiveReadLockOnRange(Database cx, KeyRange range) {
+ACTOR Future<std::vector<std::pair<KeyRange, RangeLockState>>>
+findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwnerName> ownerName) {
 	if (range.end > normalKeys.end) {
 		throw range_lock_failed();
 	}
-	state std::vector<KeyRange> lockedRanges;
+	state std::vector<std::pair<KeyRange, RangeLockState>> lockedRanges;
 	state Key beginKey = range.begin;
 	state Key endKey = range.end;
 	state Transaction tr(cx);
@@ -3693,15 +3696,18 @@ ACTOR Future<std::vector<KeyRange>> getExclusiveReadLockOnRange(Database cx, Key
 				}
 				RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(result[i].value);
 				ASSERT(rangeLockStateSet.isValid());
-				if (rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock)) {
-					lockedRanges.push_back(Standalone(KeyRangeRef(result[i].key, result[i + 1].key)));
+				if (rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
+				    (!ownerName.present() ||
+				     ownerName.get() == rangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId())) {
+					// Exclusive lock can only have one lock in the set, so we just check the first lock in the set
+					lockedRanges.push_back(std::make_pair(Standalone(KeyRangeRef(result[i].key, result[i + 1].key)),
+					                                      rangeLockStateSet.getAllLockStats()[0]));
 				}
 			}
 			if (result[result.size() - 1].key == range.end) {
 				break;
 			} else {
 				beginKey = result[result.size() - 1].key;
-				tr.reset();
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -3712,8 +3718,7 @@ ACTOR Future<std::vector<KeyRange>> getExclusiveReadLockOnRange(Database cx, Key
 
 // Validate the input range and owner.
 // If invalid, reject the request by throwing range_lock_failed error.
-// Check if the range has been locked by a different user.
-// If yes, reject the request by throwing range_locked_by_different_user error.
+// If the range has been locked, reject the request by throwing range_lock_reject error.
 ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
                                                       KeyRange range,
                                                       RangeLockOwnerName ownerUniqueID) {
@@ -3736,7 +3741,6 @@ ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
 	state RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
 	ASSERT(owner.isValid());
 	// Check lock state on the entire input range. Throw exception if the range has been locked by a different owner.
-	state RangeLockState newLock(RangeLockType::ExclusiveReadLock, ownerUniqueID);
 	state Key beginKey = range.begin;
 	state Key endKey = range.end;
 	state KeyRange rangeToRead;
@@ -3750,13 +3754,70 @@ ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
 			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
 			ASSERT(rangeLockStateSet.isValid());
 			auto lockSet = rangeLockStateSet.getLocks();
-			if (!lockSet.empty() && lockSet.find(newLock.getLockUniqueString()) == lockSet.end()) {
+			if (!lockSet.empty() && (!rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) ||
+			                         lockSet.find(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range)
+			                                          .getLockUniqueString()) == lockSet.end())) {
 				TraceEvent(SevDebug, "PrepareExclusiveRangeLockOperationFailed")
 				    .detail("Reason", "Locked")
-				    .detail("NewLock", newLock.toString())
+				    .detail("NewLockType", RangeLockType::ExclusiveReadLock)
+				    .detail("NewLockRange", range)
+				    .detail("NewLockOwner", ownerUniqueID)
 				    .detail("ExistingLocks", rangeLockStateSet.toString())
 				    .detail("Range", range);
-				throw range_locked_by_different_user(); // Has been locked by a different owner
+				throw range_lock_reject(); // Has been locked
+			}
+		}
+		beginKey = res[res.size() - 1].key;
+	}
+	return Void();
+}
+
+ACTOR Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr,
+                                                        KeyRange range,
+                                                        RangeLockOwnerName ownerUniqueID) {
+	// Check input range
+	if (range.end > normalKeys.end) {
+		TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
+		    .detail("Reason", "Range out of scope")
+		    .detail("Range", range);
+		throw range_lock_failed();
+	}
+	// Check owner
+	state Optional<Value> ownerValue = wait(tr->get(rangeLockOwnerKeyFor(ownerUniqueID)));
+	if (!ownerValue.present()) {
+		TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
+		    .detail("Reason", "Owner not found")
+		    .detail("Owner", ownerUniqueID)
+		    .detail("Range", range);
+		throw range_lock_failed();
+	}
+	state RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
+	ASSERT(owner.isValid());
+
+	// Check lock state on the entire input range. Throw exception if the range has been locked by a different owner.
+	state Key beginKey = range.begin;
+	state Key endKey = range.end;
+	state KeyRange rangeToRead;
+	while (beginKey < endKey) {
+		rangeToRead = KeyRangeRef(beginKey, endKey);
+		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
+		for (int i = 0; i < res.size() - 1; i++) {
+			if (res[i].value.empty()) {
+				continue;
+			}
+			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
+			ASSERT(rangeLockStateSet.isValid());
+			auto lockSet = rangeLockStateSet.getLocks();
+			if (!lockSet.empty() && (!rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) ||
+			                         lockSet.find(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range)
+			                                          .getLockUniqueString()) == lockSet.end())) {
+				TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
+				    .detail("Reason", "Has been locked by a different user or the same user with a different range")
+				    .detail("UnLockOwner", ownerUniqueID)
+				    .detail("UnLockRange", range)
+				    .detail("ExistingLocks", rangeLockStateSet.toString())
+				    .detail("Range", range);
+				throw range_unlock_reject();
 			}
 		}
 		beginKey = res[res.size() - 1].key;
@@ -3775,9 +3836,9 @@ ACTOR Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range,
 	// At this point, no lock presents on the range.
 	// Lock range by writting the range.
 	RangeLockStateSet rangeLockStateSet;
-	rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID));
+	rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range));
 	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(rangeLockStateSet)));
-	TraceEvent(SevInfo, "TakeExclusiveReadLockOnRange").detail("Range", range);
+	TraceEvent(SevInfo, "TakeExclusiveReadLockTransactionOnRange").detail("Range", range);
 	return Void();
 }
 
@@ -3786,11 +3847,56 @@ ACTOR Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range,
 ACTOR Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	wait(prepareExclusiveRangeLockOperation(tr, range, ownerUniqueID));
+	wait(prepareExclusiveRangeUnlockOperation(tr, range, ownerUniqueID));
 	// At this point, no lock presents on the range.
 	// Unlock by overwiting the range.
 	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(RangeLockStateSet())));
-	TraceEvent(SevInfo, "ReleaseExclusiveReadLockOnRange").detail("Range", range);
+	TraceEvent(SevInfo, "ReleaseExclusiveReadLockTransactionOnRange").detail("Range", range);
+	return Void();
+}
+
+ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID) {
+	state Key beginKey = normalKeys.begin;
+	state Key endKey = normalKeys.end;
+	state Transaction tr(cx);
+	state int i = 0;
+	state RangeResult result;
+	state KeyRange rangeToRead;
+	state RangeLockStateSet currentRangeLockStateSet;
+	state KeyRange currentRange;
+	loop {
+		rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			result.clear();
+			wait(store(result, krmGetRanges(&tr, rangeLockPrefix, rangeToRead)));
+			i = 0;
+			for (; i < result.size() - 1; i++) {
+				currentRange = KeyRangeRef(result[i].key, result[i + 1].key);
+				if (result[i].value.empty()) {
+					beginKey = currentRange.end;
+					continue;
+				}
+				currentRangeLockStateSet = decodeRangeLockStateSet(result[i].value);
+				ASSERT(currentRangeLockStateSet.isValid());
+				if (currentRangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
+				    currentRangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId() == ownerUniqueID) {
+					wait(krmSetRangeCoalescing(
+					    &tr, rangeLockPrefix, currentRange, normalKeys, rangeLockStateSetValue(RangeLockStateSet())));
+					wait(tr.commit());
+					tr.reset();
+					beginKey = currentRange.end;
+					break;
+				}
+			}
+			if (beginKey == endKey) {
+				break;
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 	return Void();
 }
 
@@ -3801,6 +3907,7 @@ ACTOR Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, Ran
 		try {
 			wait(takeExclusiveReadLockOnRange(&tr, range, ownerUniqueID));
 			wait(tr.commit());
+			TraceEvent(SevInfo, "TakeExclusiveReadLockOnRange").detail("Range", range);
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -3816,6 +3923,7 @@ ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, 
 		try {
 			wait(releaseExclusiveReadLockOnRange(&tr, range, ownerUniqueID));
 			wait(tr.commit());
+			TraceEvent(SevInfo, "ReleaseExclusiveReadLockOnRange").detail("Range", range);
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));

@@ -45,10 +45,13 @@ A range can only be locked by a registered owner.
 The user can use the following API to register an identity and lock a range.
 
 Put an exclusive read lock on a range. The range must be within the user key space, aka ``"" ~ \xff``.
+The lock is rejected with range_lock_reject error if the range has any lock (of the same user or other users).
 
 ``ACTOR Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
 
 Release an exclusive read lock on a range. The range must be within the user key space, aka ``"" ~ \xff``.
+The lock is rejected with range_unlock_reject error if the range has any lock from other users or has lock by the same user 
+but the range of the lock is different from the input range.
 
 ``ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
 
@@ -58,7 +61,7 @@ If the execution is failed, no range is locked/unlocked.
 
 Get exclusive read locks on the input range
 
-``ACTOR Future<std::vector<KeyRange>> getExclusiveReadLockOnRange(Database cx, KeyRange range);``
+``ACTOR Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(Database cx, KeyRange range);``
 
 Register a range lock owner to database metadata.
 

@@ -273,7 +273,13 @@ ACTOR Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange ran
 ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
 // Get locked ranges within the input range (the input range must be within normalKeys)
-ACTOR Future<std::vector<KeyRange>> getExclusiveReadLockOnRange(Database cx, KeyRange range);
+ACTOR Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(
+    Database cx,
+    KeyRange range,
+    Optional<RangeLockOwnerName> ownerName = Optional<RangeLockOwnerName>());
+
+// Clear all exclusive read lock by the input user. Not transactional.
+ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);

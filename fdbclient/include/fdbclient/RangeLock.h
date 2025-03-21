@@ -30,6 +30,7 @@
 
 using RangeLockOwnerName = std::string;
 using RangeLockUniqueString = std::string;
+using RangeLockID = std::string;
 
 enum class RangeLockType : uint8_t {
 	Invalid = 0,
@@ -88,8 +89,8 @@ struct RangeLockState {
 public:
 	RangeLockState() = default;
 
-	RangeLockState(RangeLockType type, const RangeLockOwnerName& ownerUniqueId)
-	  : lockType(type), ownerUniqueId(ownerUniqueId) {
+	RangeLockState(RangeLockType type, const RangeLockOwnerName& ownerUniqueId, const KeyRange& range)
+	  : lockType(type), ownerUniqueId(ownerUniqueId), range(range) {
 		ASSERT(isValid());
 	}
 
@@ -105,26 +106,36 @@ public:
 		}
 	}
 
+	KeyRange getRange() const { return range; }
+
 	std::string toString() const {
-		return "RangeLockState: [LockType]: " + rangeLockTypeString(lockType) + " [Owner]: " + ownerUniqueId;
+		return "RangeLockState: [LockType]: " + rangeLockTypeString(lockType) + ", [Owner]: " + ownerUniqueId +
+		       ", [Range]: " + range.toString() + ", [RangeLockID]: " + lockId;
 	}
 
 	bool isLockedFor(RangeLockType inputLockType) const { return lockType == inputLockType; }
 
 	bool operator==(RangeLockState const& r) const {
-		return lockType == r.lockType && ownerUniqueId == r.ownerUniqueId;
+		return lockType == r.lockType && ownerUniqueId == r.ownerUniqueId && range == r.range;
 	}
 
-	RangeLockUniqueString getLockUniqueString() const { return ownerUniqueId + rangeLockTypeString(lockType); }
+	// TODO: use lockId
+	RangeLockUniqueString getLockUniqueString() const {
+		return ownerUniqueId + rangeLockTypeString(lockType) + range.toString();
+	}
+
+	RangeLockOwnerName getOwnerUniqueId() const { return ownerUniqueId; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ownerUniqueId, lockType);
+		serializer(ar, ownerUniqueId, lockType, range, lockId);
 	}
 
 private:
 	RangeLockOwnerName ownerUniqueId; // The app/user that owns the lock.
 	RangeLockType lockType;
+	KeyRange range;
+	RangeLockID lockId; // Reserved for physical lock. Is not used now.
 };
 
 // Persisted state on a range. A range can have multiple locks distinguishing by owner and lockType.
