@@ -173,27 +173,18 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 // When the mode is on, DD will periodically check if there is any bulkload task to do by scaning the metadata.
 ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
 
-// Get bulk load tasks which range is fully contained by the input range.
-// If phase is provided, then return the task with the input phase.
-ACTOR Future<std::vector<BulkLoadTaskState>> getBulkLoadTasksWithinRange(
-    Database cx,
-    KeyRange rangeToRead,
-    size_t limit = 10,
-    Optional<BulkLoadPhase> phase = Optional<BulkLoadPhase>());
-
 // Create a bulkload task submission transaction without commit
 // Used by ManagementAPI and bulkdumpRestore at DD
-ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);
-
-// Submit a bulk load task
-ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadTaskState bulkLoadTask);
+ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr,
+                                                    BulkLoadTaskState bulkLoadTask,
+                                                    bool checkTaskExclusive = true);
 
 // Create an bulkload task acknowledge transaction without commit
 // Used by ManagementAPI and bulkdumpRestore at DD
-ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);
-
-// Finalize a bulk load task if it has been completed
-ACTOR Future<Void> finalizeBulkLoadTask(Database cx, KeyRange range, UID taskId);
+ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr,
+                                                  KeyRange range,
+                                                  UID taskId,
+                                                  bool checkTaskExclusive = true);
 
 // Get bulk load task for the input range and taskId
 ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
@@ -273,7 +264,13 @@ ACTOR Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange ran
 ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
 // Get locked ranges within the input range (the input range must be within normalKeys)
-ACTOR Future<std::vector<KeyRange>> getExclusiveReadLockOnRange(Database cx, KeyRange range);
+ACTOR Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(
+    Database cx,
+    KeyRange range,
+    Optional<RangeLockOwnerName> ownerName = Optional<RangeLockOwnerName>());
+
+// Clear all exclusive read lock by the input user. Not transactional.
+ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);

@@ -49,6 +49,13 @@ struct WatchesWorkload : TestWorkload {
 		tempRand.randomShuffle(nodeOrder);
 	}
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		// We disable RandomRangeLock workload injection because watchesWorker() does not handle the
+		// transaction error, in particular, transaction_rejected_range_locked can happen when enabling RandomRangeLock.
+		// TODO: remove after the workload handles the transaction error.
+		out.insert("RandomRangeLock");
+	}
+
 	Future<Void> setup(Database const& cx) override {
 		// return _setup(cx, this);
 		std::vector<Future<Void>> setupActors;

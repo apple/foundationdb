@@ -291,6 +291,50 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 		printLongDesc(tokens[0]);
 		return UID();
 
+	} else if (tokencmp(tokens[1], "printlock")) {
+		// For debugging purposes and invisible to users.
+		if (tokens.size() != 2) {
+			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
+			return UID();
+		}
+		std::vector<std::pair<KeyRange, RangeLockState>> lockedRanges =
+		    wait(findExclusiveReadLockOnRange(cx, normalKeys));
+		fmt::println("Total {} locked ranges", lockedRanges.size());
+		if (lockedRanges.size() > 10) {
+			fmt::println("First 10 locks are:");
+		}
+		int count = 1;
+		for (const auto& lock : lockedRanges) {
+			if (count > 10) {
+				break;
+			}
+			fmt::println("Lock {} on {} for {}", count, lock.first.toString(), lock.second.toString());
+			count++;
+		}
+		return UID();
+
+	} else if (tokencmp(tokens[1], "printlockowner")) {
+		// For debugging purposes and invisible to users.
+		if (tokens.size() != 2) {
+			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
+			return UID();
+		}
+		std::vector<RangeLockOwner> owners = wait(getAllRangeLockOwners(cx));
+		for (const auto owner : owners) {
+			fmt::println("{}", owner.toString());
+		}
+		return UID();
+
+	} else if (tokencmp(tokens[1], "clearlock")) {
+		// For debugging purposes and invisible to users.
+		if (tokens.size() != 3) {
+			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
+			return UID();
+		}
+		std::string ownerUniqueID = tokens[2].toString();
+		wait(releaseExclusiveReadLockByUser(cx, ownerUniqueID));
+		return UID();
+
 	} else {
 		printUsage(tokens[0]);
 		printLongDesc(tokens[0]);

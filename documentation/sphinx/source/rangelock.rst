@@ -39,16 +39,19 @@ Ideally, we would use the write lock to achieve this; however, we are currently 
 
 How to use?
 -----------
-Currently, FDB only provides ManagementAPI to lock a range. 
-Before a user can lock a range, the user must register its identity to the database.
-A range can only be locked by a registered owner.
-The user can use the following API to register an identity and lock a range.
+Currently, FDB provides the ManagementAPI for range locking, intended as an interface for FDB feature development.
+Before locking a range, a user must first register their identity with the database.
+Only registered users are permitted to acquire range locks.
+The following API can be used to register an identity and lock a range.
 
 Put an exclusive read lock on a range. The range must be within the user key space, aka ``"" ~ \xff``.
+The locking request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.
+Currently, only the ExclusiveReadLock type is supported, but the design allows for future extension.
 
 ``ACTOR Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
 
 Release an exclusive read lock on a range. The range must be within the user key space, aka ``"" ~ \xff``.
+The release request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.
 
 ``ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);``
 
@@ -58,7 +61,7 @@ If the execution is failed, no range is locked/unlocked.
 
 Get exclusive read locks on the input range
 
-``ACTOR Future<std::vector<KeyRange>> getExclusiveReadLockOnRange(Database cx, KeyRange range);``
+``ACTOR Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(Database cx, KeyRange range);``
 
 Register a range lock owner to database metadata.
 

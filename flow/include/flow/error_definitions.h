@@ -163,7 +163,8 @@ ERROR( bulkdump_task_failed, 1243, "Bulk dumping task failed" )
 ERROR( bulkdump_task_outdated, 1244, "Bulk dumping task outdated" )
 ERROR( bulkload_fileset_invalid_filepath, 1245, "Bulkload fileset provides invalid filepath" )
 ERROR( bulkload_manifest_decode_error, 1246, "Bulkload manifest string is failed to decode" )
-ERROR( range_locked_by_different_user, 1247, "Range has been locked by a different user" )
+ERROR( range_lock_reject, 1247, "Range lock is rejected" )
+ERROR( range_unlock_reject, 1248, "Range unlock is rejected" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
