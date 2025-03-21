@@ -157,65 +157,6 @@ struct RangeLocking : TestWorkload {
 		return res;
 	}
 
-	ACTOR Future<Void> simpleTest(RangeLocking* self, Database cx) {
-		state Key keyUpdate = "11"_sr;
-		state KeyRange keyToClear = KeyRangeRef("1"_sr, "3"_sr);
-		state KeyRange rangeLock = KeyRangeRef("1"_sr, "2"_sr);
-		state Optional<Value> value;
-		state std::vector<std::pair<KeyRange, RangeLockState>> lockedRanges;
-
-		wait(self->setKey(cx, keyUpdate, "1"_sr));
-
-		wait(store(value, self->getKey(cx, keyUpdate)));
-		ASSERT(value.present() && value.get() == "1"_sr);
-
-		wait(self->clearKey(cx, keyUpdate));
-
-		wait(store(value, self->getKey(cx, keyUpdate)));
-		ASSERT(!value.present());
-
-		wait(takeExclusiveReadLockOnRange(cx, rangeLock, self->rangeLockOwnerName));
-		TraceEvent("RangeLockWorkLoadLockRange").detail("Range", rangeLock);
-
-		wait(store(lockedRanges, findExclusiveReadLockOnRange(cx, normalKeys)));
-		TraceEvent("RangeLockWorkLoadGetLockedRange")
-		    .detail("Range", rangeLock)
-		    .detail("LockState", self->getLockRangesString(lockedRanges));
-
-		try {
-			wait(self->setKey(cx, keyUpdate, "2"_sr));
-			ASSERT(false);
-		} catch (Error& e) {
-			ASSERT(e.code() == error_code_transaction_rejected_range_locked);
-		}
-
-		try {
-			wait(self->clearRange(cx, keyToClear));
-			ASSERT(false);
-		} catch (Error& e) {
-			ASSERT(e.code() == error_code_transaction_rejected_range_locked);
-		}
-
-		wait(store(value, self->getKey(cx, keyUpdate)));
-		ASSERT(!value.present());
-
-		wait(releaseExclusiveReadLockOnRange(cx, rangeLock, self->rangeLockOwnerName));
-		TraceEvent("RangeLockWorkLoadUnlockRange").detail("Range", rangeLock);
-
-		lockedRanges.clear();
-		wait(store(lockedRanges, findExclusiveReadLockOnRange(cx, normalKeys)));
-		TraceEvent("RangeLockWorkLoadGetLockedRange")
-		    .detail("Range", rangeLock)
-		    .detail("LockState", self->getLockRangesString(lockedRanges));
-
-		wait(self->setKey(cx, keyUpdate, "3"_sr));
-
-		wait(store(value, self->getKey(cx, keyUpdate)));
-		ASSERT(value.present() && value.get() == "3"_sr);
-
-		return Void();
-	}
-
 	KeyValue getRandomKeyValue() const {
 		Key key = StringRef(std::to_string(deterministicRandom()->randomInt(0, 10)));
 		Value value = key;
@@ -507,8 +448,6 @@ struct RangeLocking : TestWorkload {
 	ACTOR Future<Void> complexTest(RangeLocking* self, Database cx) {
 		state int iterationCount = 100;
 		state int iteration = 0;
-		state std::string rangeLockOwnerName = "RangeLockingSimpleTest";
-		wait(registerRangeLockOwner(cx, rangeLockOwnerName, rangeLockOwnerName));
 		loop {
 			if (iteration > iterationCount || self->shouldExit) {
 				break;
@@ -546,7 +485,112 @@ struct RangeLocking : TestWorkload {
 			    .detail("Phase", "CheckDBCorrectness");
 			iteration++;
 		}
+		wait(releaseExclusiveReadLockByUser(cx, self->rangeLockOwnerName));
+		std::vector<std::pair<KeyRange, RangeLockState>> locks = wait(findExclusiveReadLockOnRange(cx, normalKeys));
+		ASSERT(locks.empty());
+
 		TraceEvent("RangeLockWorkloadProgress").detail("Phase", "End");
+		return Void();
+	}
+
+	bool sameRangeList(const std::vector<KeyRange>& rangesA,
+	                   const std::vector<KeyRange>& rangesB,
+	                   const RangeLockOwnerName& owner) {
+		if (rangesA.size() != rangesB.size()) {
+			TraceEvent(SevError, "RangeLockWorkloadTestUnlockRangeByUserMismatch")
+			    .detail("RangesA", describe(rangesA))
+			    .detail("RangesB", describe(rangesB))
+			    .detail("Owner", owner);
+			return false;
+		}
+		for (const auto& rangeA : rangesA) {
+			if (std::find(rangesB.begin(), rangesB.end(), rangeA) == rangesB.end()) {
+				TraceEvent(SevError, "RangeLockWorkloadTestUnlockRangeByUserMismatch")
+				    .detail("RangesA", describe(rangesA))
+				    .detail("RangesB", describe(rangesB))
+				    .detail("Owner", owner);
+				return false;
+			}
+		}
+		for (const auto& rangeB : rangesB) {
+			if (std::find(rangesA.begin(), rangesA.end(), rangeB) == rangesA.end()) {
+				TraceEvent(SevError, "RangeLockWorkloadTestUnlockRangeByUserMismatch")
+				    .detail("RangesA", describe(rangesA))
+				    .detail("RangesB", describe(rangesB))
+				    .detail("Owner", owner);
+				return false;
+			}
+		}
+		return true;
+	}
+
+	ACTOR Future<Void> testUnlockByUser(RangeLocking* self, Database cx) {
+		state int i = 0;
+		state int j = 0;
+		state std::unordered_map<RangeLockOwnerName, std::vector<KeyRange>> rangeLocks;
+		state RangeLockOwnerName rangeLockOwnerName;
+		state std::vector<RangeLockOwnerName> candidates;
+		state KeyRange rangeToLock;
+		state std::vector<KeyRange> lockedRanges;
+		state std::vector<RangeLockOwnerName> usersToUnlock; // can contain duplicated users
+		state std::vector<std::pair<KeyRange, RangeLockState>> locksPerUser;
+		for (; i < 100; i++) {
+			rangeLockOwnerName = "TestUnlockByUser" + std::to_string(i);
+			wait(registerRangeLockOwner(cx, rangeLockOwnerName, rangeLockOwnerName));
+			lockedRanges.clear();
+			for (; j < 2; j++) {
+				try {
+					rangeToLock = self->getRandomRange();
+					wait(takeExclusiveReadLockOnRange(cx, rangeToLock, rangeLockOwnerName));
+					lockedRanges.push_back(rangeToLock);
+					TraceEvent("RangeLockWorkloadTestUnlockRangeByUser")
+					    .detail("Ops", "LockRange")
+					    .detail("Range", rangeToLock)
+					    .detail("User", rangeLockOwnerName);
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+					ASSERT(e.code() == error_code_range_lock_reject);
+				}
+			}
+			auto res = rangeLocks.insert({ rangeLockOwnerName, lockedRanges });
+			ASSERT(res.second);
+			candidates.push_back(rangeLockOwnerName);
+		}
+		for (i = 0; i < 10; i++) {
+			usersToUnlock.push_back(deterministicRandom()->randomChoice(candidates));
+		}
+		for (i = 0; i < usersToUnlock.size(); i++) {
+			wait(releaseExclusiveReadLockByUser(cx, usersToUnlock[i]));
+			TraceEvent("RangeLockWorkloadTestUnlockRangeByUser")
+			    .detail("Ops", "Unlock by user")
+			    .detail("User", usersToUnlock[i]);
+		}
+		for (i = 0; i < candidates.size(); i++) {
+			locksPerUser.clear();
+			wait(store(locksPerUser, findExclusiveReadLockOnRange(cx, normalKeys, candidates[i])));
+			if (std::find(usersToUnlock.begin(), usersToUnlock.end(), candidates[i]) != usersToUnlock.end()) {
+				TraceEvent("RangeLockWorkloadTestUnlockRangeByUser")
+				    .detail("Ops", "Find unlocked user")
+				    .detail("User", candidates[i])
+				    .detail("LockCount", locksPerUser.size());
+				ASSERT(locksPerUser.empty());
+			} else {
+				std::vector<KeyRange> lockedRangeFromMetadata;
+				for (const auto& lock : locksPerUser) {
+					ASSERT(lock.first == lock.second.getRange());
+					lockedRangeFromMetadata.push_back(lock.first);
+				}
+				TraceEvent("RangeLockWorkloadTestUnlockRangeByUser")
+				    .detail("Ops", "Find locked user")
+				    .detail("User", candidates[i])
+				    .detail("LockCount", locksPerUser.size());
+				ASSERT(self->sameRangeList(coalesceRangeList(lockedRangeFromMetadata),
+				                           coalesceRangeList(rangeLocks[candidates[i]]),
+				                           candidates[i]));
+			}
+		}
 		return Void();
 	}
 
@@ -554,8 +598,8 @@ struct RangeLocking : TestWorkload {
 		if (self->clientId != 0) {
 			return Void();
 		}
-		// wait(self->simpleTest(self, cx));
 		wait(self->complexTest(self, cx));
+		wait(self->testUnlockByUser(self, cx));
 		return Void();
 	}
 };

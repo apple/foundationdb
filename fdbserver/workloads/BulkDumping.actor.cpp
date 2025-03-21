@@ -323,6 +323,9 @@ struct BulkDumping : TestWorkload {
 		// BulkLoad uses range lock
 		wait(registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad));
 
+		std::vector<RangeLockOwner> lockOwners = wait(getAllRangeLockOwners(cx));
+		ASSERT(lockOwners.size() == 1 && lockOwners[0].getOwnerUniqueId() == rangeLockNameForBulkLoad);
+
 		// Submit a bulk dump job
 		state int oldBulkDumpMode = 0;
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
@@ -391,6 +394,9 @@ struct BulkDumping : TestWorkload {
 		ASSERT(res.empty());
 
 		wait(removeRangeLockOwner(cx, rangeLockNameForBulkLoad));
+
+		std::vector<RangeLockOwner> lockOwnersAfterRemove = wait(getAllRangeLockOwners(cx));
+		ASSERT(lockOwnersAfterRemove.empty());
 
 		return Void();
 	}

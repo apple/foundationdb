@@ -173,14 +173,6 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 // When the mode is on, DD will periodically check if there is any bulkload task to do by scaning the metadata.
 ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
 
-// Get bulk load tasks which range is fully contained by the input range.
-// If phase is provided, then return the task with the input phase.
-ACTOR Future<std::vector<BulkLoadTaskState>> getBulkLoadTasksWithinRange(
-    Database cx,
-    KeyRange rangeToRead,
-    size_t limit = 10,
-    Optional<BulkLoadPhase> phase = Optional<BulkLoadPhase>());
-
 // Create a bulkload task submission transaction without commit
 // Used by ManagementAPI and bulkdumpRestore at DD
 ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr,

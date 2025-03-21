@@ -715,19 +715,6 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	// For offline test
-	void produceLargeData(BulkLoading* self, Database cx) {
-		for (int i = 0; i < 3; i++) {
-			std::string folderName = std::to_string(i);
-			Key beginKey = StringRef(std::to_string(i));
-			Key endKey = StringRef(std::to_string(i + 1));
-			KeyRange range = KeyRangeRef(beginKey, endKey);
-			std::string folderPath = joinPath(simulationBulkLoadFolder, folderName);
-			self->generateBulkLoadTaskUnit(self, folderPath, 5000000, range);
-		}
-		return;
-	}
-
 	ACTOR Future<Void> _start(BulkLoading* self, Database cx) {
 		if (self->clientId != 0) {
 			return Void();
@@ -755,6 +742,9 @@ struct BulkLoading : TestWorkload {
 
 		wait(registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad));
 
+		std::vector<RangeLockOwner> lockOwners = wait(getAllRangeLockOwners(cx));
+		ASSERT(lockOwners.size() == 1 && lockOwners[0].getOwnerUniqueId() == rangeLockNameForBulkLoad);
+
 		// Run test
 		if (deterministicRandom()->coinflip()) {
 			// Inject data to three non-overlapping ranges
@@ -763,9 +753,11 @@ struct BulkLoading : TestWorkload {
 			// Inject data to many ranges and those ranges can be overlapping
 			wait(self->complexTest(self, cx));
 		}
-		// self->produceLargeData(self, cx); // Produce data set that is used in loop back cluster test
 
 		wait(removeRangeLockOwner(cx, rangeLockNameForBulkLoad));
+
+		std::vector<RangeLockOwner> lockOwnersAfterRemove = wait(getAllRangeLockOwners(cx));
+		ASSERT(lockOwnersAfterRemove.empty());
 
 		return Void();
 	}

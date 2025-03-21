@@ -30,8 +30,6 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <string>
-#include <vector>
 
 struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "RandomRangeLock";

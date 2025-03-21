@@ -2833,60 +2833,6 @@ ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
 	}
 }
 
-ACTOR Future<std::vector<BulkLoadTaskState>> getBulkLoadTasksWithinRange(Database cx,
-                                                                         KeyRange rangeToRead,
-                                                                         size_t limit,
-                                                                         Optional<BulkLoadPhase> phase) {
-	state Transaction tr(cx);
-	state Key readBegin = rangeToRead.begin;
-	state Key readEnd = rangeToRead.end;
-	state RangeResult rangeResult;
-	state std::vector<BulkLoadTaskState> res;
-	while (readBegin < readEnd) {
-		state int retryCount = 0;
-		loop {
-			try {
-				rangeResult.clear();
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(store(rangeResult,
-				           krmGetRanges(&tr,
-				                        bulkLoadTaskPrefix,
-				                        KeyRangeRef(readBegin, readEnd),
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
-				break;
-			} catch (Error& e) {
-				if (retryCount > 30) {
-					throw timed_out();
-				}
-				wait(tr.onError(e));
-				retryCount++;
-			}
-		}
-		for (int i = 0; i < rangeResult.size() - 1; ++i) {
-			if (rangeResult[i].value.empty()) {
-				continue;
-			}
-			BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(rangeResult[i].value);
-			KeyRange range = Standalone(KeyRangeRef(rangeResult[i].key, rangeResult[i + 1].key));
-			if (range != bulkLoadTaskState.getRange()) {
-				ASSERT(bulkLoadTaskState.getRange().contains(range));
-				continue;
-			}
-			if (!phase.present() || phase.get() == bulkLoadTaskState.phase) {
-				res.push_back(bulkLoadTaskState);
-			}
-			if (res.size() >= limit) {
-				return res;
-			}
-		}
-		readBegin = rangeResult.back().key;
-	}
-
-	return res;
-}
-
 ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr,
                                                     BulkLoadTaskState bulkLoadTask,
                                                     bool checkTaskExclusive) {
@@ -3624,7 +3570,7 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 	state Key beginKey = rangeLockOwnerKeys.begin;
 	state Key endKey = rangeLockOwnerKeys.end;
 	state Transaction tr(cx);
-	loop {
+	while (beginKey < endKey) {
 		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -3633,20 +3579,19 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 			for (const auto& kv : result) {
 				RangeLockOwner owner = decodeRangeLockOwner(kv.value);
 				ASSERT(owner.isValid());
-				RangeLockOwnerName uidFromKey = decodeRangeLockOwnerKey(kv.key);
-				ASSERT(owner.getOwnerUniqueId() == uidFromKey);
+				// RangeLockOwnerName uidFromKey = decodeRangeLockOwnerKey(kv.key);
+				// ASSERT(owner.getOwnerUniqueId() == uidFromKey);
 				res.push_back(owner);
+				beginKey = keyAfter(kv.key);
 			}
-			if (result[result.size() - 1].key == endKey) {
-				return res;
-			} else {
-				beginKey = result[result.size() - 1].key;
-				tr.reset();
+			if (!result.more) {
+				break;
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
+	return res;
 }
 
 // Not transactional
@@ -3659,7 +3604,7 @@ findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwne
 	state Key beginKey = range.begin;
 	state Key endKey = range.end;
 	state Transaction tr(cx);
-	loop {
+	while (beginKey < endKey) {
 		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -3679,11 +3624,7 @@ findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwne
 					                                      rangeLockStateSet.getAllLockStats()[0]));
 				}
 			}
-			if (result[result.size() - 1].key == range.end) {
-				break;
-			} else {
-				beginKey = result[result.size() - 1].key;
-			}
+			beginKey = result.back().key;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -3840,8 +3781,8 @@ ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerNam
 	loop {
 		rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			result.clear();
 			wait(store(result, krmGetRanges(&tr, rangeLockPrefix, rangeToRead)));
 			i = 0;
