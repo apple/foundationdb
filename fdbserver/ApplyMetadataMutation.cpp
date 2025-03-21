@@ -655,6 +655,11 @@ private:
 		}
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
+
+		if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			toCommit->setShardChanged();
+		}
+
 		if (!vecBackupKeys) {
 			return;
 		}
@@ -1189,6 +1194,10 @@ private:
 		    .detail("RangeEnd", range.end)
 		    .detail("IntersectBegin", commonLogRange.begin)
 		    .detail("IntersectEnd", commonLogRange.end);
+
+		if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			toCommit->setShardChanged();
+		}
 
 		// Remove the key range from the vector, if defined
 		if (vecBackupKeys) {
