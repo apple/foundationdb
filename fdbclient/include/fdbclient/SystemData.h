@@ -560,7 +560,6 @@ RangeLockStateSet decodeRangeLockStateSet(const ValueRef& value);
 extern const KeyRangeRef rangeLockOwnerKeys;
 extern const KeyRef rangeLockOwnerPrefix;
 const Key rangeLockOwnerKeyFor(const RangeLockOwnerName& ownerUniqueID);
-const RangeLockOwnerName decodeRangeLockOwnerKey(const KeyRef& key);
 const Value rangeLockOwnerValue(const RangeLockOwner& rangeLockOwner);
 RangeLockOwner decodeRangeLockOwner(const ValueRef& value);
 

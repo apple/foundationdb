@@ -1291,13 +1291,6 @@ const Key rangeLockOwnerKeyFor(const RangeLockOwnerName& ownerUniqueID) {
 	return wr.toValue();
 }
 
-const RangeLockOwnerName decodeRangeLockOwnerKey(const KeyRef& key) {
-	std::string ownerUniqueID;
-	BinaryReader rd(key.removePrefix(rangeLockOwnerPrefix), Unversioned());
-	rd >> ownerUniqueID;
-	return ownerUniqueID;
-}
-
 const Value rangeLockOwnerValue(const RangeLockOwner& rangeLockOwner) {
 	return ObjectWriter::toValue(rangeLockOwner, IncludeVersion());
 }

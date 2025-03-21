@@ -3579,8 +3579,6 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 			for (const auto& kv : result) {
 				RangeLockOwner owner = decodeRangeLockOwner(kv.value);
 				ASSERT(owner.isValid());
-				// RangeLockOwnerName uidFromKey = decodeRangeLockOwnerKey(kv.key);
-				// ASSERT(owner.getOwnerUniqueId() == uidFromKey);
 				res.push_back(owner);
 				beginKey = keyAfter(kv.key);
 			}
