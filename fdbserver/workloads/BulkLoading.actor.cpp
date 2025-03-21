@@ -21,6 +21,7 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
@@ -103,50 +104,49 @@ struct BulkLoading : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> submitBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadTaskState> tasks) {
-		state int i = 0;
-		for (; i < tasks.size(); i++) {
-			loop {
-				try {
-					wait(submitBulkLoadTask(cx, tasks[i]));
-					TraceEvent(SevDebug, "BulkLoadingSubmitBulkLoadTask")
-					    .detail("BulkLoadTaskState", tasks[i].toString());
-					break;
-				} catch (Error& e) {
-					TraceEvent(SevWarn, "BulkLoadingSubmitBulkLoadTaskError")
-					    .setMaxEventLength(-1)
-					    .setMaxFieldLength(-1)
-					    .errorUnsuppressed(e)
-					    .detail("BulkLoadTaskState", tasks[i].toString());
-					wait(delay(0.1));
+	// Submit task can be failed due to range lock reject
+	ACTOR Future<bool> submitBulkLoadTask(Database cx, BulkLoadTaskState bulkLoadTask) {
+		loop {
+			try {
+				state Transaction tr(cx);
+				wait(setBulkLoadSubmissionTransaction(&tr, bulkLoadTask, /*checkTaskExclusive=*/false));
+				wait(tr.commit());
+				TraceEvent(SevDebug, "BulkLoadingSubmitBulkLoadTask")
+				    .detail("BulkLoadTaskState", bulkLoadTask.toString());
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "BulkLoadingSubmitBulkLoadTaskError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .errorUnsuppressed(e)
+				    .detail("BulkLoadTaskState", bulkLoadTask.toString());
+				if (e.code() == error_code_range_lock_reject) {
+					return false;
 				}
+				wait(delay(0.1));
 			}
 		}
-		return Void();
+		return true;
 	}
 
-	ACTOR Future<Void> finalizeBulkLoadTasks(BulkLoading* self, Database cx, std::vector<BulkLoadTaskState> tasks) {
-		state int i = 0;
-		for (; i < tasks.size(); i++) {
-			loop {
-				try {
-					wait(finalizeBulkLoadTask(cx, tasks[i].getRange(), tasks[i].getTaskId()));
-					TraceEvent(SevDebug, "BulkLoadingAcknowledgeBulkLoadTask")
-					    .setMaxEventLength(-1)
-					    .setMaxFieldLength(-1)
-					    .detail("BulkLoadTaskState", tasks[i].toString());
-					break;
-				} catch (Error& e) {
-					TraceEvent(SevWarn, "BulkLoadingAcknowledgeBulkLoadTaskError")
-					    .setMaxEventLength(-1)
-					    .setMaxFieldLength(-1)
-					    .errorUnsuppressed(e)
-					    .detail("BulkLoadTaskState", tasks[i].toString());
-					if (e.code() == error_code_bulkload_task_outdated) {
-						break; // has been erased or overwritten by other tasks
-					}
-					wait(delay(0.1));
-				}
+	// Finish task must always succeed
+	ACTOR Future<Void> finalizeBulkLoadTask(Database cx, KeyRange range, UID taskId) {
+		loop {
+			try {
+				state Transaction tr(cx);
+				wait(setBulkLoadFinalizeTransaction(&tr, range, taskId, /*checkTaskExclusive=*/false));
+				wait(tr.commit());
+				TraceEvent(SevDebug, "BulkLoadingAcknowledgeBulkLoadTask")
+				    .detail("TaskID", taskId.toString())
+				    .detail("TaskRange", range);
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "BulkLoadingAcknowledgeBulkLoadTaskError")
+				    .errorUnsuppressed(e)
+				    .detail("TaskID", taskId.toString())
+				    .detail("TaskRange", range);
+				ASSERT(e.code() != error_code_bulkload_task_outdated && e.code() != error_code_range_lock_reject);
+				wait(delay(0.1));
 			}
 		}
 		return Void();
@@ -508,45 +508,36 @@ struct BulkLoading : TestWorkload {
 	// Issue three non-overlapping tasks and check data consistency and correctness
 	ACTOR Future<Void> simpleTest(BulkLoading* self, Database cx) {
 		TraceEvent("BulkLoadingWorkLoadSimpleTestBegin");
-		state int counter = 0;
 		state int oldBulkLoadMode = 0;
 		state std::vector<BulkLoadTaskState> bulkLoadTaskStates;
 		state std::vector<KeyRange> taskRanges;
 		state std::vector<KeyRange> errorRanges;
 		state std::vector<BulkLoadTaskTestUnit> taskUnits;
-		loop { // New tasks overwrite old tasks on the same range
-			bulkLoadTaskStates.clear();
-			taskRanges.clear();
-			errorRanges.clear();
-			taskUnits.clear();
-			for (int i = 0; i < 2; i++) {
-				std::string indexStr = std::to_string(i);
-				std::string indexStrNext = std::to_string(i + 1);
-				Key beginKey = StringRef(indexStr);
-				Key endKey = StringRef(indexStrNext);
-				std::string folderPath = joinPath(simulationBulkLoadFolder, indexStr);
-				int dataSize = std::pow(10, deterministicRandom()->randomInt(0, 4));
-				BulkLoadTaskTestUnit taskUnit =
-				    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
-				bulkLoadTaskStates.push_back(taskUnit.bulkLoadTask);
-				taskRanges.push_back(taskUnit.bulkLoadTask.getRange());
-				taskUnits.push_back(taskUnit);
-			}
-			// Issue above 2 tasks in the same transaction
-			wait(self->submitBulkLoadTasks(self, cx, bulkLoadTaskStates));
-			TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
-			wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
-			TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
-			std::vector<BulkLoadTaskState> errorTasks = wait(self->waitUntilAllTaskCompleteOrError(self, cx));
-			for (const auto& errorTask : errorTasks) {
-				errorRanges.push_back(errorTask.getRange());
-			}
-			TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
-			counter++;
-			if (counter > 1) {
-				break;
-			}
+		state int i = 0;
+		for (i = 0; i < 2; i++) {
+			std::string indexStr = std::to_string(i);
+			std::string indexStrNext = std::to_string(i + 1);
+			Key beginKey = StringRef(indexStr);
+			Key endKey = StringRef(indexStrNext);
+			std::string folderPath = joinPath(simulationBulkLoadFolder, indexStr);
+			int dataSize = std::pow(10, deterministicRandom()->randomInt(0, 4));
+			BulkLoadTaskTestUnit taskUnit =
+			    self->generateBulkLoadTaskUnit(self, folderPath, dataSize, KeyRangeRef(beginKey, endKey));
+			bulkLoadTaskStates.push_back(taskUnit.bulkLoadTask);
+			taskRanges.push_back(taskUnit.bulkLoadTask.getRange());
+			taskUnits.push_back(taskUnit);
+			bool succeed = wait(self->submitBulkLoadTask(cx, taskUnit.bulkLoadTask));
+			ASSERT(succeed);
 		}
+
+		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
+		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
+		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
+		std::vector<BulkLoadTaskState> errorTasks = wait(self->waitUntilAllTaskCompleteOrError(self, cx));
+		for (const auto& errorTask : errorTasks) {
+			errorRanges.push_back(errorTask.getRange());
+		}
+		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
 
 		// Check data
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 0)));
@@ -571,7 +562,9 @@ struct BulkLoading : TestWorkload {
 		// Check bulk load metadata
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
-		wait(self->finalizeBulkLoadTasks(self, cx, bulkLoadTaskStates));
+		for (i = 0; i < bulkLoadTaskStates.size(); i++) {
+			wait(self->finalizeBulkLoadTask(cx, bulkLoadTaskStates[i].getRange(), bulkLoadTaskStates[i].getTaskId()));
+		}
 		wait(acknowledgeAllErrorBulkLoadTasks(cx, self->jobId, normalKeys));
 		loop {
 			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
@@ -626,8 +619,10 @@ struct BulkLoading : TestWorkload {
 			int dataSize = std::pow(10, deterministicRandom()->randomInt(0, 4));
 			taskUnit = self->generateBulkLoadTaskUnit(self, folderPath, dataSize);
 			ASSERT(normalKeys.contains(taskUnit.bulkLoadTask.getRange()));
-			taskMap.insert(taskUnit.bulkLoadTask.getRange(), taskUnit);
-			wait(self->submitBulkLoadTasks(self, cx, { taskUnit.bulkLoadTask }));
+			bool succeed = wait(self->submitBulkLoadTask(cx, taskUnit.bulkLoadTask));
+			if (succeed) {
+				taskMap.insert(taskUnit.bulkLoadTask.getRange(), taskUnit);
+			}
 			if (deterministicRandom()->coinflip()) {
 				std::vector<BulkLoadTaskState> errorTasks = wait(self->waitUntilAllTaskCompleteOrError(self, cx));
 			}
@@ -697,13 +692,12 @@ struct BulkLoading : TestWorkload {
 		std::vector<KeyValue> dbkvs = wait(self->getKvsFromDB(self, cx, ignoreRanges, completeTaskRanges));
 		ASSERT(self->checkSame(self, kvs, dbkvs));
 
-		// Clear all range lock
-		wait(releaseExclusiveReadLockOnRange(cx, normalKeys, "BulkLoad"));
-
 		// Clear metadata
 		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1)));
 		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
-		wait(self->finalizeBulkLoadTasks(self, cx, bulkLoadTaskStates));
+		for (i = 0; i < bulkLoadTaskStates.size(); i++) {
+			wait(self->finalizeBulkLoadTask(cx, bulkLoadTaskStates[i].getRange(), bulkLoadTaskStates[i].getTaskId()));
+		}
 		wait(acknowledgeAllErrorBulkLoadTasks(cx, self->jobId, normalKeys));
 		loop {
 			bool cleared = wait(self->checkBulkLoadMetadataCleared(self, cx));
@@ -712,6 +706,11 @@ struct BulkLoading : TestWorkload {
 			}
 			wait(delay(1.0));
 		}
+
+		// Make sure all ranges locked by the workload are unlocked
+		std::vector<std::pair<KeyRange, RangeLockState>> res =
+		    wait(findExclusiveReadLockOnRange(cx, normalKeys, rangeLockNameForBulkLoad));
+		ASSERT(res.empty());
 		TraceEvent("BulkLoadingWorkLoadComplexTestComplete");
 		return Void();
 	}

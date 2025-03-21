@@ -183,17 +183,16 @@ ACTOR Future<std::vector<BulkLoadTaskState>> getBulkLoadTasksWithinRange(
 
 // Create a bulkload task submission transaction without commit
 // Used by ManagementAPI and bulkdumpRestore at DD
-ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);
-
-// Submit a bulk load task
-ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadTaskState bulkLoadTask);
+ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr,
+                                                    BulkLoadTaskState bulkLoadTask,
+                                                    bool checkTaskExclusive = true);
 
 // Create an bulkload task acknowledge transaction without commit
 // Used by ManagementAPI and bulkdumpRestore at DD
-ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);
-
-// Finalize a bulk load task if it has been completed
-ACTOR Future<Void> finalizeBulkLoadTask(Database cx, KeyRange range, UID taskId);
+ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr,
+                                                  KeyRange range,
+                                                  UID taskId,
+                                                  bool checkTaskExclusive = true);
 
 // Get bulk load task for the input range and taskId
 ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,

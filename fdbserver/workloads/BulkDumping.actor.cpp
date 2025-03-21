@@ -385,6 +385,11 @@ struct BulkDumping : TestWorkload {
 			break;
 		}
 
+		// Make sure all ranges locked by the workload are unlocked
+		std::vector<std::pair<KeyRange, RangeLockState>> res =
+		    wait(findExclusiveReadLockOnRange(cx, normalKeys, rangeLockNameForBulkLoad));
+		ASSERT(res.empty());
+
 		wait(removeRangeLockOwner(cx, rangeLockNameForBulkLoad));
 
 		return Void();

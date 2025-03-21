@@ -2887,7 +2887,9 @@ ACTOR Future<std::vector<BulkLoadTaskState>> getBulkLoadTasksWithinRange(Databas
 	return res;
 }
 
-ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask) {
+ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr,
+                                                    BulkLoadTaskState bulkLoadTask,
+                                                    bool checkTaskExclusive) {
 	ASSERT(normalKeys.contains(bulkLoadTask.getRange()) &&
 	       (bulkLoadTask.phase == BulkLoadPhase::Submitted ||
 	        (bulkLoadTask.phase == BulkLoadPhase::Complete && bulkLoadTask.hasEmptyData())));
@@ -2896,27 +2898,13 @@ ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTas
 	try {
 		wait(takeExclusiveReadLockOnRange(tr, bulkLoadTask.getRange(), rangeLockNameForBulkLoad));
 	} catch (Error& e) {
-		ASSERT(e.code() != error_code_range_lock_reject); // Currently, only bulkload uses the range lock, and tasks
-		                                                  // have exclusive ranges
+		ASSERT(!checkTaskExclusive || e.code() != error_code_range_lock_reject);
+		// CheckTaskExclusive is set for bulkload job.
+		// Currently, only bulkload job uses the range lock, and tasks have exclusive ranges.
 		throw e;
 	}
 	bulkLoadTask.submitTime = now();
 	wait(krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTask.getRange(), bulkLoadTaskStateValue(bulkLoadTask)));
-	return Void();
-}
-
-// Submit bulkload task and overwrite any existing task and lock range
-ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadTaskState bulkLoadTask) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			wait(setBulkLoadSubmissionTransaction(&tr, bulkLoadTask));
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
 	return Void();
 }
 
@@ -2992,7 +2980,10 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 	return bulkLoadTaskState;
 }
 
-ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId) {
+ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr,
+                                                  KeyRange range,
+                                                  UID taskId,
+                                                  bool checkTaskExclusive) {
 	state BulkLoadTaskState bulkLoadTaskState;
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3011,26 +3002,10 @@ ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange rang
 	try {
 		wait(releaseExclusiveReadLockOnRange(tr, bulkLoadTaskState.getRange(), rangeLockNameForBulkLoad));
 	} catch (Error& e) {
-		ASSERT(e.code() != error_code_range_unlock_reject); // Currently, only bulkload uses the range lock, and tasks
-		                                                    // have exclusive ranges
+		ASSERT(!checkTaskExclusive || e.code() != error_code_range_unlock_reject);
+		// CheckTaskExclusive is set for bulkload job.
+		// Currently, only bulkload job uses the range lock, and tasks have exclusive ranges.
 		throw e;
-	}
-	return Void();
-}
-
-// We finalize a bulkload task when the bulkload job see the task completes.
-// Update bulkload task to acknowledge state and unlock the range.
-// A acknowledged bulkload task will be automatically erased by DD.
-ACTOR Future<Void> finalizeBulkLoadTask(Database cx, KeyRange range, UID taskId) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			wait(setBulkLoadFinalizeTransaction(&tr, range, taskId));
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
 	}
 	return Void();
 }
@@ -3762,8 +3737,7 @@ ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
 				    .detail("NewLockType", RangeLockType::ExclusiveReadLock)
 				    .detail("NewLockRange", range)
 				    .detail("NewLockOwner", ownerUniqueID)
-				    .detail("ExistingLocks", rangeLockStateSet.toString())
-				    .detail("Range", range);
+				    .detail("ExistingLocks", rangeLockStateSet.toString());
 				throw range_lock_reject(); // Has been locked
 			}
 		}
@@ -3815,8 +3789,7 @@ ACTOR Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr,
 				    .detail("Reason", "Has been locked by a different user or the same user with a different range")
 				    .detail("UnLockOwner", ownerUniqueID)
 				    .detail("UnLockRange", range)
-				    .detail("ExistingLocks", rangeLockStateSet.toString())
-				    .detail("Range", range);
+				    .detail("ExistingLocks", rangeLockStateSet.toString());
 				throw range_unlock_reject();
 			}
 		}
@@ -3837,7 +3810,7 @@ ACTOR Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range,
 	// Lock range by writting the range.
 	RangeLockStateSet rangeLockStateSet;
 	rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range));
-	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(rangeLockStateSet)));
+	wait(krmSetRange(tr, rangeLockPrefix, range, rangeLockStateSetValue(rangeLockStateSet)));
 	TraceEvent(SevInfo, "TakeExclusiveReadLockTransactionOnRange").detail("Range", range);
 	return Void();
 }
