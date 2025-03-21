@@ -3794,6 +3794,8 @@ ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerNam
 				ASSERT(currentRangeLockStateSet.isValid());
 				if (currentRangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
 				    currentRangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId() == ownerUniqueID) {
+					// TODO(BulkLoad): krmSetRangeCoalescing per small range is inefficient especially when the lock
+					// count is over 10K. Optimize this.
 					wait(krmSetRangeCoalescing(
 					    &tr, rangeLockPrefix, currentRange, normalKeys, rangeLockStateSetValue(RangeLockStateSet())));
 					wait(tr.commit());
