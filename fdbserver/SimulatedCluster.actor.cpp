@@ -656,6 +656,7 @@ ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 	if (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
 		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
+		TraceEvent("SimBackupAgentsStarting").log();
 		agentFuture =
 		    fileAgent.run(cx, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT);
 
