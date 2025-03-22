@@ -116,6 +116,16 @@ struct BackupWorkload : TestWorkload {
 		}
 	}
 
+	// Resume the backup agent if it is paused
+	ACTOR static Future<Void> resumeAgent(Database cx, FileBackupAgent* backupAgent) {
+		bool active = wait(backupAgent->checkActive(cx));
+		if (!active) {
+			wait(backupAgent->changePause(cx, false));
+			TraceEvent("BW_AgentResumed").log();
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
 		state FileBackupAgent agent;
 		loop {
@@ -295,6 +305,7 @@ struct BackupWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, BackupWorkload* self) {
 		state FileBackupAgent backupAgent;
+		state Future<Void> cp;
 		state bool extraTasks = false;
 		TraceEvent("BW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
@@ -305,7 +316,9 @@ struct BackupWorkload : TestWorkload {
 
 		state UID randomID = nondeterministicRandom()->randomUniqueID();
 		if (self->allowPauses && BUGGIFY) {
-			state Future<Void> cp = changePaused(cx, &backupAgent);
+			cp = changePaused(cx, &backupAgent);
+		} else {
+			cp = resumeAgent(cx, &backupAgent);
 		}
 
 		if (self->encryptionKeyFileName.present()) {

@@ -102,11 +102,20 @@ struct RestoreWorkload : TestWorkload {
 		loop {
 			wait(backupAgent->changePause(cx, true));
 			TraceEvent("RW_AgentPaused").log();
-			wait(delay(10 * deterministicRandom()->random01()));
+			wait(delay(30 * deterministicRandom()->random01()));
 			wait(backupAgent->changePause(cx, false));
 			TraceEvent("RW_AgentResumed").log();
-			wait(delay(20 * deterministicRandom()->random01()));
+			wait(delay(120 * deterministicRandom()->random01()));
 		}
+	}
+
+	// Resume the backup agent if it is paused
+	ACTOR static Future<Void> resumeAgent(Database cx, FileBackupAgent* backupAgent) {
+		bool active = wait(backupAgent->checkActive(cx));
+		if (!active) {
+			wait(backupAgent->changePause(cx, false));
+		}
+		return Void();
 	}
 
 	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
@@ -124,13 +133,16 @@ struct RestoreWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, RestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
+		state Future<Void> cp;
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		TraceEvent("RW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
 		    .detail("PerformRestore", self->performRestore);
 
 		if (self->allowPauses && BUGGIFY) {
-			state Future<Void> cp = changePaused(cx, &backupAgent);
+			cp = changePaused(cx, &backupAgent);
+		} else {
+			cp = resumeAgent(cx, &backupAgent);
 		}
 		state Future<Void> status = statusLoop(cx, self->backupTag.toString());
 
