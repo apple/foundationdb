@@ -7569,28 +7569,26 @@ public:
 	//                             When set to true, gives an inconsistent snapshot, thus not recommended
 	//   beginVersions: restore's begin version for each range
 	//   randomUid: the UID for lock the database
-	ACTOR static Future<Version> restore(
-	    FileBackupAgent* backupAgent,
-	    Database cx,
-	    Optional<Database> cxOrig,
-	    Key tagName,
-	    Key url,
-	    Optional<std::string> proxy,
-	    Standalone<VectorRef<KeyRangeRef>> ranges,
-	    Standalone<VectorRef<Version>> beginVersions,
-	    WaitForComplete waitForComplete,
-	    Version targetVersion,
-	    Verbose verbose,
-	    Key addPrefix,
-	    Key removePrefix,
-	    LockDB lockDB,
-	    UnlockDB unlockDB,
-	    OnlyApplyMutationLogs onlyApplyMutationLogs,
-	    InconsistentSnapshotOnly inconsistentSnapshotOnly,
-	    Optional<std::string> encryptionKeyFileName,
-	    UID randomUid,
-	    Optional<std::string> blobManifestUrl,
-	    TransformPartitionedLog transformPartitionedLog = TransformPartitionedLog::False) {
+	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent,
+	                                     Database cx,
+	                                     Optional<Database> cxOrig,
+	                                     Key tagName,
+	                                     Key url,
+	                                     Optional<std::string> proxy,
+	                                     Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                     Standalone<VectorRef<Version>> beginVersions,
+	                                     WaitForComplete waitForComplete,
+	                                     Version targetVersion,
+	                                     Verbose verbose,
+	                                     Key addPrefix,
+	                                     Key removePrefix,
+	                                     LockDB lockDB,
+	                                     UnlockDB unlockDB,
+	                                     OnlyApplyMutationLogs onlyApplyMutationLogs,
+	                                     InconsistentSnapshotOnly inconsistentSnapshotOnly,
+	                                     Optional<std::string> encryptionKeyFileName,
+	                                     UID randomUid,
+	                                     Optional<std::string> blobManifestUrl) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
 		if (ranges.empty()) {
 			throw restore_error();
@@ -7655,7 +7653,7 @@ public:
 				                   beginVersion,
 				                   randomUid,
 				                   blobManifestUrl,
-				                   transformPartitionedLog));
+				                   TransformPartitionedLog(desc.partitioned)));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -7944,8 +7942,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Optional<std::string> const& encryptionKeyFileName,
-                                         Optional<std::string> blobManifestUrl,
-                                         TransformPartitionedLog transformPartitionedLog) {
+                                         Optional<std::string> blobManifestUrl) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -7965,8 +7962,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    inconsistentSnapshotOnly,
 	                                    encryptionKeyFileName,
 	                                    deterministicRandom()->randomUniqueID(),
-	                                    blobManifestUrl,
-	                                    transformPartitionedLog);
+	                                    blobManifestUrl);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
@@ -7986,8 +7982,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
                                          Optional<std::string> const& encryptionKeyFileName,
-                                         Optional<std::string> blobManifestUrl,
-                                         TransformPartitionedLog transformPartitionedLog) {
+                                         Optional<std::string> blobManifestUrl) {
 	Standalone<VectorRef<Version>> beginVersions;
 	for (auto i = 0; i < ranges.size(); ++i) {
 		beginVersions.push_back(beginVersions.arena(), beginVersion);
@@ -8009,8 +8004,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
 	               encryptionKeyFileName,
-	               blobManifestUrl,
-	               transformPartitionedLog);
+	               blobManifestUrl);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
