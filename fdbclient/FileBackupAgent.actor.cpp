@@ -5087,14 +5087,93 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		static TaskParam<std::vector<RestoreConfig::RestoreFile>> logs() { return __FUNCTION__sr; }
 	} Params;
 
-	static std::string printVec(std::vector<Version>& vec) {
-		std::string str = "";
-		for (int i : vec) {
-			str += std::to_string(i);
-			str += ", ";
+	// From all iterators, find the minimum version and return it together with if this version has data.
+	ACTOR static Future<std::pair<Version, bool>> findNextVersion(
+	    std::vector<Reference<PartitionedLogIterator>> iterators) {
+		state Version minVersion = std::numeric_limits<int64_t>::max();
+		state bool atLeastOneIteratorHasNext = false;
+		state std::vector<Version> minVs(iterators.size(), 0); // can be removed or leave for debugging
+
+		state int k = 0;
+		for (; k < iterators.size(); k++) {
+			if (!iterators[k]->hasNext()) {
+				continue;
+			}
+			atLeastOneIteratorHasNext = true;
+			Version v = wait(iterators[k]->peekNextVersion());
+			minVs[k] = v;
+			minVersion = std::min(minVersion, v);
 		}
-		return str;
+		return std::make_pair(minVersion, atLeastOneIteratorHasNext);
 	}
+
+	// Reads from all iterators and returns a list of mutations for the given version.
+	ACTOR static Future<std::vector<Standalone<VectorRef<VersionedMutation>>>> getMutationsForVersion(
+	    std::vector<Reference<PartitionedLogIterator>> iterators,
+	    Version minVersion) {
+		state std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion;
+
+		state int k = 0;
+		for (; k < iterators.size(); k++) {
+			if (!iterators[k]->hasNext()) {
+				continue;
+			}
+			Version v = wait(iterators[k]->peekNextVersion());
+			if (v == minVersion) {
+				Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
+				mutationsSingleVersion.push_back(tmp);
+			}
+		}
+		return mutationsSingleVersion;
+	}
+
+	// Writes backup mutations to the database
+	ACTOR static Future<Void> writeMutations(Database cx,
+	                                         Standalone<VectorRef<KeyValueRef>> oldFormatMutations,
+	                                         Key mutationLogPrefix) {
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		state int mutationIndex = 0;
+		state int mutationCount = 0;
+		state int txBytes = 0;
+		state int totalMutation = oldFormatMutations.size();
+		state int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+
+		// multiple transactions are needed, so this has to be in a _execute method rather than
+		// a _finish method
+		// this transaction does blind writes, so they are idempotent operations even if multiple instances of
+		// the same tasks are running these transactions.
+		loop {
+			try {
+				if (mutationIndex == totalMutation) {
+					break;
+				}
+				txBytes = 0;
+				mutationCount = 0;
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				while (mutationIndex + mutationCount < totalMutation && txBytes < txBytesLimit) {
+					Key k = oldFormatMutations[mutationIndex + mutationCount].key.withPrefix(mutationLogPrefix);
+					ValueRef v = oldFormatMutations[mutationIndex + mutationCount]
+					                 .value; // each KV is a [param1 with added prefix -> param2]
+					tr->set(k, v);
+					txBytes += k.expectedSize();
+					txBytes += v.expectedSize();
+					++mutationCount;
+				}
+				wait(tr->commit());
+				mutationIndex += mutationCount; // update mutationIndex after the commit succeeds
+			} catch (Error& e) {
+				if (e.code() == error_code_transaction_too_large) {
+					txBytesLimit /= 2;
+				} else {
+					wait(tr->onError(e));
+				}
+			}
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> _execute(Database cx,
 	                                   Reference<TaskBucket> taskBucket,
 	                                   Reference<FutureBucket> futureBucket,
@@ -5164,43 +5243,27 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			    makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k], fileEndVersionByTag[k]);
 		}
 
+		TraceEvent("RestoredPartitionedLogDataExeStart")
+		    .detail("BeginVersion", begin)
+		    .detail("EndVersion", end)
+		    .detail("Files", logs.size())
+		    .detail("TaskInstance", THIS_ADDR);
 		// mergeSort all iterator until all are exhausted
 		state int totalItereators = iterators.size();
 		// it stores all mutations for the next min version, in new format
 		state std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion;
 		state bool atLeastOneIteratorHasNext = true;
-		state Version minVersion;
-		state int k;
+		state Version minVersion, lastMinVersion = invalidVersion;
 		state std::vector<Version> minVs(totalItereators, 0);
 		while (atLeastOneIteratorHasNext) {
-			minVs.resize(totalItereators, 0);
-			atLeastOneIteratorHasNext = false;
-			minVersion = std::numeric_limits<int64_t>::max();
-			k = 0;
-			for (; k < totalItereators; k++) {
-				if (!iterators[k]->hasNext()) {
-					continue;
-				}
-				atLeastOneIteratorHasNext = true;
-				Version v = wait(iterators[k]->peekNextVersion());
-				minVs[k] = v;
+			std::pair<Version, bool> minVersionAndHasNext = wait(findNextVersion(iterators));
+			minVersion = minVersionAndHasNext.first;
+			atLeastOneIteratorHasNext = minVersionAndHasNext.second;
+			ASSERT_LT(lastMinVersion, minVersion);
+			lastMinVersion = minVersion;
 
-				if (v <= minVersion) {
-					minVersion = v;
-				}
-			}
 			if (atLeastOneIteratorHasNext) {
-				k = 0;
-				for (; k < totalItereators; k++) {
-					if (!iterators[k]->hasNext()) {
-						continue;
-					}
-					Version v = wait(iterators[k]->peekNextVersion());
-					if (v == minVersion) {
-						Standalone<VectorRef<VersionedMutation>> tmp = wait(iterators[k]->getNext());
-						mutationsSingleVersion.push_back(tmp);
-					}
-				}
+				wait(store(mutationsSingleVersion, getMutationsForVersion(iterators, minVersion)));
 
 				if (minVersion < begin) {
 					// skip generating mutations, because this is not within desired range
@@ -5218,50 +5281,19 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// for a single mutation
 				state Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
 				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
-				state int mutationIndex = 0;
-				state int txnCount = 0;
-				state int txBytes = 0;
-				state int totalMutation = oldFormatMutations.size();
-				state int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
-				state Key mutationLogPrefix = restore.mutationLogPrefix();
-
-				// multiple transactions are needed, so this has to be in a _execute method rather than
-				// a _finish method
-				// this transaction does blind writes, so they are idempotent operations even if multiple instances of
-				// the same tasks are running these transactions.
-				loop {
-					try {
-						if (mutationIndex == totalMutation) {
-							break;
-						}
-						txBytes = 0;
-						txnCount = 0;
-						tr->reset();
-						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-						while (mutationIndex + txnCount < totalMutation && txBytes < txBytesLimit) {
-							Key k = oldFormatMutations[mutationIndex + txnCount].key.withPrefix(mutationLogPrefix);
-							ValueRef v = oldFormatMutations[mutationIndex + txnCount]
-							                 .value; // each KV is a [param1 with added prefix -> param2]
-							tr->set(k, v);
-							txBytes += k.expectedSize();
-							txBytes += v.expectedSize();
-							++txnCount;
-						}
-						wait(tr->commit());
-						mutationIndex += txnCount; // update mutationIndex after the commit succeeds
-					} catch (Error& e) {
-						if (e.code() == error_code_transaction_too_large) {
-							txBytesLimit /= 2;
-						} else {
-							wait(tr->onError(e));
-						}
-					}
-				}
+				wait(writeMutations(cx, oldFormatMutations, restore.mutationLogPrefix()));
+				TraceEvent("RestorePartitionedLogDataInsert")
+				    .detail("MinVersion", minVersion)
+				    .detail("TaskInstance", THIS_ADDR);
 			}
 			mutationsSingleVersion.clear();
 		}
+		TraceEvent("RestoredPartitionedLogDataExeDone")
+		    .detail("BeginVersion", begin)
+		    .detail("EndVersion", end)
+		    .detail("Files", logs.size())
+		    .detail("TaskInstance", THIS_ADDR);
+
 		return Void();
 	}
 
@@ -5520,10 +5552,10 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		    .detail("RestoreUID", restore.getUid())
 		    .detail("BeginVersion", beginVersion)
 		    .detail("EndVersion", endVersion)
+		    .detail("NextEndVersion", nextEndVersion)
 		    .detail("ApplyLag", applyLag)
 		    .detail("Decision", "dispatch_batch_complete")
-		    .detail("TaskInstance", THIS_ADDR)
-		    .log();
+		    .detail("TaskInstance", THIS_ADDR);
 
 		return Void();
 	}
@@ -6987,8 +7019,6 @@ public:
 		}
 		// this also sets restore.add/removePrefix.
 		restore.initApplyMutations(tr, addPrefix, removePrefix, onlyApplyMutationLogs);
-
-		//
 
 		Key taskKey = wait(fileBackup::StartFullRestoreTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));

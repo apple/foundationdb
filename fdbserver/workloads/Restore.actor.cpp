@@ -182,6 +182,7 @@ struct RestoreWorkload : TestWorkload {
 				TraceEvent("RW_Restore", self->randomID)
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
 				    .detail("BackupTag", printable(self->backupTag))
+				    .setMaxFieldLength(10000)
 				    .detail("Description", desc.toString());
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
