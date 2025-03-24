@@ -52,6 +52,7 @@
 #include "flow/Trace.h"
 
 #include <cinttypes>
+#include <cstdint>
 #include <ctime>
 #include <climits>
 #include "flow/IAsyncFile.h"
@@ -5084,6 +5085,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		static TaskParam<int64_t> maxTagID() { return __FUNCTION__sr; }
 		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
 		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> bytesWritten() { return __FUNCTION__sr; }
 		static TaskParam<std::vector<RestoreConfig::RestoreFile>> logs() { return __FUNCTION__sr; }
 	} Params;
 
@@ -5173,7 +5175,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	// Writes backup mutations to the database
 	ACTOR static Future<Void> writeMutations(Database cx,
 	                                         std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
-	                                         Key mutationLogPrefix) {
+	                                         Key mutationLogPrefix,
+	                                         Reference<Task> task) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Standalone<VectorRef<KeyValueRef>> oldFormatMutations;
 		state int mutationIndex = 0;
@@ -5210,6 +5213,14 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 					++mutationCount;
 				}
 				wait(tr->commit());
+				int64_t oldBytes = Params.bytesWritten().get(task);
+				Params.bytesWritten().set(task, oldBytes + txBytes);
+				DisabledTraceEvent("FileRestorePartitionedLogCommittData")
+				    .detail("TaskInstance", THIS_ADDR)
+				    .detail("MutationIndex", mutationIndex)
+				    .detail("MutationCount", mutationCount)
+				    .detail("TotalMutation", totalMutation)
+				    .detail("Bytes", txBytes);
 				mutationIndex += mutationCount; // update mutationIndex after the commit succeeds
 			} catch (Error& e) {
 				if (e.code() == error_code_transaction_too_large) {
@@ -5291,7 +5302,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			    makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k], fileEndVersionByTag[k]);
 		}
 
-		DisabledTraceEvent("RestoredPartitionedLogDataExeStart")
+		DisabledTraceEvent("FileRestorePartitionedLogDataExeStart")
 		    .detail("BeginVersion", begin)
 		    .detail("EndVersion", end)
 		    .detail("Files", logs.size())
@@ -5312,7 +5323,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// batching mutations from multiple versions together before writing to the database
 				state int64_t bytes = oneVersionData.expectedSize();
 				if (totalBytes + bytes > CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE) {
-					wait(writeMutations(cx, mutations, restore.mutationLogPrefix()));
+					wait(writeMutations(cx, mutations, restore.mutationLogPrefix(), task));
 					mutations.clear();
 					totalBytes = 0;
 				}
@@ -5321,7 +5332,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			} catch (Error& e) {
 				if (e.code() == error_code_end_of_stream) {
 					if (mutations.size() > 0) {
-						wait(writeMutations(cx, mutations, restore.mutationLogPrefix()));
+						wait(writeMutations(cx, mutations, restore.mutationLogPrefix(), task));
 					}
 					break;
 				} else {
@@ -5329,7 +5340,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				}
 			}
 		}
-		DisabledTraceEvent("RestoredPartitionedLogDataExeDone")
+		DisabledTraceEvent("FileRestorePartitionedLogDataExeDone")
 		    .detail("BeginVersion", begin)
 		    .detail("EndVersion", end)
 		    .detail("Files", logs.size())
@@ -5342,7 +5353,19 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	                                  Reference<TaskBucket> taskBucket,
 	                                  Reference<FutureBucket> futureBucket,
 	                                  Reference<Task> task) {
-		RestoreConfig(task).fileBlocksFinished().atomicOp(tr, 1, MutationRef::Type::AddValue);
+		state int64_t logBytesWritten = Params.bytesWritten().get(task);
+		RestoreConfig(task).bytesWritten().atomicOp(tr, logBytesWritten, MutationRef::Type::AddValue);
+
+		int64_t blocks =
+		    (logBytesWritten + CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE - 1) / CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+		// When dispatching, we don't know how many blocks are there, so we have to do it here
+		RestoreConfig(task).filesBlocksDispatched().atomicOp(tr, blocks, MutationRef::Type::AddValue);
+		RestoreConfig(task).fileBlocksFinished().atomicOp(tr, blocks, MutationRef::Type::AddValue);
+
+		DisabledTraceEvent("FileRestorePartitionedLogCommittedData")
+		    .detail("TaskInstance", THIS_ADDR)
+		    .detail("Blocks", blocks)
+		    .detail("LogBytes", logBytesWritten);
 
 		state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 		wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
@@ -5370,6 +5393,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		Params.beginVersion().set(task, begin);
 		Params.endVersion().set(task, end);
 		Params.logs().set(task, logs);
+		Params.bytesWritten().set(task, 0);
 
 		if (!waitFor) {
 			return taskBucket->addTask(tr, task);
@@ -5450,7 +5474,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(
 			    tr, taskBucket, task, firstVersion, beginVersion, endVersion)));
 
-			TraceEvent("RestorePartitionDispatch")
+			TraceEvent("FileRestorePartitionDispatch")
 			    .detail("RestoreUID", restore.getUid())
 			    .detail("BeginVersion", beginVersion)
 			    .detail("ApplyLag", applyLag)
@@ -5519,7 +5543,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				// If apply lag is 0 then we are done so create the completion task
 				wait(success(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
 
-				TraceEvent("RestorePartitionDispatch")
+				TraceEvent("FileRestorePartitionDispatch")
 				    .detail("RestoreUID", restore.getUid())
 				    .detail("BeginVersion", beginVersion)
 				    .detail("ApplyLag", applyLag)
@@ -5535,7 +5559,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				wait(success(RestoreDispatchPartitionedTaskFunc::addTask(
 				    tr, taskBucket, task, firstVersion, beginVersion, endVersion)));
 
-				TraceEvent("RestorePartitionDispatch")
+				TraceEvent("FileRestorePartitionDispatch")
 				    .detail("RestoreUID", restore.getUid())
 				    .detail("BeginVersion", beginVersion)
 				    .detail("ApplyLag", applyLag)
@@ -5589,7 +5613,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		wait(waitForAll(addTaskFutures));
 		wait(taskBucket->finish(tr, task));
 
-		TraceEvent("RestorePartitionDispatch")
+		TraceEvent("FileRestorePartitionDispatch")
 		    .detail("RestoreUID", restore.getUid())
 		    .detail("BeginVersion", beginVersion)
 		    .detail("EndVersion", endVersion)
