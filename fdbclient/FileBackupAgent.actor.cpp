@@ -5107,6 +5107,49 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		return std::make_pair(minVersion, atLeastOneIteratorHasNext);
 	}
 
+	// Reads from all iterators and sends a list of mutations for the given version
+	// to the mutationStream for consumption. This actor reads as fast as possible,
+	// which is fine since the task is working on the version range of size
+	// RESTORE_PARTITIONED_BATCH_VERSION_SIZE, thus limiting the amount of memory used.
+	ACTOR static Future<Void> readLogData(PromiseStream<Standalone<VectorRef<KeyValueRef>>> mutationStream,
+	                                      std::vector<Reference<PartitionedLogIterator>> iterators,
+	                                      Version begin,
+	                                      Version end) {
+		// mergeSort all iterator until all are exhausted
+		// it stores all mutations for the next min version, in new format
+		state bool atLeastOneIteratorHasNext = true;
+		state Version minVersion, lastMinVersion = invalidVersion;
+		while (atLeastOneIteratorHasNext) {
+			std::pair<Version, bool> minVersionAndHasNext = wait(findNextVersion(iterators));
+			minVersion = minVersionAndHasNext.first;
+			atLeastOneIteratorHasNext = minVersionAndHasNext.second;
+			ASSERT_LT(lastMinVersion, minVersion);
+			lastMinVersion = minVersion;
+
+			if (atLeastOneIteratorHasNext) {
+				std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion =
+				    wait(getMutationsForVersion(iterators, minVersion));
+
+				if (minVersion < begin) {
+					// skip generating mutations, because this is not within desired range
+					// this is already handled by the previous taskfunc
+					continue;
+				} else if (minVersion >= end) {
+					// all valid data has been consumed
+					break;
+				}
+
+				// transform from new format to old format(param1, param2) for this version.
+				// This transformation has to be done version by version.
+				Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
+				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
+				mutationStream.send(oldFormatMutations);
+			}
+		}
+		mutationStream.sendError(end_of_stream());
+		return Void();
+	}
+
 	// Reads from all iterators and returns a list of mutations for the given version.
 	ACTOR static Future<std::vector<Standalone<VectorRef<VersionedMutation>>>> getMutationsForVersion(
 	    std::vector<Reference<PartitionedLogIterator>> iterators,
@@ -5129,14 +5172,19 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 
 	// Writes backup mutations to the database
 	ACTOR static Future<Void> writeMutations(Database cx,
-	                                         Standalone<VectorRef<KeyValueRef>> oldFormatMutations,
+	                                         std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
 	                                         Key mutationLogPrefix) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		state Standalone<VectorRef<KeyValueRef>> oldFormatMutations;
 		state int mutationIndex = 0;
 		state int mutationCount = 0;
 		state int txBytes = 0;
-		state int totalMutation = oldFormatMutations.size();
 		state int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
+
+		for (const auto& data : mutations) {
+			oldFormatMutations.append(oldFormatMutations.arena(), data.begin(), data.size());
+		}
+		state int totalMutation = oldFormatMutations.size();
 
 		// multiple transactions are needed, so this has to be in a _execute method rather than
 		// a _finish method
@@ -5243,52 +5291,45 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			    makeReference<PartitionedLogIteratorTwoBuffers>(bc, k, filesByTag[k], fileEndVersionByTag[k]);
 		}
 
-		TraceEvent("RestoredPartitionedLogDataExeStart")
+		DisabledTraceEvent("RestoredPartitionedLogDataExeStart")
 		    .detail("BeginVersion", begin)
 		    .detail("EndVersion", end)
 		    .detail("Files", logs.size())
 		    .detail("TaskInstance", THIS_ADDR);
-		// mergeSort all iterator until all are exhausted
-		state int totalItereators = iterators.size();
-		// it stores all mutations for the next min version, in new format
-		state std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion;
-		state bool atLeastOneIteratorHasNext = true;
-		state Version minVersion, lastMinVersion = invalidVersion;
-		state std::vector<Version> minVs(totalItereators, 0);
-		while (atLeastOneIteratorHasNext) {
-			std::pair<Version, bool> minVersionAndHasNext = wait(findNextVersion(iterators));
-			minVersion = minVersionAndHasNext.first;
-			atLeastOneIteratorHasNext = minVersionAndHasNext.second;
-			ASSERT_LT(lastMinVersion, minVersion);
-			lastMinVersion = minVersion;
 
-			if (atLeastOneIteratorHasNext) {
-				wait(store(mutationsSingleVersion, getMutationsForVersion(iterators, minVersion)));
+		// Converted backup mutations
+		state PromiseStream<Standalone<VectorRef<KeyValueRef>>> mutationStream;
+		state Future<Void> reader = readLogData(mutationStream, iterators, begin, end);
 
-				if (minVersion < begin) {
-					// skip generating mutations, because this is not within desired range
-					// this is already handled by the previous taskfunc
-					mutationsSingleVersion.clear();
-					continue;
-				} else if (minVersion >= end) {
-					// all valid data has been consumed
-					break;
+		state std::vector<Standalone<VectorRef<KeyValueRef>>> mutations;
+		state int64_t totalBytes = 0;
+		state Standalone<VectorRef<KeyValueRef>> oneVersionData;
+		loop {
+			try {
+				Standalone<VectorRef<KeyValueRef>> _data = waitNext(mutationStream.getFuture());
+				oneVersionData = _data;
+
+				// batching mutations from multiple versions together before writing to the database
+				state int64_t bytes = oneVersionData.expectedSize();
+				if (totalBytes + bytes > CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE) {
+					wait(writeMutations(cx, mutations, restore.mutationLogPrefix()));
+					mutations.clear();
+					totalBytes = 0;
 				}
-
-				// transform from new format to old format(param1, param2)
-				// in the current implementation, each version will trigger a mutation
-				// if each version data is too small, we might want to combine multiple versions
-				// for a single mutation
-				state Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
-				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
-				wait(writeMutations(cx, oldFormatMutations, restore.mutationLogPrefix()));
-				TraceEvent("RestorePartitionedLogDataInsert")
-				    .detail("MinVersion", minVersion)
-				    .detail("TaskInstance", THIS_ADDR);
+				mutations.push_back(oneVersionData);
+				totalBytes += bytes;
+			} catch (Error& e) {
+				if (e.code() == error_code_end_of_stream) {
+					if (mutations.size() > 0) {
+						wait(writeMutations(cx, mutations, restore.mutationLogPrefix()));
+					}
+					break;
+				} else {
+					throw;
+				}
 			}
-			mutationsSingleVersion.clear();
 		}
-		TraceEvent("RestoredPartitionedLogDataExeDone")
+		DisabledTraceEvent("RestoredPartitionedLogDataExeDone")
 		    .detail("BeginVersion", begin)
 		    .detail("EndVersion", end)
 		    .detail("Files", logs.size())
