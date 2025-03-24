@@ -286,7 +286,7 @@ private:
 		uniquify(info.tags);
 		keyInfo->insert(insertRange, info);
 		if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			toCommit->setShardChanged();
+			toCommit->setLogsChanged();
 		}
 	}
 
@@ -657,7 +657,7 @@ private:
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 
 		if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			toCommit->setShardChanged();
+			toCommit->setLogsChanged();
 		}
 
 		if (!vecBackupKeys) {
@@ -978,7 +978,7 @@ private:
 			                    ? ServerCacheInfo()
 			                    : keyInfo->rangeContainingKeyBefore(clearRange.begin).value());
 			if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				toCommit->setShardChanged();
+				toCommit->setLogsChanged();
 			}
 		}
 
@@ -1196,7 +1196,7 @@ private:
 		    .detail("IntersectEnd", commonLogRange.end);
 
 		if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			toCommit->setShardChanged();
+			toCommit->setLogsChanged();
 		}
 
 		// Remove the key range from the vector, if defined
