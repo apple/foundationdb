@@ -414,7 +414,7 @@ public:
 	// Checks if list of sorted logfiles have the logs from snapshotBeginVersion to snapshotEndversion.
 	// Which means the sorted log files(have beginVersion and endVersion) should cover
 	// all the versions between snapshotBegingVersion and snapshotEndversion.
-	// Note: logs should be sorted
+	// Note: logs should be pre-sorted according to version order.
 	static bool hasContinuousLogsForSnapshot(const std::vector<LogFile>& logs,
 	                                         Version snapshotBeginVersion,
 	                                         Version snapshotEndVersion) {
@@ -452,6 +452,38 @@ public:
 		} // comes out if the logs are not found until snapshotEndVersion.
 
 		return prevEnd >= snapshotEndVersion;
+	}
+
+	// Find the continuous log end version starting from beginVersion in the
+	// given list of sorted logfiles.
+	// Note: logs should be pre-sorted according to version order.
+	static Version findContinuousLogEnd(const std::vector<LogFile>& logs, Version beginVersion) {
+		auto it = logs.begin();
+
+		// find the first mutation log file that covers beginVersion
+		while (it != logs.end()) {
+			if (it->beginVersion <= beginVersion && it->endVersion > beginVersion)
+				break;
+			++it;
+		}
+
+		// no log find found covering beginVersion, return invalidVersion
+		if (it == logs.end())
+			return invalidVersion;
+
+		// Iterate over the next logs, check if they are continuous
+		Version prevEnd = it->endVersion;
+		++it;
+
+		while (it != logs.end()) {
+			if (it->beginVersion != prevEnd) // not continuous logs
+				return prevEnd;
+
+			prevEnd = it->endVersion;
+			++it;
+		} // out of logs.
+
+		return prevEnd;
 	}
 
 	ACTOR static Future<BackupDescription> describeBackup(Reference<BackupContainerFileSystem> bc,
@@ -657,7 +689,7 @@ public:
 				if (!desc.contiguousLogEnd.present() || desc.contiguousLogEnd.get() <= s.endVersion)
 					s.restorable = false;
 				// If there is logs gap after contiguousLogEnd, then check whether the current snapshot
-				// can be restored from the logs availale after contiguousLogEnd.
+				// can be restored from the logs available after contiguousLogEnd.
 				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() <= s.beginVersion) {
 					if (desc.partitioned)
 						s.restorable = isPartitionedLogsContinuous(logs, s.beginVersion, s.endVersion);
@@ -670,7 +702,11 @@ public:
 
 			// If the snapshot is at a single version then it requires no logs.  Update min and max restorable.
 			// TODO:  Somehow check / report if the restorable range is not or may not be contiguous.
-			if (s.beginVersion == s.endVersion) {
+			if (s.beginVersion == s.endVersion &&
+			    (!desc.contiguousLogEnd.present() || // no logs
+			     (desc.contiguousLogEnd.present() &&
+			      desc.contiguousLogEnd.get() >= s.beginVersion)) // have logs, then should cover snapshot
+			) {
 				if (!desc.minRestorableVersion.present() || s.endVersion < desc.minRestorableVersion.get())
 					desc.minRestorableVersion = s.endVersion;
 
@@ -687,6 +723,49 @@ public:
 				if (!desc.maxRestorableVersion.present() ||
 				    (desc.contiguousLogEnd.get() - 1) > desc.maxRestorableVersion.get())
 					desc.maxRestorableVersion = desc.contiguousLogEnd.get() - 1;
+			}
+
+			// If there is logs gap after contiguousLogEnd and if current snapshot is restorable(have continuous logs)
+			if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() < s.beginVersion && s.restorable.get()) {
+				if (desc.minRestorableVersion.present() && desc.maxRestorableVersion.present()) {
+					ASSERT(desc.minRestorableVersion.get() < s.beginVersion);
+
+					// check if we have contiguous logs from minRestorableVersion to current snapshot endVersion
+					bool contiguousLogs = false;
+					if (desc.partitioned)
+						contiguousLogs =
+						    isPartitionedLogsContinuous(logs, desc.minRestorableVersion.get(), s.endVersion);
+					else
+						contiguousLogs =
+						    hasContinuousLogsForSnapshot(logs, desc.minRestorableVersion.get(), s.endVersion);
+
+					if (contiguousLogs) {
+						// The previous restorable version can be extended to current snapshot vesion,
+						// so minRestorableVersion remain same
+						desc.maxRestorableVersion = s.endVersion;
+					} else {
+						// Previous restorable version cannot be extended to current snapshot version,
+						// means some logs are missing inbetween.
+						// So set the snapshot beginversion as minRestorableVersion.
+						desc.minRestorableVersion = s.endVersion;
+					}
+				} else {
+					// There is no previous snapshot that is restorable.
+					// Since the current snapshot is restorable, set the snapshot beginversion as minRestorableVersion.
+					desc.minRestorableVersion = s.endVersion;
+				}
+
+				// Find the continuousLogEnd after snapshotEndVersion and set it as
+				// maxRestorableVersion.
+
+				if (desc.partitioned) {
+					// TO DO: Yet to implement similar function findContinuousLogEnd for partitioned logs.
+					desc.maxRestorableVersion = s.endVersion;
+				} else {
+					Version maxContinuousLogEnd = findContinuousLogEnd(logs, s.endVersion);
+					desc.maxRestorableVersion =
+					    (maxContinuousLogEnd == invalidVersion) ? s.endVersion : maxContinuousLogEnd - 1;
+				}
 			}
 		}
 
@@ -2027,8 +2106,15 @@ TEST_CASE("/backup/logs_continuous") {
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 100));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 11));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 100));
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 0) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 5) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 10) == 100);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 50) == 100);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 99) == 100);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 100) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 101) == invalidVersion);
 
-	// [100, 200)
+	// [10, 100), [100, 200)
 	files.push_back({ 100, 200, 10, "file2", 100 });
 	std::sort(files.begin(), files.end());
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 0, 5));
@@ -2056,7 +2142,18 @@ TEST_CASE("/backup/logs_continuous") {
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 70, 200));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 199, 200));
 
-	// [300, 400)
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 0) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 5) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 10) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 50) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 99) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 100) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 101) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 199) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 200) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 201) == invalidVersion);
+
+	// [10, 100), [100, 200), [300, 400)
 	files.push_back({ 300, 400, 10, "file3", 100 });
 	std::sort(files.begin(), files.end());
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 0, 5));
@@ -2098,6 +2195,25 @@ TEST_CASE("/backup/logs_continuous") {
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 200, 400));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 299, 400));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 399, 400));
+
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 0) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 5) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 10) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 50) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 99) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 100) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 101) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 199) == 200);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 200) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 201) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 250) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 299) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 300) == 400);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 301) == 400);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 399) == 400);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 400) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 401) == invalidVersion);
+	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 450) == invalidVersion);
 
 	return Void();
 }
@@ -2213,6 +2329,23 @@ ACTOR Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Opti
 			ASSERT(!rest.present());
 		else
 			ASSERT(rest.present());
+	}
+
+	for (i = snapshotsMissingLogs.size() - 1; i >= 0; --i) {
+		if (!snapshotsMissingLogs[i]) {
+			int j = i - 1;
+			for (; j >= 0; --j) {
+				if (snapshotsMissingLogs[j] ||
+				    !BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(
+				        listing.logs, listing.snapshots[j].endVersion, listing.snapshots[j + 1].beginVersion))
+					break;
+			}
+			ASSERT(desc.minRestorableVersion.get() == listing.snapshots[j + 1].endVersion);
+			ASSERT(desc.maxRestorableVersion.get() >= listing.snapshots[i].endVersion);
+			if (i + 1 < snapshotsMissingLogs.size())
+				ASSERT(desc.maxRestorableVersion.get() < listing.snapshots[i + 1].endVersion);
+			break;
+		}
 	}
 
 	printf("DELETING\n");
