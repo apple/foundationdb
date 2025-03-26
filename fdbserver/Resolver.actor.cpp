@@ -432,9 +432,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 		// If shardChanged at or before this commit version, the proxy may have computed
 		// the wrong set of groups. Then we need to broadcast to all groups below.
-		stateTransactionsPair.first = toCommit && toCommit->isShardChanged();
+		stateTransactionsPair.first = toCommit && toCommit->haveLogsChanged();
 		bool shardChanged = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
-		    &reply, firstUnseenVersion, req.version, toCommit && toCommit->isShardChanged());
+		    &reply, firstUnseenVersion, req.version, toCommit && toCommit->haveLogsChanged());
 
 		// Adds private mutation messages to the reply message.
 		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
