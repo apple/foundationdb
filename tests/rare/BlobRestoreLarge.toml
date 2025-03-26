@@ -9,6 +9,7 @@ disableTss = true
 bg_consistency_check_enabled = 0
 bw_throttling_enabled = false
 blob_restore_skip_empty_ranges = false
+shard_encode_location_metadata=false # not compatible with this feature
 
 [[test]]
 testTitle = 'SetupBlob'

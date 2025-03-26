@@ -8,6 +8,7 @@ tenantModes = ['optional', 'required']
 
 [[knobs]]
 bg_use_blob_range_change_log = true
+shard_encode_location_metadata=false # not compatible with this feature
 
 [[test]]
 testTitle = 'BlobGranuleRanges'

@@ -3,6 +3,9 @@ blobGranulesEnabled = true
 allowDefaultTenant = false
 testClass = "BlobGranule"
 
+[[knobs]]
+shard_encode_location_metadata=false # not compatible with this feature
+
 [[test]]
 testTitle = 'BlobGranuleVerifySmallClean'
 

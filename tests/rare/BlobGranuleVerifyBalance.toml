@@ -4,6 +4,9 @@ allowDefaultTenant = false
 injectTargetedSSRestart = true
 injectSSDelay = true
 
+[[knobs]]
+shard_encode_location_metadata=false # not compatible with this feature
+
 [[test]]
 testTitle = 'BlobGranuleVerifyBalance'
 
