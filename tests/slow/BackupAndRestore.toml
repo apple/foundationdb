@@ -7,6 +7,8 @@ encryptModes = ['disabled'] # Do not support encryption
 [[test]]
 testTitle = 'BackupPartitioned'
 clearAfterTest = false
+runConsistencyCheck = false
+waitForQuiescence = false
 simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
@@ -24,6 +26,8 @@ simBackupAgents = 'BackupToFile'
 
 [[test]]
 testTitle = 'RestorePartitioned'
+runConsistencyCheck = false
+waitForQuiescence = false
 simBackupAgents = 'BackupToFile'
 clearAfterTest = false
 

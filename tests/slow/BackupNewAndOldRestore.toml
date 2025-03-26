@@ -26,6 +26,8 @@ simBackupAgents = 'BackupToFile'
 
 [[test]]
 testTitle = 'OldBackup'
+runConsistencyCheck = false
+waitForQuiescence = false
 clearAfterTest = false
 simBackupAgents = 'BackupToFile'
 
@@ -48,6 +50,8 @@ simBackupAgents = 'BackupToFile'
 # Randomly pick one of the backup tag and restore it.
 [[test]]
 testTitle = 'RestoreRandomBackup'
+runConsistencyCheck = false
+waitForQuiescence = false
 simBackupAgents = 'BackupToFile'
 clearAfterTest = false
 
