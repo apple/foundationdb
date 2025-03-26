@@ -95,6 +95,7 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 			// Increment the allocation count for the current window
 			tr.Add(hca.counters.Sub(start), oneBytes)
 			countFuture := tr.Snapshot().Get(hca.counters.Sub(start))
+			defer countFuture.Close()
 
 			allocatorMutex.Unlock()
 
@@ -134,6 +135,7 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 
 			latestCounter := tr.Snapshot().GetRange(hca.counters, fdb.RangeOptions{Limit: 1, Reverse: true})
 			candidateValue := tr.Get(key)
+			defer candidateValue.Close()
 			tr.Options().SetNextWriteNoWriteConflictRange()
 			tr.Set(key, []byte(""))
 
