@@ -87,8 +87,9 @@ func (dl directoryLayer) createOrOpen(rtr fdb.ReadTransaction, tr *fdb.Transacti
 		return nil, errors.New("the root directory cannot be opened")
 	}
 
-	existingNode := dl.find(rtr, path).prefetchMetadata(rtr)
-	if existingNode.exists() {
+	existingNode, exists := dl.find(rtr, path).prefetchMetadata(rtr)
+	if exists {
+		defer existingNode._layer.Close()
 		if existingNode.isInPartition(nil, false) {
 			subpath := existingNode.getPartitionSubpath()
 			enc, err := existingNode.getContents(dl, nil)
@@ -225,9 +226,11 @@ func (dl directoryLayer) Exists(rt fdb.ReadTransactor, path []string) (bool, err
 			return false, err
 		}
 
-		node := dl.find(rtr, path).prefetchMetadata(rtr)
-		if !node.exists() {
+		node, exists := dl.find(rtr, path).prefetchMetadata(rtr)
+		if !exists {
 			return false, nil
+		} else {
+			defer node._layer.Close()
 		}
 
 		if node.isInPartition(nil, false) {
@@ -252,9 +255,11 @@ func (dl directoryLayer) List(rt fdb.ReadTransactor, path []string) ([]string, e
 			return nil, err
 		}
 
-		node := dl.find(rtr, path).prefetchMetadata(rtr)
-		if !node.exists() {
+		node, exists := dl.find(rtr, path).prefetchMetadata(rtr)
+		if !exists {
 			return nil, ErrDirNotExists
+		} else {
+			defer node._layer.Close()
 		}
 
 		if node.isInPartition(nil, true) {
@@ -291,8 +296,14 @@ func (dl directoryLayer) Move(t fdb.Transactor, oldPath []string, newPath []stri
 			return nil, errors.New("the destination directory cannot be a subdirectory of the source directory")
 		}
 
-		oldNode := dl.find(tr, oldPath).prefetchMetadata(tr)
-		newNode := dl.find(tr, newPath).prefetchMetadata(tr)
+		oldNode, oldNodeExists := dl.find(tr, oldPath).prefetchMetadata(tr)
+		if oldNodeExists {
+			defer oldNode._layer.Close()
+		}
+		newNode, newNodeExists := dl.find(tr, newPath).prefetchMetadata(tr)
+		if newNodeExists {
+			defer newNode._layer.Close()
+		}
 
 		if !oldNode.exists() {
 			return nil, errors.New("the source directory does not exist")
@@ -349,10 +360,11 @@ func (dl directoryLayer) Remove(t fdb.Transactor, path []string) (bool, error) {
 			return false, errors.New("the root directory cannot be removed")
 		}
 
-		node := dl.find(tr, path).prefetchMetadata(tr)
-
-		if !node.exists() {
+		node, exists := dl.find(tr, path).prefetchMetadata(tr)
+		if !exists {
 			return false, nil
+		} else {
+			defer node._layer.Close()
 		}
 
 		if node.isInPartition(nil, false) {
@@ -416,16 +428,10 @@ func (dl directoryLayer) subdirNames(rtr fdb.ReadTransaction, node subspace.Subs
 	sd := node.Sub(_SUBDIRS)
 
 	rr := rtr.GetRange(sd, fdb.RangeOptions{})
-	ri := rr.Iterator()
 
 	var ret []string
-
-	for ri.Advance() {
-		kv, err := ri.Get()
-		if err != nil {
-			return nil, err
-		}
-
+	kvs := rr.GetSliceOrPanic()
+	for _, kv := range kvs {
 		p, err := sd.Unpack(kv.Key)
 		if err != nil {
 			return nil, err
@@ -441,13 +447,10 @@ func (dl directoryLayer) subdirNodes(tr fdb.Transaction, node subspace.Subspace)
 	sd := node.Sub(_SUBDIRS)
 
 	rr := tr.GetRange(sd, fdb.RangeOptions{})
-	ri := rr.Iterator()
 
 	var ret []subspace.Subspace
-
-	for ri.Advance() {
-		kv := ri.MustGet()
-
+	kvs := rr.GetSliceOrPanic()
+	for _, kv := range kvs {
 		ret = append(ret, dl.nodeWithPrefix(kv.Value))
 	}
 
@@ -507,7 +510,10 @@ func (dl directoryLayer) isPrefixFree(rtr fdb.ReadTransaction, prefix []byte) (b
 }
 
 func (dl directoryLayer) checkVersion(rtr fdb.ReadTransaction, tr *fdb.Transaction) error {
-	version, err := rtr.Get(dl.rootNode.Sub([]byte("version"))).Get()
+	f := rtr.Get(dl.rootNode.Sub([]byte("version")))
+	defer f.Close()
+
+	version, err := f.Get()
 	if err != nil {
 		return err
 	}
@@ -590,8 +596,18 @@ func (dl directoryLayer) nodeWithPrefix(prefix []byte) subspace.Subspace {
 
 func (dl directoryLayer) find(rtr fdb.ReadTransaction, path []string) *node {
 	n := &node{dl.rootNode, []string{}, path, nil}
+	futures := make([]fdb.FutureByteSlice, len(path))
 	for i := range path {
-		n = &node{dl.nodeWithPrefix(rtr.Get(n.subspace.Sub(_SUBDIRS, path[i])).MustGet()), path[:i+1], path, nil}
+		futures[i] = rtr.Get(n.subspace.Sub(_SUBDIRS, path[i]))
+	}
+	defer func() {
+		for _, f := range futures {
+			f.Close()
+		}
+	}()
+
+	for i, f := range futures {
+		n = &node{dl.nodeWithPrefix(f.MustGet()), path[:i+1], path, nil}
 		if !n.exists() || bytes.Compare(n.layer(rtr).MustGet(), []byte("partition")) == 0 {
 			return n
 		}
