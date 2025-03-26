@@ -43,11 +43,12 @@ func (n *node) exists() bool {
 	return true
 }
 
-func (n *node) prefetchMetadata(rtr fdb.ReadTransaction) *node {
+func (n *node) prefetchMetadata(rtr fdb.ReadTransaction) (*node, bool) {
 	if n.exists() {
 		n.layer(rtr)
+		return n, true
 	}
-	return n
+	return n, false
 }
 
 func (n *node) layer(rtr fdb.ReadTransaction) fdb.FutureByteSlice {
