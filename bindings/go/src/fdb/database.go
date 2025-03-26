@@ -28,7 +28,6 @@ import "C"
 
 import (
 	"errors"
-	"runtime"
 )
 
 // ErrMultiVersionClientUnavailable is returned when the multi-version client API is unavailable.
@@ -92,6 +91,7 @@ func (opt DatabaseOptions) setOpt(code int, param []byte) error {
 // preferable to use the (Database).Transact method, which handles
 // automatically creating and committing a transaction with appropriate retry
 // behavior.
+// Close() must be called on the returned transaction to avoid a memory leak.
 func (d Database) CreateTransaction() (Transaction, error) {
 	var outt *C.FDBTransaction
 
@@ -100,10 +100,6 @@ func (d Database) CreateTransaction() (Transaction, error) {
 	}
 
 	t := &transaction{outt, d}
-	// transactions cannot be destroyed explicitly if any future is still potentially used
-	// thus the GC is used to figure out when all Go wrapper objects for futures have gone out of scope,
-	// making the transaction ready to be garbage-collected.
-	runtime.SetFinalizer(t, (*transaction).destroy)
 
 	return Transaction{t}, nil
 }
@@ -114,18 +110,21 @@ func (d Database) CreateTransaction() (Transaction, error) {
 // if the data directory is writeable by creating a validation file. The address must be a
 // process address is the form of IP:Port pair.
 func (d Database) RebootWorker(address string, checkFile bool, suspendDuration int) error {
-	t := &futureInt64{
-		future: newFutureWithDb(
-			d.database,
-			nil,
-			C.fdb_database_reboot_worker(
-				d.ptr,
-				byteSliceToPtr([]byte(address)),
-				C.int(len(address)),
-				C.fdb_bool_t(boolToInt(checkFile)),
-				C.int(suspendDuration),
-			),
+	f := newFutureWithDb(
+		d.database,
+		nil,
+		C.fdb_database_reboot_worker(
+			d.ptr,
+			byteSliceToPtr([]byte(address)),
+			C.int(len(address)),
+			C.fdb_bool_t(boolToInt(checkFile)),
+			C.int(suspendDuration),
 		),
+	)
+	defer f.Close()
+
+	t := &futureInt64{
+		future: f,
 	}
 
 	dbVersion, err := t.Get()
@@ -145,8 +144,11 @@ func (d Database) GetClientStatus() ([]byte, error) {
 		return nil, errAPIVersionUnset
 	}
 
+	f := newFutureWithDb(d.database, nil, C.fdb_database_get_client_status(d.ptr))
+	defer f.Close()
+
 	st := &futureByteSlice{
-		future: newFutureWithDb(d.database, nil, C.fdb_database_get_client_status(d.ptr)),
+		future: f,
 	}
 
 	b, err := st.Get()
@@ -173,7 +175,10 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 		// fdb.Error
 		var ep Error
 		if errors.As(err, &ep) {
-			processedErr := onError(ep).Get()
+			f := onError(ep)
+			defer f.Close()
+
+			processedErr := f.Get()
 			var newEp Error
 			if !errors.As(processedErr, &newEp) || newEp.Code != ep.Code {
 				// override original error only if not an Error or code changed
@@ -214,10 +219,11 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 // Transaction and Database objects.
 func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{}, error) {
 	tr, err := d.CreateTransaction()
-	// Any error here is non-retryable
 	if err != nil {
+		// Any error here is non-retryable
 		return nil, err
 	}
+	defer tr.Close()
 
 	wrapped := func() (ret interface{}, err error) {
 		defer panicToError(&err)
@@ -225,7 +231,10 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 		ret, err = f(tr)
 
 		if err == nil {
-			err = tr.Commit().Get()
+			f := tr.Commit()
+			defer f.Close()
+
+			err = f.Get()
 		}
 
 		return
@@ -263,14 +272,14 @@ func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (in
 		// Any error here is non-retryable
 		return nil, err
 	}
+	defer tr.Close()
 
 	wrapped := func() (ret interface{}, err error) {
 		defer panicToError(&err)
 
 		ret, err = f(tr)
 
-		// read-only transactions are not committed and will be destroyed automatically via GC,
-		// once all the futures go out of scope
+		// read-only transactions are not committed and will be destroyed automatically by the deferred Close()
 
 		return
 	}
@@ -300,6 +309,7 @@ func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion 
 	if err != nil {
 		return nil, err
 	}
+	defer tr.Close()
 
 	if readVersion != 0 {
 		tr.SetReadVersion(readVersion)

@@ -66,11 +66,13 @@ func (s Snapshot) Snapshot() Snapshot {
 }
 
 // Get is equivalent to (Transaction).Get, performed as a snapshot read.
+// Close() must be called on the returned future to avoid a memory leak.
 func (s Snapshot) Get(key KeyConvertible) FutureByteSlice {
 	return s.get(key.FDBKey(), 1)
 }
 
 // GetKey is equivalent to (Transaction).GetKey, performed as a snapshot read.
+// Close() must be called on the returned future to avoid a memory leak.
 func (s Snapshot) GetKey(sel Selectable) FutureKey {
 	return s.getKey(sel.FDBKeySelector(), 1)
 }
@@ -83,6 +85,7 @@ func (s Snapshot) GetRange(r Range, options RangeOptions) RangeResult {
 
 // GetReadVersion is equivalent to (Transaction).GetReadVersion, performed as
 // a snapshot read.
+// Close() must be called on the returned future to avoid a memory leak.
 func (s Snapshot) GetReadVersion() FutureInt64 {
 	return s.getReadVersion()
 }
@@ -95,6 +98,7 @@ func (s Snapshot) GetDatabase() Database {
 
 // GetEstimatedRangeSizeBytes returns an estimate for the number of bytes
 // stored in the given range.
+// Close() must be called on the returned future to avoid a memory leak.
 func (s Snapshot) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
 	beginKey, endKey := r.FDBRangeKeys()
 	return s.getEstimatedRangeSizeBytes(
