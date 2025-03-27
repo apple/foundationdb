@@ -430,7 +430,7 @@ func (dl directoryLayer) subdirNames(rtr fdb.ReadTransaction, node subspace.Subs
 	rr := rtr.GetRange(sd, fdb.RangeOptions{})
 
 	var ret []string
-	kvs := rr.GetSliceOrPanic()
+	kvs := rr.MustGet()
 	for _, kv := range kvs {
 		p, err := sd.Unpack(kv.Key)
 		if err != nil {
@@ -449,7 +449,7 @@ func (dl directoryLayer) subdirNodes(tr fdb.Transaction, node subspace.Subspace)
 	rr := tr.GetRange(sd, fdb.RangeOptions{})
 
 	var ret []subspace.Subspace
-	kvs := rr.GetSliceOrPanic()
+	kvs := rr.MustGet()
 	for _, kv := range kvs {
 		ret = append(ret, dl.nodeWithPrefix(kv.Value))
 	}
@@ -465,7 +465,7 @@ func (dl directoryLayer) nodeContainingKey(rtr fdb.ReadTransaction, key []byte) 
 	bk, _ := dl.nodeSS.FDBRangeKeys()
 	kr := fdb.KeyRange{bk, fdb.Key(append(dl.nodeSS.Pack(tuple.Tuple{key}), 0x00))}
 
-	kvs, err := rtr.GetRange(kr, fdb.RangeOptions{Reverse: true, Limit: 1}).GetSliceWithError()
+	kvs, err := rtr.GetRange(kr, fdb.RangeOptions{Reverse: true, Limit: 1}).Get()
 	if err != nil {
 		return nil, err
 	}
@@ -623,7 +623,7 @@ func (dl directoryLayer) partitionSubpath(lpath, rpath []string) []string {
 }
 
 func isRangeEmpty(rtr fdb.ReadTransaction, r fdb.Range) bool {
-	kvs := rtr.GetRange(r, fdb.RangeOptions{Limit: 1}).GetSliceOrPanic()
+	kvs := rtr.GetRange(r, fdb.RangeOptions{Limit: 1}).MustGet()
 
 	return len(kvs) == 0
 }

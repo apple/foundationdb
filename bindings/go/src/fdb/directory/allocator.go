@@ -66,7 +66,7 @@ func windowSize(start int64) int64 {
 func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subspace) (subspace.Subspace, error) {
 	for {
 		rr := tr.Snapshot().GetRange(hca.counters, fdb.RangeOptions{Limit: 1, Reverse: true})
-		kvs, err := rr.GetSliceWithError()
+		kvs, err := rr.Get()
 		if err != nil {
 			return nil, err
 		}
@@ -141,7 +141,7 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 
 			allocatorMutex.Unlock()
 
-			kvs, err = latestCounter.GetSliceWithError()
+			kvs, err = latestCounter.Get()
 			if err != nil {
 				return nil, err
 			}

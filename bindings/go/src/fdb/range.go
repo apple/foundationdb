@@ -126,15 +126,17 @@ type RangeResult struct {
 	snapshot bool
 }
 
-// GetSliceWithError returns a slice of KeyValue objects satisfying the range
+// Get returns a slice of KeyValue objects satisfying the range
 // specified in the read that returned this RangeResult, or an error if any of
 // the asynchronous operations associated with this result did not successfully
 // complete. The current goroutine will be blocked until all reads have
 // completed.
-func (rr RangeResult) GetSliceWithError() ([]KeyValue, error) {
+// Using Iterator() to streamline reads is preferable for efficiency reasons.
+func (rr RangeResult) Get() ([]KeyValue, error) {
 	var ret []KeyValue
 
 	ri := rr.Iterator()
+	defer ri.Close()
 
 	if rr.options.Limit != 0 {
 		ri.options.Mode = StreamingModeExact
@@ -142,24 +144,35 @@ func (rr RangeResult) GetSliceWithError() ([]KeyValue, error) {
 		ri.options.Mode = StreamingModeWantAll
 	}
 
-	for ri.Advance() {
-		if ri.err != nil {
-			return nil, ri.err
+	for {
+		// prefetch even if very little happens between iterations
+		kvs, err := ri.NextBatch(true)
+		if err != nil {
+			return nil, err
 		}
-		ret = append(ret, ri.kvs...)
-		ri.index = len(ri.kvs)
+		if len(kvs) == 0 {
+			break
+		}
+
+		ret = append(ret, kvs...)
+
+		if ri.options.Reverse {
+			ri.sr.End = FirstGreaterOrEqual(kvs[ri.lastBatchLen-1].Key)
+		} else {
+			ri.sr.Begin = FirstGreaterThan(kvs[ri.lastBatchLen-1].Key)
+		}
 	}
 
 	return ret, nil
 }
 
-// GetSliceOrPanic returns a slice of KeyValue objects satisfying the range
+// MustGet returns a slice of KeyValue objects satisfying the range
 // specified in the read that returned this RangeResult, or panics if any of the
 // asynchronous operations associated with this result did not successfully
 // complete. The current goroutine will be blocked until all reads have
 // completed.
-func (rr RangeResult) GetSliceOrPanic() []KeyValue {
-	kvs, err := rr.GetSliceWithError()
+func (rr RangeResult) MustGet() []KeyValue {
+	kvs, err := rr.Get()
 	if err != nil {
 		panic(err)
 	}
@@ -168,6 +181,7 @@ func (rr RangeResult) GetSliceOrPanic() []KeyValue {
 
 // Iterator returns a RangeIterator over the key-value pairs satisfying the
 // range specified in the read that returned this RangeResult.
+// Close() must be called on this range iterator to avoid a memory leak.
 func (rr RangeResult) Iterator() *RangeIterator {
 	return &RangeIterator{
 		t:         rr.t,
@@ -175,6 +189,7 @@ func (rr RangeResult) Iterator() *RangeIterator {
 		options:   rr.options,
 		iteration: 1,
 		snapshot:  rr.snapshot,
+		more:      true,
 	}
 }
 
@@ -182,73 +197,89 @@ func (rr RangeResult) Iterator() *RangeIterator {
 // objects) satisfying the range specified in a range read. RangeIterator is
 // constructed with the (RangeResult).Iterator method.
 //
-// You must call Advance and get a true result prior to calling Get or MustGet.
+// You must call NextBatch and get a true result.
 //
 // RangeIterator should not be copied or used concurrently from multiple
 // goroutines, but multiple RangeIterators may be constructed from a single
 // RangeResult and used concurrently. RangeIterator should not be returned from
 // a transactional function passed to the Transact method of a Transactor.
 type RangeIterator struct {
-	t         *transaction
-	sr        SelectorRange
-	options   RangeOptions
-	iteration int
-	done      bool
-	more      bool
-	kvs       []KeyValue
-	index     int
-	err       error
-	snapshot  bool
+	t               *transaction
+	sr              SelectorRange
+	options         RangeOptions
+	iteration       int
+	more            bool
+	lastBatchLen    int
+	snapshot        bool
+	prefetchedBatch *futureKeyValueArray
+	prefetchOptions RangeOptions
 }
 
-// Advance attempts to advance the iterator to the next key-value pair. Advance
-// returns true if there are more key-value pairs satisfying the range, or false
-// if the range has been exhausted. You must call this before every call to Get
-// or MustGet.
-func (ri *RangeIterator) Advance() bool {
-	if ri.done {
-		return false
-	}
-
-	f := ri.fetchNextBatch()
-	if f == nil {
+// NextBatch advances the iterator to the next key-value pairs batch.
+// It returns a slice of key-value pairs satisfying the range, an empty slice
+// if the range has been exhausted, or an error if any of the asynchronous
+// operations associated with this result did not successfully complete.
+// If 'prefetch' is true, future for the next batch will be created on return and
+// released when the RangeIterator is closed.
+func (ri *RangeIterator) NextBatch(prefetch bool) ([]KeyValue, error) {
+	if !ri.more {
 		// iterator is done
-		return false
-	}
-	defer f.Close()
-
-	ri.kvs, ri.more, ri.err = f.Get()
-	ri.index = 0
-
-	if ri.err != nil || len(ri.kvs) > 0 {
-		// return true in case of error so that next Get() call will retrieve this error
-		return true
+		return nil, nil
 	}
 
-	return false
+	var f *futureKeyValueArray
+	if ri.prefetchedBatch != nil {
+		// update state for the prefetched read batch
+		ri.options = ri.prefetchOptions
+		ri.iteration++
+
+		f = ri.prefetchedBatch
+		ri.prefetchedBatch = nil
+	} else {
+		f = ri.fetchNextBatch()
+	}
+
+	var err error
+	var kvs []KeyValue
+	kvs, ri.more, err = f.Get()
+	ri.lastBatchLen = len(kvs)
+	f.Close()
+	if err != nil {
+		// cannot re-use iterator after an error
+		ri.more = false
+		return nil, err
+	}
+	// consider reading done if limit was reached
+	ri.more = ri.more || ri.lastBatchLen == ri.options.Limit
+
+	if prefetch && ri.more {
+		ri.prefetchOptions = ri.options
+		if ri.prefetchOptions.Limit > 0 {
+			ri.prefetchOptions.Limit -= ri.lastBatchLen
+		}
+		f := ri.t.doGetRange(ri.sr, ri.prefetchOptions, ri.snapshot, ri.iteration+1)
+		ri.prefetchedBatch = &f
+	}
+
+	return kvs, nil
 }
 
 func (ri *RangeIterator) fetchNextBatch() *futureKeyValueArray {
-	if !ri.more || ri.index == ri.options.Limit {
-		ri.done = true
-		return nil
-	}
-
 	if ri.options.Limit > 0 {
-		// Not worried about this being zero, checked equality above
-		ri.options.Limit -= ri.index
-	}
-
-	if ri.options.Reverse {
-		ri.sr.End = FirstGreaterOrEqual(ri.kvs[ri.index-1].Key)
-	} else {
-		ri.sr.Begin = FirstGreaterThan(ri.kvs[ri.index-1].Key)
+		// Not worried about this being zero, equality was checked by caller
+		ri.options.Limit -= ri.lastBatchLen
 	}
 
 	ri.iteration++
 
 	f := ri.t.doGetRange(ri.sr, ri.options, ri.snapshot, ri.iteration)
 	return &f
+}
+
+func (ri *RangeIterator) Close() {
+	if ri.prefetchedBatch != nil {
+		ri.prefetchedBatch.Close()
+	}
 }
 
 // Strinc returns the first key that would sort outside the range prefixed by
