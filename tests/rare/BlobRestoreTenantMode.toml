@@ -13,6 +13,7 @@ bg_key_tuple_truncate_offset = 1
 enable_rest_kms_communication = true
 bg_consistency_check_enabled = 0
 bw_throttling_enabled = false
+shard_encode_location_metadata=false # not compatible with this feature
 
 [[test]] 
 testTitle = 'BackupMutationLogs'

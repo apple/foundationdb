@@ -160,7 +160,27 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 		return;
 	}
 
-	ASSERT(!this->meta.ranges.empty() && this->meta.ranges.front().contains(range));
+	if (this->meta.ranges.empty()) {
+		TraceEvent(SevError, "DataMoveValidationError")
+		    .detail("Range", range)
+		    .detail("Reason", "DataMoveMetatdataRangeEmpty")
+		    .detail("DestID", shard.destId)
+		    .detail("DataMoveMetaData", this->meta.toString())
+		    .detail("ShardPrimaryDest", describe(shard.primaryDest))
+		    .detail("ShardRemoteDest", describe(shard.remoteDest));
+		ASSERT(false);
+	}
+
+	if (!this->meta.ranges.front().contains(range)) {
+		TraceEvent(SevError, "DataMoveValidationError")
+		    .detail("Range", range)
+		    .detail("Reason", "DataMoveMetatdataRangeMismatch")
+		    .detail("DestID", shard.destId)
+		    .detail("DataMoveMetaData", this->meta.toString())
+		    .detail("ShardPrimaryDest", describe(shard.primaryDest))
+		    .detail("ShardRemoteDest", describe(shard.remoteDest));
+		ASSERT(false);
+	}
 
 	if (!shard.hasDest) {
 		TraceEvent(SevWarnAlways, "DataMoveValidationError")
