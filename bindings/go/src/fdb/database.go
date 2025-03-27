@@ -324,7 +324,7 @@ func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion 
 		append(Key("\xFF/keyServers/"), ek.FDBKey()...),
 	}
 
-	kvs, err := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).GetSliceWithError()
+	kvs, err := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).Get()
 	if err != nil {
 		return nil, err
 	}
