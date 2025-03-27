@@ -1201,8 +1201,8 @@ public:
 	             std::shared_ptr<RocksDBEventListener> eventListener,
 	             Counters* cc,
 	             std::shared_ptr<IteratorPool> iteratorPool)
-	  : path(path), logId(logId), rState(rState), dbOptions(options), dataShardMap(nullptr, specialKeys.end),
-	    counters(cc), iteratorPool(iteratorPool) {
+	  : path(path), logId(logId), rState(rState), dbOptions(options), lastWriteSetLogTime(now()),
+	    dataShardMap(nullptr, specialKeys.end), counters(cc), iteratorPool(iteratorPool) {
 		if (!g_network->isSimulated()) {
 			// Generating trace events in non-FDB thread will cause errors. The event listener is tested with local FDB
 			// cluster.
@@ -1738,6 +1738,7 @@ public:
 		ASSERT(it.value()->range == (KeyRangeRef)it.range());
 		ASSERT(writeBatch != nullptr);
 		ASSERT(dirtyShards != nullptr);
+		writeSet.insert(it.value()->physicalShard->id);
 		writeBatch->Put(it.value()->physicalShard->cf, toSlice(key), toSlice(value));
 		dirtyShards->insert(it.value()->physicalShard);
 		TraceEvent(SevVerbose, "ShardedRocksShardManagerPutEnd", this->logId)
@@ -1750,6 +1751,7 @@ public:
 		if (!it.value()) {
 			return;
 		}
+		writeSet.insert(it.value()->physicalShard->id);
 		writeBatch->Delete(it.value()->physicalShard->cf, toSlice(key));
 		dirtyShards->insert(it.value()->physicalShard);
 	}
@@ -1865,6 +1867,21 @@ public:
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) {
 		populateRangeMappingMutations(writeBatch.get(), range, isAdd);
 		dirtyShards->insert(getMetaDataShard());
+	}
+
+	void logWriteSetMetrics() {
+		double duration = now() - lastWriteSetLogTime;
+		cumulativeWriteSet.insert(writeSet.begin(), writeSet.end());
+		TraceEvent(SevInfo, "WriteSetStats", this->logId)
+		    .detail("WriteSetSize", writeSet.size())
+		    .detail("CumulativeWriteSetSize", cumulativeWriteSet.size())
+		    .detail("Duration", duration);
+		if (duration > 7200) {
+			// Reset after 2 hours.
+			cumulativeWriteSet.clear();
+			lastWriteSetLogTime = now();
+		}
+		writeSet.clear();
 	}
 
 	std::unique_ptr<rocksdb::WriteBatch> getWriteBatch() {
@@ -2018,6 +2035,9 @@ private:
 	std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*> columnFamilyMap;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	std::unique_ptr<std::set<PhysicalShard*>> dirtyShards;
+	double lastWriteSetLogTime;
+	std::set<std::string> writeSet;
+	std::set<std::string> cumulativeWriteSet;
 	KeyRangeMap<DataShard*> dataShardMap;
 	std::deque<std::string> pendingDeletionShards;
 	Counters* counters;
@@ -2217,6 +2237,7 @@ ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDB
 			if (rState->compactOnRangeDeletionFactory) {
 				rState->compactOnRangeDeletionFactory->logMetrics(/*reset=*/true);
 			}
+			shardManager->logWriteSetMetrics();
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
