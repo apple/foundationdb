@@ -432,7 +432,7 @@ public:
 			return false;
 
 		// If current log entry(it), covers the entire snapshot, return true
-		if (it->endVersion >= snapshotEndVersion)
+		if (it->endVersion > snapshotEndVersion)
 			return true;
 
 		// Iterate over the next logs, check if they are continuous and if
@@ -442,7 +442,7 @@ public:
 
 		while (it != logs.end()) {
 			if (it->beginVersion == prevEnd &&
-			    it->endVersion >= snapshotEndVersion) // continuous logs until snapshot is covered
+			    it->endVersion > snapshotEndVersion) // continuous logs until snapshot is covered
 				return true;
 			else if (it->beginVersion != prevEnd) // not continuous logs
 				return false;
@@ -451,7 +451,7 @@ public:
 			++it;
 		} // comes out if the logs are not found until snapshotEndVersion.
 
-		return prevEnd >= snapshotEndVersion;
+		return prevEnd > snapshotEndVersion;
 	}
 
 	// Find the continuous log end version starting from beginVersion in the
@@ -690,7 +690,7 @@ public:
 					s.restorable = false;
 				// If there is logs gap after contiguousLogEnd, then check whether the current snapshot
 				// can be restored from the logs available after contiguousLogEnd.
-				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() <= s.beginVersion) {
+				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() < s.beginVersion) {
 					if (desc.partitioned)
 						s.restorable = isPartitionedLogsContinuous(logs, s.beginVersion, s.endVersion);
 					else
@@ -726,7 +726,8 @@ public:
 			}
 
 			// If there is logs gap after contiguousLogEnd and if current snapshot is restorable(have continuous logs)
-			if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() < s.beginVersion && s.restorable.get()) {
+			if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() <= s.beginVersion &&
+			    s.restorable.get()) {
 				if (desc.minRestorableVersion.present() && desc.maxRestorableVersion.present()) {
 					ASSERT(desc.minRestorableVersion.get() < s.beginVersion);
 
@@ -757,7 +758,6 @@ public:
 
 				// Find the continuousLogEnd after snapshotEndVersion and set it as
 				// maxRestorableVersion.
-
 				if (desc.partitioned) {
 					// TO DO: Yet to implement similar function findContinuousLogEnd for partitioned logs.
 					desc.maxRestorableVersion = s.endVersion;
@@ -2099,13 +2099,17 @@ TEST_CASE("/backup/logs_continuous") {
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 100, 101));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 101, 150));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 99));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 100));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 100));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 101));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 150));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 70));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 100));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 99));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 100));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 11));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 100));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 98, 99));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 100));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 99));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 100, 100));
 	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 0) == invalidVersion);
 	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 5) == invalidVersion);
 	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 10) == 100);
@@ -2127,20 +2131,26 @@ TEST_CASE("/backup/logs_continuous") {
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 101));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 150));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 70));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 99));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 100));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 11));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 98, 99));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 100));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 99));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 100, 100));
 
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 150));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 205));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 200, 201));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 201, 250));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 199));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 200));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 200));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 201));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 70, 170));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 70, 200));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 199, 200));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 70, 200));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 199, 200));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 199, 199));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 200, 200));
 
 	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 0) == invalidVersion);
 	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 5) == invalidVersion);
@@ -2166,18 +2176,26 @@ TEST_CASE("/backup/logs_continuous") {
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 101));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 150));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 70));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 99));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 50, 100));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 11));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 98, 99));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 100));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 99, 99));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 100, 100));
 
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 150));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 5, 205));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 200, 201));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 201, 250));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 199));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 200));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 200));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 201));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 70, 170));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 199, 200));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 70, 200));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 199, 200));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 199, 199));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 200, 200));
 
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 250, 260));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 250, 310));
@@ -2185,16 +2203,18 @@ TEST_CASE("/backup/logs_continuous") {
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 400, 401));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 401, 450));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 300, 399));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 300, 400));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 300, 400));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 300, 401));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 300, 350));
 	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 350, 370));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 350, 400));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 350, 400));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 10, 400));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 100, 400));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 200, 400));
 	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 299, 400));
-	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 399, 400));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 399, 400));
+	ASSERT(BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 399, 399));
+	ASSERT(!BackupContainerFileSystemImpl::hasContinuousLogsForSnapshot(files, 400, 400));
 
 	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 0) == invalidVersion);
 	ASSERT(BackupContainerFileSystemImpl::findContinuousLogEnd(files, 5) == invalidVersion);
