@@ -142,12 +142,22 @@ func (rr RangeResult) GetSliceWithError() ([]KeyValue, error) {
 		ri.options.Mode = StreamingModeWantAll
 	}
 
-	for ri.Advance() {
-		if ri.err != nil {
-			return nil, ri.err
+	for {
+		ok, kvs, err := ri.Advance()
+		if err != nil {
+			return nil, err
 		}
-		ret = append(ret, ri.kvs...)
-		ri.index = len(ri.kvs)
+		if !ok {
+			break
+		}
+		ret = append(ret, kvs...)
+
+		ri.index = len(kvs)
+		if ri.options.Reverse {
+			ri.sr.End = FirstGreaterOrEqual(kvs[ri.index-1].Key)
+		} else {
+			ri.sr.Begin = FirstGreaterThan(kvs[ri.index-1].Key)
+		}
 	}
 
 	return ret, nil
@@ -195,9 +205,7 @@ type RangeIterator struct {
 	iteration int
 	done      bool
 	more      bool
-	kvs       []KeyValue
 	index     int
-	err       error
 	snapshot  bool
 }
 
@@ -205,27 +213,28 @@ type RangeIterator struct {
 // returns true if there are more key-value pairs satisfying the range, or false
 // if the range has been exhausted. You must call this before every call to Get
 // or MustGet.
-func (ri *RangeIterator) Advance() bool {
+func (ri *RangeIterator) Advance() (bool, []KeyValue, error) {
 	if ri.done {
-		return false
+		return false, nil, nil
 	}
 
 	f := ri.fetchNextBatch()
 	if f == nil {
 		// iterator is done
-		return false
+		return false, nil, nil
 	}
 	defer f.Close()
 
-	ri.kvs, ri.more, ri.err = f.Get()
+	var err error
+	var kvs []KeyValue
+	kvs, ri.more, err = f.Get()
 	ri.index = 0
 
-	if ri.err != nil || len(ri.kvs) > 0 {
-		// return true in case of error so that next Get() call will retrieve this error
-		return true
+	if err != nil || len(kvs) > 0 {
+		return true, kvs, err
 	}
 
-	return false
+	return false, nil, nil
 }
 
 func (ri *RangeIterator) fetchNextBatch() *futureKeyValueArray {
@@ -237,12 +246,6 @@ func (ri *RangeIterator) fetchNextBatch() *futureKeyValueArray {
 	if ri.options.Limit > 0 {
 		// Not worried about this being zero, checked equality above
 		ri.options.Limit -= ri.index
-	}
-
-	if ri.options.Reverse {
-		ri.sr.End = FirstGreaterOrEqual(ri.kvs[ri.index-1].Key)
-	} else {
-		ri.sr.Begin = FirstGreaterThan(ri.kvs[ri.index-1].Key)
 	}
 
 	ri.iteration++
