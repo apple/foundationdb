@@ -3120,7 +3120,7 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			}
 
 			f = AsyncFileNonDurable::open(
-			    filename, actualFilename, f, diskParameters, (flags & IAsyncFile::OPEN_NO_AIO) == 0);
+			    filename, actualFilename, f, diskParameters, (flags & IAsyncFile::OPEN_NO_AIO) != 0);
 
 			machineCache[actualFilename] = UnsafeWeakFutureReference<IAsyncFile>(f);
 		} else {

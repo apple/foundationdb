@@ -2458,6 +2458,10 @@ TestSet readTOMLTests_(std::string fileName) {
 		for (const toml::value& workload : workloads) {
 			workloadOptions = Standalone<VectorRef<KeyValueRef>>();
 			TraceEvent("TestParserFlush").detail("Reason", "new (compound) test");
+
+			// Add the test file path to the workload options
+			workloadOptions.push_back_deep(workloadOptions.arena(), KeyValueRef("testfile"_sr, StringRef(fileName)));
+
 			for (const auto& [attrib, v] : workload.as_table()) {
 				const std::string& value = toml_to_string(v);
 				workloadOptions.push_back_deep(workloadOptions.arena(),

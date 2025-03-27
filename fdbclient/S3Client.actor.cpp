@@ -205,8 +205,8 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 
 		// Open file once with UNCACHED for both checksum and upload.
 		// TODO: Fix this double read. Check what the sdk does.
-		Reference<IAsyncFile> f = wait(
-		    IAsyncFileSystem::filesystem()->open(filepath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
+		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
+		    filepath, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 		file = f;
 
 		// Calculate checksum using the same file handle
