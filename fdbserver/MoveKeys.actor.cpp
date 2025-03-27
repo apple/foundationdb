@@ -3471,6 +3471,14 @@ ACTOR Future<Void> prepareBlobRestore(Database occ,
                                       KeyRangeRef keys,
                                       UID bmId,
                                       UID reqId) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		TraceEvent(SevError, "PrepareBlobRestoreError")
+		    .detail("Reason", "SHARD_ENCODE_LOCATION_METADATA is enabled")
+		    .detail("Keys", keys)
+		    .detail("BMID", bmId)
+		    .detail("ReqID", reqId);
+		ASSERT(false);
+	}
 	state int retries = 0;
 	state Transaction tr = Transaction(occ);
 	ASSERT(ddEnabledState->isBlobRestorePreparing());

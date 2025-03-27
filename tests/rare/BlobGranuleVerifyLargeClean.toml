@@ -2,6 +2,9 @@
 blobGranulesEnabled = true 
 allowDefaultTenant = false
 
+[[knobs]]
+shard_encode_location_metadata=false # not compatible with this feature
+
 [[test]]
 testTitle = 'BlobGranuleVerifyLargeClean'
 
