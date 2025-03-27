@@ -43,6 +43,9 @@ func (n *node) exists() bool {
 	return true
 }
 
+// prefetchMetadata will make sure that layer information starts being prefetched.
+// If subspace is nil, this is a no-op and returns false.
+// Caller is responsible for closing the future used to fetch layer information.
 func (n *node) prefetchMetadata(rtr fdb.ReadTransaction) (*node, bool) {
 	if n.exists() {
 		n.layer(rtr)
@@ -51,6 +54,8 @@ func (n *node) prefetchMetadata(rtr fdb.ReadTransaction) (*node, bool) {
 	return n, false
 }
 
+// layer will start a future to fetch layer information, unless one already exists.
+// Caller is responsible for properly closing this future.
 func (n *node) layer(rtr fdb.ReadTransaction) fdb.FutureByteSlice {
 	if n._layer == nil {
 		fv := rtr.Get(n.subspace.Sub([]byte("layer")))

@@ -25,6 +25,7 @@ package fdb
 // #define FDB_API_VERSION 740
 // #include <foundationdb/fdb_c.h>
 import "C"
+import "context"
 
 // A ReadTransaction can asynchronously read from a FoundationDB
 // database. Transaction and Snapshot both satisfy the ReadTransaction
@@ -42,9 +43,14 @@ type ReadTransaction interface {
 	GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64
 	GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray
 	Options() TransactionOptions
-	Cancel()
+
+	CancellableTransaction
 
 	ReadTransactor
+}
+
+type CancellableTransaction interface {
+	Cancel()
 }
 
 // Transaction is a handle to a FoundationDB transaction. Transaction is a
@@ -118,10 +124,17 @@ func (t Transaction) GetDatabase() Database {
 //
 // See the Transactor interface for an example of using Transact with
 // Transaction and Database objects.
-func (t Transaction) Transact(f func(Transaction) (interface{}, error)) (r interface{}, err error) {
+func (t Transaction) Transact(ctx context.Context, f func(Transaction) (interface{}, error)) (r interface{}, txClose func(), err error) {
 	defer panicToError(&err)
 
+	// NOTE: 'autoCancel' must be called outside of the defer function, so that the goroutine is started
+	ch := autoCancel(ctx, t)
+	defer close(ch)
+
 	r, err = f(t)
+	if err == nil {
+		txClose = noOpFunc
+	}
 	return
 }
 
@@ -138,10 +151,17 @@ func (t Transaction) Transact(f func(Transaction) (interface{}, error)) (r inter
 //
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
-func (t Transaction) ReadTransact(f func(ReadTransaction) (interface{}, error)) (r interface{}, err error) {
+func (t Transaction) ReadTransact(ctx context.Context, f func(ReadTransaction) (interface{}, error)) (r interface{}, txClose func(), err error) {
 	defer panicToError(&err)
 
+	// NOTE: 'autoCancel' must be called outside of the defer function, so that the goroutine is started
+	ch := autoCancel(ctx, t)
+	defer close(ch)
+
 	r, err = f(t)
+	if err == nil {
+		txClose = noOpFunc
+	}
 	return
 }
 
