@@ -690,7 +690,7 @@ public:
 					s.restorable = false;
 				// If there is logs gap after contiguousLogEnd, then check whether the current snapshot
 				// can be restored from the logs available after contiguousLogEnd.
-				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() < s.beginVersion) {
+				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() <= s.beginVersion) {
 					if (desc.partitioned)
 						s.restorable = isPartitionedLogsContinuous(logs, s.beginVersion, s.endVersion);
 					else
@@ -726,7 +726,11 @@ public:
 			}
 
 			// If there is logs gap after contiguousLogEnd and if current snapshot is restorable(have continuous logs)
-			if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() <= s.beginVersion &&
+			if (desc.contiguousLogEnd.present() &&
+			    ((desc.contiguousLogEnd.get() < s.beginVersion) ||
+			     // if contiguousLogEnd==s.beginVersion==s.endVersion, there is no need to check for continuous logs in
+			     // single version snapshot. And this case is covered in above if condition.
+			     (desc.contiguousLogEnd.get() == s.beginVersion && s.beginVersion != s.endVersion)) &&
 			    s.restorable.get()) {
 				if (desc.minRestorableVersion.present() && desc.maxRestorableVersion.present()) {
 					ASSERT(desc.minRestorableVersion.get() < s.beginVersion);
@@ -741,7 +745,7 @@ public:
 						    hasContinuousLogsForSnapshot(logs, desc.minRestorableVersion.get(), s.endVersion);
 
 					if (contiguousLogs) {
-						// The previous restorable version can be extended to current snapshot vesion,
+						// The previous restorable version can be extended to current snapshot version,
 						// so minRestorableVersion remain same
 						desc.maxRestorableVersion = s.endVersion;
 					} else {
