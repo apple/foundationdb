@@ -27,6 +27,7 @@ package fdb
 import "C"
 
 import (
+	"context"
 	"errors"
 )
 
@@ -161,23 +162,52 @@ func (d Database) GetClientStatus() ([]byte, error) {
 	return b, nil
 }
 
-func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, err error) {
+func autoCancel(ctx context.Context, tr CancellableTransaction) chan<- struct{} {
+	exitCh := make(chan struct{})
+	// This goroutine ensures that as soon as context is canceled the FoundationDB transaction will be canceled as well;
+	// this can in turn cause FoundationDB's `transaction_canceled` errors.
+	go func() {
+		select {
+		case <-exitCh:
+			// transaction finished before any context cancellation was acknowledged
+			return
+		case <-ctx.Done():
+			// context cancellation happened before transaction finished
+			// NOTE: canceling the transaction does not mean that transaction state changes did not happen,
+
+			tr.Cancel()
+
+			return
+		}
+	}()
+
+	return exitCh
+}
+
+// retryable is responsible for retrying the wrapped function for as long as the returned error is retryable.
+// In case of a non-retryable error, it is returned and transaction is closed.
+func retryable(ctx context.Context, tr Transaction, wrapped func() (interface{}, error)) (ret interface{}, txClose func(), err error) {
+	// NOTE: 'autoCancel' must be called outside of the defer function, so that the goroutine is started
+	ch := autoCancel(ctx, tr)
+	defer close(ch)
+
 	for {
 		ret, err = wrapped()
-
-		// No error means success!
 		if err == nil {
+			// No error means success!
+			// Caller is responsible for closing transaction after finishing using any future created within the transaction
+			// This return value is always nil in case of errors
+			txClose = tr.Close
+
 			return
 		}
 
-		// Check if the error chain contains an
-		// fdb.Error
+		// Check if the error chain contains an fdb.Error
 		var ep Error
 		if errors.As(err, &ep) {
-			f := onError(ep)
-			defer f.Close()
-
+			f := tr.OnError(ep)
 			processedErr := f.Get()
+			f.Close()
 			var newEp Error
 			if !errors.As(processedErr, &newEp) || newEp.Code != ep.Code {
 				// override original error only if not an Error or code changed
@@ -189,6 +219,10 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 		// If OnError returns an error, then it's not
 		// retryable; otherwise take another pass at things
 		if err != nil {
+
+			// destroy transaction; this will cancel all futures created within it
+			tr.Close()
+
 			return
 		}
 	}
@@ -206,40 +240,37 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 // error.
 //
 // The transaction is retried if the error is or wraps a retryable Error.
-// The error is unwrapped.
 //
-// Do not return Future objects from the function provided to Transact. The
-// Transaction created by Transact may be finalized at any point after Transact
-// returns, resulting in the cancellation of any outstanding
-// reads. Additionally, any errors returned or panicked by the Future will no
-// longer be able to trigger a retry of the caller-provided function.
+// In case of success a transaction close function is returned and caller must
+// call it after all futures have been used.
+// Any errors returned or panicked by the Future outside of the Transact() call
+// will no longer be able to trigger a retry of the caller-provided function.
 //
 // See the Transactor interface for an example of using Transact with
 // Transaction and Database objects.
-func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{}, error) {
+func (d Database) Transact(ctx context.Context, f func(Transaction) (interface{}, error)) (interface{}, func(), error) {
 	tr, err := d.CreateTransaction()
 	if err != nil {
 		// Any error here is non-retryable
-		return nil, err
+		return nil, nil, err
 	}
-	defer tr.Close()
 
 	wrapped := func() (ret interface{}, err error) {
 		defer panicToError(&err)
 
 		ret, err = f(tr)
-
-		if err == nil {
-			f := tr.Commit()
-			defer f.Close()
-
-			err = f.Get()
+		if err != nil {
+			return
 		}
+
+		f := tr.Commit()
+		err = f.Get()
+		f.Close()
 
 		return
 	}
 
-	return retryable(wrapped, tr.OnError)
+	return retryable(ctx, tr, wrapped)
 }
 
 // ReadTransact runs a caller-provided function inside a retry loop, providing
@@ -253,37 +284,33 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // transaction or return the error.
 //
 // The transaction is retried if the error is or wraps a retryable Error.
-// The error is unwrapped.
-// Read transactions are never committed and destroyed automatically via GC,
-// once all their futures go out of scope.
+// Read transactions are never committed.
 //
-// Do not return Future objects from the function provided to ReadTransact. The
-// Transaction created by ReadTransact may be finalized at any point after
-// ReadTransact returns, resulting in the cancellation of any outstanding
-// reads. Additionally, any errors returned or panicked by the Future will no
-// longer be able to trigger a retry of the caller-provided function.
+// In case of success a transaction close function is returned and caller must
+// call it after all futures have been used.
+// Any errors returned or panicked by the Future outside of the Transact() call
+// will no longer be able to trigger a retry of the caller-provided function.
 //
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
-func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (interface{}, error) {
+func (d Database) ReadTransact(ctx context.Context, f func(ReadTransaction) (interface{}, error)) (interface{}, func(), error) {
 	tr, err := d.CreateTransaction()
 	if err != nil {
 		// Any error here is non-retryable
-		return nil, err
+		return nil, nil, err
 	}
-	defer tr.Close()
 
 	wrapped := func() (ret interface{}, err error) {
 		defer panicToError(&err)
 
 		ret, err = f(tr)
 
-		// read-only transactions are not committed and will be destroyed automatically by the deferred Close()
+		// read-only transactions are not committed and will be destroyed automatically when Transaction's Close() is called
 
 		return
 	}
 
-	return retryable(wrapped, tr.OnError)
+	return retryable(ctx, tr, wrapped)
 }
 
 // Options returns a DatabaseOptions instance suitable for setting options
