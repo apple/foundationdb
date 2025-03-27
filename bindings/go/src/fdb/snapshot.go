@@ -22,6 +22,8 @@
 
 package fdb
 
+import "context"
+
 // Snapshot is a handle to a FoundationDB transaction snapshot, suitable for
 // performing snapshot reads. Snapshot reads offer a more relaxed isolation
 // level than FoundationDB's default serializable isolation, reducing
@@ -32,6 +34,8 @@ package fdb
 type Snapshot struct {
 	*transaction
 }
+
+var noOpFunc = func() {}
 
 // ReadTransact executes the caller-provided function, passing it the Snapshot
 // receiver object (as a ReadTransaction).
@@ -46,10 +50,17 @@ type Snapshot struct {
 //
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
-func (s Snapshot) ReadTransact(f func(ReadTransaction) (interface{}, error)) (r interface{}, err error) {
+func (s Snapshot) ReadTransact(ctx context.Context, f func(ReadTransaction) (interface{}, error)) (r interface{}, txClose func(), err error) {
 	defer panicToError(&err)
 
+	// NOTE: 'autoCancel' must be called outside of the defer function, so that the goroutine is started
+	ch := autoCancel(ctx, s)
+	defer close(ch)
+
 	r, err = f(s)
+	if err == nil {
+		txClose = noOpFunc
+	}
 	return
 }
 

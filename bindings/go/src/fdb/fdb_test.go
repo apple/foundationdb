@@ -23,6 +23,7 @@
 package fdb_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -62,23 +63,29 @@ func TestVersionstamp(t *testing.T) {
 	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
 
-	setVs := func(t fdb.Transactor, key fdb.Key) (fdb.FutureKey, error) {
-		fmt.Printf("setOne called with:  %T\n", t)
-		ret, err := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	setVs := func(tr fdb.Transactor, key fdb.Key) (fdb.FutureKey, error) {
+		fmt.Printf("setOne called with:  %T\n", tr)
+		ret, txClose, err := tr.Transact(context.Background(), func(tr fdb.Transaction) (interface{}, error) {
 			tr.SetVersionstampedValue(key, []byte("blahblahbl\x00\x00\x00\x00"))
 			return tr.GetVersionstamp(), nil
 		})
+		if err == nil {
+			t.Cleanup(txClose)
+		}
 		return ret.(fdb.FutureKey), err
 	}
 
 	getOne := func(rt fdb.ReadTransactor, key fdb.Key) ([]byte, error) {
 		fmt.Printf("getOne called with: %T\n", rt)
-		ret, err := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
-			return rtr.Get(key).MustGet(), nil
+		ret, txClose, err := rt.ReadTransact(context.Background(), func(rtr fdb.ReadTransaction) (interface{}, error) {
+			f := rtr.Get(key)
+			defer f.Close()
+			return f.MustGet(), nil
 		})
 		if err != nil {
 			return nil, err
 		}
+		txClose()
 		return ret.([]byte), nil
 	}
 
@@ -109,14 +116,15 @@ func TestEstimatedRangeSize(t *testing.T) {
 	db := fdb.MustOpenDefault()
 
 	var f fdb.FutureInt64
-	_, err := db.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+	_, txClose, err := db.ReadTransact(context.Background(), func(rtr fdb.ReadTransaction) (interface{}, error) {
 		f = rtr.GetEstimatedRangeSizeBytes(subspace.AllKeys())
 
 		return nil, nil
 	})
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
+	t.Cleanup(txClose)
 
 	_, err = f.Get()
 	if err != nil {
@@ -127,37 +135,48 @@ func TestEstimatedRangeSize(t *testing.T) {
 func TestReadTransactionOptions(t *testing.T) {
 	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
-	_, err := db.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+	_, txClose, err := db.ReadTransact(context.Background(), func(rtr fdb.ReadTransaction) (interface{}, error) {
 		rtr.Options().SetAccessSystemKeys()
-		return rtr.Get(fdb.Key("\xff/")).MustGet(), nil
+		f := rtr.Get(fdb.Key("\xff/"))
+		defer f.Close()
+		return f.MustGet(), nil
 	})
 	if err != nil {
-		t.Errorf("Failed to read system key: %s", err)
+		t.Fatalf("Failed to read system key: %s", err)
 	}
+	txClose()
 }
 
 func ExampleTransactor() {
 	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
 
-	setOne := func(t fdb.Transactor, key fdb.Key, value []byte) error {
-		fmt.Printf("setOne called with:  %T\n", t)
-		_, err := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	setOne := func(tr fdb.Transactor, key fdb.Key, value []byte) error {
+		fmt.Printf("setOne called with:  %T\n", tr)
+		_, txClose, err := tr.Transact(context.Background(), func(tr fdb.Transaction) (interface{}, error) {
 			// We don't actually call tr.Set here to avoid mutating a real database.
 			// tr.Set(key, value)
 			return nil, nil
 		})
+		if err == nil {
+			// close transaction since no futures were created in it
+			txClose()
+		}
 		return err
 	}
 
-	setMany := func(t fdb.Transactor, value []byte, keys ...fdb.Key) error {
-		fmt.Printf("setMany called with: %T\n", t)
-		_, err := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+	setMany := func(tr fdb.Transactor, value []byte, keys ...fdb.Key) error {
+		fmt.Printf("setMany called with: %T\n", tr)
+		_, txClose, err := tr.Transact(context.Background(), func(tr fdb.Transaction) (interface{}, error) {
 			for _, key := range keys {
 				setOne(tr, key, value)
 			}
 			return nil, nil
 		})
+		if err == nil {
+			// close transaction since no futures were created in it
+			txClose()
+		}
 		return err
 	}
 
@@ -193,25 +212,35 @@ func ExampleReadTransactor() {
 
 	getOne := func(rt fdb.ReadTransactor, key fdb.Key) ([]byte, error) {
 		fmt.Printf("getOne called with: %T\n", rt)
-		ret, err := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
-			return rtr.Get(key).MustGet(), nil
+		ret, txClose, err := rt.ReadTransact(context.Background(), func(rtr fdb.ReadTransaction) (interface{}, error) {
+			f := rtr.Get(key)
+			defer f.Close()
+			return f.MustGet(), nil
 		})
 		if err != nil {
 			return nil, err
 		}
+		txClose()
 		return ret.([]byte), nil
 	}
 
 	getTwo := func(rt fdb.ReadTransactor, key1, key2 fdb.Key) ([][]byte, error) {
 		fmt.Printf("getTwo called with: %T\n", rt)
-		ret, err := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
-			r1, _ := getOne(rtr, key1)
-			r2, _ := getOne(rtr.Snapshot(), key2)
+		ret, txClose, err := rt.ReadTransact(context.Background(), func(rtr fdb.ReadTransaction) (interface{}, error) {
+			r1, err := getOne(rtr, key1)
+			if err != nil {
+				return nil, err
+			}
+			r2, err := getOne(rtr.Snapshot(), key2)
+			if err != nil {
+				return nil, err
+			}
 			return [][]byte{r1, r2}, nil
 		})
 		if err != nil {
 			return nil, err
 		}
+		txClose()
 		return ret.([][]byte), nil
 	}
 

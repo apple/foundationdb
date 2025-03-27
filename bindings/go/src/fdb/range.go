@@ -197,7 +197,7 @@ func (rr RangeResult) Iterator() *RangeIterator {
 // objects) satisfying the range specified in a range read. RangeIterator is
 // constructed with the (RangeResult).Iterator method.
 //
-// You must call NextBatch and get a true result.
+// You must call NextBatch and get a result without error.
 //
 // RangeIterator should not be copied or used concurrently from multiple
 // goroutines, but multiple RangeIterators may be constructed from a single
@@ -249,8 +249,12 @@ func (ri *RangeIterator) NextBatch(prefetch bool) ([]KeyValue, error) {
 		ri.more = false
 		return nil, err
 	}
-	// consider reading done if limit was reached
-	ri.more = ri.more || ri.lastBatchLen == ri.options.Limit
+
+	// if limit is zero then we can rely on the 'more' value returned by the C function
+	if ri.more && ri.options.Limit != 0 {
+		// if limit is non-zero then keep reading until Limit is zero
+		ri.more = ri.lastBatchLen < ri.options.Limit
+	}
 
 	if prefetch && ri.more {
 		ri.prefetchOptions = ri.options

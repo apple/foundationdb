@@ -23,6 +23,7 @@
 package directory
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -58,40 +59,40 @@ func (ds directorySubspace) String() string {
 	return fmt.Sprintf("DirectorySubspace(%s, %s)", path, fdb.Printable(ds.Bytes()))
 }
 
-func (d directorySubspace) CreateOrOpen(t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error) {
-	return d.dl.CreateOrOpen(t, d.dl.partitionSubpath(d.path, path), layer)
+func (d directorySubspace) CreateOrOpen(ctx context.Context, t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error) {
+	return d.dl.CreateOrOpen(ctx, t, d.dl.partitionSubpath(d.path, path), layer)
 }
 
-func (d directorySubspace) Create(t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error) {
-	return d.dl.Create(t, d.dl.partitionSubpath(d.path, path), layer)
+func (d directorySubspace) Create(ctx context.Context, t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error) {
+	return d.dl.Create(ctx, t, d.dl.partitionSubpath(d.path, path), layer)
 }
 
-func (d directorySubspace) CreatePrefix(t fdb.Transactor, path []string, layer []byte, prefix []byte) (DirectorySubspace, error) {
-	return d.dl.CreatePrefix(t, d.dl.partitionSubpath(d.path, path), layer, prefix)
+func (d directorySubspace) CreatePrefix(ctx context.Context, t fdb.Transactor, path []string, layer []byte, prefix []byte) (DirectorySubspace, error) {
+	return d.dl.CreatePrefix(ctx, t, d.dl.partitionSubpath(d.path, path), layer, prefix)
 }
 
-func (d directorySubspace) Open(rt fdb.ReadTransactor, path []string, layer []byte) (DirectorySubspace, error) {
-	return d.dl.Open(rt, d.dl.partitionSubpath(d.path, path), layer)
+func (d directorySubspace) Open(ctx context.Context, rt fdb.ReadTransactor, path []string, layer []byte) (DirectorySubspace, error) {
+	return d.dl.Open(ctx, rt, d.dl.partitionSubpath(d.path, path), layer)
 }
 
-func (d directorySubspace) MoveTo(t fdb.Transactor, newAbsolutePath []string) (DirectorySubspace, error) {
-	return moveTo(t, d.dl, d.path, newAbsolutePath)
+func (d directorySubspace) MoveTo(ctx context.Context, t fdb.Transactor, newAbsolutePath []string) (DirectorySubspace, error) {
+	return moveTo(ctx, t, d.dl, d.path, newAbsolutePath)
 }
 
-func (d directorySubspace) Move(t fdb.Transactor, oldPath []string, newPath []string) (DirectorySubspace, error) {
-	return d.dl.Move(t, d.dl.partitionSubpath(d.path, oldPath), d.dl.partitionSubpath(d.path, newPath))
+func (d directorySubspace) Move(ctx context.Context, t fdb.Transactor, oldPath []string, newPath []string) (DirectorySubspace, error) {
+	return d.dl.Move(ctx, t, d.dl.partitionSubpath(d.path, oldPath), d.dl.partitionSubpath(d.path, newPath))
 }
 
-func (d directorySubspace) Remove(t fdb.Transactor, path []string) (bool, error) {
-	return d.dl.Remove(t, d.dl.partitionSubpath(d.path, path))
+func (d directorySubspace) Remove(ctx context.Context, t fdb.Transactor, path []string) (bool, error) {
+	return d.dl.Remove(ctx, t, d.dl.partitionSubpath(d.path, path))
 }
 
-func (d directorySubspace) Exists(rt fdb.ReadTransactor, path []string) (bool, error) {
-	return d.dl.Exists(rt, d.dl.partitionSubpath(d.path, path))
+func (d directorySubspace) Exists(ctx context.Context, rt fdb.ReadTransactor, path []string) (bool, error) {
+	return d.dl.Exists(ctx, rt, d.dl.partitionSubpath(d.path, path))
 }
 
-func (d directorySubspace) List(rt fdb.ReadTransactor, path []string) ([]string, error) {
-	return d.dl.List(rt, d.dl.partitionSubpath(d.path, path))
+func (d directorySubspace) List(ctx context.Context, rt fdb.ReadTransactor, path []string) ([]string, error) {
+	return d.dl.List(ctx, rt, d.dl.partitionSubpath(d.path, path))
 }
 
 func (d directorySubspace) GetLayer() []byte {
