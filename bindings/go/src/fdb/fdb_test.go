@@ -265,7 +265,7 @@ func ExamplePrefixRange() {
 	pr, _ := fdb.PrefixRange([]byte("alphabet"))
 
 	// Read and process the range
-	kvs, err := tr.GetRange(pr, fdb.RangeOptions{}).GetSliceWithError()
+	kvs, err := tr.GetRange(pr, fdb.RangeOptions{}).Get()
 	if err != nil {
 		fmt.Printf("Unable to read range: %v\n", err)
 	}
@@ -298,15 +298,21 @@ func ExampleRangeIterator() {
 
 	rr := tr.GetRange(fdb.KeyRange{fdb.Key(""), fdb.Key{0xFF}}, fdb.RangeOptions{})
 	ri := rr.Iterator()
+	defer ri.Close()
 
-	// Advance will return true until the iterator is exhausted
-	for ri.Advance() {
-		kv, err := ri.Get()
+	// NextBatch will return values until the iterator is exhausted
+	for {
+		kvs, err := ri.NextBatch(true)
 		if err != nil {
 			fmt.Printf("Unable to read next value: %v\n", err)
 			return
 		}
-		fmt.Printf("%s is %s\n", kv.Key, kv.Value)
+		for _, kv := range kvs {
+			fmt.Printf("%s is %s\n", kv.Key, kv.Value)
+		}
+		if len(kvs) == 0 {
+			break
+		}
 	}
 
 	// Output:
