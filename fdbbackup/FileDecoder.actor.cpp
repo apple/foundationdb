@@ -336,6 +336,10 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 			param->prefixes.push_back(decode_hex_string(args->OptionArg(), err));
 			break;
 
+		case OPT_PROXY:
+			param->proxy = args->OptionArg();
+			break;
+
 		case OPT_BEGIN_VERSION_FILTER:
 			param->beginVersionFilter = std::atoll(args->OptionArg());
 			break;
