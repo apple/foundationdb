@@ -601,7 +601,7 @@ TLSPolicy::Rule::Rule(std::string input) {
 
 			s = eq + 3;
 		} else {
-			std::map<int, Criteria>* criteria = &subject_criteria;
+			std::set<std::pair<NID, Criteria>>* criteria = &subject_criteria;
 
 			if (term.find('.') != term.npos) {
 				auto scoped = splitPair(term, '.');
@@ -626,7 +626,15 @@ TLSPolicy::Rule::Rule(std::string input) {
 
 			NID termNID = abbrevToNID(term);
 			const X509Location loc = locationForNID(termNID);
-			criteria->insert(std::make_pair(termNID, Criteria(unesc, mt, loc)));
+			auto criteriaToInsert = Criteria(unesc, mt, loc);
+			auto res = criteria->insert(std::make_pair(termNID, criteriaToInsert));
+			if (!res.second) {
+				TraceEvent(SevWarn, "TLSKeyValueDuplicated")
+				    .suppressFor(60.0)
+				    .detail("TermNID", termNID)
+				    .detail("NewCriteria", criteriaToInsert.criteria)
+				    .detail("ExistingCriteria", res.first->second.criteria);
+			}
 
 			if (remain != input.size() && input[remain] != ',')
 				throw std::runtime_error("parse_verify");
