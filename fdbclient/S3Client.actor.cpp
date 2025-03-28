@@ -77,14 +77,26 @@ ACTOR static Future<std::string> calculateFileChecksum(Reference<IAsyncFile> fil
 	}
 
 	while (pos < size) {
+
 		int readSize = std::min<int64_t>(buffer.size(), size - pos);
 		int bytesRead = wait(file->read(buffer.data(), readSize, pos));
+
+		if (bytesRead <= 0) {
+			TraceEvent(SevError, "S3ClientCalculateFileChecksumReadError")
+			    .detail("Pos", pos)
+			    .detail("Size", size)
+			    .detail("BytesRead", bytesRead);
+			throw io_error();
+		}
+
 		XXH64_update(hashState, buffer.data(), bytesRead);
 		pos += bytesRead;
+
 	}
 
 	uint64_t hash = XXH64_digest(hashState);
 	XXH64_freeState(hashState);
+
 	return format("%016llx", hash);
 }
 
@@ -197,16 +209,11 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	state int64_t size = fileSize(filepath);
 
 	try {
-		TraceEvent(s3VerboseEventSev(), "S3ClientCopyUpFileStart")
-		    .detail("Filepath", filepath)
-		    .detail("Bucket", bucket)
-		    .detail("ObjectName", objectName)
-		    .detail("FileSize", size);
 
 		// Open file once with UNCACHED for both checksum and upload.
 		// TODO: Fix this double read. Check what the sdk does.
 		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
-		    filepath, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
+		    filepath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0644));
 		file = f;
 
 		// Calculate checksum using the same file handle
@@ -494,15 +501,26 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 		parts.reserve(numParts);
 		downloadFutures.reserve(numParts);
 		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
-		    filepath, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED, 0644));
+		    filepath,
+		    IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |
+		        IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_NO_AIO,
+		    0644));
 		file = f;
 		// Pre-allocate file size to avoid fragmentation
 		wait(file->truncate(fileSize));
 
 		while (offset < fileSize) {
+			// Calculate part size and ensure it's aligned to 4096 bytes
 			partSize = std::min(config.partSizeBytes, fileSize - offset);
+			// Round up to nearest 4096 bytes
+			partSize = (partSize + 4095) & ~4095;
+			// Ensure we don't read past the end of the file
+			partSize = std::min(partSize, fileSize - offset);
 
-			parts.emplace_back(partNumber, offset, partSize, "");
+			// Ensure offset is aligned to 4096 bytes
+			int64_t alignedOffset = offset & ~4095;
+
+			parts.emplace_back(partNumber, alignedOffset, partSize, "");
 
 			downloadFutures.push_back(
 			    downloadPartWithRetry(endpoint, bucket, objectName, file, parts.back(), config.retryDelayMs));

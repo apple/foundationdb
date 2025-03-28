@@ -25,16 +25,15 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/Platform.h"
 
-const std::string simulationBulkLoadS3ClientFolder = joinPath("simfdb", "bulkloads3client");
-
 // Run this workload with ../build_output/bin/fdbserver -r simulation -f
 // ../src/foundationdb/tests/fast/BulkLoadingS3Client.toml
 struct BulkLoadingS3Client : TestWorkload {
 	static constexpr auto NAME = "BulkLoadingS3ClientWorkload";
 	const bool enabled;
 	bool pass;
-	std::string s3Url; // Added field for S3 URL
+	std::string s3Url;
 	std::string credentials;
+	std::string simfdbDir;
 
 	BulkLoadingS3Client(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {
 		s3Url = getOption(options, "s3Url"_sr, ""_sr).toString();
@@ -42,18 +41,8 @@ struct BulkLoadingS3Client : TestWorkload {
 			// Default location for local seaweedfs instance.
 			s3Url = "blobstore://127.0.0.1:8333";
 		}
-		credentials = getOption(options, "credentials"_sr, ""_sr).toString();
-		if (credentials.empty()) {
-			credentials = "BulkLoadingS3Client.blob-credentials.jsonxx";
-		}
-		// If credentials path is not absolute, use the TOML file directory as prefix
-		if (!credentials.empty() && credentials[0] != '/' && credentials[0] != '\\') {
-			std::string tomlfile = getOption(options, "testfile"_sr, ""_sr).toString();
-			if (!tomlfile.empty()) {
-				auto tomlDir = tomlfile.substr(0, tomlfile.find_last_of("/\\"));
-				credentials = joinPath(tomlDir, credentials);
-			}
-		}
+		simfdbDir = getOption(options, "simfdb"_sr, "simfdb"_sr).toString();
+		credentials = joinPath(simfdbDir, "BulkLoadingS3Client.blob-credentials.json");
 	}
 	~BulkLoadingS3Client() {
 		if (pass) {
@@ -74,6 +63,21 @@ struct BulkLoadingS3Client : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+private:
+	void setupCredentialsFile() {
+		// Write the credentials file content -- hardcoded and nonsense for now. It just needs to be present.
+		writeFile(credentials,
+		          "{\"accounts\":{\"@host\":{\"api_key\":\"KEY\",\"secret\":\"SECRET\",\"token\":\"TOKEN\"}}}");
+
+		// Set the credentials file path into the global network configuration
+		auto* blobCredFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+		if (!blobCredFiles) {
+			blobCredFiles = new std::vector<std::string>();
+			g_network->setGlobal(INetwork::enBlobCredentialFiles, blobCredFiles);
+		}
+		blobCredFiles->push_back(credentials);
+	}
 
 	// Add the basename of a file to the URL path
 	static std::string addFileToUrl(std::string filePath, std::string baseUrl) {
@@ -123,29 +127,33 @@ struct BulkLoadingS3Client : TestWorkload {
 			disableConnectionFailures("BulkLoading");
 		}
 
-		// Set the credentials file path into the global network configuration
-		auto* blobCredFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
-		if (!blobCredFiles) {
-			blobCredFiles = new std::vector<std::string>();
-			g_network->setGlobal(INetwork::enBlobCredentialFiles, blobCredFiles);
-		}
-		blobCredFiles->push_back(self->credentials);
+		// Setup the credentials file.
+		self->setupCredentialsFile();
 
-		// Add the credentials file to the URL path
-		state std::string s3_url = addFileToUrl(self->credentials, self->s3Url);
+		// We are copying up the credentials file. Make the target url by adding the credentials file to the base URL
+		// path.
+		state std::string file_url = self->addFileToUrl(self->credentials, self->s3Url);
+		state std::string download = joinPath(self->simfdbDir, "downloaded_credentials");
 		try {
-			TraceEvent("BulkLoadingS3ClientWorkloadUploadCredentials")
-			    .detail("S3URL", s3_url)
-			    .detail("Path", self->credentials);
-
-			// Upload a file. Make it the credentials file.
-			wait(copyUpFile(self->credentials, s3_url));
+			wait(copyUpFile(self->credentials, file_url));
+			wait(copyDownFile(file_url, download));
+			wait(deleteResource(file_url));
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "BulkLoadingS3ClientWorkloadError")
 			    .error(e)
-			    .detail("S3URL", s3_url)
-			    .detail("Path", self->credentials);
+			    .detail("S3URL", file_url)
+			    .detail("Path", self->credentials)
+			    .detail("Download", download);
 			throw;
+		}
+		// Compare the contents of the original and downloaded files
+		std::string originalContent = readFileBytes(self->credentials, 1024 * 1024); // 1MB max size
+		std::string downloadedContent = readFileBytes(download, 1024 * 1024); // 1MB max size
+		if (originalContent != downloadedContent) {
+			TraceEvent(SevError, "BulkLoadingS3ClientContentMismatch")
+			    .detailf("OriginalSize", "%zu", originalContent.size())
+			    .detailf("DownloadedSize", "%zu", downloadedContent.size());
+			throw file_not_found();
 		}
 
 		return Void();

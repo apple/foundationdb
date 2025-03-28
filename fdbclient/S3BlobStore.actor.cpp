@@ -2207,7 +2207,7 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
                                               std::string object,
                                               std::string uploadID,
                                               S3BlobStoreEndpoint::MultiPartSetT parts) {
-	state UnsentPacketQueue part_list; // NonCopyable state var so must be declared at top of actor
+	state UnsentPacketQueue part_list;
 	wait(bstore->requestRateWrite->getAllowance(1));
 
 	std::string manifest = "<CompleteMultipartUpload>";
@@ -2218,15 +2218,24 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 	state std::string resource = constructResourcePath(bstore, bucket, object);
 	resource += format("?uploadId=%s", uploadID.c_str());
 	state HTTP::Headers headers;
+	headers["Content-Type"] = "application/xml";
+	headers["Content-Length"] = format("%d", manifest.size());
+
 	PacketWriter pw(part_list.getWriteBuffer(manifest.size()), nullptr, Unversioned());
 	pw.serializeBytes(manifest);
-	Reference<HTTP::IncomingResponse> r =
-	    wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200 }));
-	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then
-	// the next retry will see error 400.  That could be detected and handled gracefully by HEAD'ing the object before
-	// upload to get its (possibly nonexistent) eTag, then if an error 400 is seen then retrieve the eTag again and if
-	// it has changed then consider the finish complete.
-	return Void();
+
+	try {
+		Reference<HTTP::IncomingResponse> r =
+		    wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200 }));
+		return Void();
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "S3BlobStoreFinishMultiPartUploadError")
+		    .error(e)
+		    .detail("Bucket", bucket)
+		    .detail("Object", object)
+		    .detail("UploadID", uploadID);
+		throw;
+	}
 }
 
 Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucket,
