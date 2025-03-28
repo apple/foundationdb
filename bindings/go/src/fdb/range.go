@@ -124,7 +124,6 @@ type RangeResult struct {
 	sr       SelectorRange
 	options  RangeOptions
 	snapshot bool
-	f        *futureKeyValueArray
 }
 
 // GetSliceWithError returns a slice of KeyValue objects satisfying the range
@@ -143,13 +142,22 @@ func (rr RangeResult) GetSliceWithError() ([]KeyValue, error) {
 		ri.options.Mode = StreamingModeWantAll
 	}
 
-	for ri.Advance() {
-		if ri.err != nil {
-			return nil, ri.err
+	for {
+		ok, kvs, err := ri.Advance()
+		if err != nil {
+			return nil, err
 		}
-		ret = append(ret, ri.kvs...)
-		ri.index = len(ri.kvs)
-		ri.fetchNextBatch()
+		if !ok {
+			break
+		}
+		ret = append(ret, kvs...)
+
+		ri.index = len(kvs)
+		if ri.options.Reverse {
+			ri.sr.End = FirstGreaterOrEqual(kvs[ri.index-1].Key)
+		} else {
+			ri.sr.Begin = FirstGreaterThan(kvs[ri.index-1].Key)
+		}
 	}
 
 	return ret, nil
@@ -173,7 +181,6 @@ func (rr RangeResult) GetSliceOrPanic() []KeyValue {
 func (rr RangeResult) Iterator() *RangeIterator {
 	return &RangeIterator{
 		t:         rr.t,
-		f:         rr.f,
 		sr:        rr.sr,
 		options:   rr.options,
 		iteration: 1,
@@ -193,15 +200,12 @@ func (rr RangeResult) Iterator() *RangeIterator {
 // a transactional function passed to the Transact method of a Transactor.
 type RangeIterator struct {
 	t         *transaction
-	f         *futureKeyValueArray
 	sr        SelectorRange
 	options   RangeOptions
 	iteration int
 	done      bool
 	more      bool
-	kvs       []KeyValue
 	index     int
-	err       error
 	snapshot  bool
 }
 
@@ -209,30 +213,34 @@ type RangeIterator struct {
 // returns true if there are more key-value pairs satisfying the range, or false
 // if the range has been exhausted. You must call this before every call to Get
 // or MustGet.
-func (ri *RangeIterator) Advance() bool {
+func (ri *RangeIterator) Advance() (bool, []KeyValue, error) {
 	if ri.done {
-		return false
+		return false, nil, nil
 	}
 
-	if ri.f == nil {
-		return true
+	f := ri.fetchNextBatch()
+	if f == nil {
+		// iterator is done
+		return false, nil, nil
 	}
+	defer f.Close()
 
-	ri.kvs, ri.more, ri.err = ri.f.Get()
+	var err error
+	var kvs []KeyValue
+	kvs, ri.more, err = f.Get()
 	ri.index = 0
-	ri.f = nil
 
-	if ri.err != nil || len(ri.kvs) > 0 {
-		return true
+	if err != nil || len(kvs) > 0 {
+		return true, kvs, err
 	}
 
-	return false
+	return false, nil, nil
 }
 
-func (ri *RangeIterator) fetchNextBatch() {
+func (ri *RangeIterator) fetchNextBatch() *futureKeyValueArray {
 	if !ri.more || ri.index == ri.options.Limit {
 		ri.done = true
-		return
+		return nil
 	}
 
 	if ri.options.Limit > 0 {
@@ -240,49 +248,10 @@ func (ri *RangeIterator) fetchNextBatch() {
 		ri.options.Limit -= ri.index
 	}
 
-	if ri.options.Reverse {
-		ri.sr.End = FirstGreaterOrEqual(ri.kvs[ri.index-1].Key)
-	} else {
-		ri.sr.Begin = FirstGreaterThan(ri.kvs[ri.index-1].Key)
-	}
-
 	ri.iteration++
 
 	f := ri.t.doGetRange(ri.sr, ri.options, ri.snapshot, ri.iteration)
-	ri.f = &f
-}
-
-// Get returns the next KeyValue in a range read, or an error if one of the
-// asynchronous operations associated with this range did not successfully
-// complete. The Advance method of this RangeIterator must have returned true
-// prior to calling Get.
-func (ri *RangeIterator) Get() (kv KeyValue, err error) {
-	if ri.err != nil {
-		err = ri.err
-		return
-	}
-
-	kv = ri.kvs[ri.index]
-
-	ri.index++
-
-	if ri.index == len(ri.kvs) {
-		ri.fetchNextBatch()
-	}
-
-	return
-}
-
-// MustGet returns the next KeyValue in a range read, or panics if one of the
-// asynchronous operations associated with this range did not successfully
-// complete. The Advance method of this RangeIterator must have returned true
-// prior to calling MustGet.
-func (ri *RangeIterator) MustGet() KeyValue {
-	kv, err := ri.Get()
-	if err != nil {
-		panic(err)
-	}
-	return kv
+	return &f
 }
 
 // Strinc returns the first key that would sort outside the range prefixed by

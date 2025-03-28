@@ -23,6 +23,7 @@
 package fdb
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -52,7 +53,7 @@ func TestErrorWrapping(t *testing.T) {
 	}
 
 	for _, inputError := range testCases {
-		_, outputError := db.ReadTransact(func(rtr ReadTransaction) (interface{}, error) {
+		_, _, outputError := db.ReadTransact(context.Background(), func(rtr ReadTransaction) (interface{}, error) {
 			return nil, inputError
 		})
 		if inputError != outputError {
