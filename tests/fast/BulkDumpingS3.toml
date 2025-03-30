@@ -41,5 +41,6 @@ waitForQuiescence = false
 
     [[test.workload]]
     testName = 'BulkDumpingWorkload'
-    # 1 is BulkLoadTransportMethod::CP
-    bulkLoadTransportMethod = 1
+    # 2 is BulkLoadTransportMethod::BLOBSTORE
+    bulkLoadTransportMethod = 2
+    jobRoot = 'blobstore://KEY:SECRET:TOKEN@127.0.0.1:8334/bulkdumping/?bucket=bulkdumpingworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0&request_timeout=5'
