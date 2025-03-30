@@ -91,7 +91,6 @@ ACTOR static Future<std::string> calculateFileChecksum(Reference<IAsyncFile> fil
 
 		XXH64_update(hashState, buffer.data(), bytesRead);
 		pos += bytesRead;
-
 	}
 
 	uint64_t hash = XXH64_digest(hashState);

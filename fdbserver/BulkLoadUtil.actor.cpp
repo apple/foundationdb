@@ -269,7 +269,7 @@ ACTOR Future<Void> bulkLoadTransportBlobstore_impl(BulkLoadFileSet fromRemoteFil
 	resetFileFolder(abspath(toLocalFileSet.getFolder()));
 	// TODO(BulkLoad): Make use of fileBytesMax
 	// TODO: File-at-a-time costs because we make connection for each.
-  // For blobstore URLs, we don't use abspath() on the source path since it's a URL
+	// For blobstore URLs, we don't use abspath() on the source path since it's a URL
 	wait(copyDownFile(fromRemoteFileSet.getDataFileFullPath(), abspath(toLocalFileSet.getDataFileFullPath())));
 	// Copy byte sample file if exists
 	if (fromRemoteFileSet.hasByteSampleFile()) {
@@ -370,7 +370,7 @@ ACTOR Future<Void> downloadManifestFile(BulkLoadTransportMethod transportMethod,
 				wait(delay(0.1));
 			} else if (transportMethod == BulkLoadTransportMethod::BLOBSTORE) {
 				// TODO: Make use of fileBytesMax
-        // For blobstore URLs, we don't use abspath() on the source path since it's a URL
+				// For blobstore URLs, we don't use abspath() on the source path since it's a URL
 				wait(copyDownFile(fromRemotePath, abspath(toLocalPath)));
 			} else {
 				UNREACHABLE();

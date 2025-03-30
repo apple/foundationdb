@@ -106,7 +106,10 @@ private:
 			// Construct the new URL
 			return baseUrl.substr(0, hostEnd) + currentPath + basename + baseUrl.substr(queryStart);
 		} catch (Error& e) {
-			TraceEvent(SevError, "S3ClientWorkloadURLParseError").error(e).detail("URL", baseUrl).detail("Path", filePath);
+			TraceEvent(SevError, "S3ClientWorkloadURLParseError")
+			    .error(e)
+			    .detail("URL", baseUrl)
+			    .detail("Path", filePath);
 			throw;
 		}
 	}
