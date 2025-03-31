@@ -5,6 +5,8 @@ storageEngineExcludeTypes = [5] #FIXME: remove after allowing to do bulkloading 
 tenantModes = ['disabled']
 encryptModes = ['disabled']
 disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
+minimumRegions = 1
+
 
 [[knobs]]
 # This knob is commented out since the knob override is done *after* the simulation system is set up. However,
