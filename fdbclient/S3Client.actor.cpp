@@ -511,15 +511,8 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 		while (offset < fileSize) {
 			// Calculate part size and ensure it's aligned to 4096 bytes
 			partSize = std::min(config.partSizeBytes, fileSize - offset);
-			// Round up to nearest 4096 bytes
-			partSize = (partSize + 4095) & ~4095;
-			// Ensure we don't read past the end of the file
-			partSize = std::min(partSize, fileSize - offset);
 
-			// Ensure offset is aligned to 4096 bytes
-			int64_t alignedOffset = offset & ~4095;
-
-			parts.emplace_back(partNumber, alignedOffset, partSize, "");
+			parts.emplace_back(partNumber, offset, partSize, "");
 
 			downloadFutures.push_back(
 			    downloadPartWithRetry(endpoint, bucket, objectName, file, parts.back(), config.retryDelayMs));
