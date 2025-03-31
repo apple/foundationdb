@@ -189,7 +189,7 @@ $SRCDIR/packaging/osx/buildpkg.sh . $SRCDIR
 Under Windows, only Visual Studio with ClangCl is supported
 
 1. Install Visual Studio 2019 (IDE or Build Tools), and enable llvm support
-1. Install  [CMake 3.24.2](https://cmake.org/) or higher
+1. Install  [CMake 3.24.2](https://cmake.org/download/) or higher
 1. Download [Boost 1.86.0](https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2)
 1. Unpack boost to C:\boost, or use `-DBOOST_ROOT=<PATH_TO_BOOST>` with `cmake` if unpacked elsewhere
 1. Install [Python](https://www.python.org/downloads/) if is not already installed by Visual Studio
