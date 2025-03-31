@@ -157,7 +157,7 @@ function start_weed {
     "${binary}" -logdir="${dir}" server -dir="${dir}" \
       -s3 -ip=localhost -master.port="${master_port}" -s3.port="${s3_port}" \
       -volume.port.grpc="${volume_port_grpc}" -volume.port="${volume_port}" \
-      -filer.port="${filer_port}" &> /dev/null &
+      -filer.port="${filer_port}" -volume.max=100 &> /dev/null &
     # Pick up the weed pid.
     local weed_pid=$!
     # Loop while process is coming up. It can take 25 seconds.
