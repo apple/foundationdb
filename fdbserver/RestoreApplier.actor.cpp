@@ -166,7 +166,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 		isDuplicated = false;
 
 		for (int mIndex = 0; mIndex < req.versionedMutations.size(); mIndex++) {
-			const VersionedMutation& versionedMutation = req.versionedMutations[mIndex];
+			const VersionedMutationSerialized& versionedMutation = req.versionedMutations[mIndex];
 			TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 			    .detail("RestoreAsset", req.asset.toString())
 			    .detail("Version", versionedMutation.version.toString())

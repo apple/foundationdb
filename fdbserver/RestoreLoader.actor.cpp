@@ -943,7 +943,8 @@ ACTOR Future<Void> sendMutationsToApplier(
 					// CAREFUL: The split mutations' lifetime is shorter than the for-loop
 					// Must use deep copy for split mutations
 					applierVersionedMutationsBuffer[applierID].push_back_deep(
-					    applierVersionedMutationsBuffer[applierID].arena(), VersionedMutation(mutation, commitVersion));
+					    applierVersionedMutationsBuffer[applierID].arena(),
+					    VersionedMutationSerialized(mutation, commitVersion));
 					msgSize += mutation.expectedSize();
 
 					kvCount++;
@@ -960,7 +961,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 				    .detail("SubVersion", commitVersion.toString());
 				// kvm data is saved in pkvOps in batchData, so shallow copy is ok here.
 				applierVersionedMutationsBuffer[applierID].push_back(applierVersionedMutationsBuffer[applierID].arena(),
-				                                                     VersionedMutation(kvm, commitVersion));
+				                                                     VersionedMutationSerialized(kvm, commitVersion));
 				msgSize += kvm.expectedSize();
 			}
 
