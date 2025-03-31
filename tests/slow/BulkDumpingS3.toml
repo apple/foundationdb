@@ -35,7 +35,7 @@ disable_audit_storage_final_replica_check_in_sim = true
 max_trace_lines = 5000000
 
 [[test]]
-testTitle = 'BulkDumpingWorkload'
+testTitle = 'BulkDumpingWorkloadS3'
 useDB = true
 waitForQuiescence = false
 
