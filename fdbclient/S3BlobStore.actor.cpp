@@ -629,16 +629,10 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 		state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
 		    path, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 		state int64_t size = wait(f->size());
-
-		// Allocate buffer with proper alignment
-		state std::vector<char> alignedBuffer((size + 4095) & ~4095);
-		state void* alignedPtr = (void*)(((uintptr_t)alignedBuffer.data() + 4095) & ~4095);
-		state int64_t alignedSize = (size + 4095) & ~4095;
-		state int64_t alignedOffset = 0;
-
-		int r = wait(f->read(alignedPtr, alignedSize, alignedOffset));
+		state Standalone<StringRef> buf = makeString(size);
+		int r = wait(f->read(mutateString(buf), size, 0));
 		ASSERT(r == size);
-		content = std::string((const char*)alignedPtr, size);
+		content = buf.toString();
 
 		// Any exceptions from here forward are parse failures
 		errorEventType = "BlobCredentialFileParseFailed";
@@ -2231,7 +2225,8 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 		return Void();
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "S3BlobStoreFinishMultiPartUploadError")
-		    .error(e)
+		    .suppressFor(1.0)
+		    .errorUnsuppressed(e)
 		    .detail("Bucket", bucket)
 		    .detail("Object", object)
 		    .detail("UploadID", uploadID);
