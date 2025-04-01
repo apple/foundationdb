@@ -157,7 +157,9 @@ TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
 	testAddChunkRange("key_b1"_sr, "key_b9"_sr, chunks);
 
 	// check empty range. not covered
-	{ ASSERT(isRangeFullyCovered(KeyRangeRef(), chunks) == false); }
+	{
+		ASSERT(isRangeFullyCovered(KeyRangeRef(), chunks) == false);
+	}
 
 	// check empty chunks. not covered
 	{
@@ -166,16 +168,24 @@ TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
 	}
 
 	// check '' to \xff
-	{ ASSERT(isRangeFullyCovered(KeyRangeRef(""_sr, "\xff"_sr), chunks) == false); }
+	{
+		ASSERT(isRangeFullyCovered(KeyRangeRef(""_sr, "\xff"_sr), chunks) == false);
+	}
 
 	// check {key_a1, key_a9}
-	{ ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_a9"_sr), chunks)); }
+	{
+		ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_a9"_sr), chunks));
+	}
 
 	// check {key_a1, key_a3}
-	{ ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_a3"_sr), chunks)); }
+	{
+		ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_a3"_sr), chunks));
+	}
 
 	// check {key_a0, key_a3}
-	{ ASSERT(isRangeFullyCovered(KeyRangeRef("key_a0"_sr, "key_a3"_sr), chunks) == false); }
+	{
+		ASSERT(isRangeFullyCovered(KeyRangeRef("key_a0"_sr, "key_a3"_sr), chunks) == false);
+	}
 
 	// check {key_a5, key_b2}
 	{

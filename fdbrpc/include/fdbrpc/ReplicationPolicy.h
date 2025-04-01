@@ -96,7 +96,7 @@ inline void save(Archive& ar, const Reference<IReplicationPolicy>& value) {
 }
 
 struct PolicyOne final : IReplicationPolicy {
-	PolicyOne(){};
+	PolicyOne() {};
 	explicit PolicyOne(const PolicyOne& o) {}
 	std::string name() const override { return "One"; }
 	std::string info() const override { return "1"; }

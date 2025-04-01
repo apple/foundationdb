@@ -1305,7 +1305,7 @@ struct BulkDumpRequest {
 
 	BulkDumpRequest() {}
 	BulkDumpRequest(const std::vector<UID>& checksumServers, const BulkDumpState& bulkDumpState)
-	  : checksumServers(checksumServers), bulkDumpState(bulkDumpState){};
+	  : checksumServers(checksumServers), bulkDumpState(bulkDumpState) {};
 
 	std::string toString() const {
 		return "[BulkDumpState]: " + bulkDumpState.toString() + ", [ChecksumServers]: " + describe(checksumServers);

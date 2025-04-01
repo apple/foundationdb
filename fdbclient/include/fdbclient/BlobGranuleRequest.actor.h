@@ -46,7 +46,7 @@ Future<Standalone<VectorRef<REPLY_TYPE(Request)>>> txnDoBlobGranuleRequests(
     Key* beginKey,
     Key endKey,
     Request request,
-    RequestStream<Request, P> BlobWorkerInterface::*channel) {
+    RequestStream<Request, P> BlobWorkerInterface::* channel) {
 	// TODO KNOB
 	state RangeResult blobGranuleMapping = wait(krmGetRanges(
 	    tr, blobGranuleMappingKeys.begin, KeyRangeRef(*beginKey, endKey), 64, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
@@ -157,7 +157,7 @@ Future<Standalone<VectorRef<REPLY_TYPE(Request)>>> doBlobGranuleRequests(
     Database cx,
     KeyRange range,
     Request request,
-    RequestStream<Request, P> BlobWorkerInterface::*channel) {
+    RequestStream<Request, P> BlobWorkerInterface::* channel) {
 	state Key beginKey = range.begin;
 	state Key endKey = range.end;
 	state Transaction tr(cx);

@@ -39,10 +39,18 @@ inline double P_EXPENSIVE_VALIDATION{ 0.05 };
 	inline double P_##TYPE##_BUGGIFIED_SECTION_FIRES{ 0.25 };                                                          \
 	inline double P_##TYPE##_ENABLED{ false };                                                                         \
 	inline std::unordered_map<const char*, bool> Type##_SBVars;                                                        \
-	inline bool is##Type##BuggifyEnabled() noexcept { return P_##TYPE##_ENABLED; }                                     \
-	inline void enable##Type##Buggify() noexcept { P_##TYPE##_ENABLED = true; }                                        \
-	inline void disable##Type##Buggify() noexcept { P_##TYPE##_ENABLED = false; }                                      \
-	inline void clear##Type##BuggifySections() { Type##_SBVars.clear(); }                                              \
+	inline bool is##Type##BuggifyEnabled() noexcept {                                                                  \
+		return P_##TYPE##_ENABLED;                                                                                     \
+	}                                                                                                                  \
+	inline void enable##Type##Buggify() noexcept {                                                                     \
+		P_##TYPE##_ENABLED = true;                                                                                     \
+	}                                                                                                                  \
+	inline void disable##Type##Buggify() noexcept {                                                                    \
+		P_##TYPE##_ENABLED = false;                                                                                    \
+	}                                                                                                                  \
+	inline void clear##Type##BuggifySections() {                                                                       \
+		Type##_SBVars.clear();                                                                                         \
+	}                                                                                                                  \
 	inline bool get##Type##SBVar(const char* file, const int line, const char* combined) {                             \
 		if (Type##_SBVars.count(combined)) [[likely]] {                                                                \
 			return Type##_SBVars[combined];                                                                            \

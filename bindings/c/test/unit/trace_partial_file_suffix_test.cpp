@@ -61,7 +61,9 @@ int main(int argc, char** argv) {
 	    "trace.127.0.0.1." + file_identifier + ".simulated.xml" + trace_partial_file_suffix;
 
 	// Simulate this process crashing previously by creating a ".tmp" file
-	{ std::ofstream file{ simulated_stray_partial_file }; }
+	{
+		std::ofstream file{ simulated_stray_partial_file };
+	}
 
 	set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, "");
 	set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_FILE_IDENTIFIER, file_identifier);

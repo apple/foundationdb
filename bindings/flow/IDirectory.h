@@ -65,7 +65,7 @@ public:
 	virtual const Standalone<StringRef> getLayer() const = 0;
 	virtual const Path getPath() const = 0;
 
-	virtual ~IDirectory(){};
+	virtual ~IDirectory() {};
 };
 } // namespace FDB
 

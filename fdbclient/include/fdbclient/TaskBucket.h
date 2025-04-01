@@ -57,7 +57,7 @@ FDB_BOOLEAN_PARAM(UpdateParams);
 class Task : public ReferenceCounted<Task> {
 public:
 	Task(Value type = StringRef(), uint32_t version = 0, Value done = StringRef(), unsigned int priority = 0);
-	~Task(){};
+	~Task() {};
 
 	// Methods that safely read values from task's params
 	uint32_t getVersion() const;
@@ -439,7 +439,7 @@ public:
 
 struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::function<TaskFuncBase*()>>,
                       ReferenceCounted<TaskFuncBase> {
-	virtual ~TaskFuncBase(){};
+	virtual ~TaskFuncBase() {};
 	static Reference<TaskFuncBase> create(Standalone<StringRef> const& taskFuncType) {
 		return Reference<TaskFuncBase>(dispatch(taskFuncType)());
 	}

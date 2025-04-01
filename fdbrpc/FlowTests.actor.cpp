@@ -551,10 +551,8 @@ TEST_CASE("/flow/flow/callbacks") {
 	int result = 0;
 	bool happened = false;
 
-	onReady(
-	    std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
-	onReady(
-	    p.getFuture(), [&happened](int) { happened = true; }, [&happened](Error) { happened = true; });
+	onReady(std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(p.getFuture(), [&happened](int) { happened = true; }, [&happened](Error) { happened = true; });
 	ASSERT(!f.isValid());
 	ASSERT(p.isValid() && !p.isSet() && p.getFutureReferenceCount() == 1);
 	ASSERT(result == 0 && !happened);
@@ -564,16 +562,14 @@ TEST_CASE("/flow/flow/callbacks") {
 	ASSERT(p.isValid() && p.isSet() && p.getFutureReferenceCount() == 0 && p.getFuture().get() == 123);
 
 	result = 0;
-	onReady(
-	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 	ASSERT(result == 123);
 	ASSERT(p.isValid() && p.isSet() && p.getFutureReferenceCount() == 0 && p.getFuture().get() == 123);
 
 	p = Promise<int>();
 	f = p.getFuture();
 	result = 0;
-	onReady(
-	    std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -e.code(); });
+	onReady(std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -e.code(); });
 	ASSERT(!f.isValid());
 	ASSERT(p.isValid() && !p.isSet() && p.getFutureReferenceCount() == 1);
 	ASSERT(result == 0);
@@ -588,8 +584,7 @@ TEST_CASE("/flow/flow/promisestream callbacks") {
 
 	int result = 0;
 
-	onReady(
-	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 
 	ASSERT(result == 0);
 
@@ -599,14 +594,12 @@ TEST_CASE("/flow/flow/promisestream callbacks") {
 	ASSERT(result == 123);
 	result = 0;
 
-	onReady(
-	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 
 	ASSERT(result == 456);
 	result = 0;
 
-	onReady(
-	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 
 	ASSERT(result == 0);
 

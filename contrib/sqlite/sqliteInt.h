@@ -472,7 +472,7 @@ extern const int sqlite3one;
 ** compilers.
 */
 #define LARGEST_INT64 (0xffffffff | (((i64)0x7fffffff) << 32))
-#define SMALLEST_INT64 (((i64)-1) - LARGEST_INT64)
+#define SMALLEST_INT64 (((i64) - 1) - LARGEST_INT64)
 
 /*
 ** Round up a number to the next larger multiple of 8.  This is used
@@ -1046,13 +1046,12 @@ struct FuncDestructor {
 **     parameter.
 */
 #define FUNCTION(zName, nArg, iArg, bNC, xFunc)                                                                        \
-	{ nArg, SQLITE_UTF8, bNC *SQLITE_FUNC_NEEDCOLL, SQLITE_INT_TO_PTR(iArg), 0, xFunc, 0, 0, #zName, 0, 0 }
+	{ nArg, SQLITE_UTF8, bNC * SQLITE_FUNC_NEEDCOLL, SQLITE_INT_TO_PTR(iArg), 0, xFunc, 0, 0, #zName, 0, 0 }
 #define STR_FUNCTION(zName, nArg, pArg, bNC, xFunc)                                                                    \
-	{ nArg, SQLITE_UTF8, bNC *SQLITE_FUNC_NEEDCOLL, pArg, 0, xFunc, 0, 0, #zName, 0, 0 }
-#define LIKEFUNC(zName, nArg, arg, flags)                                                                              \
-	{ nArg, SQLITE_UTF8, flags, (void*)arg, 0, likeFunc, 0, 0, #zName, 0, 0 }
+	{ nArg, SQLITE_UTF8, bNC * SQLITE_FUNC_NEEDCOLL, pArg, 0, xFunc, 0, 0, #zName, 0, 0 }
+#define LIKEFUNC(zName, nArg, arg, flags) { nArg, SQLITE_UTF8, flags, (void*)arg, 0, likeFunc, 0, 0, #zName, 0, 0 }
 #define AGGREGATE(zName, nArg, arg, nc, xStep, xFinal)                                                                 \
-	{ nArg, SQLITE_UTF8, nc *SQLITE_FUNC_NEEDCOLL, SQLITE_INT_TO_PTR(arg), 0, 0, xStep, xFinal, #zName, 0, 0 }
+	{ nArg, SQLITE_UTF8, nc * SQLITE_FUNC_NEEDCOLL, SQLITE_INT_TO_PTR(arg), 0, 0, xStep, xFinal, #zName, 0, 0 }
 
 /*
 ** All current savepoints are stored in a linked list starting at

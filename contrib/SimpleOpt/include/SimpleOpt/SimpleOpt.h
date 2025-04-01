@@ -316,8 +316,7 @@ typedef enum _ESOArgType {
 } ESOArgType;
 
 //! this option definition must be the last entry in the table
-#define SO_END_OF_OPTIONS                                                                                              \
-	{ -1, nullptr, SO_NONE }
+#define SO_END_OF_OPTIONS { -1, nullptr, SO_NONE }
 
 #ifdef _DEBUG
 #ifdef _MSC_VER
