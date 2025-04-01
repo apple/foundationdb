@@ -394,11 +394,9 @@ public:
 	                                     Version* end,
 	                                     Version targetVersion) {
 		auto i = logs.begin();
-		if (outLogs != nullptr)
-			outLogs->push_back(*i);
 
 		// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
-		while (++i != logs.end()) {
+		while (i != logs.end()) {
 			if (i->beginVersion > *end || i->beginVersion > targetVersion)
 				break;
 
@@ -408,6 +406,7 @@ public:
 					outLogs->push_back(*i);
 				*end = i->endVersion;
 			}
+			++i;
 		}
 	}
 
@@ -495,7 +494,8 @@ public:
 
 		TraceEvent("BackupContainerDescribe1")
 		    .detail("URL", bc->getURL())
-		    .detail("LogStartVersionOverride", logStartVersionOverride);
+		    .detail("LogStartVersionOverride", logStartVersionOverride)
+		    .detail("DeepScan", deepScan);
 
 		bool e = wait(bc->exists());
 		if (!e) {
@@ -634,7 +634,7 @@ public:
 					// for other partitions. Set to its beginVersion to be safe.
 					desc.contiguousLogEnd = logs.begin()->beginVersion;
 				} else {
-					desc.contiguousLogEnd = logs.begin()->endVersion;
+					desc.contiguousLogEnd = logs.begin()->beginVersion;
 				}
 			}
 
@@ -1024,7 +1024,7 @@ public:
 	static Optional<RestorableFileSet> getRestoreSetFromLogs(const std::vector<LogFile>& logs,
 	                                                         Version targetVersion,
 	                                                         RestorableFileSet restorable) {
-		Version end = logs.begin()->endVersion;
+		Version end = logs.begin()->beginVersion;
 		computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
 		if (end >= targetVersion) {
 			restorable.continuousBeginVersion = logs.begin()->beginVersion;
