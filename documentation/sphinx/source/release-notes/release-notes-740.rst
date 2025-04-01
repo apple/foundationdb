@@ -14,10 +14,10 @@ Features (Supported)
 
 Features (Experimental)
 -----------------------
-* Added support to bulk load TBs' snapshot of key-values from S3 to an empty cluster. `(User Guide) <https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/bulkload-user.rst>`_, `(PR #11369) <https://github.com/apple/foundationdb/pull/11369>`_
-* Added support to bulk dump TBs' snapshot of key-values to S3 from an idle cluster. `(User Guide) <https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/bulkdump.rst>`_, `(PR #11780) <https://github.com/apple/foundationdb/pull/11780>`_
+* Added support to bulk load TBs' snapshot of key-values from S3 to an empty cluster. `(Bulk Load User Guide) <https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/bulkload-user.rst>`_, `(PR #11369) <https://github.com/apple/foundationdb/pull/11369>`_
+* Added support to bulk dump TBs' snapshot of key-values to S3 from an idle cluster. `(Bulk Dump User Guide) <https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/bulkdump.rst>`_, `(PR #11780) <https://github.com/apple/foundationdb/pull/11780>`_
 * Added support to upload/download to/from S3 (for bulk dump and bulk load). `(PR #11899) <https://github.com/apple/foundationdb/pull/11899>`_
-* Added support to perform exclusive read range lock that blocks user write traffic to a specific range. `(User Guide) <https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/rangelock.rst>`_, `(PR #11693) <https://github.com/apple/foundationdb/pull/11693>`_
+* Added support to perform exclusive read range lock that blocks user write traffic to a specific range. `(Range Lock User Guide) <https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/rangelock.rst>`_, `(PR #11693) <https://github.com/apple/foundationdb/pull/11693>`_
 * Added multiple improvements to the version vector feature, so that commits are sent only to tlogs buddied with the storage server that will receive the mutations.
 * Added support to compute mutation and accumulative checksums to conduct real-time detection of mutation corruptions on write path. `(PR #11255) <https://github.com/apple/foundationdb/pull/11255>`_
 * Added support to detect hot shards and throttle commits to them. `(PR #10970) <https://github.com/apple/foundationdb/pull/10970>`_
