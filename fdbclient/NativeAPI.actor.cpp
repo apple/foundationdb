@@ -298,6 +298,10 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 		    "TransactionDebug", info->readOptions.get().debugID.get().first(), "NativeAPI.getLatestCommitVersions");
 	}
 
+	if (info->readVersion() <= ssVersionVectorCache.lastCleared) {
+		return;
+	}
+
 	if (!info->readVersionObtainedFromGrvProxy) {
 		return;
 	}
@@ -2758,7 +2762,7 @@ void DatabaseContext::updateProxies() {
 	proxiesLastChange = clientInfo->get().id;
 	commitProxies.clear();
 	grvProxies.clear();
-	ssVersionVectorCache.clear();
+	ssVersionVectorCache.clear(true);
 	bool commitProxyProvisional = false, grvProxyProvisional = false;
 	if (clientInfo->get().commitProxies.size()) {
 		commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);

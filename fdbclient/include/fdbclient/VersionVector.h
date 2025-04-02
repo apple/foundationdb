@@ -41,9 +41,10 @@ struct VersionVector {
 	Version maxVersion; // Specifies the max version in this version vector. (Note:
 	                    // there may or may not be a corresponding entry for this
 	                    // version in the "versions" map.)
-
-	VersionVector() : maxVersion(invalidVersion), cachedEncodedSize(InvalidEncodedSize) {}
-	VersionVector(Version version) : maxVersion(version), cachedEncodedSize(InvalidEncodedSize) {}
+	Version lastCleared;
+	VersionVector() : maxVersion(invalidVersion), lastCleared(invalidVersion), cachedEncodedSize(InvalidEncodedSize) {}
+	VersionVector(Version version)
+	  : maxVersion(version), lastCleared(invalidVersion), cachedEncodedSize(InvalidEncodedSize) {}
 
 private:
 	// Only invoked by getDelta() and applyDelta(), where tag has been validated
@@ -106,8 +107,12 @@ public:
 		return iter->second;
 	}
 
-	void clear() {
+	void clear(bool setLastClear = false) {
 		versions.clear();
+		if (setLastClear) {
+			lastCleared = maxVersion;
+		}
+
 		maxVersion = invalidVersion;
 		invalidateCachedEncodedSize();
 	}
