@@ -598,7 +598,8 @@ struct StorageServerDisk {
 	bool makeVersionMutationsDurable(Version& prevStorageVersion,
 	                                 Version newStorageVersion,
 	                                 int64_t& bytesLeft,
-	                                 UnlimitedCommitBytes unlimitedCommitBytes);
+	                                 UnlimitedCommitBytes unlimitedCommitBytes,
+	                                 int64_t& clearRangesLeft);
 	void makeVersionDurable(Version version);
 	void makeAccumulativeChecksumDurable(const AccumulativeChecksumState& acsState);
 	void clearAccumulativeChecksumState(const AccumulativeChecksumState& acsState);
@@ -1487,6 +1488,8 @@ public:
 		// bytesInput, instead of the actual bytes taken in the storages, so that (bytesInput - bytesDurable) can
 		// reflect the current memory footprint of MVCC.
 		Counter bytesDurable;
+		// Count of all fetchKey clearRange operations to the storage engine.
+		Counter kvClearRangesInFetchKeys;
 
 		// Bytes fetched by fetchChangeFeed for data movements.
 		Counter feedBytesFetched;
@@ -1579,6 +1582,7 @@ public:
 		    pTreeSets("PTreeSets", cc), pTreeClears("PTreeClears", cc), pTreeClearSplits("PTreeClearSplits", cc),
 		    changeServerKeysAssigned("ChangeServerKeysAssigned", cc),
 		    changeServerKeysUnassigned("ChangeServerKeysUnassigned", cc),
+		    kvClearRangesInFetchKeys("KvClearRangesInFetchKeys", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -9223,6 +9227,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					}
 					this_block = RangeResult();
 
+					++data->counters.kvClearRangesInFetchKeys;
 					data->fetchKeysTotalCommitBytes += expectedBlockSize;
 					data->fetchKeysBytesBudget -= expectedBlockSize;
 					data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
@@ -12677,10 +12682,11 @@ struct UpdateStorageCommitStats {
 	uint64_t mutationBytes;
 	uint64_t fetchKeyBytes;
 	int64_t seqId;
+	int64_t clearRangesLeft;
 
 	UpdateStorageCommitStats()
 	  : seqId(0), whenCommit(0), beforeStorageUpdates(0), beforeStorageCommit(0), duration(0), commitDuration(0),
-	    incompleteCommitDuration(0), mutationBytes(0), fetchKeyBytes(0) {}
+	    incompleteCommitDuration(0), mutationBytes(0), fetchKeyBytes(0), clearRangesLeft(0) {}
 
 	void log(UID ssid, std::string reason) const {
 		TraceEvent(SevInfo, "UpdateStorageCommitStats", ssid)
@@ -12693,7 +12699,8 @@ struct UpdateStorageCommitStats {
 		    .detail("BeforeStorageCommit", beforeStorageCommit)
 		    .detail("WhenCommit", whenCommit)
 		    .detail("MutationBytes", mutationBytes)
-		    .detail("FetchKeyBytes", fetchKeyBytes);
+		    .detail("FetchKeyBytes", fetchKeyBytes)
+		    .detail("ClearRangesLeft", clearRangesLeft);
 	}
 };
 
@@ -12738,6 +12745,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Version newOldestVersion = data->storageVersion();
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
+		state int64_t clearRangesLeft = data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1
+		                                    ? (SERVER_KNOBS->ROCKSDB_CLEARRANGES_LIMIT_PER_COMMIT > 0
+		                                           ? SERVER_KNOBS->ROCKSDB_CLEARRANGES_LIMIT_PER_COMMIT
+		                                           : INT_MAX)
+		                                    : INT_MAX;
 
 		// Clean up stale checkpoint requests, this is not supposed to happen, since checkpoints are cleaned up on
 		// failures. This is kept as a safeguard.
@@ -12813,10 +12825,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
+		// or until we reach clearRanges limit, in case of rocksdb.
 		state double beforeStorageUpdates = now();
 		loop {
 			state bool done = data->storage.makeVersionMutationsDurable(
-			    newOldestVersion, desiredVersion, bytesLeft, unlimitedCommitBytes);
+			    newOldestVersion, desiredVersion, bytesLeft, unlimitedCommitBytes, clearRangesLeft);
 			if (data->tenantMap.getLatestVersion() < newOldestVersion) {
 				data->tenantMap.createNewVersion(newOldestVersion);
 			}
@@ -12834,10 +12847,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		recentCommitStats.back().mutationBytes = SERVER_KNOBS->STORAGE_COMMIT_BYTES - bytesLeft;
+		recentCommitStats.back().clearRangesLeft = clearRangesLeft;
 		recentCommitStats.back().beforeStorageUpdates = beforeStorageUpdates;
 
 		// Allow data fetch to use an additional bytesLeft but don't penalize fetch budget if bytesLeft is negative
-		if (SERVER_KNOBS->STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET && bytesLeft > 0) {
+		if (SERVER_KNOBS->STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET && bytesLeft > 0 && clearRangesLeft > 0) {
 			data->fetchKeysBytesBudget += bytesLeft;
 			data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 
@@ -12991,7 +13005,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					when(wait(delay(60.0))) {
 						TraceEvent(SevWarn, "CommitTooLong", data->thisServerID)
 						    .detail("FetchBytes", data->fetchKeysTotalCommitBytes)
-						    .detail("CommitBytes", SERVER_KNOBS->STORAGE_COMMIT_BYTES - bytesLeft);
+						    .detail("CommitBytes", SERVER_KNOBS->STORAGE_COMMIT_BYTES - bytesLeft)
+						    .detail("ClearRangesLeft", clearRangesLeft);
 
 						if (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 						    SERVER_KNOBS->LOGGING_ROCKSDB_BG_WORK_WHEN_IO_TIMEOUT) {
@@ -13401,8 +13416,9 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
                                                     Version newStorageVersion,
                                                     int64_t& bytesLeft,
-                                                    UnlimitedCommitBytes unlimitedCommitBytes) {
-	if (!unlimitedCommitBytes && bytesLeft <= 0)
+                                                    UnlimitedCommitBytes unlimitedCommitBytes,
+                                                    int64_t& clearRangesLeft) {
+	if ((!unlimitedCommitBytes && bytesLeft <= 0) || clearRangesLeft <= 0)
 		return true;
 
 	// Apply mutations from the mutationLog
@@ -13417,8 +13433,11 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 		} else {
 			writeMutationsBuggy(v.mutations, v.version, "makeVersionDurable");
 		}
-		for (const auto& m : v.mutations)
+		for (const auto& m : v.mutations) {
 			bytesLeft -= mvccStorageBytes(m);
+			if (m.type == MutationRef::ClearRange)
+				--clearRangesLeft;
+		}
 		prevStorageVersion = v.version;
 		return false;
 	} else {
