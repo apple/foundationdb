@@ -2253,7 +2253,7 @@ void printFileList(BackupFileList& backupFileList) {
 
 	printf("\nSnapshotFiles count:%lu", backupFileList.snapshots.size());
 	for (auto s : backupFileList.snapshots)
-		printf("\n%lld, %lld, %s, %lld", s.beginVersion, s.endVersion, s.fileName.c_str(), s.totalSize);
+		printf("\n%lld, %lld, %s, %lld\n", s.beginVersion, s.endVersion, s.fileName.c_str(), s.totalSize);
 }
 
 // Intentionally missing some log range files and checking if the snapshot can be restored.
@@ -2392,6 +2392,111 @@ ACTOR Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Opti
 TEST_CASE("/backup/containers/localdir/missingLogRangesRestorability") {
 	wait(testBackupContainerWithMissingLogRanges(
 	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}));
+	return Void();
+}
+
+ACTOR Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string> proxy) {
+	state FlowLock lock(100e6);
+	printf("BackupContainerTest URL %s\n", url.c_str());
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, proxy, {});
+
+	// Make sure container doesn't exist, then create it.
+	try {
+		wait(c->deleteContainer());
+	} catch (Error& e) {
+		if (e.code() != error_code_backup_invalid_url && e.code() != error_code_backup_does_not_exist)
+			throw;
+	}
+
+	wait(c->create());
+
+	state int blockSize = 1024;
+	state std::vector<std::string> rangeFileNames;
+	state Key begin = randomKeyBetween(normalKeys);
+	state Key end = randomKeyBetween(KeyRangeRef(begin, normalKeys.end));
+	state std::pair<Key, Key> beginEndKeys = std::make_pair(begin, end);
+	state std::vector<std::pair<Key, Key>> snapshotBeginEndKeys;
+
+	// writing random number of range files with rangeSize 100
+	state std::vector<Future<Void>> writes;
+	state Version snapshotBeginVersion = 10;
+	state Version snapshotEndVersion = deterministicRandom()->randomInt(500, 1000);
+	state Version rangeSize = 100;
+	state Version v = snapshotBeginVersion;
+	state int numRangeFiles = 0;
+	while (v <= snapshotEndVersion) {
+		state Reference<IBackupFile> range = wait(c->writeRangeFile(v, 0, v, blockSize));
+		writes.push_back(writeAndVerifyFile(c, range, 100, &lock));
+		rangeFileNames.push_back(range->getFileName());
+		snapshotBeginEndKeys.push_back(beginEndKeys);
+		v += rangeSize;
+		++numRangeFiles;
+	}
+	snapshotEndVersion = v - rangeSize;
+
+	// writing random number of log files with logSize 70, covering the entire snapshot
+	state Version logSize = 70;
+	v = snapshotBeginVersion;
+	state int numLogFiles = 0;
+	while (v <= snapshotEndVersion) {
+		Reference<IBackupFile> log = wait(c->writeLogFile(v, v + logSize, blockSize));
+		writes.push_back(writeAndVerifyFile(c, log, 100, &lock));
+		++numLogFiles;
+		v += logSize;
+	}
+
+	// writing snapshot file
+	writes.push_back(c->writeKeyspaceSnapshotFile(
+	    rangeFileNames, snapshotBeginEndKeys, deterministicRandom()->randomInt(0, 2e6), IncludeKeyRangeMap(BUGGIFY)));
+	wait(waitForAll(writes));
+
+	state BackupFileList fileList = wait(c->dumpFileList());
+	printFileList(fileList);
+	ASSERT_EQ(fileList.ranges.size(), numRangeFiles);
+	ASSERT_EQ(fileList.logs.size(), numLogFiles);
+	ASSERT_EQ(fileList.snapshots.size(), 1);
+
+	state BackupDescription desc = wait(c->describeBackup());
+	printf("\n%s\n", desc.toString().c_str());
+	ASSERT_EQ(desc.minLogBegin, snapshotBeginVersion);
+	ASSERT_EQ(desc.maxLogEnd, v);
+	ASSERT_EQ(desc.minRestorableVersion, snapshotEndVersion);
+	ASSERT_EQ(desc.maxRestorableVersion, v - 1);
+	ASSERT_EQ(desc.snapshots[0].restorable, true);
+	ASSERT_EQ(desc.contiguousLogEnd, v);
+
+	// writing random number of more continuous log files
+	state int newNumLogFiles = deterministicRandom()->randomInt(2, 8);
+	writes.clear();
+	while (newNumLogFiles) {
+		Reference<IBackupFile> log = wait(c->writeLogFile(v, v + logSize, blockSize));
+		writes.push_back(writeAndVerifyFile(c, log, 100, &lock));
+		--newNumLogFiles;
+		v += logSize;
+	}
+	wait(waitForAll(writes));
+
+	state BackupFileList fileList1 = wait(c->dumpFileList());
+	printFileList(fileList1);
+	ASSERT_EQ(fileList.ranges.size(), numRangeFiles);
+	ASSERT_EQ(fileList.logs.size(), numLogFiles + newNumLogFiles);
+	ASSERT_EQ(fileList.snapshots.size(), 1);
+
+	state BackupDescription desc1 = wait(c->describeBackup());
+	printf("\n%s\n", desc1.toString().c_str());
+	ASSERT_EQ(desc1.minLogBegin, snapshotBeginVersion);
+	ASSERT_EQ(desc1.maxLogEnd, v);
+	ASSERT_EQ(desc1.minRestorableVersion, snapshotEndVersion);
+	ASSERT_EQ(desc1.maxRestorableVersion, v - 1);
+	ASSERT_EQ(desc.snapshots[0].restorable, true);
+	ASSERT_EQ(desc1.contiguousLogEnd, v);
+
+	return Void();
+}
+
+TEST_CASE("/backup/containers/localdir/continuousLogEndVersion") {
+	wait(testBackupContinuousLogEndVer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	                                   {}));
 	return Void();
 }
 
