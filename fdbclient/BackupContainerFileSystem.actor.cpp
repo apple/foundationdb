@@ -2467,6 +2467,7 @@ ACTOR Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::
 
 	// writing random number of more continuous log files
 	state int newNumLogFiles = deterministicRandom()->randomInt(2, 8);
+	numLogFiles += newNumLogFiles;
 	writes.clear();
 	while (newNumLogFiles) {
 		Reference<IBackupFile> log = wait(c->writeLogFile(v, v + logSize, blockSize));
@@ -2478,9 +2479,9 @@ ACTOR Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::
 
 	state BackupFileList fileList1 = wait(c->dumpFileList());
 	printFileList(fileList1);
-	ASSERT_EQ(fileList.ranges.size(), numRangeFiles);
-	ASSERT_EQ(fileList.logs.size(), numLogFiles + newNumLogFiles);
-	ASSERT_EQ(fileList.snapshots.size(), 1);
+	ASSERT_EQ(fileList1.ranges.size(), numRangeFiles);
+	ASSERT_EQ(fileList1.logs.size(), numLogFiles);
+	ASSERT_EQ(fileList1.snapshots.size(), 1);
 
 	state BackupDescription desc1 = wait(c->describeBackup());
 	printf("\n%s\n", desc1.toString().c_str());
@@ -2488,7 +2489,7 @@ ACTOR Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::
 	ASSERT_EQ(desc1.maxLogEnd, v);
 	ASSERT_EQ(desc1.minRestorableVersion, snapshotEndVersion);
 	ASSERT_EQ(desc1.maxRestorableVersion, v - 1);
-	ASSERT_EQ(desc.snapshots[0].restorable, true);
+	ASSERT_EQ(desc1.snapshots[0].restorable, true);
 	ASSERT_EQ(desc1.contiguousLogEnd, v);
 
 	return Void();
