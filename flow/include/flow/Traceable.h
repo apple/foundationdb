@@ -83,7 +83,9 @@ struct Traceable : std::false_type {};
 #define FORMAT_TRACEABLE(type, fmt)                                                                                    \
 	template <>                                                                                                        \
 	struct Traceable<type> : std::true_type {                                                                          \
-		static std::string toString(type value) { return format(fmt, value); }                                         \
+		static std::string toString(type value) {                                                                      \
+			return format(fmt, value);                                                                                 \
+		}                                                                                                              \
 	}
 
 FORMAT_TRACEABLE(bool, "%d");

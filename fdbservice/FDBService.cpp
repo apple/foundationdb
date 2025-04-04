@@ -336,7 +336,7 @@ protected:
 				}
 			} else {
 				// FIXME: log error
-				throw(DWORD) 1;
+				throw (DWORD)1;
 			}
 		}
 

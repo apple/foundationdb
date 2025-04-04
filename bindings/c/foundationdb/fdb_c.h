@@ -58,8 +58,7 @@
  * ensure a compile error in such cases, and attempt to make the compile error
  * slightly informative.
  */
-#define This_FoundationDB_API_function_is_removed_at_this_FDB_API_VERSION()                                            \
-	{ == == = }
+#define This_FoundationDB_API_function_is_removed_at_this_FDB_API_VERSION() { == == = }
 #define FDB_REMOVED_FUNCTION This_FoundationDB_API_function_is_removed_at_this_FDB_API_VERSION(0)
 
 #include <stdint.h>

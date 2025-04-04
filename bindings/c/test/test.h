@@ -78,7 +78,9 @@ struct RunResult {
 	fdb_error_t e;
 };
 #define RES(x, y)                                                                                                      \
-	(struct RunResult) { x, y }
+	(struct RunResult) {                                                                                               \
+		x, y                                                                                                           \
+	}
 
 struct Kpi {
 	const char* name;

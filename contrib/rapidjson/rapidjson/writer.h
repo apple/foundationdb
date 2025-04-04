@@ -417,7 +417,7 @@ protected:
 					PutUnsafe(*os_, hexDigits[(codepoint >> 12) & 15]);
 					PutUnsafe(*os_, hexDigits[(codepoint >> 8) & 15]);
 					PutUnsafe(*os_, hexDigits[(codepoint >> 4) & 15]);
-					PutUnsafe(*os_, hexDigits[(codepoint)&15]);
+					PutUnsafe(*os_, hexDigits[(codepoint) & 15]);
 				} else {
 					RAPIDJSON_ASSERT(codepoint >= 0x010000 && codepoint <= 0x10FFFF);
 					// Surrogate pair
@@ -427,13 +427,13 @@ protected:
 					PutUnsafe(*os_, hexDigits[(lead >> 12) & 15]);
 					PutUnsafe(*os_, hexDigits[(lead >> 8) & 15]);
 					PutUnsafe(*os_, hexDigits[(lead >> 4) & 15]);
-					PutUnsafe(*os_, hexDigits[(lead)&15]);
+					PutUnsafe(*os_, hexDigits[(lead) & 15]);
 					PutUnsafe(*os_, '\\');
 					PutUnsafe(*os_, 'u');
 					PutUnsafe(*os_, hexDigits[(trail >> 12) & 15]);
 					PutUnsafe(*os_, hexDigits[(trail >> 8) & 15]);
 					PutUnsafe(*os_, hexDigits[(trail >> 4) & 15]);
-					PutUnsafe(*os_, hexDigits[(trail)&15]);
+					PutUnsafe(*os_, hexDigits[(trail) & 15]);
 				}
 			} else if ((sizeof(Ch) == 1 || static_cast<unsigned>(c) < 256) &&
 			           RAPIDJSON_UNLIKELY(escape[static_cast<unsigned char>(c)])) {

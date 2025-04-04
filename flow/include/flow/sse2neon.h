@@ -314,9 +314,10 @@ FORCE_INLINE __m128i _mm_set_epi8(signed char b15,
                                   signed char b2,
                                   signed char b1,
                                   signed char b0) {
-	int8_t __attribute__((aligned(16)))
-	data[16] = { (int8_t)b0, (int8_t)b1, (int8_t)b2,  (int8_t)b3,  (int8_t)b4,  (int8_t)b5,  (int8_t)b6,  (int8_t)b7,
-		         (int8_t)b8, (int8_t)b9, (int8_t)b10, (int8_t)b11, (int8_t)b12, (int8_t)b13, (int8_t)b14, (int8_t)b15 };
+	int8_t __attribute__((aligned(16))) data[16] = { (int8_t)b0,  (int8_t)b1,  (int8_t)b2,  (int8_t)b3,
+		                                             (int8_t)b4,  (int8_t)b5,  (int8_t)b6,  (int8_t)b7,
+		                                             (int8_t)b8,  (int8_t)b9,  (int8_t)b10, (int8_t)b11,
+		                                             (int8_t)b12, (int8_t)b13, (int8_t)b14, (int8_t)b15 };
 	return (__m128i)vld1q_s8(data);
 }
 
@@ -345,9 +346,10 @@ FORCE_INLINE __m128i _mm_setr_epi8(signed char b0,
                                    signed char b13,
                                    signed char b14,
                                    signed char b15) {
-	int8_t __attribute__((aligned(16)))
-	data[16] = { (int8_t)b0, (int8_t)b1, (int8_t)b2,  (int8_t)b3,  (int8_t)b4,  (int8_t)b5,  (int8_t)b6,  (int8_t)b7,
-		         (int8_t)b8, (int8_t)b9, (int8_t)b10, (int8_t)b11, (int8_t)b12, (int8_t)b13, (int8_t)b14, (int8_t)b15 };
+	int8_t __attribute__((aligned(16))) data[16] = { (int8_t)b0,  (int8_t)b1,  (int8_t)b2,  (int8_t)b3,
+		                                             (int8_t)b4,  (int8_t)b5,  (int8_t)b6,  (int8_t)b7,
+		                                             (int8_t)b8,  (int8_t)b9,  (int8_t)b10, (int8_t)b11,
+		                                             (int8_t)b12, (int8_t)b13, (int8_t)b14, (int8_t)b15 };
 	return (__m128i)vld1q_s8(data);
 }
 
@@ -769,7 +771,7 @@ FORCE_INLINE __m128 _mm_shuffle_ps_default(__m128 a,
 #define _mm_shuffle_ps_default(a, b, imm)                                                                              \
 	__extension__({                                                                                                    \
 		float32x4_t ret;                                                                                               \
-		ret = vmovq_n_f32(vgetq_lane_f32(vreinterpretq_f32_m128(a), (imm)&0x3));                                       \
+		ret = vmovq_n_f32(vgetq_lane_f32(vreinterpretq_f32_m128(a), (imm) & 0x3));                                     \
 		ret = vsetq_lane_f32(vgetq_lane_f32(vreinterpretq_f32_m128(a), ((imm) >> 2) & 0x3), ret, 1);                   \
 		ret = vsetq_lane_f32(vgetq_lane_f32(vreinterpretq_f32_m128(b), ((imm) >> 4) & 0x3), ret, 2);                   \
 		ret = vsetq_lane_f32(vgetq_lane_f32(vreinterpretq_f32_m128(b), ((imm) >> 6) & 0x3), ret, 3);                   \
@@ -784,7 +786,7 @@ FORCE_INLINE __m128 _mm_shuffle_ps_default(__m128 a,
 		float32x4_t _input1 = vreinterpretq_f32_m128(a);                                                               \
 		float32x4_t _input2 = vreinterpretq_f32_m128(b);                                                               \
 		float32x4_t _shuf = __builtin_shufflevector(                                                                   \
-		    _input1, _input2, (imm)&0x3, ((imm) >> 2) & 0x3, (((imm) >> 4) & 0x3) + 4, (((imm) >> 6) & 0x3) + 4);      \
+		    _input1, _input2, (imm) & 0x3, ((imm) >> 2) & 0x3, (((imm) >> 4) & 0x3) + 4, (((imm) >> 6) & 0x3) + 4);    \
 		vreinterpretq_m128_f32(_shuf);                                                                                 \
 	})
 #else // generic
@@ -963,7 +965,7 @@ FORCE_INLINE __m128i _mm_shuffle_epi32_default(__m128i a,
 #define _mm_shuffle_epi32_default(a, imm)                                                                              \
 	__extension__({                                                                                                    \
 		int32x4_t ret;                                                                                                 \
-		ret = vmovq_n_s32(vgetq_lane_s32(vreinterpretq_s32_m128i(a), (imm)&0x3));                                      \
+		ret = vmovq_n_s32(vgetq_lane_s32(vreinterpretq_s32_m128i(a), (imm) & 0x3));                                    \
 		ret = vsetq_lane_s32(vgetq_lane_s32(vreinterpretq_s32_m128i(a), ((imm) >> 2) & 0x3), ret, 1);                  \
 		ret = vsetq_lane_s32(vgetq_lane_s32(vreinterpretq_s32_m128i(a), ((imm) >> 4) & 0x3), ret, 2);                  \
 		ret = vsetq_lane_s32(vgetq_lane_s32(vreinterpretq_s32_m128i(a), ((imm) >> 6) & 0x3), ret, 3);                  \
@@ -989,7 +991,7 @@ FORCE_INLINE __m128i _mm_shuffle_epi32_default(__m128i a,
 	__extension__({                                                                                                    \
 		int32x4_t _input = vreinterpretq_s32_m128i(a);                                                                 \
 		int32x4_t _shuf = __builtin_shufflevector(                                                                     \
-		    _input, _input, (imm)&0x3, ((imm) >> 2) & 0x3, ((imm) >> 4) & 0x3, ((imm) >> 6) & 0x3);                    \
+		    _input, _input, (imm) & 0x3, ((imm) >> 2) & 0x3, ((imm) >> 4) & 0x3, ((imm) >> 6) & 0x3);                  \
 		vreinterpretq_m128i_s32(_shuf);                                                                                \
 	})
 #else // generic
@@ -1057,7 +1059,7 @@ FORCE_INLINE __m128i _mm_shuffle_epi32_default(__m128i a,
 	__extension__({                                                                                                    \
 		int16x8_t ret = vreinterpretq_s16_m128i(a);                                                                    \
 		int16x4_t lowBits = vget_low_s16(ret);                                                                         \
-		ret = vsetq_lane_s16(vget_lane_s16(lowBits, (imm)&0x3), ret, 0);                                               \
+		ret = vsetq_lane_s16(vget_lane_s16(lowBits, (imm) & 0x3), ret, 0);                                             \
 		ret = vsetq_lane_s16(vget_lane_s16(lowBits, ((imm) >> 2) & 0x3), ret, 1);                                      \
 		ret = vsetq_lane_s16(vget_lane_s16(lowBits, ((imm) >> 4) & 0x3), ret, 2);                                      \
 		ret = vsetq_lane_s16(vget_lane_s16(lowBits, ((imm) >> 6) & 0x3), ret, 3);                                      \
@@ -1072,7 +1074,7 @@ FORCE_INLINE __m128i _mm_shuffle_epi32_default(__m128i a,
 		int16x8_t _input = vreinterpretq_s16_m128i(a);                                                                 \
 		int16x8_t _shuf = __builtin_shufflevector(_input,                                                              \
 		                                          _input,                                                              \
-		                                          ((imm)&0x3),                                                         \
+		                                          ((imm) & 0x3),                                                       \
 		                                          (((imm) >> 2) & 0x3),                                                \
 		                                          (((imm) >> 4) & 0x3),                                                \
 		                                          (((imm) >> 6) & 0x3),                                                \
@@ -1095,7 +1097,7 @@ FORCE_INLINE __m128i _mm_shuffle_epi32_default(__m128i a,
 	__extension__({                                                                                                    \
 		int16x8_t ret = vreinterpretq_s16_m128i(a);                                                                    \
 		int16x4_t highBits = vget_high_s16(ret);                                                                       \
-		ret = vsetq_lane_s16(vget_lane_s16(highBits, (imm)&0x3), ret, 4);                                              \
+		ret = vsetq_lane_s16(vget_lane_s16(highBits, (imm) & 0x3), ret, 4);                                            \
 		ret = vsetq_lane_s16(vget_lane_s16(highBits, ((imm) >> 2) & 0x3), ret, 5);                                     \
 		ret = vsetq_lane_s16(vget_lane_s16(highBits, ((imm) >> 4) & 0x3), ret, 6);                                     \
 		ret = vsetq_lane_s16(vget_lane_s16(highBits, ((imm) >> 6) & 0x3), ret, 7);                                     \
@@ -1114,7 +1116,7 @@ FORCE_INLINE __m128i _mm_shuffle_epi32_default(__m128i a,
 		                                          1,                                                                   \
 		                                          2,                                                                   \
 		                                          3,                                                                   \
-		                                          ((imm)&0x3) + 4,                                                     \
+		                                          ((imm) & 0x3) + 4,                                                   \
 		                                          (((imm) >> 2) & 0x3) + 4,                                            \
 		                                          (((imm) >> 4) & 0x3) + 4,                                            \
 		                                          (((imm) >> 6) & 0x3) + 4);                                           \

@@ -55,7 +55,7 @@ struct GenerationRegInterface {
 	GenerationRegInterface() {}
 	GenerationRegInterface(NetworkAddress const& remote);
 	GenerationRegInterface(INetwork* local);
-	GenerationRegInterface(Hostname const& hostname) : hostname(hostname){};
+	GenerationRegInterface(Hostname const& hostname) : hostname(hostname) {};
 };
 
 struct UniqueGeneration {

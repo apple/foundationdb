@@ -46,10 +46,8 @@ public:
 
 template <class Context>
 concept is_wipe_enabled = requires(Context& context) {
-	                          {
-		                          context.markForWipe(std::declval<uint8_t*>(), std::declval<size_t>())
-		                          } -> std::same_as<void>;
-                          };
+	{ context.markForWipe(std::declval<uint8_t*>(), std::declval<size_t>()) } -> std::same_as<void>;
+};
 
 } // namespace detail
 

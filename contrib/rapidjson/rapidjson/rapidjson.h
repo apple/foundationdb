@@ -492,7 +492,7 @@ RAPIDJSON_NAMESPACE_END
 	while ((void)0, 0)
 
 // adopted from Boost
-#define RAPIDJSON_VERSION_CODE(x, y, z) (((x)*100000) + ((y)*100) + (z))
+#define RAPIDJSON_VERSION_CODE(x, y, z) (((x) * 100000) + ((y) * 100) + (z))
 
 ///////////////////////////////////////////////////////////////////////////////
 // RAPIDJSON_DIAG_PUSH/POP, RAPIDJSON_DIAG_OFF
