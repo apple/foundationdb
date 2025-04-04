@@ -136,6 +136,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(concurrent_requests, cr);
 	TRY_PARAM(multipart_max_part_size, maxps);
 	TRY_PARAM(multipart_min_part_size, minps);
+	TRY_PARAM(multipart_retry_delay_ms, mrd);
 	TRY_PARAM(concurrent_uploads, cu);
 	TRY_PARAM(concurrent_lists, cl);
 	TRY_PARAM(concurrent_reads_per_file, crpf);

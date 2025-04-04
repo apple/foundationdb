@@ -58,34 +58,50 @@ struct PartState {
 struct PartConfig {
 	// Let this be the minimum configured part size.
 	int64_t partSizeBytes = CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE;
-	// TODO: Make this settable via knobs.
-	int retryDelayMs = 1000;
+	// Retry delay for multipart uploads
+	int retryDelayMs = CLIENT_KNOBS->BLOBSTORE_MULTIPART_RETRY_DELAY_MS;
 };
 
 // Calculate hash of a file.
 // Uses xxhash library because it's fast (supposedly) and used elsewhere in fdb.
-ACTOR static Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size = -1) {
+// If size is -1, the function will determine the file size automatically.
+// Returns a hex string representation of the xxhash64 checksum.
+ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size) {
 	state int64_t pos = 0;
 	state XXH64_state_t* hashState = XXH64_createState();
 	state std::vector<uint8_t> buffer(65536);
+	state int readSize;
 
 	XXH64_reset(hashState, 0);
 
-	if (size == -1) {
-		int64_t s = wait(file->size());
-		size = s;
-	}
+	try {
+		if (size == -1) {
+			int64_t s = wait(file->size());
+			size = s;
+		}
 
-	while (pos < size) {
-		int readSize = std::min<int64_t>(buffer.size(), size - pos);
-		int bytesRead = wait(file->read(buffer.data(), readSize, pos));
-		XXH64_update(hashState, buffer.data(), bytesRead);
-		pos += bytesRead;
-	}
+		while (pos < size) {
+			readSize = std::min<int64_t>(buffer.size(), size - pos);
+			int bytesRead = wait(file->read(buffer.data(), readSize, pos));
+			if (bytesRead != readSize) {
+				XXH64_freeState(hashState);
+				TraceEvent(SevError, "S3ClientCalculateChecksumReadError")
+				    .detail("Expected", readSize)
+				    .detail("Actual", bytesRead)
+				    .detail("Position", pos);
+				throw io_error();
+			}
+			XXH64_update(hashState, buffer.data(), bytesRead);
+			pos += bytesRead;
+		}
 
-	uint64_t hash = XXH64_digest(hashState);
-	XXH64_freeState(hashState);
-	return format("%016llx", hash);
+		uint64_t hash = XXH64_digest(hashState);
+		XXH64_freeState(hashState);
+		return format("%016llx", hash);
+	} catch (Error& e) {
+		XXH64_freeState(hashState);
+		throw;
+	}
 }
 
 // Get the endpoint for the given s3url.
@@ -204,7 +220,10 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 		    .detail("FileSize", size);
 
 		// Open file once with UNCACHED for both checksum and upload.
-		// TODO: Fix this double read. Check what the sdk does.
+		// TODO(BulkLoad): Optimize this to avoid double reading the file. Consider:
+		// 1. Using memory-mapped files if available
+		// 2. Caching the file contents in memory
+		// 3. Using the same file handle for both checksum and upload
 		Reference<IAsyncFile> f = wait(
 		    IAsyncFileSystem::filesystem()->open(filepath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 		file = f;
@@ -230,8 +249,9 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			int bytesRead = wait(file->read(&partDatas.back()[0], partSize, offset));
 			if (bytesRead != partSize) {
 				TraceEvent(SevError, "S3ClientCopyUpFileReadError")
-				    .detail("expected", partSize)
-				    .detail("actual", bytesRead);
+				    .detail("Expected", partSize)
+				    .detail("Actual", bytesRead)
+				    .detail("Offset", offset);
 				throw io_error();
 			}
 
@@ -264,19 +284,24 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 		std::map<int, std::string> etagMap;
 		for (const auto& part : parts) {
 			if (!part.completed) {
-				TraceEvent(SevWarnAlways, "S3ClientCopyUpFilePartNotCompleted").detail("partNumber", part.partNumber);
+				TraceEvent(SevWarnAlways, "S3ClientCopyUpFilePartNotCompleted")
+				    .detail("PartNumber", part.partNumber)
+				    .detail("Offset", part.offset)
+				    .detail("Size", part.size);
 				throw operation_failed();
 			}
 			etagMap[part.partNumber] = part.etag;
 		}
 
 		wait(endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap));
-		// TODO(BulkLoad): Return map of part numbers to md5 or other checksumming so we can save
-		// aside and check integrity of downloaded file
 
 		// Clear data after successful upload
 		parts.clear();
 		partDatas.clear();
+
+		// TODO(BulkLoad): Consider returning a map of part numbers to their checksums
+		// This would allow for more granular integrity verification during downloads
+		// and could help identify which specific part failed if there's an issue.
 
 		// Add the checksum as a tag after successful upload
 		state std::map<std::string, std::string> tags;
@@ -539,8 +564,12 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 				if (actualChecksum != expectedChecksum) {
 					TraceEvent(SevError, "S3ClientCopyDownFileChecksumMismatch")
 					    .detail("Expected", expectedChecksum)
-					    .detail("Calculated", actualChecksum);
-					// TODO(BulkLoad): Non-retryable error.
+					    .detail("Calculated", actualChecksum)
+					    .detail("FileSize", fileSize)
+					    .detail("FilePath", filepath);
+					// TODO(BulkLoad): Consider making this a non-retryable error since
+					// retrying is unlikely to help if the checksum doesn't match.
+					// This would require adding a new error type and updating callers.
 					throw checksum_failed();
 				}
 			}
@@ -551,7 +580,7 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 
 		TraceEvent(s3VerboseEventSev(), "S3ClientCopyDownFileEnd")
 		    .detail("Bucket", bucket)
-		    .detail("Object", objectName)
+		    .detail("ObjectName", objectName)
 		    .detail("FileSize", fileSize)
 		    .detail("Duration", now() - startTime)
 		    .detail("Checksum", expectedChecksum)
@@ -562,9 +591,10 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 		state Error err = e;
 		TraceEvent(SevWarnAlways, "S3ClientCopyDownFileError")
 		    .detail("Bucket", bucket)
-		    .detail("Object", objectName)
+		    .detail("ObjectName", objectName)
 		    .detail("Error", err.what())
-		    .detail("FilePath", filepath);
+		    .detail("FilePath", filepath)
+		    .detail("FileSize", fileSize);
 
 		// Clean up the file in case of error
 		if (file) {
