@@ -20,6 +20,7 @@
 
 #ifndef FLOW_FLOW_H
 #define FLOW_FLOW_H
+
 #include "flow/ActorContext.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
