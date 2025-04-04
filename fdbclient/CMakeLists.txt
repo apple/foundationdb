@@ -66,6 +66,10 @@ endif()
 if(WITH_AWS_BACKUP)
   add_compile_definitions(WITH_AWS_BACKUP)
   include(awssdk)
+  set(FDBCLIENT_SRCS
+    ${FDBCLIENT_SRCS}
+    #S3TransferManagerWrapper.actor.cpp)
+    )
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
@@ -112,6 +116,10 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
 endif()
 
 add_dependencies(s3client fdboptions)
+
+if(WITH_AWS_BACKUP)
+  add_dependencies(s3client awssdk_project)
+endif()
 
 # Setup the Swift sources in FDBClient.
 if(WITH_SWIFT)
