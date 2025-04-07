@@ -62,6 +62,8 @@ public:
 	// Returns true if the KV store supports shards, i.e., implements addRange(), removeRange(), and
 	// persistRangeMapping().
 	virtual bool shardAware() const { return false; }
+	// Returns true if the store supports external SST file ingestion.
+	virtual bool supportsSstIngestion() const { return false; }
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> canCommit() { return Void(); }
@@ -156,6 +158,11 @@ public:
 
 	// Obtain the encryption mode of the storage. The encryption mode needs to match the encryption mode of the cluster.
 	virtual Future<EncryptionAtRestMode> encryptionMode() = 0;
+
+	virtual Future<Void> ingestSSTFiles(std::string bulkLoadLocalDir,
+	                                    std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
+		throw not_implemented();
+	}
 
 protected:
 	virtual ~IKeyValueStore() {}

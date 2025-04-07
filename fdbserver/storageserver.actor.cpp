@@ -9119,7 +9119,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// Note that it is possible that this SS can never get the bulkload metadata because the bulkload data
 				// move is cancelled or replaced by another data move. In this case, while
 				// getBulkLoadTaskStateFromDataMove get stuck, this fetchKeys is guaranteed to be cancelled.
-				BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
+				state BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
 				    data->cx, dataMoveId, /*atLeastVersion=*/data->version.get(), data->thisServerID));
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
@@ -9135,382 +9135,443 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
 				    .detail("Range", keys)
+				    .detail("Knobs", SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST)
+				    .detail("LoadType", bulkLoadTaskState.getLoadType())
+				    .detail("SupportsSstIngestion", data->storage.getKeyValueStore()->supportsSstIngestion())
 				    .detail("Phase", "File download");
-				hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
-				rangeEnd = keys.end;
+				state bool sstIngestionPerformed = false;
+				// If SST ingestion is enabled and we have SST files, try to ingest them directly
+				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST && bulkLoadTaskState.getLoadType() == BulkLoadType::SST &&
+				    data->storage.getKeyValueStore()->supportsSstIngestion()) {
+					sstIngestionPerformed = true;
+					TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("Range", keys)
+					    .detail("Phase", "SST ingestion");
+					// Verify that all SST files' ranges are contained within the fetchKeys range
+					for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
+						ASSERT(keys.contains(range));
+					}
+					TraceEvent("SSBulkLoadSSTIngestionStart", data->thisServerID)
+					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("FKID", fetchKeysID)
+					    .detail("Range", keys)
+					    .detail("LocalDir", bulkLoadLocalDir);
+					wait(data->storage.getKeyValueStore()->ingestSSTFiles(bulkLoadLocalDir, localBulkLoadFileSets));
+					TraceEvent("SSBulkLoadSSTIngestionComplete", data->thisServerID)
+					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("FKID", fetchKeysID)
+					    .detail("Range", keys);
+				}
+				if (!sstIngestionPerformed) {
+					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
+					rangeEnd = keys.end;
+				}
 			} else {
 				hold = tryGetRange(results, &tr, keys);
 				rangeEnd = keys.end;
 			}
 
 			state Key blockBegin = keys.begin;
-
-			try {
-				loop {
-					CODE_PROBE(true, "Fetching keys for transferred shard");
-					while (data->fetchKeysBudgetUsed.get()) {
-						std::vector<Future<Void>> delays;
-						if (SERVER_KNOBS->STORAGE_FETCH_KEYS_DELAY > 0) {
-							delays.push_back(delayJittered(SERVER_KNOBS->STORAGE_FETCH_KEYS_DELAY));
+			if (!sstIngestionPerformed) {
+				try {
+					loop {
+						CODE_PROBE(true, "Fetching keys for transferred shard");
+						while (data->fetchKeysBudgetUsed.get()) {
+							std::vector<Future<Void>> delays;
+							if (SERVER_KNOBS->STORAGE_FETCH_KEYS_DELAY > 0) {
+								delays.push_back(delayJittered(SERVER_KNOBS->STORAGE_FETCH_KEYS_DELAY));
+							}
+							delays.push_back(data->fetchKeysBudgetUsed.onChange());
+							wait(waitForAll(delays));
 						}
-						delays.push_back(data->fetchKeysBudgetUsed.onChange());
-						wait(waitForAll(delays));
-					}
-					state RangeResult this_block = waitNext(results.getFuture());
+						state RangeResult this_block = waitNext(results.getFuture());
 
-					state int expectedBlockSize =
-					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
+						state int expectedBlockSize =
+						    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
 
-					TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID)
-					    .detail("FKID", interval.pairID)
-					    .detail("BlockRows", this_block.size())
-					    .detail("BlockBytes", expectedBlockSize)
-					    .detail("KeyBegin", keys.begin)
-					    .detail("KeyEnd", keys.end)
-					    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
-					    .detail("Version", fetchVersion)
-					    .detail("More", this_block.more)
-					    .detail("DataMoveId", dataMoveId.toString())
-					    .detail("ConductBulkLoad", conductBulkLoad);
-
-					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
-					if (MUTATION_TRACKING_ENABLED) {
-						for (auto k = this_block.begin(); k != this_block.end(); ++k) {
-							DEBUG_MUTATION("fetch",
-							               fetchVersion,
-							               MutationRef(MutationRef::SetValue, k->key, k->value),
-							               data->thisServerID);
-						}
-					}
-					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
-					totalBytes += expectedBlockSize;
-
-					if (shard->reason != DataMovementReason::INVALID &&
-					    priority < SERVER_KNOBS->FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD &&
-					    !data->fetchKeysLimiter.ready().isReady()) {
-						TraceEvent(SevDebug, "FetchKeysThrottling", data->thisServerID);
-						state double ts = now();
-						wait(data->fetchKeysLimiter.ready());
-						TraceEvent(SevDebug, "FetchKeysThrottled", data->thisServerID)
-						    .detail("Priority", priority)
-						    .detail("KeyRange", shard->keys)
-						    .detail("Delay", now() - ts);
-					}
-
-					// Write this_block to storage
-					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
-					state Key blockEnd =
-					    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
-					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
-					wait(data->storage.replaceRange(blockRange, blockData));
-
-					if (conductBulkLoad) {
-						TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+						TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID)
 						    .detail("FKID", interval.pairID)
+						    .detail("BlockRows", this_block.size())
+						    .detail("BlockBytes", expectedBlockSize)
+						    .detail("KeyBegin", keys.begin)
+						    .detail("KeyEnd", keys.end)
+						    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
+						    .detail("Version", fetchVersion)
+						    .detail("More", this_block.more)
 						    .detail("DataMoveId", dataMoveId.toString())
-						    .detail("Range", keys)
-						    .detail("BlockRange", blockRange)
-						    .detail("Phase", "Replaced range");
-					}
+						    .detail("ConductBulkLoad", conductBulkLoad);
 
-					data->fetchKeysLimiter.addBytes(expectedBlockSize);
+						DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
+						if (MUTATION_TRACKING_ENABLED) {
+							for (auto k = this_block.begin(); k != this_block.end(); ++k) {
+								DEBUG_MUTATION("fetch",
+								               fetchVersion,
+								               MutationRef(MutationRef::SetValue, k->key, k->value),
+								               data->thisServerID);
+							}
+						}
+						metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
+						totalBytes += expectedBlockSize;
 
-					state KeyValueRef* kvItr = this_block.begin();
-					for (; kvItr != this_block.end(); ++kvItr) {
-						data->byteSampleApplySet(*kvItr, invalidVersion);
-					}
-					if (this_block.more) {
-						blockBegin = this_block.getReadThrough();
-					} else {
-						ASSERT(!this_block.readThrough.present());
-						blockBegin = rangeEnd;
-					}
-					this_block = RangeResult();
+						if (shard->reason != DataMovementReason::INVALID &&
+						    priority < SERVER_KNOBS->FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD &&
+						    !data->fetchKeysLimiter.ready().isReady()) {
+							TraceEvent(SevDebug, "FetchKeysThrottling", data->thisServerID);
+							state double ts = now();
+							wait(data->fetchKeysLimiter.ready());
+							TraceEvent(SevDebug, "FetchKeysThrottled", data->thisServerID)
+							    .detail("Priority", priority)
+							    .detail("KeyRange", shard->keys)
+							    .detail("Delay", now() - ts);
+						}
 
-					++data->counters.kvClearRangesInFetchKeys;
-					data->fetchKeysTotalCommitBytes += expectedBlockSize;
-					data->fetchKeysBytesBudget -= expectedBlockSize;
-					data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
-				}
-			} catch (Error& e) {
-				if (!fetchKeyCanRetry(e)) {
-					throw e;
-				}
-				lastError = e;
-				if (lastError.code() == error_code_storage_replica_comparison_error) {
-					// The inconsistency could be because of the inclusion of a rolled back
-					// transaction(s)/version(s) in the returned results. Retry.
-					wait(data->knownCommittedVersion.whenAtLeast(fetchVersion));
-				}
-				if (blockBegin == keys.begin) {
-					TraceEvent("FKBlockFail", data->thisServerID)
-					    .errorUnsuppressed(lastError)
-					    .suppressFor(1.0)
-					    .detail("FKID", interval.pairID);
+						// Write this_block to storage
+						state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
+						state Key blockEnd =
+						    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
+						state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
+						wait(data->storage.replaceRange(blockRange, blockData));
 
-					debug_getRangeRetries++;
-					if (debug_nextRetryToLog == debug_getRangeRetries) {
-						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
-						TraceEvent(SevWarn, "FetchPast", data->thisServerID)
-						    .detail("TotalAttempts", debug_getRangeRetries)
-						    .detail("FKID", interval.pairID)
-						    .detail("N", fetchVersion)
-						    .detail("E", data->version.get());
-					}
-					wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-					continue;
-				}
-				if (blockBegin < keys.end) {
-					std::deque<Standalone<VerUpdateRef>> updatesToSplit = std::move(shard->updates);
-
-					// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
-					// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own
-					// fetchKeys.
-					if (data->shardAware) {
-						StorageServerShard rightShard = data->shards[keys.begin]->toStorageServerShard();
-						rightShard.range = KeyRangeRef(blockBegin, keys.end);
-						auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard);
-						leftShard->populateShard(rightShard);
-						shard->server->addShard(leftShard);
-						shard->server->addShard(ShardInfo::newShard(data, rightShard));
-					} else {
-						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard));
-						shard->server->addShard(ShardInfo::newAdding(
-						    data, KeyRangeRef(blockBegin, keys.end), shard->reason, shard->getSSBulkLoadMetadata()));
 						if (conductBulkLoad) {
 							TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 							    .detail("FKID", interval.pairID)
 							    .detail("DataMoveId", dataMoveId.toString())
 							    .detail("Range", keys)
-							    .detail("NewSplitBeginKey", blockBegin)
-							    .detail("Phase", "Split range");
+							    .detail("BlockRange", blockRange)
+							    .detail("Phase", "Replaced range");
 						}
+
+						data->fetchKeysLimiter.addBytes(expectedBlockSize);
+
+						state KeyValueRef* kvItr = this_block.begin();
+						for (; kvItr != this_block.end(); ++kvItr) {
+							data->byteSampleApplySet(*kvItr, invalidVersion);
+						}
+
+						// TODO: Need equivalent byte sampling logic after SST ingestion succeeds.
+
+						if (this_block.more) {
+							blockBegin = this_block.getReadThrough();
+						} else {
+							ASSERT(!this_block.readThrough.present());
+							blockBegin = rangeEnd;
+						}
+
+						this_block = RangeResult();
+
+						++data->counters.kvClearRangesInFetchKeys;
+						data->fetchKeysTotalCommitBytes += expectedBlockSize;
+						data->fetchKeysBytesBudget -= expectedBlockSize;
+						data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 					}
-					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
-					warningLogger = logFetchKeysWarning(shard);
-					AddingShard* otherShard = data->shards.rangeContaining(blockBegin).value()->adding.get();
-					keys = shard->keys;
-
-					// Split our prior updates.  The ones that apply to our new, restricted key range will go back
-					// into shard->updates, and the ones delivered to the new shard will be discarded because it is
-					// in WaitPrevious phase (hasn't chosen a fetchVersion yet). What we are doing here is expensive
-					// and could get more expensive if we started having many more blocks per shard. May need
-					// optimization in the future.
-					std::deque<Standalone<VerUpdateRef>>::iterator u = updatesToSplit.begin();
-					for (; u != updatesToSplit.end(); ++u) {
-						splitMutations(data, data->shards, *u);
+				} catch (Error& e) {
+					if (!fetchKeyCanRetry(e)) {
+						throw e;
 					}
+					lastError = e;
+					if (lastError.code() == error_code_storage_replica_comparison_error) {
+						// The inconsistency could be because of the inclusion of a rolled back
+						// transaction(s)/version(s) in the returned results. Retry.
+						wait(data->knownCommittedVersion.whenAtLeast(fetchVersion));
+					}
+					if (blockBegin == keys.begin) {
+						TraceEvent("FKBlockFail", data->thisServerID)
+						    .errorUnsuppressed(lastError)
+						    .suppressFor(1.0)
+						    .detail("FKID", interval.pairID);
 
-					CODE_PROBE(true, "fetchkeys has more");
-					CODE_PROBE(shard->updates.size(), "Shard has updates");
-					ASSERT(otherShard->updates.empty());
+						debug_getRangeRetries++;
+						if (debug_nextRetryToLog == debug_getRangeRetries) {
+							debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
+							TraceEvent(SevWarn, "FetchPast", data->thisServerID)
+							    .detail("TotalAttempts", debug_getRangeRetries)
+							    .detail("FKID", interval.pairID)
+							    .detail("N", fetchVersion)
+							    .detail("E", data->version.get());
+						}
+						wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+						continue;
+					}
+					if (blockBegin < keys.end) {
+						std::deque<Standalone<VerUpdateRef>> updatesToSplit = std::move(shard->updates);
+
+						// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
+						// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own
+						// fetchKeys.
+						if (data->shardAware) {
+							StorageServerShard rightShard = data->shards[keys.begin]->toStorageServerShard();
+							rightShard.range = KeyRangeRef(blockBegin, keys.end);
+							auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard);
+							leftShard->populateShard(rightShard);
+							shard->server->addShard(leftShard);
+							shard->server->addShard(ShardInfo::newShard(data, rightShard));
+						} else {
+							shard->server->addShard(
+							    ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard));
+							shard->server->addShard(ShardInfo::newAdding(data,
+							                                             KeyRangeRef(blockBegin, keys.end),
+							                                             shard->reason,
+							                                             shard->getSSBulkLoadMetadata()));
+							if (conductBulkLoad) {
+								TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+								    .detail("FKID", interval.pairID)
+								    .detail("DataMoveId", dataMoveId.toString())
+								    .detail("Range", keys)
+								    .detail("NewSplitBeginKey", blockBegin)
+								    .detail("Phase", "Split range");
+							}
+						}
+						shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
+						warningLogger = logFetchKeysWarning(shard);
+						AddingShard* otherShard = data->shards.rangeContaining(blockBegin).value()->adding.get();
+						keys = shard->keys;
+
+						// Split our prior updates.  The ones that apply to our new, restricted key range will go back
+						// into shard->updates, and the ones delivered to the new shard will be discarded because it is
+						// in WaitPrevious phase (hasn't chosen a fetchVersion yet). What we are doing here is expensive
+						// and could get more expensive if we started having many more blocks per shard. May need
+						// optimization in the future.
+						std::deque<Standalone<VerUpdateRef>>::iterator u = updatesToSplit.begin();
+						for (; u != updatesToSplit.end(); ++u) {
+							splitMutations(data, data->shards, *u);
+						}
+
+						CODE_PROBE(true, "fetchkeys has more");
+						CODE_PROBE(shard->updates.size(), "Shard has updates");
+						ASSERT(otherShard->updates.empty());
+					}
+					break;
 				}
-				break;
+			} // end of if (!sstIngestionPerformed)
+
+			// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
+			//  As we have finished this work, we will allow more work to start...
+			shard->fetchComplete.send(Void());
+			if (SERVER_KNOBS->SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE) {
+				data->storage.markRangeAsActive(keys);
 			}
-		}
+			const double duration = now() - startTime;
+			TraceEvent(SevInfo, "FetchKeysStats", data->thisServerID)
+			    .detail("SSTIngestionPerformed", sstIngestionPerformed)
+			    .detail("TotalBytes", totalBytes)
+			    .detail("Duration", duration)
+			    .detail("Rate", static_cast<double>(totalBytes) / duration);
 
-		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
-		//  As we have finished this work, we will allow more work to start...
-		shard->fetchComplete.send(Void());
-		if (SERVER_KNOBS->SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE) {
-			data->storage.markRangeAsActive(keys);
-		}
-		const double duration = now() - startTime;
-		TraceEvent(SevInfo, "FetchKeysStats", data->thisServerID)
-		    .detail("TotalBytes", totalBytes)
-		    .detail("Duration", duration)
-		    .detail("Rate", static_cast<double>(totalBytes) / duration);
+			TraceEvent(SevDebug, "FKBeforeFinalCommit", data->thisServerID)
+			    .detail("FKID", interval.pairID)
+			    .detail("SV", data->storageVersion())
+			    .detail("DV", data->durableVersion.get());
+			// Directly commit()ing the IKVS would interfere with updateStorage, possibly resulting in an incomplete
+			// version being recovered. Instead we wait for the updateStorage loop to commit something (and consequently
+			// also what we have written)
 
-		TraceEvent(SevDebug, "FKBeforeFinalCommit", data->thisServerID)
-		    .detail("FKID", interval.pairID)
-		    .detail("SV", data->storageVersion())
-		    .detail("DV", data->durableVersion.get());
-		// Directly commit()ing the IKVS would interfere with updateStorage, possibly resulting in an incomplete
-		// version being recovered. Instead we wait for the updateStorage loop to commit something (and consequently
-		// also what we have written)
+			state Future<std::unordered_map<Key, Version>> feedFetchMain =
+			    dispatchChangeFeeds(data,
+			                        fetchKeysID,
+			                        keys,
+			                        0,
+			                        fetchVersion + 1,
+			                        destroyedFeeds,
+			                        &changeFeedsToFetch,
+			                        std::unordered_set<Key>(),
+			                        readOptions);
 
-		state Future<std::unordered_map<Key, Version>> feedFetchMain = dispatchChangeFeeds(data,
-		                                                                                   fetchKeysID,
-		                                                                                   keys,
-		                                                                                   0,
-		                                                                                   fetchVersion + 1,
-		                                                                                   destroyedFeeds,
-		                                                                                   &changeFeedsToFetch,
-		                                                                                   std::unordered_set<Key>(),
-		                                                                                   readOptions);
+			state Future<Void> fetchDurable = data->durableVersion.whenAtLeast(data->storageVersion() + 1);
+			state Future<Void> dataArrive = data->version.whenAtLeast(fetchVersion);
 
-		state Future<Void> fetchDurable = data->durableVersion.whenAtLeast(data->storageVersion() + 1);
-		state Future<Void> dataArrive = data->version.whenAtLeast(fetchVersion);
+			holdingFKPL.release();
+			wait(dataArrive && fetchDurable);
 
-		holdingFKPL.release();
-		wait(dataArrive && fetchDurable);
+			state std::unordered_map<Key, Version> feedFetchedVersions = wait(feedFetchMain);
 
-		state std::unordered_map<Key, Version> feedFetchedVersions = wait(feedFetchMain);
+			TraceEvent(SevDebug, "FKAfterFinalCommit", data->thisServerID)
+			    .detail("FKID", interval.pairID)
+			    .detail("SV", data->storageVersion())
+			    .detail("DV", data->durableVersion.get());
 
-		TraceEvent(SevDebug, "FKAfterFinalCommit", data->thisServerID)
-		    .detail("FKID", interval.pairID)
-		    .detail("SV", data->storageVersion())
-		    .detail("DV", data->durableVersion.get());
+			// Wait to run during update(), after a new batch of versions is received from the tlog but before eager
+			// reads take place.
+			Promise<FetchInjectionInfo*> p;
+			data->readyFetchKeys.push_back(p);
 
-		// Wait to run during update(), after a new batch of versions is received from the tlog but before eager
-		// reads take place.
-		Promise<FetchInjectionInfo*> p;
-		data->readyFetchKeys.push_back(p);
+			// After we add to the promise readyFetchKeys, update() would provide a pointer to FetchInjectionInfo that
+			// we can put mutation in.
+			FetchInjectionInfo* batch = wait(p.getFuture());
+			TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
 
-		// After we add to the promise readyFetchKeys, update() would provide a pointer to FetchInjectionInfo that
-		// we can put mutation in.
-		FetchInjectionInfo* batch = wait(p.getFuture());
-		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
+			shard->phase = AddingShard::FetchingCF;
+			ASSERT(data->version.get() >= fetchVersion);
+			// Choose a transferredVersion.  This choice and timing ensure that
+			//   * The transferredVersion can be mutated in versionedData
+			//   * The transferredVersion isn't yet committed to storage (so we can write the availability status
+			//   change)
+			//   * The transferredVersion is <= the version of any of the updates in batch, and if there is an equal
+			//   version
+			//     its mutations haven't been processed yet
+			shard->transferredVersion = data->version.get() + 1;
+			// shard->transferredVersion = batch->changes[0].version;  //< FIXME: This obeys the documented properties,
+			// and seems "safer" because it never introduces extra versions into the data structure, but violates some
+			// ASSERTs currently
+			TraceEvent("SSFetchKeysCreateNewVersion", data->thisServerID)
+			    .detail("SSTIngestionPerformed", sstIngestionPerformed)
+			    .detail("FKID", interval.pairID)
+			    .detail("TransferredVersion", shard->transferredVersion);
 
-		shard->phase = AddingShard::FetchingCF;
-		ASSERT(data->version.get() >= fetchVersion);
-		// Choose a transferredVersion.  This choice and timing ensure that
-		//   * The transferredVersion can be mutated in versionedData
-		//   * The transferredVersion isn't yet committed to storage (so we can write the availability status
-		//   change)
-		//   * The transferredVersion is <= the version of any of the updates in batch, and if there is an equal
-		//   version
-		//     its mutations haven't been processed yet
-		shard->transferredVersion = data->version.get() + 1;
-		// shard->transferredVersion = batch->changes[0].version;  //< FIXME: This obeys the documented properties,
-		// and seems "safer" because it never introduces extra versions into the data structure, but violates some
-		// ASSERTs currently
-		data->mutableData().createNewVersion(shard->transferredVersion);
-		ASSERT(shard->transferredVersion > data->storageVersion());
-		ASSERT(shard->transferredVersion == data->data().getLatestVersion());
+			data->mutableData().createNewVersion(shard->transferredVersion);
+			ASSERT(shard->transferredVersion > data->storageVersion());
+			ASSERT(shard->transferredVersion == data->data().getLatestVersion());
 
-		// find new change feeds for this range that didn't exist when we started the fetch
-		auto ranges = data->keyChangeFeed.intersectingRanges(keys);
-		std::unordered_set<Key> newChangeFeeds;
-		for (auto& r : ranges) {
-			for (auto& cfInfo : r.value()) {
-				CODE_PROBE(true, "SS fetching new change feed that didn't exist when fetch started");
-				if (!cfInfo->removing) {
-					newChangeFeeds.insert(cfInfo->id);
+			// find new change feeds for this range that didn't exist when we started the fetch
+			auto ranges = data->keyChangeFeed.intersectingRanges(keys);
+			std::unordered_set<Key> newChangeFeeds;
+			for (auto& r : ranges) {
+				for (auto& cfInfo : r.value()) {
+					CODE_PROBE(true, "SS fetching new change feed that didn't exist when fetch started");
+					if (!cfInfo->removing) {
+						newChangeFeeds.insert(cfInfo->id);
+					}
 				}
 			}
-		}
-		for (auto& cfId : changeFeedsToFetch) {
-			newChangeFeeds.erase(cfId);
-		}
-		// This is split into two fetches to reduce tail. Fetch [0 - fetchVersion+1)
-		// once fetchVersion is finalized, and [fetchVersion+1, transferredVersion) here once transferredVersion is
-		// finalized. Also fetch new change feeds alongside it
-		state Future<std::unordered_map<Key, Version>> feedFetchTransferred =
-		    dispatchChangeFeeds(data,
-		                        fetchKeysID,
-		                        keys,
-		                        fetchVersion + 1,
-		                        shard->transferredVersion,
-		                        destroyedFeeds,
-		                        &changeFeedsToFetch,
-		                        newChangeFeeds,
-		                        readOptions);
+			for (auto& cfId : changeFeedsToFetch) {
+				newChangeFeeds.erase(cfId);
+			}
+			// This is split into two fetches to reduce tail. Fetch [0 - fetchVersion+1)
+			// once fetchVersion is finalized, and [fetchVersion+1, transferredVersion) here once transferredVersion is
+			// finalized. Also fetch new change feeds alongside it
+			state Future<std::unordered_map<Key, Version>> feedFetchTransferred =
+			    dispatchChangeFeeds(data,
+			                        fetchKeysID,
+			                        keys,
+			                        fetchVersion + 1,
+			                        shard->transferredVersion,
+			                        destroyedFeeds,
+			                        &changeFeedsToFetch,
+			                        newChangeFeeds,
+			                        readOptions);
 
-		TraceEvent(SevDebug, "FetchKeysHaveData", data->thisServerID)
-		    .detail("FKID", interval.pairID)
-		    .detail("Version", shard->transferredVersion)
-		    .detail("StorageVersion", data->storageVersion());
-		validate(data);
+			TraceEvent(SevDebug, "FetchKeysHaveData", data->thisServerID)
+			    .detail("FKID", interval.pairID)
+			    .detail("Version", shard->transferredVersion)
+			    .detail("StorageVersion", data->storageVersion());
+			validate(data);
 
-		// the minimal version in updates must be larger than fetchVersion
-		ASSERT(shard->updates.empty() || shard->updates[0].version > fetchVersion);
+			// the minimal version in updates must be larger than fetchVersion
+			ASSERT(shard->updates.empty() || shard->updates[0].version > fetchVersion);
 
-		// Put the updates that were collected during the FinalCommit phase into the batch at the
-		// transferredVersion. Eager reads will be done for them by update(), and the mutations will come back
-		// through AddingShard::addMutations and be applied to versionedMap and mutationLog as normal. The lie about
-		// their version is acceptable because this shard will never be read at versions < transferredVersion
+			// Put the updates that were collected during the FinalCommit phase into the batch at the
+			// transferredVersion. Eager reads will be done for them by update(), and the mutations will come back
+			// through AddingShard::addMutations and be applied to versionedMap and mutationLog as normal. The lie about
+			// their version is acceptable because this shard will never be read at versions < transferredVersion
 
-		for (auto i = shard->updates.begin(); i != shard->updates.end(); ++i) {
-			i->version = shard->transferredVersion;
-			batch->arena.dependsOn(i->arena());
-		}
+			for (auto i = shard->updates.begin(); i != shard->updates.end(); ++i) {
+				i->version = shard->transferredVersion;
+				batch->arena.dependsOn(i->arena());
+			}
 
-		int startSize = batch->changes.size();
-		CODE_PROBE(startSize, "Adding fetch data to a batch which already has changes");
-		batch->changes.resize(batch->changes.size() + shard->updates.size());
+			int startSize = batch->changes.size();
+			CODE_PROBE(startSize, "Adding fetch data to a batch which already has changes");
+			batch->changes.resize(batch->changes.size() + shard->updates.size());
 
-		// FIXME: pass the deque back rather than copy the data
-		std::copy(shard->updates.begin(), shard->updates.end(), batch->changes.begin() + startSize);
-		Version checkv = shard->transferredVersion;
+			// FIXME: pass the deque back rather than copy the data
+			std::copy(shard->updates.begin(), shard->updates.end(), batch->changes.begin() + startSize);
+			Version checkv = shard->transferredVersion;
 
-		for (auto b = batch->changes.begin() + startSize; b != batch->changes.end(); ++b) {
-			ASSERT(b->version >= checkv);
-			checkv = b->version;
-			if (MUTATION_TRACKING_ENABLED) {
-				for (auto& m : b->mutations) {
-					DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
+			for (auto b = batch->changes.begin() + startSize; b != batch->changes.end(); ++b) {
+				ASSERT(b->version >= checkv);
+				checkv = b->version;
+				if (MUTATION_TRACKING_ENABLED) {
+					for (auto& m : b->mutations) {
+						DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
+					}
 				}
 			}
-		}
 
-		shard->updates.clear();
+			shard->updates.clear();
 
-		// wait on change feed fetch to complete writing to storage before marking data as available
-		std::unordered_map<Key, Version> feedFetchedVersions2 = wait(feedFetchTransferred);
-		for (auto& newFetch : feedFetchedVersions2) {
-			auto prevFetch = feedFetchedVersions.find(newFetch.first);
-			if (prevFetch != feedFetchedVersions.end()) {
-				prevFetch->second = std::max(prevFetch->second, newFetch.second);
+			// wait on change feed fetch to complete writing to storage before marking data as available
+			std::unordered_map<Key, Version> feedFetchedVersions2 = wait(feedFetchTransferred);
+			for (auto& newFetch : feedFetchedVersions2) {
+				auto prevFetch = feedFetchedVersions.find(newFetch.first);
+				if (prevFetch != feedFetchedVersions.end()) {
+					prevFetch->second = std::max(prevFetch->second, newFetch.second);
+				} else {
+					feedFetchedVersions[newFetch.first] = newFetch.second;
+				}
+			}
+
+			data->changeFeedDestroys.erase(fetchKeysID);
+
+			shard->phase = AddingShard::Waiting;
+
+			// Similar to transferred version, but wait for all feed data and
+			Version feedTransferredVersion = data->version.get() + 1;
+
+			TraceEvent(SevDebug, "FetchKeysHaveFeedData", data->thisServerID)
+			    .detail("FKID", interval.pairID)
+			    .detail("Version", feedTransferredVersion)
+			    .detail("StorageVersion", data->storageVersion());
+
+			state StorageServerShard newShard;
+			if (data->shardAware) {
+				newShard = data->shards[keys.begin]->toStorageServerShard();
+				ASSERT(newShard.range == keys);
+				ASSERT(newShard.getShardState() == StorageServerShard::ReadWritePending);
+				newShard.setShardState(StorageServerShard::ReadWrite);
+				updateStorageShard(data, newShard);
+			}
+			TraceEvent("SSFetchKeysSetAvailable", data->thisServerID)
+			    .detail("SSTIngestionPerformed", sstIngestionPerformed)
+			    .detail("FKID", interval.pairID)
+			    .detail("Range", keys)
+			    .detail("TransferredVersion", shard->transferredVersion);
+
+			setAvailableStatus(data,
+			                   keys,
+			                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
+
+			// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor until
+			// this point.
+
+			// Wait for the transferred version (and therefore the shard data) to be committed and durable.
+			TraceEvent("SSFetchKeysWaitDurable", data->thisServerID)
+			    .detail("SSTIngestionPerformed", sstIngestionPerformed)
+			    .detail("FKID", interval.pairID)
+			    .detail("WaitVersion", feedTransferredVersion)
+			    .detail("TransferredVersion", shard->transferredVersion);
+
+			wait(data->durableVersion.whenAtLeast(feedTransferredVersion));
+
+			ASSERT(data->shards[shard->keys.begin]->assigned() &&
+			       data->shards[shard->keys.begin]->keys ==
+			           shard->keys); // We aren't changing whether the shard is assigned
+			data->newestAvailableVersion.insert(shard->keys, latestVersion);
+			shard->readWrite.send(Void());
+			TraceEvent("SSFetchKeysAddShard", data->thisServerID)
+			    .detail("SSTIngestionPerformed", sstIngestionPerformed)
+			    .detail("FKID", interval.pairID)
+			    .detail("Range", keys);
+			if (data->shardAware) {
+				data->addShard(ShardInfo::newShard(data, newShard)); // invalidates shard!
+				coalescePhysicalShards(data, keys);
 			} else {
-				feedFetchedVersions[newFetch.first] = newFetch.second;
+				data->addShard(ShardInfo::newReadWrite(shard->keys, data)); // invalidates shard!
+				coalesceShards(data, keys);
 			}
+
+			validate(data);
+
+			++data->counters.fetchExecutingCount;
+			data->counters.fetchExecutingMS += 1000 * (now() - executeStart);
+
+			TraceEvent(SevDebug, interval.end(), data->thisServerID);
+			if (conductBulkLoad) {
+				// Do best effort cleanup
+				clearFileFolder(bulkLoadLocalDir, data->thisServerID, /*ignoreError=*/true);
+			}
+			break;
 		}
-
-		data->changeFeedDestroys.erase(fetchKeysID);
-
-		shard->phase = AddingShard::Waiting;
-
-		// Similar to transferred version, but wait for all feed data and
-		Version feedTransferredVersion = data->version.get() + 1;
-
-		TraceEvent(SevDebug, "FetchKeysHaveFeedData", data->thisServerID)
-		    .detail("FKID", interval.pairID)
-		    .detail("Version", feedTransferredVersion)
-		    .detail("StorageVersion", data->storageVersion());
-
-		state StorageServerShard newShard;
-		if (data->shardAware) {
-			newShard = data->shards[keys.begin]->toStorageServerShard();
-			ASSERT(newShard.range == keys);
-			ASSERT(newShard.getShardState() == StorageServerShard::ReadWritePending);
-			newShard.setShardState(StorageServerShard::ReadWrite);
-			updateStorageShard(data, newShard);
-		}
-		setAvailableStatus(data,
-		                   keys,
-		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
-
-		// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor until
-		// this point.
-
-		// Wait for the transferred version (and therefore the shard data) to be committed and durable.
-		wait(data->durableVersion.whenAtLeast(feedTransferredVersion));
-
-		ASSERT(data->shards[shard->keys.begin]->assigned() &&
-		       data->shards[shard->keys.begin]->keys ==
-		           shard->keys); // We aren't changing whether the shard is assigned
-		data->newestAvailableVersion.insert(shard->keys, latestVersion);
-		shard->readWrite.send(Void());
-		if (data->shardAware) {
-			data->addShard(ShardInfo::newShard(data, newShard)); // invalidates shard!
-			coalescePhysicalShards(data, keys);
-		} else {
-			data->addShard(ShardInfo::newReadWrite(shard->keys, data)); // invalidates shard!
-			coalesceShards(data, keys);
-		}
-
-		validate(data);
-
-		++data->counters.fetchExecutingCount;
-		data->counters.fetchExecutingMS += 1000 * (now() - executeStart);
-
-		TraceEvent(SevDebug, interval.end(), data->thisServerID);
-		if (conductBulkLoad) {
-			// Do best effort cleanup
-			clearFileFolder(bulkLoadLocalDir, data->thisServerID, /*ignoreError=*/true);
-		}
-
+		return Void();
 	} catch (Error& e) {
 		TraceEvent(SevDebug, interval.end(), data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -9548,8 +9609,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 		throw; // goes nowhere
 	}
-
-	return Void();
 }
 
 AddingShard::AddingShard(StorageServer* server,
@@ -10147,7 +10206,8 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	state BulkLoadTaskState bulkLoadTaskState;
 	state bool conductBulkLoad = moveInShard->meta->conductBulkLoad;
 	if (conductBulkLoad) {
-		// Get the bulkload task metadata from the data move metadata. For details, see the comments in the fetchKeys.
+		// Get the bulkload task metadata from the data move metadata. For details, see the comments in the
+		// fetchKeys.
 		wait(store(bulkLoadTaskState,
 		           getBulkLoadTaskStateFromDataMove(
 		               data->cx, moveInShard->dataMoveId(), data->version.get(), data->thisServerID)));
@@ -10455,15 +10515,16 @@ ShardInfo* ShardInfo::newShard(StorageServer* data, const StorageServerShard& sh
 		break;
 	case StorageServerShard::Adding:
 		// This handles two cases: (1) old data moves when encode_shard_location_metadata is off; (2) fallback data
-		// moves. For case 1, the bulkload is available only if the encode_shard_location_metadata is on. Therefore, the
-		// old data moves is never for bulkload. For case 2, fallback happens only if fetchCheckpoint fails which is not
-		// a case for bulkload which does not do fetchCheckpoint.
+		// moves. For case 1, the bulkload is available only if the encode_shard_location_metadata is on. Therefore,
+		// the old data moves is never for bulkload. For case 2, fallback happens only if fetchCheckpoint fails
+		// which is not a case for bulkload which does not do fetchCheckpoint.
 		res = newAdding(data, shard.range, DataMovementReason::INVALID, SSBulkLoadMetadata());
 		break;
 	case StorageServerShard::ReadWritePending:
 		TraceEvent(SevWarnAlways, "CancellingAlmostReadyMoveInShard").detail("StorageServerShard", shard.toString());
 		ASSERT(!shard.moveInShardId.present());
-		// TODO(BulkLoad): current bulkload with ShardedRocksDB and PhysicalSharMove cannot handle this fallback case.
+		// TODO(BulkLoad): current bulkload with ShardedRocksDB and PhysicalSharMove cannot handle this fallback
+		// case.
 		res = newAdding(data, shard.range, DataMovementReason::INVALID, SSBulkLoadMetadata());
 		break;
 	case StorageServerShard::MovingIn: {
@@ -10932,8 +10993,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	    Reference<ShardInfo>()); // null reference indicates the range being changed
 	std::unordered_map<UID, std::shared_ptr<MoveInShard>> updatedMoveInShards;
 
-	// When TSS is lagging behind, it could see data move conflicts. The conflicting TSS will not recover from error and
-	// needs to be removed.
+	// When TSS is lagging behind, it could see data move conflicts. The conflicting TSS will not recover from error
+	// and needs to be removed.
 	Severity sev = data->isTss() ? SevWarnAlways : SevError;
 	for (int i = 0; i < ranges.size(); i++) {
 		const Reference<ShardInfo> currentShard = ranges[i].value;
@@ -11069,8 +11130,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			}
 			if (r->value()->moveInShard) {
 				r->value()->moveInShard->cancel();
-				// This is an overkill, and is necessary only when psm has written data to `range`; Also we don't need
-				// to clean up the PTree.
+				// This is an overkill, and is necessary only when psm has written data to `range`; Also we don't
+				// need to clean up the PTree.
 				removeRanges.push_back(range);
 			}
 			updatedShards.push_back(StorageServerShard::notAssigned(range, cVer));
@@ -11144,9 +11205,9 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						if (context == CSK_FALL_BACK) {
 							updatedShards.push_back(
 							    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::Adding));
-							// Physical shard move fall back happens if and only if the data move is failed to get the
-							// checkpoint. However, this case never happens the bulkload. So, the bulkload does not
-							// support fall back.
+							// Physical shard move fall back happens if and only if the data move is failed to get
+							// the checkpoint. However, this case never happens the bulkload. So, the bulkload does
+							// not support fall back.
 							ASSERT(!conductBulkLoad); // TODO(BulkLoad): remove this assert
 							data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 							data->newestDirtyVersion.insert(range, cVer);
@@ -11401,8 +11462,8 @@ private:
 			processedStartKey = false;
 		} else if (m.type == MutationRef::SetValue && m.param1.startsWith(data->sk)) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
-			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
-			// keys
+			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the
+			// same keys
 			startKey = m.param1;
 			DataMoveType dataMoveType = DataMoveType::LOGICAL;
 			dataMoveReason = DataMovementReason::INVALID;
@@ -11425,12 +11486,13 @@ private:
 			                                    dataMoveType == DataMoveType::PHYSICAL_BULKLOAD);
 			conductBulkLoad = ConductBulkLoad(dataMoveType == DataMoveType::LOGICAL_BULKLOAD ||
 			                                  dataMoveType == DataMoveType::PHYSICAL_BULKLOAD);
-			// conductBulkLoad represents the intention of the data move, which is ONLY used to suggest whether needs to
-			// read data move metadata to get the bulk load task from system metadata. We rely on the existence of data
-			// move metadata to decide if the SS should do bulk load task, rather than relying on the data move ID.
+			// conductBulkLoad represents the intention of the data move, which is ONLY used to suggest whether
+			// needs to read data move metadata to get the bulk load task from system metadata. We rely on the
+			// existence of data move metadata to decide if the SS should do bulk load task, rather than relying on
+			// the data move ID.
 			if (conductBulkLoad && (dataMoveId == anonymousShardId || !dataMoveId.isValid())) {
-				// If conductBulkLoad == true but dataMoveId is not usable, SS should ignore the request by setting the
-				// conductBulkLoad to false. Then, a normal data move is triggered.
+				// If conductBulkLoad == true but dataMoveId is not usable, SS should ignore the request by setting
+				// the conductBulkLoad to false. Then, a normal data move is triggered.
 				TraceEvent(SevError, "SSBulkLoadTaskDataMoveIdInvalid", data->thisServerID)
 				    .detail("Message",
 				            "A bulkload request is converted to a normal data move because the data move id is either "
@@ -13747,8 +13809,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		ASSERT(normalKeys.contains(bulkLoadRange));
 		bulkLoadTaskRangeMap.insert(bulkLoadRange, metadata.getDataMoveId());
 	}
-	// BulkLoadTaskRangeMap range boundary is aligned to the shard assignment boundary, because we persist the bulkload
-	// task metadata and the shard assignment metadata at the same version with the same shard boundary.
+	// BulkLoadTaskRangeMap range boundary is aligned to the shard assignment boundary, because we persist the
+	// bulkload task metadata and the shard assignment metadata at the same version with the same shard boundary.
 
 	state RangeResult assigned = fShardAssigned.get();
 	data->bytesRestored += assigned.logicalSize();
@@ -13778,8 +13840,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 				if (!bulkLoadIt->value().present()) {
 					continue;
 				}
-				// Assert checks the invariant: any bulkload task data move has set to assign the range and the range
-				// must align to the shard assignment boundary.
+				// Assert checks the invariant: any bulkload task data move has set to assign the range and the
+				// range must align to the shard assignment boundary.
 				ASSERT(bulkLoadIt->range() == keys && nowAssigned);
 				dataMoveId = bulkLoadIt->value().get();
 				conductBulkLoad = ConductBulkLoad::True;

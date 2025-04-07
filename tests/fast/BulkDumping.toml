@@ -1,6 +1,4 @@
 [configuration]
-storageEngineExcludeTypes = [5] #FIXME: remove after allowing to do bulkloading with fetchKey and shardedrocksdb
-
 # Do not support tenant, encryption, and TSS
 tenantModes = ['disabled']
 encryptModes = ['disabled']
