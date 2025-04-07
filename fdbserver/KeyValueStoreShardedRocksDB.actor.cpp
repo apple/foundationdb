@@ -3870,6 +3870,77 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> refreshRocksDBBackgroundWorkHolder;
 	Future<Void> cleanUpJob;
 	Future<Void> counterLogger;
+
+	Future<Void> ingestSSTFiles(std::string bulkLoadLocalDir,
+	                            std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) override {
+		// Create a map of SST files to ingest for each shard ID
+		std::map<std::string, std::vector<std::string>> shardSstFiles;
+		for (const auto& [range, fileSet] : *localFileSets) {
+			// Determine which shard this file belongs to based on the key range
+			auto dataShard = shardManager.getDataShard(range.begin);
+			if (!dataShard || !dataShard->physicalShard) {
+				// Handle error: shard not found for this range
+				TraceEvent(SevError, "ShardedRocksDBIngestSSTFilesShardNotFound", id)
+				    .detail("Range", range)
+				    .detail("FileSet", fileSet.toString());
+				throw operation_failed();
+			}
+			std::string shardId = dataShard->physicalShard->id;
+
+			// Get the data file path from the fileSet
+			std::string filePath = fileSet.getDataFileFullPath();
+			shardSstFiles[shardId].push_back(filePath);
+		}
+
+		// Configure ingestion options
+		rocksdb::IngestExternalFileOptions options;
+		options.move_files = true; // Move files instead of copying
+		options.snapshot_consistency = false;
+		options.allow_global_seqno = false;
+		options.allow_blocking_flush = false;
+		options.verify_checksums_before_ingest = true; // Verify checksums before ingestion
+
+		// Ingest the SST files for each shard
+		for (const auto& [shardId, sstFiles] : shardSstFiles) {
+			// Get the physical shard from the shard manager
+			auto& allShards = *shardManager.getAllShards(); // Dereference the pointer
+			auto it = allShards.find(shardId);
+			if (it == allShards.end()) {
+				TraceEvent(SevError, "ShardedRocksDBIngestSSTFilesPhysicalShardNotFound", id)
+				    .detail("ShardId", shardId);
+				throw operation_failed(); // Should not happen if mapping was correct
+			}
+			auto physicalShard = it->second.get();
+
+			// Ingest the SST files into the shard's database
+			rocksdb::Status status = physicalShard->db->IngestExternalFile(sstFiles, options);
+			if (!status.ok()) {
+				TraceEvent(SevError, "ShardedRocksDBIngestSSTFilesError", id)
+				    .detail("Error", status.ToString())
+				    .detail("ShardId", shardId) // Use shardId string
+				    .detail("NumFiles", sstFiles.size())
+				    .detail("LocalDir", bulkLoadLocalDir);
+				throw internal_error();
+			}
+
+			// Verify the ingestion was successful for this shard (files moved)
+			for (const auto& file : sstFiles) {
+				if (fileExists(file)) {
+					TraceEvent(SevWarn, "ShardedRocksDBIngestSSTFilesFileNotMoved", id)
+					    .detail("File", file)
+					    .detail("ShardId", shardId); // Use shardId string
+				}
+			}
+		}
+
+		TraceEvent("ShardedRocksDBIngestSSTFiles", id)
+		    .detail("NumShards", shardSstFiles.size())
+		    .detail("LocalDir", bulkLoadLocalDir);
+
+		return Void();
+	}
+
+	bool supportsSstIngestion() const override { return true; }
 };
 
 ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<KeyRange> ranges) {

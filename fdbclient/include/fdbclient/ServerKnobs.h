@@ -1457,6 +1457,8 @@ public:
 	// Swift: Enable the Swift runtime hooks and use Swift implementations where possible
 	bool FLOW_WITH_SWIFT;
 
+	bool BULK_LOAD_USE_SST_INGEST; // Enable direct SST file ingestion for RocksDB storage engines
+
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };

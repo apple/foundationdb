@@ -2141,6 +2141,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	void close() override { doClose(this, false); }
 
 	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1); }
+	bool supportsSstIngestion() const override { return true; }
 
 	Future<Void> init() override {
 		if (openFuture.isValid()) {
@@ -2490,6 +2491,48 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<EncryptionAtRestMode> encryptionMode() override {
 		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
+
+	Future<Void> ingestSSTFiles(std::string bulkLoadLocalDir,
+	                            std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) override {
+		// Create a list of SST files to ingest
+		std::vector<std::string> sstFiles;
+		for (const auto& [range, fileSet] : *localFileSets) {
+			if (fileSet.hasDataFile()) {
+				sstFiles.push_back(fileSet.getDataFileFullPath());
+			}
+		}
+
+		// Configure ingestion options
+		rocksdb::IngestExternalFileOptions options;
+		options.move_files = true; // Move files instead of copying
+		options.snapshot_consistency = false;
+		options.allow_global_seqno = false;
+		options.allow_blocking_flush = false;
+		options.verify_checksums_before_ingest = true; // Verify checksums before ingestion
+
+		// Ingest the SST files
+		rocksdb::Status status = db->IngestExternalFile(sstFiles, options);
+		if (!status.ok()) {
+			TraceEvent(SevError, "RocksDBIngestSSTFilesError", id)
+			    .detail("Error", status.ToString())
+			    .detail("NumFiles", sstFiles.size())
+			    .detail("LocalDir", bulkLoadLocalDir);
+			throw internal_error();
+		}
+
+		// Verify the ingestion was successful
+		for (const auto& file : sstFiles) {
+			if (fileExists(file)) {
+				TraceEvent(SevWarn, "RocksDBIngestSSTFilesFileNotMoved", id).detail("File", file);
+			}
+		}
+
+		TraceEvent("RocksDBIngestSSTFiles", id)
+		    .detail("NumFiles", sstFiles.size())
+		    .detail("LocalDir", bulkLoadLocalDir);
+
+		return Void();
 	}
 
 	DB db = nullptr;
