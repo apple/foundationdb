@@ -18,7 +18,10 @@
  * limitations under the License.
  */
 
+#include <cstddef>
 #include <iomanip>
+#include <memory>
+#include <string>
 #include <time.h>
 
 #include "fdbclient/BackupAgent.actor.h"
@@ -28,12 +31,16 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/Optional.h"
+#include "flow/Trace.h"
+#include "flow/flow.h"
 #include "flow/network.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -275,15 +282,442 @@ std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key) {
 	    bigEndian32(*(int32_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t) + sizeof(int64_t))));
 }
 
+struct RestoreMetrics {
+	Optional<std::chrono::high_resolution_clock::duration> totalRangeMapOperationTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxRangeMapOperationTime;
+	Optional<std::chrono::high_resolution_clock::duration> minRangeMapOperationTime;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalAddResultTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxAddResultTime;
+	Optional<std::chrono::high_resolution_clock::duration> minAddResultTime;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalMutationSetTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxMutationSetTime;
+	Optional<std::chrono::high_resolution_clock::duration> minMutationSetTime;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalMutationClearTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxMutationClearTime;
+	Optional<std::chrono::high_resolution_clock::duration> minMutationClearTime;
+
+	Optional<size_t> totalLoopCounterPerDecodeBackupLogValue;
+	Optional<size_t> minLoopCounterPerDecodeBackupLogValue;
+	Optional<size_t> maxLoopCounterPerDecodeBackupLogValue;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalGetDBConfigTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxGetDBConfigTime;
+	Optional<std::chrono::high_resolution_clock::duration> minGetDBConfigTime;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalMemoryCopyTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxMemoryCopyTime;
+	Optional<std::chrono::high_resolution_clock::duration> minMemoryCopyTime;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalKVMutationLogToTransactionsTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxKVMutationLogToTransactionsTime;
+	Optional<std::chrono::high_resolution_clock::duration> minKVMutationLogToTransactionsTime;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalGetGroupTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxGetGroupTime;
+	Optional<std::chrono::high_resolution_clock::duration> minGetGroupTime;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalDecodeBackupLogValueTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxDecodeBackupLogValueTime;
+	Optional<std::chrono::high_resolution_clock::duration> minDecodeBackupLogValueTime;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalSendCommitTransactionRequestTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxSendCommitTransactionRequestTime;
+	Optional<std::chrono::high_resolution_clock::duration> minSendCommitTransactionRequestTime;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalTakeCommitLockTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxTakeCommitLockTime;
+	Optional<std::chrono::high_resolution_clock::duration> minTakeCommitLockTime;
+
+	Optional<std::chrono::high_resolution_clock::duration> totalCommitAndUnlockTime;
+	Optional<std::chrono::high_resolution_clock::duration> maxCommitAndUnlockTime;
+	Optional<std::chrono::high_resolution_clock::duration> minCommitAndUnlockTime;
+
+	Optional<size_t> totalDecodeBackupLogValueCounter;
+	Optional<size_t> minDecodeBackupLogValueCounter;
+	Optional<size_t> maxDecodeBackupLogValueCounter;
+
+	Optional<size_t> totalSendRequestCounter;
+	Optional<size_t> minSendRequestCounter;
+	Optional<size_t> maxSendRequestCounter;
+
+	Optional<size_t> totalGetGroupCounter;
+	Optional<size_t> minGetGroupCounter;
+	Optional<size_t> maxGetGroupCounter;
+
+	Optional<size_t> totalBytes;
+	Optional<size_t> maxBytes;
+	Optional<size_t> minBytes;
+
+	Optional<size_t> totalMutations;
+	Optional<size_t> maxMutations;
+	Optional<size_t> minMutations;
+
+	bool update = false;
+	UID logId;
+
+	RestoreMetrics(const UID& logId) : logId(logId) {}
+
+	void updateRangeMapOperationTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalRangeMapOperationTime.present()) {
+			totalRangeMapOperationTime = totalRangeMapOperationTime.get() + time;
+		} else {
+			totalRangeMapOperationTime = time;
+		}
+		if (!minRangeMapOperationTime.present() || time < minRangeMapOperationTime.get()) {
+			minRangeMapOperationTime = time;
+		}
+		if (!maxRangeMapOperationTime.present() || time > maxRangeMapOperationTime.get()) {
+			maxRangeMapOperationTime = time;
+		}
+		update = true;
+	}
+
+	void updateAddResultTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalAddResultTime.present()) {
+			totalAddResultTime = totalAddResultTime.get() + time;
+		} else {
+			totalAddResultTime = time;
+		}
+		if (!minAddResultTime.present() || time < minAddResultTime.get()) {
+			minAddResultTime = time;
+		}
+		if (!maxAddResultTime.present() || time > maxAddResultTime.get()) {
+			maxAddResultTime = time;
+		}
+		update = true;
+	}
+
+	void updateMutationClearTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalMutationClearTime.present()) {
+			totalMutationClearTime = totalMutationClearTime.get() + time;
+		} else {
+			totalMutationClearTime = time;
+		}
+		if (!minMutationClearTime.present() || time < minMutationClearTime.get()) {
+			minMutationClearTime = time;
+		}
+		if (!maxMutationClearTime.present() || time > maxMutationClearTime.get()) {
+			maxMutationClearTime = time;
+		}
+		update = true;
+	}
+
+	void updateMutationSetTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalMutationSetTime.present()) {
+			totalMutationSetTime = totalMutationSetTime.get() + time;
+		} else {
+			totalMutationSetTime = time;
+		}
+		if (!minMutationSetTime.present() || time < minMutationSetTime.get()) {
+			minMutationSetTime = time;
+		}
+		if (!maxMutationSetTime.present() || time > maxMutationSetTime.get()) {
+			maxMutationSetTime = time;
+		}
+		update = true;
+	}
+
+	void updateLoopCounterPerDecodeBackupLogValue(size_t counter) {
+		if (totalLoopCounterPerDecodeBackupLogValue.present()) {
+			totalLoopCounterPerDecodeBackupLogValue = totalLoopCounterPerDecodeBackupLogValue.get() + counter;
+		} else {
+			totalLoopCounterPerDecodeBackupLogValue = counter;
+		}
+		if (!minLoopCounterPerDecodeBackupLogValue.present() || counter < minLoopCounterPerDecodeBackupLogValue.get()) {
+			minLoopCounterPerDecodeBackupLogValue = counter;
+		}
+		if (!maxLoopCounterPerDecodeBackupLogValue.present() || counter > maxLoopCounterPerDecodeBackupLogValue.get()) {
+			maxLoopCounterPerDecodeBackupLogValue = counter;
+		}
+		update = true;
+	}
+
+	void updateGetDBConfigTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalGetDBConfigTime.present()) {
+			totalGetDBConfigTime = totalGetDBConfigTime.get() + time;
+		} else {
+			totalGetDBConfigTime = time;
+		}
+		if (!minGetDBConfigTime.present() || time < minGetDBConfigTime.get()) {
+			minGetDBConfigTime = time;
+		}
+		if (!maxGetDBConfigTime.present() || time > maxGetDBConfigTime.get()) {
+			maxGetDBConfigTime = time;
+		}
+		update = true;
+	}
+
+	void updateMemoryCopyTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalMemoryCopyTime.present()) {
+			totalMemoryCopyTime = totalMemoryCopyTime.get() + time;
+		} else {
+			totalMemoryCopyTime = time;
+		}
+		if (!minMemoryCopyTime.present() || time < minMemoryCopyTime.get()) {
+			minMemoryCopyTime = time;
+		}
+		if (!maxMemoryCopyTime.present() || time > maxMemoryCopyTime.get()) {
+			maxMemoryCopyTime = time;
+		}
+		update = true;
+	}
+
+	void updateTakeCommitLockTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalTakeCommitLockTime.present()) {
+			totalTakeCommitLockTime = totalTakeCommitLockTime.get() + time;
+		} else {
+			totalTakeCommitLockTime = time;
+		}
+		if (!minTakeCommitLockTime.present() || time < minTakeCommitLockTime.get()) {
+			minTakeCommitLockTime = time;
+		}
+		if (!maxTakeCommitLockTime.present() || time > maxTakeCommitLockTime.get()) {
+			maxTakeCommitLockTime = time;
+		}
+		update = true;
+	}
+
+	void updateCommitAndUnlockTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalCommitAndUnlockTime.present()) {
+			totalCommitAndUnlockTime = totalCommitAndUnlockTime.get() + time;
+		} else {
+			totalCommitAndUnlockTime = time;
+		}
+		if (!minCommitAndUnlockTime.present() || time < minCommitAndUnlockTime.get()) {
+			minCommitAndUnlockTime = time;
+		}
+		if (!maxCommitAndUnlockTime.present() || time > maxCommitAndUnlockTime.get()) {
+			maxCommitAndUnlockTime = time;
+		}
+		update = true;
+	}
+
+	void updateDecodeBackupLogValueCounter(size_t counter) {
+		if (totalDecodeBackupLogValueCounter.present()) {
+			totalDecodeBackupLogValueCounter = totalDecodeBackupLogValueCounter.get() + counter;
+		} else {
+			totalDecodeBackupLogValueCounter = counter;
+		}
+		if (!minDecodeBackupLogValueCounter.present() || counter < minDecodeBackupLogValueCounter.get()) {
+			minDecodeBackupLogValueCounter = counter;
+		}
+		if (!maxDecodeBackupLogValueCounter.present() || counter > maxDecodeBackupLogValueCounter.get()) {
+			maxDecodeBackupLogValueCounter = counter;
+		}
+		update = true;
+	}
+
+	void updateSendRequestCounter(size_t counter) {
+		if (totalSendRequestCounter.present()) {
+			totalSendRequestCounter = totalSendRequestCounter.get() + counter;
+		} else {
+			totalSendRequestCounter = counter;
+		}
+		if (!minSendRequestCounter.present() || counter < minSendRequestCounter.get()) {
+			minSendRequestCounter = counter;
+		}
+		if (!maxSendRequestCounter.present() || counter > maxSendRequestCounter.get()) {
+			maxSendRequestCounter = counter;
+		}
+		update = true;
+	}
+
+	void updateGetGroupCounter(size_t counter) {
+		if (totalGetGroupCounter.present()) {
+			totalGetGroupCounter = totalGetGroupCounter.get() + counter;
+		} else {
+			totalGetGroupCounter = counter;
+		}
+		if (!minGetGroupCounter.present() || counter < minGetGroupCounter.get()) {
+			minGetGroupCounter = counter;
+		}
+		if (!maxGetGroupCounter.present() || counter > maxGetGroupCounter.get()) {
+			maxGetGroupCounter = counter;
+		}
+		update = true;
+	}
+
+	void updateMutations(int mutationSize) {
+		if (totalMutations.present()) {
+			totalMutations = totalMutations.get() + mutationSize;
+		} else {
+			totalMutations = mutationSize;
+		}
+		if (!minMutations.present() || mutationSize < minMutations.get()) {
+			minMutations = mutationSize;
+		}
+		if (!maxMutations.present() || mutationSize > maxMutations.get()) {
+			maxMutations = mutationSize;
+		}
+		update = true;
+	}
+
+	void updateBytes(int bytes) {
+		if (totalBytes.present()) {
+			totalBytes = totalBytes.get() + bytes;
+		} else {
+			totalBytes = bytes;
+		}
+		if (!minBytes.present() || bytes < minBytes.get()) {
+			minBytes = bytes;
+		}
+		if (!maxBytes.present() || bytes > maxBytes.get()) {
+			maxBytes = bytes;
+		}
+		update = true;
+	}
+
+	void updateGroupTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalGetGroupTime.present()) {
+			totalGetGroupTime = totalGetGroupTime.get() + time;
+		} else {
+			totalGetGroupTime = time;
+		}
+		if (!minGetGroupTime.present() || time < minGetGroupTime.get()) {
+			minGetGroupTime = time;
+		}
+		if (!maxGetGroupTime.present() || time > maxGetGroupTime.get()) {
+			maxGetGroupTime = time;
+		}
+		update = true;
+	}
+
+	void updateDecodeBackupLogValueTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalDecodeBackupLogValueTime.present()) {
+			totalDecodeBackupLogValueTime = totalDecodeBackupLogValueTime.get() + time;
+		} else {
+			totalDecodeBackupLogValueTime = time;
+		}
+		if (!minDecodeBackupLogValueTime.present() || time < minDecodeBackupLogValueTime.get()) {
+			minDecodeBackupLogValueTime = time;
+		}
+		if (!maxDecodeBackupLogValueTime.present() || time > maxDecodeBackupLogValueTime.get()) {
+			maxDecodeBackupLogValueTime = time;
+		}
+		update = true;
+	}
+
+	void updateSendCommitTransactionRequestTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalSendCommitTransactionRequestTime.present()) {
+			totalSendCommitTransactionRequestTime = totalSendCommitTransactionRequestTime.get() + time;
+		} else {
+			totalSendCommitTransactionRequestTime = time;
+		}
+		if (!minSendCommitTransactionRequestTime.present() || time < minSendCommitTransactionRequestTime.get()) {
+			minSendCommitTransactionRequestTime = time;
+		}
+		if (!maxSendCommitTransactionRequestTime.present() || time > maxSendCommitTransactionRequestTime.get()) {
+			maxSendCommitTransactionRequestTime = time;
+		}
+		update = true;
+	}
+
+	void updateKVMutationLogToTransactionsTime(std::chrono::high_resolution_clock::duration time) {
+		if (totalKVMutationLogToTransactionsTime.present()) {
+			totalKVMutationLogToTransactionsTime = totalKVMutationLogToTransactionsTime.get() + time;
+		} else {
+			totalKVMutationLogToTransactionsTime = time;
+		}
+		if (!minKVMutationLogToTransactionsTime.present() || time < minKVMutationLogToTransactionsTime.get()) {
+			minKVMutationLogToTransactionsTime = time;
+		}
+		if (!maxKVMutationLogToTransactionsTime.present() || time > maxKVMutationLogToTransactionsTime.get()) {
+			maxKVMutationLogToTransactionsTime = time;
+		}
+		update = true;
+	}
+
+	std::string getStringForCounter(Optional<std::chrono::high_resolution_clock::duration> time) {
+		if (time.present()) {
+			return std::to_string(time.get().count());
+		} else {
+			return "[unset]";
+		}
+	}
+
+	void log() {
+		if (!CLIENT_KNOBS->RESTORE_VERBOSE_LOGGING) {
+			return;
+		}
+		if (!update) {
+			TraceEvent("RestoreMetricsForEmptyTask", logId);
+			return;
+		}
+		TraceEvent("RestoreMetrics", logId)
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
+		    .detail("TotalBytes", totalBytes)
+		    .detail("MaxBytes", maxBytes)
+		    .detail("MinBytes", minBytes)
+		    .detail("TotalMutations", totalMutations)
+		    .detail("MaxMutations", maxMutations)
+		    .detail("MinMutations", minMutations)
+		    .detail("TotalDecodeBackupLogValueCounter", totalDecodeBackupLogValueCounter)
+		    .detail("MaxDecodeBackupLogValueCounter", maxDecodeBackupLogValueCounter)
+		    .detail("MinDecodeBackupLogValueCounter", minDecodeBackupLogValueCounter)
+		    .detail("TotalSendRequestCounter", totalSendRequestCounter)
+		    .detail("MaxSendRequestCounter", maxSendRequestCounter)
+		    .detail("MinSendRequestCounter", minSendRequestCounter)
+		    .detail("TotalGetGroupCounter", totalGetGroupCounter)
+		    .detail("MaxGetGroupCounter", maxGetGroupCounter)
+		    .detail("MinGetGroupCounter", minGetGroupCounter)
+		    .detail("GetGroupTimeTotal", getStringForCounter(totalGetGroupTime))
+		    .detail("MaxGetGroupTime", getStringForCounter(maxGetGroupTime))
+		    .detail("MinGetGroupTime", getStringForCounter(minGetGroupTime))
+		    .detail("DecodeBackupLogValueTimeTotal", getStringForCounter(totalDecodeBackupLogValueTime))
+		    .detail("MaxDecodeBackupLogValueTime", getStringForCounter(maxDecodeBackupLogValueTime))
+		    .detail("MinDecodeBackupLogValueTime", getStringForCounter(minDecodeBackupLogValueTime))
+		    .detail("SendCommitTransactionRequestTimeTotal", getStringForCounter(totalSendCommitTransactionRequestTime))
+		    .detail("MaxSendCommitTransactionRequestTime", getStringForCounter(maxSendCommitTransactionRequestTime))
+		    .detail("MinSendCommitTransactionRequestTime", getStringForCounter(minSendCommitTransactionRequestTime))
+		    .detail("KVMutationLogToTransactionsTimeTotal", getStringForCounter(totalKVMutationLogToTransactionsTime))
+		    .detail("MaxKVMutationLogToTransactionsTime", getStringForCounter(maxKVMutationLogToTransactionsTime))
+		    .detail("MinKVMutationLogToTransactionsTime", getStringForCounter(minKVMutationLogToTransactionsTime))
+		    .detail("TakeCommitLockTimeTotal", getStringForCounter(totalTakeCommitLockTime))
+		    .detail("MaxTakeCommitLockTime", getStringForCounter(maxTakeCommitLockTime))
+		    .detail("MinTakeCommitLockTime", getStringForCounter(minTakeCommitLockTime))
+		    .detail("CommitAndUnlockTimeTotal", getStringForCounter(totalCommitAndUnlockTime))
+		    .detail("MaxCommitAndUnlockTime", getStringForCounter(maxCommitAndUnlockTime))
+		    .detail("MinCommitAndUnlockTime", getStringForCounter(minCommitAndUnlockTime))
+		    .detail("RangeMapOperationTimeTotal", getStringForCounter(totalRangeMapOperationTime))
+		    .detail("MaxRangeMapOperationTime", getStringForCounter(maxRangeMapOperationTime))
+		    .detail("MinRangeMapOperationTime", getStringForCounter(minRangeMapOperationTime))
+		    .detail("AddResultTimeTotal", getStringForCounter(totalAddResultTime))
+		    .detail("MaxAddResultTime", getStringForCounter(maxAddResultTime))
+		    .detail("MinAddResultTime", getStringForCounter(minAddResultTime))
+		    .detail("MutationSetTimeTotal", getStringForCounter(totalMutationSetTime))
+		    .detail("MaxMutationSetTime", getStringForCounter(maxMutationSetTime))
+		    .detail("MinMutationSetTime", getStringForCounter(minMutationSetTime))
+		    .detail("MutationClearTimeTotal", getStringForCounter(totalMutationClearTime))
+		    .detail("MaxMutationClearTime", getStringForCounter(maxMutationClearTime))
+		    .detail("MinMutationClearTime", getStringForCounter(minMutationClearTime))
+		    .detail("MemoryCopyTimeTotal", getStringForCounter(totalMemoryCopyTime))
+		    .detail("MaxMemoryCopyTime", getStringForCounter(maxMemoryCopyTime))
+		    .detail("MinMemoryCopyTime", getStringForCounter(minMemoryCopyTime))
+		    .detail("LoopCounterPerDecodeBackupLogValueTotal", totalLoopCounterPerDecodeBackupLogValue)
+		    .detail("MaxLoopCounterPerDecodeBackupLogValue", maxLoopCounterPerDecodeBackupLogValue)
+		    .detail("MinLoopCounterPerDecodeBackupLogValue", minLoopCounterPerDecodeBackupLogValue)
+		    .detail("GetDBConfigTimeTotal", getStringForCounter(totalGetDBConfigTime))
+		    .detail("MaxGetDBConfigTime", getStringForCounter(maxGetDBConfigTime))
+		    .detail("MinGetDBConfigTime", getStringForCounter(minGetDBConfigTime));
+	}
+};
+
 void _addResult(bool* tenantMapChanging,
                 VectorRef<MutationRef>* result,
                 int* mutationSize,
                 Arena* arena,
                 MutationRef logValue,
-                KeyRangeRef tenantMapRange) {
+                KeyRangeRef tenantMapRange,
+                std::shared_ptr<RestoreMetrics> metrics) {
+	std::chrono::time_point<std::chrono::high_resolution_clock> startTime = std::chrono::high_resolution_clock::now();
 	*tenantMapChanging = *tenantMapChanging || TenantAPI::tenantMapChanging(logValue, tenantMapRange);
 	result->push_back_deep(*arena, logValue);
 	*mutationSize += logValue.expectedSize();
+	metrics->updateAddResultTime(std::chrono::high_resolution_clock::now() - startTime);
 }
 
 /*
@@ -305,11 +739,32 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                Database cx,
                                                std::map<int64_t, TenantName>* tenantMap,
                                                bool provisionalProxy,
-                                               std::shared_ptr<DatabaseConfiguration> dbConfig) {
+                                               std::shared_ptr<DatabaseConfiguration> dbConfig,
+                                               std::shared_ptr<RestoreMetrics> metrics) {
 	try {
 		state uint64_t offset(0);
+		state std::chrono::high_resolution_clock::duration memCopyTime =
+		    std::chrono::high_resolution_clock::duration(0);
+
+		state std::chrono::time_point<std::chrono::high_resolution_clock> beforeMemCopyTime;
+
+		state std::chrono::high_resolution_clock::duration mutationSetTime =
+		    std::chrono::high_resolution_clock::duration(0);
+
+		state std::chrono::time_point<std::chrono::high_resolution_clock> beforeMutationSetTime;
+
+		state std::chrono::high_resolution_clock::duration mutationClearRangeTime =
+		    std::chrono::high_resolution_clock::duration(0);
+
+		state std::chrono::time_point<std::chrono::high_resolution_clock> beforeMutationClearRangeTime;
+
+		state std::chrono::high_resolution_clock::duration rangeMapOperationTime =
+		    std::chrono::high_resolution_clock::duration(0);
+
+		beforeMemCopyTime = std::chrono::high_resolution_clock::now();
 		uint64_t protocolVersion = 0;
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
+		memCopyTime = memCopyTime + std::chrono::high_resolution_clock::now() - beforeMemCopyTime;
 		offset += sizeof(uint64_t);
 		if (protocolVersion <= 0x0FDB00A200090001) {
 			TraceEvent(SevError, "DecodeBackupLogValue")
@@ -334,9 +789,18 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 		}
 
 		state int originalOffset = offset;
+		state std::chrono::time_point<std::chrono::high_resolution_clock> beforeGetDBConfig =
+		    std::chrono::high_resolution_clock::now();
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		metrics->updateGetDBConfigTime(std::chrono::high_resolution_clock::now() - beforeGetDBConfig);
+
 		state KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
 
+		state size_t loopCounter = 0;
+
 		while (consumed < totalBytes) {
+			loopCounter++;
+			beforeMemCopyTime = std::chrono::high_resolution_clock::now();
 			uint32_t type = 0;
 			memcpy(&type, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
@@ -346,6 +810,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			state uint32_t len2 = 0;
 			memcpy(&len2, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
+			memCopyTime = memCopyTime + std::chrono::high_resolution_clock::now() - beforeMemCopyTime;
 
 			ASSERT(offset + len1 + len2 <= value.size() && isValidMutationType(type));
 
@@ -416,8 +881,11 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			MutationRef originalLogValue = logValue;
 
 			if (logValue.type == MutationRef::ClearRange) {
+				beforeMutationClearRangeTime = std::chrono::high_resolution_clock::now();
 				KeyRangeRef range(logValue.param1, logValue.param2);
 				auto ranges = key_version->intersectingRanges(range);
+				rangeMapOperationTime =
+				    rangeMapOperationTime + std::chrono::high_resolution_clock::now() - beforeMutationClearRangeTime;
 				for (auto r : ranges) {
 					if (version > r.value() && r.value() != invalidVersion) {
 						KeyRef minKey = std::min(r.range().end, range.end);
@@ -430,7 +898,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 								logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 							}
 							logValue.param2 = addPrefix == StringRef() ? allKeys.end : strinc(addPrefix, tempArena);
-							_addResult(tenantMapChanging, result, mutationSize, arena, logValue, tenantMapRange);
+							_addResult(
+							    tenantMapChanging, result, mutationSize, arena, logValue, tenantMapRange, metrics);
 						} else {
 							logValue.param1 = std::max(r.range().begin, range.begin);
 							logValue.param2 = minKey;
@@ -442,7 +911,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 								logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 								logValue.param2 = logValue.param2.withPrefix(addPrefix, tempArena);
 							}
-							_addResult(tenantMapChanging, result, mutationSize, arena, logValue, tenantMapRange);
+							_addResult(
+							    tenantMapChanging, result, mutationSize, arena, logValue, tenantMapRange, metrics);
 						}
 						if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
 							encryptedResult->push_back_deep(*arena, encryptedLogValue);
@@ -451,8 +921,13 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 						}
 					}
 				}
+				mutationClearRangeTime =
+				    mutationClearRangeTime + std::chrono::high_resolution_clock::now() - beforeMutationClearRangeTime;
 			} else {
+				beforeMutationSetTime = std::chrono::high_resolution_clock::now();
 				Version ver = key_version->rangeContaining(logValue.param1).value();
+				rangeMapOperationTime =
+				    rangeMapOperationTime + std::chrono::high_resolution_clock::now() - beforeMutationSetTime;
 				//TraceEvent("ApplyMutation").detail("LogValue", logValue).detail("Version", version).detail("Ver", ver).detail("Apply", version > ver && ver != invalidVersion);
 				if (version > ver && ver != invalidVersion) {
 					if (removePrefix.size()) {
@@ -461,7 +936,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 					if (addPrefix.size()) {
 						logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 					}
-					_addResult(tenantMapChanging, result, mutationSize, arena, logValue, tenantMapRange);
+					_addResult(tenantMapChanging, result, mutationSize, arena, logValue, tenantMapRange, metrics);
 					// If we did not remove/add prefixes to the mutation then keep the original encrypted mutation so we
 					// do not have to re-encrypt unnecessarily
 					if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
@@ -470,6 +945,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 						encryptedResult->push_back_deep(*arena, Optional<MutationRef>());
 					}
 				}
+				mutationSetTime = mutationSetTime + std::chrono::high_resolution_clock::now() - beforeMutationSetTime;
 			}
 
 			consumed += BackupAgentBase::logHeaderSize + len1 + len2;
@@ -493,6 +969,11 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 		    .detail("Value", value);
 		throw;
 	}
+	metrics->updateMemoryCopyTime(memCopyTime);
+	metrics->updateLoopCounterPerDecodeBackupLogValue(loopCounter);
+	metrics->updateMutationSetTime(mutationSetTime);
+	metrics->updateMutationClearTime(mutationClearRangeTime);
+	metrics->updateRangeMapOperationTime(rangeMapOperationTime);
 	return Void();
 }
 
@@ -725,7 +1206,13 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
                                                 int* totalBytes,
                                                 int* mutationSize,
                                                 FlowLock* commitLock,
-                                                PublicRequestStream<CommitTransactionRequest> commit) {
+                                                PublicRequestStream<CommitTransactionRequest> commit,
+                                                std::shared_ptr<RestoreMetrics> metrics) {
+
+	state std::chrono::time_point<std::chrono::high_resolution_clock> timeStart =
+	    std::chrono::high_resolution_clock::now();
+	state std::chrono::time_point<std::chrono::high_resolution_clock> timeBeforeCommitAndUnlock;
+
 	Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
 	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
 	Key rangeEnd = getApplyKey(newBeginVersion, uid);
@@ -747,6 +1234,9 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 
 	*totalBytes += *mutationSize;
 	wait(commitLock->take(TaskPriority::DefaultYield, *mutationSize));
+	metrics->updateTakeCommitLockTime(std::chrono::high_resolution_clock::now() - timeStart);
+
+	timeBeforeCommitAndUnlock = std::chrono::high_resolution_clock::now();
 	Future<Void> commitAndUnlock = commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize);
 	// If tenant map is changing, we need to wait until it's committed before processing next mutations.
 	// Next muations need the updated tenant map for filtering.
@@ -754,6 +1244,7 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	// Otherwise, an update to the applyEnd key will trigger another applyMutation() which can
 	// have an overlapping range with the current applyMutation() and cause conflicts.
 	wait(commitAndUnlock);
+	metrics->updateCommitAndUnlockTime(std::chrono::high_resolution_clock::now() - timeBeforeCommitAndUnlock);
 	return Void();
 }
 
@@ -774,10 +1265,25 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
                                               Reference<KeyRangeMap<Version>> keyVersion,
                                               std::map<int64_t, TenantName>* tenantMap,
                                               bool provisionalProxy,
-                                              std::shared_ptr<DatabaseConfiguration> dbConfig) {
+                                              std::shared_ptr<DatabaseConfiguration> dbConfig,
+                                              UID logId,
+                                              std::shared_ptr<RestoreMetrics> metrics) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
 	state int totalBytes = 0;
+
+	state size_t decodeBackupLogValueCounter = 0;
+	state size_t sendRequestCounter = 0;
+	state size_t getGroupCounter = 0;
+
+	state std::chrono::time_point<std::chrono::high_resolution_clock> startTime =
+	    std::chrono::high_resolution_clock::now();
+	state std::chrono::time_point<std::chrono::high_resolution_clock> timeBeforeGetGroup;
+	state std::chrono::time_point<std::chrono::high_resolution_clock> timeBeforeDecodeBackupLogValue;
+	state std::chrono::time_point<std::chrono::high_resolution_clock> timeBeforeSendRequest;
+
+	state size_t totalMutations = 0;
+
 	loop {
 		state CommitTransactionRequest req;
 		state Version newBeginVersion = invalidVersion;
@@ -785,12 +1291,16 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 		state bool tenantMapChanging = false;
 		loop {
 			try {
+				timeBeforeGetGroup = std::chrono::high_resolution_clock::now();
 				state RCGroup group = waitNext(results.getFuture());
 				state CommitTransactionRequest curReq;
 				lock->release(group.items.expectedSize());
 				state int curBatchMutationSize = 0;
 				tenantMapChanging = false;
+				metrics->updateGroupTime(std::chrono::high_resolution_clock::now() - timeBeforeGetGroup);
+				getGroupCounter++;
 
+				timeBeforeDecodeBackupLogValue = std::chrono::high_resolution_clock::now();
 				BinaryWriter bw(Unversioned());
 				for (int i = 0; i < group.items.size(); ++i) {
 					bw.serializeBytes(group.items[i].value);
@@ -810,8 +1320,11 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				                          cx,
 				                          tenantMap,
 				                          provisionalProxy,
-				                          dbConfig));
-
+				                          dbConfig,
+				                          metrics));
+				metrics->updateDecodeBackupLogValueTime(std::chrono::high_resolution_clock::now() -
+				                                        timeBeforeDecodeBackupLogValue);
+				decodeBackupLogValueCounter++;
 				// A single call to decodeBackupLogValue (above) will only parse mutations from a single transaction,
 				// however in the code below we batch the results across several calls to decodeBackupLogValue and send
 				// it in one big CommitTransactionRequest (so one CTR contains mutations from multiple transactions).
@@ -822,6 +1335,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				// far if the latest call to decodeBackupLogValue contained a transaction which changed the tenant map
 				// (before processing the mutations which caused the tenant map to change).
 				if (tenantMapChanging && req.transaction.mutations.size()) {
+					timeBeforeSendRequest = std::chrono::high_resolution_clock::now();
 					// If the tenantMap is changing send the previous CommitTransactionRequest to the CommitProxy
 					TraceEvent("MutationLogRestoreTenantMapChanging").detail("BeginVersion", newBeginVersion);
 					CODE_PROBE(true, "mutation log tenant map changing");
@@ -833,9 +1347,13 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 					                                  &totalBytes,
 					                                  &mutationSize,
 					                                  commitLock,
-					                                  commit));
+					                                  commit,
+					                                  metrics));
 					req = CommitTransactionRequest();
 					mutationSize = 0;
+					metrics->updateSendCommitTransactionRequestTime(std::chrono::high_resolution_clock::now() -
+					                                                timeBeforeSendRequest);
+					sendRequestCounter++;
 				}
 
 				state int i;
@@ -859,18 +1377,46 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 					if (endVersion.present() && endVersion.get() > lastVersion && endVersion.get() > newBeginVersion) {
 						newBeginVersion = endVersion.get();
 					}
-					if (newBeginVersion == invalidVersion)
+					if (newBeginVersion == invalidVersion) {
+						metrics->updateKVMutationLogToTransactionsTime(std::chrono::high_resolution_clock::now() -
+						                                               startTime);
+						metrics->updateBytes(totalBytes);
+						metrics->updateMutations(totalMutations);
+						metrics->updateGetGroupCounter(getGroupCounter);
+						metrics->updateDecodeBackupLogValueCounter(decodeBackupLogValueCounter);
+						metrics->updateSendRequestCounter(sendRequestCounter);
 						return totalBytes;
+					}
 					endOfStream = true;
 					break;
 				}
 				throw;
 			}
 		}
-		// TraceEvent("MutationLogRestore").detail("BeginVersion", newBeginVersion);
-		wait(sendCommitTransactionRequest(
-		    req, uid, newBeginVersion, rangeBegin, committedVersion, &totalBytes, &mutationSize, commitLock, commit));
+
+		timeBeforeSendRequest = std::chrono::high_resolution_clock::now();
+		wait(sendCommitTransactionRequest(req,
+		                                  uid,
+		                                  newBeginVersion,
+		                                  rangeBegin,
+		                                  committedVersion,
+		                                  &totalBytes,
+		                                  &mutationSize,
+		                                  commitLock,
+		                                  commit,
+		                                  metrics));
+		metrics->updateSendCommitTransactionRequestTime(std::chrono::high_resolution_clock::now() -
+		                                                timeBeforeSendRequest);
+		sendRequestCounter++;
+		totalMutations = totalMutations + mutationSize;
+
 		if (endOfStream) {
+			metrics->updateKVMutationLogToTransactionsTime(std::chrono::high_resolution_clock::now() - startTime);
+			metrics->updateBytes(totalBytes);
+			metrics->updateMutations(totalMutations);
+			metrics->updateGetGroupCounter(getGroupCounter);
+			metrics->updateDecodeBackupLogValueCounter(decodeBackupLogValueCounter);
+			metrics->updateSendRequestCounter(sendRequestCounter);
 			return totalBytes;
 		}
 	}
@@ -942,20 +1488,33 @@ ACTOR Future<Void> applyMutations(Database cx,
 
 	keyVersion->insert(metadataVersionKey, 0);
 
+	state double startTime = now();
+	state UID logId = deterministicRandom()->randomUniqueID();
+
+	state std::shared_ptr<RestoreMetrics> metrics = std::make_shared<RestoreMetrics>(logId);
+	state double loopBeginTime = 0;
+	state double kvMutationLogToTransactionsBeginTime = 0;
+	state double coalesceKeyVersionCacheBeginTime = 0;
+
 	try {
 		wait(store(*dbConfig, getDatabaseConfiguration(cx)));
 
 		loop {
+			loopBeginTime = now();
+
 			if (beginVersion >= *endVersion) {
 				// Why do we need to take a lock here?
 				wait(commitLock.take(TaskPriority::DefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES));
 				commitLock.release(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 				if (beginVersion >= *endVersion) {
+					if (CLIENT_KNOBS->RESTORE_VERBOSE_LOGGING) {
+						metrics->log();
+					}
 					return Void();
 				}
 			}
 
-			int rangeCount = std::max(1, CLIENT_KNOBS->APPLY_MAX_LOCK_BYTES / maxBytes);
+			state int rangeCount = std::max(1, CLIENT_KNOBS->APPLY_MAX_LOCK_BYTES / maxBytes);
 			state Version newEndVersion = std::min(*endVersion,
 			                                       ((beginVersion / CLIENT_KNOBS->APPLY_BLOCK_SIZE) + rangeCount) *
 			                                           CLIENT_KNOBS->APPLY_BLOCK_SIZE);
@@ -972,6 +1531,7 @@ ACTOR Future<Void> applyMutations(Database cx,
 				rc.push_back(readCommitted(cx, results[i], locks[i], ranges[i], decodeBKMutationLogKey));
 			}
 
+			kvMutationLogToTransactionsBeginTime = now();
 			maxBytes = std::max<int>(maxBytes * CLIENT_KNOBS->APPLY_MAX_DECAY_RATE, CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES);
 			for (idx = 0; idx < ranges.size(); ++idx) {
 				int bytes =
@@ -989,14 +1549,34 @@ ACTOR Future<Void> applyMutations(Database cx,
 				                                     keyVersion,
 				                                     tenantMap,
 				                                     provisionalProxy,
-				                                     dbConfig));
+				                                     dbConfig,
+				                                     logId,
+				                                     metrics));
 				maxBytes = std::max<int>(CLIENT_KNOBS->APPLY_MAX_INCREASE_FACTOR * bytes, maxBytes);
 				if (error.isError())
 					throw error.getError();
 			}
 
+			coalesceKeyVersionCacheBeginTime = now();
 			wait(coalesceKeyVersionCache(
 			    uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
+
+			if (CLIENT_KNOBS->RESTORE_VERBOSE_LOGGING) {
+				TraceEvent("RestoreMutationLogToTransactions", logId)
+				    .detail("InputEndVersion", *endVersion)
+				    .detail("Uid", uid)
+				    .detail("SinceStart", now() - startTime)
+				    .detail("BeginVersion", beginVersion)
+				    .detail("EndVersion", newEndVersion)
+				    .detail("RangeCount", rangeCount)
+				    .detail("RangeCountDone", ranges.size())
+				    .detail("MaxBytes", maxBytes)
+				    .detail("PrepareTime", kvMutationLogToTransactionsBeginTime - loopBeginTime)
+				    .detail("KvMutationLogToTransactionsTime",
+				            coalesceKeyVersionCacheBeginTime - kvMutationLogToTransactionsBeginTime)
+				    .detail("CoalesceKeyVersionCacheTime", now() - coalesceKeyVersionCacheBeginTime);
+			}
+
 			beginVersion = newEndVersion;
 			if (BUGGIFY) {
 				wait(delay(2.0));
