@@ -685,7 +685,9 @@ struct XXH3_state_s {
  * it's still necessary to use XXH3_NNbits_reset*() afterwards.
  */
 #define XXH3_INITSTATE(XXH3_state_ptr)                                                                                 \
-	{ (XXH3_state_ptr)->seed = 0; }
+	{                                                                                                                  \
+		(XXH3_state_ptr)->seed = 0;                                                                                    \
+	}
 
 /* ===   Experimental API   === */
 /* Symbols defined below must be considered tied to a specific library version. */
@@ -3702,10 +3704,8 @@ static XXH64_hash_t XXH3_mergeAccs(const xxh_u64* XXH_RESTRICT acc, const xxh_u8
 }
 
 #define XXH3_INIT_ACC                                                                                                  \
-	{                                                                                                                  \
-		XXH_PRIME32_3, XXH_PRIME64_1, XXH_PRIME64_2, XXH_PRIME64_3, XXH_PRIME64_4, XXH_PRIME32_2, XXH_PRIME64_5,       \
-		    XXH_PRIME32_1                                                                                              \
-	}
+	{ XXH_PRIME32_3, XXH_PRIME64_1, XXH_PRIME64_2, XXH_PRIME64_3,                                                      \
+	  XXH_PRIME64_4, XXH_PRIME32_2, XXH_PRIME64_5, XXH_PRIME32_1 }
 
 XXH_FORCE_INLINE XXH64_hash_t XXH3_hashLong_64b_internal(const void* XXH_RESTRICT input,
                                                          size_t len,

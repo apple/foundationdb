@@ -91,7 +91,7 @@ struct create_static {
 		double double_;
 		long double longDouble_;
 		struct Test;
-		int Test::*pMember_;
+		int Test::* pMember_;
 		int (Test::*pMemberFn_)(int);
 	};
 

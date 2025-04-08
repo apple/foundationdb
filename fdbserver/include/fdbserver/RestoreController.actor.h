@@ -49,7 +49,7 @@ struct VersionBatch {
 	double size; // size of data in range and log files
 	int batchIndex; // Never reset
 
-	VersionBatch() : beginVersion(0), endVersion(0), size(0){};
+	VersionBatch() : beginVersion(0), endVersion(0), size(0) {};
 
 	bool operator<(const VersionBatch& rhs) const {
 		return std::tie(batchIndex, beginVersion, endVersion, logFiles, rangeFiles, size) <

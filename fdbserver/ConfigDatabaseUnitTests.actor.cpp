@@ -144,7 +144,7 @@ class ReadFromLocalConfigEnvironment {
 
 	ACTOR template <class T, class V, class E>
 	static Future<Void> checkEventually(Reference<LocalConfiguration const> localConfiguration,
-	                                    V T::*member,
+	                                    V T::* member,
 	                                    Optional<E> expected) {
 		state double lastMismatchTime = now();
 		loop {
@@ -200,7 +200,7 @@ public:
 	}
 
 	template <class T, class V, class E>
-	void checkImmediate(V T::*member, Optional<E> expected) const {
+	void checkImmediate(V T::* member, Optional<E> expected) const {
 		if (expected.present()) {
 			ASSERT_EQ(localConfiguration->getTestKnobs().*member, expected.get());
 		} else {
@@ -209,7 +209,7 @@ public:
 	}
 
 	template <class T, class V, class E>
-	Future<Void> checkEventually(V T::*member, Optional<E> expected) const {
+	Future<Void> checkEventually(V T::* member, Optional<E> expected) const {
 		return checkEventually(localConfiguration, member, expected);
 	}
 
@@ -251,7 +251,7 @@ public:
 		return addMutation(configClass, knobName, knobValue.contents());
 	}
 	template <class T, class V, class E>
-	void check(V T::*member, Optional<E> value) const {
+	void check(V T::* member, Optional<E> value) const {
 		return readFrom.checkImmediate(member, value);
 	}
 };
@@ -295,7 +295,7 @@ public:
 	void clear(Optional<KeyRef> configClass, KeyRef knobName) { addMutation(configClass, knobName, {}); }
 
 	template <class T, class V, class E>
-	Future<Void> check(V T::*member, Optional<E> value) const {
+	Future<Void> check(V T::* member, Optional<E> value) const {
 		return readFrom.checkEventually(member, value);
 	}
 
@@ -484,7 +484,7 @@ public:
 	}
 	Future<Void> clear(Optional<KeyRef> configClass, KeyRef knobName) { return writeTo.clear(configClass, knobName); }
 	template <class T, class V, class E>
-	Future<Void> check(V T::*member, Optional<E> value) const {
+	Future<Void> check(V T::* member, Optional<E> value) const {
 		return readFrom.checkEventually(member, value);
 	}
 	void close() const {

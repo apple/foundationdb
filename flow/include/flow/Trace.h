@@ -210,7 +210,9 @@ struct SpecialTraceMetricType
 #define TRACE_METRIC_TYPE(from, to)                                                                                    \
 	template <>                                                                                                        \
 	struct SpecialTraceMetricType<from> : std::true_type {                                                             \
-		static to getValue(from v) { return v; }                                                                       \
+		static to getValue(from v) {                                                                                   \
+			return v;                                                                                                  \
+		}                                                                                                              \
 	}
 
 TRACE_METRIC_TYPE(double, double);
