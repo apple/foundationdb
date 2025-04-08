@@ -8892,6 +8892,72 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 	}
 }
 
+// Bulkload fetchkeys either by ingesting sst file or by opening a reader on the sst.
+ACTOR Future<std::pair<bool, std::shared_ptr<BulkLoadFileSetKeyMap>>> fetchKeysBulkLoad(
+    StorageServer* data,
+    UID fetchKeysID,
+    std::string bulkLoadLocalDir,
+    UID dataMoveId,
+    KeyRange keys,
+    PromiseStream<RangeResult> results // Output parameter for normal fetch if needed
+) {
+	ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId));
+	state bool sstIngestionPerformed = false;
+	state std::shared_ptr<BulkLoadFileSetKeyMap> localBulkLoadFileSets;
+
+	// Get the bulkload task metadata...
+	state BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
+	    data->cx, dataMoveId, /*atLeastVersion=*/data->version.get(), data->thisServerID));
+	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+	    .detail("DataMoveId", dataMoveId.toString())
+	    .detail("Range", keys)
+	    .detail("Phase", "Got task metadata");
+	ASSERT(bulkLoadTaskState.getDataMoveId() == dataMoveId);
+
+	// Download files...
+	localBulkLoadFileSets = std::make_shared<BulkLoadFileSetKeyMap>();
+	wait(bulkLoadFetchKeyValueFileToLoad(data, bulkLoadLocalDir, bulkLoadTaskState, /*output=*/localBulkLoadFileSets));
+	TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+	    .detail("DataMoveId", dataMoveId.toString())
+	    .detail("Range", keys)
+	    .detail("Knobs", SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST)
+	    .detail("LoadType", bulkLoadTaskState.getLoadType())
+	    .detail("SupportsSstIngestion", data->storage.getKeyValueStore()->supportsSstIngestion())
+	    .detail("Phase", "File download");
+
+	// Attempt SST ingestion...
+	if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST && bulkLoadTaskState.getLoadType() == BulkLoadType::SST &&
+	    data->storage.getKeyValueStore()->supportsSstIngestion()) {
+		sstIngestionPerformed = true;
+		TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+		    .detail("DataMoveId", dataMoveId.toString())
+		    .detail("Range", keys)
+		    .detail("Phase", "SST ingestion");
+		// Verify ranges...
+		for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
+			ASSERT(keys.contains(range));
+		}
+		TraceEvent("SSBulkLoadSSTIngestionStart", data->thisServerID)
+		    .detail("DataMoveId", dataMoveId.toString())
+		    .detail("FKID", fetchKeysID)
+		    .detail("Range", keys)
+		    .detail("LocalDir", bulkLoadLocalDir);
+		wait(data->storage.getKeyValueStore()->ingestSSTFiles(bulkLoadLocalDir, localBulkLoadFileSets));
+		TraceEvent("SSBulkLoadSSTIngestionComplete", data->thisServerID)
+		    .detail("DataMoveId", dataMoveId.toString())
+		    .detail("FKID", fetchKeysID)
+		    .detail("Range", keys);
+	}
+
+	// If ingestion didn't happen, set up the normal fetch path
+	if (!sstIngestionPerformed) {
+		// Directly call tryGetRangeForBulkLoad which will push results to the 'results' promise stream.
+		tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
+	}
+
+	return std::make_pair(sstIngestionPerformed, localBulkLoadFileSets);
+}
+
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
@@ -9110,64 +9176,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					rangeEnd = keys.end;
 				}
 			} else if (conductBulkLoad) {
-				ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId)); // TODO(BulkLoad): remove dangerous assert
-				// Get the bulkload task metadata from the data move metadata. Note that a SS can receive a data move
-				// mutation before the bulkload task metadata is persisted. In this case, the SS will not be able to
-				// read the bulkload task. SS will wait at this point until the bulkload task metadata is persisted.
-				// Moreover, the bulkload task metadata is persist at a verison at least the version when this SS
-				// receives the datamove mutation. Therefore, the SS should read the bulkload task metadata at a version
-				// at least this SS version.
-				// Note that it is possible that this SS can never get the bulkload metadata because the bulkload data
-				// move is cancelled or replaced by another data move. In this case, while
-				// getBulkLoadTaskStateFromDataMove get stuck, this fetchKeys is guaranteed to be cancelled.
-				state BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
-				    data->cx, dataMoveId, /*atLeastVersion=*/data->version.get(), data->thisServerID));
-				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
-				    .detail("DataMoveId", dataMoveId.toString())
-				    .detail("Range", keys)
-				    .detail("Phase", "Got task metadata");
-				// Check the correctness: bulkLoadTaskMetadata stored in dataMoveMetadata must have the same
-				// dataMoveId.
-				ASSERT(bulkLoadTaskState.getDataMoveId() == dataMoveId);
-				// We download the data file to local disk and pass the data file path to read in the next step.
-				localBulkLoadFileSets = std::make_shared<BulkLoadFileSetKeyMap>();
-				wait(bulkLoadFetchKeyValueFileToLoad(
-				    data, bulkLoadLocalDir, bulkLoadTaskState, /*output=*/localBulkLoadFileSets));
-				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
-				    .detail("DataMoveId", dataMoveId.toString())
-				    .detail("Range", keys)
-				    .detail("Knobs", SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST)
-				    .detail("LoadType", bulkLoadTaskState.getLoadType())
-				    .detail("SupportsSstIngestion", data->storage.getKeyValueStore()->supportsSstIngestion())
-				    .detail("Phase", "File download");
-
-				// If SST ingestion is enabled and we have SST files, try to ingest them directly
-				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST && bulkLoadTaskState.getLoadType() == BulkLoadType::SST &&
-				    data->storage.getKeyValueStore()->supportsSstIngestion()) {
-					sstIngestionPerformed = true;
-					TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
-					    .detail("DataMoveId", dataMoveId.toString())
-					    .detail("Range", keys)
-					    .detail("Phase", "SST ingestion");
-					// Verify that all SST files' ranges are contained within the fetchKeys range
-					for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
-						ASSERT(keys.contains(range));
-					}
-					TraceEvent("SSBulkLoadSSTIngestionStart", data->thisServerID)
-					    .detail("DataMoveId", dataMoveId.toString())
-					    .detail("FKID", fetchKeysID)
-					    .detail("Range", keys)
-					    .detail("LocalDir", bulkLoadLocalDir);
-					wait(data->storage.getKeyValueStore()->ingestSSTFiles(bulkLoadLocalDir, localBulkLoadFileSets));
-					TraceEvent("SSBulkLoadSSTIngestionComplete", data->thisServerID)
-					    .detail("DataMoveId", dataMoveId.toString())
-					    .detail("FKID", fetchKeysID)
-					    .detail("Range", keys);
-				}
-				if (!sstIngestionPerformed) {
-					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
-					rangeEnd = keys.end;
-				}
+				// Call the helper actor for bulk load logic
+				state std::pair<bool, std::shared_ptr<BulkLoadFileSetKeyMap>> bulkLoadResult =
+				    wait(fetchKeysBulkLoad(data, fetchKeysID, bulkLoadLocalDir, dataMoveId, keys, results));
+				sstIngestionPerformed = bulkLoadResult.first;
+				localBulkLoadFileSets = bulkLoadResult.second; // Keep for potential later use if needed? (e.g. cleanup)
+				// 'hold' is not set here; results stream is populated by the helper actor if needed and the
+				// tryGetRangeForBulkLoad call done in fetchKeysBulkLoad does not return a future so no need to 'hold'.
+				rangeEnd = keys.end;
 			} else {
 				hold = tryGetRange(results, &tr, keys);
 				rangeEnd = keys.end;
@@ -9176,6 +9192,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state Key blockBegin = keys.begin;
 			if (!sstIngestionPerformed) {
 				try {
+					// If hold is not valid (e.g. bulk load without ingestion),
+					// the results stream was already populated by the helper actor.
+					// Otherwise, wait for the initial getRange call to complete or fail.
+					if (hold.isValid()) {
+						wait(hold); // Wait for tryGetRange or tryGetRangeFromBlob
+					}
 					loop {
 						CODE_PROBE(true, "Fetching keys for transferred shard");
 						while (data->fetchKeysBudgetUsed.get()) {
@@ -9235,6 +9257,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						wait(data->storage.replaceRange(blockRange, blockData));
 
 						if (conductBulkLoad) {
+							// TODO: If we are ingesting SST files, we will not come here.
 							TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 							    .detail("FKID", interval.pairID)
 							    .detail("DataMoveId", dataMoveId.toString())
