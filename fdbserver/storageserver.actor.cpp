@@ -8913,6 +8913,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	                                             data->currentRunningFetchKeys,
 	                                             data->counters.bytesFetched,
 	                                             data->counters.kvFetched);
+	state bool sstIngestionPerformed = false;
 
 	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is disabled by
 	// a knob
@@ -9136,7 +9137,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("LoadType", bulkLoadTaskState.getLoadType())
 				    .detail("SupportsSstIngestion", data->storage.getKeyValueStore()->supportsSstIngestion())
 				    .detail("Phase", "File download");
-				state bool sstIngestionPerformed = false;
+
 				// If SST ingestion is enabled and we have SST files, try to ingest them directly
 				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST && bulkLoadTaskState.getLoadType() == BulkLoadType::SST &&
 				    data->storage.getKeyValueStore()->supportsSstIngestion()) {
