@@ -3871,6 +3871,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> cleanUpJob;
 	Future<Void> counterLogger;
 
+	// Ingest SST files into the database. Currently not exercised. supportsSstIngestion() is false
+	// until the ss metadata change for sharded rocksdb is fixed. TODO(BulkLoad)
 	Future<Void> ingestSSTFiles(std::string bulkLoadLocalDir,
 	                            std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) override {
 		// Create a map of SST files to ingest for each shard ID
@@ -3939,8 +3941,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		return Void();
 	}
-
-	bool supportsSstIngestion() const override { return true; }
 };
 
 ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<KeyRange> ranges) {
