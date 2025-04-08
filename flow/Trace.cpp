@@ -277,7 +277,7 @@ public:
 		struct Ping final : TypedAction<WriterThread, Ping> {
 			ThreadReturnPromise<Void> ack;
 
-			explicit Ping(){};
+			explicit Ping() {};
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action(Ping& ping) {

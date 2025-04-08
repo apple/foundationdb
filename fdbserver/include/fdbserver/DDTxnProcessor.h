@@ -256,7 +256,7 @@ protected:
 	std::vector<DDShardInfo> getDDShardInfos() const;
 
 public:
-	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(std::move(mgs)){};
+	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(std::move(mgs)) {};
 
 	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;
 

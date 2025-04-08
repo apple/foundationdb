@@ -108,12 +108,12 @@ public:
 	// v.map(&T::member) is equivalent to v.map([](T v) { return v.member; })
 	template <class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
-	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::* member) const& {
 		return present() ? Optional<Rp>(get().*member) : Optional<Rp>();
 	}
 	template <class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
-	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::* member) && {
 		return present() ? Optional<Rp>(std::move(*this).get().*member) : Optional<Rp>();
 	}
 
@@ -141,7 +141,7 @@ public:
 	//
 	// v.mapRef(&P::member) is equivalent to Optional<R>(v.get()->member) if v is present and non-null
 	template <class P, class R, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R P::*member) const& {
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R P::* member) const& {
 		if (!present() || !get()) {
 			return Optional<Rp>();
 		}

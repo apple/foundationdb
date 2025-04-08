@@ -304,16 +304,24 @@ CodeProbeImpl<FileName, Condition, Comment, CompUnit, Line, CodeProbeAnnotations
 
 #define _CODE_PROBE_IMPL(file, line, condition, comment, compUnit, fileType, condType, commentType, compUnitType, ...) \
 	struct fileType {                                                                                                  \
-		constexpr static const char* value() { return file; }                                                          \
+		constexpr static const char* value() {                                                                         \
+			return file;                                                                                               \
+		}                                                                                                              \
 	};                                                                                                                 \
 	struct condType {                                                                                                  \
-		constexpr static const char* value() { return #condition; }                                                    \
+		constexpr static const char* value() {                                                                         \
+			return #condition;                                                                                         \
+		}                                                                                                              \
 	};                                                                                                                 \
 	struct commentType {                                                                                               \
-		constexpr static const char* value() { return comment; }                                                       \
+		constexpr static const char* value() {                                                                         \
+			return comment;                                                                                            \
+		}                                                                                                              \
 	};                                                                                                                 \
 	struct compUnitType {                                                                                              \
-		constexpr static const char* value() { return compUnit; }                                                      \
+		constexpr static const char* value() {                                                                         \
+			return compUnit;                                                                                           \
+		}                                                                                                              \
 	};                                                                                                                 \
 	if (condition) {                                                                                                   \
 		probe::probeInstance<fileType, condType, commentType, compUnitType, line>(__VA_ARGS__).hit();                  \

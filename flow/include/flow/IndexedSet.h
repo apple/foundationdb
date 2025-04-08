@@ -95,7 +95,7 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 			static_assert(isConst);
 		}
 
-		explicit IteratorImpl(decltype(node) n = nullptr) : node(n){};
+		explicit IteratorImpl(decltype(node) n = nullptr) : node(n) {};
 
 		typename std::conditional_t<isConst, const T, T>& operator*() const { return node->data; }
 
@@ -149,7 +149,7 @@ public:
 	using iterator = IteratorImpl<false>;
 	using const_iterator = IteratorImpl<true>;
 
-	IndexedSet() : root(nullptr){};
+	IndexedSet() : root(nullptr) {};
 	~IndexedSet() { delete root; }
 	IndexedSet(IndexedSet&& r) noexcept : root(r.root) { r.root = nullptr; }
 	IndexedSet& operator=(IndexedSet&& r) noexcept {
