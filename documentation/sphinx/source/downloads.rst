@@ -12,16 +12,16 @@ macOS
 
 The macOS installation package is supported on macOS 10.7+. It includes the client and (optionally) the server.
 
-* `FoundationDB-7.3.43_x86_64.pkg <https://github.com/apple/foundationdb/releases/download/7.3.43/FoundationDB-7.3.43_x86_64.pkg>`_
-* `FoundationDB-7.3.43_arm64.pkg <https://github.com/apple/foundationdb/releases/download/7.3.43/FoundationDB-7.3.43_arm64.pkg>`_
+* `FoundationDB-7.3.63_x86_64.pkg <https://github.com/apple/foundationdb/releases/download/7.3.63/FoundationDB-7.3.63_x86_64.pkg>`_
+* `FoundationDB-7.3.63_arm64.pkg <https://github.com/apple/foundationdb/releases/download/7.3.63/FoundationDB-7.3.63_arm64.pkg>`_
 
 Ubuntu
 ------
 
 The Ubuntu packages are supported on 64-bit Ubuntu 12.04+, but beware of the Linux kernel bug in Ubuntu 12.x.
 
-* `foundationdb-clients_7.3.43-1_amd64.deb <https://github.com/apple/foundationdb/releases/download/7.3.43/foundationdb-clients_7.3.43-1_amd64.deb>`_
-* `foundationdb-server_7.3.43-1_amd64.deb <https://github.com/apple/foundationdb/releases/download/7.3.43/foundationdb-server_7.3.43-1_amd64.deb>`_ (depends on the clients package)
+* `foundationdb-clients_7.3.63-1_amd64.deb <https://github.com/apple/foundationdb/releases/download/7.3.63/foundationdb-clients_7.3.63-1_amd64.deb>`_
+* `foundationdb-server_7.3.63-1_amd64.deb <https://github.com/apple/foundationdb/releases/download/7.3.63/foundationdb-server_7.3.63-1_amd64.deb>`_ (depends on the clients package)
 
 
 RHEL/CentOS 7
@@ -29,8 +29,8 @@ RHEL/CentOS 7
 
 The RHEL/CentOS EL7 packages are supported on 64-bit RHEL/CentOS 7.x.
 
-* `foundationdb-clients-7.3.43-1.el7.x86_64.rpm <https://github.com/apple/foundationdb/releases/download/7.3.43/foundationdb-clients-7.3.43-1.el7.x86_64.rpm>`_
-* `foundationdb-server-7.3.43-1.el7.x86_64.rpm <https://github.com/apple/foundationdb/releases/download/7.3.43/foundationdb-server-7.3.43-1.el7.x86_64.rpm>`_ (depends on the clients package)
+* `foundationdb-clients-7.3.63-1.el7.x86_64.rpm <https://github.com/apple/foundationdb/releases/download/7.3.63/foundationdb-clients-7.3.63-1.el7.x86_64.rpm>`_
+* `foundationdb-server-7.3.63-1.el7.x86_64.rpm <https://github.com/apple/foundationdb/releases/download/7.3.63/foundationdb-server-7.3.63-1.el7.x86_64.rpm>`_ (depends on the clients package)
 
 Windows
 -------
