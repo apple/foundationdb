@@ -61,6 +61,7 @@
 #include <memory>
 #include <tuple>
 #include <vector>
+#include <fstream>
 
 #endif // WITH_ROCKSDB
 
@@ -2505,32 +2506,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		// Configure ingestion options
 		rocksdb::IngestExternalFileOptions options;
-		options.move_files = true; // Move files instead of copying
-		options.snapshot_consistency = false;
-		options.allow_global_seqno = false;
-		options.allow_blocking_flush = false;
-		options.verify_checksums_before_ingest = true; // Verify checksums before ingestion
+		options.move_files = true;
+		options.write_global_seqno = false;
+		options.verify_checksums_before_ingest = true;
 
 		// Ingest the SST files
-		rocksdb::Status status = db->IngestExternalFile(sstFiles, options);
+		// The default column family parameter is necessary here; w/o it the ingested keyvalues are unreadable
+		rocksdb::Status status = db->IngestExternalFile(defaultFdbCF, sstFiles, options);
 		if (!status.ok()) {
-			TraceEvent(SevError, "RocksDBIngestSSTFilesError", id)
-			    .detail("Error", status.ToString())
-			    .detail("NumFiles", sstFiles.size())
-			    .detail("LocalDir", bulkLoadLocalDir);
+			TraceEvent(SevError, "RocksDBIngestSSTFilesError", id).detail("Error", status.ToString());
 			throw internal_error();
 		}
-
-		// Verify the ingestion was successful
-		for (const auto& file : sstFiles) {
-			if (fileExists(file)) {
-				TraceEvent(SevWarn, "RocksDBIngestSSTFilesFileNotMoved", id).detail("File", file);
-			}
-		}
-
-		TraceEvent("RocksDBIngestSSTFiles", id)
-		    .detail("NumFiles", sstFiles.size())
-		    .detail("LocalDir", bulkLoadLocalDir);
 
 		return Void();
 	}
@@ -3006,6 +2992,36 @@ TEST_CASE("noSim/RocksDB/RangeClear") {
 	wait(closed);
 	return Void();
 }
-} // namespace
 
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/IngestSSTFileVisibility") {
+	state std::string testDir = "test_ingest_sst_visibility";
+	state UID testStoreID = deterministicRandom()->randomUniqueID();
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, testStoreID);
+
+	// Initialize the store
+	wait(kvStore->init());
+
+	// Create and ingest an SST file
+	state std::string sstFile = testDir + "/test.sst";
+	rocksdb::SstFileWriter sstWriter(rocksdb::EnvOptions(), kvStore->sharedState->getOptions());
+	ASSERT(sstWriter.Open(sstFile).ok());
+	ASSERT(sstWriter.Put("test_key", "test_value").ok());
+	ASSERT(sstWriter.Finish().ok());
+
+	// Ingest the SST file
+	wait(kvStore->ingestSSTFiles(testDir, std::make_shared<BulkLoadFileSetKeyMap>()));
+
+	// Verify the key is visible
+	Optional<Value> value = wait(kvStore->readValue("test_key"_sr, Optional<ReadOptions>()));
+	ASSERT(value.present());
+	ASSERT(value.get() == "test_value"_sr);
+
+	// Clean up
+	kvStore->dispose();
+	platform::eraseDirectoryRecursive(testDir);
+
+	return Void();
+}
+
+} // namespace
 #endif // WITH_ROCKSDB
