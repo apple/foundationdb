@@ -8328,7 +8328,7 @@ public:
 		}));
 	}
 
-	~KeyValueStoreRedwood() override{};
+	~KeyValueStoreRedwood() override {};
 
 private:
 	std::string m_filename;

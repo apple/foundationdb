@@ -35,7 +35,7 @@ struct IGenerator {
 	virtual T last() const = 0;
 	virtual std::string toString() const = 0;
 	virtual T next(int distance, bool wrap = false) { throw unsupported_operation(); }
-	virtual ~IGenerator(){};
+	virtual ~IGenerator() {};
 };
 
 struct IKeyGenerator : public IGenerator<Key> {
@@ -301,7 +301,7 @@ typedef RandomStringSetGenerator<RandomStringGenerator> RandomKeySetGenerator;
 // Generate random keys which are composed of tuple segments from a list of RandomKeySets
 // String Definition Format: RandomKeySet[,RandomKeySet]...
 struct RandomKeyTupleGenerator : public IKeyGenerator {
-	RandomKeyTupleGenerator(){};
+	RandomKeyTupleGenerator() {};
 	RandomKeyTupleGenerator(std::vector<RandomKeySetGenerator> tupleParts) : tuples(tupleParts) {}
 	RandomKeyTupleGenerator(std::string s) : RandomKeyTupleGenerator(StringRef(s)) {}
 	RandomKeyTupleGenerator(StringRef s) {

@@ -126,7 +126,7 @@ template <class Interface, class Request, bool P>
 Future<REPLY_TYPE(Request)> loadBalance(
     DatabaseContext* ctx,
     const Reference<LocationInfo> alternatives,
-    RequestStream<Request, P> Interface::*channel,
+    RequestStream<Request, P> Interface::* channel,
     const Request& request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
@@ -3106,7 +3106,7 @@ template <class F>
 Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
                                             TenantInfo const& tenant,
                                             Key const& key,
-                                            F StorageServerInterface::*member,
+                                            F StorageServerInterface::* member,
                                             SpanContext spanContext,
                                             Optional<UID> debugID,
                                             UseProvisionalProxies useProvisionalProxies,
@@ -3140,7 +3140,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
 template <class F>
 Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
                                             Key const& key,
-                                            F StorageServerInterface::*member,
+                                            F StorageServerInterface::* member,
                                             Reverse isBackward,
                                             UseTenant useTenant) {
 	CODE_PROBE(!useTenant, "Get key location ignoring tenant");
@@ -3256,7 +3256,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& c
                                                                KeyRange const& keys,
                                                                int limit,
                                                                Reverse reverse,
-                                                               F StorageServerInterface::*member,
+                                                               F StorageServerInterface::* member,
                                                                SpanContext const& spanContext,
                                                                Optional<UID> const& debugID,
                                                                UseProvisionalProxies useProvisionalProxies,
@@ -3299,7 +3299,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
                                                                KeyRange const& keys,
                                                                int limit,
                                                                Reverse reverse,
-                                                               F StorageServerInterface::*member,
+                                                               F StorageServerInterface::* member,
                                                                UseTenant useTenant) {
 	CODE_PROBE(!useTenant, "Get key range locations ignoring tenant");
 	return getKeyRangeLocations(trState->cx,
@@ -4282,7 +4282,7 @@ void transformRangeLimits(GetRangeLimits limits, Reverse reverse, GetKeyValuesFa
 }
 
 template <class GetKeyValuesFamilyRequest>
-PublicRequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::*getRangeRequestStream() {
+PublicRequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::* getRangeRequestStream() {
 	if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesRequest>::value) {
 		return &StorageServerInterface::getKeyValues;
 	} else if (std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value) {
