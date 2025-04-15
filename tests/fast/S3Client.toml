@@ -46,4 +46,7 @@ testTitle = 'S3Client'
     # to the service from simulation.
     # Use 127.0.0.1 rather than localhost. If 'localhost', code uses the ipv6 version.
     # if 127.0.0.1, its ipv4 which is likely where we started seaweed.
-    s3Url = 'blobstore://127.0.0.1:8334/?bucket=3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0&request_timeout=5'
+    # If running against joshua, refer to the seaweed instance running at seaweedfs.default.svc.cluster.local.
+    s3Url = 'blobstore://seaweedfs:tot4llys3cure@seaweedfs.default.svc.cluster.local:8333/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0'
+    #s3Url = 'blobstore://127.0.0.1:8333/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0'
+

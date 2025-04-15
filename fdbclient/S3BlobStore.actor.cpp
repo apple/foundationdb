@@ -626,8 +626,9 @@ ACTOR Future<int64_t> objectSize_impl(Reference<S3BlobStoreEndpoint> b, std::str
 	state HTTP::Headers headers;
 
 	Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
-	if (r->code == 404)
+	if (r->code == 404) {
 		throw file_not_found();
+	}
 	return r->data.contentLen;
 }
 
@@ -999,9 +1000,10 @@ std::string parseErrorCodeFromS3(std::string xmlResponse) {
 		}
 		return std::string(codeNode->value());
 	} catch (Error e) {
-		TraceEvent("BackupParseS3ErrorCodeFailure").errorUnsuppressed(e);
+		TraceEvent(SevError, "BackupParseS3ErrorCodeFailure").errorUnsuppressed(e);
 		throw backup_parse_s3_response_failure();
 	} catch (...) {
+		TraceEvent(SevError, "BackupParseS3ErrorCodeFailure").detail("Response", xmlResponse).log();
 		throw backup_parse_s3_response_failure();
 	}
 }
@@ -1254,11 +1256,13 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(reqF, requestTimeout));
+			/* TODO: Remove this once we have a better way to test the S3 client
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
-				// simulate an error from s3
-				_r->code = badRequestCode;
-				simulateS3TokenError = true;
+			    // simulate an error from s3
+			    _r->code = badRequestCode;
+			    simulateS3TokenError = true;
 			}
+			*/
 			r = _r;
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
@@ -1269,10 +1273,25 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 			rconn.conn.clear();
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "S3BlobStoreDoRequestError")
-			    .errorUnsuppressed(e)
-			    .detail("Verb", verb)
-			    .detail("Resource", resource);
+			// Log additional details specifically for http_bad_response
+			if (e.code() == error_code_http_bad_response && r) {
+				TraceEvent(SevError, "S3BlobStoreHttpBadResponseDebug")
+				    .errorUnsuppressed(e) // Log original error
+				    .detail("Verb", verb)
+				    .detail("Resource", resource)
+				    .detail("ConnID", connID) // Log connection ID if available
+				    .detail("PartialResponseBody", r->data.content); // Log potentially partial body
+			} else {
+				// Determine severity based on error code
+				// Presumption is that operation_cancelled is a normal part of operation, not an error
+				// and triggered by request by higher layers.
+				Severity sev = (e.code() == error_code_operation_cancelled ? SevWarn : SevError);
+				// Log the event with the determined severity
+				TraceEvent(sev, "S3BlobStoreDoRequestError")
+				    .errorUnsuppressed(e)
+				    .detail("Verb", verb)
+				    .detail("Resource", resource);
+			}
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 			// TODO: should this also do rconn.conn.clear()? (would need to extend lifetime outside of try block)
@@ -1313,7 +1332,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			fastRetry = false;
 		}
 
-		TraceEvent event(SevWarn,
+		TraceEvent event(SevError,
 		                 retryable ? (fastRetry ? "S3BlobStoreEndpointRequestFailedFastRetryable"
 		                                        : "S3BlobStoreEndpointRequestFailedRetryable")
 		                           : "S3BlobStoreEndpointRequestFailed");
@@ -1328,12 +1347,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		}
 		event.suppressFor(60);
 
-		if (!err.present()) {
+		// Only attempt parsing if NO error was caught AND we received an HTTP response with content
+		if (!err.present() && r && !r->data.content.empty()) {
 			event.detail("ResponseCode", r->code);
 			std::string s3Error = parseErrorCodeFromS3(r->data.content);
 			event.detail("S3ErrorCode", s3Error);
 			if (r->code == badRequestCode) {
-				if (isS3TokenError(s3Error) || simulateS3TokenError) {
+				// Only flag s3TokenError if parsing actually yielded a relevant S3 error code
+				if (isS3TokenError(s3Error)) {
 					s3TokenError = true;
 				}
 				TraceEvent(SevWarnAlways, "S3BlobStoreBadRequest")
@@ -1342,6 +1363,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 				    .detail("S3Error", s3Error)
 				    .log();
 			}
+		} else if (!err.present() && r) {
+			// We got a response, but it was empty or failed pre-check. Log code but don't parse.
+			event.detail("ResponseCode", r->code);
+			event.detail("ResponseEmptyOrUnparseable", true);
+			// Add the actual response content for debugging
+			event.detail("HttpResponseContent", r->data.content);
+		} else {
+			// Error was present (err.present() == true), already logged above via event.errorUnsuppressed(err.get());
 		}
 
 		event.detail("ConnectionEstablished", connectionEstablished);
@@ -1429,6 +1458,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 					throw err.get();
 			}
 
+			event.log();
 			throw http_request_failed();
 		}
 	}
