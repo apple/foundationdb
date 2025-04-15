@@ -40,10 +40,10 @@
     foundationdb-server\_\ |release|\ -1\_amd64.deb
 
 .. |package-rpm-clients| replace::
-    foundationdb-clients-|release|\ -1.el7.x86_64.rpm
+    foundationdb-clients-|release|\ -1.el9.x86_64.rpm
 
 .. |package-rpm-server| replace::
-    foundationdb-server-|release|\ -1.el7.x86_64.rpm
+    foundationdb-server-|release|\ -1.el9.x86_64.rpm
 
 .. |package-mac| replace::
     FoundationDB-|release|.pkg

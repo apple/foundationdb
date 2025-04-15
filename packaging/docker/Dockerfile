@@ -55,7 +55,7 @@ RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd6
 
 WORKDIR /
 
-FROM golang:1.22.5-bullseye AS go-build
+FROM docker.io/library/golang:1.22.5-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
