@@ -145,11 +145,11 @@ function start_weed {
   local filer_port=8888
   local max=10
   local index
-  for index in $(seq 1 ${max}); do
+  for index in $(seq 0 ${max}); do
     # Increment port numbers each time through -- even the first time
     # to get past defaults.
     ((master_port=master_port+1))
-    ((s3_port=s3_port+1))
+    ((s3_port=s3_port+${index}))
     ((volume_port=volume_port+1))
     ((volume_port_grpc=volume_port_grpc+1))
     ((filer_port=filer_port+1))
