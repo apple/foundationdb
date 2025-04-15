@@ -9193,7 +9193,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// Process sample files after SST ingestion
 					processSampleFiles(data, bulkLoadLocalDir, localBulkLoadFileSets);
 
-					// NOTICE: We break the loop here if we successfully ingest the SST files.
+					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
+					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
 					break;
 				} else {
 					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
