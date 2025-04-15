@@ -1820,7 +1820,7 @@ std::vector<Reference<LocalitySet>> TagPartitionedLogSystem::getPushLocationsFor
 		for (int i : fromLocations) {
 			// check if provided location falls within the local logSet's range
 			if (i >= locationOffset && i < locationOffset + log->logServers.size()) {
-				e.emplace_back(LocalityEntry(i));
+				e.emplace_back(LocalityEntry(i - locationOffset));
 			}
 		}
 		restrictedLogSets.push_back(log->logServerSet->restrict(e));
