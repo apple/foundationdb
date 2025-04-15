@@ -2,4 +2,5 @@ com.apple.foundationdb
 com.apple.foundationdb.async
 com.apple.foundationdb.directory
 com.apple.foundationdb.subspace
+com.apple.foundationdb.testing
 com.apple.foundationdb.tuple

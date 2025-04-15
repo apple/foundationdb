@@ -5,20 +5,23 @@ Downloads
 Client & Server Packages
 ========================
 
+FoundationDB is available for download on the following platforms and the latest releases are available on the `GitHub releases page <https://github.com/apple/foundationdb/releases>`_.
+
 macOS
 -----
 
 The macOS installation package is supported on macOS 10.7+. It includes the client and (optionally) the server.
 
-* `FoundationDB-6.3.23.pkg <https://github.com/apple/foundationdb/releases/download/6.3.23/FoundationDB-6.3.23.pkg>`_
+* `FoundationDB-7.3.43_x86_64.pkg <https://github.com/apple/foundationdb/releases/download/7.3.43/FoundationDB-7.3.43_x86_64.pkg>`_
+* `FoundationDB-7.3.43_arm64.pkg <https://github.com/apple/foundationdb/releases/download/7.3.43/FoundationDB-7.3.43_arm64.pkg>`_
 
 Ubuntu
 ------
 
 The Ubuntu packages are supported on 64-bit Ubuntu 12.04+, but beware of the Linux kernel bug in Ubuntu 12.x.
 
-* `foundationdb-clients_6.3.23-1_amd64.deb <https://github.com/apple/foundationdb/releases/download/6.3.23/foundationdb-clients_6.3.23-1_amd64.deb>`_
-* `foundationdb-server_6.3.23-1_amd64.deb <https://github.com/apple/foundationdb/releases/download/6.3.23/foundationdb-server_6.3.23-1_amd64.deb>`_ (depends on the clients package)
+* `foundationdb-clients_7.3.43-1_amd64.deb <https://github.com/apple/foundationdb/releases/download/7.3.43/foundationdb-clients_7.3.43-1_amd64.deb>`_
+* `foundationdb-server_7.3.43-1_amd64.deb <https://github.com/apple/foundationdb/releases/download/7.3.43/foundationdb-server_7.3.43-1_amd64.deb>`_ (depends on the clients package)
 
 
 RHEL/CentOS 7
@@ -26,8 +29,8 @@ RHEL/CentOS 7
 
 The RHEL/CentOS EL7 packages are supported on 64-bit RHEL/CentOS 7.x.
 
-* `foundationdb-clients-6.3.23-1.el7.x86_64.rpm <https://github.com/apple/foundationdb/releases/download/6.3.12/foundationdb-clients-6.3.23-1.el7.x86_64.rpm>`_
-* `foundationdb-server-6.3.23-1.el7.x86_64.rpm <https://github.com/apple/foundationdb/releases/download/6.3.12/foundationdb-server-6.3.23-1.el7.x86_64.rpm>`_ (depends on the clients package)
+* `foundationdb-clients-7.3.43-1.el7.x86_64.rpm <https://github.com/apple/foundationdb/releases/download/7.3.43/foundationdb-clients-7.3.43-1.el7.x86_64.rpm>`_
+* `foundationdb-server-7.3.43-1.el7.x86_64.rpm <https://github.com/apple/foundationdb/releases/download/7.3.43/foundationdb-server-7.3.43-1.el7.x86_64.rpm>`_ (depends on the clients package)
 
 Windows
 -------
@@ -44,7 +47,7 @@ C
 
 FoundationDB's C bindings are installed with the FoundationDB client binaries. You can find more details in the :doc:`C API Documentation <api-c>`.
 
-Python 3.7+
+Python 3.8+
 -----------
 
 Python package is available from `PiPy <https://pypi.org/project/foundationdb/>`_
