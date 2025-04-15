@@ -8891,44 +8891,63 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 }
 
 // Utility function to process sample files during bulk load
-// Not critical if we fail to process sample files
-void processSampleFiles(StorageServer* data,
-                        const std::string& bulkLoadLocalDir,
-                        const std::shared_ptr<BulkLoadFileSetKeyMap>& localFileSets) {
-	for (const auto& [range, fileSet] : *localFileSets) {
+ACTOR static Future<Void> processSampleFiles(StorageServer* data,
+                                             std::string bulkLoadLocalDir,
+                                             std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
+	state BulkLoadFileSetKeyMap::const_iterator iter = localFileSets->begin();
+	state BulkLoadFileSetKeyMap::const_iterator end = localFileSets->end();
+
+	while (iter != end) {
+		const auto& [range, fileSet] = *iter;
 		if (fileSet.hasByteSampleFile()) {
-			std::string sampleFilePath = fileSet.getBytesSampleFileFullPath();
-			std::ifstream sampleFile(sampleFilePath);
-			if (sampleFile.is_open()) {
-				std::string line;
-				while (std::getline(sampleFile, line)) {
-					try {
-						// Process each line of the sample file
-						// Format is typically key\tvalue
-						size_t tabPos = line.find('\t');
-						if (tabPos != std::string::npos) {
-							std::string key = line.substr(0, tabPos);
-							std::string value = line.substr(tabPos + 1);
-							// Add to byte sample set only
-							KeyValueRef kv{ StringRef(key), StringRef(value) };
-							data->byteSampleApplySet(kv, invalidVersion);
-						}
-					} catch (Error& e) {
-						TraceEvent(SevWarn, "StorageServerSampleFileProcessingError", data->thisServerID)
-						    .detail("Error", e.what())
-						    .detail("Line", line)
-						    .detail("File", sampleFilePath);
-						// Continue processing other lines
+			state std::string sampleFilePath = fileSet.getBytesSampleFileFullPath();
+			state int retryCount = 0;
+			state int maxRetries = 10;
+			state Error lastError;
+
+			while (retryCount < maxRetries) {
+				try {
+					// First read all samples into memory
+					state std::vector<KeyValueRef> samples;
+					state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
+					reader->open(abspath(sampleFilePath));
+
+					while (reader->hasNext()) {
+						KeyValue kv = reader->next();
+						samples.emplace_back(kv.key, kv.value);
 					}
+
+					// Now apply all samples in a batch
+					for (const auto& kv : samples) {
+						data->byteSampleApplySet(kv, invalidVersion);
+					}
+
+					// If we get here, processing was successful
+					break;
+				} catch (Error& e) {
+					lastError = e;
+					retryCount++;
+					TraceEvent(retryCount < maxRetries ? SevWarn : SevError,
+					           "StorageServerSampleFileProcessingError",
+					           data->thisServerID)
+					    .detail("Error", e.what())
+					    .detail("File", sampleFilePath)
+					    .detail("RetryCount", retryCount)
+					    .detail("MaxRetries", maxRetries);
+
+					if (retryCount < maxRetries) {
+						// Wait before retrying, with exponential backoff
+						wait(delay(0.1 * pow(2, retryCount)));
+						continue;
+					}
+					// On final retry, throw the last error we encountered
+					throw lastError;
 				}
-				sampleFile.close();
-			} else {
-				TraceEvent(SevWarn, "StorageServerSampleFileOpenError", data->thisServerID)
-				    .detail("File", sampleFilePath)
-				    .detail("Error", "Failed to open sample file");
 			}
 		}
+		++iter;
 	}
+	return Void();
 }
 
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
@@ -9188,10 +9207,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
 						ASSERT(keys.contains(range));
 					}
+					// Clear the key range before ingestion. This mirrors the replaceRange done in the case were we do
+					// not ingest SST files.
+					data->storage.getKeyValueStore()->clear(keys);
 					wait(data->storage.getKeyValueStore()->ingestSSTFiles(bulkLoadLocalDir, localBulkLoadFileSets));
 
 					// Process sample files after SST ingestion
-					processSampleFiles(data, bulkLoadLocalDir, localBulkLoadFileSets);
+					wait(processSampleFiles(data, bulkLoadLocalDir, localBulkLoadFileSets));
 
 					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!

@@ -1413,4 +1413,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	}
 
 	init(BULK_LOAD_USE_SST_INGEST, true); // Enable SST ingestion by default
+	if (isSimulated) {
+		BULK_LOAD_USE_SST_INGEST = deterministicRandom()->coinflip();
+	}
 }
