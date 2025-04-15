@@ -147,9 +147,8 @@ public:
 		    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file,
 		    enable_read_cache, read_block_size, read_ahead_blocks, read_cache_blocks_per_file,
 		    max_send_bytes_per_second, max_recv_bytes_per_second, sdk_auth, enable_object_integrity_check,
-		    global_connection_pool, max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms;
 		    global_connection_pool, max_delay_retryable_error, max_delay_connection_failed, bypass_simulation,
-        multipart_retry_delay_ms;
+		    multipart_retry_delay_ms;
 
 		bool set(StringRef name, int value);
 		std::string getURLParameters() const;
@@ -224,14 +223,15 @@ public:
 	    useProxy(proxyHost.present() && proxyPort.present()), credentials(creds),
 	    lookupKey(creds.present() && creds.get().key.empty()),
 	    lookupSecret(creds.present() && creds.get().secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
-	    requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
-	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
-	    requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
-	    requestRateRead(new SpeedLimit(knobs.read_requests_per_second, 1)),
-	    requestRateDelete(new SpeedLimit(knobs.delete_requests_per_second, 1)),
-	    sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
-	    recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)), concurrentRequests(knobs.concurrent_requests),
-	    concurrentUploads(knobs.concurrent_uploads), concurrentLists(knobs.concurrent_lists) {
+	    requestRate(makeReference<SpeedLimit>(knobs.requests_per_second, 1)),
+	    requestRateList(makeReference<SpeedLimit>(knobs.list_requests_per_second, 1)),
+	    requestRateWrite(makeReference<SpeedLimit>(knobs.write_requests_per_second, 1)),
+	    requestRateRead(makeReference<SpeedLimit>(knobs.read_requests_per_second, 1)),
+	    requestRateDelete(makeReference<SpeedLimit>(knobs.delete_requests_per_second, 1)),
+	    sendRate(makeReference<SpeedLimit>(knobs.max_send_bytes_per_second, 1)),
+	    recvRate(makeReference<SpeedLimit>(knobs.max_recv_bytes_per_second, 1)),
+	    concurrentRequests(knobs.concurrent_requests), concurrentUploads(knobs.concurrent_uploads),
+	    concurrentLists(knobs.concurrent_lists) {
 
 		if (host.empty() || (proxyHost.present() != proxyPort.present()))
 			throw connection_string_invalid();
