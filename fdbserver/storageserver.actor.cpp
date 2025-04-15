@@ -9191,7 +9191,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					wait(data->storage.getKeyValueStore()->ingestSSTFiles(bulkLoadLocalDir, localBulkLoadFileSets));
 
 					// Process sample files after SST ingestion
-					data->processSampleFiles(bulkLoadLocalDir, localBulkLoadFileSets);
+					processSampleFiles(data, bulkLoadLocalDir, localBulkLoadFileSets);
 
 					// NOTICE: We break the loop here if we successfully ingest the SST files.
 					break;
@@ -9206,7 +9206,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 			state Key blockBegin = keys.begin;
 
-			wait(hold); // Wait for tryGetRange or tryGetRangeFromBlob or tryGetRangeForBulkLoad.
 			try {
 				loop {
 					CODE_PROBE(true, "Fetching keys for transferred shard");
