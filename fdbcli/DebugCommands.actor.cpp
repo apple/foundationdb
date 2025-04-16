@@ -83,7 +83,7 @@ ACTOR Future<bool> getKeyServers(
 			when(ErrorOr<GetKeyServerLocationsReply> shards = wait(keyServerLocationFuture)) {
 				// Get the list of shards if one was returned.
 				if (shards.present() && !keyServersInsertedForThisIteration) {
-					std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> resultPerShard;
+					std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> shardResultList;
 					for (auto& result : shards.get().results) {
 						std::vector<StorageServerInterface> servers;
 						for (auto& server : result.second) {
@@ -94,9 +94,9 @@ ACTOR Future<bool> getKeyServers(
 							}
 							servers.push_back(server);
 						}
-						resultPerShard.push_back({ result.first, servers });
+						shardResultList.push_back({ result.first, servers });
 					}
-					keyServers.insert(keyServers.end(), resultPerShard.begin(), resultPerShard.end());
+					keyServers.insert(keyServers.end(), shardResultList.begin(), shardResultList.end());
 					keyServersInsertedForThisIteration = true;
 					begin = shards.get().results.back().first.end;
 					break;
@@ -472,6 +472,7 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 		    "Check inconsistency of the input range by comparing all replicas and print any corruptions.\n"
 		    "The default behavior is to stop on the first subrange where corruption is found\n"
 		    "DCID is optional. If set, the tool only check storage server of the specified data center.\n"
+		    "DCID is ignored if the cluster has not set dcid.\n"
 		    "`all` is optional. When `all` is appended, the checker does not stop until all subranges have checked.\n"
 		    "Note this is intended to check a small range of keys, not the entire database (consider consistencycheck "
 		    "for that purpose).\n");
