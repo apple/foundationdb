@@ -8930,40 +8930,13 @@ ACTOR static Future<Void> processSampleFiles(StorageServer* data,
 					// Now apply all read samples to the in-memory set and update metrics
 					for (const auto& kv : rawSamples) {
 						const KeyRef& key = kv.key;
-						const ValueRef& encodedSizeValue = kv.value; // Keep the original encoded value
-						int64_t decoded_size = -1; // Initialize to invalid size
-
-						try {
-							// Decode the size for metrics and logging
-							decoded_size = BinaryReader::fromStringRef<int64_t>(encodedSizeValue, Unversioned());
-
-							// Use the operator() overload, passing the original KeyValueRef
-							// This uses the key and the *encoded* size value, as expected by the operator()
-							data->byteSampleApplySet(kv, invalidVersion);
-
-							// Update metrics using the original key and *decoded* size
-							if (decoded_size >= 0) {
-								data->metrics.byteSample.sample.insert(key, decoded_size);
-								data->metrics.notifyBytes(key, decoded_size);
-							} else {
-								// Log if size decoding failed but we still applied via operator()
-								TraceEvent(SevWarn, "StorageServerSampleAppliedWithInvalidSize", data->thisServerID)
-								    .detail("File", sampleFilePath)
-								    .detail("Key", key);
-							}
-
-						} catch (Error& e) {
-							// Handle potential decoding errors for metrics/logging, but operator() was already called
-							TraceEvent(SevWarn, "StorageServerSampleDecodingErrorPostApply", data->thisServerID)
-							    .error(e)
-							    .detail("File", sampleFilePath);
-							// Decide if you need to do anything else if decoding fails *after* applying
-						}
+						int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
+						data->metrics.byteSample.sample.insert(key, size);
+						data->metrics.notifyBytes(key, size);
+						data->addMutationToMutationLogOrStorage(
+						    invalidVersion,
+						    MutationRef(MutationRef::SetValue, key.withPrefix(persistByteSampleKeys.begin), kv.value));
 					}
-
-					TraceEvent(SevInfo, "StorageServerSampleFileProcessed", data->thisServerID)
-					    .detail("File", sampleFilePath)
-					    .detail("SamplesLoaded", rawSamples.size());
 
 					// If we get here, processing was successful for this file
 					break; // Exit the retry loop
