@@ -86,7 +86,7 @@ TEST_CASE("/fdbrpc/grpc/actor_basic_stream_server") {
 	try {
 		EchoRequest request;
 		request.set_message("Ping!");
-		state FutureStream<EchoResponse> stream = client.call(&TestEchoService::Stub::EchoRecvStream10, request);
+		state ThreadFutureStream<EchoResponse> stream = client.call(&TestEchoService::Stub::EchoRecvStream10, request);
 		while (true) {
 			EchoResponse response = waitNext(stream);
 			ASSERT_EQ(response.message(), "Echo: Ping!");
