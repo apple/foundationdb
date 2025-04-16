@@ -8905,51 +8905,95 @@ ACTOR static Future<Void> processSampleFiles(StorageServer* data,
 		if (fileSet.hasByteSampleFile()) {
 			state std::string sampleFilePath = fileSet.getBytesSampleFileFullPath();
 			state int retryCount = 0;
-			state int maxRetries = 10;
+			state int maxRetries = 10; // Consider making this a KNOB
 			state Error lastError;
 
+			// This outer loop retries reading the entire file if errors occur during opening/reading
 			while (retryCount < maxRetries) {
 				try {
-					// First read all samples into memory
-					state std::vector<KeyValueRef> samples;
+					// Read all samples from the SST file into memory first
+					// Store as KeyValueRef to keep the original encoded size value
+					state std::vector<KeyValueRef> rawSamples;
 					state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
 					reader->open(abspath(sampleFilePath));
 
+					TraceEvent(SevInfo, "StorageServerProcessingSampleFile", data->thisServerID)
+					    .detail("File", sampleFilePath);
+
+					// Read all samples
 					while (reader->hasNext()) {
 						KeyValue kv = reader->next();
-						samples.emplace_back(kv.key, kv.value);
+						// Store the raw KeyValueRef
+						rawSamples.push_back(KeyValueRef(kv.key, kv.value));
 					}
 
-					// Now apply all samples in a batch
-					for (const auto& kv : samples) {
-						data->byteSampleApplySet(kv, invalidVersion);
+					// Now apply all read samples to the in-memory set and update metrics
+					for (const auto& kv : rawSamples) {
+						const KeyRef& key = kv.key;
+						const ValueRef& encodedSizeValue = kv.value; // Keep the original encoded value
+						int64_t decoded_size = -1; // Initialize to invalid size
+
+						try {
+							// Decode the size for metrics and logging
+							decoded_size = BinaryReader::fromStringRef<int64_t>(encodedSizeValue, Unversioned());
+
+							// Use the operator() overload, passing the original KeyValueRef
+							// This uses the key and the *encoded* size value, as expected by the operator()
+							data->byteSampleApplySet(kv, invalidVersion);
+
+							// Update metrics using the original key and *decoded* size
+							if (decoded_size >= 0) {
+								data->metrics.byteSample.sample.insert(key, decoded_size);
+								data->metrics.notifyBytes(key, decoded_size);
+							} else {
+								// Log if size decoding failed but we still applied via operator()
+								TraceEvent(SevWarn, "StorageServerSampleAppliedWithInvalidSize", data->thisServerID)
+								    .detail("File", sampleFilePath)
+								    .detail("Key", key);
+							}
+
+						} catch (Error& e) {
+							// Handle potential decoding errors for metrics/logging, but operator() was already called
+							TraceEvent(SevWarn, "StorageServerSampleDecodingErrorPostApply", data->thisServerID)
+							    .error(e)
+							    .detail("File", sampleFilePath);
+							// Decide if you need to do anything else if decoding fails *after* applying
+						}
 					}
 
-					// If we get here, processing was successful
-					break;
+					TraceEvent(SevInfo, "StorageServerSampleFileProcessed", data->thisServerID)
+					    .detail("File", sampleFilePath)
+					    .detail("SamplesLoaded", rawSamples.size());
+
+					// If we get here, processing was successful for this file
+					break; // Exit the retry loop
+
 				} catch (Error& e) {
 					lastError = e;
 					retryCount++;
 					TraceEvent(retryCount < maxRetries ? SevWarn : SevError,
 					           "StorageServerSampleFileProcessingError",
 					           data->thisServerID)
-					    .detail("Error", e.what())
+					    .error(e) // Log the actual error 'e'
 					    .detail("File", sampleFilePath)
+					    // REMOVED: .detail("Key", kv.key).detail("Value", kv.value) as 'kv' is out of scope
 					    .detail("RetryCount", retryCount)
 					    .detail("MaxRetries", maxRetries);
 
+					// No need to check/close reader here, unique_ptr handles it.
+
 					if (retryCount < maxRetries) {
 						// Wait before retrying, with exponential backoff
-						wait(delay(0.1 * pow(2, retryCount)));
-						continue;
+						wait(delay(0.1 * pow(2, retryCount))); // Consider adding jitter
+						continue; // Retry reading the file
 					}
-					// On final retry, throw the last error we encountered
+					// On final retry failure, throw the last error encountered
 					throw lastError;
 				}
-			}
+			} // end retry loop
 		}
 		++iter;
-	}
+	} // end file iteration loop
 	return Void();
 }
 
