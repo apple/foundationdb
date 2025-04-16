@@ -25,6 +25,7 @@
 #include <string_view>
 
 #include "flow/flow.h"
+#include "flow/FlowThread.h"
 
 // The IThreadPool interface represents a thread pool suitable for doing blocking disk-intensive work
 // (as opposed to a one-thread-per-core pool for CPU-intensive work)
@@ -123,42 +124,6 @@ public:
 
 private:
 	Promise<T> promise;
-};
-
-template <class T>
-class ThreadReturnPromiseStream : NonCopyable {
-public:
-	ThreadReturnPromiseStream() {}
-	ThreadReturnPromiseStream(const ThreadReturnPromiseStream& p) = delete;
-	ThreadReturnPromiseStream(ThreadReturnPromiseStream&& other) : promiseStream(std::move(other.promiseStream)) {}
-
-	~ThreadReturnPromiseStream() {}
-
-	FutureStream<T> getFuture() { // Call only on the originating thread!
-		return promiseStream.getFuture();
-	}
-
-	void send(T const& t) { // Can be called safely from another thread.
-		Promise<Void> signal;
-		tagAndForward(&promiseStream, t, signal.getFuture());
-		g_network->onMainThread(std::move(signal),
-		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
-		                                                    : TaskPriority::DefaultOnMainThread);
-	}
-
-	void sendError(Error const& e) { // Can be called safely from another thread.
-		Promise<Void> signal;
-		tagAndForwardError(&promiseStream, e, signal.getFuture());
-		g_network->onMainThread(std::move(signal),
-		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
-		                                                    : TaskPriority::DefaultOnMainThread);
-	}
-
-	int getFutureReferenceCount() const { return promiseStream.getFutureReferenceCount(); }
-	int getPromiseReferenceCount() const { return promiseStream.getPromiseReferenceCount(); }
-
-private:
-	PromiseStream<T> promiseStream;
 };
 
 Reference<IThreadPool> createGenericThreadPool(int stackSize = 0, int pri = 10);

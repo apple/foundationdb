@@ -133,7 +133,7 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 		pool->post(a);
 	}
 
-	state FutureStream<std::string> futs = notifications->getFuture();
+	state ThreadFutureStream<std::string> futs = notifications->getFuture();
 
 	state int n = 0;
 	while (n < num) {
