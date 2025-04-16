@@ -2504,6 +2504,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
+		if (sstFiles.empty()) {
+			TraceEvent(SevInfo, "RocksDBIngestSSTFilesNoFiles", id);
+			return Void(); // Nothing to ingest
+		}
+
 		// Configure ingestion options
 		rocksdb::IngestExternalFileOptions options;
 		options.move_files = true;
