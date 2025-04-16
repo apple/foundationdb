@@ -46,7 +46,7 @@ Populate some data::
 
 Check if the bulkdump folder cited above has been created and populated. It should look something like this::
 
-  find /tmp/bulkload/
+  find /tmp/bulkload/de6b2ae7197cef28cac38d7ad7a6d3e7
   .
   |____3cdf8d1534e3077f0a9d3ebd5aaa4df0
   | |____0
