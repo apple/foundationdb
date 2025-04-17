@@ -304,7 +304,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                Reference<KeyRangeMap<Version>> key_version,
                                                Database cx,
                                                std::map<int64_t, TenantName>* tenantMap,
-                                               bool provisionalProxy) {
+                                               bool provisionalProxy,
+                                               std::shared_ptr<DatabaseConfiguration> dbConfig) {
 	try {
 		state uint64_t offset(0);
 		uint64_t protocolVersion = 0;
@@ -333,7 +334,6 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 		}
 
 		state int originalOffset = offset;
-		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		state KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
 
 		while (consumed < totalBytes) {
@@ -357,15 +357,15 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			logValue.param2 = value.substr(offset, len2);
 			offset += len2;
 			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
-			ASSERT(!config.encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());
+			ASSERT(!dbConfig->encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());
 
 			// Check for valid tenant in required tenant mode. If the tenant does not exist in our tenant map then
 			// we EXCLUDE the mutation (of that respective tenant) during the restore. NOTE: This simply allows a
 			// restore to make progress in the event of tenant deletion, but tenant deletion should be considered
 			// carefully so that we do not run into this case. We do this check here so if encrypted mutations are not
 			// found in the tenant map then we exit early without needing to reach out to the EKP.
-			if (config.tenantMode == TenantMode::REQUIRED &&
-			    config.encryptionAtRestMode.mode != EncryptionAtRestMode::CLUSTER_AWARE &&
+			if (dbConfig->tenantMode == TenantMode::REQUIRED &&
+			    dbConfig->encryptionAtRestMode.mode != EncryptionAtRestMode::CLUSTER_AWARE &&
 			    !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
 				consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 				continue;
@@ -406,8 +406,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			ASSERT(!logValue.isEncrypted());
 
 			// If the mutation was encrypted using cluster aware encryption then check after decryption
-			if (config.tenantMode == TenantMode::REQUIRED &&
-			    config.encryptionAtRestMode.mode == EncryptionAtRestMode::CLUSTER_AWARE &&
+			if (dbConfig->tenantMode == TenantMode::REQUIRED &&
+			    dbConfig->encryptionAtRestMode.mode == EncryptionAtRestMode::CLUSTER_AWARE &&
 			    !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
 				consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 				continue;
@@ -773,7 +773,8 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
                                               FlowLock* commitLock,
                                               Reference<KeyRangeMap<Version>> keyVersion,
                                               std::map<int64_t, TenantName>* tenantMap,
-                                              bool provisionalProxy) {
+                                              bool provisionalProxy,
+                                              std::shared_ptr<DatabaseConfiguration> dbConfig) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
 	state int totalBytes = 0;
@@ -808,7 +809,8 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				                          keyVersion,
 				                          cx,
 				                          tenantMap,
-				                          provisionalProxy));
+				                          provisionalProxy,
+				                          dbConfig));
 
 				// A single call to decodeBackupLogValue (above) will only parse mutations from a single transaction,
 				// however in the code below we batch the results across several calls to decodeBackupLogValue and send
@@ -936,10 +938,13 @@ ACTOR Future<Void> applyMutations(Database cx,
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
 	state int maxBytes = CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES;
+	state std::shared_ptr<DatabaseConfiguration> dbConfig = std::make_shared<DatabaseConfiguration>();
 
 	keyVersion->insert(metadataVersionKey, 0);
 
 	try {
+		wait(store(*dbConfig, getDatabaseConfiguration(cx)));
+
 		loop {
 			if (beginVersion >= *endVersion) {
 				// Why do we need to take a lock here?
@@ -983,7 +988,8 @@ ACTOR Future<Void> applyMutations(Database cx,
 				                                     &commitLock,
 				                                     keyVersion,
 				                                     tenantMap,
-				                                     provisionalProxy));
+				                                     provisionalProxy,
+				                                     dbConfig));
 				maxBytes = std::max<int>(CLIENT_KNOBS->APPLY_MAX_INCREASE_FACTOR * bytes, maxBytes);
 				if (error.isError())
 					throw error.getError();
