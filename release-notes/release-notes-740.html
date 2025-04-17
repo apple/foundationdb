@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Release Notes &#8212; FoundationDB ON documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Release Notes" href="release-notes-730.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="../_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="../index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="../contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="../index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#id1">7.4.0</a><ul>
+<li><a class="reference internal" href="#features-supported">Features (Supported)</a></li>
+<li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
+<li><a class="reference internal" href="#performance">Performance</a></li>
+<li><a class="reference internal" href="#fixes">Fixes</a></li>
+<li><a class="reference internal" href="#status">Status</a></li>
+<li><a class="reference internal" href="#bindings">Bindings</a></li>
+<li><a class="reference internal" href="#other-changes">Other Changes</a></li>
+<li><a class="reference internal" href="#dependencies">Dependencies</a></li>
+<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="release-notes-730.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="../search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#id1">7.4.0</a><ul>
+<li><a class="reference internal" href="#features-supported">Features (Supported)</a></li>
+<li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
+<li><a class="reference internal" href="#performance">Performance</a></li>
+<li><a class="reference internal" href="#fixes">Fixes</a></li>
+<li><a class="reference internal" href="#status">Status</a></li>
+<li><a class="reference internal" href="#bindings">Bindings</a></li>
+<li><a class="reference internal" href="#other-changes">Other Changes</a></li>
+<li><a class="reference internal" href="#dependencies">Dependencies</a></li>
+<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="release-notes">
+<h1>Release Notes</h1>
+<section id="id1">
+<h2>7.4.0</h2>
+<section id="features-supported">
+<h3>Features (Supported)</h3>
+<ul class="simple">
+<li><p>Added support to restore from new backup’s partitioned log files. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11901">(PR #11901)</a></p></li>
+<li><p>Added LRU-like cache replacement for in-memory page checksums to save memory usage. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11194">(PR #11194)</a></p></li>
+<li><p>Added gray failure features to track remote processes and allow complaints from storage servers. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11717">(PR #11717)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/11753">(PR #11753)</a></p></li>
+<li><p>Added network option to disable non-TLS connections. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9984">(PR #9984)</a></p></li>
+</ul>
+</section>
+<section id="features-experimental">
+<h3>Features (Experimental)</h3>
+<ul class="simple">
+<li><p>Added support to bulk load TBs’ snapshot of key-values from S3 to an empty cluster. <a class="reference external" href="https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/bulkload-user.rst">(Bulk Load User Guide)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/11369">(PR #11369)</a></p></li>
+<li><p>Added support to bulk dump TBs’ snapshot of key-values to S3 from an idle cluster. <a class="reference external" href="https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/bulkdump.rst">(Bulk Dump User Guide)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/11780">(PR #11780)</a></p></li>
+<li><p>Added support to upload/download to/from S3 (for bulk dump and bulk load). <a class="reference external" href="https://github.com/apple/foundationdb/pull/11899">(PR #11899)</a></p></li>
+<li><p>Added support to perform exclusive read range lock that blocks user write traffic to a specific range. <a class="reference external" href="https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/rangelock.rst">(Range Lock User Guide)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/11693">(PR #11693)</a></p></li>
+<li><p>Added multiple improvements to the version vector feature, so that commits are sent only to tlogs buddied with the storage server that will receive the mutations.</p></li>
+<li><p>Added support to compute mutation and accumulative checksums to conduct real-time detection of mutation corruptions on write path. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11255">(PR #11255)</a></p></li>
+<li><p>Added support to detect hot shards and throttle commits to them. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10970">(PR #10970)</a></p></li>
+<li><p>Added support to synthesize test data on a cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11107">(PR #11107)</a></p></li>
+<li><p>Added support to compare storage replicas on reads. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11235">(PR #11235)</a></p></li>
+<li><p>Added gRPC integration with Flow. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11782">(PR #11782)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/11892">(PR #11892)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/12023">(PR #12023)</a></p></li>
+</ul>
+</section>
+<section id="performance">
+<h3>Performance</h3>
+<ul class="simple">
+<li><p>Improved storage performance with ptree optimizations. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11435">(PR #11435)</a></p></li>
+<li><p>Added yields to backup agents to avoid slow tasks. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10878">(PR #10878)</a></p></li>
+</ul>
+</section>
+<section id="fixes">
+<h3>Fixes</h3>
+<ul class="simple">
+<li><p>Fixed a fdbmonitor issue on FreeBSD where child processes continued to run after fdbmonitor termination. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11361">(PR #11361)</a></p></li>
+<li><p>Fixed issues where backup workers missed mutations and caused assertion failures. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11908">(PR #11908)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/12026">(PR #12026)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/12046">(PR #12046)</a></p></li>
+<li><p>Fixed AuditStorage empty range read error. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12043">(PR #12043)</a></p></li>
+<li><p>Fixed an issue where failover was triggered even though remote storage servers were lagging behind. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11054">(PR #11054)</a></p></li>
+<li><p>Fixed an issue where fdbserver was not being able to join the cluster during an upgrade. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9814">(PR #9814)</a></p></li>
+<li><p>Fixed an assert in GetMappedRange that depends on the range read returning once it has at least one result. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10522">(PR #10522)</a></p></li>
+<li><p>Fixed an issue where clients connecting to coordination server were never getting a response. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10363">(PR #10363)</a></p></li>
+<li><p>Fixed an issue where describeBackup() never updated continousLogEnd property. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10488">(PR #10488)</a></p></li>
+<li><p>Fixed an issue where watch was stuck due to races. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11112">(PR #11112)</a></p></li>
+<li><p>Fixed an issue where ConnectionMonitor would incorrectly close connections. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10495">(PR #10495)</a></p></li>
+<li><p>Fixed an issue where TSS conversion can be stuck sometimes. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10711">(PR #10711)</a></p></li>
+<li><p>Fixed an issue where status timeout error on Cluster Controller was incorrectly triggering recovery. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10791">(PR #10791)</a></p></li>
+</ul>
+</section>
+<section id="status">
+<h3>Status</h3>
+<ul class="simple">
+<li><p>Added RocksDB version to status JSON. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11868">(PR #11868)</a></p></li>
+<li><p>Added support to fetch a specific group of status JSON fields. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10927">(PR #10927)</a></p></li>
+<li><p>Added gray failure excluded processes to status JSON. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11758">(PR #11758)</a></p></li>
+</ul>
+</section>
+<section id="bindings">
+<h3>Bindings</h3>
+<ul class="simple">
+<li><p>Fixed an issue where not calling Close() on the db object would result in memory leak in Go bindings. This is a breaking change since clients are now expected to close their db to avoid memory leak. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11394">(PR #11394)</a></p></li>
+<li><p>Fixed an issue causing SIGSEGV when network routine was started multiple times concurrently in Go bindings. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11104">(PR #11104)</a></p></li>
+<li><p>Fixed an issue where user’s transaction function FoundationDB error was getting reset in Go bindings. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11810">(PR #11810)</a></p></li>
+<li><p>Fixed an issue causing panic when connecting to database from multiple threads in Go bindings. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10702">(PR #10702)</a></p></li>
+<li><p>Added support to cancel snapshots and R/O transactions in Go bindings. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11614">(PR #11614)</a></p></li>
+<li><p>Added GetClientStatus method to database in Go bindings. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11627">(PR #11627)</a></p></li>
+</ul>
+</section>
+<section id="other-changes">
+<h3>Other Changes</h3>
+<ul class="simple">
+<li><p>Removed upgrade support from 6.2 and earlier TLogs and made xxhash checksum the default for TLog. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11667">(PR #11667)</a></p></li>
+<li><p>Added rate keeper logs for zones with lowest tps. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11067">(PR #11067)</a></p></li>
+<li><p>Added LOG_CONNECTION_ATTEMPTS_ENABLED and CONNECTION_LOG_DIRECTORY to log all incoming connections to an external file. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11704">(PR #11704)</a></p></li>
+<li><p>Added exclude in progress signal to fdbcli. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11569">(PR #11569)</a></p></li>
+<li><p>Added a sidecar container that refreshes S3 credentials. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11945">(PR #11945)</a></p></li>
+<li><p>Fixed an issue where storage and tlog store types were not valid as part of configure command. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10876">(PR #10876)</a></p></li>
+<li><p>Improved BytesWritten in MovingData trace event to account for non-overlapped server lists. <a class="reference external" href="https://github.com/apple/foundationdb/pull/10076">(PR #10076)</a></p></li>
+</ul>
+</section>
+<section id="dependencies">
+<h3>Dependencies</h3>
+<ul class="simple">
+<li><p>Upgraded boost to version 1.86. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11788">(PR #11788)</a></p></li>
+<li><p>Upgraded awssdk to version 1.11.473. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11853">(PR #11853)</a></p></li>
+<li><p>Upgraded RocksDB to 9.7.3. <a class="reference external" href="https://github.com/apple/foundationdb/pull/11735">(PR #11735)</a></p></li>
+<li><p>Added support for GCC 13 and Clang 19 compilers.</p></li>
+</ul>
+</section>
+<section id="earlier-release-notes">
+<h3>Earlier release notes</h3>
+<ul class="simple">
+<li><p><a class="reference internal" href="release-notes-730.html"><span class="doc">7.3 (API Version 730)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-720.html"><span class="doc">7.2 (API Version 720)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-710.html"><span class="doc">7.1 (API Version 710)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-700.html"><span class="doc">7.0 (API Version 700)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-630.html"><span class="doc">6.3 (API Version 630)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-620.html"><span class="doc">6.2 (API Version 620)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-610.html"><span class="doc">6.1 (API Version 610)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-600.html"><span class="doc">6.0 (API Version 600)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-520.html"><span class="doc">5.2 (API Version 520)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-510.html"><span class="doc">5.1 (API Version 510)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-500.html"><span class="doc">5.0 (API Version 500)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-460.html"><span class="doc">4.6 (API Version 460)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-450.html"><span class="doc">4.5 (API Version 450)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-440.html"><span class="doc">4.4 (API Version 440)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-430.html"><span class="doc">4.3 (API Version 430)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-420.html"><span class="doc">4.2 (API Version 420)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-410.html"><span class="doc">4.1 (API Version 410)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-400.html"><span class="doc">4.0 (API Version 400)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-300.html"><span class="doc">3.0 (API Version 300)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-200.html"><span class="doc">2.0 (API Version 200)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></p></li>
+<li><p><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="../_sources/release-notes/release-notes-740.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 11, 2025.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

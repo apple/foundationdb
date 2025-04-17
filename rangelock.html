@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>FoundationDB Range Locks (WiP) &#8212; FoundationDB ON documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="BulkDump (Dev)" href="bulkdump.html" />
+    <link rel="prev" title="Consistency Checker Urgent" href="consistency-check-urgent.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">FoundationDB Range Locks (WiP)</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a><ul>
+<li><a class="reference internal" href="#comparison-with-general-locking-concepts">Comparison with general locking concepts</a></li>
+<li><a class="reference internal" href="#example-use-cases">Example use cases</a></li>
+<li><a class="reference internal" href="#how-to-use">How to use?</a></li>
+<li><a class="reference internal" href="#example-usage">Example usage</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#range-lock-design-exclusive-read-lock">Range Lock Design (Exclusive Read Lock)</a><ul>
+<li><a class="reference internal" href="#support-multiple-range-lock-users">Support multiple range lock users</a></li>
+<li><a class="reference internal" href="#transaction-error-handling">Transaction error handling</a></li>
+<li><a class="reference internal" href="#compatibility">Compatibility</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="consistency-check-urgent.html" title="Previous Chapter: Consistency Checker Urgent"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Consistency C...</span>
+    </a>
+  </li>
+  <li>
+    <a href="bulkdump.html" title="Next Chapter: BulkDump (Dev)"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">BulkDump (Dev) &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">FoundationDB Range Locks (WiP)</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a><ul>
+<li><a class="reference internal" href="#comparison-with-general-locking-concepts">Comparison with general locking concepts</a></li>
+<li><a class="reference internal" href="#example-use-cases">Example use cases</a></li>
+<li><a class="reference internal" href="#how-to-use">How to use?</a></li>
+<li><a class="reference internal" href="#example-usage">Example usage</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#range-lock-design-exclusive-read-lock">Range Lock Design (Exclusive Read Lock)</a><ul>
+<li><a class="reference internal" href="#support-multiple-range-lock-users">Support multiple range lock users</a></li>
+<li><a class="reference internal" href="#transaction-error-handling">Transaction error handling</a></li>
+<li><a class="reference internal" href="#compatibility">Compatibility</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="foundationdb-range-locks-wip">
+<h1>FoundationDB Range Locks (WiP)</h1>
+<div class="line-block">
+<div class="line">Author: Zhe Wang</div>
+<div class="line">Reviewer: Jingyu Zhou</div>
+<div class="line">Audience: FDB developers, SREs and expert users.</div>
+</div>
+<section id="overview">
+<h2>Overview</h2>
+<p>Range Lock is a feature that blocks write traffic to a specific key range in FoundationDB (FDB).
+The locked range must be within the user key space, aka <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span> <span class="pre">~</span> <span class="pre">\xff</span></code>.
+If a user grabs a lock on a range, other users can read the range but cannot write to the range.
+A range can have at most one lock by one user.
+Note that the “user” here is not an user of the database, but an application or a feature that uses the range lock.
+In this document, we use “user” to represent the application or feature that uses the range lock.</p>
+<section id="comparison-with-general-locking-concepts">
+<h3>Comparison with general locking concepts</h3>
+<p>The range lock is similar to a “read lock” — when a user wants to do read, the user grabs a read lock which prevents other users
+to write to the locked data while the lock does not block any read operation from other users.
+However, the range lock is different from a “read lock”.
+Normally, the read lock is not exclusive. Multiple users can read the same range at the same time. However, in the context of FDB range lock,
+the current read lock is exclusive. A range can have at most one lock of a user.
+We will implement the non-exclusive read lock later on demand.</p>
+<p>On the other hand, there is a concept of write lock in the context of FDB range lock — If a user takes a write lock on a range,
+other users cannot do any read nor write. The write lock is exclusive, if a user takes the write lock on a range, the range must have not any other lock.
+Currently, we only implemented the read lock. The write lock is currently not implemented. we will implement the write lock later on demand.</p>
+</section>
+<section id="example-use-cases">
+<h3>Example use cases</h3>
+<p>Currently, BulkLoad feature is an example of using the range lock.
+BulkLoad is developed to load a large amount of data into a FDB range without going through the transaction system.
+As a result, BulkLoad must ensure the correctness during the data injection in the presence of user traffic.
+To achieve this, BulkLoad locks the range to prevent user traffic from writing to the database, and then loads the range data directly into storage servers.
+After the data injection is done, BulkLoad releases the lock.
+Ideally, we would use the write lock to achieve this; however, we are currently using the exclusive read lock as a temporary solution.</p>
+</section>
+<section id="how-to-use">
+<h3>How to use?</h3>
+<p>Currently, FDB provides the ManagementAPI for range locking, intended as an interface for FDB feature development.
+Before locking a range, a user must first register their identity with the database.
+Only registered users are permitted to acquire range locks.
+The following API can be used to register an identity and lock a range.</p>
+<p>Put an exclusive read lock on a range. The range must be within the user key space, aka <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span> <span class="pre">~</span> <span class="pre">\xff</span></code>.
+The locking request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.
+Currently, only the ExclusiveReadLock type is supported, but the design allows for future extension.</p>
+<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">takeExclusiveReadLockOnRange(Database</span> <span class="pre">cx,</span> <span class="pre">KeyRange</span> <span class="pre">range,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
+<p>Release an exclusive read lock on a range. The range must be within the user key space, aka <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span> <span class="pre">~</span> <span class="pre">\xff</span></code>.
+The release request is rejected with a range_lock_reject error if the range contains any existing lock with a different range, user, or lock type.</p>
+<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">releaseExclusiveReadLockOnRange(Database</span> <span class="pre">cx,</span> <span class="pre">KeyRange</span> <span class="pre">range,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
+<p>Note that takeExclusiveReadLockOnRange and releaseExclusiveReadLockOnRange are transactional.
+If the execution of the API is successful, all ranges are guaranteed to be locked/unlocked at a single version.
+If the execution is failed, no range is locked/unlocked.</p>
+<p>Get exclusive read locks on the input range</p>
+<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;std::vector&lt;std::pair&lt;KeyRange,</span> <span class="pre">RangeLockState&gt;&gt;&gt;</span> <span class="pre">findExclusiveReadLockOnRange(Database</span> <span class="pre">cx,</span> <span class="pre">KeyRange</span> <span class="pre">range);</span></code></p>
+<p>Register a range lock owner to database metadata.</p>
+<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">registerRangeLockOwner(Database</span> <span class="pre">cx,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID,</span> <span class="pre">std::string</span> <span class="pre">description);</span></code></p>
+<p>Remove an owner from the database metadata</p>
+<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">removeRangeLockOwner(Database</span> <span class="pre">cx,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
+<p>Get all registered range lock owners</p>
+<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;std::vector&lt;RangeLockOwner&gt;&gt;</span> <span class="pre">getAllRangeLockOwners(Database</span> <span class="pre">cx);</span></code></p>
+<p>Get a range lock owner by uniqueId</p>
+<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Optional&lt;RangeLockOwner&gt;&gt;</span> <span class="pre">getRangeLockOwner(Database</span> <span class="pre">cx,</span> <span class="pre">RangeLockOwnerName</span> <span class="pre">ownerUniqueID);</span></code></p>
+</section>
+<section id="example-usage">
+<h3>Example usage</h3>
+<p>When submitting a bulk load task on a range, we block user write traffic to the range.</p>
+<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">setBulkLoadSubmissionTransaction(Transaction*</span> <span class="pre">tr,</span> <span class="pre">BulkLoadTaskState</span> <span class="pre">bulkLoadTask);</span></code></p>
+<p>Upon a bulk load task completes on a range, we unblock user write traffic on the range.</p>
+<p><code class="docutils literal notranslate"><span class="pre">ACTOR</span> <span class="pre">Future&lt;Void&gt;</span> <span class="pre">setBulkLoadFinalizeTransaction(Transaction*</span> <span class="pre">tr,</span> <span class="pre">KeyRange</span> <span class="pre">range,</span> <span class="pre">UID</span> <span class="pre">taskId);</span></code></p>
+</section>
+</section>
+<section id="range-lock-design-exclusive-read-lock">
+<h2>Range Lock Design (Exclusive Read Lock)</h2>
+<p>The range lock information is persisted in <code class="docutils literal notranslate"><span class="pre">\xff/rangeLock/</span></code> system key space.
+Users specify ranges to lock in <code class="docutils literal notranslate"><span class="pre">\xff/rangeLock/</span></code> system key space via a transaction.
+The range lock can be only within user key space, aka <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span> <span class="pre">~</span> <span class="pre">\xff</span></code>.
+The value within the key space is either empty or a set of locks.
+Note that the design is specific to the exclusive read lock, however the metadata is extensible to the non-exclusive read lock and the write lock.
+If a range has a lock, the cluster will block any transaction that writes to the range.
+If the range value is empty, the cluster does not reject the traffic as the range is unlocked.</p>
+<p>The range lock API issues transactions to update the <code class="docutils literal notranslate"><span class="pre">\xff/rangeLock/</span></code> system metadata.
+When the mutation arrives at commit proxies, each commit proxy keeps an in-memory key range map of range locking status,
+and they update the maps when applying the metadata mutation.
+When following normal mutation arrives at the commit proxy, the commit proxy checks the range locking status in the in-memory map.
+If the mutation is within a locked range, the commit proxy rejects the transaction containing the mutation.
+This process happens in the phase of postResolution, where the commit proxy scans all transactions.
+In addition, the lockRange mutation is also persisted to txnStateStore. When recovery, a new commit proxy will rebuild the in-memory lockRange
+map based on the status persisted in txnStateStore.</p>
+<p>When a locking mutation arrives at a commit proxy,
+the lock takes effect on all mutations that arrive at any commit proxy after this locking mutation.
+Note that it is possible that this locking mutation is batched with other mutations with the same commit version.
+The locking mutation takes effect on all mutations after the locking mutation in the same batch.
+To achieve this, the locking transaction adds a write_conflict_range on the lock range.
+As a result, any following transactions in the batch that writes to the locked range will be marked as <code class="docutils literal notranslate"><span class="pre">Conflict</span></code>.</p>
+<section id="support-multiple-range-lock-users">
+<h3>Support multiple range lock users</h3>
+<p>To support rangeLock for multiple applications, we add ownership concept to rangeLock.
+In the context of the exclusive read lock, if a range is locked by a user using the exclusive read lock,
+the range cannot be locked by a different user until the range is unlocked by the user.
+An owner can only unlock its own rangeLock. A mutation will be rejected if it updates keys in a range that has a rangeLock with an owner.
+An owner can lock a range if and only if the owner has registered its identity (including uniqueID string and description string) to the database.
+The identity is persisted to the system metadata (<code class="docutils literal notranslate"><span class="pre">\xff/rangeLockOwner/</span></code>).</p>
+</section>
+<section id="transaction-error-handling">
+<h3>Transaction error handling</h3>
+<p>If a transaction has a mutation accessing to a locked range, the proxy will mark the transaction as rejected and reply client with transaction_rejected_range_locked error.
+Transaction.onError can automatically retry with this error code, similar to other mutation lock/throttling mechanisms.</p>
+</section>
+<section id="compatibility">
+<h3>Compatibility</h3>
+<ul class="simple">
+<li><p>Database lock: RangeLock is transparent to the database lock. When the database lock is on, the rangeLock metadata transaction with LockAware can still update the rangeLock metadata, but rangeLock does not reject any transaction.</p></li>
+<li><p>Backup and restore: RangeLock can cause losing mutations when restoring. Restoring should automatically detect the failure due to rangeLock and self-retry from a clean state.</p></li>
+<li><p>ChangeFeed: RangeLock can trigger assertion failure. The reason is unclear yet.</p></li>
+<li><p>Version vector: Version vector has a different path of updating metadata at proxies than the default one. Therefore, rangeLock temporarily is not available when the version vector is on.</p></li>
+<li><p>Encryption and tenant: Currently, RangeLock does not have a clear functionality in the context of encryption and tenant, so when the encryption and tenant are on, we disable rangeLock for the clarity.</p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/rangelock.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 11, 2025.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

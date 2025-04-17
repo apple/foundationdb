@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Audit Storage &#8212; FoundationDB ON documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Client Design" href="client-design.html" />
+    <link rel="prev" title="BulkDump (Dev)" href="bulkdump.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Audit Storage</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a><ul>
+<li><a class="reference internal" href="#key-features">Key features</a></li>
+<li><a class="reference internal" href="#how-to-use">How to use?</a></li>
+<li><a class="reference internal" href="#compared-to-consistency-checker-urgent">Compared to Consistency Checker Urgent</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#auditstorage-design">AuditStorage design</a><ul>
+<li><a class="reference internal" href="#replica-check-replica">Replica check (replica)</a></li>
+<li><a class="reference internal" href="#keyserver-and-serverkey-consistency-check-locationmetadata">KeyServer and ServerKey consistency check (locationmetadata)</a></li>
+<li><a class="reference internal" href="#serverkey-and-ss-shard-mapping-consistency-check-ssshard">ServerKey and SS shard mapping consistency check (ssshard)</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="bulkdump.html" title="Previous Chapter: BulkDump (Dev)"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; BulkDump (Dev)</span>
+    </a>
+  </li>
+  <li>
+    <a href="client-design.html" title="Next Chapter: Client Design"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Client Design &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Audit Storage</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a><ul>
+<li><a class="reference internal" href="#key-features">Key features</a></li>
+<li><a class="reference internal" href="#how-to-use">How to use?</a></li>
+<li><a class="reference internal" href="#compared-to-consistency-checker-urgent">Compared to Consistency Checker Urgent</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#auditstorage-design">AuditStorage design</a><ul>
+<li><a class="reference internal" href="#replica-check-replica">Replica check (replica)</a></li>
+<li><a class="reference internal" href="#keyserver-and-serverkey-consistency-check-locationmetadata">KeyServer and ServerKey consistency check (locationmetadata)</a></li>
+<li><a class="reference internal" href="#serverkey-and-ss-shard-mapping-consistency-check-ssshard">ServerKey and SS shard mapping consistency check (ssshard)</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="audit-storage">
+<h1>Audit Storage</h1>
+<div class="line-block">
+<div class="line">Author: Zhe Wang</div>
+<div class="line">Reviewer: Jingyu Zhou</div>
+<div class="line">Audience: FDB developers, SREs and expert users.</div>
+</div>
+<section id="overview">
+<h2>Overview</h2>
+<p>In a FoundationDB (FDB) key-value cluster, every key-value pair is replicated across multiple storage servers.
+The location of key-value pairs is decided by the data distribution system (DD).
+When DD relocates a range, DD updates the location metadata accordingly.
+The location metadata stores the ground truth of the range location. Therefore, the location metadata consistency is crucial for the correctness of the system.
+The AuditStorage tool can be used to validate the consistency of all replicas for each key-value pair. Moreover, it can also be used to validate the location metadata consistency.
+If any data inconsistency is detected, the tool generates Error trace events.</p>
+<section id="key-features">
+<h3>Key features</h3>
+<p>Detecting replica consistency and location metadata consistency are two crucial tasks for the AuditStorage tool.
+For the replica consistency check, the auditstorage has a different implementation compared to the Consistency Checker Urgent tool, which results in a faster
+checking process. We will introduce the design in the following sections.
+AuditStorage tool also checks the consistency of the location metadata.
+In particular, the tool checks if <code class="docutils literal notranslate"><span class="pre">KeyServer</span></code> and <code class="docutils literal notranslate"><span class="pre">ServerKey</span></code> are consistent: a range is assigned to a set of servers in the <code class="docutils literal notranslate"><span class="pre">KeyServer</span></code> if and only if the servers have the range in the <code class="docutils literal notranslate"><span class="pre">ServerKey</span></code>.
+The tool also checks if the <code class="docutils literal notranslate"><span class="pre">ServerKeys</span></code> are consistent to StorageServer (SS) location shard mapping.
+Note that <code class="docutils literal notranslate"><span class="pre">ServerKeys</span></code> is a part of the system key space while the SS location shard mapping is stored in the storage server locally.
+The tool checks a range is assigned to the SS in <code class="docutils literal notranslate"><span class="pre">ServerKeys</span></code> if and only if the range is owned by the SS in the local shard mapping.</p>
+<p>The AuditStorage tool has following features:</p>
+<ul class="simple">
+<li><p>End-to-end completeness check — The checker continues until all ranges are marked as complete. AuditStorage persists progress to the system metadata. “<code class="docutils literal notranslate"><span class="pre">\xff/auditRanges/</span> <span class="pre">~</span> <span class="pre">\xff/auditRanges0</span></code>” is for replica and locationmetadata checking, and “<code class="docutils literal notranslate"><span class="pre">\xff/auditServers/</span> <span class="pre">~</span> <span class="pre">\xff/auditServers0</span></code>” is for ssshard checking. This is a major difference from the Consistency Checker Urgent tool.</p></li>
+<li><p>Scalability — Adding more parallelism results in nearly linear speedup. This is controlled by the knob <code class="docutils literal notranslate"><span class="pre">CONCURRENT_AUDIT_TASK_COUNT_MAX</span></code>.</p></li>
+<li><p>Progress monitoring — Providing FDBCLI command to check the progress of the checking.</p></li>
+<li><p>Fault tolerance — Failures do not impact the checker process. Checking failures are automatically retried.</p></li>
+<li><p>Simple to setup — Different from the Consistency Checker Urgent tool, the AuditStorage tool uses DD and SSes to conduct checking. Therefore, a cluster can run the AuditStorage tool without any additional setup.</p></li>
+</ul>
+</section>
+<section id="how-to-use">
+<h3>How to use?</h3>
+<p>Start new audit job</p>
+<p><code class="docutils literal notranslate"><span class="pre">audit_storage</span> <span class="pre">[replica\|locationmetadata\|ssshard]</span> <span class="pre">[BeginKey]</span> <span class="pre">[EndKey]</span></code></p>
+<p>For example, to check all replicas, we can run <code class="docutils literal notranslate"><span class="pre">audit_storage</span> <span class="pre">replica</span> <span class="pre">&quot;&quot;</span> <span class="pre">\xff\xff</span></code>.</p>
+<p>List recent jobs</p>
+<p><code class="docutils literal notranslate"><span class="pre">get_audit_status</span> <span class="pre">[replica\|locationmetadata\|ssshard]</span> <span class="pre">recent</span></code></p>
+<p>Check a job progress</p>
+<p><code class="docutils literal notranslate"><span class="pre">get_audit_status</span> <span class="pre">[replica\|locationmetadata\|ssshard]</span> <span class="pre">progress</span> <span class="pre">[AuditID]</span></code></p>
+<p>Cancel an audit</p>
+<p><code class="docutils literal notranslate"><span class="pre">audit_storage</span> <span class="pre">cancel</span> <span class="pre">[replica\|locationmetadata\|ssshard]</span> <span class="pre">[AuditID]</span></code></p>
+<p>There three auditTypes:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">replica</span></code>: This audit checks the consistency of user data between replicas of all DCs. <code class="docutils literal notranslate"><span class="pre">SSAuditStorageShardReplicaError</span></code> trace event is generated if any inconsistency is detected.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">locationmetadata</span></code>: This audit checks the consistency between <code class="docutils literal notranslate"><span class="pre">KeyServer</span></code> and <code class="docutils literal notranslate"><span class="pre">ServerKey</span></code> space. <code class="docutils literal notranslate"><span class="pre">DDDoAuditLocationMetadataError</span></code> trace event is generated if any inconsistency is detected.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ssshard</span></code>: This audit checks the consistency between <code class="docutils literal notranslate"><span class="pre">KeyServer</span></code> and storage server in-memory shard information. <code class="docutils literal notranslate"><span class="pre">SSAuditStorageSsShardError</span></code> trace event is generated if any inconsistency is detected.</p></li>
+</ol>
+<p><code class="docutils literal notranslate"><span class="pre">BeginKey</span></code> and <code class="docutils literal notranslate"><span class="pre">EndKey</span></code> decide the scope of the consistency check of user data (replica). Note that the <code class="docutils literal notranslate"><span class="pre">locationmetadata</span></code> and <code class="docutils literal notranslate"><span class="pre">ssshard</span></code> always check the consistency on all key space no matter the user input.</p>
+</section>
+<section id="compared-to-consistency-checker-urgent">
+<h3>Compared to Consistency Checker Urgent</h3>
+<p>AuditStorage offers significant improvements over the existing consistency checker urgent in several key areas:</p>
+<ul class="simple">
+<li><p>ConsistencyCheckerUrgent is not efficient because it does not persist progress to the database. On the other hand, AuditStorage persists progress to the metadata stored in the database. As a result, the AuditStorage tool improves the efficiency by avoiding doing repeated work.</p></li>
+<li><p>ConsistencyCheckerUrgent does not support location metadata consistency check. AuditStorage supports location metadata consistency check.</p></li>
+<li><p>ConsistencyCheckerUrgent does not provide fdbcli tools for job submit and progress check. AuditStorage provides fdbcli tools for job submit and progress check.</p></li>
+</ul>
+</section>
+</section>
+<section id="auditstorage-design">
+<h2>AuditStorage design</h2>
+<p>The AuditStorage system conducts consistency checks in a distributed, client-server manner.
+In the system, DD serves as a centralized leader to monitor the progress and dispatch tasks.
+SSes are agents to performa actual checking. The checking progress is shared between DD and SSes on system metadata.
+When a SS completes a range, the SS marks the range as completed in the metadata using a transaction.
+Then, the DD will know this range has been completed and does not schedule task to check this range again.</p>
+<section id="replica-check-replica">
+<h3>Replica check (replica)</h3>
+<p>The AuditStorage tool checks the consistency of all replicas for each key-value pair.
+Given a job range, DD partitions the job range in the unit of shards. DD randomly chooses a storage server from the set of shard owner to conduct the check.
+This mechanism implicitly balances the workload among storage servers because the shard is stored among storage servers in a balanced way.</p>
+</section>
+<section id="keyserver-and-serverkey-consistency-check-locationmetadata">
+<h3>KeyServer and ServerKey consistency check (locationmetadata)</h3>
+<p>The AuditStorage tool checks the consistency between KeyServer and ServerKey.
+This job is conduct by DD only since the workload is small. It only needs to read all KeyServer and ServerKey metadata.</p>
+</section>
+<section id="serverkey-and-ss-shard-mapping-consistency-check-ssshard">
+<h3>ServerKey and SS shard mapping consistency check (ssshard)</h3>
+<p>The AuditStorage tool checks the consistency between ServerKey and SS local shard mapping.
+In this job, the tool needs to check each storage server to see each SS has the shard mapping consistent with ServerKey.
+For each SS, DD partitions the job range in the unit of shards. Given a shard, DD requests the SS to check the consistency between the shard mapping and the ServerKey.
+The SS reads the shard mapping and compares it with the ServerKey.</p>
+</section>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/auditstorage.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 11, 2025.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Consistency Scan &#8212; FoundationDB ON documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Consistency Scan</a><ul>
+<li><a class="reference internal" href="#summary">Summary</a></li>
+<li><a class="reference internal" href="#configuration">Configuration</a><ul>
+<li><a class="reference internal" href="#example-commands">Example commands</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#monitor">Monitor</a><ul>
+<li><a class="reference internal" href="#trace-events">Trace Events</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Consistency Scan</a><ul>
+<li><a class="reference internal" href="#summary">Summary</a></li>
+<li><a class="reference internal" href="#configuration">Configuration</a><ul>
+<li><a class="reference internal" href="#example-commands">Example commands</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#monitor">Monitor</a><ul>
+<li><a class="reference internal" href="#trace-events">Trace Events</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="consistency-scan">
+<span id="id1"></span><h1>Consistency Scan</h1>
+<p>This document covers the concept and usage of the consistency scan feature.</p>
+<section id="summary">
+<span id="consistency-scan-introduction"></span><h2>Summary</h2>
+<blockquote>
+<div><p>The consistency scan reads all replicas of each shard to verify data consistency at a configured rate.  It is useful for finding corrupt cold data by ensuring that all data is read periodically.  Any errors found will be logged as TraceEvents with Severity = 40.</p>
+</div></blockquote>
+</section>
+<section id="configuration">
+<h2>Configuration</h2>
+<p>You can configure the Consistency Scan via the FDB <a class="reference internal" href="command-line-interface.html#command-line-interface"><span class="std std-ref">command line interface</span></a> using the <code class="docutils literal notranslate"><span class="pre">consistencyscan</span></code> command.</p>
+<section id="example-commands">
+<h3>Example commands</h3>
+<p>Enable consistency scan to scan the cluster once every 28 days with a maximum speed of 5MB/s: <code class="docutils literal notranslate"><span class="pre">consistencyscan</span> <span class="pre">on</span> <span class="pre">maxRate</span> <span class="pre">5000000</span> <span class="pre">targetInterval</span> <span class="pre">2419200</span></code>.</p>
+<p>Disable consistency scan on the cluster: <code class="docutils literal notranslate"><span class="pre">consistencyscan</span> <span class="pre">off</span></code>.</p>
+<p>View the current stats for the consistency scan: <code class="docutils literal notranslate"><span class="pre">consistencyscan</span> <span class="pre">stats</span></code>.</p>
+</section>
+</section>
+<section id="monitor">
+<h2>Monitor</h2>
+<p>The consistency scan role publishes its configuration and metrics in Status JSON under the path <code class="docutils literal notranslate"><span class="pre">.cluster.consistency_scan</span></code>.</p>
+<section id="trace-events">
+<h3>Trace Events</h3>
+<p><code class="docutils literal notranslate"><span class="pre">ConsistencyScanMetrics</span></code> show the over-time stats of the consistency scan’s behavior, including bytes scanned, error counts, inconsistencies found, etc…</p>
+</section>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/consistency-scan.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 11, 2025.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

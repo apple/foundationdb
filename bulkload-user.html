@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>BulkLoad User Guide &#8212; FoundationDB ON documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Monitored Metrics" href="monitored-metrics.html" />
+    <link rel="prev" title="Authorization" href="authorization.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">BulkLoad User Guide</a><ul>
+<li><a class="reference internal" href="#id1">BulkDump</a></li>
+<li><a class="reference internal" href="#bulkload">BulkLoad</a></li>
+<li><a class="reference internal" href="#bulkdump-bulkload-and-s3">BulkDump/BulkLoad and S3</a></li>
+<li><a class="reference internal" href="#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="authorization.html" title="Previous Chapter: Authorization"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Authorization</span>
+    </a>
+  </li>
+  <li>
+    <a href="monitored-metrics.html" title="Next Chapter: Monitored Metrics"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Monitored Metrics &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">BulkLoad User Guide</a><ul>
+<li><a class="reference internal" href="#id1">BulkDump</a></li>
+<li><a class="reference internal" href="#bulkload">BulkLoad</a></li>
+<li><a class="reference internal" href="#bulkdump-bulkload-and-s3">BulkDump/BulkLoad and S3</a></li>
+<li><a class="reference internal" href="#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="bulkload-user-guide">
+<h1>BulkLoad User Guide</h1>
+<div class="toctree-wrapper compound">
+</div>
+<p id="bulkdump">Below we describe the <strong class="command">BulkDump</strong> and <strong class="command">BulkLoad</strong> ‘fdbcli’ commands and basic troubleshooting tips bulkloading.</p>
+<section id="id1">
+<h2>BulkDump</h2>
+<p>Type <strong class="command">help bulkdump</strong> on the <strong class="command">fdbcli</strong> command-line to see the <strong class="command">bulkdump</strong> usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">help</span> <span class="n">bulkdump</span>
+
+<span class="n">bulkdump</span> <span class="p">[</span><span class="n">mode</span><span class="o">|</span><span class="n">dump</span><span class="o">|</span><span class="n">status</span><span class="o">|</span><span class="n">cancel</span><span class="p">]</span> <span class="p">[</span><span class="n">ARGs</span><span class="p">]</span>
+
+<span class="n">Bulkdump</span> <span class="n">commands</span><span class="o">.</span>
+
+<span class="n">To</span> <span class="nb">set</span> <span class="n">bulkdump</span> <span class="n">mode</span><span class="p">:</span> <span class="n">bulkdump</span> <span class="n">mode</span> <span class="p">[</span><span class="n">on</span><span class="o">|</span><span class="n">off</span><span class="p">]</span>
+<span class="n">To</span> <span class="n">dump</span> <span class="n">a</span> <span class="nb">range</span> <span class="n">of</span> <span class="n">key</span><span class="o">/</span><span class="n">values</span><span class="p">:</span> <span class="n">bulkdump</span> <span class="n">dump</span> <span class="o">&lt;</span><span class="n">BEGINKEY</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">ENDKEY</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">DIR</span><span class="o">&gt;</span>
+ <span class="n">where</span> <span class="o">&lt;</span><span class="n">BEGINKEY</span><span class="o">&gt;</span> <span class="n">to</span> <span class="o">&lt;</span><span class="n">ENDKEY</span><span class="o">&gt;</span> <span class="n">denotes</span> <span class="n">the</span> <span class="n">key</span><span class="o">/</span><span class="n">value</span> <span class="nb">range</span> <span class="ow">and</span> <span class="o">&lt;</span><span class="n">DIR</span><span class="o">&gt;</span> <span class="ow">is</span>
+ <span class="n">a</span> <span class="n">local</span> <span class="n">directory</span> <span class="n">OR</span> <span class="n">blobstore</span> <span class="n">url</span> <span class="n">to</span> <span class="n">dump</span> <span class="n">SST</span> <span class="n">files</span> <span class="n">to</span><span class="o">.</span>
+<span class="n">To</span> <span class="n">get</span> <span class="n">status</span><span class="p">:</span> <span class="n">bulkdump</span> <span class="n">status</span>
+<span class="n">To</span> <span class="n">cancel</span> <span class="n">current</span> <span class="n">bulkdump</span> <span class="n">job</span><span class="p">:</span> <span class="n">bulkdump</span> <span class="n">cancel</span> <span class="o">&lt;</span><span class="n">JOBID</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p>To use the <strong class="command">BulkDump</strong> facility, you must first enable it as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">bulkdump</span> <span class="n">mode</span> <span class="n">on</span>
+</pre></div>
+</div>
+<p>To dump all of the key/values in user space to a local directory:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>   fdb&gt; bulkdump dump &quot;&quot; \xff /tmp/region
+   Received Job ID: 62d4548cf46dc0a9d06889ba3f6d1c08
+
+To monitor the status of your running :command:`BulkDump` job, type::
+
+   fdb&gt; bulkdump status
+   Running bulk dumping job: b20ce68b03a28d654ee948ca4b5d859a
+   Finished 1 tasks
+
+The :command:`status` command will return variants on the above until finally after the job completes it will print::
+
+   fdb&gt; bulkdump status
+   No bulk dumping job is running
+</pre></div>
+</div>
+<p>To cancel a running job:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>   fdb&gt; bulkdump cancel c9de5a364ecc2abb6f7a8bd890a175cf
+   Job c9de5a364ecc2abb6f7a8bd890a175cf has been cancelled. No new tasks will be spawned.
+
+Only one :command:`BulkDump` (or :command:`BulkLoad`) job can be run at a time.
+</pre></div>
+</div>
+</section>
+<section id="bulkload">
+<span id="id2"></span><h2>BulkLoad</h2>
+<p><strong class="command">BulkLoad</strong> is the inverse of <strong class="command">BulkDump</strong> but then adds a history dimension so you can see status or previous <strong class="command">BulkLoad</strong> runs.</p>
+<p>Type <strong class="command">help bulkload</strong> for usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">help</span> <span class="n">bulkload</span>
+
+<span class="n">bulkload</span> <span class="p">[</span><span class="n">mode</span><span class="o">|</span><span class="n">load</span><span class="o">|</span><span class="n">status</span><span class="o">|</span><span class="n">cancel</span><span class="o">|</span><span class="n">history</span><span class="p">]</span> <span class="p">[</span><span class="n">ARGs</span><span class="p">]</span>
+
+<span class="n">Bulkload</span> <span class="n">commands</span><span class="o">.</span>
+
+<span class="n">To</span> <span class="nb">set</span> <span class="n">bulkload</span> <span class="n">mode</span><span class="p">:</span> <span class="n">bulkload</span> <span class="n">mode</span> <span class="p">[</span><span class="n">on</span><span class="o">|</span><span class="n">off</span><span class="p">]</span>
+<span class="n">To</span> <span class="n">load</span> <span class="n">a</span> <span class="nb">range</span> <span class="n">of</span> <span class="n">key</span><span class="o">/</span><span class="n">values</span><span class="p">:</span> <span class="n">bulkload</span> <span class="n">load</span> <span class="o">&lt;</span><span class="n">JOBID</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">BEGINKEY</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">ENDKEY</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">DIR</span><span class="o">&gt;</span>
+ <span class="n">where</span> <span class="o">&lt;</span><span class="n">JOBID</span><span class="o">&gt;</span> <span class="ow">is</span> <span class="n">the</span> <span class="nb">id</span> <span class="n">of</span> <span class="n">the</span> <span class="n">bulkdumped</span> <span class="n">job</span> <span class="n">to</span> <span class="n">load</span><span class="p">,</span> <span class="o">&lt;</span><span class="n">BEGINKEY</span><span class="o">&gt;</span> <span class="n">to</span> <span class="o">&lt;</span><span class="n">ENDKEY</span><span class="o">&gt;</span>
+ <span class="n">denotes</span> <span class="n">the</span> <span class="n">key</span><span class="o">/</span><span class="n">value</span> <span class="nb">range</span> <span class="n">to</span> <span class="n">load</span><span class="p">,</span> <span class="ow">and</span> <span class="o">&lt;</span><span class="n">DIR</span><span class="o">&gt;</span> <span class="ow">is</span> <span class="n">a</span> <span class="n">local</span> <span class="n">directory</span> <span class="n">OR</span>
+ <span class="n">blobstore</span> <span class="n">url</span> <span class="n">to</span> <span class="n">load</span> <span class="n">SST</span> <span class="n">files</span> <span class="n">from</span><span class="o">.</span>
+<span class="n">To</span> <span class="n">get</span> <span class="n">status</span><span class="p">:</span> <span class="n">bulkload</span> <span class="n">status</span>
+<span class="n">To</span> <span class="n">cancel</span> <span class="n">current</span> <span class="n">bulkload</span> <span class="n">job</span><span class="p">:</span> <span class="n">bulkload</span> <span class="n">cancel</span> <span class="o">&lt;</span><span class="n">JOBID</span><span class="o">&gt;</span>
+<span class="n">To</span> <span class="nb">print</span> <span class="n">bulkload</span> <span class="n">job</span> <span class="n">history</span><span class="p">:</span> <span class="n">bulkload</span> <span class="n">history</span>
+<span class="n">To</span> <span class="n">clear</span> <span class="n">history</span><span class="p">:</span> <span class="n">bulkload</span> <span class="n">history</span> <span class="n">clear</span> <span class="p">[</span><span class="nb">all</span><span class="o">|</span><span class="nb">id</span><span class="p">]</span>
+</pre></div>
+</div>
+<p>In the below we presume an empty cluster.</p>
+<p>As per <strong class="command">BulkDump</strong>, first you must enable <strong class="command">BulkLoad</strong> to make use of this feature:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">bulkload</span> <span class="n">mode</span> <span class="n">on</span>
+</pre></div>
+</div>
+<p>To load a <strong class="command">BulkDump</strong>, say <strong class="command">c9de5a364ecc2abb6f7a8bd890a175cf</strong> from the above <strong class="command">BulkDump</strong> section:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">bulkload</span> <span class="n">load</span> <span class="n">c9de5a364ecc2abb6f7a8bd890a175cf</span> <span class="s2">&quot;&quot;</span> \<span class="n">xff</span> <span class="o">/</span><span class="n">tmp</span><span class="o">/</span><span class="n">dump</span>
+<span class="n">Received</span> <span class="n">Job</span> <span class="n">ID</span><span class="p">:</span> <span class="n">c9de5a364ecc2abb6f7a8bd890a175cf</span>
+</pre></div>
+</div>
+<p>To monitor the state of your running job, as per <strong class="command">BulkDump</strong>, type status:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">bulkload</span> <span class="n">status</span>
+</pre></div>
+</div>
+<p>Eventually status will return there are no jobs running.</p>
+<p>To see recent history of <strong class="command">BulkLoad</strong> runs, type:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">bulkload</span> <span class="n">history</span>
+<span class="n">Job</span> <span class="n">b20ce68b03a28d654ee948ca4b5d859a</span> <span class="n">submitted</span> <span class="n">at</span> <span class="mf">1741926085.210577</span> <span class="k">for</span> <span class="nb">range</span> <span class="p">{</span> <span class="n">begin</span><span class="o">=</span>  <span class="n">end</span><span class="o">=</span>\<span class="n">xff</span> <span class="p">}</span><span class="o">.</span> <span class="n">The</span> <span class="n">job</span> <span class="n">ran</span> <span class="k">for</span> <span class="mf">0.162005</span> <span class="n">mins</span> <span class="ow">and</span> <span class="n">exited</span> <span class="k">with</span> <span class="n">status</span> <span class="n">Complete</span><span class="o">.</span>
+</pre></div>
+</div>
+<p>You can also clear ‘all’ history or by selectively remove jobs from the history list by ‘id’.</p>
+</section>
+<section id="bulkdump-bulkload-and-s3">
+<span id="blobstore"></span><h2>BulkDump/BulkLoad and S3</h2>
+<p>In the above we illustrate dumping to a directory on the local filesystem.
+It is also possible to <strong class="command">BulkDump</strong> to, and
+<strong class="command">BulkLoad</strong> from, amazon’s <a class="reference external" href="https://aws.amazon.com/s3/">S3</a>.
+Rather than reference a directory when dumping or loading,
+instead we make use of the fdb ‘blobstore’ url, or ‘backup’ url as it is also known, described in
+<a class="reference external" href="https://apple.github.io/foundationdb/backups.html#backup-urls">Backup, Restore, and Replication for Disaster Recovery</a>.
+All backup configurations pertaining to ‘S3’ – such as ‘BLOBSTORE_CONCURRENT_UPLOADS’, ‘HTTP_VERBOSE_LEVEL’,
+and ‘BLOBSTORE_ENCRYPTION_TYPE’ including how we specify credentials to ‘S3’– apply when running bulkload
+against ‘S3’ since bulkload uses the same underlying ‘S3’ accessing machinery.</p>
+<p>For illustration, let the ‘S3’ bucket that we want to dump be called
+‘backup-123456789-us-west-2’ and that this bucket is the ‘us-west-2’ amazon region.
+Let the ‘prefix’ that we want our dump to have in ‘S3’ be ‘bulkload/test’. Then, in
+accordance with <a class="reference external" href="https://apple.github.io/foundationdb/backups.html#backup-urls">Backup URLs</a>,
+our resulting url will be:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>blobstore://@backup-123456789-us-west-2.s3.us-west-2.amazonaws.com/bulkload/test?bucket=backup-123456789-us-west-2&amp;region=us-west-2
+</pre></div>
+</div>
+<p>Presuming the fdb cluster has been setup with the appropriate <a class="reference external" href="https://apple.github.io/foundationdb/backups.html#blob-credential-files">blob credentials</a> and ‘mTLS’ – a site-specific affair – below is how we’d dump a cluster to ‘S3’:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>fdb&gt; bulkdump mode on
+fdb&gt; bulkdump dump &quot;&quot; \xff blobstore://@backup-123456789-us-west-2.s3.us-west-2.amazonaws.com/bulkload/test?bucket=backup-123456789-us-west-2&amp;region=us-west-2
+fdb&gt; bulkdump status
+...
+</pre></div>
+</div>
+<p>Once <strong class="command">status</strong> reports ‘No bulk dumping job is running’, inspect the dumped dataset in ‘S3’ via your aws console or <a class="reference external" href="https://aws.amazon.com/cli/">aws s3 command-line tool</a>. The job can take minutes or hours dependent on the amount of data hosted by your cluster.</p>
+<p>To load from ‘S3’ (presuming an empty cluster and presuming a previous dump whose ‘id’ is ‘123456789’):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>fdb&gt; bulkload mode on
+fdb&gt; bulkload load 123456789 &quot;&quot; \xff blobstore://@backup-123456789-us-west-2.s3.us-west-2.amazonaws.com/bulkload/test?bucket=backup-123456789-us-west-2&amp;region=us-west-2
+fdb&gt; bulkload status
+...
+</pre></div>
+</div>
+</section>
+<section id="troubleshooting">
+<span id="id3"></span><h2>Troubleshooting</h2>
+<p><strong class="command">BulkLoad</strong> and <strong class="command">BulkDump</strong> require ‘–knob_shard_encode_location_metadata=1’.</p>
+<p>As for backup, enable ‘–knob_http_verbose_level 10’ to debug connection issues: the http request/response will be dumped on STDOUT.</p>
+<p>To watch your job in operation, search ‘DDBulkLoad*’, ‘SSBulkLoad*’, ‘DDBulkDump*’, ‘SSBulkDump*’, ‘S3Client*’ in trace events to see more details.</p>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/bulkload-user.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 11, 2025.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

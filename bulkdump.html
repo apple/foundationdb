@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>BulkDump (Dev) &#8212; FoundationDB ON documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Audit Storage" href="auditstorage.html" />
+    <link rel="prev" title="FoundationDB Range Locks (WiP)" href="rangelock.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">BulkDump (Dev)</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a><ul>
+<li><a class="reference internal" href="#input-and-output">Input and output</a></li>
+<li><a class="reference internal" href="#how-to-use">How to use?</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#mechanisms">Mechanisms</a><ul>
+<li><a class="reference internal" href="#workflow">Workflow</a></li>
+<li><a class="reference internal" href="#invariant">Invariant</a></li>
+<li><a class="reference internal" href="#failure-handling">Failure handling</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="rangelock.html" title="Previous Chapter: FoundationDB Range Locks (WiP)"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; FoundationDB ...</span>
+    </a>
+  </li>
+  <li>
+    <a href="auditstorage.html" title="Next Chapter: Audit Storage"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Audit Storage &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">BulkDump (Dev)</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a><ul>
+<li><a class="reference internal" href="#input-and-output">Input and output</a></li>
+<li><a class="reference internal" href="#how-to-use">How to use?</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#mechanisms">Mechanisms</a><ul>
+<li><a class="reference internal" href="#workflow">Workflow</a></li>
+<li><a class="reference internal" href="#invariant">Invariant</a></li>
+<li><a class="reference internal" href="#failure-handling">Failure handling</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="bulkdump-dev">
+<h1>BulkDump (Dev)</h1>
+<div class="line-block">
+<div class="line">Author: Zhe Wang</div>
+<div class="line">Reviewer: Michael Stack, Jingyu Zhou</div>
+<div class="line">Audience: FDB developers, SREs and expert users.</div>
+</div>
+<section id="overview">
+<h2>Overview</h2>
+<p>In a FoundationDB (FDB) key-value cluster, every key-value pair is replicated across multiple storage servers.
+The BulkDump tool is developed to dump all key-value pairs within the input range to files.
+Note that when the input range is large, the range is split into smaller subranges.
+Each subrange of data is dumped to a file at a version. All data within a file is at the same version. However, versions can differ across files.</p>
+<section id="input-and-output">
+<h3>Input and output</h3>
+<p>When a user wants to start a bulkdump job, the user provides the range to dump and the path root of where to dump the data.
+The range can be any subrange within the user key space (i.e. “ “ ~ “\xff”).
+Dumping the data of the system key space and special key space (i.e. “\xff” ~ “\xff\xff\xff”) is not allowed.
+The path root can be either a <a class="reference external" href="https://apple.github.io/foundationdb/backups.html#backup-urls">blobstore url</a> or a path on the file system.
+Given the input range, if the range is large, the range is split into smaller subranges.
+Each subrange is dumped at a version to a folder. In particular, the folder is organized as following:</p>
+<ol class="arabic simple">
+<li><p>(rootLocal)/(relativeFolder)/(dumpVersion)-manifest.txt (must have)</p></li>
+<li><p>(rootLocal)/(relativeFolder)/(dumpVersion)-data.sst (omitted if the subrange is empty)</p></li>
+<li><p>(rootLocal)/(relativeFolder)/(dumpVersion)-sample.sst (omitted if data size is too small to have a sample)</p></li>
+</ol>
+<p>The (relativeFolder) is defined as (JobId)/(TaskId)/(BatchId).
+The (dumpVersion) is the version of the data stored in the (dumpVersion)-data.sst file.
+At any time, a FDB cluster can have at most one bulkdump job running.
+A bulkdump job is partitioned into tasks per subrange and subranges never span a shard boundary.
+When dumping the subrange of a task, the data is collected in batches. All key-value pairs of a batch are collected at the same version.
+Above all, (JobId) is the unique ID of a job. (TaskId) is the unique ID of a task. (BatchId) is the unique ID of a batch.
+All tasks’s data files of the same job are located at the same Job folder named by the JobId.
+A task can consist of multiple batches, where each batch has a distinct version. However, all the data within a single batch shares the same version.</p>
+<p>Each (relativeFolder) corresponds to exactly one subrange with exactly one manifest file.
+The manifest file includes all necessary information for loading the data from the folder to a FDB cluster.
+The manifest file content includes the following information:</p>
+<ol class="arabic simple">
+<li><p>File paths (full path root)</p></li>
+<li><p>Key Range of the dumped data in the folder</p></li>
+<li><p>Version of the data when the subrange was collected</p></li>
+<li><p>Checksum of the data</p></li>
+<li><p>Datasize of the data in bytes</p></li>
+<li><p>Bytes sampling setting (when a cluster loads the folder, if the setting mismatches, the loading cluster does bytes sampling by itself; Otherwise, the loading cluster directly uses the sample file of the folder).</p></li>
+</ol>
+<p>In the job folder, there is a global manifest file named ‘job-manifest.txt’ that lists all ranges and their corresponding manifest files.
+When loading a cluster, users can use this global manifest to rebuild the data.</p>
+</section>
+<section id="how-to-use">
+<h3>How to use?</h3>
+<p>Currently, FDBCLI tools and low-level ManagementAPIs are provided to submit a job or clear a job.
+These operations are achieved by issuing transactions to update the bulkdump metadata.
+Submitting a job is achieved by writting the job metadata to the bulkdump metadata range of the job.
+When submitting a job, the API checks if there is any ongoing bulkdump job. If yes, it will reject the job. Otherwise, it accepts the job.
+Clearing a job is achieved by erasing the entire user range space of the bulkdump metadata range. When clearing a job, all metadata will be cleared and any ongoing task is stopped (with some latency).</p>
+<p>FDBCLI provides following interfaces to do the operations:</p>
+<ol class="arabic simple">
+<li><p>Submit a job: bulkdump dump (BeginKey) (EndKey) (RootFolder) // …where RootFolder is a local directory on the filesystem or a blobstore URL.</p></li>
+<li><p>Clear a job: bulkdump clear (JobID)</p></li>
+<li><p>Enable the feature: bulkdump mode on | off // “bulkdump mode” command prints the current value (on or off) of the mode.</p></li>
+</ol>
+<p>ManagementAPI provides following interfaces to do the operations:</p>
+<ol class="arabic simple">
+<li><p>Submit a job: submitBulkDumpJob(BulkDumpState job); // For generating the input job metadata, see the point 4.</p></li>
+<li><p>Clear a job: cancelBulkDumpJob(UID jobId);</p></li>
+<li><p>Enable the feature: setBulkDumpMode(int mode); // Set mode = 1 to enable; Set mode = 0 to disable.</p></li>
+<li><p>BulkDump job metadata is generated by createBulkDumpJob();</p></li>
+</ol>
+</section>
+</section>
+<section id="mechanisms">
+<h2>Mechanisms</h2>
+<section id="workflow">
+<h3>Workflow</h3>
+<ul class="simple">
+<li><p>Users input a range by a transaction and this range is persisted to bulkdump metadata (with “\xff/bulkDump/” prefix).</p></li>
+<li><p>Bulkdump metadata is range-based.</p></li>
+<li><p>DD observes this range to dump by reading from metadata.</p></li>
+<li><p>DD partitions the range into smaller subranges according.</p></li>
+<li><p>DD randomly chooses one storage server which owns the range as the agent to do the dump. DD holds an outstanding promise with this SS. The task assigned to a SS is stateless.</p></li>
+<li><p>DD sends the range dump request to the storage server. DD spawns a dedicated actor waiting on the call. If any failure happens at SS side, DD will know this.</p></li>
+<li><p>DD sends the range dump request within the max parallelism specified by the knob DD_BULKDUMP_PARALLELISM.</p></li>
+<li><p>SS receives the request and reads the data from local storage. If the range has been moved away or split, the SS replies failure to the DD and DD will retry the remaining range later. If the range is there, SS reads the data and uploads the data to external storage.</p></li>
+<li><p>When SS completes, the SS marks this range as completed in the metadata.</p></li>
+</ul>
+</section>
+<section id="invariant">
+<h3>Invariant</h3>
+<ul class="simple">
+<li><p>At any time, FDB cluster accepts at most one bulkdump job. When user issues a bulk dump job, the client will check if there is an existing bulk load job. If yes, reject the request.</p></li>
+<li><p>DD partitions the range into subranges according to the shard boundary. For a subrange, the data is guaranteed to put into the same folder — same as task ID.</p></li>
+<li><p>Each data filename is the version indicating the version of the data read by the SS.</p></li>
+<li><p>Each subrange always has one manifest file indicating the metadata information of the data, such as Range, Checksum (to be implemented later in a separate PR), and FilePath.</p></li>
+<li><p>In SS, we dump files at first and then write metadata in the system key space. If any phase is failed, DD will re-do the range. For each time SS writes the folder (locally or in BlobStore), the SS erases the folder at first.</p></li>
+<li><p>A SS handles at most one dump task at a time (the parallelism is protected by the knob SS_SERVE_BULKDUMP_PARALLELISM. With current implementation, this knob is set to 1. However, we leave the flexibility of setting bulkdump parallelism at a SS here).</p></li>
+<li><p>Each subrange does not necessarily have a byteSample file and data file which depends on the data size. A SS may be assigned a range but the range is empty.</p></li>
+</ul>
+</section>
+<section id="failure-handling">
+<h3>Failure handling</h3>
+<ul class="simple">
+<li><p>SS failure: DD will receive broken_promise. DD gives up working on the range at this time. DD will re-issue the request (via a different task) in the future until the range completes.</p></li>
+<li><p>DD failure: It is possible that the same SS recieves two requests to work on the same range. SS uses a FlowLock to guarantee that SS handles one request at a time. So, there is no conflict.</p></li>
+<li><p>S3 outage: Result in task failure. The failed task will be retried by DD.</p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/bulkdump.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 11, 2025.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>
