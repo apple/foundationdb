@@ -8899,6 +8899,8 @@ ACTOR static Future<Void> processSampleFiles(StorageServer* data,
                                              std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
 	state BulkLoadFileSetKeyMap::const_iterator iter = localFileSets->begin();
 	state BulkLoadFileSetKeyMap::const_iterator end = localFileSets->end();
+	state std::vector<KeyValue> rawSamples;
+	state std::unique_ptr<IRocksDBSstFileReader> reader;
 
 	while (iter != end) {
 		const auto& [range, fileSet] = *iter;
@@ -8913,8 +8915,8 @@ ACTOR static Future<Void> processSampleFiles(StorageServer* data,
 				try {
 					// Read all samples from the SST file into memory first
 					// Store as KeyValueRef to keep the original encoded size value
-					state std::vector<KeyValueRef> rawSamples;
-					state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
+					rawSamples.clear();
+					reader = newRocksDBSstFileReader();
 					reader->open(abspath(sampleFilePath));
 
 					TraceEvent(SevInfo, "StorageServerProcessingSampleFile", data->thisServerID)
@@ -9229,7 +9231,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					}
 					// Clear the key range before ingestion. This mirrors the replaceRange done in the case were we do
 					// not ingest SST files.
-					data->storage.getKeyValueStore()->clear(keys);
+					// data->storage.getKeyValueStore()->clear(keys);
+					// TODO: this is a blocking call. We should make this as async call.
 					wait(data->storage.getKeyValueStore()->ingestSSTFiles(bulkLoadLocalDir, localBulkLoadFileSets));
 
 					// Process sample files after SST ingestion
