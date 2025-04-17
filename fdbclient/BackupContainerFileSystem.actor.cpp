@@ -2256,7 +2256,11 @@ void printFileList(BackupFileList& backupFileList) {
 
 	printf("\nSnapshotFiles count:%lu", backupFileList.snapshots.size());
 	for (auto s : backupFileList.snapshots)
-		printf("\n%lld, %lld, %s, %lld\n", s.beginVersion, s.endVersion, s.fileName.c_str(), s.totalSize);
+		printf("\n%" PRId64 ", %" PRId64 ", %s, %" PRId64 "\n",
+		       s.beginVersion,
+		       s.endVersion,
+		       s.fileName.c_str(),
+		       s.totalSize);
 }
 
 // Intentionally missing some log range files and checking if the snapshot can be restored.
