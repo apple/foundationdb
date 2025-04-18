@@ -39,7 +39,6 @@ package fdb
 import "C"
 
 import (
-	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -68,6 +67,10 @@ type Future interface {
 	// Note that even if a future is not ready, the associated asynchronous
 	// operation may already have completed and be unable to be cancelled.
 	Cancel()
+
+	// Close will release resources associated with this future.
+	// It must always be called, and called exactly once.
+	Close()
 }
 
 type future struct {
@@ -80,17 +83,18 @@ type future struct {
 	ptr *C.FDBFuture
 }
 
+// newFuture returns a future which must be explicitly destroyed with a call to destroy().
 func newFuture(t *transaction, ptr *C.FDBFuture) *future {
 	return newFutureWithDb(nil, t, ptr)
 }
 
+// newFutureWithDb returns a database-associated future which must be explicitly destroyed with a call to destroy().
 func newFutureWithDb(db *database, t *transaction, ptr *C.FDBFuture) *future {
 	f := &future{
 		db:  db,
 		t:   t,
 		ptr: ptr,
 	}
-	runtime.SetFinalizer(f, func(f *future) { C.fdb_future_destroy(f.ptr) })
 	return f
 }
 
@@ -114,18 +118,20 @@ func fdb_future_block_until_ready(f *C.FDBFuture) {
 }
 
 func (f *future) BlockUntilReady() {
-	defer runtime.KeepAlive(f)
 	fdb_future_block_until_ready(f.ptr)
 }
 
 func (f *future) IsReady() bool {
-	defer runtime.KeepAlive(f)
 	return C.fdb_future_is_ready(f.ptr) != 0
 }
 
 func (f *future) Cancel() {
-	defer runtime.KeepAlive(f)
 	C.fdb_future_cancel(f.ptr)
+}
+
+// Close must be explicitly called for each future to avoid a memory leak.
+func (f *future) Close() {
+	C.fdb_future_destroy(f.ptr)
 }
 
 // FutureByteSlice represents the asynchronous result of a function that returns
@@ -156,8 +162,6 @@ type futureByteSlice struct {
 
 func (f *futureByteSlice) Get() ([]byte, error) {
 	f.o.Do(func() {
-		defer runtime.KeepAlive(f.future)
-
 		var present C.fdb_bool_t
 		var value *C.uint8_t
 		var length C.int
@@ -213,8 +217,6 @@ type futureKey struct {
 
 func (f *futureKey) Get() (Key, error) {
 	f.o.Do(func() {
-		defer runtime.KeepAlive(f.future)
-
 		var value *C.uint8_t
 		var length C.int
 
@@ -262,8 +264,6 @@ type futureNil struct {
 }
 
 func (f *futureNil) Get() error {
-	defer runtime.KeepAlive(f.future)
-
 	f.BlockUntilReady()
 	if err := C.fdb_future_get_error(f.ptr); err != 0 {
 		return Error{int(err)}
@@ -296,8 +296,6 @@ func stringRefToSlice(ptr unsafe.Pointer) []byte {
 }
 
 func (f *futureKeyValueArray) Get() ([]KeyValue, bool, error) {
-	defer runtime.KeepAlive(f.future)
-
 	f.BlockUntilReady()
 
 	var kvs *C.FDBKeyValue
@@ -341,8 +339,6 @@ type futureKeyArray struct {
 }
 
 func (f *futureKeyArray) Get() ([]Key, error) {
-	defer runtime.KeepAlive(f.future)
-
 	f.BlockUntilReady()
 
 	var ks *C.FDBKey
@@ -393,8 +389,6 @@ type futureInt64 struct {
 }
 
 func (f *futureInt64) Get() (int64, error) {
-	defer runtime.KeepAlive(f.future)
-
 	f.BlockUntilReady()
 
 	var ver C.int64_t
@@ -436,8 +430,6 @@ type futureStringSlice struct {
 }
 
 func (f *futureStringSlice) Get() ([]string, error) {
-	defer runtime.KeepAlive(f.future)
-
 	f.BlockUntilReady()
 
 	var strings **C.char
