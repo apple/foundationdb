@@ -742,7 +742,10 @@ ACTOR Future<Version> getDatacenterLag(Database cx, Reference<AsyncVar<ServerDBI
 				break;
 			}
 
-			TraceEvent("DCLag").detail("Primary", primaryMetrics.get().v).detail("Remote", remoteMetrics.get().v);
+			TraceEvent("DCLag")
+			    .detail("Lag", remoteMetrics.get().v - primaryMetrics.get().v)
+			    .detail("Primary", primaryMetrics.get().v)
+			    .detail("Remote", remoteMetrics.get().v);
 			ASSERT(primaryMetrics.get().v >= 0 && remoteMetrics.get().v >= 0);
 			return primaryMetrics.get().v - remoteMetrics.get().v;
 		}
