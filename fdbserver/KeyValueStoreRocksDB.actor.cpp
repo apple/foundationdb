@@ -364,7 +364,7 @@ std::string getErrorReason(BackgroundErrorReason reason) {
 // could potentially cause segmentation fault.
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
-	RocksDBErrorListener(UID id) : id(id){};
+	RocksDBErrorListener(UID id) : id(id) {};
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
 		TraceEvent(SevError, "RocksDBBGError", id)
 		    .detail("Reason", getErrorReason(reason))
@@ -404,7 +404,7 @@ private:
 
 class RocksDBEventListener : public rocksdb::EventListener {
 public:
-	RocksDBEventListener(std::shared_ptr<SharedRocksDBState> sharedState) : sharedState(sharedState){};
+	RocksDBEventListener(std::shared_ptr<SharedRocksDBState> sharedState) : sharedState(sharedState) {};
 
 	void OnFlushCompleted(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override {
 		sharedState->setLastFlushTime(now());
@@ -2494,8 +2494,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
 	}
 
-	Future<Void> ingestSSTFiles(std::string bulkLoadLocalDir,
-	                            std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) override {
+	Future<Void> ingestSSTFiles(std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) override {
 		// Create a list of SST files to ingest
 		std::vector<std::string> sstFiles;
 		for (const auto& [range, fileSet] : *localFileSets) {
@@ -3030,7 +3029,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/IngestSSTFileVisibility") {
 	fileSetMap->emplace_back(allKeys, fileSet); // Use emplace_back for std::vector
 
 	// Ingest the SST file using the populated map
-	wait(kvStore->ingestSSTFiles(testDir, fileSetMap));
+	wait(kvStore->ingestSSTFiles(fileSetMap));
 
 	// Verify the key is visible
 	Optional<Value> value = wait(kvStore->readValue("test_key"_sr, Optional<ReadOptions>()));
