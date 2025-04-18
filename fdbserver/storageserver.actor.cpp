@@ -8923,7 +8923,7 @@ ACTOR static Future<Void> processSampleFiles(StorageServer* data,
 					while (reader->hasNext()) {
 						KeyValue kv = reader->next();
 						// Store the raw KeyValueRef
-						rawSamples.push_back(KeyValueRef(kv.key, kv.value));
+						rawSamples.push_back(KeyValue(kv.key, kv.value));
 					}
 
 					// Now apply all read samples to the in-memory set and update metrics
