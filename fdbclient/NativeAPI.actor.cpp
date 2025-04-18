@@ -1019,6 +1019,8 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					}
 					curCommitProxies = clientDBInfo->get().commitProxies;
 					curGrvProxies = clientDBInfo->get().grvProxies;
+					// Commits in the previous epoch may have been recovered but not included in the version vector.
+					// Clear the version vector to ensure the latest commit versions are received.
 					cx->ssVersionVectorCache.clear();
 					proxiesChangeTrigger->trigger();
 				}
