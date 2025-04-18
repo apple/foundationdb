@@ -21,6 +21,7 @@
 #ifndef FLOW_COROUTINESIMPL_H
 #define FLOW_COROUTINESIMPL_H
 
+#include "flow/FlowThread.h"
 #include "flow/flow.h"
 
 template <class T>
@@ -270,6 +271,74 @@ struct AwaitableFuture : std::conditional_t<IsStream, SingleCallback<ToFutureVal
 	}
 };
 
+// TODO: This can be merged with AwaitableFutureStream by passing more template arguments.
+template <class promise_type, class U>
+struct ThreadAwaitableFutureStream : SingleCallback<ToFutureVal<U>>,
+                                     AwaitableResume<ThreadAwaitableFutureStream<promise_type, U>, U, true> {
+	using FutureValue = ToFutureVal<U>;
+	using FutureType = ThreadFutureStream<FutureValue>;
+	FutureType future;
+	promise_type* pt = nullptr;
+	AwaitableFutureStore<FutureValue> store;
+
+	ThreadAwaitableFutureStream(const FutureType& f, promise_type* pt) : future(f), pt(pt) {}
+
+	void fire(FutureValue const& value) override {
+		store.set(value);
+		pt->resume();
+	}
+	void fire(FutureValue&& value) override {
+		store.set(std::move(value));
+		pt->resume();
+	}
+
+	void error(Error error) override {
+		store.data = error;
+		pt->resume();
+	}
+
+	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
+		if (pt->waitState() < 0) {
+			pt->waitState() = -2;
+			// actor was cancelled
+			return true;
+		}
+		return future.isReady();
+	}
+
+	[[maybe_unused]] void await_suspend(n_coroutine::coroutine_handle<> h) {
+		// Create a coroutine callback if it's the first time being suspended
+		pt->setHandle(h);
+
+		// Set wait_state and add callback
+		pt->waitState() = 1;
+
+		auto sf = future;
+		sf.addCallbackAndClear(this);
+	}
+
+	bool resumeImpl() {
+		// If actor is cancelled, then throw actor_cancelled()
+		switch (pt->waitState()) {
+		case -1:
+			this->remove();
+		case -2:
+			// -2 means that the `await_suspend` call returned `true`, so we shouldn't remove the callback.
+			// if the wait_state is -1 we still have to throw, so we fall through to the -2 case
+			throw actor_cancelled();
+		}
+
+		bool wasReady = pt->waitState() == 0;
+		// Actor return from waiting, remove callback and reset wait_state.
+		if (pt->waitState() > 0) {
+			this->remove();
+
+			pt->waitState() = 0;
+		}
+		return wasReady;
+	}
+};
+
 template <class T, bool>
 struct ActorMember {
 	T* member;
@@ -372,6 +441,11 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
 		return coro::AwaitableFuture<promise_type, U, true>{ futureStream, this };
+	}
+
+	template <class U>
+	auto await_transform(const ThreadFutureStream<U>& futureStream) {
+		return coro::ThreadAwaitableFutureStream<promise_type, U>{ futureStream, this };
 	}
 };
 

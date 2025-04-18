@@ -975,7 +975,11 @@ namespace actorcompiler
             {
                 string getFunc = ch.Stmt.wait.isWaitNext ? "pop" : "get";
                 LineNumber(cx.target, ch.Stmt.wait.FirstSourceLine);
-                cx.target.WriteLine("{2}<{3}> {0} = {1};", ch.Future, ch.Stmt.wait.futureExpression, ch.Stmt.wait.isWaitNext ? "FutureStream" : "StrictFuture", ch.Stmt.wait.result.type);
+                if (ch.Stmt.wait.isWaitNext) {
+                    cx.target.WriteLine("auto {0} = {1};", ch.Future, ch.Stmt.wait.futureExpression);
+                } else {
+                    cx.target.WriteLine("{2}<{3}> {0} = {1};", ch.Future, ch.Stmt.wait.futureExpression, "StrictFuture", ch.Stmt.wait.result.type);
+                }
 
                 if (firstChoice)
                 {
