@@ -225,7 +225,9 @@ func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) 
 	}
 	defer func() {
 		err := file.Close()
-		monitor.logger.Error(err, "Error could not close file", "monitorConfigPath", monitor.configFile)
+		if err != nil {
+			monitor.logger.Error(err, "Error could not close file", "monitorConfigPath", monitor.configFile)
+		}
 	}()
 	configuration := &api.ProcessConfiguration{}
 	configurationBytes, err := io.ReadAll(file)
