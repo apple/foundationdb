@@ -205,6 +205,7 @@ if(NOT WIN32)
     add_executable(fdb_c_client_config_tester test/client_config_tester.cpp)
   endif()
 
+  set_target_properties(fdb_c_performance_test PROPERTIES LINKER_LANGUAGE CXX)
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c Threads::Threads stdc++)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c Threads::Threads)
   target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c Threads::Threads)
