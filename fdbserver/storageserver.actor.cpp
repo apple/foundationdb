@@ -9225,9 +9225,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
 						ASSERT(keys.contains(range));
 					}
-					// TODO: Clear the key range before ingestion. This mirrors the replaceRange done in the case were we do
-					// not ingest SST files.
-					// data->storage.getKeyValueStore()->clear(keys);
+					// TODO: Clear the key range before ingestion. This mirrors the replaceRange done in the case were
+					// we do not ingest SST files. data->storage.getKeyValueStore()->clear(keys);
 					// TODO: this is a blocking call. We should make this as async call.
 					wait(data->storage.getKeyValueStore()->ingestSSTFiles(bulkLoadLocalDir, localBulkLoadFileSets));
 
