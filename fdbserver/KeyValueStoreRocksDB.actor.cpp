@@ -61,6 +61,7 @@
 #include <memory>
 #include <tuple>
 #include <vector>
+#include <fstream>
 
 #endif // WITH_ROCKSDB
 
@@ -2141,6 +2142,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	void close() override { doClose(this, false); }
 
 	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1); }
+	bool supportsSstIngestion() const override { return true; }
 
 	Future<Void> init() override {
 		if (openFuture.isValid()) {
@@ -2490,6 +2492,37 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<EncryptionAtRestMode> encryptionMode() override {
 		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
+
+	Future<Void> ingestSSTFiles(std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) override {
+		// Create a list of SST files to ingest
+		std::vector<std::string> sstFiles;
+		for (const auto& [range, fileSet] : *localFileSets) {
+			if (fileSet.hasDataFile()) {
+				sstFiles.push_back(fileSet.getDataFileFullPath());
+			}
+		}
+
+		if (sstFiles.empty()) {
+			TraceEvent(SevInfo, "RocksDBIngestSSTFilesNoFiles", id);
+			return Void(); // Nothing to ingest
+		}
+
+		// Configure ingestion options
+		rocksdb::IngestExternalFileOptions options;
+		options.move_files = true;
+		options.verify_checksums_before_ingest = true;
+
+		// Ingest the SST files
+		// The default column family parameter is necessary here; w/o it the ingested keyvalues are unreadable
+		rocksdb::Status status = db->IngestExternalFile(defaultFdbCF, sstFiles, options);
+
+		if (!status.ok()) {
+			TraceEvent(SevError, "RocksDBIngestSSTFilesError", id).detail("Error", status.ToString());
+			throw internal_error();
+		}
+
+		return Void();
 	}
 
 	DB db = nullptr;
@@ -2963,6 +2996,54 @@ TEST_CASE("noSim/RocksDB/RangeClear") {
 	wait(closed);
 	return Void();
 }
-} // namespace
 
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/IngestSSTFileVisibility") {
+	state std::string testDir = "test_ingest_sst_visibility";
+	state UID testStoreID = deterministicRandom()->randomUniqueID();
+	state RocksDBKeyValueStore* kvStore = new RocksDBKeyValueStore(testDir, testStoreID);
+
+	// Initialize the store
+	wait(kvStore->init());
+
+	// Create an SST file
+	state std::string sstFilename = "test.sst"; // Base filename
+	state std::string sstFileFullPath = joinPath(testDir, sstFilename); // Full path for writer
+	rocksdb::SstFileWriter sstWriter(rocksdb::EnvOptions(), kvStore->sharedState->getOptions());
+	ASSERT(sstWriter.Open(sstFileFullPath).ok()); // Use full path here
+	ASSERT(sstWriter.Put("test_key", "test_value").ok());
+	ASSERT(sstWriter.Finish().ok());
+
+	// Create and populate the file set map (which is a vector)
+	state std::shared_ptr<BulkLoadFileSetKeyMap> fileSetMap = std::make_shared<BulkLoadFileSetKeyMap>();
+	state std::string dummyManifestFile = "dummy_manifest.txt"; // Dummy filename for validation
+
+	// Create the BulkLoadFileSet using its constructor.
+	// Pass the test directory, dummy manifest, and the base SST filename.
+	BulkLoadFileSet fileSet(testDir, // rootPath
+	                        /*relativePath=*/"",
+	                        dummyManifestFile, // manifestFileName
+	                        sstFilename, // dataFileName (use base name)
+	                        /*byteSampleFileName=*/"",
+	                        BulkLoadChecksum()); // checksum
+
+	fileSetMap->emplace_back(allKeys, fileSet); // Use emplace_back for std::vector
+
+	// Ingest the SST file using the populated map
+	wait(kvStore->ingestSSTFiles(fileSetMap));
+
+	// Verify the key is visible
+	Optional<Value> value = wait(kvStore->readValue("test_key"_sr, Optional<ReadOptions>()));
+	ASSERT(value.present());
+	ASSERT(value.get() == "test_value"_sr);
+
+	// Clean up
+	Future<Void> closed = kvStore->onClosed(); // Get future before dispose
+	kvStore->dispose();
+	wait(closed); // Wait for close completion
+	platform::eraseDirectoryRecursive(testDir);
+
+	return Void();
+}
+
+} // namespace
 #endif // WITH_ROCKSDB

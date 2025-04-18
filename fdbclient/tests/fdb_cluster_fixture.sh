@@ -58,7 +58,7 @@ function start_fdb_cluster {
       "${local_build_dir}" \
       --knobs "${knobs}" \
       --stateless_count 1 --replication_count 1 --logs_count 1 \
-      --storage_count "${ss_count}" --storage_type ssd \
+      --storage_count "${ss_count}" --storage_type ssd-rocksdb-v1 \
       --dump_pids on \
       > >(tee "${output}") \
       2> >(tee "${output}" >&2)
