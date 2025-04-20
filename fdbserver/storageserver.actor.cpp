@@ -9225,9 +9225,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
 						ASSERT(keys.contains(range));
 					}
-					// TODO: Clear the key range before ingestion. This mirrors the replaceRange done in the case were
-					// we do not ingest SST files. data->storage.getKeyValueStore()->clear(keys);
+					// Clear the key range before ingestion. This mirrors the replaceRange done in the case were
+					// we do not ingest SST files.
+					data->storage.getKeyValueStore()->clear(keys);
+					// Now wait on the durableVersion to be updated so clear has been committed.
+					wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
 					// TODO: this is a blocking call. We should make this as async call.
+					// TODO: Should we compact the range before ingestion?
 					wait(data->storage.getKeyValueStore()->ingestSSTFiles(localBulkLoadFileSets));
 
 					// Process sample files after SST ingestion
