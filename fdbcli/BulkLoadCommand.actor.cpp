@@ -25,7 +25,6 @@
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include "fmt/base.h"
 
 namespace fdb_cli {
 
