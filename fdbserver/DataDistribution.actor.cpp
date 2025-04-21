@@ -1637,7 +1637,8 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		    .detail("TaskRange", bulkLoadTask.getRange())
 		    .detail("Duration", now() - beginTime);
 
-		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
+		if (g_network->isSimulated() && SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION &&
+		    deterministicRandom()->random01() < 0.1) {
 			TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorInjectDDRestart", self->ddId).detail("Context", "New");
 			throw movekeys_conflict(); // improve code coverage
 		}
@@ -1690,7 +1691,8 @@ ACTOR Future<Void> bulkLoadJobMonitorTask(Reference<DataDistributor> self,
 		    .detail("TaskRange", bulkLoadTask.getRange())
 		    .detail("Duration", now() - beginTime);
 
-		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
+		if (g_network->isSimulated() && SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION &&
+		    deterministicRandom()->random01() < 0.1) {
 			TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorInjectDDRestart", self->ddId).detail("Context", "Monitor");
 			throw movekeys_conflict(); // improve code coverage
 		}
