@@ -27,6 +27,7 @@
 #include <flow/FastAlloc.h>
 #include <flow/ThreadPrimitives.h>
 #include <flow/ThreadHelper.actor.h>
+#include <flow/ScopeExit.h>
 
 // NOTE: Currently futures should only be used from main thread.
 template <class T>
@@ -51,10 +52,13 @@ public:
 		return !queue.empty() || error.isValid();
 	}
 
+	// Returns `true` if error exists and there are no pending items to be popped from queue.
+	// E.g. if producer three values before sending error, client will first see the first
+	// three values before error is visible.
 	bool isError() {
 		ThreadSpinLockHolder holder(mutex);
 		return queue.empty() && error.isValid();
-	} // the *next* thing queued is an error
+	}
 
 	bool hasError() {
 		ThreadSpinLockHolder holder(mutex);
@@ -85,6 +89,7 @@ public:
 
 		addPromiseRef();
 		onMainThreadVoid([this, value = std::forward<U>(value)]() {
+			ScopeExit scope([&]() {this->delPromiseRef(); });
 			mutex.enter();
 			if (this->next != this) {
 				auto n = this->next;
@@ -94,7 +99,6 @@ public:
 				this->queue.emplace(value);
 				mutex.leave();
 			}
-			this->delPromiseRef();
 		});
 	}
 
@@ -107,6 +111,7 @@ public:
 
 		addPromiseRef();
 		onMainThreadVoid([this, err]() {
+			ScopeExit scope([&]() { this->delPromiseRef(); });
 			// end_of_stream error is "expected", don't terminate reading stream early for this
 			SingleCallback<T>* n = nullptr;
 			{
@@ -118,8 +123,6 @@ public:
 
 			if (n)
 				n->error(err);
-
-			this->delPromiseRef();
 		});
 	}
 
