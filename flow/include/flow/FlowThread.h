@@ -89,7 +89,7 @@ public:
 
 		addPromiseRef();
 		onMainThreadVoid([this, value = std::forward<U>(value)]() {
-			ScopeExit scope([&]() {this->delPromiseRef(); });
+			ScopeExit scope([&]() { this->delPromiseRef(); });
 			mutex.enter();
 			if (this->next != this) {
 				auto n = this->next;
