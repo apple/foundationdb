@@ -1347,6 +1347,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::IngestExternalFileOptions options;
 			options.move_files = true;
 			options.verify_checksums_before_ingest = true;
+			options.allow_blocking_flush = true;
+			// write_global_seqno is default true which means on ingest the SST file is rewritten w/ seqno injected for
+			// each KV.
 
 			// Ingest the SST files
 			// The default column family parameter is necessary here; w/o it the ingested keyvalues are unreadable
