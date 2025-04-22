@@ -1319,6 +1319,79 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		void init() override {}
 
+		struct IngestSSTFilesAction : TypedAction<Writer, IngestSSTFilesAction> {
+			IngestSSTFilesAction(std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) : localFileSets(localFileSets) {}
+
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets;
+			ThreadReturnPromise<Void> done;
+		};
+
+		void action(IngestSSTFilesAction& a) {
+			// Create a list of SST files to ingest
+			std::vector<std::string> sstFiles;
+			for (const auto& [range, fileSet] : *a.localFileSets) {
+				if (fileSet.hasDataFile()) {
+					sstFiles.push_back(fileSet.getDataFileFullPath());
+				}
+			}
+
+			if (sstFiles.empty()) {
+				TraceEvent(SevInfo, "RocksDBIngestSSTFilesNoFiles", id);
+				a.done.send(Void()); // Nothing to ingest
+				return;
+			}
+
+			// Configure ingestion options
+			rocksdb::IngestExternalFileOptions options;
+			options.move_files = true;
+			options.verify_checksums_before_ingest = true;
+
+			// Ingest the SST files
+			// The default column family parameter is necessary here; w/o it the ingested keyvalues are unreadable
+			rocksdb::Status status = db->IngestExternalFile(cf, sstFiles, options);
+
+			if (!status.ok()) {
+				logRocksDBError(id, status, "IngestSSTFiles");
+				a.done.sendError(statusToError(status));
+				return;
+			}
+
+			a.done.send(Void());
+		}
+
+		struct CompactRangeAction : TypedAction<Writer, CompactRangeAction> {
+			CompactRangeAction(KeyRangeRef range) : range(range) {}
+
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			const KeyRange range;
+			ThreadReturnPromise<Void> done;
+		};
+
+		void action(CompactRangeAction& a) {
+			// Configure compaction options
+			rocksdb::CompactRangeOptions options;
+			// Force RocksDB to rewrite file to last level
+			options.bottommost_level_compaction = rocksdb::BottommostLevelCompaction::kForceOptimized;
+
+			// Convert key range to slices
+			auto begin = toSlice(a.range.begin);
+			auto end = toSlice(a.range.end);
+
+			// Perform the compaction
+			rocksdb::Status status = db->CompactRange(options, cf, &begin, &end);
+
+			if (!status.ok()) {
+				logRocksDBError(id, status, "CompactRange");
+				a.done.sendError(statusToError(status));
+				return;
+			}
+
+			a.done.send(Void());
+		}
+
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			std::string path;
 			ThreadReturnPromise<Void> done;
@@ -2495,34 +2568,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Void> ingestSSTFiles(std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) override {
-		// Create a list of SST files to ingest
-		std::vector<std::string> sstFiles;
-		for (const auto& [range, fileSet] : *localFileSets) {
-			if (fileSet.hasDataFile()) {
-				sstFiles.push_back(fileSet.getDataFileFullPath());
-			}
-		}
+		auto a = new Writer::IngestSSTFilesAction(localFileSets);
+		auto res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
+	}
 
-		if (sstFiles.empty()) {
-			TraceEvent(SevInfo, "RocksDBIngestSSTFilesNoFiles", id);
-			return Void(); // Nothing to ingest
-		}
-
-		// Configure ingestion options
-		rocksdb::IngestExternalFileOptions options;
-		options.move_files = true;
-		options.verify_checksums_before_ingest = true;
-
-		// Ingest the SST files
-		// The default column family parameter is necessary here; w/o it the ingested keyvalues are unreadable
-		rocksdb::Status status = db->IngestExternalFile(defaultFdbCF, sstFiles, options);
-
-		if (!status.ok()) {
-			TraceEvent(SevError, "RocksDBIngestSSTFilesError", id).detail("Error", status.ToString());
-			throw internal_error();
-		}
-
-		return Void();
+	Future<Void> compactRange(KeyRangeRef range) override {
+		auto a = new Writer::CompactRangeAction(range);
+		auto res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
 	}
 
 	DB db = nullptr;

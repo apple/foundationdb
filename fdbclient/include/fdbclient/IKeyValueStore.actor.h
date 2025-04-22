@@ -136,6 +136,9 @@ public:
 	// Delete a checkpoint.
 	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
+	// Compact a range of keys in the store
+	virtual Future<Void> compactRange(KeyRangeRef range) { throw not_implemented(); }
+
 	/*
 	Concurrency contract
 	    Causal consistency:
