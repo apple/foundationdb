@@ -132,7 +132,10 @@ struct StorageServerMetrics {
 	                       int64_t versionLag,
 	                       double lastUpdate,
 	                       int64_t bytesDurable,
-	                       int64_t bytesInput) const;
+	                       int64_t bytesInput,
+	                       int64_t ingestedBytes,
+	                       int64_t ingestedFiles,
+	                       double ingestDurationSeconds) const;
 
 	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
 

@@ -1336,6 +1336,11 @@ public:
 	CoalescedKeyRangeMap<Version> newestDirtyVersion; // Similar to newestAvailableVersion, but includes (only) keys
 	                                                  // that were only partly available (due to cancelled fetchKeys)
 
+	// SST Ingestion Metrics
+	std::atomic<int64_t> ingestedBytes = 0;
+	std::atomic<int64_t> ingestedFiles = 0;
+	std::atomic<double> ingestDurationSeconds = 0.0;
+
 	// The following are in rough order from newest to oldest
 	Version lastTLogVersion, lastVersionWithData, restoredVersion, prevVersion;
 	NotifiedVersion version;
@@ -2028,7 +2033,10 @@ public:
 		                          versionLag,
 		                          lastUpdate,
 		                          counters.bytesDurable.getValue(),
-		                          counters.bytesInput.getValue());
+		                          counters.bytesInput.getValue(),
+		                          ingestedBytes.load(std::memory_order_relaxed),
+		                          ingestedFiles.load(std::memory_order_relaxed),
+		                          ingestDurationSeconds.load(std::memory_order_relaxed));
 	}
 
 	void getSplitMetrics(const SplitMetricsRequest& req) override { this->metrics.splitMetrics(req); }
@@ -9195,7 +9203,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// Note that it is possible that this SS can never get the bulkload metadata because the bulkload data
 				// move is cancelled or replaced by another data move. In this case, while
 				// getBulkLoadTaskStateFromDataMove get stuck, this fetchKeys is guaranteed to be cancelled.
-				BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
+				state BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
 				    data->cx, dataMoveId, /*atLeastVersion=*/data->version.get(), data->thisServerID));
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
@@ -9236,7 +9244,17 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					wait(data->storage.getKeyValueStore()->compactRange(keys));
 
 					// Ingest the SST files.
+					state int numFilesToReport = bulkLoadTaskState.getManifests().size();
+					state int64_t bytesToReport = 0;
+					for (const auto& manifest : bulkLoadTaskState.getManifests()) {
+						bytesToReport += manifest.getTotalBytes();
+					}
+					state double ingestStartTime = now(); // Record start time
 					wait(data->storage.getKeyValueStore()->ingestSSTFiles(localBulkLoadFileSets));
+					double ingestDuration = now() - ingestStartTime; // Calculate duration
+					data->ingestedBytes.fetch_add(bytesToReport, std::memory_order_relaxed);
+					data->ingestedFiles.fetch_add(numFilesToReport, std::memory_order_relaxed);
+					data->ingestDurationSeconds.store(ingestDuration, std::memory_order_relaxed);
 
 					// Process sample files after SST ingestion
 					wait(processSampleFiles(data, bulkLoadLocalDir, localBulkLoadFileSets));
@@ -14324,6 +14342,12 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 		    te.detail("KvstoreBytesAvailable", sb.available);
 		    te.detail("KvstoreBytesTotal", sb.total);
 		    te.detail("KvstoreBytesTemp", sb.temp);
+		    if (self->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1) {
+			    te.detail("IngestedBytes", self->ingestedBytes.load(std::memory_order_relaxed));
+			    te.detail("IngestedFiles", self->ingestedFiles.load(std::memory_order_relaxed));
+			    te.detail("IngestDurationSeconds", self->ingestDurationSeconds.load(std::memory_order_relaxed));
+		    }
+
 		    if (self->isTss()) {
 			    te.detail("TSSPairID", self->tssPairID);
 			    te.detail("TSSJointID",

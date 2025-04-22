@@ -366,7 +366,10 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
                                              int64_t versionLag,
                                              double lastUpdate,
                                              int64_t bytesDurable,
-                                             int64_t bytesInput) const {
+                                             int64_t bytesInput,
+                                             int64_t ingestedBytes,
+                                             int64_t ingestedFiles,
+                                             double ingestDurationSeconds) const {
 	GetStorageMetricsReply rep;
 
 	// SOMEDAY: make bytes dynamic with hard disk space
@@ -398,6 +401,11 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 
 	rep.bytesDurable = bytesDurable;
 	rep.bytesInput = bytesInput;
+
+	// Populate SST Ingestion Metrics
+	rep.ingestedBytes = ingestedBytes;
+	rep.ingestedFiles = ingestedFiles;
+	rep.ingestDurationSeconds = ingestDurationSeconds;
 
 	req.reply.send(rep);
 }

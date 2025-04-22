@@ -533,6 +533,17 @@ struct RolesInfo {
 			obj.setKeyRawNumber("kvstore_inline_keys", storageMetrics.getValue("KvstoreInlineKey"));
 			obj["input_bytes"] = StatusCounter(storageMetrics.getValue("BytesInput")).getStatus();
 			obj["durable_bytes"] = StatusCounter(storageMetrics.getValue("BytesDurable")).getStatus();
+
+			try {
+				// Read raw counter values directly using setKeyRawNumber
+				obj.setKeyRawNumber("sst_ingested_bytes_total", storageMetrics.getValue("IngestedBytes"));
+				obj.setKeyRawNumber("sst_ingested_files_total", storageMetrics.getValue("IngestedFiles"));
+				obj.setKeyRawNumber("sst_last_ingest_duration_seconds",
+				                    storageMetrics.getValue("IngestDurationSeconds"));
+			} catch (AttributeNotFoundError&) {
+				// If metrics aren't present (e.g., no ingestion yet), just skip them.
+			}
+
 			obj.setKeyRawNumber("query_queue_max", storageMetrics.getValue("QueryQueueMax"));
 			obj["total_queries"] = StatusCounter(storageMetrics.getValue("QueryQueue")).getStatus();
 			obj["finished_queries"] = StatusCounter(storageMetrics.getValue("FinishedQueries")).getStatus();
