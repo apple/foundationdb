@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#ifdef FLOW_GRPC_ENABLED
 #ifndef FDBRPC_FLOW_GRPC_THREAD_POOL_H
 #define FDBRPC_FLOW_GRPC_THREAD_POOL_H
 
@@ -121,7 +120,7 @@ private:
 // `ThreadAction` implementation for tasks that return non-void values.
 template <typename Func>
 struct AsyncTaskExecutor::Action<Func, typename std::enable_if_t<!IsVoidReturn<Func>>> : ThreadAction {
-	using Ret = std::invoke_result<Func>::type;
+	using Ret = typename std::invoke_result<Func>::type;
 
 	Action(Func&& fn) : fn_(std::move(fn)) {}
 
@@ -158,7 +157,7 @@ private:
 // `ThreadAction` implementation for tasks that return void.
 template <typename Func>
 struct AsyncTaskExecutor::Action<Func, typename std::enable_if_t<IsVoidReturn<Func>>> : ThreadAction {
-	using Ret = std::invoke_result<Func>::type;
+	using Ret = typename std::invoke_result<Func>::type;
 
 	Action(Func&& fn) : fn_(std::move(fn)) {}
 
@@ -178,4 +177,3 @@ private:
 };
 
 #endif // FDBRPC_FLOW_GRPC_THREAD_POOL_H
-#endif // FLOW_GRPC_ENABLED
