@@ -8884,9 +8884,6 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		if (e.code() == error_code_inverted_range) {
-			TraceEvent(SevError, "Zhe1").detail("Keys", keys);
-		}
 		results.sendError(bulkload_task_failed());
 		throw;
 	}
