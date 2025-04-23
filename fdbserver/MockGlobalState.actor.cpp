@@ -379,11 +379,18 @@ Future<Void> MockStorageServer::waitMetricsTenantAware(const WaitMetricsRequest&
 }
 
 void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {
-	StorageBytes storageBytes(
-	    totalDiskSpace - usedDiskSpace, totalDiskSpace, usedDiskSpace, totalDiskSpace - usedDiskSpace);
-	metrics.getStorageMetrics(
-	    req, storageBytes, counters.bytesInput.getRate(), 0, now(), 0, counters.bytesInput.getValue(), 0, 0, 0.0);
-	// FIXME: MockStorageServer does not support bytesDurable yet
+	GetStorageMetricsReply reply;
+	reply.load = metrics.getMetrics(allKeys);
+	// Use placeholders for unavailable metrics in the mock
+	reply.available.bytes = 1e12; // Example capacity
+	reply.capacity.bytes = 1e12; // Example capacity
+	reply.bytesInputRate = 0; // Example rate
+	reply.versionLag = 0; // Example lag
+	reply.lastUpdate = now();
+	reply.bytesDurable = 0; // Example durable bytes
+	reply.bytesInput = 0; // Example input bytes
+	// No need to populate removed ingestion fields
+	req.reply.send(reply);
 }
 
 void MockStorageServer::getSplitMetrics(const SplitMetricsRequest& req) {

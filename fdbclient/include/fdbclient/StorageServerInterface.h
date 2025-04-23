@@ -1139,28 +1139,11 @@ struct GetStorageMetricsReply {
 	double lastUpdate = 0;
 	int64_t bytesDurable = 0, bytesInput = 0;
 
-	// SST Ingestion Metrics
-	int64_t ingestedBytes = 0;
-	int64_t ingestedFiles = 0;
-	double ingestDurationSeconds = 0.0;
-
 	GetStorageMetricsReply() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           load,
-		           available,
-		           capacity,
-		           bytesInputRate,
-		           versionLag,
-		           lastUpdate,
-		           bytesDurable,
-		           bytesInput,
-		           // New fields
-		           ingestedBytes,
-		           ingestedFiles,
-		           ingestDurationSeconds);
+		serializer(ar, load, available, capacity, bytesInputRate, versionLag, lastUpdate, bytesDurable, bytesInput);
 	}
 };
 

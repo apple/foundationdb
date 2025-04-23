@@ -24,6 +24,8 @@
 #include "fdbserver/StorageMetrics.actor.g.h"
 #elif !defined(FDBSERVER_STORAGEMETRICS_H)
 #define FDBSERVER_STORAGEMETRICS_H
+#include <vector>
+#include <string>
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
@@ -132,10 +134,7 @@ struct StorageServerMetrics {
 	                       int64_t versionLag,
 	                       double lastUpdate,
 	                       int64_t bytesDurable,
-	                       int64_t bytesInput,
-	                       int64_t ingestedBytes,
-	                       int64_t ingestedFiles,
-	                       double ingestDurationSeconds) const;
+	                       int64_t bytesInput) const;
 
 	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
 
