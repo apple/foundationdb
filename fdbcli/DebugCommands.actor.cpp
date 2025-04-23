@@ -55,10 +55,13 @@ ACTOR Future<Version> getVersion(Database cx) {
 // Get a list of storage servers that persist keys within range "kr" from the
 // first commit proxy. Returns false if there is a failure (in this case,
 // keyServersPromise will never be set).
+// If dcid is set, only return the storage servers in the given datacenter.
+// Ignore the input dcid if the cluster has not set dcid.
 ACTOR Future<bool> getKeyServers(
     Database cx,
     Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
-    KeyRangeRef kr) {
+    KeyRangeRef kr,
+    Optional<StringRef> dcid) {
 	state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
 
 	// Try getting key server locations from the first commit proxy
@@ -82,7 +85,20 @@ ACTOR Future<bool> getKeyServers(
 			when(ErrorOr<GetKeyServerLocationsReply> shards = wait(keyServerLocationFuture)) {
 				// Get the list of shards if one was returned.
 				if (shards.present() && !keyServersInsertedForThisIteration) {
-					keyServers.insert(keyServers.end(), shards.get().results.begin(), shards.get().results.end());
+					std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> shardResultList;
+					for (auto& result : shards.get().results) {
+						std::vector<StorageServerInterface> servers;
+						for (auto& server : result.second) {
+							// Filter out storage servers that are not in the given datacenter
+							Optional<Standalone<StringRef>> serverDcId = server.locality.dcId();
+							if (dcid.present() && serverDcId.present() && serverDcId.get() != dcid.get()) {
+								continue;
+							}
+							servers.push_back(server);
+						}
+						shardResultList.push_back({ result.first, servers });
+					}
+					keyServers.insert(keyServers.end(), shardResultList.begin(), shardResultList.end());
 					keyServersInsertedForThisIteration = true;
 					begin = shards.get().results.back().first.end;
 					break;
@@ -111,7 +127,7 @@ ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> t
 	state KeyRange kr = KeyRangeRef(tokens[1], tokens.size() == 3 ? tokens[2] : keyAfter(tokens[1]));
 	// find key range locations without GRV
 	state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise;
-	bool found = wait(getKeyServers(cx, keyServersPromise, kr));
+	bool found = wait(getKeyServers(cx, keyServersPromise, kr, Optional<StringRef>()));
 	if (!found) {
 		fmt::println("{} locations not found", printable(kr));
 		return false;
@@ -295,9 +311,9 @@ bool checkResults(Version version,
 	return allSame;
 }
 
-ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll);
+ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dcid, bool checkAll);
 // Return whether inconsistency is detected in the inputRange
-ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
+ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dcid, bool checkAll) {
 	state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 	state bool consistent = true;
 	loop {
@@ -305,7 +321,7 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 			fmt::println("Start checking for range: {}", printable(inputRange));
 			// Get SS interface for each shard of the inputRange
 			state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-			bool foundKeyServers = wait(getKeyServers(cx, keyServerPromise, inputRange));
+			bool foundKeyServers = wait(getKeyServers(cx, keyServerPromise, inputRange, dcid));
 			if (!foundKeyServers) {
 				fmt::println("key server locations for {} not found, retrying in 1s...", printable(inputRange));
 				wait(delay(1.0));
@@ -395,7 +411,7 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 						// child checkall is done, we move to the range: maxEndKey ~ rangeToCheck.end
 						state KeyRange spawnedRangeToCheck = Standalone(KeyRangeRef(beginKeyToCheck, maxEndKey));
 						fmt::println("Spawn new checkall for range {}", printable(spawnedRangeToCheck));
-						bool allSame = wait(doCheckAll(cx, spawnedRangeToCheck, checkAll));
+						bool allSame = wait(doCheckAll(cx, spawnedRangeToCheck, dcid, checkAll));
 						beginKeyToCheck = spawnedRangeToCheck.end;
 						consistent = consistent && allSame; // !allSame of any subrange results in !consistent
 					} else {
@@ -437,17 +453,27 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, bool checkAll) {
 // The command is used to check the data inconsistency of the user input range
 ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens) {
 	state bool checkAll = false; // If set, do not return on first error, continue checking all keys
+	state Optional<StringRef> dcid;
 	state KeyRange inputRange;
 	if (tokens.size() == 3) {
 		inputRange = KeyRangeRef(tokens[1], tokens[2]);
 	} else if (tokens.size() == 4 && tokens[3] == "all"_sr) {
 		inputRange = KeyRangeRef(tokens[1], tokens[2]);
 		checkAll = true;
+	} else if (tokens.size() == 4 && tokens[3] != "all"_sr) {
+		inputRange = KeyRangeRef(tokens[1], tokens[2]);
+		dcid = tokens[3];
+	} else if (tokens.size() == 5 && tokens[4] == "all"_sr) {
+		inputRange = KeyRangeRef(tokens[1], tokens[2]);
+		checkAll = true;
+		dcid = tokens[3];
 	} else {
 		fmt::println(
-		    "checkall [<KEY> <KEY2>] (all)\n"
+		    "checkall [<KEY> <KEY2>] <DCID> (all)\n"
 		    "Check inconsistency of the input range by comparing all replicas and print any corruptions.\n"
 		    "The default behavior is to stop on the first subrange where corruption is found\n"
+		    "DCID is optional. If set, the tool only check storage server of the specified data center.\n"
+		    "DCID is ignored if the cluster has not set dcid.\n"
 		    "`all` is optional. When `all` is appended, the checker does not stop until all subranges have checked.\n"
 		    "Note this is intended to check a small range of keys, not the entire database (consider consistencycheck "
 		    "for that purpose).");
@@ -458,7 +484,7 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 		return false;
 	}
 	// At this point, we have a non-empty inputRange to check
-	bool res = wait(doCheckAll(cx, inputRange, checkAll));
+	bool res = wait(doCheckAll(cx, inputRange, dcid, checkAll));
 	fmt::println("Checking complete. AllSame: {}", res);
 	return true;
 }
