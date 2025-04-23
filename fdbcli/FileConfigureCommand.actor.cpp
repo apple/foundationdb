@@ -74,7 +74,7 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 	if (isNewDatabase) {
 		configString = "new" + configString;
 	} else {
-		configString.assign(configString.c_str() + 1);
+		configString.erase(0, 1); // configureStringFromJSON returns a string with leading space.
 	}
 
 	ConfigurationResult result = wait(ManagementAPI::changeConfig(db, configString, force));
