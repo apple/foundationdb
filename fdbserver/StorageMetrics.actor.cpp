@@ -399,8 +399,6 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 	rep.bytesDurable = bytesDurable;
 	rep.bytesInput = bytesInput;
 
-	// Populate SST Ingestion Metrics
-
 	req.reply.send(rep);
 }
 

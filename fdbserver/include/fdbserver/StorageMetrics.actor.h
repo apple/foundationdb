@@ -24,8 +24,6 @@
 #include "fdbserver/StorageMetrics.actor.g.h"
 #elif !defined(FDBSERVER_STORAGEMETRICS_H)
 #define FDBSERVER_STORAGEMETRICS_H
-#include <vector>
-#include <string>
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
