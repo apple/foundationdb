@@ -179,18 +179,44 @@ ACTOR static Future<Void> replaceRange_impl(IKeyValueStore* self,
 	state int sinceYield = 0;
 	state const KeyValueRef* kvItr = data.begin();
 	state KeyRangeRef rangeRef = range;
-	if (rangeRef.empty()) {
-		return Void();
-	}
-	self->clear(rangeRef);
-	for (; kvItr != data.end(); kvItr++) {
-		self->set(*kvItr);
-		if (++sinceYield > 1000) {
-			wait(yield());
-			sinceYield = 0;
+	state bool errorOccurred = false;
+
+	try {
+		if (rangeRef.empty()) {
+			return Void();
 		}
+
+		// Clear the range first
+		self->clear(rangeRef);
+
+		// Set the new data
+		for (; kvItr != data.end(); kvItr++) {
+			try {
+				self->set(*kvItr);
+				if (++sinceYield > 1000) {
+					wait(yield());
+					sinceYield = 0;
+				}
+			} catch (Error& e) {
+				errorOccurred = true;
+				TraceEvent(SevError, "ReplaceRangeError")
+				    .error(e)
+				    .detail("Key", kvItr->key)
+				    .detail("ValueSize", kvItr->value.size());
+				throw;
+			}
+		}
+
+		// Wait for the changes to be durable
+		wait(self->commit());
+		return Void();
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		TraceEvent(SevError, "ReplaceRangeFailed").error(e).detail("Range", rangeRef).detail("DataSize", data.size());
+		throw;
 	}
-	return Void();
 }
 
 #include "flow/unactorcompiler.h"
