@@ -283,17 +283,6 @@ public:
 
 			// Step 2: Conduct Power-of-D-Choice to select a team
 			std::vector<Reference<TCTeamInfo>> candidateTeams;
-
-			/*int nTries = 0;
-			while (candidateTeams.size() < std::min(SERVER_KNOBS->BEST_TEAM_OPTION_COUNT, int(validTeams.size())) &&
-			       nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES) {
-			    Reference<TCTeamInfo> dest = deterministicRandom()->randomChoice(validTeams);
-			    if (std::find(candidateTeams.begin(), candidateTeams.end(), dest) == candidateTeams.end()) {
-			        candidateTeams.push_back(dest);
-			    }
-			    nTries++;
-			}*/
-
 			if (validTeams.size() <= 4) {
 				candidateTeams = validTeams;
 			} else {
