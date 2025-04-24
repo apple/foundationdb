@@ -103,6 +103,7 @@ public:
 	KeyValueStoreType getStoreType() const { return storeType; }
 	int64_t getDataInFlightToServer() const { return dataInFlightToServer; }
 	int64_t getStorageQueueSize() const;
+	int getMaxOngoingBulkLoadTaskCount() const;
 	// expect read traffic to server after data movement
 	int64_t getReadInFlightToServer() const { return readInFlightToServer; }
 	void incrementDataInFlightToServer(int64_t bytes) { dataInFlightToServer += bytes; }
@@ -225,6 +226,8 @@ public:
 	int64_t getDataInFlightToTeam() const override;
 
 	Optional<int64_t> getLongestStorageQueueSize() const override;
+
+	Optional<int> getMaxOngoingBulkLoadTaskCount() const override;
 
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 

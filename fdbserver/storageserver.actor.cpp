@@ -1010,6 +1010,17 @@ struct TenantSSInfo {
 	}
 };
 
+struct SSBulkLoadScheduler {
+public:
+	SSBulkLoadScheduler() : ongoingTasks(0) {}
+	void addTask() { ongoingTasks++; }
+	void removeTask() { ongoingTasks--; }
+	int getOngoingTasks() { return ongoingTasks; }
+
+private:
+	int ongoingTasks = 0;
+};
+
 struct StorageServer : public IStorageMetricsService {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -1687,6 +1698,8 @@ public:
 
 	std::shared_ptr<AccumulativeChecksumValidator> acsValidator = nullptr;
 
+	std::shared_ptr<SSBulkLoadScheduler> bulkLoadScheduler = nullptr;
+
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi,
@@ -1754,7 +1767,8 @@ public:
 	    acsValidator(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 	                         !SERVER_KNOBS->ENABLE_VERSION_VECTOR && !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST
 	                     ? std::make_shared<AccumulativeChecksumValidator>()
-	                     : nullptr) {
+	                     : nullptr),
+	    bulkLoadScheduler(std::make_shared<SSBulkLoadScheduler>()) {
 		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READTYPE_PRIORITY_MAP, ',');
 		ASSERT(readPriorityRanks.size() > (int)ReadType::MAX);
 		version.initMetric("StorageServer.Version"_sr, counters.cc.getId());
@@ -2027,7 +2041,8 @@ public:
 		                          versionLag,
 		                          lastUpdate,
 		                          counters.bytesDurable.getValue(),
-		                          counters.bytesInput.getValue());
+		                          counters.bytesInput.getValue(),
+		                          bulkLoadScheduler->getOngoingTasks());
 	}
 
 	void getSplitMetrics(const SplitMetricsRequest& req) override { this->metrics.splitMetrics(req); }
@@ -8920,10 +8935,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	    {}, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
 	if (conductBulkLoad) {
-		TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+		TraceEvent(bulkLoadPerfEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 		    .detail("DataMoveId", dataMoveId.toString())
 		    .detail("Range", keys)
-		    .detail("Phase", "Begin");
+		    .detail("Phase", "Begin")
+		    .detail("ConcurrentTasks", data->bulkLoadScheduler->getOngoingTasks());
+		data->bulkLoadScheduler->addTask();
 	}
 
 	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we get
@@ -9504,6 +9521,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
 		if (conductBulkLoad) {
+			data->bulkLoadScheduler->removeTask();
 			// Do best effort cleanup
 			clearFileFolder(bulkLoadLocalDir, data->thisServerID, /*ignoreError=*/true);
 		}
@@ -9540,6 +9558,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		if (e.code() != error_code_actor_cancelled)
 			data->otherError.sendError(e); // Kill the storage server.  Are there any recoverable errors?
 		if (conductBulkLoad) {
+			data->bulkLoadScheduler->removeTask();
 			// Do best effort cleanup
 			clearFileFolder(bulkLoadLocalDir, data->thisServerID, /*ignoreError=*/true);
 		}
