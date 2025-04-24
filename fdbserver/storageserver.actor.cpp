@@ -9221,7 +9221,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("SupportsSstIngestion", data->storage.getKeyValueStore()->supportsSstIngestion())
 				    .detail("Phase", "File download");
 				// Attempt SST ingestion...
-				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
+				if (false && SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
 				    data->storage.getKeyValueStore()->supportsSstIngestion()) {
 					TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 					    .detail("DataMoveId", dataMoveId.toString())
