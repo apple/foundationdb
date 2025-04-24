@@ -9056,6 +9056,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// Test using GRV version for fetchKey.
 				lastError = transaction_too_old();
 			}
+
 			if (lastError.code() == error_code_transaction_too_old) {
 				try {
 					Version grvVersion = wait(tr.getRawReadVersion());
