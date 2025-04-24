@@ -306,6 +306,8 @@ public:
 		for (const auto& team : teams) {
 			Optional<int> ongoingBulkLoadTaskCount = team->getMaxOngoingBulkLoadTaskCount();
 			if (!ongoingBulkLoadTaskCount.present()) {
+				// If a SS tracker cannot get the metrics from the SS, it is possible that this SS has some healthy
+				// issue. So, return an empty result to avoid choosing this server.
 				return Optional<int>();
 			}
 			maxOngoingBulkLoadTaskCount = std::max(maxOngoingBulkLoadTaskCount, ongoingBulkLoadTaskCount.get());
