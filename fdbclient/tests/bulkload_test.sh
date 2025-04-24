@@ -242,7 +242,12 @@ TEST_SCRATCH_DIR=
 TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
 readonly TLS_CA_FILE
 readonly HTTP_VERBOSE_LEVEL=2
-KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+KNOBS=(
+  "--knob_blobstore_encryption_type=aws:kms"
+  "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}"
+  "--knob_enable_mutation_checksum=true"
+  "--knob_enable_accumulative_checksum=true"
+)
 readonly KNOBS
 # Should we use S3? If USE_S3 is not defined, then check if
 # OKTETO_NAMESPACE is defined (It is defined on the okteto
