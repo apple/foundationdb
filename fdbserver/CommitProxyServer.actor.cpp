@@ -842,23 +842,22 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 					transactionTags.insert(cacheTag);
 				}
 			} else if (m.type == MutationRef::ClearRange) {
-				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
-				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
-				auto firstRange = ranges.begin();
-				++firstRange;
-				if (firstRange == ranges.end()) {
+				auto range = pProxyCommitData->keyInfo.rangeContaining(m.param1);
+				if (range.end() >= m.param2) {
 					std::set<Tag> filteredTags;
-					ranges.begin().value().populateTags();
-					filteredTags.insert(ranges.begin().value().tags.begin(), ranges.begin().value().tags.end());
-					transactionTags.insert(ranges.begin().value().tags.begin(), ranges.begin().value().tags.end());
+					range.value().populateTags();
+					filteredTags.insert(range.value().tags.begin(), range.value().tags.end());
+					transactionTags.insert(range.value().tags.begin(), range.value().tags.end());
 				} else {
 					std::set<Tag> allSources;
-					for (auto r : ranges) {
-						r.value().populateTags();
-						allSources.insert(r.value().tags.begin(), r.value().tags.end());
-						transactionTags.insert(r.value().tags.begin(), r.value().tags.end());
+					while (range.begin() < m.param2) {
+						range.value().populateTags();
+						allSources.insert(range.value().tags.begin(), range.value().tags.end());
+						transactionTags.insert(range.value().tags.begin(), range.value().tags.end());
+						++range;
 					}
 				}
+				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					transactionTags.insert(cacheTag);
 				}
@@ -2183,22 +2182,19 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
 			} else if (m.type == MutationRef::ClearRange) {
-				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
-				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
-				auto firstRange = ranges.begin();
-				++firstRange;
-				if (firstRange == ranges.end()) {
+				auto range = pProxyCommitData->keyInfo.rangeContaining(m.param1);
+				if (range.end() >= m.param2) {
 					// Fast path
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
-					    .detail("To", ranges.begin().value().tags);
-					ranges.begin().value().populateTags();
-					self->toCommit.addTags(ranges.begin().value().tags);
+					    .detail("To", range.value().tags);
+					range.value().populateTags();
+					self->toCommit.addTags(range.value().tags);
 
 					if (pProxyCommitData->acsBuilder != nullptr) {
 						updateMutationWithAcsAndAddMutationToAcsBuilder(
 						    pProxyCommitData->acsBuilder,
 						    m,
-						    ranges.begin().value().tags,
+						    range.value().tags,
 						    getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex),
 						    pProxyCommitData->epoch,
 						    self->commitVersion,
@@ -2208,7 +2204,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					// check whether clear is sampled
 					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
 					    trCost->get().clearIdxCosts[0].first == mutationNum) {
-						auto const& ssInfos = ranges.begin().value().src_info;
+						auto const& ssInfos = range.value().src_info;
 						for (auto const& ssInfo : ssInfos) {
 							auto id = ssInfo->interf.id();
 							pProxyCommitData->updateSSTagCost(id,
@@ -2221,14 +2217,14 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				} else {
 					CODE_PROBE(true, "A clear range extends past a shard boundary");
 					std::set<Tag> allSources;
-					for (auto r : ranges) {
-						r.value().populateTags();
-						allSources.insert(r.value().tags.begin(), r.value().tags.end());
+					while (range.begin() < m.param2) {
+						range.value().populateTags();
+						allSources.insert(range.value().tags.begin(), range.value().tags.end());
 
 						// check whether clear is sampled
 						if (checkSample && !trCost->get().clearIdxCosts.empty() &&
 						    trCost->get().clearIdxCosts[0].first == mutationNum) {
-							auto const& ssInfos = r.value().src_info;
+							auto const& ssInfos = range.value().src_info;
 							for (auto const& ssInfo : ssInfos) {
 								auto id = ssInfo->interf.id();
 								pProxyCommitData->updateSSTagCost(id,
@@ -2239,6 +2235,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 							}
 							trCost->get().clearIdxCosts.pop_front();
 						}
+						++range;
 					}
 
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
@@ -2258,6 +2255,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					}
 				}
 
+				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
