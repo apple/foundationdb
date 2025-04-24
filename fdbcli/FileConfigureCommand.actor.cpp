@@ -62,9 +62,6 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 	}
 
 	state std::string configString;
-	if (isNewDatabase) {
-		configString = "new";
-	}
 
 	try {
 		configString += DatabaseConfiguration::configureStringFromJSON(configJSON);
@@ -72,6 +69,12 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 		fmt::print("ERROR: {}", e.what());
 		printUsage("fileconfigure"_sr);
 		return false;
+	}
+
+	if (isNewDatabase) {
+		configString = "new" + configString;
+	} else {
+		configString.erase(0, 1); // configureStringFromJSON returns a string with leading space.
 	}
 
 	ConfigurationResult result = wait(ManagementAPI::changeConfig(db, configString, force));
