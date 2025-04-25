@@ -844,9 +844,7 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 			} else if (m.type == MutationRef::ClearRange) {
 				auto range = pProxyCommitData->keyInfo.rangeContaining(m.param1);
 				if (range.end() >= m.param2) {
-					std::set<Tag> filteredTags;
 					range.value().populateTags();
-					filteredTags.insert(range.value().tags.begin(), range.value().tags.end());
 					transactionTags.insert(range.value().tags.begin(), range.value().tags.end());
 				} else {
 					std::set<Tag> allSources;
