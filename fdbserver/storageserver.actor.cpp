@@ -1010,9 +1010,9 @@ struct TenantSSInfo {
 	}
 };
 
-struct SSBulkLoadScheduler {
+struct SSBulkLoadMetrics {
 public:
-	SSBulkLoadScheduler() : ongoingTasks(0) {}
+	SSBulkLoadMetrics() : ongoingTasks(0) {}
 	void addTask() { ongoingTasks++; }
 	void removeTask() { ongoingTasks--; }
 	int getOngoingTasks() { return ongoingTasks; }
@@ -1698,7 +1698,7 @@ public:
 
 	std::shared_ptr<AccumulativeChecksumValidator> acsValidator = nullptr;
 
-	std::shared_ptr<SSBulkLoadScheduler> bulkLoadScheduler = nullptr;
+	std::shared_ptr<SSBulkLoadMetrics> bulkLoadMetrics = nullptr;
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
@@ -1768,7 +1768,7 @@ public:
 	                         !SERVER_KNOBS->ENABLE_VERSION_VECTOR && !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST
 	                     ? std::make_shared<AccumulativeChecksumValidator>()
 	                     : nullptr),
-	    bulkLoadScheduler(std::make_shared<SSBulkLoadScheduler>()) {
+	    bulkLoadMetrics(std::make_shared<SSBulkLoadMetrics>()) {
 		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READTYPE_PRIORITY_MAP, ',');
 		ASSERT(readPriorityRanks.size() > (int)ReadType::MAX);
 		version.initMetric("StorageServer.Version"_sr, counters.cc.getId());
@@ -2042,7 +2042,7 @@ public:
 		                          lastUpdate,
 		                          counters.bytesDurable.getValue(),
 		                          counters.bytesInput.getValue(),
-		                          bulkLoadScheduler->getOngoingTasks());
+		                          bulkLoadMetrics->getOngoingTasks());
 	}
 
 	void getSplitMetrics(const SplitMetricsRequest& req) override { this->metrics.splitMetrics(req); }
@@ -8939,8 +8939,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("DataMoveId", dataMoveId.toString())
 		    .detail("Range", keys)
 		    .detail("Phase", "Begin")
-		    .detail("ConcurrentTasks", data->bulkLoadScheduler->getOngoingTasks());
-		data->bulkLoadScheduler->addTask();
+		    .detail("ConcurrentTasks", data->bulkLoadMetrics->getOngoingTasks());
+		data->bulkLoadMetrics->addTask();
 	}
 
 	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we get
@@ -9521,7 +9521,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
 		if (conductBulkLoad) {
-			data->bulkLoadScheduler->removeTask();
+			data->bulkLoadMetrics->removeTask();
 			// Do best effort cleanup
 			clearFileFolder(bulkLoadLocalDir, data->thisServerID, /*ignoreError=*/true);
 		}
@@ -9558,7 +9558,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		if (e.code() != error_code_actor_cancelled)
 			data->otherError.sendError(e); // Kill the storage server.  Are there any recoverable errors?
 		if (conductBulkLoad) {
-			data->bulkLoadScheduler->removeTask();
+			data->bulkLoadMetrics->removeTask();
 			// Do best effort cleanup
 			clearFileFolder(bulkLoadLocalDir, data->thisServerID, /*ignoreError=*/true);
 		}
