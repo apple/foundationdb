@@ -34,7 +34,6 @@
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/ResolverInterface.h"
-#include "fdbserver/RestoreUtil.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/WaitFailure.h"
@@ -608,7 +607,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(
 
 		((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);
 
-		MutationsVec mutations;
+		Standalone<VectorRef<MutationRef>> mutations;
 		std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;

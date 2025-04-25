@@ -39,7 +39,7 @@ struct ProcessClass {
 		LogClass,
 		ClusterControllerClass,
 		LogRouterClass,
-		FastRestoreClass,
+		FastRestoreClass, // deprecated
 		DataDistributorClass,
 		CoordinatorClass,
 		RatekeeperClass,
@@ -145,7 +145,7 @@ public:
 		else if (s=="log") _class = LogClass;
 		else if (s=="router") _class = LogRouterClass;
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
-		else if (s=="fast_restore") _class = FastRestoreClass;
+		else if (s=="fast_restore") ASSERT(false); // deprecated
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;
@@ -177,7 +177,7 @@ public:
 		else if (classStr=="log") _class = LogClass;
 		else if (classStr=="router") _class = LogRouterClass;
 		else if (classStr=="cluster_controller") _class = ClusterControllerClass;
-		else if (classStr=="fast_restore") _class = FastRestoreClass;
+		else if (classStr=="fast_restore") ASSERT(false); // deprecated
 		else if (classStr=="data_distributor") _class = DataDistributorClass;
 		else if (classStr=="coordinator") _class = CoordinatorClass;
 		else if (classStr=="ratekeeper") _class = RatekeeperClass;
@@ -219,7 +219,7 @@ public:
 			case LogClass: return "log";
 			case LogRouterClass: return "router";
 			case ClusterControllerClass: return "cluster_controller";
-			case FastRestoreClass: return "fast_restore";
+			case FastRestoreClass: ASSERT(false); return "fast_restore";
 			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
 			case RatekeeperClass: return "ratekeeper";

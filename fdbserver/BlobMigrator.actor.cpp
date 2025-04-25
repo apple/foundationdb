@@ -23,8 +23,6 @@
 #include <string>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/Knobs.h"
-#include "fdbserver/RestoreCommon.actor.h"
-#include "fdbserver/RestoreUtil.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "flow/CodeProbe.h"
 #include "flow/Error.h"
