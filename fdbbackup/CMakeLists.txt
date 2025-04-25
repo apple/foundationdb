@@ -37,11 +37,11 @@ if(NOT OPEN_FOR_IDE)
   symlink_files(
     LOCATION packages/bin
     SOURCE fdbbackup
-    TARGETS fdbdr dr_agent backup_agent fdbrestore fastrestore_tool)
+    TARGETS fdbdr dr_agent backup_agent fdbrestore)
   symlink_files(
     LOCATION bin
     SOURCE fdbbackup
-    TARGETS fdbdr dr_agent backup_agent fdbrestore fastrestore_tool)
+    TARGETS fdbdr dr_agent backup_agent fdbrestore)
 endif()
 
 if (GPERFTOOLS_FOUND)

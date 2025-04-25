@@ -82,7 +82,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Type of program being executed
-enum class ProgramExe { AGENT, BACKUP, RESTORE, FASTRESTORE_TOOL, DR_AGENT, DB_BACKUP, UNDEFINED };
+enum class ProgramExe { AGENT, BACKUP, RESTORE, DR_AGENT, DB_BACKUP, UNDEFINED };
 
 enum class BackupType {
 	UNDEFINED = 0,
@@ -695,7 +695,7 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
-// g_rgRestoreOptions is used by fdbrestore and fastrestore_tool
+// g_rgRestoreOptions is used by fdbrestore
 CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
@@ -931,7 +931,6 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 const KeyRef exeAgent = "backup_agent"_sr;
 const KeyRef exeBackup = "fdbbackup"_sr;
 const KeyRef exeRestore = "fdbrestore"_sr;
-const KeyRef exeFastRestoreTool = "fastrestore_tool"_sr; // must be lower case
 const KeyRef exeDatabaseAgent = "dr_agent"_sr;
 const KeyRef exeDatabaseBackup = "fdbdr"_sr;
 
@@ -1253,14 +1252,6 @@ static void printRestoreUsage(bool devhelp) {
 	return;
 }
 
-static void printFastRestoreUsage(bool devhelp) {
-	printf(" NOTE: Fast restore aims to support the same fdbrestore option list.\n");
-	printf("       But fast restore is still under development. The options may not be fully supported.\n");
-	printf(" Supported options are: --dest-cluster-file, -r, --waitfordone, --logdir\n");
-	printRestoreUsage(devhelp);
-	return;
-}
-
 static void printDBAgentUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s [OPTIONS]\n\n", exeDatabaseAgent.toString().c_str());
@@ -1363,9 +1354,6 @@ static void printUsage(ProgramExe programExe, bool devhelp) {
 	case ProgramExe::RESTORE:
 		printRestoreUsage(devhelp);
 		break;
-	case ProgramExe::FASTRESTORE_TOOL:
-		printFastRestoreUsage(devhelp);
-		break;
 	case ProgramExe::DR_AGENT:
 		printDBAgentUsage(devhelp);
 		break;
@@ -1424,14 +1412,6 @@ ProgramExe getProgramType(std::string programExe) {
 	         (programExe.compare(
 	              programExe.length() - exeRestore.size(), exeRestore.size(), (const char*)exeRestore.begin()) == 0)) {
 		enProgramExe = ProgramExe::RESTORE;
-	}
-
-	// Check if restore
-	else if ((programExe.length() >= exeFastRestoreTool.size()) &&
-	         (programExe.compare(programExe.length() - exeFastRestoreTool.size(),
-	                             exeFastRestoreTool.size(),
-	                             (const char*)exeFastRestoreTool.begin()) == 0)) {
-		enProgramExe = ProgramExe::FASTRESTORE_TOOL;
 	}
 
 	// Check if db agent
@@ -2463,121 +2443,6 @@ ACTOR Future<Void> runRestore(Database db,
 	return Void();
 }
 
-// Fast restore agent that kicks off the restore: send restore requests to restore workers.
-ACTOR Future<Void> runFastRestoreTool(Database db,
-                                      std::string tagName,
-                                      std::string container,
-                                      Optional<std::string> proxy,
-                                      Standalone<VectorRef<KeyRangeRef>> ranges,
-                                      Version dbVersion,
-                                      bool performRestore,
-                                      Verbose verbose,
-                                      WaitForComplete waitForDone) {
-	try {
-		state FileBackupAgent backupAgent;
-		state Version restoreVersion = invalidVersion;
-
-		if (ranges.size() > 1) {
-			fprintf(stdout, "[WARNING] Currently only a single restore range is tested!\n");
-		}
-
-		if (ranges.size() == 0) {
-			ranges.push_back(ranges.arena(), normalKeys);
-		}
-
-		printf("[INFO] runFastRestoreTool: restore_ranges:%d first range:%s\n",
-		       ranges.size(),
-		       ranges.front().toString().c_str());
-		TraceEvent ev("FastRestoreTool");
-		ev.detail("RestoreRanges", ranges.size());
-		for (int i = 0; i < ranges.size(); ++i) {
-			ev.detail(format("Range%d", i), ranges[i]);
-		}
-
-		if (performRestore) {
-			if (dbVersion == invalidVersion) {
-				TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", "Largest restorable version");
-				BackupDescription desc = wait(IBackupContainer::openContainer(container, proxy, {})->describeBackup());
-				if (!desc.maxRestorableVersion.present()) {
-					fprintf(stderr, "The specified backup is not restorable to any version.\n");
-					throw restore_error();
-				}
-
-				dbVersion = desc.maxRestorableVersion.get();
-				TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", dbVersion);
-			}
-			state UID randomUID = deterministicRandom()->randomUniqueID();
-			TraceEvent("FastRestoreTool")
-			    .detail("SubmitRestoreRequests", ranges.size())
-			    .detail("RestoreUID", randomUID);
-			wait(backupAgent.submitParallelRestore(db,
-			                                       KeyRef(tagName),
-			                                       ranges,
-			                                       KeyRef(container),
-			                                       proxy,
-			                                       dbVersion,
-			                                       LockDB::True,
-			                                       randomUID,
-			                                       ""_sr,
-			                                       ""_sr));
-			// TODO: Support addPrefix and removePrefix
-			if (waitForDone) {
-				// Wait for parallel restore to finish and unlock DB after that
-				TraceEvent("FastRestoreTool").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
-				wait(backupAgent.parallelRestoreFinish(db, randomUID));
-				TraceEvent("FastRestoreTool").detail("BackupAndParallelRestore", "RestoreFinished");
-			} else {
-				TraceEvent("FastRestoreTool")
-				    .detail("RestoreUID", randomUID)
-				    .detail("OperationGuide", "Manually unlock DB when restore finishes");
-				printf("WARNING: DB will be in locked state after restore. Need UID:%s to unlock DB\n",
-				       randomUID.toString().c_str());
-			}
-
-			restoreVersion = dbVersion;
-		} else {
-			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container, proxy, {});
-			state BackupDescription description = wait(bc->describeBackup());
-
-			if (dbVersion <= 0) {
-				wait(description.resolveVersionTimes(db));
-				if (description.maxRestorableVersion.present())
-					restoreVersion = description.maxRestorableVersion.get();
-				else {
-					fprintf(stderr, "Backup is not restorable\n");
-					throw restore_invalid_version();
-				}
-			} else {
-				restoreVersion = dbVersion;
-			}
-
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
-			if (!rset.present()) {
-				fmt::print(stderr, "Insufficient data to restore to version {}\n", restoreVersion);
-				throw restore_invalid_version();
-			}
-
-			// Display the restore information, if requested
-			if (verbose) {
-				fmt::print("[DRY RUN] Restoring backup to version: {}\n", restoreVersion);
-				fmt::print("{}\n", description.toString());
-			}
-		}
-
-		if (waitForDone && verbose) {
-			// If restore completed then report version restored
-			fmt::print("Restored to version {0}{1}\n", restoreVersion, (performRestore) ? "" : " (DRY RUN)");
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-		fprintf(stderr, "ERROR: %s\n", e.what());
-		throw;
-	}
-
-	return Void();
-}
-
 ACTOR Future<Void> dumpBackupData(const char* name,
                                   std::string destinationContainer,
                                   Optional<std::string> proxy,
@@ -3467,20 +3332,6 @@ int main(int argc, char* argv[]) {
 				    argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 			}
 			break;
-		case ProgramExe::FASTRESTORE_TOOL:
-			if (argc < 2) {
-				printFastRestoreUsage(false);
-				return FDB_EXIT_ERROR;
-			}
-			// Get the restore operation type
-			restoreType = getRestoreType(argv[1]);
-			if (restoreType == RestoreType::UNKNOWN) {
-				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
-			} else {
-				args = std::make_unique<CSimpleOpt>(
-				    argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
-			}
-			break;
 		case ProgramExe::UNDEFINED:
 		default:
 			fprintf(stderr, "FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
@@ -4036,13 +3887,6 @@ int main(int argc, char* argv[]) {
 				return FDB_EXIT_ERROR;
 				break;
 
-			case ProgramExe::FASTRESTORE_TOOL:
-				fprintf(
-				    stderr, "ERROR: FDB Fast Restore Tool does not support argument value `%s'\n", args->File(argLoop));
-				printHelpTeaser(argv[0]);
-				return FDB_EXIT_ERROR;
-				break;
-
 			case ProgramExe::DR_AGENT:
 				fprintf(stderr, "ERROR: DR Agent does not support argument value `%s'\n", args->File(argLoop));
 				printHelpTeaser(argv[0]);
@@ -4197,16 +4041,8 @@ int main(int argc, char* argv[]) {
 			return result.present();
 		};
 
-		// The fastrestore tool does not yet support multiple ranges and is incompatible with tenants
-		// or other features that back up data in the system keys
-		if (!restoreSystemKeys && !restoreUserKeys && backupKeys.empty() &&
-		    programExe != ProgramExe::FASTRESTORE_TOOL) {
+		if (!restoreSystemKeys && !restoreUserKeys && backupKeys.empty()) {
 			addDefaultBackupRanges(backupKeys);
-		}
-
-		if ((restoreSystemKeys || restoreUserKeys) && programExe == ProgramExe::FASTRESTORE_TOOL) {
-			fprintf(stderr, "ERROR: Options: --user-data and --system-metadata are not supported with fastrestore\n");
-			return FDB_EXIT_ERROR;
 		}
 
 		if ((restoreUserKeys || restoreSystemKeys) && !backupKeys.empty()) {
@@ -4459,81 +4295,6 @@ int main(int argc, char* argv[]) {
 					printf("%s\n", s.c_str());
 					return Void();
 				}));
-				break;
-			default:
-				throw restore_error();
-			}
-			break;
-		case ProgramExe::FASTRESTORE_TOOL:
-			// Support --dest-cluster-file option as fdbrestore does
-			if (dryRun) {
-				if (restoreType != RestoreType::START) {
-					fprintf(stderr, "Restore dry run only works for 'start' command\n");
-					return FDB_EXIT_ERROR;
-				}
-
-				// Must explicitly call trace file options handling if not calling Database::createDatabase()
-				initTraceFile();
-			} else {
-				if (restoreClusterFileDest.empty()) {
-					fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
-					return FDB_EXIT_ERROR;
-				}
-
-				if (!fileExists(restoreClusterFileDest)) {
-					fprintf(stderr,
-					        "Restore destination cluster file '%s' does not exist.\n",
-					        restoreClusterFileDest.c_str());
-					return FDB_EXIT_ERROR;
-				}
-
-				try {
-					db = Database::createDatabase(restoreClusterFileDest, ApiVersion::LATEST_VERSION);
-				} catch (Error& e) {
-					fprintf(stderr,
-					        "Restore destination cluster file '%s' invalid: %s\n",
-					        restoreClusterFileDest.c_str(),
-					        e.what());
-					return FDB_EXIT_ERROR;
-				}
-			}
-			// TODO: We have not implemented the code commented out in this case
-			switch (restoreType) {
-			case RestoreType::START:
-				f = stopAfter(runFastRestoreTool(db,
-				                                 tagName,
-				                                 restoreContainer,
-				                                 proxy,
-				                                 backupKeys,
-				                                 restoreVersion,
-				                                 !dryRun,
-				                                 Verbose{ !quietDisplay },
-				                                 waitForDone));
-				break;
-			case RestoreType::WAIT:
-				printf("[TODO][ERROR] FastRestore does not support RESTORE_WAIT yet!\n");
-				throw restore_error();
-				//					f = stopAfter( success(ba.waitRestore(db, KeyRef(tagName), true)) );
-				break;
-			case RestoreType::ABORT:
-				printf("[TODO][ERROR] FastRestore does not support RESTORE_ABORT yet!\n");
-				throw restore_error();
-				//					f = stopAfter( map(ba.abortRestore(db, KeyRef(tagName)),
-				//[tagName](FileBackupAgent::ERestoreState s) -> Void { 						printf("Tag: %s  State:
-				//%s\n", tagName.c_str(),
-				// FileBackupAgent::restoreStateText(s).toString().c_str()); 						return Void();
-				//					}) );
-				break;
-			case RestoreType::STATUS:
-				printf("[TODO][ERROR] FastRestore does not support RESTORE_STATUS yet!\n");
-				throw restore_error();
-				// If no tag is specifically provided then print all tag status, don't just use "default"
-				if (tagProvided)
-					tag = tagName;
-				//					f = stopAfter( map(ba.restoreStatus(db, KeyRef(tag)), [](std::string s) -> Void {
-				//						printf("%s\n", s.c_str());
-				//						return Void();
-				//					}) );
 				break;
 			default:
 				throw restore_error();
