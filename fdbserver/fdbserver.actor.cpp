@@ -1808,7 +1808,7 @@ private:
 					blobCredentials.push_back(file.toString());
 			} while (t.size() != 0);
 		}
-		
+
 		// Sets up proxy from ENV if it is not set by arg.
 		const char* proxyENV = getenv("FDB_PROXY");
 		if (proxyENV != nullptr && !proxy.present()) {
@@ -2394,8 +2394,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			// Update proxy string
-			Optional<std::string>* pProxy =
-			    (Optional<std::string>*)g_network->global(INetwork::enProxy);
+			Optional<std::string>* pProxy = (Optional<std::string>*)g_network->global(INetwork::enProxy);
 			*pProxy = opts.proxy;
 
 			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
