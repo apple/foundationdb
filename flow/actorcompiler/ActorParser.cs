@@ -28,8 +28,9 @@ namespace actorcompiler
     class Error : Exception
     {
         public int SourceLine { get; private set; }
+
         public Error(int SourceLine, string format, params object[] args)
-            : base(string.Format(format,args))
+            : base(string.Format(format, args))
         {
             this.SourceLine = SourceLine;
         }
@@ -38,15 +39,23 @@ namespace actorcompiler
     class ErrorMessagePolicy
     {
         public bool DisableDiagnostics = false;
+
         public void HandleActorWithoutWait(String sourceFile, Actor actor)
         {
             if (!DisableDiagnostics && !actor.isTestCase)
             {
                 // TODO(atn34): Once cmake is the only build system we can make this an error instead of a warning.
-                Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);
+                Console.Error.WriteLine(
+                    "{0}:{1}: warning: ACTOR {2} does not contain a wait() statement",
+                    sourceFile,
+                    actor.SourceLine,
+                    actor.name
+                );
             }
         }
-        public bool ActorsNoDiscardByDefault() {
+
+        public bool ActorsNoDiscardByDefault()
+        {
             return !DisableDiagnostics;
         }
     }
@@ -58,52 +67,91 @@ namespace actorcompiler
         public int SourceLine;
         public int BraceDepth;
         public int ParenDepth;
-        public bool IsWhitespace { get { return Value == " " || Value == "\n" || Value == "\r" || Value == "\r\n" || Value == "\t" || Value.StartsWith("//") || Value.StartsWith("/*"); } }
-        public override string ToString() { return Value; }
+        public bool IsWhitespace
+        {
+            get
+            {
+                return Value == " "
+                    || Value == "\n"
+                    || Value == "\r"
+                    || Value == "\r\n"
+                    || Value == "\t"
+                    || Value.StartsWith("//")
+                    || Value.StartsWith("/*");
+            }
+        }
+
+        public override string ToString()
+        {
+            return Value;
+        }
+
         public Token Assert(string error, Func<Token, bool> pred)
         {
-            if (!pred(this)) throw new Error(SourceLine, error);
+            if (!pred(this))
+                throw new Error(SourceLine, error);
             return this;
         }
+
         public TokenRange GetMatchingRangeIn(TokenRange range)
         {
-            Func<Token,bool> pred;
+            Func<Token, bool> pred;
             int dir;
-            switch (Value) {
-                case "(": pred = t=> t.Value != ")" || t.ParenDepth != ParenDepth; dir = +1; break;
-                case ")": pred = t=> t.Value != "(" || t.ParenDepth != ParenDepth; dir = -1; break;
-                case "{": pred = t=> t.Value != "}" || t.BraceDepth != BraceDepth; dir = +1; break;
-                case "}": pred = t=> t.Value != "{" || t.BraceDepth != BraceDepth; dir = -1; break;
-                case "<": return
-                    new TokenRange(range.GetAllTokens(),
-                        Position+1,
-                        AngleBracketParser.NotInsideAngleBrackets(
-                                    new TokenRange(range.GetAllTokens(), Position, range.End))
-                                .Skip(1)  // skip the "<", which is considered "outside"
-                                .First()  // get the ">", which is likewise "outside"
-                                .Position);
-                case "[": return
-                    new TokenRange(range.GetAllTokens(),
-                        Position+1,
-                        BracketParser.NotInsideBrackets(
-                                    new TokenRange(range.GetAllTokens(), Position, range.End))
-                                .Skip(1)  // skip the "[", which is considered "outside"
-                                .First()  // get the "]", which is likewise "outside"
-                                .Position);
-                default: throw new NotSupportedException("Can't match this token!");
+            switch (Value)
+            {
+                case "(":
+                    pred = t => t.Value != ")" || t.ParenDepth != ParenDepth;
+                    dir = +1;
+                    break;
+                case ")":
+                    pred = t => t.Value != "(" || t.ParenDepth != ParenDepth;
+                    dir = -1;
+                    break;
+                case "{":
+                    pred = t => t.Value != "}" || t.BraceDepth != BraceDepth;
+                    dir = +1;
+                    break;
+                case "}":
+                    pred = t => t.Value != "{" || t.BraceDepth != BraceDepth;
+                    dir = -1;
+                    break;
+                case "<":
+                    return new TokenRange(
+                        range.GetAllTokens(),
+                        Position + 1,
+                        AngleBracketParser
+                            .NotInsideAngleBrackets(
+                                new TokenRange(range.GetAllTokens(), Position, range.End)
+                            )
+                            .Skip(1) // skip the "<", which is considered "outside"
+                            .First() // get the ">", which is likewise "outside"
+                            .Position
+                    );
+                case "[":
+                    return new TokenRange(
+                        range.GetAllTokens(),
+                        Position + 1,
+                        BracketParser
+                            .NotInsideBrackets(
+                                new TokenRange(range.GetAllTokens(), Position, range.End)
+                            )
+                            .Skip(1) // skip the "[", which is considered "outside"
+                            .First() // get the "]", which is likewise "outside"
+                            .Position
+                    );
+                default:
+                    throw new NotSupportedException("Can't match this token!");
             }
             TokenRange r;
             if (dir == -1)
             {
-                r = new TokenRange(range.GetAllTokens(), range.Begin, Position)
-                    .RevTakeWhile(pred);
+                r = new TokenRange(range.GetAllTokens(), range.Begin, Position).RevTakeWhile(pred);
                 if (r.Begin == range.Begin)
                     throw new Error(SourceLine, "Syntax error: Unmatched " + Value);
             }
             else
             {
-                r = new TokenRange(range.GetAllTokens(), Position+1, range.End)
-                    .TakeWhile(pred);
+                r = new TokenRange(range.GetAllTokens(), Position + 1, range.End).TakeWhile(pred);
                 if (r.End == range.End)
                     throw new Error(SourceLine, "Syntax error: Unmatched " + Value);
             }
@@ -115,23 +163,40 @@ namespace actorcompiler
     {
         public TokenRange(Token[] tokens, int beginPos, int endPos)
         {
-            if (beginPos > endPos) throw new InvalidOperationException("Invalid TokenRange");
+            if (beginPos > endPos)
+                throw new InvalidOperationException("Invalid TokenRange");
             this.tokens = tokens;
             this.beginPos = beginPos;
             this.endPos = endPos;
         }
 
-        public bool IsEmpty { get { return beginPos==endPos; } }
-        public int Begin { get { return beginPos; } }
-        public int End { get { return endPos; } }
-        public Token First() {
-            if (beginPos == endPos) throw new InvalidOperationException("Empty TokenRange");
-            return tokens[beginPos]; 
+        public bool IsEmpty
+        {
+            get { return beginPos == endPos; }
         }
-        public Token Last() {
-            if (beginPos == endPos) throw new InvalidOperationException("Empty TokenRange");
+        public int Begin
+        {
+            get { return beginPos; }
+        }
+        public int End
+        {
+            get { return endPos; }
+        }
+
+        public Token First()
+        {
+            if (beginPos == endPos)
+                throw new InvalidOperationException("Empty TokenRange");
+            return tokens[beginPos];
+        }
+
+        public Token Last()
+        {
+            if (beginPos == endPos)
+                throw new InvalidOperationException("Empty TokenRange");
             return tokens[endPos - 1];
         }
+
         public Token Last(Func<Token, bool> pred)
         {
             for (int i = endPos - 1; i >= beginPos; i--)
@@ -139,26 +204,35 @@ namespace actorcompiler
                     return tokens[i];
             throw new Exception("Matching token not found");
         }
+
         public TokenRange Skip(int count)
         {
             return new TokenRange(tokens, beginPos + count, endPos);
         }
+
         public TokenRange Consume(string value)
         {
             First().Assert("Expected " + value, t => t.Value == value);
             return Skip(1);
         }
+
         public TokenRange Consume(string error, Func<Token, bool> pred)
         {
             First().Assert(error, pred);
             return Skip(1);
         }
-        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() { return GetEnumerator(); }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
+        {
+            return GetEnumerator();
+        }
+
         public IEnumerator<Token> GetEnumerator()
         {
             for (int i = beginPos; i < endPos; i++)
                 yield return tokens[i];
         }
+
         public TokenRange SkipWhile(Func<Token, bool> pred)
         {
             for (int e = beginPos; e < endPos; e++)
@@ -166,6 +240,7 @@ namespace actorcompiler
                     return new TokenRange(tokens, e, endPos);
             return new TokenRange(tokens, endPos, endPos);
         }
+
         public TokenRange TakeWhile(Func<Token, bool> pred)
         {
             for (int e = beginPos; e < endPos; e++)
@@ -173,13 +248,15 @@ namespace actorcompiler
                     return new TokenRange(tokens, beginPos, e);
             return new TokenRange(tokens, beginPos, endPos);
         }
+
         public TokenRange RevTakeWhile(Func<Token, bool> pred)
         {
-            for (int e = endPos-1; e >= beginPos; e--)
+            for (int e = endPos - 1; e >= beginPos; e--)
                 if (!pred(tokens[e]))
-                    return new TokenRange(tokens, e+1, endPos);
+                    return new TokenRange(tokens, e + 1, endPos);
             return new TokenRange(tokens, beginPos, endPos);
         }
+
         public TokenRange RevSkipWhile(Func<Token, bool> pred)
         {
             for (int e = endPos - 1; e >= beginPos; e--)
@@ -187,12 +264,15 @@ namespace actorcompiler
                     return new TokenRange(tokens, beginPos, e + 1);
             return new TokenRange(tokens, beginPos, beginPos);
         }
-        public Token[] GetAllTokens() { return tokens; }
 
-        public int Length {
-            get {
-                return endPos - beginPos;
-            }
+        public Token[] GetAllTokens()
+        {
+            return tokens;
+        }
+
+        public int Length
+        {
+            get { return endPos - beginPos; }
         }
 
         Token[] tokens;
@@ -208,14 +288,18 @@ namespace actorcompiler
             int? BasePD = null;
             foreach (var tok in tokens)
             {
-                if (BasePD == null) BasePD = tok.ParenDepth;
-                if (tok.ParenDepth == BasePD && tok.Value == "]") BracketDepth--;
+                if (BasePD == null)
+                    BasePD = tok.ParenDepth;
+                if (tok.ParenDepth == BasePD && tok.Value == "]")
+                    BracketDepth--;
                 if (BracketDepth == 0)
                     yield return tok;
-                if (tok.ParenDepth == BasePD && tok.Value == "[") BracketDepth++;
+                if (tok.ParenDepth == BasePD && tok.Value == "[")
+                    BracketDepth++;
             }
         }
     };
+
     static class AngleBracketParser
     {
         public static IEnumerable<Token> NotInsideAngleBrackets(IEnumerable<Token> tokens)
@@ -224,11 +308,14 @@ namespace actorcompiler
             int? BasePD = null;
             foreach (var tok in tokens)
             {
-                if (BasePD == null) BasePD = tok.ParenDepth;
-                if (tok.ParenDepth == BasePD && tok.Value == ">") AngleDepth--;
+                if (BasePD == null)
+                    BasePD = tok.ParenDepth;
+                if (tok.ParenDepth == BasePD && tok.Value == ">")
+                    AngleDepth--;
                 if (AngleDepth == 0)
                     yield return tok;
-                if (tok.ParenDepth == BasePD && tok.Value == "<") AngleDepth++;
+                if (tok.ParenDepth == BasePD && tok.Value == "<")
+                    AngleDepth++;
             }
         }
     };
@@ -241,22 +328,28 @@ namespace actorcompiler
         string sourceFile;
         ErrorMessagePolicy errorMessagePolicy;
         public bool generateProbes;
-        public Dictionary<(ulong, ulong), string> uidObjects { get; private set; }
+        public List<ActorInformation> uidObjects;
 
-        public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy, bool generateProbes)
+        public ActorParser(
+            string text,
+            string sourceFile,
+            ErrorMessagePolicy errorMessagePolicy,
+            bool generateProbes
+        )
         {
             this.sourceFile = sourceFile;
             this.errorMessagePolicy = errorMessagePolicy;
             this.generateProbes = generateProbes;
-            this.uidObjects = new Dictionary<(ulong, ulong), string>();
-            tokens = Tokenize(text).Select(t=>new Token{ Value=t }).ToArray();
+            this.uidObjects = new List<ActorInformation>();
+            tokens = Tokenize(text).Select(t => new Token { Value = t }).ToArray();
             CountParens();
             //if (sourceFile.EndsWith(".h")) LineNumbersEnabled = false;
             //Console.WriteLine("{0} chars -> {1} tokens", text.Length, tokens.Length);
             //showTokens();
         }
 
-        class ClassContext {
+        class ClassContext
+        {
             public string name;
             public int inBlocks;
         }
@@ -295,26 +388,34 @@ namespace actorcompiler
 
             // http://nongnu.org/hcb/#class-head-name
             first = toks.First(NonWhitespace);
-            if (!identifierPattern.Match(first.Value).Success) {
+            if (!identifierPattern.Match(first.Value).Success)
+            {
                 return false;
             }
-            while (true) {
-                first.Assert("Expected identifier", t=>identifierPattern.Match(t.Value).Success);
+            while (true)
+            {
+                first.Assert("Expected identifier", t => identifierPattern.Match(t.Value).Success);
                 name += first.Value;
                 toks = range(first.Position + 1, toks.End);
-                if (toks.First(NonWhitespace).Value == "::") {
+                if (toks.First(NonWhitespace).Value == "::")
+                {
                     name += "::";
                     toks = toks.SkipWhile(Whitespace).Skip(1);
-                } else {
+                }
+                else
+                {
                     break;
                 }
                 first = toks.First(NonWhitespace);
             }
             // http://nongnu.org/hcb/#class-virt-specifier-seq
-            toks = toks.SkipWhile(t => Whitespace(t) || t.Value == "final" || t.Value == "explicit");
+            toks = toks.SkipWhile(t =>
+                Whitespace(t) || t.Value == "final" || t.Value == "explicit"
+            );
 
             first = toks.First(NonWhitespace);
-            if (first.Value == ":" || first.Value == "{") {
+            if (first.Value == ":" || first.Value == "{")
+            {
                 // At this point we've confirmed that this is a class.
                 return true;
             }
@@ -333,9 +434,9 @@ namespace actorcompiler
             }
             int inBlocks = 0;
             Stack<ClassContext> classContextStack = new Stack<ClassContext>();
-            for(int i=0; i<tokens.Length; i++)
+            for (int i = 0; i < tokens.Length; i++)
             {
-                if(tokens[0].SourceLine == 0)
+                if (tokens[0].SourceLine == 0)
                 {
                     throw new Exception("Internal error: Invalid source line (0)");
                 }
@@ -344,13 +445,22 @@ namespace actorcompiler
                     var actor = ParseActor(i, out int end);
                     if (classContextStack.Count > 0)
                     {
-                        actor.enclosingClass = String.Join("::", classContextStack.Reverse().Select(t => t.name));
+                        actor.enclosingClass = String.Join(
+                            "::",
+                            classContextStack.Reverse().Select(t => t.name)
+                        );
                     }
                     var actorWriter = new System.IO.StringWriter();
                     actorWriter.NewLine = "\n";
-                    var actorCompiler = new ActorCompiler(actor, sourceFile, inBlocks == 0, LineNumbersEnabled, generateProbes);
+                    var actorCompiler = new ActorCompiler(
+                        actor,
+                        sourceFile,
+                        inBlocks == 0,
+                        LineNumbersEnabled,
+                        generateProbes
+                    );
                     actorCompiler.Write(actorWriter);
-                    actorCompiler.uidObjects.ToList().ForEach(x => this.uidObjects.TryAdd(x.Key, x.Value));
+                    this.uidObjects.AddRange(actorCompiler.uidObjects);
 
                     string[] actorLines = actorWriter.ToString().Split('\n');
 
@@ -361,16 +471,21 @@ namespace actorcompiler
                         if (LineNumbersEnabled)
                         {
                             bool isLineNumber = line.Contains("#line");
-                            if (isLineNumber) hadLineNumber = true;
+                            if (isLineNumber)
+                                hadLineNumber = true;
                             if (!isLineNumber && !hasLineNumber && hadLineNumber)
                             {
-                                writer.WriteLine("\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t#line {0} \"{1}\"", outLine + 1, destFileName);
+                                writer.WriteLine(
+                                    "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t#line {0} \"{1}\"",
+                                    outLine + 1,
+                                    destFileName
+                                );
                                 outLine++;
                                 hadLineNumber = false;
                             }
                             hasLineNumber = isLineNumber;
                         }
-                        writer.WriteLine(line.TrimEnd('\n','\r'));
+                        writer.WriteLine(line.TrimEnd('\n', '\r'));
                         outLine++;
                     }
 
@@ -395,13 +510,19 @@ namespace actorcompiler
                         outLine++;
                     }
                 }
-                else if (tokens[i].Value == "class" || tokens[i].Value == "struct" || tokens[i].Value == "union")
+                else if (
+                    tokens[i].Value == "class"
+                    || tokens[i].Value == "struct"
+                    || tokens[i].Value == "union"
+                )
                 {
                     writer.Write(tokens[i].Value);
                     string name;
-                    if (ParseClassContext(range(i+1, tokens.Length), out name))
+                    if (ParseClassContext(range(i + 1, tokens.Length), out name))
                     {
-                        classContextStack.Push(new ClassContext { name = name, inBlocks = inBlocks});
+                        classContextStack.Push(
+                            new ClassContext { name = name, inBlocks = inBlocks }
+                        );
                     }
                 }
                 else
@@ -413,7 +534,10 @@ namespace actorcompiler
                     else if (tokens[i].Value == "}")
                     {
                         inBlocks--;
-                        if (classContextStack.Count > 0 && classContextStack.Peek().inBlocks == inBlocks)
+                        if (
+                            classContextStack.Count > 0
+                            && classContextStack.Peek().inBlocks == inBlocks
+                        )
                         {
                             classContextStack.Pop();
                         }
@@ -424,13 +548,20 @@ namespace actorcompiler
             }
         }
 
-        IEnumerable<TokenRange> SplitParameterList( TokenRange toks, string delimiter ) {
-            if (toks.Begin==toks.End) yield break;
-            while (true) {
-                Token comma = AngleBracketParser.NotInsideAngleBrackets( toks )
-                    .FirstOrDefault( t=> t.Value==delimiter && t.ParenDepth == toks.First().ParenDepth );
-                if (comma == null) break;
-                yield return range(toks.Begin,comma.Position);
+        IEnumerable<TokenRange> SplitParameterList(TokenRange toks, string delimiter)
+        {
+            if (toks.Begin == toks.End)
+                yield break;
+            while (true)
+            {
+                Token comma = AngleBracketParser
+                    .NotInsideAngleBrackets(toks)
+                    .FirstOrDefault(t =>
+                        t.Value == delimiter && t.ParenDepth == toks.First().ParenDepth
+                    );
+                if (comma == null)
+                    break;
+                yield return range(toks.Begin, comma.Position);
                 toks = range(comma.Position + 1, toks.End);
             }
             yield return toks;
@@ -444,7 +575,8 @@ namespace actorcompiler
             {
                 if (!tok.IsWhitespace)
                 {
-                    if (inWhitespace && !leading) yield return new Token { Value = " " };
+                    if (inWhitespace && !leading)
+                        yield return new Token { Value = " " };
                     inWhitespace = false;
                     yield return tok;
                     leading = false;
@@ -456,41 +588,52 @@ namespace actorcompiler
             }
         }
 
-        void ParseDeclaration(TokenRange tokens,
-            out Token name, 
+        void ParseDeclaration(
+            TokenRange tokens,
+            out Token name,
             out TokenRange type,
-            out TokenRange initializer, 
-            out bool constructorSyntax)
+            out TokenRange initializer,
+            out bool constructorSyntax
+        )
         {
             initializer = null;
             TokenRange beforeInitializer = tokens;
             constructorSyntax = false;
 
-            Token equals = AngleBracketParser.NotInsideAngleBrackets(tokens)
+            Token equals = AngleBracketParser
+                .NotInsideAngleBrackets(tokens)
                 .FirstOrDefault(t => t.Value == "=" && t.ParenDepth == tokens.First().ParenDepth);
             if (equals != null)
             {
                 // type name = initializer;
-                beforeInitializer = range(tokens.Begin,equals.Position);
+                beforeInitializer = range(tokens.Begin, equals.Position);
                 initializer = range(equals.Position + 1, tokens.End);
             }
             else
             {
-                Token paren = AngleBracketParser.NotInsideAngleBrackets(tokens)
+                Token paren = AngleBracketParser
+                    .NotInsideAngleBrackets(tokens)
                     .FirstOrDefault(t => t.Value == "(");
                 if (paren != null)
                 {
                     // type name(initializer);
                     constructorSyntax = true;
                     beforeInitializer = range(tokens.Begin, paren.Position);
-                    initializer = 
-                        range(paren.Position + 1, tokens.End)
-                            .TakeWhile(t => t.ParenDepth > paren.ParenDepth);
-                } else {
-                    Token brace = AngleBracketParser.NotInsideAngleBrackets(tokens).FirstOrDefault(t => t.Value == "{");
-                    if (brace != null) {
+                    initializer = range(paren.Position + 1, tokens.End)
+                        .TakeWhile(t => t.ParenDepth > paren.ParenDepth);
+                }
+                else
+                {
+                    Token brace = AngleBracketParser
+                        .NotInsideAngleBrackets(tokens)
+                        .FirstOrDefault(t => t.Value == "{");
+                    if (brace != null)
+                    {
                         // type name{initializer};
-                        throw new Error(brace.SourceLine, "Uniform initialization syntax is not currently supported for state variables (use '(' instead of '}}' ?)");
+                        throw new Error(
+                            brace.SourceLine,
+                            "Uniform initialization syntax is not currently supported for state variables (use '(' instead of '}}' ?)"
+                        );
                     }
                 }
             }
@@ -503,9 +646,10 @@ namespace actorcompiler
         VarDeclaration ParseVarDeclaration(TokenRange tokens)
         {
             Token name;
-            TokenRange type, initializer;
+            TokenRange type,
+                initializer;
             bool constructorSyntax;
-            ParseDeclaration( tokens, out name, out type, out initializer, out constructorSyntax );
+            ParseDeclaration(tokens, out name, out type, out initializer, out constructorSyntax);
             return new VarDeclaration
             {
                 name = name.Value,
@@ -538,13 +682,18 @@ namespace actorcompiler
 
             // The parameter(s) to the TEST_CASE macro are opaque to the actor compiler
             TokenRange paramRange = toks.Last(NonWhitespace)
-                .Assert("Unexpected tokens after test case parameter list.",
-                    t => t.Value == ")" && t.ParenDepth == toks.First().ParenDepth)
+                .Assert(
+                    "Unexpected tokens after test case parameter list.",
+                    t => t.Value == ")" && t.ParenDepth == toks.First().ParenDepth
+                )
                 .GetMatchingRangeIn(toks);
             actor.testCaseParameters = str(paramRange);
 
             actor.name = "flowTestCase" + toks.First().SourceLine;
-            actor.parameters = new VarDeclaration[] { new VarDeclaration {
+            actor.parameters = new VarDeclaration[]
+            {
+                new VarDeclaration
+                {
                     name = "params",
                     type = "UnitTestParameters",
                     initializer = "",
@@ -559,13 +708,13 @@ namespace actorcompiler
             var template = toks.First(NonWhitespace);
             if (template.Value == "template")
             {
-                var templateParams = range(template.Position+1, toks.End)
+                var templateParams = range(template.Position + 1, toks.End)
                     .First(NonWhitespace)
-                    .Assert("Invalid template declaration", t=>t.Value=="<")
+                    .Assert("Invalid template declaration", t => t.Value == "<")
                     .GetMatchingRangeIn(toks);
 
                 actor.templateFormals = SplitParameterList(templateParams, ",")
-                    .Select(p => ParseVarDeclaration(p))    //< SOMEDAY: ?
+                    .Select(p => ParseVarDeclaration(p)) //< SOMEDAY: ?
                     .ToArray();
 
                 toks = range(templateParams.End + 1, toks.End);
@@ -576,7 +725,11 @@ namespace actorcompiler
                 var attributeContents = attribute.GetMatchingRangeIn(toks);
 
                 var asArray = attributeContents.ToArray();
-                if (asArray.Length < 2 || asArray[0].Value != "[" || asArray[asArray.Length - 1].Value != "]")
+                if (
+                    asArray.Length < 2
+                    || asArray[0].Value != "["
+                    || asArray[asArray.Length - 1].Value != "]"
+                )
                 {
                     throw new Error(actor.SourceLine, "Invalid attribute: Expected [[...]]");
                 }
@@ -602,14 +755,16 @@ namespace actorcompiler
 
             // Find the parameter list
             TokenRange paramRange = toks.Last(NonWhitespace)
-                .Assert("Unexpected tokens after actor parameter list.", 
-                        t => t.Value == ")" && t.ParenDepth == toks.First().ParenDepth)
+                .Assert(
+                    "Unexpected tokens after actor parameter list.",
+                    t => t.Value == ")" && t.ParenDepth == toks.First().ParenDepth
+                )
                 .GetMatchingRangeIn(toks);
             actor.parameters = SplitParameterList(paramRange, ",")
                 .Select(p => ParseVarDeclaration(p))
                 .ToArray();
 
-            var name = range(toks.Begin,paramRange.Begin-1).Last(NonWhitespace);
+            var name = range(toks.Begin, paramRange.Begin - 1).Last(NonWhitespace);
             actor.name = name.Value;
 
             // SOMEDAY: refactor?
@@ -617,11 +772,17 @@ namespace actorcompiler
             var retToken = returnType.First();
             if (retToken.Value == "Future")
             {
-                var ofType = returnType.Skip(1).First(NonWhitespace).Assert("Expected <", tok => tok.Value == "<").GetMatchingRangeIn(returnType);
+                var ofType = returnType
+                    .Skip(1)
+                    .First(NonWhitespace)
+                    .Assert("Expected <", tok => tok.Value == "<")
+                    .GetMatchingRangeIn(returnType);
                 actor.returnType = str(NormalizeWhitespace(ofType));
                 toks = range(ofType.End + 1, returnType.End);
             }
-            else if (retToken.Value == "void"/* && !returnType.Skip(1).Any(NonWhitespace)*/)
+            else if (
+                retToken.Value == "void" /* && !returnType.Skip(1).Any(NonWhitespace)*/
+            )
             {
                 actor.returnType = null;
                 toks = returnType.Skip(1);
@@ -638,11 +799,23 @@ namespace actorcompiler
                 }
                 else
                 {
-                    Console.WriteLine("Tokens: '{0}' {1} '{2}'", str(toks), toks.Count(), toks.Last().Value);
-                    throw new Error(actor.SourceLine, "Unrecognized tokens preceding parameter list in actor declaration");
+                    Console.WriteLine(
+                        "Tokens: '{0}' {1} '{2}'",
+                        str(toks),
+                        toks.Count(),
+                        toks.Last().Value
+                    );
+                    throw new Error(
+                        actor.SourceLine,
+                        "Unrecognized tokens preceding parameter list in actor declaration"
+                    );
                 }
             }
-            if (errorMessagePolicy.ActorsNoDiscardByDefault() && !actor.attributes.Contains("[[flow_allow_discard]]")) {
+            if (
+                errorMessagePolicy.ActorsNoDiscardByDefault()
+                && !actor.attributes.Contains("[[flow_allow_discard]]")
+            )
+            {
                 if (actor.IsCancellable())
                 {
                     actor.attributes.Add("[[nodiscard]]");
@@ -650,8 +823,10 @@ namespace actorcompiler
             }
             HashSet<string> knownFlowAttributes = new HashSet<string>();
             knownFlowAttributes.Add("[[flow_allow_discard]]");
-            foreach (var flowAttribute in actor.attributes.Where(a => a.StartsWith("[[flow_"))) {
-                if (!knownFlowAttributes.Contains(flowAttribute)) {
+            foreach (var flowAttribute in actor.attributes.Where(a => a.StartsWith("[[flow_")))
+            {
+                if (!knownFlowAttributes.Contains(flowAttribute))
+                {
                     throw new Error(actor.SourceLine, "Unknown flow attribute {0}", flowAttribute);
                 }
             }
@@ -660,58 +835,46 @@ namespace actorcompiler
 
         LoopStatement ParseLoopStatement(TokenRange toks)
         {
-            return new LoopStatement { 
-                body = ParseCompoundStatement( toks.Consume("loop") )
-            };
+            return new LoopStatement { body = ParseCompoundStatement(toks.Consume("loop")) };
         }
 
         ChooseStatement ParseChooseStatement(TokenRange toks)
         {
-            return new ChooseStatement
-            {
-                body = ParseCompoundStatement(toks.Consume("choose"))
-            };
+            return new ChooseStatement { body = ParseCompoundStatement(toks.Consume("choose")) };
         }
 
         WhenStatement ParseWhenStatement(TokenRange toks)
         {
             var expr = toks.Consume("when")
-                           .SkipWhile(Whitespace)
-                           .First()
-                           .Assert("Expected (", t => t.Value == "(")
-                           .GetMatchingRangeIn(toks)
-                           .SkipWhile(Whitespace);
+                .SkipWhile(Whitespace)
+                .First()
+                .Assert("Expected (", t => t.Value == "(")
+                .GetMatchingRangeIn(toks)
+                .SkipWhile(Whitespace);
 
-            return new WhenStatement {
+            return new WhenStatement
+            {
                 wait = ParseWaitStatement(expr),
-                body = ParseCompoundStatement(range(expr.End+1, toks.End))
+                body = ParseCompoundStatement(range(expr.End + 1, toks.End))
             };
         }
 
         StateDeclarationStatement ParseStateDeclaration(TokenRange toks)
         {
             toks = toks.Consume("state").RevSkipWhile(t => t.Value == ";");
-            return new StateDeclarationStatement { 
-                decl = ParseVarDeclaration(toks)
-            };
+            return new StateDeclarationStatement { decl = ParseVarDeclaration(toks) };
         }
 
         ReturnStatement ParseReturnStatement(TokenRange toks)
         {
             toks = toks.Consume("return").RevSkipWhile(t => t.Value == ";");
-            return new ReturnStatement
-            {
-                expression = str(NormalizeWhitespace(toks))
-            };
+            return new ReturnStatement { expression = str(NormalizeWhitespace(toks)) };
         }
 
         ThrowStatement ParseThrowStatement(TokenRange toks)
         {
             toks = toks.Consume("throw").RevSkipWhile(t => t.Value == ";");
-            return new ThrowStatement
-            {
-                expression = str(NormalizeWhitespace(toks))
-            };
+            return new ThrowStatement { expression = str(NormalizeWhitespace(toks)) };
         }
 
         WaitStatement ParseWaitStatement(TokenRange toks)
@@ -726,22 +889,35 @@ namespace actorcompiler
             TokenRange initializer;
             if (toks.First().Value == "wait" || toks.First().Value == "waitNext")
             {
-                initializer = toks.RevSkipWhile(t=>t.Value==";");
-                ws.result = new VarDeclaration {
-                        name = "_",
-                        type = "Void",
-                        initializer = "",
-                        initializerConstructorSyntax = false
+                initializer = toks.RevSkipWhile(t => t.Value == ";");
+                ws.result = new VarDeclaration
+                {
+                    name = "_",
+                    type = "Void",
+                    initializer = "",
+                    initializerConstructorSyntax = false
                 };
-            } else {
+            }
+            else
+            {
                 Token name;
                 TokenRange type;
                 bool constructorSyntax;
-                ParseDeclaration( toks.RevSkipWhile(t=>t.Value==";"), out name, out type, out initializer, out constructorSyntax );
+                ParseDeclaration(
+                    toks.RevSkipWhile(t => t.Value == ";"),
+                    out name,
+                    out type,
+                    out initializer,
+                    out constructorSyntax
+                );
 
                 string typestring = str(NormalizeWhitespace(type));
-                if (typestring == "Void") {
-                    throw new Error(ws.FirstSourceLine, "Assigning the result of a Void wait is not allowed.  Just use a standalone wait statement.");
+                if (typestring == "Void")
+                {
+                    throw new Error(
+                        ws.FirstSourceLine,
+                        "Assigning the result of a Void wait is not allowed.  Just use a standalone wait statement."
+                    );
                 }
 
                 ws.result = new VarDeclaration
@@ -753,19 +929,38 @@ namespace actorcompiler
                 };
             }
 
-            if (initializer == null) throw new Error(ws.FirstSourceLine, "Wait statement must be a declaration or standalone statement");
+            if (initializer == null)
+                throw new Error(
+                    ws.FirstSourceLine,
+                    "Wait statement must be a declaration or standalone statement"
+                );
 
             var waitParams = initializer
-                .SkipWhile(Whitespace).Consume("Statement contains a wait, but is not a valid wait statement or a supported compound statement.1", 
-                        t=> {
-                            if (t.Value=="wait") return true;
-                            if (t.Value=="waitNext") { ws.isWaitNext = true; return true; }
-                            return false;
-                        })
-                .SkipWhile(Whitespace).First().Assert("Expected (", t => t.Value == "(")
+                .SkipWhile(Whitespace)
+                .Consume(
+                    "Statement contains a wait, but is not a valid wait statement or a supported compound statement.1",
+                    t =>
+                    {
+                        if (t.Value == "wait")
+                            return true;
+                        if (t.Value == "waitNext")
+                        {
+                            ws.isWaitNext = true;
+                            return true;
+                        }
+                        return false;
+                    }
+                )
+                .SkipWhile(Whitespace)
+                .First()
+                .Assert("Expected (", t => t.Value == "(")
                 .GetMatchingRangeIn(initializer);
-            if (!range(waitParams.End, initializer.End).Consume(")").All(Whitespace)) {
-                throw new Error(toks.First().SourceLine, "Statement contains a wait, but is not a valid wait statement or a supported compound statement.2");
+            if (!range(waitParams.End, initializer.End).Consume(")").All(Whitespace))
+            {
+                throw new Error(
+                    toks.First().SourceLine,
+                    "Statement contains a wait, but is not a valid wait statement or a supported compound statement.2"
+                );
             }
 
             ws.futureExpression = str(NormalizeWhitespace(waitParams));
@@ -775,9 +970,9 @@ namespace actorcompiler
         WhileStatement ParseWhileStatement(TokenRange toks)
         {
             var expr = toks.Consume("while")
-                           .First(NonWhitespace)
-                           .Assert("Expected (", t => t.Value == "(")
-                           .GetMatchingRangeIn(toks);
+                .First(NonWhitespace)
+                .Assert("Expected (", t => t.Value == "(")
+                .GetMatchingRangeIn(toks);
             return new WhileStatement
             {
                 expression = str(NormalizeWhitespace(expr)),
@@ -787,18 +982,17 @@ namespace actorcompiler
 
         Statement ParseForStatement(TokenRange toks)
         {
-            var head = 
-                toks.Consume("for")
-                    .First(NonWhitespace)
-                    .Assert("Expected (", t => t.Value == "(")
-                    .GetMatchingRangeIn(toks);
+            var head = toks.Consume("for")
+                .First(NonWhitespace)
+                .Assert("Expected (", t => t.Value == "(")
+                .GetMatchingRangeIn(toks);
 
-            Token[] delim = 
-                head.Where(
-                    t => t.ParenDepth == head.First().ParenDepth &&
-                         t.BraceDepth == head.First().BraceDepth &&
-                         t.Value==";"
-                    ).ToArray();
+            Token[] delim = head.Where(t =>
+                    t.ParenDepth == head.First().ParenDepth
+                    && t.BraceDepth == head.First().BraceDepth
+                    && t.Value == ";"
+                )
+                .ToArray();
             if (delim.Length == 2)
             {
                 var init = range(head.Begin, delim[0].Position);
@@ -815,23 +1009,34 @@ namespace actorcompiler
                 };
             }
 
-            delim =
-                head.Where(
-                    t => t.ParenDepth == head.First().ParenDepth &&
-                            t.BraceDepth == head.First().BraceDepth &&
-                            t.Value == ":"
-                    ).ToArray();
+            delim = head.Where(t =>
+                    t.ParenDepth == head.First().ParenDepth
+                    && t.BraceDepth == head.First().BraceDepth
+                    && t.Value == ":"
+                )
+                .ToArray();
             if (delim.Length != 1)
             {
-                throw new Error(head.First().SourceLine, "for statement must be 3-arg style or c++11 2-arg style");
+                throw new Error(
+                    head.First().SourceLine,
+                    "for statement must be 3-arg style or c++11 2-arg style"
+                );
             }
 
             return new RangeForStatement
             {
                 // The container over which to iterate
-                rangeExpression = str(NormalizeWhitespace(range(delim[0].Position + 1, head.End).SkipWhile(Whitespace))),
+                rangeExpression = str(
+                    NormalizeWhitespace(
+                        range(delim[0].Position + 1, head.End).SkipWhile(Whitespace)
+                    )
+                ),
                 // Type and name of the variable assigned in each iteration
-                rangeDecl = str(NormalizeWhitespace(range(head.Begin, delim[0].Position - 1).SkipWhile(Whitespace))),
+                rangeDecl = str(
+                    NormalizeWhitespace(
+                        range(head.Begin, delim[0].Position - 1).SkipWhile(Whitespace)
+                    )
+                ),
                 // The body of the for loop
                 body = ParseCompoundStatement(range(head.End + 1, toks.End))
             };
@@ -842,20 +1047,23 @@ namespace actorcompiler
             toks = toks.Consume("if");
             toks = toks.SkipWhile(Whitespace);
             bool constexpr = toks.First().Value == "constexpr";
-            if(constexpr) {
-               toks = toks.Consume("constexpr").SkipWhile(Whitespace);
+            if (constexpr)
+            {
+                toks = toks.Consume("constexpr").SkipWhile(Whitespace);
             }
 
             var expr = toks.First(NonWhitespace)
-                           .Assert("Expected (", t => t.Value == "(")
-                           .GetMatchingRangeIn(toks);
-            return new IfStatement {
+                .Assert("Expected (", t => t.Value == "(")
+                .GetMatchingRangeIn(toks);
+            return new IfStatement
+            {
                 expression = str(NormalizeWhitespace(expr)),
                 constexpr = constexpr,
-                ifBody = ParseCompoundStatement(range(expr.End+1, toks.End))
+                ifBody = ParseCompoundStatement(range(expr.End + 1, toks.End))
                 // elseBody will be filled in later if necessary by ParseElseStatement
             };
         }
+
         void ParseElseStatement(TokenRange toks, Statement prevStatement)
         {
             var ifStatement = prevStatement as IfStatement;
@@ -871,9 +1079,10 @@ namespace actorcompiler
             return new TryStatement
             {
                 tryBody = ParseCompoundStatement(toks.Consume("try")),
-                catches = new List<TryStatement.Catch>()    // will be filled in later by ParseCatchStatement
+                catches = new List<TryStatement.Catch>() // will be filled in later by ParseCatchStatement
             };
         }
+
         void ParseCatchStatement(TokenRange toks, Statement prevStatement)
         {
             var tryStatement = prevStatement as TryStatement;
@@ -889,17 +1098,27 @@ namespace actorcompiler
                     expression = str(NormalizeWhitespace(expr)),
                     body = ParseCompoundStatement(range(expr.End + 1, toks.End)),
                     FirstSourceLine = expr.First().SourceLine
-                });
+                }
+            );
         }
 
-        static readonly HashSet<string> IllegalKeywords = new HashSet<string> { "goto", "do", "finally", "__if_exists", "__if_not_exists" };
+        static readonly HashSet<string> IllegalKeywords = new HashSet<string>
+        {
+            "goto",
+            "do",
+            "finally",
+            "__if_exists",
+            "__if_not_exists"
+        };
 
         void ParseDeclaration(TokenRange toks, List<Declaration> declarations)
         {
             Declaration dec = new Declaration();
 
             Token delim = toks.First(t => t.Value == ";");
-            var nameRange = range(toks.Begin, delim.Position).RevSkipWhile(Whitespace).RevTakeWhile(NonWhitespace);
+            var nameRange = range(toks.Begin, delim.Position)
+                .RevSkipWhile(Whitespace)
+                .RevTakeWhile(NonWhitespace);
             var typeRange = range(toks.Begin, nameRange.Begin);
             var commentRange = range(delim.Position + 1, toks.End);
 
@@ -922,51 +1141,101 @@ namespace actorcompiler
 
             switch (toks.First().Value)
             {
-                case "loop": Add(ParseLoopStatement(toks)); break;
-                case "while": Add(ParseWhileStatement(toks)); break;
-                case "for": Add(ParseForStatement(toks)); break;
-                case "break": Add(new BreakStatement()); break;
-                case "continue": Add(new ContinueStatement()); break;
-                case "return": Add(ParseReturnStatement(toks)); break;
-                case "{": Add(ParseCompoundStatement(toks)); break;
-                case "if": Add(ParseIfStatement(toks)); break;
-                case "else": ParseElseStatement(toks, statements[statements.Count - 1]); break;
-                case "choose": Add(ParseChooseStatement(toks)); break;
-                case "when": Add(ParseWhenStatement(toks)); break;
-                case "try": Add(ParseTryStatement(toks)); break;
-                case "catch": ParseCatchStatement(toks, statements[statements.Count - 1]); break;
-                case "throw": Add(ParseThrowStatement(toks)); break;
+                case "loop":
+                    Add(ParseLoopStatement(toks));
+                    break;
+                case "while":
+                    Add(ParseWhileStatement(toks));
+                    break;
+                case "for":
+                    Add(ParseForStatement(toks));
+                    break;
+                case "break":
+                    Add(new BreakStatement());
+                    break;
+                case "continue":
+                    Add(new ContinueStatement());
+                    break;
+                case "return":
+                    Add(ParseReturnStatement(toks));
+                    break;
+                case "{":
+                    Add(ParseCompoundStatement(toks));
+                    break;
+                case "if":
+                    Add(ParseIfStatement(toks));
+                    break;
+                case "else":
+                    ParseElseStatement(toks, statements[statements.Count - 1]);
+                    break;
+                case "choose":
+                    Add(ParseChooseStatement(toks));
+                    break;
+                case "when":
+                    Add(ParseWhenStatement(toks));
+                    break;
+                case "try":
+                    Add(ParseTryStatement(toks));
+                    break;
+                case "catch":
+                    ParseCatchStatement(toks, statements[statements.Count - 1]);
+                    break;
+                case "throw":
+                    Add(ParseThrowStatement(toks));
+                    break;
                 default:
                     if (IllegalKeywords.Contains(toks.First().Value))
-                        throw new Error(toks.First().SourceLine, "Statement '{0}' not supported in actors.", toks.First().Value);
+                        throw new Error(
+                            toks.First().SourceLine,
+                            "Statement '{0}' not supported in actors.",
+                            toks.First().Value
+                        );
                     if (toks.Any(t => t.Value == "wait" || t.Value == "waitNext"))
                         Add(ParseWaitStatement(toks));
                     else if (toks.First().Value == "state")
                         Add(ParseStateDeclaration(toks));
                     else if (toks.First().Value == "switch" && toks.Any(t => t.Value == "return"))
-                        throw new Error(toks.First().SourceLine, "Unsupported compound statement containing return.");
+                        throw new Error(
+                            toks.First().SourceLine,
+                            "Unsupported compound statement containing return."
+                        );
                     else if (toks.First().Value.StartsWith("#"))
-                        throw new Error(toks.First().SourceLine, "Found \"{0}\". Preprocessor directives are not supported within ACTORs", toks.First().Value);
+                        throw new Error(
+                            toks.First().SourceLine,
+                            "Found \"{0}\". Preprocessor directives are not supported within ACTORs",
+                            toks.First().Value
+                        );
                     else if (toks.RevSkipWhile(t => t.Value == ";").Any(NonWhitespace))
-                        Add(new PlainOldCodeStatement
-                        {
-                            code = str(NormalizeWhitespace(toks.RevSkipWhile(t => t.Value == ";"))) + ";"
-                        });
+                        Add(
+                            new PlainOldCodeStatement
+                            {
+                                code =
+                                    str(NormalizeWhitespace(toks.RevSkipWhile(t => t.Value == ";")))
+                                    + ";"
+                            }
+                        );
                     break;
-            };
+            }
+            ;
         }
 
         Statement ParseCompoundStatement(TokenRange toks)
         {
             var first = toks.First(NonWhitespace);
-            if (first.Value == "{") {
+            if (first.Value == "{")
+            {
                 var inBraces = first.GetMatchingRangeIn(toks);
                 if (!range(inBraces.End, toks.End).Consume("}").All(Whitespace))
-                    throw new Error(inBraces.Last().SourceLine, "Unexpected tokens after compound statement");
+                    throw new Error(
+                        inBraces.Last().SourceLine,
+                        "Unexpected tokens after compound statement"
+                    );
                 return ParseCodeBlock(inBraces);
-            } else {
+            }
+            else
+            {
                 List<Statement> statements = new List<Statement>();
-                ParseStatement( toks.Skip(1), statements );
+                ParseStatement(toks.Skip(1), statements);
                 return statements[0];
             }
         }
@@ -981,7 +1250,8 @@ namespace actorcompiler
                     break;
 
                 int pos = delim.Position + 1;
-                var potentialComment = range(pos, toks.End).SkipWhile(t => t.Value == "\t" || t.Value == " ");
+                var potentialComment = range(pos, toks.End)
+                    .SkipWhile(t => t.Value == "\t" || t.Value == " ");
                 if (!potentialComment.IsEmpty && potentialComment.First().Value.StartsWith("//"))
                 {
                     pos = potentialComment.First().Position + 1;
@@ -992,7 +1262,10 @@ namespace actorcompiler
                 toks = range(pos, toks.End);
             }
             if (!toks.All(Whitespace))
-                throw new Error(toks.First(NonWhitespace).SourceLine, "Trailing unterminated statement in code block");
+                throw new Error(
+                    toks.First(NonWhitespace).SourceLine,
+                    "Trailing unterminated statement in code block"
+                );
             return declarations;
         }
 
@@ -1001,19 +1274,21 @@ namespace actorcompiler
             List<Statement> statements = new List<Statement>();
             while (true)
             {
-                Token delim = toks
-                    .FirstOrDefault( 
-                        t=> t.ParenDepth == toks.First().ParenDepth &&
-                            t.BraceDepth == toks.First().BraceDepth &&
-                            (t.Value==";" || t.Value == "}")
-                            );
+                Token delim = toks.FirstOrDefault(t =>
+                    t.ParenDepth == toks.First().ParenDepth
+                    && t.BraceDepth == toks.First().BraceDepth
+                    && (t.Value == ";" || t.Value == "}")
+                );
                 if (delim == null)
                     break;
                 ParseStatement(range(toks.Begin, delim.Position + 1), statements);
                 toks = range(delim.Position + 1, toks.End);
             }
             if (!toks.All(Whitespace))
-                throw new Error(toks.First(NonWhitespace).SourceLine, "Trailing unterminated statement in code block");
+                throw new Error(
+                    toks.First(NonWhitespace).SourceLine,
+                    "Trailing unterminated statement in code block"
+                );
             return new CodeBlock { statements = statements.ToArray() };
         }
 
@@ -1028,7 +1303,7 @@ namespace actorcompiler
             var toks = range(pos + 1, tokens.Length);
             var heading = toks.TakeWhile(t => t.Value != "{");
             var body = range(heading.End + 1, tokens.Length)
-                .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth || t.Value == ";" ); //assumes no whitespace between the last "}" and the ";"
+                .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth || t.Value == ";"); //assumes no whitespace between the last "}" and the ";"
 
             ParseDescrHeading(descr, heading);
             descr.body = ParseDescrCodeBlock(body);
@@ -1037,32 +1312,40 @@ namespace actorcompiler
             return descr;
         }
 
-        Actor ParseActor( int pos, out int end ) {
+        Actor ParseActor(int pos, out int end)
+        {
             var actor = new Actor();
             var head_token = tokens[pos];
             actor.SourceLine = head_token.SourceLine;
 
-            var toks = range(pos+1, tokens.Length);
+            var toks = range(pos + 1, tokens.Length);
             var heading = toks.TakeWhile(t => t.Value != "{");
             var toSemicolon = toks.TakeWhile(t => t.Value != ";");
             actor.isForwardDeclaration = toSemicolon.Length < heading.Length;
-            if (actor.isForwardDeclaration) {
+            if (actor.isForwardDeclaration)
+            {
                 heading = toSemicolon;
-                if (head_token.Value == "ACTOR" || head_token.Value == "SWIFT_ACTOR") {
+                if (head_token.Value == "ACTOR")
+                {
                     ParseActorHeading(actor, heading);
-                } else {
+                }
+                else
+                {
                     head_token.Assert("ACTOR expected!", t => false);
                 }
                 end = heading.End + 1;
-            } else {
-                var body = range(heading.End+1, tokens.Length)
+            }
+            else
+            {
+                var body = range(heading.End + 1, tokens.Length)
                     .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
 
                 if (head_token.Value == "ACTOR" || head_token.Value == "SWIFT_ACTOR")
                 {
                     ParseActorHeading(actor, heading);
                 }
-                else if (head_token.Value == "TEST_CASE") {
+                else if (head_token.Value == "TEST_CASE")
+                {
                     ParseTestCaseHeading(actor, heading);
                     actor.isTestCase = true;
                 }
@@ -1083,39 +1366,64 @@ namespace actorcompiler
         {
             return string.Join("", tokens.Select(x => x.Value).ToArray());
         }
+
         string str(int begin, int end)
         {
-            return str(range(begin,end));
+            return str(range(begin, end));
         }
 
         void CountParens()
         {
-            int BraceDepth = 0, ParenDepth = 0, LineCount = 1;
-            Token lastParen = null, lastBrace = null;
+            int BraceDepth = 0,
+                ParenDepth = 0,
+                LineCount = 1;
+            Token lastParen = null,
+                lastBrace = null;
             for (int i = 0; i < tokens.Length; i++)
             {
                 switch (tokens[i].Value)
                 {
-                    case "}": BraceDepth--; break;
-                    case ")": ParenDepth--; break;
-                    case "\r\n": LineCount++; break;
-                    case "\n": LineCount++; break;
+                    case "}":
+                        BraceDepth--;
+                        break;
+                    case ")":
+                        ParenDepth--;
+                        break;
+                    case "\r\n":
+                        LineCount++;
+                        break;
+                    case "\n":
+                        LineCount++;
+                        break;
                 }
-                if (BraceDepth < 0) throw new Error(LineCount, "Mismatched braces");
-                if (ParenDepth < 0) throw new Error(LineCount, "Mismatched parenthesis");
+                if (BraceDepth < 0)
+                    throw new Error(LineCount, "Mismatched braces");
+                if (ParenDepth < 0)
+                    throw new Error(LineCount, "Mismatched parenthesis");
                 tokens[i].Position = i;
                 tokens[i].SourceLine = LineCount;
                 tokens[i].BraceDepth = BraceDepth;
                 tokens[i].ParenDepth = ParenDepth;
-                if (tokens[i].Value.StartsWith("/*")) LineCount += tokens[i].Value.Count(c=>c=='\n');
+                if (tokens[i].Value.StartsWith("/*"))
+                    LineCount += tokens[i].Value.Count(c => c == '\n');
                 switch (tokens[i].Value)
                 {
-                    case "{": BraceDepth++; if (BraceDepth==1) lastBrace = tokens[i]; break;
-                    case "(": ParenDepth++; if (ParenDepth==1) lastParen = tokens[i]; break;
+                    case "{":
+                        BraceDepth++;
+                        if (BraceDepth == 1)
+                            lastBrace = tokens[i];
+                        break;
+                    case "(":
+                        ParenDepth++;
+                        if (ParenDepth == 1)
+                            lastParen = tokens[i];
+                        break;
                 }
             }
-            if (BraceDepth != 0) throw new Error(lastBrace.SourceLine, "Unmatched brace");
-            if (ParenDepth != 0) throw new Error(lastParen.SourceLine, "Unmatched parenthesis");
+            if (BraceDepth != 0)
+                throw new Error(lastBrace.SourceLine, "Unmatched brace");
+            if (ParenDepth != 0)
+                throw new Error(lastParen.SourceLine, "Unmatched parenthesis");
         }
 
         void showTokens()
@@ -1131,27 +1439,35 @@ namespace actorcompiler
             }
         }
 
-        readonly Regex identifierPattern = new Regex(@"\G[a-zA-Z_][a-zA-Z_0-9]*", RegexOptions.Singleline);
+        readonly Regex identifierPattern = new Regex(
+            @"\G[a-zA-Z_][a-zA-Z_0-9]*",
+            RegexOptions.Singleline
+        );
 
-        readonly Regex[] tokenExpressions = (new string[] {
-            @"\{",
-            @"\}",
-            @"\(",
-            @"\)",
-            @"\[",
-            @"\]",
-            @"//[^\n]*",
-            @"/[*]([*][^/]|[^*])*[*]/",
-            @"'(\\.|[^\'\n])*'",    //< SOMEDAY: Not fully restrictive
-            @"""(\\.|[^\""\n])*""",
-            @"[a-zA-Z_][a-zA-Z_0-9]*",
-            @"\r\n",
-            @"\n",
-            @"::",
-            @":",
-            @"#[a-z]*", // Recognize preprocessor directives so that we can reject them
-            @".",
-        }).Select( x=>new Regex(@"\G"+x, RegexOptions.Singleline) ).ToArray();
+        readonly Regex[] tokenExpressions = (
+            new string[]
+            {
+                @"\{",
+                @"\}",
+                @"\(",
+                @"\)",
+                @"\[",
+                @"\]",
+                @"//[^\n]*",
+                @"/[*]([*][^/]|[^*])*[*]/",
+                @"'(\\.|[^\'\n])*'", //< SOMEDAY: Not fully restrictive
+                @"""(\\.|[^\""\n])*""",
+                @"[a-zA-Z_][a-zA-Z_0-9]*",
+                @"\r\n",
+                @"\n",
+                @"::",
+                @":",
+                @"#[a-z]*", // Recognize preprocessor directives so that we can reject them
+                @".",
+            }
+        )
+            .Select(x => new Regex(@"\G" + x, RegexOptions.Singleline))
+            .ToArray();
 
         IEnumerable<string> Tokenize(string text)
         {
@@ -1171,7 +1487,7 @@ namespace actorcompiler
                     }
                 }
                 if (!ok)
-                    throw new Exception( String.Format("Can't tokenize! {0}", pos));
+                    throw new Exception(String.Format("Can't tokenize! {0}", pos));
             }
         }
     }

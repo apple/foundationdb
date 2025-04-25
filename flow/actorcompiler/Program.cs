@@ -25,7 +25,8 @@ namespace actorcompiler
 {
     class Program
     {
-        private static void OverwriteByMove(string target, string temporaryFile) {
+        private static void OverwriteByMove(string target, string temporaryFile)
+        {
             if (File.Exists(target))
             {
                 File.SetAttributes(target, FileAttributes.Normal);
@@ -41,17 +42,27 @@ namespace actorcompiler
             if (args.Length < 2)
             {
                 Console.WriteLine("Usage:");
-                Console.WriteLine("  actorcompiler <input> <output> [--disable-diagnostics] [--generate-probes]");
+                Console.WriteLine(
+                    "  actorcompiler <input> <output> [--disable-diagnostics] [--generate-probes]"
+                );
                 return 100;
             }
             Console.WriteLine("actorcompiler {0}", string.Join(" ", args));
-            string input = args[0], output = args[1], outputtmp = args[1] + ".tmp", outputUid = args[1] + ".uid";
+            string input = args[0],
+                output = args[1],
+                outputtmp = args[1] + ".tmp",
+                outputUid = args[1] + ".uid";
             ErrorMessagePolicy errorMessagePolicy = new ErrorMessagePolicy();
-            foreach (var arg in args) {
-                if (arg.StartsWith("--")) {
-                    if (arg.Equals("--disable-diagnostics")) {
+            foreach (var arg in args)
+            {
+                if (arg.StartsWith("--"))
+                {
+                    if (arg.Equals("--disable-diagnostics"))
+                    {
                         errorMessagePolicy.DisableDiagnostics = true;
-                    } else if (arg.Equals("--generate-probes")) {
+                    }
+                    else if (arg.Equals("--generate-probes"))
+                    {
                         generateProbes = true;
                     }
                 }
@@ -59,16 +70,34 @@ namespace actorcompiler
             try
             {
                 var inputData = File.ReadAllText(input);
-                var parser = new ActorParser(inputData, input.Replace('\\', '/'), errorMessagePolicy, generateProbes);
+                var parser = new ActorParser(
+                    inputData,
+                    input.Replace('\\', '/'),
+                    errorMessagePolicy,
+                    generateProbes
+                );
 
-                using (var outputStream = new StreamWriter(outputtmp)) {
+                using (var outputStream = new StreamWriter(outputtmp))
+                {
                     parser.Write(outputStream, output.Replace('\\', '/'));
                 }
                 OverwriteByMove(output, outputtmp);
 
-                using (var outputStream = new StreamWriter(outputtmp)) {
-                    foreach(var entry in parser.uidObjects) {
-                        outputStream.WriteLine("{0}|{1}|{2}", entry.Key.Item1, entry.Key.Item2, entry.Value);
+                using (var outputStream = new StreamWriter(outputtmp))
+                {
+                    // FIXME The only reason this ugly format is used is that System.Text.Json is not supported
+                    // in the build environment of Mono/.NET framework.
+                    foreach (var item in parser.uidObjects)
+                    {
+                        outputStream.WriteLine(
+                            "{0}|{1}|{2}|{3}|{4}|{5}",
+                            item.guid1,
+                            item.guid2,
+                            item.fileName,
+                            item.lineNumber,
+                            item.type,
+                            item.name
+                        );
                     }
                 }
                 OverwriteByMove(outputUid, outputtmp);
@@ -77,7 +106,12 @@ namespace actorcompiler
             }
             catch (actorcompiler.Error e)
             {
-                Console.Error.WriteLine("{0}({1}): error FAC1000: {2}", input, e.SourceLine, e.Message);
+                Console.Error.WriteLine(
+                    "{0}({1}): error FAC1000: {2}",
+                    input,
+                    e.SourceLine,
+                    e.Message
+                );
                 if (File.Exists(outputtmp))
                     File.Delete(outputtmp);
                 if (File.Exists(output))
@@ -89,7 +123,12 @@ namespace actorcompiler
             }
             catch (Exception e)
             {
-                Console.Error.WriteLine("{0}({1}): error FAC2000: Internal {2}", input, 1, e.ToString());
+                Console.Error.WriteLine(
+                    "{0}({1}): error FAC2000: Internal {2}",
+                    input,
+                    1,
+                    e.ToString()
+                );
                 if (File.Exists(outputtmp))
                     File.Delete(outputtmp);
                 if (File.Exists(output))
