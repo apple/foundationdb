@@ -231,10 +231,12 @@ public:
 
 			self->updateTeamPivotValues();
 
-			std::vector<Reference<TCTeamInfo>> candidateTeams;
+			// Step 1: find all valid teams from team collection
+			std::vector<Reference<TCTeamInfo>> validTeams;
 			int unhealthyTeamCount = 0;
 			int notEligibileTeamCount = 0;
 			int duplicatedCount = 0;
+			int failToGetMetricsCount = 0;
 			for (const auto& dest : self->teams) {
 				if (!dest->isHealthy()) {
 					unhealthyTeamCount++;
@@ -253,6 +255,12 @@ public:
 						continue;
 					}
 				}
+				Optional<int> ongoingBulkLoadTaskCount = dest->getMaxOngoingBulkLoadTaskCount();
+				if (!ongoingBulkLoadTaskCount.present()) {
+					// This team may have an unhealthy SS, so avoid selecting it
+					failToGetMetricsCount++;
+					continue;
+				}
 				bool ok = true;
 				for (const auto& srcId : req.src) {
 					std::vector<UID> serverIds = dest->getServerIDs();
@@ -270,20 +278,43 @@ public:
 					duplicatedCount++;
 					continue;
 				}
-				candidateTeams.push_back(dest);
+				validTeams.push_back(dest);
 			}
+
+			// Step 2: Conduct Power-of-D-Choice to select a team
+			std::vector<Reference<TCTeamInfo>> candidateTeams;
+			if (validTeams.size() <= 4) {
+				candidateTeams = validTeams;
+			} else {
+				deterministicRandom()->randomShuffle(validTeams);
+				candidateTeams =
+				    std::vector<Reference<TCTeamInfo>>(validTeams.begin(), validTeams.begin() + validTeams.size() / 4);
+			}
+
 			Optional<Reference<IDataDistributionTeam>> res;
-			if (candidateTeams.size() >= 1) {
-				res = deterministicRandom()->randomChoice(candidateTeams);
+			int minOngoingBulkLoadTaskCount = 0;
+			for (int i = 0; i < candidateTeams.size(); i++) {
+				Optional<int> ongoingBulkLoadTaskCount = candidateTeams[i]->getMaxOngoingBulkLoadTaskCount();
+				if (!ongoingBulkLoadTaskCount.present()) {
+					continue;
+				}
+				if (!res.present() || ongoingBulkLoadTaskCount.get() < minOngoingBulkLoadTaskCount) {
+					minOngoingBulkLoadTaskCount = ongoingBulkLoadTaskCount.get();
+					res = candidateTeams[i];
+				}
+			}
+
+			if (res.present()) {
 				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadEngineTaskGetTeamReply", self->distributorId)
 				    .detail("TCReady", self->readyToStart.isReady())
 				    .detail("SrcIds", describe(req.src))
 				    .detail("Primary", self->isPrimary())
 				    .detail("TeamSize", self->teams.size())
-				    .detail("CandidateSize", candidateTeams.size())
+				    .detail("ValidTeamSize", validTeams.size())
 				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
 				    .detail("DuplicatedCount", duplicatedCount)
 				    .detail("NotEligibileTeamCount", notEligibileTeamCount)
+				    .detail("FailToGetMetricsCount", failToGetMetricsCount)
 				    .detail("DestIds", describe(res.get()->getServerIDs()))
 				    .detail("DestTeam", res.get()->getTeamID());
 			} else {
@@ -292,9 +323,10 @@ public:
 				    .detail("SrcIds", describe(req.src))
 				    .detail("Primary", self->isPrimary())
 				    .detail("TeamSize", self->teams.size())
-				    .detail("CandidateSize", candidateTeams.size())
+				    .detail("ValidTeamSize", validTeams.size())
 				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
 				    .detail("DuplicatedCount", duplicatedCount)
+				    .detail("FailToGetMetricsCount", failToGetMetricsCount)
 				    .detail("NotEligibileTeamCount", notEligibileTeamCount);
 			}
 			req.reply.send(std::make_pair(res, false));

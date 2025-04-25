@@ -301,6 +301,20 @@ public:
 		return maxQueueSize;
 	}
 
+	Optional<int> getMaxOngoingBulkLoadTaskCount() const override {
+		int maxOngoingBulkLoadTaskCount = 0;
+		for (const auto& team : teams) {
+			Optional<int> ongoingBulkLoadTaskCount = team->getMaxOngoingBulkLoadTaskCount();
+			if (!ongoingBulkLoadTaskCount.present()) {
+				// If a SS tracker cannot get the metrics from the SS, it is possible that this SS has some healthy
+				// issue. So, return an empty result to avoid choosing this server.
+				return Optional<int>();
+			}
+			maxOngoingBulkLoadTaskCount = std::max(maxOngoingBulkLoadTaskCount, ongoingBulkLoadTaskCount.get());
+		}
+		return maxOngoingBulkLoadTaskCount;
+	}
+
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
 		int64_t result = std::numeric_limits<int64_t>::max();
 		for (const auto& team : teams) {
@@ -1867,6 +1881,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				// once we've found healthy candidate teams, make sure they're not overloaded with outstanding moves
 				// already
 				anyDestOverloaded = !canLaunchDest(bestTeams, rd.priority, self->destBusymap);
+				if (doBulkLoading) {
+					anyDestOverloaded = false;
+				}
 
 				if (foundTeams && anyHealthy && !anyDestOverloaded) {
 					ASSERT(rd.completeDests.empty());
