@@ -399,10 +399,11 @@ struct DDBulkLoadJobManager {
 	BulkLoadTransportMethod jobTransportMethod;
 	std::shared_ptr<BulkLoadManifestFileMap> manifestEntryMap;
 	std::string manifestLocalTempFolder;
+	bool allTaskSubmitted = false;
 
 	DDBulkLoadJobManager() = default;
 	DDBulkLoadJobManager(const BulkLoadJobState& jobState, const std::string& manifestLocalTempFolder)
-	  : jobState(jobState), manifestLocalTempFolder(manifestLocalTempFolder) {
+	  : jobState(jobState), manifestLocalTempFolder(manifestLocalTempFolder), allTaskSubmitted(false) {
 		manifestEntryMap = std::make_shared<BulkLoadManifestFileMap>();
 	}
 
@@ -1605,8 +1606,6 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 	state BulkLoadTaskState bulkLoadTask;
 	state BulkLoadManifestSet manifests;
 	state double beginTime = now();
-	ASSERT(self->bulkLoadParallelismLimitor.canStart());
-	self->bulkLoadParallelismLimitor.incrementTaskCounter();
 	ASSERT(!manifestEntries.empty());
 	try {
 		// Step 1: Get manifest metadata by downloading the manifest file
@@ -1620,7 +1619,6 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		    self, KeyRangeRef(manifests.getMinBeginKey(), manifests.getMaxEndKey()), jobId, self->ddId));
 		if (bulkLoadTask_.present()) {
 			// The task was not existing in the metadata but existing now. So, we need not create the task.
-			self->bulkLoadParallelismLimitor.decrementTaskCounter();
 			return Void();
 		}
 
@@ -1642,7 +1640,6 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 			TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorInjectDDRestart", self->ddId).detail("Context", "New");
 			throw movekeys_conflict(); // improve code coverage
 		}
-		self->bulkLoadParallelismLimitor.decrementTaskCounter();
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
@@ -1653,7 +1650,6 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		    .detail("TaskID", bulkLoadTask.getTaskId())
 		    .detail("TaskRange", bulkLoadTask.getRange())
 		    .detail("Duration", now() - beginTime);
-		self->bulkLoadParallelismLimitor.decrementTaskCounter();
 		if (errorOut.canBeSet()) {
 			errorOut.sendError(e);
 		}
@@ -1898,15 +1894,20 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 						} else if (task.onAnyPhase({ BulkLoadPhase::Submitted,
 						                             BulkLoadPhase::Triggered,
 						                             BulkLoadPhase::Running })) {
-							// Limit parallelism
-							loop {
-								if (self->bulkLoadParallelismLimitor.canStart()) {
-									break;
+							// Do not monitor any task until all tasks are submitted.
+							// Otherwise, the parallelism limitor will slow down the task submission.
+							if (self->bulkLoadJobManager.get().allTaskSubmitted) {
+								// Limit parallelism
+								loop {
+									if (self->bulkLoadParallelismLimitor.canStart()) {
+										break;
+									}
+									wait(self->bulkLoadParallelismLimitor.waitUntilCounterChanged());
 								}
-								wait(self->bulkLoadParallelismLimitor.waitUntilCounterChanged());
+								// Monitor submitted tasks
+								actors.push_back(
+								    bulkLoadJobMonitorTask(self, task.getJobId(), task.getRange(), errorOut));
 							}
-							// Monitor submitted tasks
-							actors.push_back(bulkLoadJobMonitorTask(self, task.getJobId(), task.getRange(), errorOut));
 							ASSERT(task.getRange().end == res[i + 1].key);
 							beginKey = task.getRange().end;
 							continue;
@@ -1916,15 +1917,11 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 					}
 				}
 				// Schedule new tasks on range between res[i].key and res[i + 1].key
-				// Limit parallelism
+				// Need not limit parallelism here since the execution parallelism is limited by the
+				// bulkLoadEngineParallelismLimitor. Without limiting the parallelism here, we can
+				// dispatch all tasks of the job at once.
 				ASSERT(beginKey == res[i].key);
 				while (beginKey < res[i + 1].key) {
-					loop {
-						if (self->bulkLoadParallelismLimitor.canStart()) {
-							break;
-						}
-						wait(self->bulkLoadParallelismLimitor.waitUntilCounterChanged());
-					}
 					std::vector<BulkLoadJobFileManifestEntry> manifestEntries;
 					while (manifestEntries.size() < SERVER_KNOBS->MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK &&
 					       beginKey < res[i + 1].key) {
@@ -1947,6 +1944,7 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 			}
 			if (beginKey == jobState.getJobRange().end) {
 				// last round
+				self->bulkLoadJobManager.get().allTaskSubmitted = true;
 				break;
 			}
 		} catch (Error& e) {
