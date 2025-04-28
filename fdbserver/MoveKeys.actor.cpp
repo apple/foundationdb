@@ -1608,6 +1608,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 		loop {
 			state Key begin = keys.begin;
 			state KeyRange currentKeys = keys;
+			state std::unordered_map<std::string, std::vector<UID>> dcServerMap;
 
 			state std::vector<Future<Void>> actors; // Note this clears ongoing actors from the previous iteration
 			state Transaction tr(occ);
@@ -1687,6 +1688,11 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						// FIXME: Answer why this can happen?
 						// TODO(psm): Mark the data move as 'deleting'.
 						throw move_to_removed_server();
+					}
+					StorageServerInterface ssi = decodeServerListValue(serverListValues[s].get());
+					if (tssMapping->find(ssi.id()) == tssMapping->end()) {
+						// Ignore TSS when building the destination map.
+						dcServerMap[ssi.locality.dcId()].push_back(ssi.id());
 					}
 				}
 

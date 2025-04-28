@@ -422,6 +422,8 @@ public:
 	uint64_t changeCounter;
 	uint64_t shardId;
 	uint64_t desiredShardId;
+	uint64_t dataMoveId;
+	uint64_t teamId;
 	Version version;
 
 	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
@@ -990,15 +992,18 @@ private:
 
 public:
 	struct PendingNewShard {
-		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(format("%016llx", shardId)), range(range) {}
+		PendingNewShard(uint64_t shardId, UID dataMoveId, KeyRangeRef range)
+		  : shardId(format("%016llx", shardId)), dataMoveId(dataMoveId), range(range) {}
 
 		std::string toString() const {
-			return fmt::format("PendingNewShard: [ShardID]: {} [Range]: {}",
+			return fmt::format("PendingNewShard: [ShardID]: {} [Range]: {}, [DataMoveID]: {}",
 			                   this->shardId,
-			                   Traceable<KeyRangeRef>::toString(this->range));
+			                   Traceable<KeyRangeRef>::toString(this->range),
+			                   dataMoveId.toString());
 		}
 
 		std::string shardId;
+		UID dataMoveId;
 		KeyRange range;
 	};
 
@@ -1013,6 +1018,8 @@ public:
 	std::deque<std::pair<Standalone<StringRef>, Standalone<StringRef>>> constructedData;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
+
+	std::unordered_map<UID, DataMoveMetaData> teamInfo; // Team info for shard placement.
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -11778,6 +11785,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		state bool addedRanges = false;
 		if (!data->pendingAddRanges.empty()) {
+			std::vector<UID> dataMoveIds;
 			const Version aVer = data->pendingAddRanges.begin()->first;
 			if (aVer <= desiredVersion) {
 				TraceEvent(SevDebug, "AddRangeVersionSatisfied", data->thisServerID)
@@ -11796,6 +11804,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					    .detail("Range", shard.range)
 					    .detail("PhysicalShardID", shard.shardId);
 					fAddRanges.push_back(data->storage.addRange(shard.range, shard.shardId));
+					if (SERVER_KNOBS->SS_TRACE_SHARD_TEAM) {
+						dataMoveIds.push_back(shard.dataMoveId);
+					}
 				}
 				wait(waitForAll(fAddRanges));
 				TraceEvent(SevVerbose, "SSAddKVSRangeEnd", data->thisServerID)
@@ -11806,6 +11817,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				// `addRange` are committed.
 				unlimitedCommitBytes = UnlimitedCommitBytes::True;
 			}
+			wait(getDataMoveMetaData(self, dataMoveIds));
 		}
 
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
@@ -13117,6 +13129,33 @@ ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
 		}
 	}
 
+	return Void();
+}
+
+ACTOR Future<Void> getDataMoveMetaData(StorageServer* self, std::vector<UID> dataMoveIds) {
+	state Transaction tr(self->cx);
+	state std::vector<Future<Optional<Value>>> results;
+	try {
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		for (auto& uid : dataMoveIds) {
+			results.push_back(tr.get(dataMoveKeyFor(dataMoveId)).getFuture());
+		}
+		waitForAll(results);
+		ASSERT_WE_THINK(results.size() == dataMoveIds.size());
+		for (auto i = 0; i < dataMoveIds.size(); ++i) {
+			if (results[i].get().present()) {
+				DataMoveMetaData dmv = decodeDataMoveValue(results[i].get());
+				ASSERT_WE_THINK(dmv.phase == DataMoveMetaData::Phase::Running);
+				ASSERT_WE_THINK(dmv.dataMoveId == dataMoveIds[i]);
+				self->teamInfo[dataMoveIds[i]] = dmv;
+			} else {
+				TraceEvent("SSDataMoveIdNotFound").detail("DataMoveID", id);
+			}
+		}
+	} catch (Error& e) {
+		wait(tr.onError(e));
+	}
 	return Void();
 }
 

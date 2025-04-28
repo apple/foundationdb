@@ -173,6 +173,7 @@ struct DataMoveMetaData {
 	std::set<UID> checkpoints;
 	int16_t phase; // DataMoveMetaData::Phase.
 	int8_t mode;
+	std::unordered_map<std::string, std::string> dcTeamIdMap;
 
 	DataMoveMetaData() = default;
 	DataMoveMetaData(UID id, Version version, KeyRange range) : id(id), version(version), priority(0), mode(0) {
@@ -197,7 +198,7 @@ struct DataMoveMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode);
+		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode, dcTeamIdMap);
 	}
 };
 

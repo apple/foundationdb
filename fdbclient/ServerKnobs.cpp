@@ -629,6 +629,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE,              0.001 ); if( isSimulated ) SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE = deterministicRandom()->random01();
 	init( SHARDED_ROCKSDB_USE_DIRECT_IO,                 false ); if (isSimulated) SHARDED_ROCKSDB_USE_DIRECT_IO = deterministicRandom()->coinflip();
 	init( SHARDED_ROCKSDB_FLUSH_PERIOD,                        0.0 ); if (isSimulated) SHARDED_ROCKSDB_FLUSH_PERIOD = deterministicRandom()->randomInt(100, 1000);
+	init( SHARDED_ROCKSDB_DETAILED_STATS,                  false ); if (isSimulated) SHARDED_ROCKSDB_DETAILED_STATS = deterministicRandom()->coinflip();
 
 
 	// Leader election
