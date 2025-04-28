@@ -1298,12 +1298,18 @@ public:
 					int numLevels = 0;
 					for (auto it = cfMetadata.levels.begin(); it != cfMetadata.levels.end(); ++it) {
 						std::string propValue = "";
-						ASSERT(shard->db->GetProperty(shard->cf,
-						                              rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix +
-						                                  std::to_string(it->level),
-						                              &propValue));
-						e.detail("Level" + std::to_string(it->level),
-						         std::to_string(it->size) + " " + propValue + " " + std::to_string(it->files.size()));
+						if (SERVER_KNOBS->SHARDED_ROCKSDB_DETAILED_STATS) {
+							ASSERT(shard->db->GetProperty(shard->cf,
+							                              rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix +
+							                                  std::to_string(it->level),
+							                              &propValue));
+							e.detail("Level" + std::to_string(it->level),
+							         std::to_string(it->size) + " " + propValue + " " +
+							             std::to_string(it->files.size()));
+						}
+						if (it->level == 0) {
+							e.detail("Level0Files", it->files.size());
+						}
 						if (it->size > 0) {
 							++numLevels;
 						}
