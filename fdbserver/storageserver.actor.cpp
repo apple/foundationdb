@@ -1555,6 +1555,7 @@ public:
 		LatencySample kvReadRangeLatencySample;
 		LatencySample updateLatencySample;
 		LatencySample updateEncryptionLatencySample;
+		// DESTABILIZER LatencySample ingestDurationSample;
 
 		LatencyBands readLatencyBands;
 		std::unique_ptr<LatencySample> mappedRangeSample; // Samples getMappedRange latency
@@ -1630,6 +1631,10 @@ public:
 		                                  self->thisServerID,
 		                                  SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                                  SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+		    // ingestDurationSample("IngestDurationMetrics",
+		    //                      self->thisServerID,
+		    //                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		    //                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 		    mappedRangeSample(std::make_unique<LatencySample>("GetMappedRangeMetrics",
 		                                                      self->thisServerID,
@@ -1643,6 +1648,7 @@ public:
 		                                                           self->thisServerID,
 		                                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {
+
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -9234,6 +9240,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					for (; kvItr != this_block.end(); ++kvItr) {
 						data->byteSampleApplySet(*kvItr, invalidVersion);
 					}
+
 					if (this_block.more) {
 						blockBegin = this_block.getReadThrough();
 					} else {
@@ -9322,7 +9329,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				}
 				break;
 			}
-		}
+		} // fetchKeys loop.
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
