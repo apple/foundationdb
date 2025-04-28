@@ -1249,12 +1249,18 @@ public:
 					int numLevels = 0;
 					for (auto it = cfMetadata.levels.begin(); it != cfMetadata.levels.end(); ++it) {
 						std::string propValue = "";
-						ASSERT(shard->db->GetProperty(shard->cf,
-						                              rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix +
-						                                  std::to_string(it->level),
-						                              &propValue));
-						e.detail("Level" + std::to_string(it->level),
-						         std::to_string(it->size) + " " + propValue + " " + std::to_string(it->files.size()));
+						if (SERVER_KNOBS->SHARDED_ROCKSDB_DETAILED_STATS) {
+							ASSERT(shard->db->GetProperty(shard->cf,
+							                              rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix +
+							                                  std::to_string(it->level),
+							                              &propValue));
+							e.detail("Level" + std::to_string(it->level),
+							         std::to_string(it->size) + " " + propValue + " " +
+							             std::to_string(it->files.size()));
+						}
+						if (it->level == 0) {
+							e.detail("Level0Files", it->files.size());
+						}
 						if (it->size > 0) {
 							++numLevels;
 						}
@@ -1768,7 +1774,8 @@ public:
 			auto physicalShard = it.value()->physicalShard;
 
 			// TODO: Disable this once RocksDB is upgraded to a version with range delete improvement.
-			if (SERVER_KNOBS->ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS && systemKeys.contains(range)) {
+			if (SERVER_KNOBS->ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS &&
+			    (systemKeys.contains(range) || specialKeys.contains(range))) {
 				auto scanRange = it.range() & range;
 				auto beginSlice = toSlice(scanRange.begin);
 				auto endSlice = toSlice(scanRange.end);
@@ -3491,7 +3498,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	void set(KeyValueRef kv, const Arena*) override {
 		shardManager.put(kv.key, kv.value);
-		if (SERVER_KNOBS->ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS && systemKeys.contains(kv.key)) {
+		if (SERVER_KNOBS->ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS &&
+		    (systemKeys.contains(kv.key) || specialKeys.contains(kv.key))) {
 			keysSet.insert(kv.key);
 		}
 	}
