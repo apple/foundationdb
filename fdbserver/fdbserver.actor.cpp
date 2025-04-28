@@ -134,7 +134,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
 	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE
 };
@@ -221,6 +221,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_TRACE_FORMAT,          "--trace-format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist-binpath",         SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIALS,      "--blob-credentials",          SO_REQ_SEP },
+	{ OPT_PROXY,                 "--proxy",                     SO_REQ_SEP },
 	{ OPT_CONFIG_PATH,           "--config-path",               SO_REQ_SEP },
 	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
 	{ OPT_NO_CONFIG_DB,          "--no-config-db",              SO_NONE },
@@ -701,6 +702,7 @@ static void printUsage(const char* name, bool devhelp) {
 	printOptionUsage("--blob-credentials FILE",
 	                 "File containing blob credentials in JSON format. Can be specified "
 	                 "multiple times for multiple files. See fdbbackup usage for more details.");
+	printOptionUsage("--proxy PROXY:PORT", "IP:port or host:port to proxy server for connecting to external network.");
 	printOptionUsage("--profiler-",
 	                 "Set an actor profiler option. Supported options are:\n"
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
@@ -1107,6 +1109,7 @@ struct CLIOptions {
 	bool fileIoWarnOnly = false;
 	uint64_t rsssize = -1;
 	std::vector<std::string> blobCredentials; // used for fast restore workers & backup workers
+	Optional<std::string> proxy;
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
@@ -1662,6 +1665,14 @@ private:
 				// Add blob credential following backup agent example
 				blobCredentials.push_back(args.OptionArg());
 				break;
+			case OPT_PROXY:
+				proxy = args.OptionArg();
+				if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
+					fprintf(stderr, "ERROR: proxy format should be either IP:port or host:port\n");
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
 			case OPT_CONFIG_PATH:
 				configPath = args.OptionArg();
 				break;
@@ -1796,6 +1807,17 @@ private:
 				if (file.size() != 0)
 					blobCredentials.push_back(file.toString());
 			} while (t.size() != 0);
+		}
+
+		// Sets up proxy from ENV if it is not set by arg.
+		const char* proxyENV = getenv("FDB_PROXY");
+		if (proxyENV != nullptr && !proxy.present()) {
+			proxy = proxyENV;
+			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
+				fprintf(stderr, "ERROR: proxy format should be either IP:port or host:port\n");
+				printHelpTeaser(argv[0]);
+				flushAndExit(FDB_EXIT_ERROR);
+			}
 		}
 
 		setThreadLocalDeterministicRandomSeed(randomSeed);
@@ -2375,6 +2397,10 @@ int main(int argc, char* argv[]) {
 					pFiles->push_back(f);
 				}
 			}
+
+			// Update proxy string
+			Optional<std::string>* pProxy = (Optional<std::string>*)g_network->global(INetwork::enProxy);
+			*pProxy = opts.proxy;
 
 			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
 			if (opts.processClass == ProcessClass::FastRestoreClass) {
