@@ -163,24 +163,6 @@ public:
 	static StringRef restoreStateText(ERestoreState id);
 	static Key getPauseKey();
 
-	// parallel restore
-	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB = UnlockDB::True);
-	Future<Void> submitParallelRestore(Database cx,
-	                                   Key backupTag,
-	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                   Key bcUrl,
-	                                   Optional<std::string> proxy,
-	                                   Version targetVersion,
-	                                   LockDB lockDB,
-	                                   UID randomUID,
-	                                   Key addPrefix,
-	                                   Key removePrefix);
-	Future<Void> atomicParallelRestore(Database cx,
-	                                   Key tagName,
-	                                   Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                   Key addPrefix,
-	                                   Key removePrefix);
-
 	// restore() will
 	//   - make sure that url is readable and appears to be a complete backup
 	//   - make sure the requested TargetVersion is valid
@@ -1038,15 +1020,6 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Refe
 // Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
 Value makePadding(int size);
 } // namespace fileBackup
-
-// For fast restore simulation test
-// For testing addPrefix feature in fast restore.
-// Transform db content in restoreRanges by removePrefix and then addPrefix.
-// Assume: DB is locked
-ACTOR Future<Void> transformRestoredDatabase(Database cx,
-                                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                             Key addPrefix,
-                                             Key removePrefix);
 
 void simulateBlobFailure();
 

@@ -1148,6 +1148,7 @@ public:
 	int PHYSICAL_SHARD_MOVE_LOG_SEVERITY;
 	int FETCH_SHARD_BUFFER_BYTE_LIMIT;
 	int FETCH_SHARD_UPDATES_BYTE_LIMIT;
+	int64_t STORAGE_UPDATE_PROCESS_STATS_INTERVAL; // How quickly to update process metrics
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -1236,59 +1237,6 @@ public:
 	// Timekeeper
 	int64_t TIME_KEEPER_DELAY;
 	int64_t TIME_KEEPER_MAX_ENTRIES;
-
-	// Fast Restore
-	// TODO: After 6.3, review FR knobs, remove unneeded ones and change default value
-	int64_t FASTRESTORE_FAILURE_TIMEOUT;
-	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
-	double FASTRESTORE_SAMPLING_PERCENT;
-	int64_t FASTRESTORE_NUM_LOADERS;
-	int64_t FASTRESTORE_NUM_APPLIERS;
-	// FASTRESTORE_TXN_BATCH_MAX_BYTES is target txn size used by appliers to apply mutations
-	double FASTRESTORE_TXN_BATCH_MAX_BYTES;
-	// FASTRESTORE_VERSIONBATCH_MAX_BYTES is the maximum data size in each version batch
-	double FASTRESTORE_VERSIONBATCH_MAX_BYTES;
-	// FASTRESTORE_VB_PARALLELISM is the number of concurrently running version batches
-	int64_t FASTRESTORE_VB_PARALLELISM;
-	int64_t FASTRESTORE_VB_MONITOR_DELAY; // How quickly monitor finished version batch
-	double FASTRESTORE_VB_LAUNCH_DELAY;
-	int64_t FASTRESTORE_ROLE_LOGGING_DELAY;
-	int64_t FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL; // How quickly to update process metrics for restore
-	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
-	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
-	int64_t FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS;
-	bool FASTRESTORE_TRACK_REQUEST_LATENCY; // true to track reply latency of each request in a request batch
-	int64_t FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT; // threshold when pipelined actors should be delayed
-	int64_t FASTRESTORE_WAIT_FOR_MEMORY_LATENCY;
-	int64_t FASTRESTORE_HEARTBEAT_DELAY; // interval for master to ping loaders and appliers
-	int64_t
-	    FASTRESTORE_HEARTBEAT_MAX_DELAY; // master claim a node is down if no heart beat from the node for this delay
-	int64_t FASTRESTORE_APPLIER_FETCH_KEYS_SIZE; // number of keys to fetch in a txn on applier
-	int64_t FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES; // desired size of mutation message sent from loader to appliers
-	bool FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE; // parse each range file to get (range, version) it has?
-	int64_t FASTRESTORE_REQBATCH_PARALLEL; // number of requests to wait on for getBatchReplies()
-	bool FASTRESTORE_REQBATCH_LOG; // verbose log information for getReplyBatches
-	int FASTRESTORE_TXN_CLEAR_MAX; // threshold to start tracking each clear op in a txn
-	int FASTRESTORE_TXN_RETRY_MAX; // threshold to start output error on too many retries
-	double FASTRESTORE_TXN_EXTRA_DELAY; // extra delay to avoid overwhelming fdb
-	bool FASTRESTORE_NOT_WRITE_DB; // do not write result to DB. Only for dev testing
-	bool FASTRESTORE_USE_RANGE_FILE; // use range file in backup
-	bool FASTRESTORE_USE_LOG_FILE; // use log file in backup
-	int64_t FASTRESTORE_SAMPLE_MSG_BYTES; // sample message desired size
-	double FASTRESTORE_SCHED_UPDATE_DELAY; // delay in seconds in updating process metrics
-	int FASTRESTORE_SCHED_TARGET_CPU_PERCENT; // release as many requests as possible when cpu usage is below the knob
-	int FASTRESTORE_SCHED_MAX_CPU_PERCENT; // max cpu percent when scheduler shall not release non-urgent requests
-	int FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS; // number of inflight requests to load backup files
-	int FASTRESTORE_SCHED_INFLIGHT_SEND_REQS; // number of inflight requests for loaders to  send mutations to appliers
-	int FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE; // number of load request to release at once
-	int FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD; // we can send future VB requests if it is less than this knob
-	int FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH; // number of future VB sendLoadingParam requests to process at once
-	int FASTRESTORE_NUM_TRACE_EVENTS;
-	bool FASTRESTORE_EXPENSIVE_VALIDATION; // when set true, performance will be heavily affected
-	double FASTRESTORE_WRITE_BW_MB; // target aggregated write bandwidth from all appliers
-	double FASTRESTORE_RATE_UPDATE_SECONDS; // how long to update appliers target write rate
-	bool FASTRESTORE_DUMP_INSERT_RANGE_VERSION; // Dump all the range version after insertion. This is for debugging
-	                                            // purpose.
 
 	int REDWOOD_DEFAULT_PAGE_SIZE; // Page size for new Redwood files
 	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files
