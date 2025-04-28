@@ -702,7 +702,7 @@ static void printUsage(const char* name, bool devhelp) {
 	printOptionUsage("--blob-credentials FILE",
 	                 "File containing blob credentials in JSON format. Can be specified "
 	                 "multiple times for multiple files. See fdbbackup usage for more details.");
-	printOptionUsage("--proxy MACHINE", "IP:port or host:port to proxy server for connecting to external network.");
+	printOptionUsage("--proxy PROXY:PORT", "IP:port or host:port to proxy server for connecting to external network.");
 	printOptionUsage("--profiler-",
 	                 "Set an actor profiler option. Supported options are:\n"
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
@@ -1813,6 +1813,11 @@ private:
 		const char* proxyENV = getenv("FDB_PROXY");
 		if (proxyENV != nullptr && !proxy.present()) {
 			proxy = proxyENV;
+			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
+				fprintf(stderr, "ERROR: proxy format should be either IP:port or host:port\n");
+				printHelpTeaser(argv[0]);
+				flushAndExit(FDB_EXIT_ERROR);
+			}
 		}
 
 		setThreadLocalDeterministicRandomSeed(randomSeed);
