@@ -389,9 +389,15 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		// Set the proxy in fileBackupAgentProxy if it's present
+		// Set the proxy in g_network if it's present
 		if (param->proxy.present()) {
-			fileBackupAgentProxy = param->proxy.get();
+			if (!Hostname::isHostname(param->proxy.get()) &&
+			    !NetworkAddress::parseOptional(param->proxy.get()).present()) {
+				fprintf(stderr, "ERROR: proxy format should be either IP:port or host:port\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			Optional<std::string>* pProxy = (Optional<std::string>*)g_network->global(INetwork::enProxy);
+			*pProxy = param->proxy.get();
 		}
 
 		TraceEvent("ProgramStart")

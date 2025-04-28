@@ -111,8 +111,13 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
                                            S3BlobStoreEndpoint::ParametersT& parameters) {
 	try {
 		std::string error;
+		Optional<std::string> proxy;
+		auto res = g_network->global(INetwork::enProxy);
+		if (res) {
+			proxy = *static_cast<Optional<std::string>*>(res);
+		}
 		Reference<S3BlobStoreEndpoint> endpoint =
-		    S3BlobStoreEndpoint::fromString(s3url, {}, &resource, &error, &parameters);
+		    S3BlobStoreEndpoint::fromString(s3url, proxy, &resource, &error, &parameters);
 
 		if (!endpoint) {
 			TraceEvent(SevError, "S3ClientGetEndpointNullEndpoint").detail("URL", s3url).detail("Error", error);
