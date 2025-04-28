@@ -55,7 +55,7 @@ RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd6
 
 WORKDIR /
 
-FROM docker.io/library/golang:1.23.0-bullseye AS go-build
+FROM docker.io/library/golang:1.23.8-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
@@ -75,7 +75,6 @@ RUN groupadd --gid 4059 fdb && \
 USER fdb
 COPY --from=go-build /fdb-aws-s3-credentials-fetcher /usr/bin/
 ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
-
 
 FROM base AS foundationdb-base
 
@@ -155,7 +154,7 @@ RUN microdnf -y install \
     python3 -m pip install watchdog==4.0.1
 
 WORKDIR /
-ADD entrypoint.bash sidecar.py /
+COPY entrypoint.bash sidecar.py /
 RUN chmod a+x /entrypoint.bash /sidecar.py
 USER fdb
 VOLUME /var/input-files
@@ -176,7 +175,7 @@ RUN curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539
     rm -rf /tmp/*
 WORKDIR /
 # Set Up Runtime Scripts and Directories
-ADD fdb.bash fdb_single.bash /var/fdb/scripts/
+COPY fdb.bash fdb_single.bash /var/fdb/scripts/
 RUN chmod a+x /var/fdb/scripts/fdb.bash /var/fdb/scripts/fdb_single.bash
 VOLUME /var/fdb/data
 ENV FDB_PORT 4500
@@ -210,13 +209,13 @@ RUN NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-e
 
 # TODO: Log4J complains that it's eating the HTracer logs.  Even without it, we get per-operation
 # time series graphs of throughput, median, 90, 99, 99.9 and 99.99 (in usec).
-ADD run_ycsb.sh run_ycsb_standalone.sh /usr/local/bin
+COPY run_ycsb.sh run_ycsb_standalone.sh /usr/local/bin
 RUN mkdir -p /var/log/fdb-trace-logs && \
     chmod +x /usr/local/bin/run_ycsb.sh && \
     chmod +x /usr/local/bin/run_ycsb_standalone.sh
 
 
-ADD YCSB /YCSB
+COPY YCSB /YCSB
 WORKDIR /YCSB
 ENV FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY=/var/dynamic-conf/lib/multiversion/
 ENV FDB_NETWORK_OPTION_TRACE_ENABLE=/var/log/fdb-trace-logs
