@@ -1555,12 +1555,11 @@ public:
 		LatencySample kvReadRangeLatencySample;
 		LatencySample updateLatencySample;
 		LatencySample updateEncryptionLatencySample;
-		// DESTABILIZER LatencySample ingestDurationSample;
-
 		LatencyBands readLatencyBands;
 		std::unique_ptr<LatencySample> mappedRangeSample; // Samples getMappedRange latency
 		std::unique_ptr<LatencySample> mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
 		std::unique_ptr<LatencySample> mappedRangeLocalSample; // Samples getMappedRange local subquery latency
+		std::unique_ptr<LatencySample> ingestDurationLatencySample;
 
 		explicit Counters(StorageServer* self)
 		  : CommonStorageCounters("StorageServer", self->thisServerID.toString(), &self->metrics),
@@ -1631,10 +1630,6 @@ public:
 		                                  self->thisServerID,
 		                                  SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                                  SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    // ingestDurationSample("IngestDurationMetrics",
-		    //                      self->thisServerID,
-		    //                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		    //                      SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 		    mappedRangeSample(std::make_unique<LatencySample>("GetMappedRangeMetrics",
 		                                                      self->thisServerID,
@@ -1647,7 +1642,11 @@ public:
 		    mappedRangeLocalSample(std::make_unique<LatencySample>("GetMappedRangeLocalMetrics",
 		                                                           self->thisServerID,
 		                                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {
+		                                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
+			ingestDurationLatencySample(std::make_unique<LatencySample>("IngestDurationMetrics",
+								self->thisServerID,
+		                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {
 
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -9260,18 +9259,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					// Ingest the SST files.
 					// Measure duration at this level so we capture the inter-thread handoff time.
-					state double ingestStartTime = now(); // Record start time
+					state double ingestStartTime = g_network->timer(); // Record start time
 					wait(data->storage.getKeyValueStore()->ingestSSTFiles(localBulkLoadFileSets));
-					// DESTABILIZER data->counters.ingestDurationSample.addMeasurement(now() - ingestStartTime);
+					const double ingestDuration = g_network->timer() - ingestStartTime;
+					data->counters.ingestDurationLatencySample->addMeasurement(ingestDuration);
 
 					// Process sample files after SST ingestion
 					wait(processSampleFiles(data, bulkLoadLocalDir, localBulkLoadFileSets));
-
-					// Ensure all changes are durable
-					wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
-
-					// Add a small delay to ensure audit system sees the changes
-					wait(delay(0.1));
 
 					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
@@ -15298,6 +15292,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	static_assert(sizeof(self) < 16384, "FastAlloc doesn't allow allocations larger than 16KB");
 	TraceEvent("StorageServerInitProgress", ssi.id())
 	    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+		.detail("Size", sizeof(self))
 	    .detail("Step", "4.StartInit");
 
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
