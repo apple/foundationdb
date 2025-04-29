@@ -20,6 +20,8 @@
 
 #include <string>
 #include <vector>
+#include <unordered_set>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <io.h>
@@ -32,9 +34,10 @@
 #include "flow/flow.h"
 #include "flow/xxhash.h"
 #include "flow/Error.h"
+#include "rapidxml/rapidxml.hpp"
 
 #include "flow/actorcompiler.h" // has to be last include
-//
+
 #define S3_CHECKSUM_TAG_NAME "xxhash64"
 
 typedef XXH64_state_t XXHashState;
@@ -652,4 +655,150 @@ ACTOR Future<Void> deleteResource(std::string s3url) {
 	state std::string bucket = parameters["bucket"];
 	wait(endpoint->deleteRecursively(bucket, resource));
 	return Void();
+}
+
+ACTOR Future<Void> listFiles(std::string s3url, int maxDepth) {
+	try {
+		state std::string resource;
+		state std::string error;
+		state S3BlobStoreEndpoint::ParametersT parameters;
+		state Reference<S3BlobStoreEndpoint> bstore = getEndpoint(s3url, resource, parameters);
+
+		if (!bstore) {
+			TraceEvent(SevError, "S3ClientListingFailed").detail("Error", error);
+			throw backup_invalid_url();
+		}
+
+		// Get bucket directly from parameters
+		state std::string bucket = parameters["bucket"];
+
+		// Check if bucket exists first
+		bool exists = wait(bstore->bucketExists(bucket));
+		if (!exists) {
+			std::cerr << "ERROR: Bucket '" << bucket << "' does not exist" << std::endl;
+			throw http_request_failed();
+		}
+
+		// Let S3BlobStoreEndpoint handle the resource path construction
+		state Optional<char> delimiter;
+		if (maxDepth <= 1) {
+			delimiter = Optional<char>('/');
+		}
+
+		// Use listObjects with the resource path directly, letting S3BlobStoreEndpoint handle URL construction
+		state S3BlobStoreEndpoint::ListResult result =
+		    wait(bstore->listObjects(bucket, resource, delimiter, maxDepth > 1));
+
+		// Format and display the objects
+		std::cout << "Contents of " << s3url << ":" << std::endl;
+
+		// Track directories to avoid duplicates
+		std::set<std::string> directories;
+
+		// First print common prefixes (directories)
+		for (const auto& prefix : result.commonPrefixes) {
+			std::string dirName = prefix;
+			// Remove trailing slash if present
+			if (!dirName.empty() && dirName.back() == '/') {
+				dirName.pop_back();
+			}
+			directories.insert(dirName);
+			std::cout << "  " << dirName << "/" << std::endl;
+		}
+
+		// Then print objects, skipping those in directories we've already printed
+		for (const auto& object : result.objects) {
+			std::string objectName = object.name;
+			// Skip if this object is in a directory we've already printed
+			bool skip = false;
+			for (const auto& dir : directories) {
+				if (objectName.find(dir + "/") == 0) {
+					skip = true;
+					break;
+				}
+			}
+			if (!skip) {
+				std::cout << "  " << objectName << std::endl;
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevError, "S3ClientListFilesError").detail("URL", s3url).detail("Error", e.what());
+		if (e.code() == error_code_backup_invalid_url) {
+			std::cerr << "ERROR: Invalid blobstore URL: " << s3url << std::endl;
+		} else if (e.code() == error_code_backup_auth_missing) {
+			std::cerr << "ERROR: Authentication information missing from URL" << std::endl;
+		} else if (e.code() == error_code_backup_auth_unreadable) {
+			std::cerr << "ERROR: Could not read authentication information" << std::endl;
+		} else if (e.code() == error_code_http_request_failed) {
+			// Check if the error is due to a non-existent bucket
+			if (e.what() && strstr(e.what(), "NoSuchBucket") != nullptr) {
+				std::cerr << "ERROR: Bucket '" << parameters["bucket"] << "' does not exist" << std::endl;
+			} else if (e.what() && strstr(e.what(), "NoSuchKey") != nullptr) {
+				std::cerr << "ERROR: Resource '" << resource << "' does not exist in bucket '" << parameters["bucket"]
+				          << "'" << std::endl;
+				throw resource_not_found();
+			} else {
+				std::cerr << "ERROR: HTTP request to blobstore failed" << std::endl;
+			}
+		} else {
+			std::cerr << "ERROR: " << e.what() << std::endl;
+		}
+		throw;
+	}
+	return Void();
+}
+
+ACTOR Future<std::vector<std::string>> listFiles_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                      std::string bucket,
+                                                      std::string path) {
+	wait(bstore->requestRateRead->getAllowance(1));
+
+	state std::string resource = bstore->constructResourcePath(bucket, path);
+	state HTTP::Headers headers;
+	state std::string fullResource = resource + "?list-type=2&prefix=" + path;
+
+	Reference<HTTP::IncomingResponse> r =
+	    wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200, 404 }));
+
+	if (r->code == 404) {
+		TraceEvent(SevWarn, "S3ClientListFilesNotFound").detail("Bucket", bucket).detail("Path", path);
+		throw file_not_found();
+	}
+
+	try {
+		rapidxml::xml_document<> doc;
+		std::string content = r->data.content;
+		doc.parse<0>((char*)content.c_str());
+
+		rapidxml::xml_node<>* result = doc.first_node();
+		if (result == nullptr || strcmp(result->name(), "ListBucketResult") != 0) {
+			TraceEvent(SevWarn, "S3ClientListFilesInvalidResponse")
+			    .detail("NodeName", result ? result->name() : "null");
+			throw http_bad_response();
+		}
+
+		std::vector<std::string> files;
+		rapidxml::xml_node<>* n = result->first_node();
+		while (n != nullptr) {
+			const char* name = n->name();
+			if (strcmp(name, "Contents") == 0) {
+				rapidxml::xml_node<>* key = n->first_node("Key");
+				if (key == nullptr) {
+					TraceEvent(SevWarn, "S3ClientListFilesMissingKey").detail("NodeName", name);
+					throw http_bad_response();
+				}
+				std::string file = key->value();
+				if (file.size() > path.size() && file.substr(0, path.size()) == path) {
+					file = file.substr(path.size());
+				}
+				files.push_back(file);
+			}
+			n = n->next_sibling();
+		}
+
+		return files;
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "S3ClientListFilesError").error(e).detail("Bucket", bucket).detail("Path", path);
+		throw;
+	}
 }
