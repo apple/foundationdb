@@ -732,10 +732,9 @@ ACTOR Future<Void> listFiles(std::string s3url, int maxDepth) {
 		} else if (e.code() == error_code_http_request_failed) {
 			// Check if the error is due to a non-existent bucket
 			if (e.what() && strstr(e.what(), "NoSuchBucket") != nullptr) {
-				std::cerr << "ERROR: Bucket '" << parameters["bucket"] << "' does not exist" << std::endl;
+				std::cerr << "ERROR: Bucket does not exist" << std::endl;
 			} else if (e.what() && strstr(e.what(), "NoSuchKey") != nullptr) {
-				std::cerr << "ERROR: Resource '" << resource << "' does not exist in bucket '" << parameters["bucket"]
-				          << "'" << std::endl;
+				std::cerr << "ERROR: Resource does not exist in bucket" << std::endl;
 				throw resource_not_found();
 			} else {
 				std::cerr << "ERROR: HTTP request to blobstore failed" << std::endl;
