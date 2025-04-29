@@ -1643,10 +1643,10 @@ public:
 		                                                           self->thisServerID,
 		                                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
-			ingestDurationLatencySample(std::make_unique<LatencySample>("IngestDurationMetrics",
-								self->thisServerID,
-		                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {
+		    ingestDurationLatencySample(std::make_unique<LatencySample>("IngestDurationMetrics",
+		                                                                self->thisServerID,
+		                                                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                                SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {
 
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -15292,7 +15292,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	static_assert(sizeof(self) < 16384, "FastAlloc doesn't allow allocations larger than 16KB");
 	TraceEvent("StorageServerInitProgress", ssi.id())
 	    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-		.detail("Size", sizeof(self))
+	    .detail("Size", sizeof(self))
 	    .detail("Step", "4.StartInit");
 
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
