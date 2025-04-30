@@ -2286,7 +2286,7 @@ ACTOR Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Opti
 	state Version logEnd = v;
 	state Version snapshotBeginVersion = v;
 	state Version snapshotEndVersion = v;
-	state bool nextSnapshotMissingLogs = false;
+	state Version lastMissedLogFileEnd = 0;
 
 	// create a random number of snapshots
 	state int numSnapshots = deterministicRandom()->randomInt(1, 10);
@@ -2315,8 +2315,9 @@ ACTOR Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Opti
 		                                              deterministicRandom()->randomInt(0, 2e6),
 		                                              IncludeKeyRangeMap(BUGGIFY)));
 
-		snapshotsMissingLogs.push_back(nextSnapshotMissingLogs);
-		nextSnapshotMissingLogs = false;
+		// if the last missing log file overlaps with the current snapshot,
+		// mark snapshotsMissingLogs for current snapshot as true.
+		snapshotsMissingLogs.push_back(lastMissedLogFileEnd > snapshotBeginVersion);
 
 		// creating log files for the snapshot range.
 		while (logStart < logEnd) {
@@ -2328,8 +2329,7 @@ ACTOR Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Opti
 				// If the missing log range falls in the current snapshot range, mark it.
 				if (!(tempLogEnd < snapshotBeginVersion || snapshotEndVersion < logStart))
 					snapshotsMissingLogs.back() = true;
-				if (tempLogEnd > v) // if it overlaps with the next snapshot, mark the next snapshot as well.
-					nextSnapshotMissingLogs = true;
+				lastMissedLogFileEnd = tempLogEnd;
 			}
 			logStart = tempLogEnd;
 		}
