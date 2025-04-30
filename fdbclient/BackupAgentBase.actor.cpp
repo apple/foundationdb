@@ -643,10 +643,11 @@ struct RestoreMetrics {
 			return;
 		}
 		if (!update) {
-			TraceEvent("RestoreMetricsForEmptyTask", logId);
+			TraceEvent("RestoreMetricsForEmptyTask", logId).suppressFor(5.0);
 			return;
 		}
 		TraceEvent("RestoreMetrics", logId)
+		    .suppressFor(5.0)
 		    .setMaxEventLength(-1)
 		    .setMaxFieldLength(-1)
 		    .detail("TotalBytes", totalBytes)
@@ -1574,7 +1575,12 @@ ACTOR Future<Void> applyMutations(Database cx,
 				    .detail("PrepareTime", kvMutationLogToTransactionsBeginTime - loopBeginTime)
 				    .detail("KvMutationLogToTransactionsTime",
 				            coalesceKeyVersionCacheBeginTime - kvMutationLogToTransactionsBeginTime)
-				    .detail("CoalesceKeyVersionCacheTime", now() - coalesceKeyVersionCacheBeginTime);
+				    .detail("CoalesceKeyVersionCacheTime", now() - coalesceKeyVersionCacheBeginTime)
+				    .detail("Zhe", "Wang");
+			}
+
+			if (CLIENT_KNOBS->RESTORE_VERBOSE_LOGGING) {
+				metrics->log();
 			}
 
 			beginVersion = newEndVersion;
