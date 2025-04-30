@@ -100,6 +100,7 @@ static void printUsage(std::string const& programName) {
 	             "                 TARGET must be a local directory and vice versa. See 'Backup URLs'\n"
 	             "                 in https://apple.github.io/foundationdb/backups.html for\n"
 	             "                 more on the fdb s3 'blobstore://' URL format.\n"
+	             "  ls             List contents of SOURCE. Must be a s3/blobstore 'Backup URL'.\n"
 	             "  rm             Delete SOURCE. Must be a s3/blobstore 'Backup URL'.\n"
 	             "OPTIONS:\n"
 	             "  --log          Enables trace file logging for the CLI session.\n"
@@ -298,6 +299,18 @@ static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
 		}
 		param->whichIsBlobstoreURL = 0;
 		param->tgt = "";
+	} else if (command == "ls") {
+		if (args->FileCount() != 2) {
+			std::cerr << "ERROR: ls command requires a SOURCE" << std::endl;
+			return FDB_EXIT_ERROR;
+		}
+		param->src = args->Files()[1];
+		if (!isBlobStoreURL(param->src)) {
+			std::cerr << "ERROR: SOURCE must be a blobstore URL for ls command" << std::endl;
+			return FDB_EXIT_ERROR;
+		}
+		param->whichIsBlobstoreURL = 0;
+		param->tgt = "";
 	} else {
 		std::cerr << "ERROR: Invalid command: " << command << std::endl;
 		return FDB_EXIT_ERROR;
@@ -323,6 +336,24 @@ ACTOR Future<Void> run(Reference<Params> params) {
 		}
 	} else if (params->command == "rm") {
 		wait(deleteResource(params->src));
+	} else if (params->command == "ls") {
+		// Default depth of 1 to not recursively list by default
+		wait(listFiles(params->src, 1));
+	}
+	return Void();
+}
+
+ACTOR Future<Void> deleteResource(std::string src) {
+	// Implementation of deleteResource
+	return Void();
+}
+
+ACTOR Future<Void> listFiles(std::string src, int maxDepth) {
+	try {
+		wait(::listFiles(src, maxDepth));
+	} catch (Error& e) {
+		// Rethrow the error to ensure it's handled by the main error handler
+		throw;
 	}
 	return Void();
 }

@@ -184,6 +184,297 @@ function test_dir_upload_and_download {
   fi
 }
 
+# Test non-existent bucket listing
+# $1 The url to go against
+# $2 Directory I can write test files in.
+# $3 credentials file
+# $4 The s3client binary.
+function test_nonexistent_bucket {
+  local url="${1}"
+  local dir="${2}"
+  local credentials="${3}"
+  local s3client="${4}"
+  local logsdir="${dir}/logs"
+  if [[ ! -d "${logsdir}" ]]; then
+    mkdir "${logsdir}"
+  fi
+  if [[ "${USE_S3}" == "true" ]]; then
+    # For S3, expect "Requested resource was not found" error
+    if ! "${s3client}" \
+        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+        --knob_blobstore_encryption_type=aws:kms \
+        --tls-ca-file "${TLS_CA_FILE}" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${logsdir}" \
+        ls "${url}" \
+        2>&1 | grep -q "Requested resource was not found"; then
+      err "Failed to detect non-existent bucket in S3"
+      return 1
+    fi
+  else
+    # For SeaweedFS, expect either:
+    # 1. "No objects found" message
+    # 2. Just the header line
+    # 3. Or successful completion with no objects listed
+    local output
+    local status
+    output=$("${s3client}" \
+        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+        --knob_blobstore_encryption_type=aws:kms \
+        --tls-ca-file "${TLS_CA_FILE}" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${logsdir}" \
+        ls "${url}" 2>&1)
+    status=$?
+
+    # Check if command succeeded and output matches expected patterns
+    if [[ ${status} -eq 0 ]]; then
+      # Command succeeded, check output patterns
+      # For SeaweedFS, we consider it a success if:
+      # 1. The command succeeded (status 0)
+      # 2. The output contains the URL header
+      # 3. There are no objects listed (no lines after the header)
+      if echo "${output}" | grep -q "Contents of" &&
+         [[ $(echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "HTTP" | wc -l) -eq 0 ]]; then
+        # Success - we have the header and no other non-empty lines (excluding HTTP debug lines)
+        return 0
+      else
+        err "Failed to handle empty bucket listing in SeaweedFS"
+        return 1
+      fi
+    else
+      # Command failed, which is unexpected for SeaweedFS
+      err "Command failed unexpectedly for SeaweedFS"
+      return 1
+    fi
+  fi
+}
+
+# Test non-existent resource in existing bucket
+# $1 The url to go against
+# $2 Directory I can write test files in.
+# $3 credentials file
+# $4 The s3client binary.
+function test_nonexistent_resource {
+  local url="${1}"
+  local dir="${2}"
+  local credentials="${3}"
+  local s3client="${4}"
+  local logsdir="${dir}/logs"
+  if [[ ! -d "${logsdir}" ]]; then
+    mkdir "${logsdir}"
+  fi
+
+  local output
+  local status
+  output=$("${s3client}" \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+      --knob_blobstore_encryption_type=aws:kms \
+      --tls-ca-file "${TLS_CA_FILE}" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      ls "${url}" 2>&1)
+  status=$?
+
+  if [[ "${USE_S3}" == "true" ]]; then
+    # For S3, a non-existent path returns a 200 with empty contents
+    # We expect to see the "Contents of" header but no actual contents
+    if ! (echo "${output}" | grep -q "Contents of" &&
+          [[ $(echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "HTTP" | wc -l) -eq 0 ]]); then
+      err "Failed to detect non-existent resource in S3"
+      return 1
+    fi
+  else
+    # For SeaweedFS, expect either:
+    # 1. Empty listing (just the header line)
+    # 2. Or successful completion with no objects listed
+    if [[ ${status} -eq 0 ]]; then
+      # For SeaweedFS, we consider it a success if:
+      # 1. The command succeeded (status 0)
+      # 2. The output contains the URL header
+      # 3. There are no actual object listings (no lines starting with FILE or DIR)
+      if echo "${output}" | grep -q "Contents of" && 
+         ! echo "${output}" | grep -q "^FILE\|^DIR"; then
+        # Success - we have the header and no object listings
+        return 0
+      else
+        err "Failed to handle non-existent resource in SeaweedFS"
+        return 1
+      fi
+    else
+      # Command failed, which is unexpected for SeaweedFS
+      err "Command failed unexpectedly for SeaweedFS"
+      return 1
+    fi
+  fi
+}
+
+# Test empty bucket listing
+# $1 The url to go against
+# $2 Directory I can write test files in.
+# $3 credentials file
+# $4 The s3client binary.
+function test_empty_bucket {
+  local url="${1}"
+  local dir="${2}"
+  local credentials="${3}"
+  local s3client="${4}"
+  local logsdir="${dir}/logs"
+  if [[ ! -d "${logsdir}" ]]; then
+    mkdir "${logsdir}"
+  fi
+
+  # Construct URL with empty path, ensuring no double slashes
+  local empty_url
+  if [[ "${url}" == *"?"* ]]; then
+    # If URL has query parameters, insert path before the ?
+    local base="${url%%\?*}"
+    # Remove trailing slash if present
+    base="${base%/}"
+    empty_url="${base}/empty?${url#*\?}"
+  else
+    # If no query parameters, just append path
+    # Remove trailing slash if present
+    url="${url%/}"
+    empty_url="${url}/empty"
+  fi
+
+  # Run the command and capture both output and status
+  local output
+  local status
+  output=$("${s3client}" \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+      --knob_blobstore_encryption_type=aws:kms \
+      --tls-ca-file "${TLS_CA_FILE}" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      ls "${empty_url}" 2>&1)
+  status=$?
+
+  # Check for either:
+  # 1. "No objects found" message
+  # 2. Or successful completion (status 0) with no objects listed
+  if [[ ${status} -eq 0 ]]; then
+    if echo "${output}" | grep -q "No objects found" || 
+       (echo "${output}" | grep -q "Contents of" && 
+        [[ $(echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "HTTP" | wc -l) -eq 0 ]]); then
+      log "Successfully handled empty bucket listing"
+      return 0
+    else
+      err "Failed to handle empty bucket listing - unexpected output"
+      return 1
+    fi
+  else
+    err "Failed to handle empty bucket listing - command failed"
+    return 1
+  fi
+}
+
+# Test listing with existing files
+# $1 The url to go against
+# $2 Directory I can write test files in.
+# $3 credentials file
+# $4 The s3client binary.
+function test_list_with_files {
+  local url="${1}"
+  local dir="${2}"
+  local credentials="${3}"
+  local s3client="${4}"
+  local logsdir="${dir}/logs"
+  if [[ ! -d "${logsdir}" ]]; then
+    mkdir "${logsdir}"
+  fi
+
+  # Create test files
+  local test_dir="${dir}/ls_test"
+  mkdir -p "${test_dir}"
+  date -Iseconds > "${test_dir}/file1"
+  date -Iseconds > "${test_dir}/file2"
+  mkdir "${test_dir}/subdir"
+  date -Iseconds > "${test_dir}/subdir/file3"
+
+  # Upload test files
+  if ! "${s3client}" \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+      --knob_blobstore_encryption_type=aws:kms \
+      --tls-ca-file "${TLS_CA_FILE}" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      cp "${test_dir}" "${url}"; then
+    err "Failed to upload test files for ls test"
+    return 1
+  fi
+
+  # Test ls on the uploaded directory
+  local output
+  local status
+  output=$("${s3client}" \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+      --knob_blobstore_encryption_type=aws:kms \
+      --tls-ca-file "${TLS_CA_FILE}" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      ls "${url}" 2>&1)
+  status=$?
+
+  # For SeaweedFS, the output format is:
+  # Contents of blobstore://localhost:8334/s3client/ls_test?bucket=testbucket&region=all_regions&secure_connection=0:
+  #   s3client/ls_test/
+  # We need to check that we see the directory listing
+  if ! echo "${output}" | grep -q "s3client/ls_test/"; then
+    err "Failed to list directory in ls output"
+    return 1
+  fi
+
+  # Clean up test files
+  if ! "${s3client}" \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+      --knob_blobstore_encryption_type=aws:kms \
+      --tls-ca-file "${TLS_CA_FILE}" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      rm "${url}"; then
+    err "Failed to clean up test files"
+    return 1
+  fi
+
+  log "Successfully tested ls with existing files and directories"
+}
+
+# Test ls command handling
+# $1 The url to go against
+# $2 Directory I can write test files in.
+# $3 credentials file
+# $4 The s3client binary.
+function test_ls_handling {
+  local base_url="${1}"
+  local dir="${2}"
+  local credentials="${3}"
+  local s3client="${4}"
+  local logsdir="${dir}/logs"
+  if [[ ! -d "${logsdir}" ]]; then
+    mkdir "${logsdir}"
+  fi
+
+  # Test non-existent resource in existing bucket
+  local nonexistent_path_url="blobstore://${host}/nonexistent/path?${query_str}"
+  if ! test_nonexistent_resource "${nonexistent_path_url}" "${dir}" "${credentials}" "${s3client}"; then
+    return 1
+  fi
+
+  # Test empty bucket listing (should not error)
+  local empty_bucket_url="blobstore://${host}/?${query_str}"
+  if ! test_empty_bucket "${empty_bucket_url}" "${dir}" "${credentials}" "${s3client}"; then
+    return 1
+  fi
+
+  # Test positive case - create some files and verify ls works
+  local test_url="blobstore://${host}/${path_prefix}/ls_test?${query_str}"
+  if ! test_list_with_files "${test_url}" "${dir}" "${credentials}" "${s3client}"; then
+    return 1
+  fi
+}
+
 # set -o xtrace   # a.k.a set -x  # Set this one when debugging (or 'bash -x THIS_SCRIPT').
 set -o errexit  # a.k.a. set -e
 set -o nounset  # a.k.a. set -u
@@ -263,7 +554,8 @@ if [[ "${USE_S3}" == "true" ]]; then
   readonly bucket="${configs[1]}"
   readonly blob_credentials_file="${configs[2]}"
   readonly region="${configs[3]}"
-  query_str="bucket=${bucket}&region=${region}"
+  # Construct query string with raw ampersands using single quotes
+  query_str='bucket='"${bucket}"'&region='"${region}"'&secure_connection=1'
   path_prefix="bulkload/test/s3client"
 else
   log "Testing against seaweedfs"
@@ -285,23 +577,24 @@ else
   readonly host
   readonly bucket="${SEAWEED_BUCKET}"
   readonly region="all_regions"
-  # Reference a non-existent blob file (its ignored by seaweed)
+  # Create an empty blob credentials file (its ignored by seaweed)
   readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
-  # Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
-  query_str="bucket=${bucket}&region=${region}&secure_connection=0"
+  touch "${blob_credentials_file}"
+  # Construct query string with raw ampersands using single quotes
+  query_str='bucket='"${bucket}"'&region='"${region}"'&secure_connection=0'
   path_prefix="s3client"
 fi
 
 # Run tests.
 test="test_file_upload_and_download"
-url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
 test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
 log_test_result $? "${test}"
 
 if [[ "${USE_S3}" == "true" ]]; then
   # Only run this on s3. It is checking that the old s3blobstore md5 checksum still works.
   test="test_file_upload_and_download_no_integrity_check"
-  url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+  url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
   test_file_upload_and_download_no_integrity_check "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
   log_test_result $? "${test}"
 fi
@@ -309,4 +602,10 @@ fi
 test="test_dir_upload_and_download"
 url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
 test_dir_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+log_test_result $? "${test}"
+
+# Add ls error handling test
+test="test_ls_handling"
+url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
+test_ls_handling "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
 log_test_result $? "${test}"

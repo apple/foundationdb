@@ -126,5 +126,11 @@ ACTOR Future<Void> deleteResource(std::string s3url);
 // Returns a Future that completes with the hex string representation of the checksum
 ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size = -1);
 
+// List files and directories at the given S3 URL
+// s3url: S3 URL to list (must include bucket parameter)
+// maxDepth: Maximum depth to recurse (default: 1)
+// Returns a Future that completes when the operation is done
+ACTOR Future<Void> listFiles(std::string s3url, int maxDepth = 1);
+
 #include "flow/unactorcompiler.h"
 #endif

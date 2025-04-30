@@ -277,6 +277,9 @@ public:
 	// parameters in addition to the passed params string
 	std::string getResourceURL(std::string resource, std::string params) const;
 
+	// Construct a resource path for S3 operations
+	std::string constructResourcePath(const std::string& bucket, const std::string& object) const;
+
 	// FIXME: add periodic connection reaper to pool
 	// local connection pool for this blobstore
 	Reference<ConnectionPoolData> connectionPool;
