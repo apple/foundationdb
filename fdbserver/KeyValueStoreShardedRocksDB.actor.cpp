@@ -211,6 +211,25 @@ public:
 		}
 
 		flushReasons[index]++;
+
+		// Update flush stats.
+		std::unique_lock<std::mutex> lock(mutex);
+		if (info.flush_reason == rocksdb::FlushReason::kWalFull) {
+			// When WAL is full, multiple flushes are triggered. RocksDB doesn't have API to query the exact sequence
+			// number of a flush batch. The smallest sequence number is used here as an estimate of the actual sequence
+			// number. We only update the last flush time when a larger sequence number is seen.
+			if (info.smallest_seqno > lastWalFullFlushSeqNumber) {
+				lastWalFullFlushTime = now();
+				lastWalFullFlushSeqNumber = info.smallest_seqno;
+				TraceEvent("RocksDBFlushWALFull", logId)
+				    .detail("SmallestSeqNo", info.smallest_seqno)
+				    .detail("LastFlushTime", lastWalFullFlushTime);
+				recentFlushedCfs.clear();
+			}
+			return;
+		}
+		// Track CF name if it's flushed due to other reasons.
+		recentFlushedCfs.insert(info.cf_name);
 	}
 
 	void OnCompactionBegin(rocksdb::DB* db, const rocksdb::CompactionJobInfo& info) override {
@@ -273,6 +292,15 @@ public:
 		lastResetTime = now();
 	}
 
+	double getLastWalFullFlushTime() {
+		std::unique_lock<std::mutex> lock(mutex);
+		return lastWalFullFlushTime;
+	}
+	std::set<std::string> getRecentFlushedCfs() {
+		std::unique_lock<std::mutex> lock(mutex);
+		return recentFlushedCfs;
+	}
+
 private:
 	UID logId;
 
@@ -280,6 +308,11 @@ private:
 	std::vector<std::atomic_int> compactionReasons;
 	std::atomic_int flushTotal;
 	std::atomic_int compactionTotal;
+
+	std::mutex mutex; // mutex for cfSquenceNumber access.
+	std::set<std::string> recentFlushedCfs;
+	uint64_t lastWalFullFlushSeqNumber = 0;
+	double lastWalFullFlushTime;
 
 	// Histograms.
 	Reference<Histogram> numRangeDeletionsInTableFile;
@@ -477,12 +510,13 @@ rocksdb::WALRecoveryMode getWalRecoveryMode() {
 
 // Encapsulation of shared states.
 struct ShardedRocksDBState {
+	UID logId;
 	bool closing = false;
 	Counters counters;
 	std::shared_ptr<rocksdb::Cache> blockCache = nullptr;
 	std::shared_ptr<CompactOnRangeDeletionCollectorFactory> compactOnRangeDeletionFactory = nullptr;
 
-	ShardedRocksDBState() {
+	ShardedRocksDBState(UID id) : logId(id) {
 		if (SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE > 0) {
 			blockCache =
 			    rocksdb::NewLRUCache(SERVER_KNOBS->SHARDED_ROCKSDB_BLOCK_CACHE_SIZE,
@@ -1070,6 +1104,21 @@ struct PhysicalShard {
 	bool shouldFlush() {
 		return SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT > 0 &&
 		       numRangeDeletions > SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT;
+	}
+
+	rocksdb::Status flush() {
+		if (cf == nullptr || deletePending) {
+			TraceEvent("SkippedFlush").detail("ShardId", id).detail("DeletePending", deletePending);
+			return rocksdb::Status::OK();
+		}
+		rocksdb::FlushOptions flushOptions;
+		flushOptions.wait = false;
+		flushOptions.allow_write_stall = false;
+		auto status = db->Flush(flushOptions, cf);
+		if (!status.ok()) {
+			logRocksDBError(status, "Flush");
+		}
+		return status;
 	}
 
 	std::string toString() {
@@ -2247,6 +2296,62 @@ ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDB
 	return Void();
 }
 
+// Flushes the oldest column families in the RocksDB periodically. When the database is under normal load, flush happens
+// regularly as the WAL get filled up frequently. When the database is idle, a manual flush is needed to avoid
+// accumulating too many unflushed versions. This is crucial for fast recovery.
+ACTOR Future<Void> flushShardWorker(std::shared_ptr<ShardedRocksDBState> rState,
+                                    Future<Void> openFuture,
+                                    ShardManager* shardManager,
+                                    std::shared_ptr<RocksDBEventListener> eventListener) {
+	if (SERVER_KNOBS->SHARDED_ROCKSDB_FLUSH_PERIOD <= 0.0) {
+		return Void();
+	}
+	wait(openFuture);
+	state std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards =
+	    shardManager->getAllShards();
+	state rocksdb::DB* db = shardManager->getDb();
+	TraceEvent("FlushWorkerStarted", rState->logId).detail("FlushPeriod", SERVER_KNOBS->SHARDED_ROCKSDB_FLUSH_PERIOD);
+	try {
+		loop {
+			wait(delay(SERVER_KNOBS->SHARDED_ROCKSDB_FLUSH_PERIOD));
+			if (rState->closing) {
+				break;
+			}
+			int count = 0;
+			double start = now();
+			// If a flush happened recently, skip this iteration.
+			if (start - eventListener->getLastWalFullFlushTime() > SERVER_KNOBS->SHARDED_ROCKSDB_FLUSH_PERIOD) {
+				// Try to flush oldest CFs.
+				auto recentFlushedCfs = eventListener->getRecentFlushedCfs();
+				for (auto& [id, physicalShard] : *physicalShards) {
+					if (!physicalShard->initialized()) {
+						continue;
+					}
+					if (recentFlushedCfs.find(id) != recentFlushedCfs.end()) {
+						continue;
+					}
+					uint64_t memtableSize = 0;
+					db->GetIntProperty(physicalShard->cf, rocksdb::DB::Properties::kCurSizeAllMemTables, &memtableSize);
+					if (memtableSize > 0) {
+						physicalShard->flush();
+						++count;
+					}
+				}
+				TraceEvent("ShardedRocksDBFlushWorker", rState->logId)
+				    .detail("FlushedCfs", count)
+				    .detail("RecentFlushedCfs", recentFlushedCfs.size())
+				    .detail("LastWalFullFlushTime", eventListener->getLastWalFullFlushTime())
+				    .detail("FlushActorDuration", now() - start);
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled) {
+			TraceEvent(SevError, "ShardedRocksDBFlushWorkerError").errorUnsuppressed(e);
+		}
+	}
+	return Void();
+}
+
 struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	using CF = rocksdb::ColumnFamilyHandle*;
 
@@ -3354,7 +3459,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	// Persist shard mappinng key range should not be in shardMap.
 	explicit ShardedRocksDBKeyValueStore(const std::string& path, UID id)
-	  : rState(std::make_shared<ShardedRocksDBState>()), path(path), id(id),
+	  : rState(std::make_shared<ShardedRocksDBState>(id)), path(path), id(id),
 	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
@@ -3407,6 +3512,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		self->refreshRocksDBBackgroundWorkHolder.cancel();
 		self->cleanUpJob.cancel();
 		self->counterLogger.cancel();
+		self->flushWorker.cancel();
 
 		try {
 			wait(self->readThreads->stop());
@@ -3472,6 +3578,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			this->cleanUpJob = emptyShardCleaner(this->rState, openFuture, &shardManager, writeThread);
 			writeThread->post(a.release());
 			counterLogger = counters.cc.traceCounters("RocksDBCounters", id, SERVER_KNOBS->ROCKSDB_METRICS_DELAY);
+			this->flushWorker = flushShardWorker(this->rState, openFuture, &shardManager, this->eventListener);
 			return openFuture;
 		}
 	}
@@ -3845,6 +3952,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> refreshRocksDBBackgroundWorkHolder;
 	Future<Void> cleanUpJob;
 	Future<Void> counterLogger;
+	Future<Void> flushWorker;
 };
 
 ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<KeyRange> ranges) {
