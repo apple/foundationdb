@@ -1555,11 +1555,11 @@ public:
 		LatencySample kvReadRangeLatencySample;
 		LatencySample updateLatencySample;
 		LatencySample updateEncryptionLatencySample;
-
 		LatencyBands readLatencyBands;
 		std::unique_ptr<LatencySample> mappedRangeSample; // Samples getMappedRange latency
 		std::unique_ptr<LatencySample> mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
 		std::unique_ptr<LatencySample> mappedRangeLocalSample; // Samples getMappedRange local subquery latency
+		std::unique_ptr<LatencySample> ingestDurationLatencySample;
 
 		explicit Counters(StorageServer* self)
 		  : CommonStorageCounters("StorageServer", self->thisServerID.toString(), &self->metrics),
@@ -1642,7 +1642,12 @@ public:
 		    mappedRangeLocalSample(std::make_unique<LatencySample>("GetMappedRangeLocalMetrics",
 		                                                           self->thisServerID,
 		                                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {
+		                                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)),
+		    ingestDurationLatencySample(std::make_unique<LatencySample>("IngestDurationMetrics",
+		                                                                self->thisServerID,
+		                                                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                                SERVER_KNOBS->LATENCY_SKETCH_ACCURACY)) {
+
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -8904,6 +8909,84 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 	}
 }
 
+// Utility function to process sample files during bulk load
+ACTOR static Future<Void> processSampleFiles(StorageServer* data,
+                                             std::string bulkLoadLocalDir,
+                                             std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
+	state BulkLoadFileSetKeyMap::const_iterator iter = localFileSets->begin();
+	state BulkLoadFileSetKeyMap::const_iterator end = localFileSets->end();
+	state std::vector<KeyValue> rawSamples;
+	state std::unique_ptr<IRocksDBSstFileReader> reader;
+
+	while (iter != end) {
+		const auto& [range, fileSet] = *iter;
+		if (fileSet.hasByteSampleFile()) {
+			state std::string sampleFilePath = fileSet.getBytesSampleFileFullPath();
+			state int retryCount = 0;
+			state int maxRetries = 10; // Consider making this a KNOB
+			state Error lastError;
+
+			// This outer loop retries reading the entire file if errors occur during opening/reading
+			while (retryCount < maxRetries) {
+				try {
+					// Read all samples from the SST file into memory first
+					// Store as KeyValueRef to keep the original encoded size value
+					rawSamples.clear();
+					reader = newRocksDBSstFileReader();
+					reader->open(abspath(sampleFilePath));
+
+					TraceEvent(SevInfo, "StorageServerProcessingSampleFile", data->thisServerID)
+					    .detail("File", sampleFilePath);
+
+					// Read all samples
+					while (reader->hasNext()) {
+						// Copy the next kv to rawSamples.
+						rawSamples.push_back(reader->next());
+					}
+
+					// Now apply all read samples to the in-memory set and update metrics
+					for (const auto& kv : rawSamples) {
+						const KeyRef& key = kv.key;
+						int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
+						data->metrics.byteSample.sample.insert(key, size);
+						data->metrics.notifyBytes(key, size);
+						data->addMutationToMutationLogOrStorage(
+						    invalidVersion,
+						    MutationRef(MutationRef::SetValue, key.withPrefix(persistByteSampleKeys.begin), kv.value));
+					}
+
+					// If we get here, processing was successful for this file
+					break; // Exit the retry loop
+
+				} catch (Error& e) {
+					lastError = e;
+					retryCount++;
+					TraceEvent(retryCount < maxRetries ? SevWarn : SevError,
+					           "StorageServerSampleFileProcessingError",
+					           data->thisServerID)
+					    .error(e) // Log the actual error 'e'
+					    .detail("File", sampleFilePath)
+					    // REMOVED: .detail("Key", kv.key).detail("Value", kv.value) as 'kv' is out of scope
+					    .detail("RetryCount", retryCount)
+					    .detail("MaxRetries", maxRetries);
+
+					// No need to check/close reader here, unique_ptr handles it.
+
+					if (retryCount < maxRetries) {
+						// Wait before retrying, with exponential backoff
+						wait(delay(0.1 * pow(2, retryCount))); // Consider adding jitter
+						continue; // Retry reading the file
+					}
+					// On final retry failure, throw the last error encountered
+					throw lastError;
+				}
+			} // end retry loop
+		}
+		++iter;
+	} // end file iteration loop
+	return Void();
+}
+
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
@@ -9150,9 +9233,47 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
 				    .detail("Range", keys)
+				    .detail("Knobs", SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST)
+				    .detail("SupportsSstIngestion", data->storage.getKeyValueStore()->supportsSstIngestion())
 				    .detail("Phase", "File download");
-				hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
-				rangeEnd = keys.end;
+				// Attempt SST ingestion...
+				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
+				    data->storage.getKeyValueStore()->supportsSstIngestion()) {
+					TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("Range", keys)
+					    .detail("Phase", "SST ingestion");
+					// Verify ranges...
+					for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
+						ASSERT(keys.contains(range));
+					}
+					// Clear the key range before ingestion. This mirrors the replaceRange done in the case were
+					// we do not ingest SST files.
+					data->storage.getKeyValueStore()->clear(keys);
+
+					// Now wait on the durableVersion to be updated so clear has been committed.
+					wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
+
+					// Compact the range before ingestion to optimize storage
+					wait(data->storage.getKeyValueStore()->compactRange(keys));
+
+					// Ingest the SST files.
+					// Measure duration at this level so we capture the inter-thread handoff time.
+					state double ingestStartTime = g_network->timer(); // Record start time
+					wait(data->storage.getKeyValueStore()->ingestSSTFiles(localBulkLoadFileSets));
+					const double ingestDuration = g_network->timer() - ingestStartTime;
+					data->counters.ingestDurationLatencySample->addMeasurement(ingestDuration);
+
+					// Process sample files after SST ingestion
+					wait(processSampleFiles(data, bulkLoadLocalDir, localBulkLoadFileSets));
+
+					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
+					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
+					break;
+				} else {
+					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
+					rangeEnd = keys.end;
+				}
 			} else {
 				hold = tryGetRange(results, &tr, keys);
 				rangeEnd = keys.end;
@@ -9234,6 +9355,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					for (; kvItr != this_block.end(); ++kvItr) {
 						data->byteSampleApplySet(*kvItr, invalidVersion);
 					}
+
 					if (this_block.more) {
 						blockBegin = this_block.getReadThrough();
 					} else {
@@ -9322,7 +9444,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				}
 				break;
 			}
-		}
+		} // fetchKeys loop.
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
@@ -15170,6 +15292,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	static_assert(sizeof(self) < 16384, "FastAlloc doesn't allow allocations larger than 16KB");
 	TraceEvent("StorageServerInitProgress", ssi.id())
 	    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
+	    .detail("Size", sizeof(self))
 	    .detail("Step", "4.StartInit");
 
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
