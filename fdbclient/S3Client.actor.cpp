@@ -127,10 +127,7 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
 			throw backup_invalid_url();
 		}
 
-		if (resource.empty()) {
-			TraceEvent(SevError, "S3ClientGetEndpointEmptyResource").detail("URL", s3url);
-			throw backup_invalid_url();
-		}
+		// Let empty resource path be valid - it means list root of bucket
 
 		// Validate bucket parameter exists
 		if (parameters.find("bucket") == parameters.end()) {
