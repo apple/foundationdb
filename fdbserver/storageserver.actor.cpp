@@ -9451,9 +9451,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		if (conductBulkLoad && !SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
 		    data->storage.getKeyValueStore()->supportsSstIngestion()) {
-			// Wait until the load data has been committed
+			// This block is for the fetchKey without SST ingestion case.
+			// For the SST ingestion case, we have already compacted the range right after ingestion.
+			// Wait until the load data has been committed.
 			wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
-			// Compact the range after ingestion to avoid accumulating compaction overtime
+			// Compact the range after ingestion to avoid accumulating compaction overtime.
 			wait(data->storage.getKeyValueStore()->compactRange(keys));
 		}
 
