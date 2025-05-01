@@ -9264,7 +9264,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					const double ingestDuration = g_network->timer() - ingestStartTime;
 					data->counters.ingestDurationLatencySample->addMeasurement(ingestDuration);
 
-					// Compact the range after ingestion to avoid accumulating TODO compaction
+					// Compact the range after ingestion to avoid accumulating compaction overtime
 					wait(data->storage.getKeyValueStore()->compactRange(keys));
 
 					// Process sample files after SST ingestion
@@ -9453,7 +9453,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    data->storage.getKeyValueStore()->supportsSstIngestion()) {
 			// Wait until the load data has been committed
 			wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
-			// Compact the range to avoid accumulating TODO compaction
+			// Compact the range after ingestion to avoid accumulating compaction overtime
 			wait(data->storage.getKeyValueStore()->compactRange(keys));
 		}
 
