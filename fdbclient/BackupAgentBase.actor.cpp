@@ -790,10 +790,6 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 		}
 
 		state int originalOffset = offset;
-		state std::chrono::time_point<std::chrono::high_resolution_clock> beforeGetDBConfig =
-		    std::chrono::high_resolution_clock::now();
-		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		metrics->updateGetDBConfigTime(std::chrono::high_resolution_clock::now() - beforeGetDBConfig);
 
 		state KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
 
@@ -1498,7 +1494,10 @@ ACTOR Future<Void> applyMutations(Database cx,
 	state double coalesceKeyVersionCacheBeginTime = 0;
 
 	try {
+		state std::chrono::time_point<std::chrono::high_resolution_clock> beforeGetDBConfig =
+		    std::chrono::high_resolution_clock::now();
 		wait(store(*dbConfig, getDatabaseConfiguration(cx)));
+		metrics->updateGetDBConfigTime(std::chrono::high_resolution_clock::now() - beforeGetDBConfig);
 
 		loop {
 			loopBeginTime = now();
@@ -1576,7 +1575,7 @@ ACTOR Future<Void> applyMutations(Database cx,
 				    .detail("KvMutationLogToTransactionsTime",
 				            coalesceKeyVersionCacheBeginTime - kvMutationLogToTransactionsBeginTime)
 				    .detail("CoalesceKeyVersionCacheTime", now() - coalesceKeyVersionCacheBeginTime)
-				    .detail("Zhe", "Wang");
+				    .detail("Zhe", "Wang-fix-and-metrics2");
 			}
 
 			if (CLIENT_KNOBS->RESTORE_VERBOSE_LOGGING) {
