@@ -9264,6 +9264,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					const double ingestDuration = g_network->timer() - ingestStartTime;
 					data->counters.ingestDurationLatencySample->addMeasurement(ingestDuration);
 
+					// Compact the range after ingestion to avoid accumulating compaction overtime
+					wait(data->storage.getKeyValueStore()->compactRange(keys));
+
 					// Process sample files after SST ingestion
 					wait(processSampleFiles(data, bulkLoadLocalDir, localBulkLoadFileSets));
 
@@ -9445,6 +9448,16 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				break;
 			}
 		} // fetchKeys loop.
+
+		if (conductBulkLoad && !SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
+		    data->storage.getKeyValueStore()->supportsSstIngestion()) {
+			// This block is for the fetchKey without SST ingestion case.
+			// For the SST ingestion case, we have already compacted the range right after ingestion.
+			// Wait until the load data has been committed.
+			wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
+			// Compact the range after ingestion to avoid accumulating compaction overtime.
+			wait(data->storage.getKeyValueStore()->compactRange(keys));
+		}
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
