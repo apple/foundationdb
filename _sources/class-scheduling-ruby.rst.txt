@@ -23,7 +23,7 @@ Open a Ruby interactive interpreter and import the FoundationDB API module::
 
 Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions::
 
-    > FDB.api_version 740
+    > FDB.api_version 730
     => nil
 
 Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the :ref:`default cluster file <default-cluster-file>`. ::
@@ -46,7 +46,7 @@ If this is all working, it looks like we are ready to start building a real appl
 .. code-block:: ruby
 
     require 'fdb'
-    FDB.api_version 740
+    FDB.api_version 730
     @db = FDB.open
     @db['hello'] = 'world'
     print 'hello ', @db['hello']
@@ -373,7 +373,7 @@ Here's the code for the scheduling tutorial:
 
     require 'fdb'
 
-    FDB.api_version 740
+    FDB.api_version 730
 
     ####################################
     ##        Initialization          ##

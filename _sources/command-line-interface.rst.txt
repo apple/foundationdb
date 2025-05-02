@@ -49,13 +49,6 @@ The ``clear`` command clears a key from the database. Its syntax is ``clear <KEY
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
-clearknob
----------
-
-The ``clearknob`` command can be used to clear knobs set in the configuration database. Its syntax is ``clearknob <KNOBNAME> [CONFIGCLASS]``. If not present in a ``begin\commit`` block, the CLI will prompt for a description of the change.
-
-Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
-
 clearrange
 ----------
 
@@ -145,31 +138,24 @@ This command controls a native data consistency scan role that is automatically 
 
 The syntax is
 
-``consistencyscan [on|off] [restart] [stats] [clearstats] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]``
+``consistencyscan [ off | on [maxRate <RATE>] [targetInterval <INTERVAL>] [restart <RESTART>] ]``
 
-* ``on`` enables the scan.
+* ``off`` will disable the consistency scan
 
-* ``off`` disables the scan but keeps the current cycle's progress so it will resume later if enabled again.
+* ``on`` will enable the scan and can be accompanied by additional options shown above
 
-* ``restart`` will end the current scan cycle.  A new cycle will start if the scan is enabled, or later when it is re-enabled.
+  * ``RATE`` - sets the maximum read speed of the scan in bytes/s.
 
-* ``stats`` dumps the current round and lifetime stats of the consistency scan. It is a convenience method to expose the stats which are also in status json.
+  * ``INTERVAL`` - sets the target completion time, in seconds, for each full pass over all data in the cluster.  Scan speed will target this interval with a hard limit of RATE.
 
-* ``clearstats`` will clear all of the stats for the consistency scan but otherwise leave the configuration as is. This can be used to clear errors or reset stat counts, for example.
+  * ``RESTART`` - a 1 or 0 and controls whether the process should restart from the beginning of userspace on startup or not.  This should normally be set to 0 which will resume progress from the last time the scan was running.
 
-* ``maxRate <BYTES_PER_SECOND>`` sets the maximum scan read speed rate to BYTES_PER_SECOND, post-replication.
-
-* ``targetInterval <SECONDS>`` sets the target interval for the scan to SECONDS.  The scan will adjust speed to attempt to complete in that amount of time but it will not exceed BYTES_PER_SECOND.
-
-The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan``.
-
-For more details, see :ref:`consistency-scan`.
+The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan_info``.
 
 consistencycheck
 ----------------
 
-.. note::
-   This command exists for backward compatibility, it is suggested to use the ``consistencyscan`` command above to control FDB's internal consistency scan role instead.
+Note: This command exists for backward compatibility, it is suggested to use the ``consistencyscan`` command to control FDB's internal consistency scan role instead.
 
 This command controls a key which controls behavior of any externally configured consistency check roles.  You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
 
@@ -423,7 +409,7 @@ flow
 
 ``profile flow run <DURATION> <FILENAME> <PROCESS...>``
 
-Enables flow profiling on the specified processes for ``DURATION`` seconds. Profiling output will be stored at the specified filename relative to the fdbserver process's trace log directory. To profile all processes, use ``all`` for the ``PROCESS`` parameter.
+Enables flow profiling on the specifed processes for ``DURATION`` seconds. Profiling output will be stored at the specified filename relative to the fdbserver process's trace log directory. To profile all processes, use ``all`` for the ``PROCESS`` parameter.
 
 heap
 ^^^^

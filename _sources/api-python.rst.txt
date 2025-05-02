@@ -65,12 +65,12 @@ Python API
 .. |future-object| replace:: :ref:`Future <api-python-future>` object
 .. |infrequent| replace:: *Infrequently used*.
 .. |slice-defaults| replace:: The default slice begin is ``''``; the default slice end is ``'\xFF'``.
-.. |byte-string| replace:: In Python 3, a byte string has type ``bytes``.
+.. |byte-string| replace:: In Python 2, a byte string is a string of type ``str``. In Python 3, a byte string has type ``bytes``.
 
 Installation
 ============
 
-The FoundationDB Python API is compatible with 3.8 and newer versions.
+The FoundationDB Python API is compatible with Python 2.7 - 3.7. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed. Also please note that Python 3.7 no longer bundles a full copy of libffi, which is used for building the _ctypes module on non-macOS UNIX platforms. Hence, if you are using Python 3.7, you should make sure libffi is already installed on your system.
 
 On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see :ref:`installing-client-binaries`). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually via Python's package manager ``pip``:
 
@@ -109,7 +109,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(740)
+    fdb.api_version(730)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
@@ -205,10 +205,6 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
     .. method :: fdb.options.set_tls_password(password)
 
        |option-tls-password|
-
-    .. method :: fdb.options.set_tls_disable_plaintext_connection()
-
-       |option-tls-disable-plaintext-connection|
 
     .. method :: fdb.options.set_disable_local_client()
 
@@ -530,7 +526,7 @@ A ``Transaction`` object represents a FoundationDB database transaction.  All op
 
 The most convenient way to use Transactions is using the :func:`@fdb.transactional <transactional>` decorator.
 
-Keys and values in FoundationDB are byte strings (``bytes`` type in Python 3).  To encode other data types, see the :mod:`fdb.tuple` module and :ref:`encoding-data-types`.
+Keys and values in FoundationDB are byte strings (``str`` in Python 2.x, ``bytes`` in 3.x).  To encode other data types, see the :mod:`fdb.tuple` module and :ref:`encoding-data-types`.
 
 Attributes
 ----------
@@ -1157,10 +1153,11 @@ The tuple layer in the FoundationDB Python API supports tuples that contain elem
 +-----------------------+-------------------------------------------------------------------------------+
 | Byte string           | Any ``value`` such that ``isinstance(value, bytes)``                          |
 +-----------------------+-------------------------------------------------------------------------------+
-| Unicode string        | Any ``value`` such that ``isinstance(value, str)``                            |
+| Unicode string        | Any ``value`` such that ``isinstance(value, unicode)``                        |
 +-----------------------+-------------------------------------------------------------------------------+
-| Integer               | Any ``value`` such that ``isinstance(value, int)`` and                        |
-|                       | ``-2**2040+1 <= value <= 2**2040-1``.                                         |
+| Integer               | Python 2.7: Any ``value`` such that ``isinstance(value, (int,long))`` and     |
+|                       | ``-2**2040+1 <= value <= 2**2040-1``. Python 3.x: Any ``value`` such that     |
+|                       | ``isinstance(value, int)`` and ``-2**2040+1 <= value <= 2**2040-1``.          |
 +-----------------------+-------------------------------------------------------------------------------+
 | Floating point number | Any ``value`` such that ``isinstance(value, fdb.tuple.SingleFloat)`` or       |
 | (single-precision)    | ``isinstance(value, ctypes.c_float)``                                         |
