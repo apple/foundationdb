@@ -106,6 +106,8 @@ public:
 	void assignRangeToTeams(KeyRangeRef keys, const std::vector<Team>& destinationTeam);
 	void check() const;
 	void setCheckMode(CheckMode);
+	// Prints the team shard mapping as trace events.
+	void traceTeamShardMapping() const;
 
 	PromiseStream<KeyRange> restartShardTracker;
 
