@@ -2,6 +2,27 @@
 Release Notes
 #############
 
+7.3.67
+======
+* Same as 7.3.66 release with AVX enabled.
+
+7.3.66
+======
+* Fixed a restore speed regression. `(PR #12088) <https://github.com/apple/foundationdb/pull/12088>`_
+* Added per DC check for fdbcli's checkall command. `(PR #12089) <https://github.com/apple/foundationdb/pull/12089>`_
+
+7.3.65
+======
+* Same as 7.3.64 release with AVX enabled.
+
+7.3.64
+======
+* Fixed fdb-kubernetes-monitor to only log an error when there is one. `(PR #12112) <https://github.com/apple/foundationdb/pull/12112>`_
+* Fixed distributed conconsistency checker tester to always accept new requests from ConsistencyCheckUrgent role. `(PR #12001) <https://github.com/apple/foundationdb/pull/12001>`_
+* Added RocksDB compaction knobs and more metrics. `(PR #12016) <https://github.com/apple/foundationdb/pull/12016>`_, `(PR #11993) <https://github.com/apple/foundationdb/pull/11993>`_, `(PR #12054) <https://github.com/apple/foundationdb/pull/12054>`_, and `(PR #12055) <https://github.com/apple/foundationdb/pull/12055>`_
+* Fixed a rare restore bug due to a race condition. `(PR #12041) <https://github.com/apple/foundationdb/pull/12041>`_
+* Fixed backup reporting on snapshot restorable state and continuous log end version. `(PR #12038) <https://github.com/apple/foundationdb/pull/12038>`_ and `(PR #12069) <https://github.com/apple/foundationdb/pull/12069>`_
+
 7.3.63
 ======
 * Same as 7.3.62 release with AVX enabled.
