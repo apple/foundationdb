@@ -40,6 +40,8 @@ extern "C" {
 // forward declaration and typedef
 typedef struct DatabaseSharedState DatabaseSharedState;
 
+DLLEXPORT const unsigned char* fdb_retrieve_build_id();
+
 DLLEXPORT FDBFuture* fdb_database_create_shared_state(FDBDatabase* db);
 
 DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p);
