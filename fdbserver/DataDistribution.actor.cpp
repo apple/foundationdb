@@ -53,7 +53,6 @@
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <memory>
 
 static const std::string ddServerBulkDumpFolder = "ddBulkDumpFiles";
 static const std::string ddServerBulkLoadFolder = "ddBulkLoadFiles";

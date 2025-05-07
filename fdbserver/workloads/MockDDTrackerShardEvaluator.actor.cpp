@@ -20,7 +20,6 @@
 
 #include "fdbserver/workloads/MockDDTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <memory>
 
 class MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 public:
