@@ -282,11 +282,11 @@ public:
 				deterministicRandom()->randomShuffle(validTeams);
 				candidateTeams = std::vector<Reference<TCTeamInfo>>(
 				    validTeams.begin(),
-				    validTeams.begin() + validTeams.size() / SERVER_KNOBS->DD_BULKLOAD_POWER_OF_D_RATIO);
+				    validTeams.begin() + std::floor(validTeams.size() / SERVER_KNOBS->DD_BULKLOAD_POWER_OF_D_RATIO));
 			}
 
 			Optional<Reference<IDataDistributionTeam>> res;
-			int minOngoingBulkLoadTaskCount = 0;
+			int minOngoingBulkLoadTaskCount = std::numeric_limits<int>::max();
 			for (int i = 0; i < candidateTeams.size(); i++) {
 				int ongoingBulkLoadTaskCount = -1;
 				for (const auto& ssid : candidateTeams[i]->getServerIDs()) {
