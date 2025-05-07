@@ -294,12 +294,13 @@ public:
 			Optional<Reference<IDataDistributionTeam>> res;
 			int minOngoingBulkLoadTaskCount = 0;
 			for (int i = 0; i < candidateTeams.size(); i++) {
-				Optional<int> ongoingBulkLoadTaskCount = candidateTeams[i]->getMaxOngoingBulkLoadTaskCount();
-				if (!ongoingBulkLoadTaskCount.present()) {
-					continue;
+				int ongoingBulkLoadTaskCount = -1;
+				for (const auto& ssid : candidateTeams[i]->getServerIDs()) {
+					ongoingBulkLoadTaskCount =
+					    std::max(ongoingBulkLoadTaskCount, self->bulkLoadTaskCollection->busyMap.getTaskCount(ssid));
 				}
-				if (!res.present() || ongoingBulkLoadTaskCount.get() < minOngoingBulkLoadTaskCount) {
-					minOngoingBulkLoadTaskCount = ongoingBulkLoadTaskCount.get();
+				if (!res.present() || ongoingBulkLoadTaskCount < minOngoingBulkLoadTaskCount) {
+					minOngoingBulkLoadTaskCount = ongoingBulkLoadTaskCount;
 					res = candidateTeams[i];
 				}
 			}
@@ -4446,7 +4447,8 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     storageServerRecruitmentEventHolder(
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + params.distributorId.toString())),
     primary(params.primary), distributorId(params.distributorId), underReplication(false),
-    configuration(params.configuration), storageServerSet(new LocalityMap<UID>()) {
+    configuration(params.configuration), storageServerSet(new LocalityMap<UID>()),
+    bulkLoadTaskCollection(params.bulkLoadTaskCollection) {
 
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)
@@ -6230,7 +6232,8 @@ public:
 		                                                     Promise<UID>(),
 		                                                     PromiseStream<Promise<int>>(),
 		                                                     PromiseStream<Promise<int64_t>>(),
-		                                                     PromiseStream<RebalanceStorageQueueRequest>() }));
+		                                                     PromiseStream<RebalanceStorageQueueRequest>(),
+		                                                     std::make_shared<BulkLoadTaskCollection>(UID(0, 0)) }));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -6284,7 +6287,8 @@ public:
 		                                                     Promise<UID>(),
 		                                                     PromiseStream<Promise<int>>(),
 		                                                     PromiseStream<Promise<int64_t>>(),
-		                                                     PromiseStream<RebalanceStorageQueueRequest>() }));
+		                                                     PromiseStream<RebalanceStorageQueueRequest>(),
+		                                                     std::make_shared<BulkLoadTaskCollection>(UID(0, 0)) }));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);

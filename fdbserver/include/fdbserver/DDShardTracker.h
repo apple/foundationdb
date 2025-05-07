@@ -44,7 +44,7 @@ struct DataDistributionTrackerInitParams {
 	PromiseStream<RelocateShard> const& output;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
-	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	std::shared_ptr<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	bool* trackerCancelled = nullptr;
@@ -78,7 +78,7 @@ public:
 	Reference<PhysicalShardCollection> physicalShardCollection;
 
 	// BulkLoadTask Tracker
-	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	std::shared_ptr<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	bool bulkLoadEnabled = false;
 
 	Promise<Void> readyToStart;

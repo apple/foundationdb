@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "flow/IRandom.h"
+#include <unordered_map>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_G_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_G_H
 #include "fdbserver/DataDistribution.actor.g.h"
@@ -539,6 +541,37 @@ struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
 
+struct DDBulkLoadTaskBusyMap {
+	std::unordered_map<UID, int> busyMap; // <taskId, taskCount>
+
+	void addTask(const UID& ssid) {
+		auto it = busyMap.find(ssid);
+		if (it == busyMap.end()) {
+			busyMap[ssid] = 1;
+		} else {
+			it->second++;
+		}
+	}
+
+	void removeTask(const UID& ssid) {
+		auto it = busyMap.find(ssid);
+		ASSERT(it != busyMap.end());
+		it->second--;
+		if (it->second == 0) {
+			busyMap.erase(it);
+		}
+	}
+
+	int getTaskCount(const UID& ssid) {
+		auto it = busyMap.find(ssid);
+		if (it == busyMap.end()) {
+			return 0;
+		} else {
+			return it->second;
+		}
+	}
+};
+
 // Used to piggyback the data move priority when an unretrievable error happens to the task datamove.
 // If the priority indicates the data move is a team unhealthy related data move, the bulkload engine
 // system trigger a new data move when terminate the error task.
@@ -579,7 +612,7 @@ inline bool bulkDumpIsEnabled(int bulkDumpModeValue) {
 	return bulkDumpModeValue == 1;
 }
 
-class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
+class BulkLoadTaskCollection {
 public:
 	BulkLoadTaskCollection(UID ddId) : ddId(ddId) { bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadEngineTask>()); }
 
@@ -748,6 +781,8 @@ public:
 		    .detail("Task", res.present() ? describe(res.get()) : "");
 		return res;
 	}
+
+	DDBulkLoadTaskBusyMap busyMap; // <SSID, taskCount>
 
 private:
 	KeyRangeMap<Optional<DDBulkLoadEngineTask>> bulkLoadTaskMap;

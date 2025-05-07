@@ -20,6 +20,7 @@
 #ifndef FOUNDATIONDB_DDRELOCATIONQUEUE_H
 #define FOUNDATIONDB_DDRELOCATIONQUEUE_H
 
+#include <memory>
 #include <numeric>
 
 #include "fdbserver/DataDistribution.actor.h"
@@ -111,7 +112,7 @@ struct DDQueueInitParams {
 	std::vector<TeamCollectionInterface> const& teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
-	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	std::shared_ptr<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes;
 	int const& teamSize;
 	int const& singleRegionTeamSize;
@@ -245,7 +246,7 @@ public:
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
-	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	std::shared_ptr<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	FlowLock startMoveKeysParallelismLock;

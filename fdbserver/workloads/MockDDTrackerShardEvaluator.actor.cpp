@@ -20,6 +20,7 @@
 
 #include "fdbserver/workloads/MockDDTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <memory>
 
 class MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 public:
@@ -96,7 +97,8 @@ public:
 		    mock->getInitialDataDistribution(ddcx.id(), ddcx.lock, {}, ddcx.ddEnabledState.get(), SkipDDModeCheck::True)
 		        .get();
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
-		Reference<BulkLoadTaskCollection> bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(ddcx.id());
+		std::shared_ptr<BulkLoadTaskCollection> bulkLoadTaskCollection =
+		    std::make_shared<BulkLoadTaskCollection>(ddcx.id());
 		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
 
 		shardTracker = makeReference<DataDistributionTracker>(

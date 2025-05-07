@@ -53,6 +53,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <memory>
 
 static const std::string ddServerBulkDumpFolder = "ddBulkDumpFiles";
 static const std::string ddServerBulkLoadFolder = "ddBulkLoadFiles";
@@ -449,7 +450,7 @@ public:
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
 	PromiseStream<BulkLoadShardRequest> triggerShardBulkLoading;
 	Reference<PhysicalShardCollection> physicalShardCollection;
-	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	std::shared_ptr<BulkLoadTaskCollection> bulkLoadTaskCollection;
 
 	Promise<Void> initialized;
 
@@ -2634,7 +2635,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
-			self->bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(self->ddId);
+			self->bulkLoadTaskCollection = std::make_shared<BulkLoadTaskCollection>(self->ddId);
 			wait(self->resumeRelocations());
 
 			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Relocation Resumed");
@@ -2748,7 +2749,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    removeFailedServer,
 			    getUnhealthyRelocationCount,
 			    getAverageShardBytes,
-			    triggerStorageQueueRebalance });
+			    triggerStorageQueueRebalance,
+			    self->bulkLoadTaskCollection });
 			teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
 			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage;
 			if (!isMocked) {
@@ -2774,7 +2776,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                removeFailedServer,
 				                                getUnhealthyRelocationCount,
 				                                getAverageShardBytes,
-				                                triggerStorageQueueRebalance });
+				                                triggerStorageQueueRebalance,
+				                                self->bulkLoadTaskCollection });
 				teamCollectionsPtrs.push_back(self->context->remoteTeamCollection.getPtr());
 				self->context->remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->remoteTeamCollection,
