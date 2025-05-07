@@ -541,9 +541,9 @@ struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
 
+// Used to track the number of ongoing bulkload tasks for each storage server
 struct DDBulkLoadTaskBusyMap {
-	std::unordered_map<UID, int> busyMap; // <taskId, taskCount>
-
+public:
 	void addTask(const UID& ssid) {
 		auto it = busyMap.find(ssid);
 		if (it == busyMap.end()) {
@@ -570,6 +570,9 @@ struct DDBulkLoadTaskBusyMap {
 			return it->second;
 		}
 	}
+
+private:
+	std::unordered_map<UID, int> busyMap; // <taskId, taskCount>
 };
 
 // Used to piggyback the data move priority when an unretrievable error happens to the task datamove.
@@ -612,7 +615,7 @@ inline bool bulkDumpIsEnabled(int bulkDumpModeValue) {
 	return bulkDumpModeValue == 1;
 }
 
-class BulkLoadTaskCollection {
+class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
 public:
 	BulkLoadTaskCollection(UID ddId) : ddId(ddId) { bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadEngineTask>()); }
 

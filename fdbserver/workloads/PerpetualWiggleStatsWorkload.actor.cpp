@@ -215,7 +215,7 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		                                      PromiseStream<Promise<int>>(),
 		                                      PromiseStream<Promise<int64_t>>(),
 		                                      PromiseStream<RebalanceStorageQueueRequest>(),
-		                                      std::make_shared<BulkLoadTaskCollection>(UID(8, 6)) });
+		                                      makeReference<BulkLoadTaskCollection>(UID(8, 6)) });
 		tester.configuration.storageTeamSize = 3;
 		tester.configuration.perpetualStorageWiggleSpeed = 1;
 

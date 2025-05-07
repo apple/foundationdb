@@ -6225,7 +6225,7 @@ public:
 		                                                     PromiseStream<Promise<int>>(),
 		                                                     PromiseStream<Promise<int64_t>>(),
 		                                                     PromiseStream<RebalanceStorageQueueRequest>(),
-		                                                     std::make_shared<BulkLoadTaskCollection>(UID(0, 0)) }));
+		                                                     makeReference<BulkLoadTaskCollection>(UID(0, 0)) }));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -6280,7 +6280,7 @@ public:
 		                                                     PromiseStream<Promise<int>>(),
 		                                                     PromiseStream<Promise<int64_t>>(),
 		                                                     PromiseStream<RebalanceStorageQueueRequest>(),
-		                                                     std::make_shared<BulkLoadTaskCollection>(UID(0, 0)) }));
+		                                                     makeReference<BulkLoadTaskCollection>(UID(0, 0)) }));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);

@@ -450,7 +450,7 @@ public:
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
 	PromiseStream<BulkLoadShardRequest> triggerShardBulkLoading;
 	Reference<PhysicalShardCollection> physicalShardCollection;
-	std::shared_ptr<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 
 	Promise<Void> initialized;
 
@@ -2635,7 +2635,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
-			self->bulkLoadTaskCollection = std::make_shared<BulkLoadTaskCollection>(self->ddId);
+			self->bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(self->ddId);
 			wait(self->resumeRelocations());
 
 			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Relocation Resumed");

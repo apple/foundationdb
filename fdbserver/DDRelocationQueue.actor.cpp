@@ -2087,6 +2087,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
 			healthyDestinations.addReadInFlightToTeam(+metrics.readLoadKSecond());
 
+			// At this point, we are about to launch the data move, so we should update the busy map counter
+			// for destination servers.
 			launchDest(rd, bestTeams, self->destBusymap);
 			if (doBulkLoading) {
 				for (const auto& [team, _] : bestTeams) {

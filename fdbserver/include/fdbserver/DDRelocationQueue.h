@@ -112,7 +112,7 @@ struct DDQueueInitParams {
 	std::vector<TeamCollectionInterface> const& teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
-	std::shared_ptr<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes;
 	int const& teamSize;
 	int const& singleRegionTeamSize;
@@ -246,7 +246,7 @@ public:
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
-	std::shared_ptr<BulkLoadTaskCollection> bulkLoadTaskCollection;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	FlowLock startMoveKeysParallelismLock;

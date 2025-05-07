@@ -97,8 +97,7 @@ public:
 		    mock->getInitialDataDistribution(ddcx.id(), ddcx.lock, {}, ddcx.ddEnabledState.get(), SkipDDModeCheck::True)
 		        .get();
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
-		std::shared_ptr<BulkLoadTaskCollection> bulkLoadTaskCollection =
-		    std::make_shared<BulkLoadTaskCollection>(ddcx.id());
+		Reference<BulkLoadTaskCollection> bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(ddcx.id());
 		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
 
 		shardTracker = makeReference<DataDistributionTracker>(
