@@ -236,7 +236,6 @@ public:
 			int unhealthyTeamCount = 0;
 			int notEligibileTeamCount = 0;
 			int duplicatedCount = 0;
-			int failToGetMetricsCount = 0;
 			for (const auto& dest : self->teams) {
 				if (!dest->isHealthy()) {
 					unhealthyTeamCount++;
@@ -254,12 +253,6 @@ public:
 						notEligibileTeamCount++;
 						continue;
 					}
-				}
-				Optional<int> ongoingBulkLoadTaskCount = dest->getMaxOngoingBulkLoadTaskCount();
-				if (!ongoingBulkLoadTaskCount.present()) {
-					// This team may have an unhealthy SS, so avoid selecting it
-					failToGetMetricsCount++;
-					continue;
 				}
 				bool ok = true;
 				for (const auto& srcId : req.src) {
@@ -283,12 +276,13 @@ public:
 
 			// Step 2: Conduct Power-of-D-Choice to select a team
 			std::vector<Reference<TCTeamInfo>> candidateTeams;
-			if (validTeams.size() <= 4) {
+			if (validTeams.size() <= SERVER_KNOBS->DD_BULKLOAD_POWER_OF_D_RATIO) {
 				candidateTeams = validTeams;
 			} else {
 				deterministicRandom()->randomShuffle(validTeams);
-				candidateTeams =
-				    std::vector<Reference<TCTeamInfo>>(validTeams.begin(), validTeams.begin() + validTeams.size() / 4);
+				candidateTeams = std::vector<Reference<TCTeamInfo>>(
+				    validTeams.begin(),
+				    validTeams.begin() + validTeams.size() / SERVER_KNOBS->DD_BULKLOAD_POWER_OF_D_RATIO);
 			}
 
 			Optional<Reference<IDataDistributionTeam>> res;
@@ -315,7 +309,6 @@ public:
 				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
 				    .detail("DuplicatedCount", duplicatedCount)
 				    .detail("NotEligibileTeamCount", notEligibileTeamCount)
-				    .detail("FailToGetMetricsCount", failToGetMetricsCount)
 				    .detail("DestIds", describe(res.get()->getServerIDs()))
 				    .detail("DestTeam", res.get()->getTeamID());
 			} else {
@@ -327,7 +320,6 @@ public:
 				    .detail("ValidTeamSize", validTeams.size())
 				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
 				    .detail("DuplicatedCount", duplicatedCount)
-				    .detail("FailToGetMetricsCount", failToGetMetricsCount)
 				    .detail("NotEligibileTeamCount", notEligibileTeamCount);
 			}
 			req.reply.send(std::make_pair(res, false));
