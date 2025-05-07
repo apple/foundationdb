@@ -572,7 +572,7 @@ public:
 	}
 
 private:
-	std::unordered_map<UID, int> busyMap; // <taskId, taskCount>
+	std::unordered_map<UID, int> busyMap; // <Storage Server ID, Task Count>
 };
 
 // Used to piggyback the data move priority when an unretrievable error happens to the task datamove.
