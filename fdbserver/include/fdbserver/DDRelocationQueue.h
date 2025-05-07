@@ -20,7 +20,6 @@
 #ifndef FOUNDATIONDB_DDRELOCATIONQUEUE_H
 #define FOUNDATIONDB_DDRELOCATIONQUEUE_H
 
-#include <memory>
 #include <numeric>
 
 #include "fdbserver/DataDistribution.actor.h"
