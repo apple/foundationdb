@@ -200,6 +200,7 @@ struct DDTeamCollectionInitParams {
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 	PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 };
 
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
@@ -282,6 +283,8 @@ protected:
 
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
+
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 
 	// team pivot values
 	struct {

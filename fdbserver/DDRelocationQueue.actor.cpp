@@ -2087,7 +2087,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
 			healthyDestinations.addReadInFlightToTeam(+metrics.readLoadKSecond());
 
+			// At this point, we are about to launch the data move, so we should update the busy map counter
+			// for destination servers.
 			launchDest(rd, bestTeams, self->destBusymap);
+			if (doBulkLoading) {
+				for (const auto& [team, _] : bestTeams) {
+					for (const UID& ssid : team->getServerIDs()) {
+						self->bulkLoadTaskCollection->busyMap.addTask(ssid);
+					}
+				}
+			}
 
 			TraceEvent ev(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId);
 			RelocateDecision decision{ rd, destIds, extraIds, metrics, parentMetrics };
@@ -2296,6 +2305,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					if (doBulkLoading) {
+						for (const auto& [team, _] : bestTeams) {
+							for (const UID& ssid : team->getServerIDs()) {
+								self->bulkLoadTaskCollection->busyMap.removeTask(ssid);
+							}
+						}
 						try {
 							self->bulkLoadTaskCollection->terminateTask(rd.bulkLoadTask.get().coreState);
 							TraceEvent(
@@ -2323,6 +2337,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    .errorUnsuppressed(error)
 						    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId())
 						    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId());
+						for (const auto& [team, _] : bestTeams) {
+							for (const UID& ssid : team->getServerIDs()) {
+								self->bulkLoadTaskCollection->busyMap.removeTask(ssid);
+							}
+						}
 					}
 					throw error;
 				}
@@ -2341,6 +2360,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					completeDest(rd, self->destBusymap);
 				}
 				rd.completeDests.clear();
+
+				if (doBulkLoading) {
+					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskRelocatorError")
+					    .errorUnsuppressed(error)
+					    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId())
+					    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId());
+					for (const auto& [team, _] : bestTeams) {
+						for (const UID& ssid : team->getServerIDs()) {
+							self->bulkLoadTaskCollection->busyMap.removeTask(ssid);
+						}
+					}
+				}
 
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
