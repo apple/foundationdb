@@ -2305,6 +2305,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					if (doBulkLoading) {
+						for (const auto& [team, _] : bestTeams) {
+							for (const UID& ssid : team->getServerIDs()) {
+								self->bulkLoadTaskCollection->busyMap.removeTask(ssid);
+							}
+						}
 						try {
 							self->bulkLoadTaskCollection->terminateTask(rd.bulkLoadTask.get().coreState);
 							TraceEvent(
@@ -2323,11 +2328,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							    .detail("Dests", describe(destIds))
 							    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId())
 							    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId());
-						}
-						for (const auto& [team, _] : bestTeams) {
-							for (const UID& ssid : team->getServerIDs()) {
-								self->bulkLoadTaskCollection->busyMap.removeTask(ssid);
-							}
 						}
 					}
 					return Void();
