@@ -9888,7 +9888,7 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	localRecord.ranges = coalesceRanges;
 	rcp.fetchedFiles.emplace_back(
 	    abspath(toLocalFileSet.getDataFileFullPath()), coalesceRanges[0], bulkLoadTaskState.getTotalBytes());
-	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+	localRecord.setSerializedCheckpoint(ObjectWriter::toValue(rcp, IncludeVersion()));
 	localRecord.version = moveInShard->meta->createVersion;
 	if (toLocalFileSet.hasByteSampleFile()) {
 		ASSERT(fileExists(abspath(toLocalFileSet.getBytesSampleFileFullPath())));

@@ -89,6 +89,10 @@ struct CheckpointMetaData {
 
 	void setFormat(CheckpointFormat format) { this->format = static_cast<int16_t>(format); }
 
+	void setSerializedCheckpoint(Standalone<StringRef> checkpoint);
+
+	Standalone<StringRef> getSerializedCheckpoint() const;
+
 	bool hasRange(const KeyRangeRef range) const {
 		for (const auto& checkpointRange : ranges) {
 			if (checkpointRange.contains(range)) {

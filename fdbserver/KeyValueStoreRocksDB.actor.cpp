@@ -364,7 +364,7 @@ std::string getErrorReason(BackgroundErrorReason reason) {
 // could potentially cause segmentation fault.
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
-	RocksDBErrorListener(UID id) : id(id) {};
+	RocksDBErrorListener(UID id) : id(id){};
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
 		TraceEvent(SevError, "RocksDBBGError", id)
 		    .detail("Reason", getErrorReason(reason))
@@ -404,7 +404,7 @@ private:
 
 class RocksDBEventListener : public rocksdb::EventListener {
 public:
-	RocksDBEventListener(std::shared_ptr<SharedRocksDBState> sharedState) : sharedState(sharedState) {};
+	RocksDBEventListener(std::shared_ptr<SharedRocksDBState> sharedState) : sharedState(sharedState){};
 
 	void OnFlushCompleted(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override {
 		sharedState->setLastFlushTime(now());
@@ -515,7 +515,7 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 		rocksCF.sstFiles.push_back(liveFileMetaData);
 	}
 	checkpoint->setFormat(DataMoveRocksCF);
-	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
+	checkpoint->setSerializedCheckpoint(ObjectWriter::toValue(rocksCF, IncludeVersion()));
 }
 
 rocksdb::Slice toSlice(StringRef s) {
@@ -2545,7 +2545,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) override {
 		if (checkpoint.format == DataMoveRocksCF) {
 			RocksDBColumnFamilyCheckpoint rocksCF;
-			ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+			ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
 			reader.deserialize(rocksCF);
 
 			std::unordered_set<std::string> dirs;
@@ -2691,7 +2691,7 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 		RocksDBCheckpoint rcp;
 		rcp.checkpointDir = checkpointDir;
 		rcp.sstFiles = platform::listFiles(checkpointDir, ".sst");
-		res.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+		res.setSerializedCheckpoint(ObjectWriter::toValue(rcp, IncludeVersion()));
 		TraceEvent("RocksDBCheckpointCreated", id)
 		    .detail("CheckpointVersion", a.request.version)
 		    .detail("RocksSequenceNumber", debugCheckpointSeq)
