@@ -302,6 +302,16 @@ public:
 		       ", [ByteSampleFileName]: " + byteSampleFileName + ", " + checksum.toString();
 	}
 
+	void setRootPath(const std::string& inputRootPath) {
+		if (rootPath != inputRootPath) {
+			TraceEvent(SevWarn, "DDBulkLoadFileSetRootPathChanged")
+			    .suppressFor(10.0)
+			    .detail("OldRootPath", rootPath)
+			    .detail("NewRootPath", inputRootPath);
+			rootPath = inputRootPath;
+		}
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, rootPath, relativePath, manifestFileName, dataFileName, byteSampleFileName, checksum);
@@ -501,6 +511,8 @@ public:
 		       ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod));
 	}
 
+	void setRootPath(const std::string& rootPath) { fileSet.setRootPath(rootPath); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -658,6 +670,12 @@ public:
 	}
 
 	std::string toString() const { return describe(manifests); }
+
+	void setRootPath(const std::string& rootPath) {
+		for (auto& manifest : manifests) {
+			manifest.setRootPath(rootPath);
+		}
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

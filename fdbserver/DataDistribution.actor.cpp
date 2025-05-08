@@ -1626,6 +1626,7 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		// Discussion about what if another newer job has persist some task on the range with a different
 		// job Id. This case should never happen because before the newer job starts, the old job has
 		// completed or cancelled.
+		manifests.setRootPath(jobRoot);
 		wait(store(bulkLoadTask, bulkLoadJobSubmitTask(self, jobId, manifests)));
 
 		TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadJobExecutorTask", self->ddId)
