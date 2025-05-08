@@ -324,7 +324,14 @@ void ReadWriteCommon::getMetrics(std::vector<PerfMetric>& m) {
 }
 
 Value ReadWriteCommon::randomValue() {
-	return StringRef((uint8_t*)valueString.c_str(), deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
+	int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
+	int zeroPadding = static_cast<int>(0.15 * length);
+	valueString = deterministicRandom()->randomAlphaNumeric(length);
+
+	for (int i = 0; i < zeroPadding; ++i) {
+		valueString[i] = '\0';
+	}
+	return StringRef((uint8_t*)valueString.c_str(), length);
 }
 
 Standalone<KeyValueRef> ReadWriteCommon::operator()(uint64_t n) {

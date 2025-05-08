@@ -44,8 +44,6 @@ struct WriteBandwidthWorkload : KVWorkload {
 	    GRVLatencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		keysPerTransaction = getOption(options, "keysPerTransaction"_sr, 100);
-		valueString = std::string(maxValueBytes, '.');
-
 		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
 		maxInsertRate = getOption(options, "maxInsertRate"_sr, 1e12);
 	}
@@ -83,8 +81,13 @@ struct WriteBandwidthWorkload : KVWorkload {
 	}
 
 	Value randomValue() {
-		return StringRef((uint8_t*)valueString.c_str(),
-		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
+		int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
+		int zeroPadding = static_cast<int>(0.15 * length);
+		valueString = deterministicRandom()->randomAlphaNumeric(length);
+		for (int i = 0; i < zeroPadding; ++i) {
+			valueString[i] = '\0';
+		}
+		return StringRef((uint8_t*)valueString.c_str(), length);
 	}
 
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }

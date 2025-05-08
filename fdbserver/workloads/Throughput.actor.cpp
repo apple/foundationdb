@@ -60,7 +60,6 @@ struct RWTransactor : ITransactor {
 	  : reads(reads), writes(writes), minValueBytes(minValueBytes), maxValueBytes(maxValueBytes), keyCount(keyCount),
 	    keyBytes(keyBytes) {
 		ASSERT(minValueBytes <= maxValueBytes);
-		valueString = std::string(maxValueBytes, '.');
 	}
 
 	Key randomKey() {
@@ -75,8 +74,14 @@ struct RWTransactor : ITransactor {
 	}
 
 	Value randomValue() {
-		return StringRef((const uint8_t*)valueString.c_str(),
-		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
+
+		int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
+		int zeroPadding = static_cast<int>(0.15 * length);
+		valueString = deterministicRandom()->randomAlphaNumeric(length);
+		for (int i = 0; i < zeroPadding; ++i) {
+			valueString[i] = '\0';
+		}
+		return StringRef((uint8_t*)valueString.c_str(), length);
 	};
 
 	Future<Void> doTransaction(Database const& db, Stats* stats) override {

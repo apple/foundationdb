@@ -109,7 +109,6 @@ struct ReadWriteCommon : KVWorkload {
 		writesPerTransactionB = getOption(options, "writesPerTransactionB"_sr, 9);
 		alpha = getOption(options, "alpha"_sr, 0.1);
 
-		valueString = std::string(maxValueBytes, '.');
 		if (nodePrefix > 0) {
 			keyBytes += 16;
 		}
