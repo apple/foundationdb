@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/IRandom.h"
-#include <unordered_map>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_G_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_G_H
 #include "fdbserver/DataDistribution.actor.g.h"
@@ -544,14 +542,7 @@ struct TeamCollectionInterface {
 // Used to track the number of ongoing bulkload tasks for each storage server
 struct DDBulkLoadTaskBusyMap {
 public:
-	void addTask(const UID& ssid) {
-		auto it = busyMap.find(ssid);
-		if (it == busyMap.end()) {
-			busyMap[ssid] = 1;
-		} else {
-			it->second++;
-		}
-	}
+	void addTask(const UID& ssid) { busyMap[ssid]++; }
 
 	void removeTask(const UID& ssid) {
 		auto it = busyMap.find(ssid);
