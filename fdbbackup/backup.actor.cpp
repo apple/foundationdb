@@ -2319,6 +2319,13 @@ Reference<IBackupContainer> openBackupContainer(const char* name,
 		throw backup_error();
 	}
 
+	if (destinationContainer.find("../") != std::string::npos) {
+		fprintf(
+		    stderr, "ERROR: Backup Container URL '%s' contains directory traversals\n", destinationContainer.c_str());
+		printHelpTeaser(name);
+		throw backup_invalid_url();
+	}
+
 	Reference<IBackupContainer> c;
 	try {
 		c = IBackupContainer::openContainer(destinationContainer, proxy, encryptionKeyFile);
