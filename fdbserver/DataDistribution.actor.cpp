@@ -50,6 +50,7 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
+#include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -1940,6 +1941,7 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 					                                    self->bulkLoadJobManager.get().manifestLocalTempFolder,
 					                                    manifestEntries,
 					                                    errorOut));
+					wait(yield()); // Avoid busy loop
 				}
 				ASSERT(beginKey == res[i + 1].key);
 			}
@@ -2749,7 +2751,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    removeFailedServer,
 			    getUnhealthyRelocationCount,
 			    getAverageShardBytes,
-			    triggerStorageQueueRebalance });
+			    triggerStorageQueueRebalance,
+			    self->bulkLoadTaskCollection });
 			teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
 			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage;
 			if (!isMocked) {
@@ -2775,7 +2778,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                removeFailedServer,
 				                                getUnhealthyRelocationCount,
 				                                getAverageShardBytes,
-				                                triggerStorageQueueRebalance });
+				                                triggerStorageQueueRebalance,
+				                                self->bulkLoadTaskCollection });
 				teamCollectionsPtrs.push_back(self->context->remoteTeamCollection.getPtr());
 				self->context->remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->remoteTeamCollection,

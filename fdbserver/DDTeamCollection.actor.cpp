@@ -236,7 +236,6 @@ public:
 			int unhealthyTeamCount = 0;
 			int notEligibileTeamCount = 0;
 			int duplicatedCount = 0;
-			int failToGetMetricsCount = 0;
 			for (const auto& dest : self->teams) {
 				if (!dest->isHealthy()) {
 					unhealthyTeamCount++;
@@ -254,12 +253,6 @@ public:
 						notEligibileTeamCount++;
 						continue;
 					}
-				}
-				Optional<int> ongoingBulkLoadTaskCount = dest->getMaxOngoingBulkLoadTaskCount();
-				if (!ongoingBulkLoadTaskCount.present()) {
-					// This team may have an unhealthy SS, so avoid selecting it
-					failToGetMetricsCount++;
-					continue;
 				}
 				bool ok = true;
 				for (const auto& srcId : req.src) {
@@ -283,23 +276,25 @@ public:
 
 			// Step 2: Conduct Power-of-D-Choice to select a team
 			std::vector<Reference<TCTeamInfo>> candidateTeams;
-			if (validTeams.size() <= 4) {
+			if (validTeams.size() <= SERVER_KNOBS->DD_BULKLOAD_POWER_OF_D_RATIO) {
 				candidateTeams = validTeams;
 			} else {
 				deterministicRandom()->randomShuffle(validTeams);
-				candidateTeams =
-				    std::vector<Reference<TCTeamInfo>>(validTeams.begin(), validTeams.begin() + validTeams.size() / 4);
+				candidateTeams = std::vector<Reference<TCTeamInfo>>(
+				    validTeams.begin(),
+				    validTeams.begin() + std::floor(validTeams.size() / SERVER_KNOBS->DD_BULKLOAD_POWER_OF_D_RATIO));
 			}
 
 			Optional<Reference<IDataDistributionTeam>> res;
-			int minOngoingBulkLoadTaskCount = 0;
+			int minOngoingBulkLoadTaskCount = std::numeric_limits<int>::max();
 			for (int i = 0; i < candidateTeams.size(); i++) {
-				Optional<int> ongoingBulkLoadTaskCount = candidateTeams[i]->getMaxOngoingBulkLoadTaskCount();
-				if (!ongoingBulkLoadTaskCount.present()) {
-					continue;
+				int ongoingBulkLoadTaskCount = -1;
+				for (const auto& ssid : candidateTeams[i]->getServerIDs()) {
+					ongoingBulkLoadTaskCount =
+					    std::max(ongoingBulkLoadTaskCount, self->bulkLoadTaskCollection->busyMap.getTaskCount(ssid));
 				}
-				if (!res.present() || ongoingBulkLoadTaskCount.get() < minOngoingBulkLoadTaskCount) {
-					minOngoingBulkLoadTaskCount = ongoingBulkLoadTaskCount.get();
+				if (!res.present() || ongoingBulkLoadTaskCount < minOngoingBulkLoadTaskCount) {
+					minOngoingBulkLoadTaskCount = ongoingBulkLoadTaskCount;
 					res = candidateTeams[i];
 				}
 			}
@@ -314,7 +309,6 @@ public:
 				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
 				    .detail("DuplicatedCount", duplicatedCount)
 				    .detail("NotEligibileTeamCount", notEligibileTeamCount)
-				    .detail("FailToGetMetricsCount", failToGetMetricsCount)
 				    .detail("DestIds", describe(res.get()->getServerIDs()))
 				    .detail("DestTeam", res.get()->getTeamID());
 			} else {
@@ -326,7 +320,6 @@ public:
 				    .detail("ValidTeamSize", validTeams.size())
 				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
 				    .detail("DuplicatedCount", duplicatedCount)
-				    .detail("FailToGetMetricsCount", failToGetMetricsCount)
 				    .detail("NotEligibileTeamCount", notEligibileTeamCount);
 			}
 			req.reply.send(std::make_pair(res, false));
@@ -4446,7 +4439,8 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     storageServerRecruitmentEventHolder(
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + params.distributorId.toString())),
     primary(params.primary), distributorId(params.distributorId), underReplication(false),
-    configuration(params.configuration), storageServerSet(new LocalityMap<UID>()) {
+    configuration(params.configuration), storageServerSet(new LocalityMap<UID>()),
+    bulkLoadTaskCollection(params.bulkLoadTaskCollection) {
 
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)
@@ -6230,7 +6224,8 @@ public:
 		                                                     Promise<UID>(),
 		                                                     PromiseStream<Promise<int>>(),
 		                                                     PromiseStream<Promise<int64_t>>(),
-		                                                     PromiseStream<RebalanceStorageQueueRequest>() }));
+		                                                     PromiseStream<RebalanceStorageQueueRequest>(),
+		                                                     makeReference<BulkLoadTaskCollection>(UID(0, 0)) }));
 
 		for (int id = 1; id <= processCount; ++id) {
 			UID uid(id, 0);
@@ -6284,7 +6279,8 @@ public:
 		                                                     Promise<UID>(),
 		                                                     PromiseStream<Promise<int>>(),
 		                                                     PromiseStream<Promise<int64_t>>(),
-		                                                     PromiseStream<RebalanceStorageQueueRequest>() }));
+		                                                     PromiseStream<RebalanceStorageQueueRequest>(),
+		                                                     makeReference<BulkLoadTaskCollection>(UID(0, 0)) }));
 
 		for (int id = 1; id <= processCount; id++) {
 			UID uid(id, 0);
