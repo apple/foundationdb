@@ -51,15 +51,25 @@ ACTOR Future<Void> printPastBulkLoadJob(Database cx) {
 	for (const auto& job : jobs) {
 		ASSERT(job.getPhase() == BulkLoadJobPhase::Complete || job.getPhase() == BulkLoadJobPhase::Error ||
 		       job.getPhase() == BulkLoadJobPhase::Cancelled);
-		ASSERT(job.getTaskCount().present());
-		fmt::println("Job {} submitted at {} for range {}. The job has {} tasks. The job ran for {} mins and exited "
-		             "with status {}.",
-		             job.getJobId().toString(),
-		             std::to_string(job.getSubmitTime()),
-		             job.getJobRange().toString(),
-		             job.getTaskCount().get(),
-		             std::to_string((job.getEndTime() - job.getSubmitTime()) / 60.0),
-		             convertBulkLoadJobPhaseToString(job.getPhase()));
+		if (!job.getTaskCount().present()) {
+			fmt::println("Job {} submitted at {} for range {}. The job has not initialized for {} mins and exited "
+			             "with status {}.",
+			             job.getJobId().toString(),
+			             std::to_string(job.getSubmitTime()),
+			             job.getJobRange().toString(),
+			             std::to_string((job.getEndTime() - job.getSubmitTime()) / 60.0),
+			             convertBulkLoadJobPhaseToString(job.getPhase()));
+		} else {
+			fmt::println(
+			    "Job {} submitted at {} for range {}. The job has {} tasks. The job ran for {} mins and exited "
+			    "with status {}.",
+			    job.getJobId().toString(),
+			    std::to_string(job.getSubmitTime()),
+			    job.getJobRange().toString(),
+			    job.getTaskCount().get(),
+			    std::to_string((job.getEndTime() - job.getSubmitTime()) / 60.0),
+			    convertBulkLoadJobPhaseToString(job.getPhase()));
+		}
 		if (job.getPhase() == BulkLoadJobPhase::Error) {
 			Optional<std::string> errorMessage = job.getErrorMessage();
 			fmt::println("Error message: {}", errorMessage.present() ? errorMessage.get() : "Not provided.");
