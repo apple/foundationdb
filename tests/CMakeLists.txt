@@ -395,6 +395,12 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.3.5_until_7.3.29/ClientTransactionProfilingCorrectness-1.toml
     restarting/from_7.3.5_until_7.3.29/ClientTransactionProfilingCorrectness-2.toml)
   add_fdb_test(
+    TEST_FILES restarting/from_7.4.0/ClientTransactionProfilingCorrectness-1.toml
+    restarting/from_7.4.0/ClientTransactionProfilingCorrectness-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.4.0/CycleTestRestart-1.toml
+    restarting/from_7.4.0/CycleTestRestart-2.toml)
+  add_fdb_test(
     TEST_FILES restarting/from_7.3.29/ClientTransactionProfilingCorrectness-1.toml
     restarting/from_7.3.29/ClientTransactionProfilingCorrectness-2.toml)
   add_fdb_test(

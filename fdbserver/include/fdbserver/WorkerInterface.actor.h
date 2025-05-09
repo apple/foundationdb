@@ -1418,6 +1418,25 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 	}
 }
 
+namespace oldTLog_7_0 {
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
+                        IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo> const> db,
+                        LocalityData locality,
+                        PromiseStream<InitializeTLogRequest> tlogRequests,
+                        UID tlogId,
+                        UID workerID,
+                        bool restoreFromDisk,
+                        Promise<Void> oldLog,
+                        Promise<Void> recovered,
+                        std::string folder,
+                        Reference<AsyncVar<bool>> degraded,
+                        Reference<AsyncVar<UID>> activeSharedTLog,
+                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
+}
+
+typedef decltype(&tLog) TLogFn;
+
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/unactorcompiler.h"
 #endif
