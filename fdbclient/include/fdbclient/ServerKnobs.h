@@ -1157,6 +1157,9 @@ public:
 	int FETCH_SHARD_BUFFER_BYTE_LIMIT;
 	int FETCH_SHARD_UPDATES_BYTE_LIMIT;
 
+	// Storage Server with Physical Shard
+	bool SS_GET_DATA_MOVE_ID;
+
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
 	double WAIT_FAILURE_DELAY_LIMIT;
