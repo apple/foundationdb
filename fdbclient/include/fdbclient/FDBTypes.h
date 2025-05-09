@@ -1024,6 +1024,7 @@ struct TLogVersion {
 		// V5 merged reference and value spilling
 		// V6 added span context to list of serialized mutations sent from proxy to tlogs
 		// V7 use xxhash3 for TLog checksum
+		// V8 version vector disk queue changes
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
@@ -1031,10 +1032,11 @@ struct TLogVersion {
 		V5 = 5, // 6.3
 		V6 = 6, // 7.0
 		V7 = 7, // 7.2
+		V8 = 8,
 		MIN_SUPPORTED = V5,
-		MAX_SUPPORTED = V7,
+		MAX_SUPPORTED = V8,
 		MIN_RECRUITABLE = V6,
-		DEFAULT = V7,
+		DEFAULT = V8,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -1062,6 +1064,8 @@ struct TLogVersion {
 			return V6;
 		if (s == "7"_sr)
 			return V7;
+		if (s == "8"_sr)
+			return V8;
 		return default_error_or();
 	}
 };

@@ -47,7 +47,8 @@ static const char* logTypes[] = { "log_engine:=1",
 	                              "log_version:=5",
 	                              "log_version:=6",
 	                              // downgrade incompatible log version
-	                              "log_version:=7" };
+	                              "log_version:=7",
+	                              "log_version:=8" };
 static const char* redundancies[] = { "single", "double", "triple" };
 static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_enabled:=1" };
 
