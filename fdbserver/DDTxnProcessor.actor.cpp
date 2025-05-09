@@ -340,6 +340,17 @@ class DDTxnProcessorImpl {
 				for (int i = 0; i < dms.size(); ++i) {
 					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
 					const DataMoveMetaData& meta = dataMove->meta;
+					bool assigned, emptyRange;
+					DataMoveType type;
+					DataMovementReason reason;
+					decodeDataMoveId(meta.id, assigned, emptyRange, type, reason);
+					if (reason == DataMovementReason::SEED_SHARD_SERVER) {
+						TraceEvent("FoundSeedSeverDataMove")
+						    .detail("DataMoveId", meta.id)
+						    .detail("Metadata", meta.toString());
+						ASSERT_WE_THINK(meta.ranges.front() == allKeys);
+						continue;
+					}
 					if (meta.ranges.empty()) {
 						// Any persisted datamove with an empty range must be an tombstone persisted by
 						// a background cleanup (with retry_clean_up_datamove_tombstone_added),
