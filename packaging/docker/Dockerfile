@@ -190,7 +190,7 @@ RUN microdnf -y install \
     rm -rf /var/cache/yum
 
 WORKDIR /tmp
-RUN RUN if [ "$TARGETARCH" = "amd64" ]; then \
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
         AWS_ARCH=x86_64; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
         AWS_ARCH=aarch64; \
