@@ -3025,9 +3025,9 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			}
 			// tlogs
 			for (const auto& tlog : *tlogs) {
-				TraceEvent(SevDebug, "GetStatefulWorkersTlog").detail("Addr", tlog.address());
+				TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
 				if (workersMap.find(tlog.address()) == workersMap.end()) {
-					TraceEvent(SevWarn, "MissingTlogWorkerInterface").detail("TlogAddress", tlog.address());
+					TraceEvent(SevWarn, "MissingTLogWorkerInterface").detail("TlogAddress", tlog.address());
 					throw snap_tlog_failed();
 				}
 				if (result.contains(tlog.address())) {
