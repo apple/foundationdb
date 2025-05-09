@@ -1712,7 +1712,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					serverListEntries.push_back(tr.get(serverListKeyFor(servers[s])));
 				}
 				std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
-
+				state std::unordered_map<std::string, std::vector<std::string>> dcServers;
 				for (int s = 0; s < serverListValues.size(); s++) {
 					if (!serverListValues[s].present()) {
 						// Attempt to move onto a server that isn't in serverList (removed or never added to the
@@ -1721,6 +1721,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						// TODO(psm): Mark the data move as 'deleting'.
 						throw move_to_removed_server();
 					}
+					auto si = decodeServerListValue(serverListValues[s].get());
+					ASSERT(si.id() == servers[s]);
+					auto it = dcServers.find(si.locality.describeDcId());
+					if (it == dcServers.end()) {
+						dcServers[si.locality.describeDcId()] = std::vector<std::string>();
+					}
+					dcServers[si.locality.describeDcId()].push_back(si.id().shortString());
 				}
 
 				currentKeys = KeyRangeRef(begin, keys.end);
@@ -1732,6 +1739,15 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 					state Key endKey = old.back().key;
 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
+
+					if (ranges.front() != currentKeys) {
+						TraceEvent("MoveShardsPartialRange")
+						    .detail("ExpectedRange", ranges.front())
+						    .detail("ActualRange", currentKeys)
+						    .detail("DataMoveId", dataMoveId)
+						    .detail("RowLimit", SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT)
+						    .detail("ByteLimit", SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
+					}
 
 					// Check that enough servers for each shard are in the correct state
 					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
@@ -1806,6 +1822,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									TraceEvent(
 									    SevWarn, "StartMoveShardsCancelConflictingDataMove", relocationIntervalId)
 									    .detail("Range", rangeIntersectKeys)
+									    .detail("CurrentDataMoveRange", ranges[0])
 									    .detail("DataMoveID", dataMoveId.toString())
 									    .detail("ExistingDataMoveID", destId.toString());
 									wait(cleanUpDataMove(occ, destId, lock, startMoveKeysLock, keys, ddEnabledState));
@@ -1868,6 +1885,20 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					dataMove.ranges.clear();
 					dataMove.ranges.push_back(KeyRangeRef(keys.begin, currentKeys.end));
 					dataMove.dest.insert(servers.begin(), servers.end());
+					dataMove.dcTeamIds = std::unordered_map<std::string, std::string>();
+					for (auto& [dc, serverIds] : dcServers) {
+						std::sort(serverIds.begin(), serverIds.end());
+						std::string teamId;
+						for (const auto& serverId : serverIds) {
+							if (teamId.size() == 0) {
+								teamId = serverId;
+							} else {
+								teamId += "," + serverId;
+							}
+						}
+						// Use the concatenated server ids as the team id to avoid conflicts.
+						dataMove.dcTeamIds.get()[dc] = teamId;
+					}
 				}
 
 				if (currentKeys.end == keys.end) {

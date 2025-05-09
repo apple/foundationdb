@@ -104,6 +104,7 @@ struct StorageServerShard {
 	uint64_t desiredId; // The intended shard ID.
 	int8_t shardState;
 	Optional<UID> moveInShardId; // If present, it is the associated MoveInShardMetaData.
+	UID teamId;
 };
 
 #endif
