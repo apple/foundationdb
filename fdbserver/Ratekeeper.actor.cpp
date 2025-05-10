@@ -260,7 +260,7 @@ public:
 	ACTOR static Future<Void> trackTLogQueueInfo(Ratekeeper* self, TLogInterface tli) {
 		self->tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
 		state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
-		TraceEvent("RkTrackTlog", self->id).detail("TransactionLog", tli.id());
+		TraceEvent("RkTrackTLog", self->id).detail("TransactionLog", tli.id());
 		try {
 			loop {
 				ErrorOr<TLogQueuingMetricsReply> reply = wait(tli.getQueuingMetrics.getReplyUnlessFailedFor(
@@ -283,7 +283,7 @@ public:
 			// including cancellation
 			self->tlogQueueInfo.erase(myQueueInfo);
 			if (e.code() != error_code_actor_cancelled) {
-				TraceEvent("RkTrackTlogError", self->id).detail("TransactionLog", tli.id()).errorUnsuppressed(e);
+				TraceEvent("RkTrackTLogError", self->id).detail("TransactionLog", tli.id()).errorUnsuppressed(e);
 			}
 			throw;
 		}
@@ -1285,7 +1285,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		if (tl.lastReply.bytesInput - tl.lastReply.bytesDurable > tl.lastReply.storageBytes.free - minFreeSpace / 2) {
 			if (now() - lastWarning > 5.0) {
 				lastWarning = now();
-				TraceEvent(SevWarnAlways, "RkTlogMinFreeSpaceZero", id).detail("ReasonId", tl.id);
+				TraceEvent(SevWarnAlways, "RkTLogMinFreeSpaceZero", id).detail("ReasonId", tl.id);
 			}
 			reasonID = tl.id;
 			limitReason = limitReason_t::log_server_min_free_space;
