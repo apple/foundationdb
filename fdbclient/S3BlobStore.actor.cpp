@@ -109,6 +109,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	sdk_auth = false;
 	enable_object_integrity_check = CLIENT_KNOBS->BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK;
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
+	bypass_simulation = 0; // Initialize bypass_simulation knob
 }
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
@@ -152,6 +153,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(sdk_auth, sa);
 	TRY_PARAM(enable_object_integrity_check, eoic);
 	TRY_PARAM(global_connection_pool, gcp);
+	TRY_PARAM(bypass_simulation, bs);
 #undef TRY_PARAM
 	return false;
 }
@@ -194,6 +196,7 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(global_connection_pool, gcp);
 	_CHECK_PARAM(max_delay_retryable_error, dre);
 	_CHECK_PARAM(max_delay_connection_failed, dcf);
+	_CHECK_PARAM(bypass_simulation, bs);
 #undef _CHECK_PARAM
 	return r;
 }
@@ -626,8 +629,9 @@ ACTOR Future<int64_t> objectSize_impl(Reference<S3BlobStoreEndpoint> b, std::str
 	state HTTP::Headers headers;
 
 	Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
-	if (r->code == 404)
+	if (r->code == 404) {
 		throw file_not_found();
+	}
 	return r->data.contentLen;
 }
 
@@ -653,7 +657,7 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 		ASSERT(r == size);
 		content = buf.toString();
 
-		// Any exceptions from hehre forward are parse failures
+		// Any exceptions from here forward are parse failures
 		errorEventType = "BlobCredentialFileParseFailed";
 		json_spirit::mValue json;
 		json_spirit::read_string(content, json);
@@ -806,24 +810,35 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		++b->blobStats->expiredConnections;
 	}
 	++b->blobStats->newConnections;
-	std::string host = b->host, service = b->service;
+	state std::string host = b->host;
+	state std::string service = b->service;
+	state bool tls = b->knobs.isTLS();
 	TraceEvent(SevDebug, "S3BlobStoreEndpointBuildingNewConnection")
 	    .detail("UseProxy", b->useProxy)
-	    .detail("TLS", b->knobs.secure_connection == 1)
+	    .detail("TLS", tls)
 	    .detail("Host", host)
 	    .detail("Service", service)
+	    .detail("BypassSimulation", b->knobs.bypass_simulation)
 	    .log();
 	if (service.empty()) {
 		if (b->useProxy) {
 			fprintf(stderr, "ERROR: Port can't be empty when using HTTP proxy.\n");
 			throw connection_failed();
 		}
-		service = b->knobs.secure_connection ? "https" : "http";
+		service = tls ? "https" : "http";
 	}
-	bool isTLS = b->knobs.isTLS();
+	if (host.empty()) {
+		if (b->useProxy) {
+			fprintf(stderr, "ERROR: Host can't be empty when using HTTP proxy.\n");
+			throw connection_failed();
+		}
+		host = "127.0.0.1"; // Explicitly use IPv4 localhost
+	} else if (host == "localhost") {
+		host = "127.0.0.1"; // Convert localhost to IPv4
+	}
 	state Reference<IConnection> conn;
 	if (b->useProxy) {
-		if (isTLS) {
+		if (tls) {
 			Reference<IConnection> _conn =
 			    wait(HTTP::proxyConnect(host, service, b->proxyHost.get(), b->proxyPort.get()));
 			conn = _conn;
@@ -834,7 +849,72 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 			conn = _conn;
 		}
 	} else {
-		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
+		try {
+			if (b->knobs.bypass_simulation && g_network->isSimulated()) {
+				// When bypassing simulation, use the real network
+				if (!INetworkConnections::net()) {
+					TraceEvent(SevWarn, "S3BlobStoreEndpointNoNetwork").detail("Host", host).detail("Service", service);
+					throw connection_failed();
+				}
+				std::vector<NetworkAddress> addresses =
+				    wait(INetworkConnections::net()->resolveTCPEndpoint(host, service));
+				if (addresses.empty()) {
+					TraceEvent(SevWarn, "S3BlobStoreEndpointNoAddresses")
+					    .detail("Host", host)
+					    .detail("Service", service);
+					throw connection_failed();
+				}
+				state NetworkAddress addr = INetworkConnections::net()->pickOneAddress(addresses);
+				if (!addr.isValid()) {
+					TraceEvent(SevWarn, "S3BlobStoreEndpointInvalidAddress")
+					    .detail("Host", host)
+					    .detail("Service", service);
+					throw connection_failed();
+				}
+				addr = NetworkAddress(addr.ip, addr.port, true, tls);
+				try {
+					TraceEvent(SevInfo, "S3BlobStoreEndpointAttemptingExternalConnection")
+					    .detail("Host", host)
+					    .detail("Service", service)
+					    .detail("Address", addr.toString())
+					    .detail("IsTLS", tls);
+					Reference<IConnection> _conn = wait(INetworkConnections::net()->connectExternal(addr));
+					if (!_conn) {
+						TraceEvent(SevWarn, "S3BlobStoreEndpointConnectionFailed")
+						    .detail("Host", host)
+						    .detail("Service", service)
+						    .detail("Address", addr.toString())
+						    .detail("IsTLS", tls);
+						throw connection_failed();
+					}
+					conn = _conn;
+				} catch (Error& e) {
+					TraceEvent(SevWarn, "S3BlobStoreEndpointExternalConnectionError")
+					    .error(e)
+					    .detail("Host", host)
+					    .detail("Service", service)
+					    .detail("Address", addr.toString())
+					    .detail("IsTLS", tls);
+					throw connection_failed();
+				}
+			} else {
+				if (!INetworkConnections::net()) {
+					TraceEvent(SevWarn, "S3BlobStoreEndpointNoNetwork").detail("Host", host).detail("Service", service);
+					throw connection_failed();
+				}
+				wait(store(conn, INetworkConnections::net()->connect(host, service, tls)));
+			}
+		} catch (Error& e) {
+			// Log the error before rethrowing
+			// Make a copy of the error. See if this helps case where we crash in ThreadEvent.
+			Error err = e;
+			TraceEvent(SevWarn, "S3BlobStoreEndpointConnectError").error(err);
+			throw err;
+		}
+	}
+	if (!conn) {
+		TraceEvent(SevWarn, "S3BlobStoreEndpointNoConnection").detail("Host", host).detail("Service", service);
+		throw connection_failed();
 	}
 	wait(conn->connectHandshake());
 
@@ -923,9 +1003,10 @@ std::string parseErrorCodeFromS3(std::string xmlResponse) {
 		}
 		return std::string(codeNode->value());
 	} catch (Error e) {
-		TraceEvent("BackupParseS3ErrorCodeFailure").errorUnsuppressed(e);
+		TraceEvent(SevError, "BackupParseS3ErrorCodeFailure").errorUnsuppressed(e);
 		throw backup_parse_s3_response_failure();
 	} catch (...) {
+		TraceEvent(SevError, "BackupParseS3ErrorCodeFailure").detail("Response", xmlResponse).log();
 		throw backup_parse_s3_response_failure();
 	}
 }
@@ -962,7 +1043,7 @@ std::string getCanonicalURI(Reference<S3BlobStoreEndpoint> bstore, Reference<HTT
 		}
 	}
 
-	if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
+	if (bstore->useProxy && !bstore->knobs.isTLS()) {
 		// Has to be in absolute-form.
 		canonicalURI = "http://" + bstore->host + ":" + bstore->service + canonicalURI;
 	}
@@ -1178,11 +1259,13 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(reqF, requestTimeout));
+			/* TODO: Remove this once we have a better way to test the S3 client
 			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
-				// simulate an error from s3
-				_r->code = badRequestCode;
-				simulateS3TokenError = true;
+			    // simulate an error from s3
+			    _r->code = badRequestCode;
+			    simulateS3TokenError = true;
 			}
+			*/
 			r = _r;
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
@@ -1193,10 +1276,25 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 			rconn.conn.clear();
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "S3BlobStoreDoRequestError")
-			    .errorUnsuppressed(e)
-			    .detail("Verb", verb)
-			    .detail("Resource", resource);
+			// Log additional details specifically for http_bad_response
+			if (e.code() == error_code_http_bad_response && r) {
+				TraceEvent(SevError, "S3BlobStoreHttpBadResponseDebug")
+				    .errorUnsuppressed(e) // Log original error
+				    .detail("Verb", verb)
+				    .detail("Resource", resource)
+				    .detail("ConnID", connID) // Log connection ID if available
+				    .detail("PartialResponseBody", r->data.content); // Log potentially partial body
+			} else {
+				// Determine severity based on error code
+				// Presumption is that operation_cancelled is a normal part of operation, not an error
+				// and triggered by request by higher layers.
+				Severity sev = (e.code() == error_code_operation_cancelled ? SevWarn : SevError);
+				// Log the event with the determined severity
+				TraceEvent(sev, "S3BlobStoreDoRequestError")
+				    .errorUnsuppressed(e)
+				    .detail("Verb", verb)
+				    .detail("Resource", resource);
+			}
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 			// TODO: should this also do rconn.conn.clear()? (would need to extend lifetime outside of try block)
@@ -1237,7 +1335,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			fastRetry = false;
 		}
 
-		TraceEvent event(SevWarn,
+		TraceEvent event(SevError,
 		                 retryable ? (fastRetry ? "S3BlobStoreEndpointRequestFailedFastRetryable"
 		                                        : "S3BlobStoreEndpointRequestFailedRetryable")
 		                           : "S3BlobStoreEndpointRequestFailed");
@@ -1252,12 +1350,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		}
 		event.suppressFor(60);
 
-		if (!err.present()) {
+		// Only attempt parsing if NO error was caught AND we received an HTTP response with content
+		if (!err.present() && r && !r->data.content.empty()) {
 			event.detail("ResponseCode", r->code);
 			std::string s3Error = parseErrorCodeFromS3(r->data.content);
 			event.detail("S3ErrorCode", s3Error);
 			if (r->code == badRequestCode) {
-				if (isS3TokenError(s3Error) || simulateS3TokenError) {
+				// Only flag s3TokenError if parsing actually yielded a relevant S3 error code
+				if (isS3TokenError(s3Error)) {
 					s3TokenError = true;
 				}
 				TraceEvent(SevWarnAlways, "S3BlobStoreBadRequest")
@@ -1266,6 +1366,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 				    .detail("S3Error", s3Error)
 				    .log();
 			}
+		} else if (!err.present() && r) {
+			// We got a response, but it was empty or failed pre-check. Log code but don't parse.
+			event.detail("ResponseCode", r->code);
+			event.detail("ResponseEmptyOrUnparseable", true);
+			// Add the actual response content for debugging
+			event.detail("HttpResponseContent", r->data.content);
+		} else {
+			// Error was present (err.present() == true), already logged above via event.errorUnsuppressed(err.get());
 		}
 
 		event.detail("ConnectionEstablished", connectionEstablished);
@@ -1353,6 +1461,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 					throw err.get();
 			}
 
+			event.log();
 			throw http_request_failed();
 		}
 	}
@@ -2161,7 +2270,7 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
                                               std::string object,
                                               std::string uploadID,
                                               S3BlobStoreEndpoint::MultiPartSetT parts) {
-	state UnsentPacketQueue part_list; // NonCopyable state var so must be declared at top of actor
+	state UnsentPacketQueue part_list;
 	wait(bstore->requestRateWrite->getAllowance(1));
 
 	std::string manifest = "<CompleteMultipartUpload>";
@@ -2172,15 +2281,25 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 	state std::string resource = bstore->constructResourcePath(bucket, object);
 	resource += format("?uploadId=%s", uploadID.c_str());
 	state HTTP::Headers headers;
+	headers["Content-Type"] = "application/xml";
+	headers["Content-Length"] = format("%d", manifest.size());
+
 	PacketWriter pw(part_list.getWriteBuffer(manifest.size()), nullptr, Unversioned());
 	pw.serializeBytes(manifest);
-	Reference<HTTP::IncomingResponse> r =
-	    wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200 }));
-	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then
-	// the next retry will see error 400.  That could be detected and handled gracefully by HEAD'ing the object before
-	// upload to get its (possibly nonexistent) eTag, then if an error 400 is seen then retrieve the eTag again and if
-	// it has changed then consider the finish complete.
-	return Void();
+
+	try {
+		Reference<HTTP::IncomingResponse> r =
+		    wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200 }));
+		return Void();
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "S3BlobStoreFinishMultiPartUploadError")
+		    .suppressFor(1.0)
+		    .errorUnsuppressed(e)
+		    .detail("Bucket", bucket)
+		    .detail("Object", object)
+		    .detail("UploadID", uploadID);
+		throw;
+	}
 }
 
 Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucket,
