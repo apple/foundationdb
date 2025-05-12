@@ -24,6 +24,7 @@ package directory
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
@@ -65,16 +66,16 @@ func (n *node) layer(rtr fdb.ReadTransaction) fdb.FutureByteSlice {
 	return n._layer
 }
 
-func (n *node) isInPartition(tr *fdb.Transaction, includeEmptySubpath bool) bool {
-	return n.exists() && bytes.Compare(n._layer.MustGet(), []byte("partition")) == 0 && (includeEmptySubpath || len(n.targetPath) > len(n.path))
+func (n *node) isInPartition(ctx context.Context, tr *fdb.Transaction, includeEmptySubpath bool) bool {
+	return n.exists() && bytes.Compare(n._layer.MustGet(ctx), []byte("partition")) == 0 && (includeEmptySubpath || len(n.targetPath) > len(n.path))
 }
 
 func (n *node) getPartitionSubpath() []string {
 	return n.targetPath[len(n.path):]
 }
 
-func (n *node) getContents(dl directoryLayer, tr *fdb.Transaction) (DirectorySubspace, error) {
-	l, err := n._layer.Get()
+func (n *node) getContents(ctx context.Context, dl directoryLayer, tr *fdb.Transaction) (DirectorySubspace, error) {
+	l, err := n._layer.Get(ctx)
 	if err != nil {
 		return nil, err
 	}

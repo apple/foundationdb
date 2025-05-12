@@ -112,7 +112,7 @@ func (d Database) CreateTransaction() (Transaction, error) {
 // process address is the form of IP:Port pair without the :tls suffix if the cluster is running
 // with TLS enabled. The address can also be multiple processes addresses concated by a comma, e.g.
 // "IP1:Port,IP2:port", in this case the RebootWorker will reboot all provided addresses concurrently.
-func (d Database) RebootWorker(address string, checkFile bool, suspendDuration int) error {
+func (d Database) RebootWorker(ctx context.Context, address string, checkFile bool, suspendDuration int) error {
 	f := newFuture(C.fdb_database_reboot_worker(
 		d.ptr,
 		byteSliceToPtr([]byte(address)),
@@ -127,7 +127,7 @@ func (d Database) RebootWorker(address string, checkFile bool, suspendDuration i
 		future: f,
 	}
 
-	dbVersion, err := t.Get()
+	dbVersion, err := t.Get(ctx)
 
 	if dbVersion == 0 {
 		return errors.New("failed to send reboot process request")
@@ -139,7 +139,7 @@ func (d Database) RebootWorker(address string, checkFile bool, suspendDuration i
 // GetClientStatus returns a JSON byte slice containing database client-side status information.
 // At the top level the report describes the status of the Multi-Version Client database - its initialization state, the protocol version, the available client versions; it also embeds the status of the actual version-specific database and within it the addresses of various FDB server roles the client is aware of and their connection status.
 // NOTE: ErrMultiVersionClientUnavailable will be returned if the Multi-Version client API was not enabled.
-func (d Database) GetClientStatus() ([]byte, error) {
+func (d Database) GetClientStatus(ctx context.Context) ([]byte, error) {
 	if apiVersion == 0 {
 		return nil, errAPIVersionUnset
 	}
@@ -151,7 +151,7 @@ func (d Database) GetClientStatus() ([]byte, error) {
 		future: f,
 	}
 
-	b, err := st.Get()
+	b, err := st.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +206,7 @@ func retryable(ctx context.Context, tr Transaction, wrapped func() (interface{},
 		var ep Error
 		if errors.As(err, &ep) {
 			f := tr.OnError(ep)
-			processedErr := f.Get()
+			processedErr := f.Get(ctx)
 			f.Close()
 			var newEp Error
 			if !errors.As(processedErr, &newEp) || newEp.Code != ep.Code {
@@ -264,7 +264,7 @@ func (d Database) Transact(ctx context.Context, f func(Transaction) (interface{}
 		}
 
 		f := tr.Commit()
-		err = f.Get()
+		err = f.Get(ctx)
 		f.Close()
 
 		return
@@ -330,7 +330,7 @@ func (d Database) Options() DatabaseOptions {
 //
 // If readVersion is non-zero, the boundary keys as of readVersion will be
 // returned.
-func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion int64) ([]Key, error) {
+func (d Database) LocalityGetBoundaryKeys(ctx context.Context, er ExactRange, limit int, readVersion int64) ([]Key, error) {
 	tr, err := d.CreateTransaction()
 	if err != nil {
 		return nil, err
@@ -350,7 +350,7 @@ func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion 
 		append(Key("\xFF/keyServers/"), ek.FDBKey()...),
 	}
 
-	kvs, err := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).Get()
+	kvs, err := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).Get(ctx)
 	if err != nil {
 		return nil, err
 	}
