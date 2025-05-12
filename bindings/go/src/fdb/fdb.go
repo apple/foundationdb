@@ -51,10 +51,10 @@ var (
 // exports and functions in preamble
 // (https://code.google.com/p/go-wiki/wiki/cgo#Global_functions)
 //
-//export unlockMutex
-func unlockMutex(p unsafe.Pointer) {
-	m := (*sync.Mutex)(p)
-	m.Unlock()
+//export goFutureReadyCallback
+func goFutureReadyCallback(pF, pRs unsafe.Pointer) {
+	rs := (*readySignal)(pRs)
+	close(*rs)
 }
 
 // A Transactor can execute a function that requires a Transaction. Functions
