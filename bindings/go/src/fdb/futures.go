@@ -27,14 +27,14 @@ package fdb
 //  #include <foundationdb/fdb_c.h>
 //  #include <string.h>
 //
-//  extern void unlockMutex(void*);
+//  extern void goFutureReadyCallback(void*, void*);
 //
-//  void go_callback(FDBFuture* f, void* m) {
-//      unlockMutex(m);
+//  void c_future_ready_callback(FDBFuture* f, void* rs) {
+//      goFutureReadyCallback(f, rs);
 //  }
 //
-//  void go_set_callback(void* f, void* m) {
-//      fdb_future_set_callback(f, (FDBCallback)&go_callback, m);
+//  void c_set_callback(void* f, void* rs) {
+//      fdb_future_set_callback(f, (FDBCallback)&c_future_ready_callback, rs);
 //  }
 import "C"
 
@@ -85,23 +85,22 @@ func newFuture(ptr *C.FDBFuture) *future {
 	return f
 }
 
+type readySignal chan (struct{})
+
 // Note: This function guarantees the callback will be executed **at most once**.
 func fdb_future_block_until_ready(f *C.FDBFuture) {
 	if C.fdb_future_is_ready(f) != 0 {
 		return
 	}
 
-	// The mutex here is used as a signal that the callback is complete.
-	// We first lock it, then pass it to the callback, and then lock it
-	// again. The second call to lock won't return until the callback has
-	// fired.
+	// The channel here is used as a signal that the callback is complete.
+	// The callback is responsible for closing it, and this function returns
+	// only after that has happened.
 	//
-	// See https://groups.google.com/forum/#!topic/golang-nuts/SPjQEcsdORA
-	// for the history of why this pattern came to be used.
-	m := &sync.Mutex{}
-	m.Lock()
-	C.go_set_callback(unsafe.Pointer(f), unsafe.Pointer(m))
-	m.Lock()
+	// See also: https://groups.google.com/forum/#!topic/golang-nuts/SPjQEcsdORA
+	rs := make(readySignal)
+	C.c_set_callback(unsafe.Pointer(f), unsafe.Pointer(&rs))
+	<-rs
 }
 
 func (f *future) BlockUntilReady() {
