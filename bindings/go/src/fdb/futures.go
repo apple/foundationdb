@@ -39,6 +39,7 @@ package fdb
 import "C"
 
 import (
+	"context"
 	"sync"
 	"unsafe"
 )
@@ -52,7 +53,7 @@ type Future interface {
 	// BlockUntilReady blocks the calling goroutine until the future is ready. A
 	// future becomes ready either when it receives a value of its enclosed type
 	// (if any) or is set to an error state.
-	BlockUntilReady()
+	BlockUntilReady(context.Context) error
 
 	// IsReady returns true if the future is ready, and false otherwise, without
 	// blocking. A future is ready either when has received a value of its
@@ -87,10 +88,11 @@ func newFuture(ptr *C.FDBFuture) *future {
 
 type readySignal chan (struct{})
 
+// BlockUntilReady is a Go re-implementation of fdb_future_block_until_ready.
 // Note: This function guarantees the callback will be executed **at most once**.
-func fdb_future_block_until_ready(f *C.FDBFuture) {
-	if C.fdb_future_is_ready(f) != 0 {
-		return
+func (f *future) BlockUntilReady(ctx context.Context) error {
+	if C.fdb_future_is_ready(f.ptr) != 0 {
+		return nil
 	}
 
 	// The channel here is used as a signal that the callback is complete.
@@ -99,12 +101,16 @@ func fdb_future_block_until_ready(f *C.FDBFuture) {
 	//
 	// See also: https://groups.google.com/forum/#!topic/golang-nuts/SPjQEcsdORA
 	rs := make(readySignal)
-	C.c_set_callback(unsafe.Pointer(f), unsafe.Pointer(&rs))
-	<-rs
-}
+	C.c_set_callback(unsafe.Pointer(f.ptr), unsafe.Pointer(&rs))
 
-func (f *future) BlockUntilReady() {
-	fdb_future_block_until_ready(f.ptr)
+	select {
+	case <-rs:
+		return nil
+	case <-ctx.Done():
+		C.fdb_future_cancel(f.ptr)
+
+		return ctx.Err()
+	}
 }
 
 func (f *future) IsReady() bool {
@@ -128,13 +134,13 @@ type FutureByteSlice interface {
 	// if the asynchronous operation associated with this future did not
 	// successfully complete. The current goroutine will be blocked until the
 	// future is ready.
-	Get() ([]byte, error)
+	Get(context.Context) ([]byte, error)
 
 	// MustGet returns a database value (or nil if there is no value), or panics
 	// if the asynchronous operation associated with this future did not
 	// successfully complete. The current goroutine will be blocked until the
 	// future is ready.
-	MustGet() []byte
+	MustGet(context.Context) []byte
 
 	Future
 }
@@ -146,13 +152,17 @@ type futureByteSlice struct {
 	o sync.Once
 }
 
-func (f *futureByteSlice) Get() ([]byte, error) {
+func (f *futureByteSlice) Get(ctx context.Context) ([]byte, error) {
 	f.o.Do(func() {
 		var present C.fdb_bool_t
 		var value *C.uint8_t
 		var length C.int
 
-		f.BlockUntilReady()
+		err := f.BlockUntilReady(ctx)
+		if err != nil {
+			f.e = err
+			return
+		}
 
 		if err := C.fdb_future_get_value(f.ptr, &present, &value, &length); err != 0 {
 			f.e = Error{int(err)}
@@ -169,8 +179,8 @@ func (f *futureByteSlice) Get() ([]byte, error) {
 	return f.v, f.e
 }
 
-func (f *futureByteSlice) MustGet() []byte {
-	val, err := f.Get()
+func (f *futureByteSlice) MustGet(ctx context.Context) []byte {
+	val, err := f.Get(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -184,12 +194,12 @@ type FutureKey interface {
 	// Get returns a database key or an error if the asynchronous operation
 	// associated with this future did not successfully complete. The current
 	// goroutine will be blocked until the future is ready.
-	Get() (Key, error)
+	Get(context.Context) (Key, error)
 
 	// MustGet returns a database key, or panics if the asynchronous operation
 	// associated with this future did not successfully complete. The current
 	// goroutine will be blocked until the future is ready.
-	MustGet() Key
+	MustGet(context.Context) Key
 
 	Future
 }
@@ -201,12 +211,16 @@ type futureKey struct {
 	o sync.Once
 }
 
-func (f *futureKey) Get() (Key, error) {
+func (f *futureKey) Get(ctx context.Context) (Key, error) {
 	f.o.Do(func() {
 		var value *C.uint8_t
 		var length C.int
 
-		f.BlockUntilReady()
+		err := f.BlockUntilReady(ctx)
+		if err != nil {
+			f.e = err
+			return
+		}
 
 		if err := C.fdb_future_get_key(f.ptr, &value, &length); err != 0 {
 			f.e = Error{int(err)}
@@ -220,8 +234,8 @@ func (f *futureKey) Get() (Key, error) {
 	return f.k, f.e
 }
 
-func (f *futureKey) MustGet() Key {
-	val, err := f.Get()
+func (f *futureKey) MustGet(ctx context.Context) Key {
+	val, err := f.Get(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -235,12 +249,12 @@ type FutureNil interface {
 	// Get returns an error if the asynchronous operation associated with this
 	// future did not successfully complete. The current goroutine will be
 	// blocked until the future is ready.
-	Get() error
+	Get(context.Context) error
 
 	// MustGet panics if the asynchronous operation associated with this future
 	// did not successfully complete. The current goroutine will be blocked
 	// until the future is ready.
-	MustGet()
+	MustGet(context.Context)
 
 	Future
 }
@@ -249,8 +263,11 @@ type futureNil struct {
 	*future
 }
 
-func (f *futureNil) Get() error {
-	f.BlockUntilReady()
+func (f *futureNil) Get(ctx context.Context) error {
+	err := f.BlockUntilReady(ctx)
+	if err != nil {
+		return err
+	}
 	if err := C.fdb_future_get_error(f.ptr); err != 0 {
 		return Error{int(err)}
 	}
@@ -258,8 +275,8 @@ func (f *futureNil) Get() error {
 	return nil
 }
 
-func (f *futureNil) MustGet() {
-	if err := f.Get(); err != nil {
+func (f *futureNil) MustGet(ctx context.Context) {
+	if err := f.Get(ctx); err != nil {
 		panic(err)
 	}
 }
@@ -281,8 +298,10 @@ func stringRefToSlice(ptr unsafe.Pointer) []byte {
 	return C.GoBytes(src, size)
 }
 
-func (f *futureKeyValueArray) Get() ([]KeyValue, bool, error) {
-	f.BlockUntilReady()
+func (f *futureKeyValueArray) Get(ctx context.Context) ([]KeyValue, bool, error) {
+	if err := f.BlockUntilReady(ctx); err != nil {
+		return nil, false, err
+	}
 
 	var kvs *C.FDBKeyValue
 	var count C.int
@@ -312,20 +331,22 @@ type FutureKeyArray interface {
 	// Get returns an array of keys or an error if the asynchronous operation
 	// associated with this future did not successfully complete. The current
 	// goroutine will be blocked until the future is ready.
-	Get() ([]Key, error)
+	Get(context.Context) ([]Key, error)
 
 	// MustGet returns an array of keys, or panics if the asynchronous operations
 	// associated with this future did not successfully complete. The current goroutine
 	// will be blocked until the future is ready.
-	MustGet() []Key
+	MustGet(context.Context) []Key
 }
 
 type futureKeyArray struct {
 	*future
 }
 
-func (f *futureKeyArray) Get() ([]Key, error) {
-	f.BlockUntilReady()
+func (f *futureKeyArray) Get(ctx context.Context) ([]Key, error) {
+	if err := f.BlockUntilReady(ctx); err != nil {
+		return nil, err
+	}
 
 	var ks *C.FDBKey
 	var count C.int
@@ -345,8 +366,8 @@ func (f *futureKeyArray) Get() ([]Key, error) {
 	return ret, nil
 }
 
-func (f *futureKeyArray) MustGet() []Key {
-	val, err := f.Get()
+func (f *futureKeyArray) MustGet(ctx context.Context) []Key {
+	val, err := f.Get(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -360,12 +381,12 @@ type FutureInt64 interface {
 	// Get returns a database version or an error if the asynchronous operation
 	// associated with this future did not successfully complete. The current
 	// goroutine will be blocked until the future is ready.
-	Get() (int64, error)
+	Get(context.Context) (int64, error)
 
 	// MustGet returns a database version, or panics if the asynchronous
 	// operation associated with this future did not successfully complete. The
 	// current goroutine will be blocked until the future is ready.
-	MustGet() int64
+	MustGet(context.Context) int64
 
 	Future
 }
@@ -374,8 +395,10 @@ type futureInt64 struct {
 	*future
 }
 
-func (f *futureInt64) Get() (int64, error) {
-	f.BlockUntilReady()
+func (f *futureInt64) Get(ctx context.Context) (int64, error) {
+	if err := f.BlockUntilReady(ctx); err != nil {
+		return 0, err
+	}
 
 	var ver C.int64_t
 	if err := C.fdb_future_get_int64(f.ptr, &ver); err != 0 {
@@ -385,8 +408,8 @@ func (f *futureInt64) Get() (int64, error) {
 	return int64(ver), nil
 }
 
-func (f *futureInt64) MustGet() int64 {
-	val, err := f.Get()
+func (f *futureInt64) MustGet(ctx context.Context) int64 {
+	val, err := f.Get(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -401,12 +424,12 @@ type FutureStringSlice interface {
 	// Get returns a slice of strings or an error if the asynchronous operation
 	// associated with this future did not successfully complete. The current
 	// goroutine will be blocked until the future is ready.
-	Get() ([]string, error)
+	Get(context.Context) ([]string, error)
 
 	// MustGet returns a slice of strings or panics if the asynchronous
 	// operation associated with this future did not successfully complete. The
 	// current goroutine will be blocked until the future is ready.
-	MustGet() []string
+	MustGet(context.Context) []string
 
 	Future
 }
@@ -415,8 +438,10 @@ type futureStringSlice struct {
 	*future
 }
 
-func (f *futureStringSlice) Get() ([]string, error) {
-	f.BlockUntilReady()
+func (f *futureStringSlice) Get(ctx context.Context) ([]string, error) {
+	if err := f.BlockUntilReady(ctx); err != nil {
+		return nil, err
+	}
 
 	var strings **C.char
 	var count C.int
@@ -434,8 +459,8 @@ func (f *futureStringSlice) Get() ([]string, error) {
 	return ret, nil
 }
 
-func (f *futureStringSlice) MustGet() []string {
-	val, err := f.Get()
+func (f *futureStringSlice) MustGet(ctx context.Context) []string {
+	val, err := f.Get(ctx)
 	if err != nil {
 		panic(err)
 	}

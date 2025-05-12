@@ -23,6 +23,7 @@
 package fdb
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -132,7 +133,7 @@ type RangeResult struct {
 // complete. The current goroutine will be blocked until all reads have
 // completed.
 // Using Iterator() to streamline reads is preferable for efficiency reasons.
-func (rr RangeResult) Get() ([]KeyValue, error) {
+func (rr RangeResult) Get(ctx context.Context) ([]KeyValue, error) {
 	var ret []KeyValue
 
 	ri := rr.Iterator()
@@ -146,7 +147,7 @@ func (rr RangeResult) Get() ([]KeyValue, error) {
 
 	for {
 		// prefetch even if very little happens between iterations
-		kvs, err := ri.NextBatch(true)
+		kvs, err := ri.NextBatch(ctx, true)
 		if err != nil {
 			return nil, err
 		}
@@ -171,8 +172,8 @@ func (rr RangeResult) Get() ([]KeyValue, error) {
 // asynchronous operations associated with this result did not successfully
 // complete. The current goroutine will be blocked until all reads have
 // completed.
-func (rr RangeResult) MustGet() []KeyValue {
-	kvs, err := rr.Get()
+func (rr RangeResult) MustGet(ctx context.Context) []KeyValue {
+	kvs, err := rr.Get(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -221,7 +222,7 @@ type RangeIterator struct {
 // operations associated with this result did not successfully complete.
 // If 'prefetch' is true, future for the next batch will be created on return and
 // released when the RangeIterator is closed.
-func (ri *RangeIterator) NextBatch(prefetch bool) ([]KeyValue, error) {
+func (ri *RangeIterator) NextBatch(ctx context.Context, prefetch bool) ([]KeyValue, error) {
 	if !ri.more {
 		// iterator is done
 		return nil, nil
@@ -241,7 +242,7 @@ func (ri *RangeIterator) NextBatch(prefetch bool) ([]KeyValue, error) {
 
 	var err error
 	var kvs []KeyValue
-	kvs, ri.more, err = f.Get()
+	kvs, ri.more, err = f.Get(ctx)
 	ri.lastBatchLen = len(kvs)
 	f.Close()
 	if err != nil {
