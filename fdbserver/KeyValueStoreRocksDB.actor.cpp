@@ -1235,6 +1235,9 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		e.detail("NumTimesReadIteratorsReused", stat - readIteratorPoolStats["NumTimesReadIteratorsReused"]);
 		readIteratorPoolStats["NumTimesReadIteratorsReused"] = stat;
 
+		// Add all server knobs value that needs to be track in the event.
+		e.detail("BlockCacheSize", SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
+
 		counters->cc.logToTraceEvent(e);
 
 		if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE) {
