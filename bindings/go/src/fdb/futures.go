@@ -147,23 +147,26 @@ type FutureByteSlice interface {
 
 type futureByteSlice struct {
 	*future
-	v []byte
-	e error
-	o sync.Once
+	v   []byte
+	e   error
+	get sync.Once
 }
 
 func (f *futureByteSlice) Get(ctx context.Context) ([]byte, error) {
-	f.o.Do(func() {
-		var present C.fdb_bool_t
-		var value *C.uint8_t
-		var length C.int
-
+	f.get.Do(func() {
 		err := f.BlockUntilReady(ctx)
 		if err != nil {
 			f.e = err
 			return
 		}
+		if err := C.fdb_future_get_error(f.ptr); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
 
+		var present C.fdb_bool_t
+		var value *C.uint8_t
+		var length C.int
 		if err := C.fdb_future_get_value(f.ptr, &present, &value, &length); err != 0 {
 			f.e = Error{int(err)}
 			return
@@ -206,22 +209,25 @@ type FutureKey interface {
 
 type futureKey struct {
 	*future
-	k Key
-	e error
-	o sync.Once
+	k   Key
+	e   error
+	get sync.Once
 }
 
 func (f *futureKey) Get(ctx context.Context) (Key, error) {
-	f.o.Do(func() {
-		var value *C.uint8_t
-		var length C.int
-
+	f.get.Do(func() {
 		err := f.BlockUntilReady(ctx)
 		if err != nil {
 			f.e = err
 			return
 		}
+		if err := C.fdb_future_get_error(f.ptr); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
 
+		var value *C.uint8_t
+		var length C.int
 		if err := C.fdb_future_get_key(f.ptr, &value, &length); err != 0 {
 			f.e = Error{int(err)}
 			return
@@ -261,16 +267,24 @@ type FutureNil interface {
 
 type futureNil struct {
 	*future
+	e   error
+	get sync.Once
 }
 
 func (f *futureNil) Get(ctx context.Context) error {
-	err := f.BlockUntilReady(ctx)
-	if err != nil {
-		return err
-	}
-	if err := C.fdb_future_get_error(f.ptr); err != 0 {
-		return Error{int(err)}
-	}
+	f.get.Do(func() {
+		err := f.BlockUntilReady(ctx)
+		if err != nil {
+			f.e = err
+			return
+		}
+		if err := C.fdb_future_get_error(f.ptr); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
+
+		C.fdb_future_release_memory(f.ptr)
+	})
 
 	return nil
 }
@@ -283,6 +297,10 @@ func (f *futureNil) MustGet(ctx context.Context) {
 
 type futureKeyValueArray struct {
 	*future
+	v    []KeyValue
+	more bool
+	e    error
+	o    sync.Once
 }
 
 //go:nocheckptr
@@ -299,28 +317,41 @@ func stringRefToSlice(ptr unsafe.Pointer) []byte {
 }
 
 func (f *futureKeyValueArray) Get(ctx context.Context) ([]KeyValue, bool, error) {
-	if err := f.BlockUntilReady(ctx); err != nil {
-		return nil, false, err
-	}
+	f.o.Do(func() {
+		err := f.BlockUntilReady(ctx)
+		if err != nil {
+			f.e = err
+			return
+		}
+		if err := C.fdb_future_get_error(f.ptr); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
 
-	var kvs *C.FDBKeyValue
-	var count C.int
-	var more C.fdb_bool_t
+		var kvs *C.FDBKeyValue
+		var count C.int
+		var more C.fdb_bool_t
+		if err := C.fdb_future_get_keyvalue_array(f.ptr, &kvs, &count, &more); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
 
-	if err := C.fdb_future_get_keyvalue_array(f.ptr, &kvs, &count, &more); err != 0 {
-		return nil, false, Error{int(err)}
-	}
+		f.v = make([]KeyValue, int(count))
+		if more != 0 {
+			f.more = true
+		}
 
-	ret := make([]KeyValue, int(count))
+		for i := 0; i < int(count); i++ {
+			kvptr := unsafe.Pointer(uintptr(unsafe.Pointer(kvs)) + uintptr(i*24))
 
-	for i := 0; i < int(count); i++ {
-		kvptr := unsafe.Pointer(uintptr(unsafe.Pointer(kvs)) + uintptr(i*24))
+			f.v[i].Key = stringRefToSlice(kvptr)
+			f.v[i].Value = stringRefToSlice(unsafe.Pointer(uintptr(kvptr) + 12))
+		}
 
-		ret[i].Key = stringRefToSlice(kvptr)
-		ret[i].Value = stringRefToSlice(unsafe.Pointer(uintptr(kvptr) + 12))
-	}
+		C.fdb_future_release_memory(f.ptr)
+	})
 
-	return ret, (more != 0), nil
+	return f.v, f.more, f.e
 }
 
 // FutureKeyArray represents the asynchronous result of a function
@@ -341,29 +372,42 @@ type FutureKeyArray interface {
 
 type futureKeyArray struct {
 	*future
+	v   []Key
+	e   error
+	get sync.Once
 }
 
 func (f *futureKeyArray) Get(ctx context.Context) ([]Key, error) {
-	if err := f.BlockUntilReady(ctx); err != nil {
-		return nil, err
-	}
+	f.get.Do(func() {
+		err := f.BlockUntilReady(ctx)
+		if err != nil {
+			f.e = err
+			return
+		}
+		if err := C.fdb_future_get_error(f.ptr); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
 
-	var ks *C.FDBKey
-	var count C.int
+		var ks *C.FDBKey
+		var count C.int
+		if err := C.fdb_future_get_key_array(f.ptr, &ks, &count); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
 
-	if err := C.fdb_future_get_key_array(f.ptr, &ks, &count); err != 0 {
-		return nil, Error{int(err)}
-	}
+		f.v = make([]Key, int(count))
 
-	ret := make([]Key, int(count))
+		for i := 0; i < int(count); i++ {
+			kptr := unsafe.Pointer(uintptr(unsafe.Pointer(ks)) + uintptr(i*12))
 
-	for i := 0; i < int(count); i++ {
-		kptr := unsafe.Pointer(uintptr(unsafe.Pointer(ks)) + uintptr(i*12))
+			f.v[i] = stringRefToSlice(kptr)
+		}
 
-		ret[i] = stringRefToSlice(kptr)
-	}
+		C.fdb_future_release_memory(f.ptr)
+	})
 
-	return ret, nil
+	return f.v, f.e
 }
 
 func (f *futureKeyArray) MustGet(ctx context.Context) []Key {
@@ -393,19 +437,34 @@ type FutureInt64 interface {
 
 type futureInt64 struct {
 	*future
+	v   int64
+	e   error
+	get sync.Once
 }
 
 func (f *futureInt64) Get(ctx context.Context) (int64, error) {
-	if err := f.BlockUntilReady(ctx); err != nil {
-		return 0, err
-	}
+	f.get.Do(func() {
+		err := f.BlockUntilReady(ctx)
+		if err != nil {
+			f.e = err
+			return
+		}
+		if err := C.fdb_future_get_error(f.ptr); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
 
-	var ver C.int64_t
-	if err := C.fdb_future_get_int64(f.ptr, &ver); err != 0 {
-		return 0, Error{int(err)}
-	}
+		var value C.int64_t
+		if err := C.fdb_future_get_int64(f.ptr, &value); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
 
-	return int64(ver), nil
+		f.v = int64(value)
+		C.fdb_future_release_memory(f.ptr)
+	})
+
+	return f.v, f.e
 }
 
 func (f *futureInt64) MustGet(ctx context.Context) int64 {
@@ -436,27 +495,40 @@ type FutureStringSlice interface {
 
 type futureStringSlice struct {
 	*future
+	v   []string
+	e   error
+	get sync.Once
 }
 
 func (f *futureStringSlice) Get(ctx context.Context) ([]string, error) {
-	if err := f.BlockUntilReady(ctx); err != nil {
-		return nil, err
-	}
+	f.get.Do(func() {
+		err := f.BlockUntilReady(ctx)
+		if err != nil {
+			f.e = err
+			return
+		}
+		if err := C.fdb_future_get_error(f.ptr); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
 
-	var strings **C.char
-	var count C.int
+		var strings **C.char
+		var count C.int
+		if err := C.fdb_future_get_string_array(f.ptr, (***C.char)(unsafe.Pointer(&strings)), &count); err != 0 {
+			f.e = Error{int(err)}
+			return
+		}
 
-	if err := C.fdb_future_get_string_array(f.ptr, (***C.char)(unsafe.Pointer(&strings)), &count); err != 0 {
-		return nil, Error{int(err)}
-	}
+		f.v = make([]string, int(count))
 
-	ret := make([]string, int(count))
+		for i := 0; i < int(count); i++ {
+			f.v[i] = C.GoString((*C.char)(*(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(strings)) + uintptr(i*8)))))
+		}
 
-	for i := 0; i < int(count); i++ {
-		ret[i] = C.GoString((*C.char)(*(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(strings)) + uintptr(i*8)))))
-	}
+		C.fdb_future_release_memory(f.ptr)
+	})
 
-	return ret, nil
+	return f.v, f.e
 }
 
 func (f *futureStringSlice) MustGet(ctx context.Context) []string {
