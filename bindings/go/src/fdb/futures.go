@@ -47,35 +47,22 @@ import (
 // A Future represents a value (or error) to be available at some later
 // time. Asynchronous FDB API functions return one of the types that implement
 // the Future interface. All Future types additionally implement Get and MustGet
-// methods with different return types. Calling BlockUntilReady, Get or MustGet
-// will block the calling goroutine until the Future is ready.
+// methods with different return types. Calling Get or MustGet will block
+// the calling goroutine until the Future is ready.
 type Future interface {
-	// BlockUntilReady blocks the calling goroutine until the future is ready. A
-	// future becomes ready either when it receives a value of its enclosed type
-	// (if any) or is set to an error state.
-	BlockUntilReady(context.Context) error
-
 	// IsReady returns true if the future is ready, and false otherwise, without
 	// blocking. A future is ready either when has received a value of its
 	// enclosed type (if any) or has been set to an error state.
 	IsReady() bool
 
-	// Cancel cancels a future and its associated asynchronous operation. If
-	// called before the future becomes ready, attempts to access the future
-	// will return an error. Cancel has no effect if the future is already
-	// ready.
-	//
-	// Note that even if a future is not ready, the associated asynchronous
-	// operation may already have completed and be unable to be cancelled.
-	Cancel()
-
 	// Close will release resources associated with this future.
-	// It must always be called, and called exactly once.
+	// It must always be called at least once.
 	Close()
 }
 
 type future struct {
-	ptr *C.FDBFuture
+	ptr    *C.FDBFuture
+	closer sync.Once
 }
 
 // newFuture returns a future which must be explicitly destroyed with a call to destroy().
@@ -88,42 +75,48 @@ func newFuture(ptr *C.FDBFuture) *future {
 
 type readySignal chan (struct{})
 
-// BlockUntilReady is a Go re-implementation of fdb_future_block_until_ready.
+// blockUntilReady blocks the calling goroutine until the given Future is ready.
+// This is a Go re-implementation of fdb_future_block_until_ready but it differs because
+// it will return the Future's error if any was set.
 // Note: This function guarantees the callback will be executed **at most once**.
-func (f *future) BlockUntilReady(ctx context.Context) error {
-	if C.fdb_future_is_ready(f.ptr) != 0 {
-		return nil
+func (f *future) blockUntilReady(ctx context.Context) error {
+	if C.fdb_future_is_ready(f.ptr) == 0 {
+		// The channel here is used as a signal that the callback is complete.
+		// The callback is responsible for closing it, and this function returns
+		// only after that has happened.
+		//
+		// See also: https://groups.google.com/forum/#!topic/golang-nuts/SPjQEcsdORA
+		rs := make(readySignal)
+		C.c_set_callback(unsafe.Pointer(f.ptr), unsafe.Pointer(&rs))
+
+		select {
+		case <-rs:
+			// future is ready (either with value or error)
+			break
+		case <-ctx.Done():
+			// Note: future cancellation does not happen here but rather on the calling Get()
+			// when the future is closed
+
+			return ctx.Err()
+		}
 	}
 
-	// The channel here is used as a signal that the callback is complete.
-	// The callback is responsible for closing it, and this function returns
-	// only after that has happened.
-	//
-	// See also: https://groups.google.com/forum/#!topic/golang-nuts/SPjQEcsdORA
-	rs := make(readySignal)
-	C.c_set_callback(unsafe.Pointer(f.ptr), unsafe.Pointer(&rs))
-
-	select {
-	case <-rs:
-		return nil
-	case <-ctx.Done():
-		C.fdb_future_cancel(f.ptr)
-
-		return ctx.Err()
+	if err := C.fdb_future_get_error(f.ptr); err != 0 {
+		return Error{int(err)}
 	}
+
+	return nil
 }
 
 func (f *future) IsReady() bool {
 	return C.fdb_future_is_ready(f.ptr) != 0
 }
 
-func (f *future) Cancel() {
-	C.fdb_future_cancel(f.ptr)
-}
-
 // Close must be explicitly called for each future to avoid a memory leak.
 func (f *future) Close() {
-	C.fdb_future_destroy(f.ptr)
+	f.closer.Do(func() {
+		C.fdb_future_destroy(f.ptr)
+	})
 }
 
 // FutureByteSlice represents the asynchronous result of a function that returns
@@ -147,20 +140,18 @@ type FutureByteSlice interface {
 
 type futureByteSlice struct {
 	*future
-	v   []byte
-	e   error
-	get sync.Once
+	v      []byte
+	e      error
+	getter sync.Once
 }
 
 func (f *futureByteSlice) Get(ctx context.Context) ([]byte, error) {
-	f.get.Do(func() {
-		err := f.BlockUntilReady(ctx)
+	f.getter.Do(func() {
+		defer f.Close()
+
+		err := f.blockUntilReady(ctx)
 		if err != nil {
 			f.e = err
-			return
-		}
-		if err := C.fdb_future_get_error(f.ptr); err != 0 {
-			f.e = Error{int(err)}
 			return
 		}
 
@@ -175,8 +166,6 @@ func (f *futureByteSlice) Get(ctx context.Context) ([]byte, error) {
 		if present != 0 {
 			f.v = C.GoBytes(unsafe.Pointer(value), length)
 		}
-
-		C.fdb_future_release_memory(f.ptr)
 	})
 
 	return f.v, f.e
@@ -216,13 +205,11 @@ type futureKey struct {
 
 func (f *futureKey) Get(ctx context.Context) (Key, error) {
 	f.get.Do(func() {
-		err := f.BlockUntilReady(ctx)
+		defer f.Close()
+
+		err := f.blockUntilReady(ctx)
 		if err != nil {
 			f.e = err
-			return
-		}
-		if err := C.fdb_future_get_error(f.ptr); err != 0 {
-			f.e = Error{int(err)}
 			return
 		}
 
@@ -234,7 +221,6 @@ func (f *futureKey) Get(ctx context.Context) (Key, error) {
 		}
 
 		f.k = C.GoBytes(unsafe.Pointer(value), length)
-		C.fdb_future_release_memory(f.ptr)
 	})
 
 	return f.k, f.e
@@ -273,17 +259,13 @@ type futureNil struct {
 
 func (f *futureNil) Get(ctx context.Context) error {
 	f.get.Do(func() {
-		err := f.BlockUntilReady(ctx)
+		defer f.Close()
+
+		err := f.blockUntilReady(ctx)
 		if err != nil {
 			f.e = err
 			return
 		}
-		if err := C.fdb_future_get_error(f.ptr); err != 0 {
-			f.e = Error{int(err)}
-			return
-		}
-
-		C.fdb_future_release_memory(f.ptr)
 	})
 
 	return nil
@@ -318,13 +300,9 @@ func stringRefToSlice(ptr unsafe.Pointer) []byte {
 
 func (f *futureKeyValueArray) Get(ctx context.Context) ([]KeyValue, bool, error) {
 	f.o.Do(func() {
-		err := f.BlockUntilReady(ctx)
+		err := f.blockUntilReady(ctx)
 		if err != nil {
 			f.e = err
-			return
-		}
-		if err := C.fdb_future_get_error(f.ptr); err != 0 {
-			f.e = Error{int(err)}
 			return
 		}
 
@@ -379,13 +357,11 @@ type futureKeyArray struct {
 
 func (f *futureKeyArray) Get(ctx context.Context) ([]Key, error) {
 	f.get.Do(func() {
-		err := f.BlockUntilReady(ctx)
+		defer f.Close()
+
+		err := f.blockUntilReady(ctx)
 		if err != nil {
 			f.e = err
-			return
-		}
-		if err := C.fdb_future_get_error(f.ptr); err != 0 {
-			f.e = Error{int(err)}
 			return
 		}
 
@@ -403,8 +379,6 @@ func (f *futureKeyArray) Get(ctx context.Context) ([]Key, error) {
 
 			f.v[i] = stringRefToSlice(kptr)
 		}
-
-		C.fdb_future_release_memory(f.ptr)
 	})
 
 	return f.v, f.e
@@ -444,13 +418,11 @@ type futureInt64 struct {
 
 func (f *futureInt64) Get(ctx context.Context) (int64, error) {
 	f.get.Do(func() {
-		err := f.BlockUntilReady(ctx)
+		defer f.Close()
+
+		err := f.blockUntilReady(ctx)
 		if err != nil {
 			f.e = err
-			return
-		}
-		if err := C.fdb_future_get_error(f.ptr); err != 0 {
-			f.e = Error{int(err)}
 			return
 		}
 
@@ -461,7 +433,6 @@ func (f *futureInt64) Get(ctx context.Context) (int64, error) {
 		}
 
 		f.v = int64(value)
-		C.fdb_future_release_memory(f.ptr)
 	})
 
 	return f.v, f.e
@@ -502,13 +473,11 @@ type futureStringSlice struct {
 
 func (f *futureStringSlice) Get(ctx context.Context) ([]string, error) {
 	f.get.Do(func() {
-		err := f.BlockUntilReady(ctx)
+		defer f.Close()
+
+		err := f.blockUntilReady(ctx)
 		if err != nil {
 			f.e = err
-			return
-		}
-		if err := C.fdb_future_get_error(f.ptr); err != 0 {
-			f.e = Error{int(err)}
 			return
 		}
 
@@ -524,8 +493,6 @@ func (f *futureStringSlice) Get(ctx context.Context) ([]string, error) {
 		for i := 0; i < int(count); i++ {
 			f.v[i] = C.GoString((*C.char)(*(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(strings)) + uintptr(i*8)))))
 		}
-
-		C.fdb_future_release_memory(f.ptr)
 	})
 
 	return f.v, f.e
