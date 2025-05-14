@@ -59,6 +59,7 @@ struct ShardResult {
 };
 
 // Actor to retrieve shard boundaries for a given key range
+// TODO: Generalize... This is like fdbclient/AuditUtils.actor.cpp getShardMapFromKeyServers.
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getShardBoundaries(Database cx, KeyRangeRef rangeToScanBoundariesFor) {
 	state std::vector<Key> tempBoundaries; // Use std::vector for easy manipulation
 	state Key currentBoundaryScanBegin = rangeToScanBoundariesFor.begin;
@@ -395,14 +396,6 @@ ACTOR Future<ChecksumResult> calculateDatabaseChecksum(Database cx, Optional<Key
 			} // Re-throw
 		}
 	}
-
-	// No longer need the old loop structure
-	// state int boundaryIdx = 0;
-	// state Key currentOuterBeginKey = overallRangeToProcess.begin;
-	// state int64_t maxBytesPerTransactionAttempt = 10 * 1024 * 1024;
-	// loop { ... old processing logic removed ... }
-
-	// finalResult.checksum = XXH64_digest(&xxhStateGlobal); // Done via XOR now
 
 	TraceEvent(SevInfo, "ChecksumFinalResult")
 	    .detail("Checksum", finalResult.checksum) // This is now the XORed checksum
