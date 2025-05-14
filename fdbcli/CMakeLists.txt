@@ -71,3 +71,5 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
     )
   endif()
 endif()
+
+add_subdirectory(fdb_checksum_tool)

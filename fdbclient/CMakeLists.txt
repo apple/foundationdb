@@ -1,5 +1,6 @@
 fdb_find_sources(FDBCLIENT_SRCS)
 list(APPEND FDBCLIENT_SRCS sha1/SHA1.cpp)
+list(APPEND FDBCLIENT_SRCS ChecksumDatabase.actor.cpp)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
@@ -68,8 +69,27 @@ if(WITH_AWS_BACKUP)
   include(awssdk)
 endif()
 
+# Find Homebrew fmt directly
+find_path(FMT_INCLUDE_DIR NAMES fmt/core.h
+    HINTS /opt/homebrew/opt/fmt/include NO_DEFAULT_PATH)
+find_library(FMT_LIBRARY NAMES fmt
+    HINTS /opt/homebrew/opt/fmt/lib NO_DEFAULT_PATH)
+
+if(FMT_INCLUDE_DIR AND FMT_LIBRARY)
+    message(STATUS "Found Homebrew fmt: ${FMT_LIBRARY} (includes: ${FMT_INCLUDE_DIR})")
+    set(PC_FMT_INCLUDE_DIRS ${FMT_INCLUDE_DIR}) # Keep variable name for compatibility downstream if used
+    set(PC_FMT_LIBRARIES ${FMT_LIBRARY})     # Keep variable name for compatibility downstream if used
+else()
+    message(FATAL_ERROR "Homebrew fmt not found. Please install with 'brew install fmt'")
+endif()
+
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
-target_include_directories(fdbclient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_include_directories(fdbclient PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/bindings/c/foundationdb"
+    "${CMAKE_BINARY_DIR}/bindings/c/foundationdb"
+    )
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/versions.h)
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
@@ -85,6 +105,7 @@ target_include_directories(s3client PRIVATE
     "${CMAKE_SOURCE_DIR}/contrib/md5/include"
     "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
     "/opt/boost_1_86_0_clang/include"
+    ${PC_FMT_INCLUDE_DIRS}
 )
 
 target_link_libraries(s3client PRIVATE
@@ -95,7 +116,7 @@ target_link_libraries(s3client PRIVATE
     md5
     libb64
     stacktrace
-    fmt
+    ${PC_FMT_LIBRARIES}
     crc32
     eio
     rapidxml
@@ -156,7 +177,12 @@ endif()
 # fdbserver retain sampling functionality in client code while disabling
 # sampling for pure clients.
 add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
-target_include_directories(fdbclient_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_include_directories(fdbclient_sampling PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/bindings/c/foundationdb"
+    "${CMAKE_BINARY_DIR}/bindings/c/foundationdb"
+    )
 add_dependencies(fdbclient_sampling fdboptions)
 target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack PRIVATE rapidxml)
 target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
