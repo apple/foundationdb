@@ -112,7 +112,9 @@ func (d Database) CreateTransaction() (Transaction, error) {
 // from the go bindings. If a suspendDuration > 0 is provided the rebooted process will be
 // suspended for suspendDuration seconds. If checkFile is set to true the process will check
 // if the data directory is writeable by creating a validation file. The address must be a
-// process address is the form of IP:Port pair.
+// process address is the form of IP:Port pair without the :tls suffix if the cluster is running
+// with TLS enabled. The address can also be multiple processes addresses concated by a comma, e.g.
+// "IP1:Port,IP2:port", in this case the RebootWorker will reboot all provided addresses concurrently.
 func (d Database) RebootWorker(address string, checkFile bool, suspendDuration int) error {
 	t := &futureInt64{
 		future: newFutureWithDb(
