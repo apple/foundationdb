@@ -48,6 +48,7 @@ struct ChecksumResult {
 // #include "flow/actorcompiler.h" // This was correctly commented out previously
 #include "fdbclient/DatabaseContext.h" // Provides 'Database' type, needed for the signature
 
+#ifndef ACTOR_COMPILER
 namespace fdb {
 // Actor declared within fdb namespace, returning the namespaced fdb::ChecksumResult struct
 // The ChecksumResult struct is now defined globally above.
@@ -55,6 +56,7 @@ ACTOR Future<fdb::ChecksumResult> calculateDatabaseChecksum(Database cx,
                                                             Optional<KeyRange> range = Optional<KeyRange>());
 
 } // namespace fdb
+#endif // ACTOR_COMPILER
 
 #endif // NO_INTELLISENSE
 
