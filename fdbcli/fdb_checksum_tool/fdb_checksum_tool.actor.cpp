@@ -17,7 +17,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifndef NO_INTELLISENSE
+// In IDE, we need to define the API version explicitly
+#define FDB_API_VERSION 710
+#else
+// In actual build, use the latest version
 #define FDB_USE_LATEST_API_VERSION
+#endif
+
 #include "flow/flow.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
@@ -37,9 +44,6 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/xxhash.h"
 #include "fdbclient/ChecksumDatabase.actor.h" // This now brings in actorcompiler.h for its own actors
-
-// Define FDB_API_VERSION before including fdb_c.h
-#define FDB_API_VERSION 710
 
 // Include C API here
 #include "foundationdb/fdb_c.h"
