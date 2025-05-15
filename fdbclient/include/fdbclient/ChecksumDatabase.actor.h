@@ -38,16 +38,14 @@ struct ChecksumResult {
 };
 } // namespace fdb
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H)
-#define FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H
+#ifdef NO_INTELLISENSE
+#ifndef FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H_WRAPPER // New guard specific to this block
+#define FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H_WRAPPER
 #include "fdbclient/ChecksumDatabase.actor.g.h"
+#endif // FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H_WRAPPER
 #else
-
-// For Intellisense, ensure other necessary headers are included if not pulled by global ones
-// And critically, include actorcompiler.h here for the linter/intellisense path
-// #include "flow/actorcompiler.h" // No longer needed here, moved up
+// For Intellisense (NO_INTELLISENSE is not defined)
+// #include "flow/actorcompiler.h" // This was correctly commented out previously
 #include "fdbclient/DatabaseContext.h" // Provides 'Database' type, needed for the signature
 
 namespace fdb {
@@ -58,6 +56,6 @@ ACTOR Future<fdb::ChecksumResult> calculateDatabaseChecksum(Database cx,
 
 } // namespace fdb
 
-#endif // #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H)
+#endif // NO_INTELLISENSE
 
 #endif // FDBCLIENT_CHECKSUMDATABASE_ACTOR_H
