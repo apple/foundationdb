@@ -80,7 +80,7 @@ ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
 
 FROM base AS foundationdb-base
 
-ARG FDB_VERSION=6.3.22
+ARG FDB_VERSION=7.3.63
 ARG FDB_LIBRARY_VERSIONS="${FDB_VERSION}"
 ARG FDB_WEBSITE=https://github.com/apple/foundationdb/releases/download
 
