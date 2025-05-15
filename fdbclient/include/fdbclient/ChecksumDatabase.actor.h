@@ -21,8 +21,6 @@
 #define FDBCLIENT_CHECKSUMDATABASE_ACTOR_H
 #pragma once
 
-#include "flow/actorcompiler.h" // Moved for global ACTOR definition
-
 #define XXH_STATIC_LINKING_ONLY // Ensure full xxhash definitions are exposed
 
 // Includes that might be needed by ChecksumResult or the actor

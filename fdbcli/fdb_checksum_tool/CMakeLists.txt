@@ -43,9 +43,8 @@ target_link_libraries(fdb_checksum_tool PRIVATE
     fdbrpc
     flow
     fdb_flow
-    "${CMAKE_BINARY_DIR}/boost_install/lib/libboost_program_options.a"
-    "${CMAKE_BINARY_DIR}/boost_install/lib/libboost_system.a"
-    "${CMAKE_BINARY_DIR}/boost_install/lib/libboost_filesystem.a"
+    boost_target
+    boost_target_program_options
     stacktrace
     fmt::fmt
 )
