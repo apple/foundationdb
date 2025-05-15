@@ -403,12 +403,9 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 		}
 		if (!lookupSecret) {
 			credsString += ":" + credentials.get().secret;
-		}
-		if (!lookupSecret) {
-			credsString +=
-			    credentials.get().securityToken.empty()
-			        ? std::string(":") + credentials.get().secret
-			        : std::string(":") + credentials.get().secret + std::string(":") + credentials.get().securityToken;
+			if (!credentials.get().securityToken.empty()) {
+				credsString += ":" + credentials.get().securityToken;
+			}
 		}
 		credsString += "@";
 	}
