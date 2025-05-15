@@ -76,9 +76,7 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete, bool include_user_ty
 			i += sizeof(float) + 1;
 		} else if (data[i] == 0x21) {
 			i += sizeof(double) + 1;
-		} else if (data[i] == 0x26 || data[i] == 0x27) {
-			i += 1;
-		} else if (data[i] == '\x00') {
+		} else if (data[i] == 0x26 || data[i] == 0x27 || data[i] == '\x00') {
 			i += 1;
 		} else if (data[i] == VERSIONSTAMP_96_CODE) {
 			i += VERSIONSTAMP_TUPLE_SIZE + 1;

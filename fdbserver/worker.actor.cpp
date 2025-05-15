@@ -374,19 +374,21 @@ KeyValueStoreSuffix shardedRocksdbSuffix = { KeyValueStoreType::SSD_SHARDED_ROCK
 std::string validationFilename = "_validate";
 
 std::string filenameFromSample(KeyValueStoreType storeType, std::string folder, std::string sample_filename) {
-	if (storeType == KeyValueStoreType::SSD_BTREE_V1)
+	switch (storeType.storeType()) {
+	case KeyValueStoreType::SSD_BTREE_V1:
+	case KeyValueStoreType::SSD_BTREE_V2:
+	case KeyValueStoreType::SSD_REDWOOD_V1:
+	case KeyValueStoreType::SSD_ROCKSDB_V1:
+	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:
 		return joinPath(folder, sample_filename);
-	else if (storeType == KeyValueStoreType::SSD_BTREE_V2)
-		return joinPath(folder, sample_filename);
-	else if (storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE)
+
+	case KeyValueStoreType::MEMORY:
+	case KeyValueStoreType::MEMORY_RADIXTREE:
 		return joinPath(folder, sample_filename.substr(0, sample_filename.size() - 5));
-	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
-		return joinPath(folder, sample_filename);
-	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
-		return joinPath(folder, sample_filename);
-	else if (storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
-		return joinPath(folder, sample_filename);
-	UNREACHABLE();
+
+	default:
+		UNREACHABLE();
+	}
 }
 
 std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std::string prefix, UID id) {
