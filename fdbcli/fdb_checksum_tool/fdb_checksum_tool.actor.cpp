@@ -38,6 +38,9 @@
 #include "flow/xxhash.h"
 #include "fdbclient/ChecksumDatabase.actor.h" // This now brings in actorcompiler.h for its own actors
 
+// Define FDB_API_VERSION before including fdb_c.h
+#define FDB_API_VERSION 710
+
 // Include C API here
 #include "foundationdb/fdb_c.h"
 
