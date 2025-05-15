@@ -256,7 +256,8 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 				TraceEvent(SevError, "S3ClientCopyUpFileReadError")
 				    .detail("Expected", partSize)
 				    .detail("Actual", bytesRead)
-				    .detail("Offset", offset);
+				    .detail("Offset", offset)
+				    .detail("FilePath", filepath);
 				throw io_error();
 			}
 
@@ -446,7 +447,8 @@ ACTOR static Future<PartState> downloadPartWithRetry(Reference<S3BlobStoreEndpoi
 			TraceEvent(SevError, "S3ClientDownloadPartSizeMismatch")
 			    .detail("Expected", resultPart.size)
 			    .detail("Actual", bytesRead)
-			    .detail("Offset", resultPart.offset);
+			    .detail("Offset", resultPart.offset)
+			    .detail("FilePath", file->getFilename());
 			throw io_error();
 		}
 
@@ -692,6 +694,20 @@ ACTOR Future<Void> listFiles(std::string s3url, int maxDepth) {
 		// Track directories to avoid duplicates
 		std::set<std::string> directories;
 
+		// Helper function to format size in human-readable format
+		auto formatSize = [](int64_t size) -> std::string {
+			const char* units[] = { "B", "KB", "MB", "GB", "TB", "PB" };
+			int unit = 0;
+			double value = static_cast<double>(size);
+			while (value >= 1024.0 && unit < 5) {
+				value /= 1024.0;
+				unit++;
+			}
+			char buffer[32];
+			snprintf(buffer, sizeof(buffer), "%.2f %s", value, units[unit]);
+			return std::string(buffer);
+		};
+
 		// First print common prefixes (directories)
 		for (const auto& prefix : result.commonPrefixes) {
 			std::string dirName = prefix;
@@ -715,7 +731,7 @@ ACTOR Future<Void> listFiles(std::string s3url, int maxDepth) {
 				}
 			}
 			if (!skip) {
-				std::cout << "  " << objectName << std::endl;
+				std::cout << " " << objectName << " " << formatSize(object.size) << std::endl;
 			}
 		}
 	} catch (Error& e) {
