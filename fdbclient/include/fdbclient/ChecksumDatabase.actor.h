@@ -17,47 +17,47 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef FDBCLIENT_CHECKSUMDATABASE_ACTOR_H
+
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H)
+#define FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H
+#include "fdbclient/ChecksumDatabase.actor.g.h"
+#elif !defined(FDBCLIENT_CHECKSUMDATABASE_ACTOR_H)
 #define FDBCLIENT_CHECKSUMDATABASE_ACTOR_H
-#pragma once
 
-#define XXH_STATIC_LINKING_ONLY // Ensure full xxhash definitions are exposed
+// Define XXH_STATIC_LINKING_ONLY before including xxhash.h
+#define XXH_STATIC_LINKING_ONLY
+#include "flow/xxhash.h" // For XXH64_state_t and checksum functions
 
-// Includes that might be needed by ChecksumResult or the actor
-#include <cstdint> // For uint64_t, int64_t
-#include "fdbclient/FDBTypes.h" // For KeyRange, Optional
-#include "flow/flow.h" // For Future, etc.
-#include "flow/xxhash.h" // For XXH64_state_t
+// Includes for types used in actor signatures and ChecksumResult
+#include "fdbclient/DatabaseContext.h" // For Database
+#include "fdbclient/FDBTypes.h" // For TenantName, KeyRange, Key, Version
+#include "flow/flow.h" // For Future, Optional, serializer, etc.
+#include "flow/FileIdentifier.h" // For FileIdentifier (if used, else remove)
 
-// Define ChecksumResult struct globally within the header, inside its namespace
 namespace fdb {
 struct ChecksumResult {
 	uint64_t checksum;
 	int64_t totalBytes;
 	int64_t totalKeys;
+
+	ChecksumResult() : checksum(0), totalBytes(0), totalKeys(0) {}
+	ChecksumResult(uint64_t checksum, int64_t totalBytes, int64_t totalKeys)
+	  : checksum(checksum), totalBytes(totalBytes), totalKeys(totalKeys) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checksum, totalBytes, totalKeys);
+	}
 };
 } // namespace fdb
 
-#ifdef NO_INTELLISENSE
-#ifndef FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H_WRAPPER // New guard specific to this block
-#define FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H_WRAPPER
-#include "fdbclient/ChecksumDatabase.actor.g.h"
-#endif // FDBCLIENT_CHECKSUMDATABASE_ACTOR_G_H_WRAPPER
-#else
-// For Intellisense (NO_INTELLISENSE is not defined)
-// #include "flow/actorcompiler.h" // This was correctly commented out previously
-#include "fdbclient/DatabaseContext.h" // Provides 'Database' type, needed for the signature
+// This must be the last #include.
+#include "flow/actorcompiler.h"
 
-#ifndef ACTOR_COMPILER
 namespace fdb {
-// Actor declared within fdb namespace, returning the namespaced fdb::ChecksumResult struct
-// The ChecksumResult struct is now defined globally above.
-ACTOR Future<fdb::ChecksumResult> calculateDatabaseChecksum(Database cx,
-                                                            Optional<KeyRange> range = Optional<KeyRange>());
-
+ACTOR Future<ChecksumResult> calculateDatabaseChecksum(Database cx, Optional<KeyRange> range);
 } // namespace fdb
-#endif // ACTOR_COMPILER
 
-#endif // NO_INTELLISENSE
+#include "flow/unactorcompiler.h"
 
 #endif // FDBCLIENT_CHECKSUMDATABASE_ACTOR_H
