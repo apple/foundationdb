@@ -344,7 +344,12 @@ ACTOR Future<Void> run(Reference<Params> params) {
 }
 
 ACTOR Future<Void> deleteResource(std::string src) {
-	// Implementation of deleteResource
+	try {
+		wait(::deleteResource(src));
+	} catch (Error& e) {
+		// Rethrow the error to ensure it's handled by the main error handler
+		throw;
+	}
 	return Void();
 }
 
