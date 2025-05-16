@@ -414,6 +414,12 @@ public:
 	int SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST; // the max number of batch count per bulkdump request to a SS
 	int BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE; // the block size when performing async read/write for bulkload
 	int MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK; // the max number of manifest that a bulkload task can process
+	bool BULKLOAD_SIM_FAILURE_INJECTION; // Set to true to inject failure in bulkload simulation
+	double DD_BULKLOAD_POWER_OF_D_RATIO; // When selecting the dest team, DD randomly chooses 1/D portion of all valid
+	                                     // teams as the candidates and the DD selects the team with the minimal number
+	                                     // of ongoing tasks from the candidates as the dest team.
+	double DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC; // the seconds that the bulkload task submitter has to wait
+	                                                 // between two tasks
 	bool CC_ENFORCE_USE_UNFIT_DD_IN_SIM; // Set for CC to enforce to use an unfit DD in the simulation. This knob takes
 	                                     // effect only in the simulation.
 	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the
@@ -1455,6 +1461,8 @@ public:
 
 	// Swift: Enable the Swift runtime hooks and use Swift implementations where possible
 	bool FLOW_WITH_SWIFT;
+
+	bool BULK_LOAD_USE_SST_INGEST; // Enable direct SST file ingestion for RocksDB storage engines
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

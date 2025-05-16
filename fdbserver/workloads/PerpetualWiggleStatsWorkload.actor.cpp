@@ -214,7 +214,8 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		                                      Promise<UID>(),
 		                                      PromiseStream<Promise<int>>(),
 		                                      PromiseStream<Promise<int64_t>>(),
-		                                      PromiseStream<RebalanceStorageQueueRequest>() });
+		                                      PromiseStream<RebalanceStorageQueueRequest>(),
+		                                      makeReference<BulkLoadTaskCollection>(UID(8, 6)) });
 		tester.configuration.storageTeamSize = 3;
 		tester.configuration.perpetualStorageWiggleSpeed = 1;
 

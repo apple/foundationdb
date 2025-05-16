@@ -872,7 +872,8 @@ RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
 		rep.push_back_deep(rep.arena(), kv);
 		expectedSize = expectedSize + kv.expectedSize();
 		keyCount++;
-		if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
+		if (g_network->isSimulated() && SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION &&
+		    deterministicRandom()->random01() < 0.1) {
 			TraceEvent(SevWarnAlways, "TryGetRangeForBulkLoadInjectError");
 			throw operation_failed();
 		}

@@ -136,6 +136,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(concurrent_requests, cr);
 	TRY_PARAM(multipart_max_part_size, maxps);
 	TRY_PARAM(multipart_min_part_size, minps);
+	TRY_PARAM(multipart_retry_delay_ms, mrd);
 	TRY_PARAM(concurrent_uploads, cu);
 	TRY_PARAM(concurrent_lists, cl);
 	TRY_PARAM(concurrent_reads_per_file, crpf);
@@ -231,7 +232,22 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 		resourceFromURL->clear();
 
 	try {
-		StringRef t(url);
+		// Replace HTML-encoded ampersands with raw ampersands
+		std::string decoded_url = url;
+		size_t pos = 0;
+		while ((pos = decoded_url.find("&amp;", pos)) != std::string::npos) {
+			decoded_url.replace(pos, 5, "&");
+			pos += 1;
+		}
+
+		// Also handle double-encoded ampersands
+		pos = 0;
+		while ((pos = decoded_url.find("&amp;amp;", pos)) != std::string::npos) {
+			decoded_url.replace(pos, 9, "&");
+			pos += 1;
+		}
+
+		StringRef t(decoded_url);
 		StringRef prefix = t.eat("://");
 		if (prefix != "blobstore"_sr)
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
@@ -418,18 +434,17 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 		params.append(v);
 	}
 
-	if (!params.empty())
+	if (!params.empty()) {
 		r.append("?").append(params);
+	}
 
 	return r;
 }
 
-std::string constructResourcePath(Reference<S3BlobStoreEndpoint> b,
-                                  const std::string& bucket,
-                                  const std::string& object) {
+std::string S3BlobStoreEndpoint::constructResourcePath(const std::string& bucket, const std::string& object) const {
 	std::string resource;
 
-	if (b->getHost().find(bucket + ".") != 0) {
+	if (host.find(bucket + ".") != 0) {
 		resource += std::string("/") + bucket; // not virtual hosting mode
 	}
 
@@ -447,11 +462,19 @@ std::string constructResourcePath(Reference<S3BlobStoreEndpoint> b,
 ACTOR Future<bool> bucketExists_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket) {
 	wait(b->requestRateRead->getAllowance(1));
 
-	state std::string resource = constructResourcePath(b, bucket, "");
+	state std::string resource = b->constructResourcePath(bucket, "");
 	state HTTP::Headers headers;
 
-	Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
-	return r->code == 200;
+	try {
+		Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
+		return r->code == 200;
+	} catch (Error& e) {
+		TraceEvent(SevError, "S3ClientBucketExistsError")
+		    .detail("Bucket", bucket)
+		    .detail("Host", b->host)
+		    .errorUnsuppressed(e);
+		throw;
+	}
 }
 
 Future<bool> S3BlobStoreEndpoint::bucketExists(std::string const& bucket) {
@@ -461,7 +484,7 @@ Future<bool> S3BlobStoreEndpoint::bucketExists(std::string const& bucket) {
 ACTOR Future<bool> objectExists_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateRead->getAllowance(1));
 
-	state std::string resource = constructResourcePath(b, bucket, object);
+	state std::string resource = b->constructResourcePath(bucket, object);
 	state HTTP::Headers headers;
 
 	Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
@@ -475,7 +498,7 @@ Future<bool> S3BlobStoreEndpoint::objectExists(std::string const& bucket, std::s
 ACTOR Future<Void> deleteObject_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateDelete->getAllowance(1));
 
-	state std::string resource = constructResourcePath(b, bucket, object);
+	state std::string resource = b->constructResourcePath(bucket, object);
 	state HTTP::Headers headers;
 	// 200 or 204 means object successfully deleted, 404 means it already doesn't exist, so any of those are considered
 	// successful
@@ -569,7 +592,7 @@ ACTOR Future<Void> createBucket_impl(Reference<S3BlobStoreEndpoint> b, std::stri
 
 	bool exists = wait(b->bucketExists(bucket));
 	if (!exists) {
-		state std::string resource = constructResourcePath(b, bucket, "");
+		state std::string resource = b->constructResourcePath(bucket, "");
 		state HTTP::Headers headers;
 
 		std::string region = b->getRegion();
@@ -599,7 +622,7 @@ Future<Void> S3BlobStoreEndpoint::createBucket(std::string const& bucket) {
 ACTOR Future<int64_t> objectSize_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateRead->getAllowance(1));
 
-	state std::string resource = constructResourcePath(b, bucket, object);
+	state std::string resource = b->constructResourcePath(bucket, object);
 	state HTTP::Headers headers;
 
 	Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
@@ -930,7 +953,13 @@ std::string getCanonicalURI(Reference<S3BlobStoreEndpoint> bstore, Reference<HTT
 	    awsCanonicalURI(req->resource, queryParameters, CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER);
 	if (!queryParameters.empty()) {
 		canonicalURI += "?";
-		canonicalURI += boost::algorithm::join(queryParameters, "&");
+		// Use raw ampersands when joining query parameters
+		for (size_t i = 0; i < queryParameters.size(); ++i) {
+			if (i > 0) {
+				canonicalURI += "&";
+			}
+			canonicalURI += queryParameters[i];
+		}
 	}
 
 	if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
@@ -951,7 +980,7 @@ void populateDryrunRequest(Reference<HTTP::OutgoingRequest> dryrunRequest,
 	dryrunRequest->data.headers["Host"] = bstore->host;
 	dryrunRequest->data.headers["Accept"] = "application/xml";
 
-	dryrunRequest->resource = constructResourcePath(bstore, bucket, "");
+	dryrunRequest->resource = bstore->constructResourcePath(bucket, "");
 }
 
 bool isWriteRequest(std::string verb) {
@@ -1347,7 +1376,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
                                           int maxDepth,
                                           std::function<bool(std::string const&)> recurseFilter) {
 	// Request 1000 keys at a time, the maximum allowed
-	state std::string resource = constructResourcePath(bstore, bucket, "");
+	state std::string resource = bstore->constructResourcePath(bucket, "");
 
 	resource.append("/?max-keys=1000");
 	if (prefix.present())
@@ -1368,11 +1397,21 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		state std::string fullResource = resource + lastFile;
 		lastFile.clear();
 		Reference<HTTP::IncomingResponse> r =
-		    wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200 }));
+		    wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200, 404 }));
 		listReleaser.release();
 
 		try {
 			S3BlobStoreEndpoint::ListResult listResult;
+
+			// If we got a 404, throw an error to indicate the resource doesn't exist
+			if (r->code == 404) {
+				TraceEvent(SevError, "S3BlobStoreResourceNotFound")
+				    .detail("Bucket", bucket)
+				    .detail("Prefix", prefix.present() ? prefix.get() : "")
+				    .detail("Resource", fullResource);
+				throw resource_not_found();
+			}
+
 			xml_document<> doc;
 
 			// Copy content because rapidxml will modify it during parse
@@ -1841,7 +1880,7 @@ ACTOR Future<std::string> readEntireFile_impl(Reference<S3BlobStoreEndpoint> bst
                                               std::string object) {
 	wait(bstore->requestRateRead->getAllowance(1));
 
-	state std::string resource = constructResourcePath(bstore, bucket, object);
+	state std::string resource = bstore->constructResourcePath(bucket, object);
 	state HTTP::Headers headers;
 	// Set this header on the GET for it to volunteer saved checksum in the response headers.
 	// See https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html#API_GetObject_RequestSyntax
@@ -1885,7 +1924,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint>
 	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
-	state std::string resource = constructResourcePath(bstore, bucket, object);
+	state std::string resource = bstore->constructResourcePath(bucket, object);
 	state HTTP::Headers headers;
 	// contentHash is calculated by the caller. It is md5 or sha256 dependent on
 	// enable_object_integrity_check setting. If the hash (md5 or sha256) we
@@ -1979,7 +2018,7 @@ ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore,
 		// Log rate limiter state
 		wait(bstore->requestRateRead->getAllowance(1));
 
-		state std::string resource = constructResourcePath(bstore, bucket, object);
+		state std::string resource = bstore->constructResourcePath(bucket, object);
 		state HTTP::Headers headers;
 		headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
 
@@ -2034,7 +2073,7 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStore
                                                            std::string object) {
 	wait(bstore->requestRateWrite->getAllowance(1));
 
-	state std::string resource = constructResourcePath(bstore, bucket, object);
+	state std::string resource = bstore->constructResourcePath(bucket, object);
 	resource += "?uploads";
 	state HTTP::Headers headers;
 	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
@@ -2077,7 +2116,7 @@ ACTOR Future<std::string> uploadPart_impl(Reference<S3BlobStoreEndpoint> bstore,
 	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
-	state std::string resource = constructResourcePath(bstore, bucket, object);
+	state std::string resource = bstore->constructResourcePath(bucket, object);
 	resource += format("?partNumber=%d&uploadId=%s", partNumber, uploadID.c_str());
 	state HTTP::Headers headers;
 	// Send MD5 sum for content so blobstore can verify it
@@ -2130,7 +2169,7 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 		manifest += format("<Part><PartNumber>%d</PartNumber><ETag>%s</ETag></Part>\n", p.first, p.second.c_str());
 	manifest += "</CompleteMultipartUpload>";
 
-	state std::string resource = constructResourcePath(bstore, bucket, object);
+	state std::string resource = bstore->constructResourcePath(bucket, object);
 	resource += format("?uploadId=%s", uploadID.c_str());
 	state HTTP::Headers headers;
 	PacketWriter pw(part_list.getWriteBuffer(manifest.size()), nullptr, Unversioned());
@@ -2157,7 +2196,7 @@ ACTOR Future<Void> abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bsto
                                              std::string uploadID) {
 	wait(bstore->requestRateWrite->getAllowance(1));
 
-	std::string resource = constructResourcePath(bstore, bucket, object);
+	std::string resource = bstore->constructResourcePath(bucket, object);
 	resource += format("?uploadId=%s", uploadID.c_str());
 
 	HTTP::Headers headers;
@@ -2183,7 +2222,7 @@ ACTOR Future<Void> putObjectTags_impl(Reference<S3BlobStoreEndpoint> bstore,
                                       std::map<std::string, std::string> tags) {
 	state UnsentPacketQueue packets;
 	wait(bstore->requestRateWrite->getAllowance(1));
-	state std::string resource = constructResourcePath(bstore, bucket, object);
+	state std::string resource = bstore->constructResourcePath(bucket, object);
 	resource += "?tagging";
 	state int maxRetries = 5;
 	state int retryCount = 0;
@@ -2258,7 +2297,7 @@ ACTOR Future<std::map<std::string, std::string>> getObjectTags_impl(Reference<S3
                                                                     std::string object) {
 	wait(bstore->requestRateRead->getAllowance(1));
 
-	state std::string resource = constructResourcePath(bstore, bucket, object);
+	state std::string resource = bstore->constructResourcePath(bucket, object);
 	resource += "?tagging";
 	state HTTP::Headers headers;
 

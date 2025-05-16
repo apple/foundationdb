@@ -62,6 +62,7 @@ struct IDataDistributionTeam {
 	virtual void addReadInFlightToTeam(int64_t delta) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual Optional<int64_t> getLongestStorageQueueSize() const = 0;
+	virtual Optional<int> getMaxOngoingBulkLoadTaskCount() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getReadInFlightToTeam() const = 0;
 	virtual double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;

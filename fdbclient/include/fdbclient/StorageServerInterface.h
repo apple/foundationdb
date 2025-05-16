@@ -1138,12 +1138,22 @@ struct GetStorageMetricsReply {
 	int64_t versionLag = 0;
 	double lastUpdate = 0;
 	int64_t bytesDurable = 0, bytesInput = 0;
+	int ongoingBulkLoadTaskCount = 0;
 
 	GetStorageMetricsReply() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, available, capacity, bytesInputRate, versionLag, lastUpdate, bytesDurable, bytesInput);
+		serializer(ar,
+		           load,
+		           available,
+		           capacity,
+		           bytesInputRate,
+		           versionLag,
+		           lastUpdate,
+		           bytesDurable,
+		           bytesInput,
+		           ongoingBulkLoadTaskCount);
 	}
 };
 
