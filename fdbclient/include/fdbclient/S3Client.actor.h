@@ -132,5 +132,15 @@ ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int6
 // Returns a Future that completes when the operation is done
 ACTOR Future<Void> listFiles(std::string s3url, int maxDepth = 1);
 
+// Get the endpoint for the given s3url.
+// Populates parameters and resource with parse of s3url.
+// s3url: S3 URL to parse
+// resource: Output parameter for the resource path
+// parameters: Output parameter for the URL parameters
+// Returns a Reference to the S3BlobStoreEndpoint
+Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
+                                           std::string& resource,
+                                           S3BlobStoreEndpoint::ParametersT& parameters);
+
 #include "flow/unactorcompiler.h"
 #endif
