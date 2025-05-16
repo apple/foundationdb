@@ -1921,7 +1921,7 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 					                                    self->bulkLoadJobManager.get().manifestLocalTempFolder,
 					                                    manifestEntries,
 					                                    errorOut));
-					wait(yield()); // Avoid busy loop
+					wait(delay(SERVER_KNOBS->DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC)); // Avoid busy loop
 				}
 				ASSERT(beginKey == res[i + 1].key);
 			}

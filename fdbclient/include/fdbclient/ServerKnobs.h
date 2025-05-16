@@ -418,6 +418,8 @@ public:
 	double DD_BULKLOAD_POWER_OF_D_RATIO; // When selecting the dest team, DD randomly chooses 1/D portion of all valid
 	                                     // teams as the candidates and the DD selects the team with the minimal number
 	                                     // of ongoing tasks from the candidates as the dest team.
+	double DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC; // the seconds that the bulkload task submitter has to wait
+	                                                 // between two tasks
 	bool CC_ENFORCE_USE_UNFIT_DD_IN_SIM; // Set for CC to enforce to use an unfit DD in the simulation. This knob takes
 	                                     // effect only in the simulation.
 	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the
