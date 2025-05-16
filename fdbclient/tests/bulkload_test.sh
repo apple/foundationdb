@@ -189,6 +189,21 @@ function test_basic_bulkdump_and_bulkload {
     err "Failed loading data into fdb"
     return 1
   fi
+
+  log "Calculating checksum after initial load"
+  local initial_checksum_output
+  if ! initial_checksum_output=$("${local_build_dir}"/bin/fdb_checksum_tool -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" 2>&1); then
+    err "fdb_checksum_tool failed after initial load. Output: ${initial_checksum_output}"
+    return 1
+  fi
+  local initial_checksum
+  initial_checksum=$(echo "${initial_checksum_output}" | grep "Checksum:" | awk '{print $2}')
+  if [[ -z "${initial_checksum}" ]]; then
+    err "Failed to parse checksum after initial load. Output: ${initial_checksum_output}"
+    return 1
+  fi
+  log "Initial checksum: ${initial_checksum}"
+
   if [[ "${USE_S3}" == "true" ]]; then
     # Run this rm only if s3. In seaweed, it would fail because
     # bucket doesn't exist yet (they are lazily created).
@@ -222,6 +237,28 @@ function test_basic_bulkdump_and_bulkload {
     err "Failed verification of data in fdb"
     return 1
   fi
+
+  log "Calculating checksum after bulkload and verify"
+  local final_checksum_output
+  if ! final_checksum_output=$("${local_build_dir}"/bin/fdb_checksum_tool -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" 2>&1); then
+    err "fdb_checksum_tool failed after bulkload. Output: ${final_checksum_output}"
+    return 1
+  fi
+  local final_checksum
+  final_checksum=$(echo "${final_checksum_output}" | grep "Checksum:" | awk '{print $2}')
+  if [[ -z "${final_checksum}" ]]; then
+    err "Failed to parse checksum after bulkload. Output: ${final_checksum_output}"
+    return 1
+  fi
+  log "Final checksum: ${final_checksum}"
+
+  if [[ "${initial_checksum}" != "${final_checksum}" ]]; then
+    err "Checksum mismatch! Initial: ${initial_checksum}, Final: ${final_checksum}"
+    return 1
+  else
+    log "Checksums match: ${initial_checksum}"
+  fi
+
   log "Check for Severity=40 errors"
   if ! grep_for_severity40 "${local_scratch_dir}"; then
     err "Found Severity=40 errors in logs"

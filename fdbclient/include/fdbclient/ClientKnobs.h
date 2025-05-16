@@ -367,6 +367,12 @@ public:
 	// Enable to logging verbose trace events related to the accumulative checksum
 	bool ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING;
 
+	// Checksum Tool Knobs
+	int CHECKSUM_MAX_CONCURRENT_SHARDS = 16;
+
+	// Max number of trace logs that can be dumped to disk concurrently.
+	int MAX_CONCURRENT_TRACE_DUMPS = 10;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };
