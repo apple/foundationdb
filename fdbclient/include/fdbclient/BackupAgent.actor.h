@@ -25,14 +25,15 @@
 #elif !defined(FDBCLIENT_BACKUP_AGENT_ACTOR_H)
 #define FDBCLIENT_BACKUP_AGENT_ACTOR_H
 
+#include <ctime>
+#include <climits>
+
 #include "flow/flow.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
 #include "flow/IAsyncFile.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include <ctime>
-#include <climits>
 #include "fdbclient/BackupContainer.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -205,8 +206,7 @@ public:
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        Optional<std::string> blobManifestUrl = {},
-	                        TransformPartitionedLog transformPartitionedLog = TransformPartitionedLog::False);
+	                        Optional<std::string> blobManifestUrl = {});
 
 	// this method will construct range and version vectors and then call restore()
 	Future<Version> restore(Database cx,
@@ -245,8 +245,7 @@ public:
 	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
 	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        Optional<std::string> blobManifestUrl = {},
-	                        TransformPartitionedLog transformPartitionedLog = TransformPartitionedLog::False);
+	                        Optional<std::string> blobManifestUrl = {});
 
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,

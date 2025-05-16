@@ -1,0 +1,47 @@
+testClass = "Backup"
+
+[configuration]
+tenantModes = ['disabled'] # Do not support tenant
+encryptModes = ['disabled'] # Do not support encryption
+
+[[test]]
+testTitle = 'BackupPartitioned'
+clearAfterTest = false
+runConsistencyCheck = false
+waitForQuiescence = false
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'Backup'
+    usePartitionedLog = true
+    backupAfter = 10.0
+    restoreAfter = 60.0
+
+[[test]]
+testTitle = 'RestorePartitioned'
+runConsistencyCheck = false
+waitForQuiescence = false
+simBackupAgents = 'BackupToFile'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Restore'
+
+# check consistency after restore
+[[test]]
+testTitle = 'CycleAfterRestore'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+    skipSetup = true
+    expectedRate = 0
