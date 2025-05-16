@@ -3370,9 +3370,6 @@ int main(int argc, char* argv[]) {
 					    argc - 1, &argv[1], g_rgBackupDiscontinueOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::PAUSE:
-					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
-					break;
 				case BackupType::RESUME:
 					args = std::make_unique<CSimpleOpt>(
 					    argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
@@ -3445,9 +3442,6 @@ int main(int argc, char* argv[]) {
 					    argc - 1, &argv[1], g_rgDBAbortOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case DBType::PAUSE:
-					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgDBPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
-					break;
 				case DBType::RESUME:
 					args = std::make_unique<CSimpleOpt>(
 					    argc - 1, &argv[1], g_rgDBPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
@@ -3741,8 +3735,6 @@ int main(int argc, char* argv[]) {
 				restoreClusterFileOrig = args->OptionArg();
 				break;
 			case OPT_CLUSTERFILE:
-				clusterFile = args->OptionArg();
-				break;
 			case OPT_DEST_CLUSTER:
 				clusterFile = args->OptionArg();
 				break;

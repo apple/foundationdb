@@ -37,14 +37,12 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::TransactionClass:
-			return ProcessClass::WorstFit;
 		case ProcessClass::LogClass:
 			return ProcessClass::WorstFit;
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
 		case ProcessClass::BlobWorkerClass:
-			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::NeverAssign;
 		}
@@ -184,15 +182,10 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::MasterClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::CommitProxyClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::GrvProxyClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::LogRouterClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
@@ -287,7 +280,6 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::MasterClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::OkayFit;
 		default:

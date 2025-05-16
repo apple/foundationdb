@@ -115,43 +115,26 @@ struct ProcessInfo : NonCopyable {
 	bool isAvailableClass() const {
 		switch (startingClass._class) {
 		case ProcessClass::UnsetClass:
-			return true;
 		case ProcessClass::StorageClass:
-			return true;
 		case ProcessClass::TransactionClass:
-			return true;
-		case ProcessClass::ResolutionClass:
-			return false;
-		case ProcessClass::CommitProxyClass:
-			return false;
-		case ProcessClass::GrvProxyClass:
-			return false;
-		case ProcessClass::MasterClass:
-			return false;
-		case ProcessClass::TesterClass:
-			return false;
-		case ProcessClass::StatelessClass:
-			return false;
 		case ProcessClass::LogClass:
 			return true;
+
+		case ProcessClass::ResolutionClass:
+		case ProcessClass::CommitProxyClass:
+		case ProcessClass::GrvProxyClass:
+		case ProcessClass::MasterClass:
+		case ProcessClass::TesterClass:
+		case ProcessClass::StatelessClass:
 		case ProcessClass::LogRouterClass:
-			return false;
 		case ProcessClass::ClusterControllerClass:
-			return false;
 		case ProcessClass::DataDistributorClass:
-			return false;
 		case ProcessClass::RatekeeperClass:
-			return false;
 		case ProcessClass::ConsistencyScanClass:
-			return false;
 		case ProcessClass::BlobManagerClass:
-			return false;
 		case ProcessClass::StorageCacheClass:
-			return false;
 		case ProcessClass::BackupClass:
-			return false;
 		case ProcessClass::EncryptKeyProxyClass:
-			return false;
 		default:
 			return false;
 		}
