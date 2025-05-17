@@ -159,6 +159,36 @@ ACTOR Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap* tagsMa
 KeyBackedTag::KeyBackedTag(std::string tagName, StringRef tagMapPrefix)
   : KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName),
     tagMapPrefix(tagMapPrefix) {}
+
+// Lists all backups and find if any partitioned backup is running.
+ACTOR Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransaction> tr) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	std::vector<KeyBackedTag> tags = wait(getAllBackupTags(tr));
+
+	state std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
+	for (const auto& tag : tags) {
+		futures.push_back(tag.get(tr));
+	}
+
+	wait(waitForAll(futures));
+	state int i = 0;
+	for (i = 0; i < futures.size(); i++) {
+		if (futures[i].get().present()) {
+			state Optional<bool> partitionedLog;
+			state EBackupState state;
+			BackupConfig config(futures[i].get().get().first);
+
+			wait(store(state, config.stateEnum().getD(tr, Snapshot::False, EBackupState::STATE_NEVERRAN)) &&
+			     store(partitionedLog, config.partitionedLogEnabled().get(tr)));
+			if (FileBackupAgent::isRunnable(state) && partitionedLog.present() && partitionedLog.get()) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 class RestoreConfig : public KeyBackedTaskConfig {
 public:
 	RestoreConfig(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
@@ -4109,9 +4139,6 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				}
 
 				tr->set(backupStartedKey, encodeBackupStartedValue(ids));
-				if (backupWorkerEnabled) {
-					config.backupWorkerEnabled().set(tr, true);
-				}
 
 				// The task may be restarted. Set the watch if started key has NOT been set.
 				if (!taskStarted.get().present()) {
@@ -7236,6 +7263,15 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> checkAndDisableBackupWorkers(Database cx) {
+		state bool running = wait(runRYWTransaction(
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return anyPartitionedBackupRunning(tr); }));
+		if (!running) {
+			wait(disableBackupWorker(cx));
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> changePause(FileBackupAgent* backupAgent, Database db, bool pause) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
 		state Future<Void> change = backupAgent->taskBucket->changePause(db, pause);
@@ -8222,6 +8258,10 @@ Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransact
 
 Future<Void> FileBackupAgent::abortBackup(Reference<ReadYourWritesTransaction> tr, std::string tagName) {
 	return FileBackupAgentImpl::abortBackup(this, tr, tagName);
+}
+
+Future<Void> FileBackupAgent::checkAndDisableBackupWorkers(Database cx) {
+	return FileBackupAgentImpl::checkAndDisableBackupWorkers(cx);
 }
 
 Future<std::string> FileBackupAgent::getStatus(Database cx, ShowErrors showErrors, std::string tagName) {
