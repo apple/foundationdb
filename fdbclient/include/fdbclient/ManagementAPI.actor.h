@@ -294,5 +294,8 @@ bool schemaMatch(json_spirit::mValue const& schema,
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
+ACTOR Future<Void> disableBackupWorker(Database cx);
+ACTOR Future<Void> enableBackupWorker(Database cx);
+
 #include "flow/unactorcompiler.h"
 #endif
