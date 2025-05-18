@@ -36,6 +36,9 @@ disable_audit_storage_final_replica_check_in_sim = true
 # Since the machineCount is large, this test produces more trace events to complete
 max_trace_lines = 5000000
 
+# For s3, less faults.... The communication w/ external seaweed resource is less tolerant.
+bulkload_sim_failure_injection = false
+
 [[test]]
 testTitle = 'BulkDumpingWorkloadS3'
 useDB = true
@@ -48,5 +51,5 @@ waitForQuiescence = false
     # Use 127.0.0.1 rather than localhost. If 'localhost', code uses the ipv6 version.
     # if 127.0.0.1, its ipv4 which is likely where we started seaweed.
     # If running against joshua, refer to the seaweed instance running at seaweedfs.default.svc.cluster.local.
-    jobRoot = 'blobstore://seaweedfs:tot4llys3cure@seaweedfs.default.svc.cluster.local:8333/bulkdump?bucket=bulkdumpingworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0'
+    jobRoot = 'blobstore://seaweedfs:tot4llys3cure@seaweedfs.default.svc.cluster.local:8333/bulkdump?bucket=bulkdumpingworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0&request_timeout=60'
     #jobRoot = 'blobstore://KEY:SECRET:TOKEN@127.0.0.1:8333/bulkdumping/?bucket=bulkdumpingworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0&request_timeout=5'
