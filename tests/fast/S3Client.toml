@@ -34,16 +34,16 @@ connection_monitor_idle_timeout = 60.0
 
 [[test]]
 testTitle = 'S3Client'
-# useDB = true # TODO(BulkLoad): remove if do not use FDB database in the test
 
 # Note: The blob credentials file path should be set in the environment variable FDB_BLOB_CREDENTIALS
 # when running the test, not in this configuration file. The file gets written when the test runs.
  
     [[test.workload]]
     testName = 'S3ClientWorkload'
-    # So set the base URL for the (ersatz?) s3 service that we want to go against here.
+    # So set the base URL for the (ersatz) s3 service that we want to go against here.
     # Add the 'bypass_simulation=1' so we bypass simulated network to get
-    # to the service from simulation.
+    # to the service from simulation. Add global_connection_pool=0 so single-threaded
+    # and some form of determinacy.
     # Use 127.0.0.1 rather than localhost. If 'localhost', code uses the ipv6 version.
     # if 127.0.0.1, its ipv4 which is likely where we started seaweed.
     # If running against joshua, refer to the seaweed instance running at seaweedfs.default.svc.cluster.local.

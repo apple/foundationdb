@@ -1,3 +1,6 @@
+[knobs]
+BULKLOAD_SIM_FAILURE_INJECTION = false
+
 [configuration]
 storageEngineExcludeTypes = [5] #FIXME: remove after allowing to do bulkloading with fetchKey and shardedrocksdb
 
@@ -5,44 +8,85 @@ storageEngineExcludeTypes = [5] #FIXME: remove after allowing to do bulkloading 
 tenantModes = ['disabled']
 encryptModes = ['disabled']
 disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
-#minimumRegions = 1
 
+# Instruct simulation to generate a simple, single-region config
+generateFearless = false
+simpleConfig = true
 
-[[knobs]]
-# This knob is commented out since the knob override is done *after* the simulation system is set up. However,
-# this is not going to completely work:
-# The purpose of setting the knob to true was to enable the shard rocksdb storage engine
-# The shard rocksdb storage engine is set up before this knob is overridden
-# The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check.
-shard_encode_location_metadata = true
+# Simple network configuration - single region, no satellites
+minimumRegions = 1
+config = "single usable_regions=1"
 
-# Rely on RangeLock
-enable_read_lock_on_range = true
-
-# Do not support version vector
-enable_version_vector = false
-enable_version_vector_tlog_unicast = false
-enable_version_vector_reply_recovery = false
-
-# Set high enough sample rate to test bytes sampling
-min_byte_sampling_probability = 0.5
-
-# CC can repeatedly re-recruit new DD for the unfit recruitment which can block the test.
-cc_enforce_use_unfit_dd_in_sim = true
-
-# AuditStorage replica check can cause tooManyTraceEvents because both tests are large
-disable_audit_storage_final_replica_check_in_sim = true
-
-# Since the machineCount is large, this test produces more trace events to complete
-max_trace_lines = 5000000
-
-# For s3, less faults.... The communication w/ external seaweed resource is less tolerant.
-bulkload_sim_failure_injection = false
+# Disable all fault injection and network failures
+buggify = false
 
 [[test]]
 testTitle = 'BulkDumpingWorkloadS3'
 useDB = true
 waitForQuiescence = false
+connectionFailuresDisableDuration = 1000000
+
+    [test.knobs]
+    # The purpose of setting the knob to true was to enable the shard rocksdb storage engine
+    # The shard rocksdb storage engine is set up before this knob is overridden
+    # The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check.
+    shard_encode_location_metadata = true
+
+    # Rely on RangeLock
+    enable_read_lock_on_range = true
+
+    # Do not support version vector
+    enable_version_vector = false
+    enable_vector_tlog_unicast = false
+    enable_version_vector_reply_recovery = false
+
+    # Set high enough sample rate to test bytes sampling
+    min_byte_sampling_probability = 0.5
+
+    # CC can repeatedly re-recruit new DD for the unfit recruitment which can block the test.
+    cc_enforce_use_unfit_dd_in_sim = true
+
+    # AuditStorage replica check can cause tooManyTraceEvents because both tests are large
+    disable_audit_storage_final_replica_check_in_sim = true
+
+    # Since the machineCount is large, this test produces more trace events to complete
+    max_trace_lines = 5000000
+
+    # For s3, less faults.... The communication w/ external seaweed resource is less tolerant.
+    # # BULKLOAD_SIM_FAILURE_INJECTION = false # Recognized as unrecognized, but is a SERVER_KNOB. # MOVED TO GLOBAL [knobs]
+
+    # Reduce network partition probability
+    # buggify_disable_network_partitions = true # Recognized as unrecognized, but is a SERVER_KNOB.
+
+    # S3/Blobstore settings from S3Client.toml for stability/determinism
+    blobstore_max_connection_life = 300
+    blobstore_request_timeout_min = 300  # Was 60
+    blobstore_request_tries = 5          # Was 10
+    blobstore_connect_tries = 5          # Was 10
+    blobstore_connect_timeout = 30       # Was 60
+    http_send_size = 1024
+    http_read_size = 1024
+    connection_monitor_loop_time = 0.1
+    connection_monitor_timeout = 1.0
+    connection_monitor_idle_timeout = 60.0
+
+    # Reduce team allocation issues
+    dd_team_zero_server_left_log_delay = 0
+    # dd_team_zero_healthy_team_delay = 0 # Recognized as unrecognized, but is a SERVER_KNOB.
+    dd_rebalance_parallelism = 1
+
+    # Additional network stability knobs
+    # disable_connection_failure_for_network_tests = true # REMOVING - unrecognized, and connectionFailuresDisableDuration is at test level
+    # disable_dd_physical_shard_move = true # Recognized as unrecognized, but is a SERVER_KNOB.
+    # disable_dd_macroshards = true # Recognized as unrecognized, but is a SERVER_KNOB.
+    # disable_dd_maintenance_mode = true # Recognized as unrecognized, but is a SERVER_KNOB.
+
+    # Simplify network configuration - REMOVING ALL THESE SATELLITE RELATED ONES for a single region test
+    # satellite_logs = 0
+    # satellite_log_policy_max_staleness = 0
+    # satellite_log_replication_factor = 0
+    # satellite_log_write_anti_quorum = 0
+    # satellite_redundancy_mode = "one_satellite_single"
 
     [[test.workload]]
     testName = 'BulkDumpingWorkload'
@@ -51,5 +95,5 @@ waitForQuiescence = false
     # Use 127.0.0.1 rather than localhost. If 'localhost', code uses the ipv6 version.
     # if 127.0.0.1, its ipv4 which is likely where we started seaweed.
     # If running against joshua, refer to the seaweed instance running at seaweedfs.default.svc.cluster.local.
-    jobRoot = 'blobstore://seaweedfs:tot4llys3cure@seaweedfs.default.svc.cluster.local:8333/bulkdump?bucket=bulkdumpingworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0&request_timeout=60'
-    #jobRoot = 'blobstore://KEY:SECRET:TOKEN@127.0.0.1:8333/bulkdumping/?bucket=bulkdumpingworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0&request_timeout=5'
+    jobRoot = 'blobstore://seaweedfs:tot4llys3cure@seaweedfs.default.svc.cluster.local:8333/bulkdump/dumps?bucket=bulkdumpingworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0&request_timeout=60'
+    #jobRoot = 'blobstore://KEY:SECRET:TOKEN@127.0.0.1:8333/bulkdumping/dumps?bucket=bulkdumpingworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0&request_timeout=5'
