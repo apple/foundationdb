@@ -168,6 +168,12 @@ struct RestoreWorkload : TestWorkload {
 				                                                 lastBackupContainer->getProxy(),
 				                                                 lastBackupContainer->getEncryptionKeyFileName());
 				BackupDescription desc = wait(container->describeBackup());
+				TraceEvent("RW_Restore", self->randomID)
+				    .setMaxEventLength(12000)
+				    .detail("LastBackupContainer", lastBackupContainer->getURL())
+				    .detail("BackupTag", printable(self->backupTag))
+				    .setMaxFieldLength(10000)
+				    .detail("Description", desc.toString());
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
 					if (deterministicRandom()->random01() < 0.1) {
@@ -175,15 +181,12 @@ struct RestoreWorkload : TestWorkload {
 					} else if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.maxRestorableVersion.get();
 					} else if (deterministicRandom()->random01() < 0.5) {
-						targetVersion = deterministicRandom()->randomInt64(desc.minRestorableVersion.get(),
-						                                                   desc.contiguousLogEnd.get());
+						targetVersion = (desc.minRestorableVersion.get() != desc.maxRestorableVersion.get())
+						                    ? deterministicRandom()->randomInt64(desc.minRestorableVersion.get(),
+						                                                         desc.maxRestorableVersion.get())
+						                    : desc.maxRestorableVersion.get();
 					}
 				}
-				TraceEvent("RW_Restore", self->randomID)
-				    .detail("LastBackupContainer", lastBackupContainer->getURL())
-				    .detail("BackupTag", printable(self->backupTag))
-				    .setMaxFieldLength(10000)
-				    .detail("Description", desc.toString());
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					for (auto& kvrange : self->backupRanges) {
