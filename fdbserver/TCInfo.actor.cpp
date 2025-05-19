@@ -280,6 +280,10 @@ int64_t TCServerInfo::getStorageQueueSize() const {
 	return getMetrics().bytesInput - getMetrics().bytesDurable;
 }
 
+int TCServerInfo::getMaxOngoingBulkLoadTaskCount() const {
+	return getMetrics().ongoingBulkLoadTaskCount;
+}
+
 void TCServerInfo::removeTeam(Reference<TCTeamInfo> team) {
 	for (int t = 0; t < teams.size(); t++) {
 		if (teams[t] == team) {
@@ -444,6 +448,18 @@ Optional<int64_t> TCTeamInfo::getLongestStorageQueueSize() const {
 		}
 	}
 	return longestQueueSize;
+}
+
+Optional<int> TCTeamInfo::getMaxOngoingBulkLoadTaskCount() const {
+	int count = 0;
+	for (const auto& server : servers) {
+		if (server->metricsPresent()) {
+			count = std::max(count, server->getMaxOngoingBulkLoadTaskCount());
+		} else {
+			return Optional<int>();
+		}
+	}
+	return count;
 }
 
 int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) const {

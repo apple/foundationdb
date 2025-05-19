@@ -382,7 +382,7 @@ void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {
 	StorageBytes storageBytes(
 	    totalDiskSpace - usedDiskSpace, totalDiskSpace, usedDiskSpace, totalDiskSpace - usedDiskSpace);
 	metrics.getStorageMetrics(
-	    req, storageBytes, counters.bytesInput.getRate(), 0, now(), 0, counters.bytesInput.getValue());
+	    req, storageBytes, counters.bytesInput.getRate(), 0, now(), 0, counters.bytesInput.getValue(), 0);
 	// FIXME: MockStorageServer does not support bytesDurable yet
 }
 

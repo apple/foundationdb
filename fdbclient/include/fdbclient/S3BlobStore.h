@@ -147,7 +147,7 @@ public:
 		    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file,
 		    enable_read_cache, read_block_size, read_ahead_blocks, read_cache_blocks_per_file,
 		    max_send_bytes_per_second, max_recv_bytes_per_second, sdk_auth, enable_object_integrity_check,
-		    global_connection_pool, max_delay_retryable_error, max_delay_connection_failed;
+		    global_connection_pool, max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms;
 
 		bool set(StringRef name, int value);
 		std::string getURLParameters() const;
@@ -168,6 +168,7 @@ public:
 				"delete_requests_per_second (or drps)  Max number of delete requests to start per second.",
 				"multipart_max_part_size (or maxps)    Max part size for multipart uploads.",
 				"multipart_min_part_size (or minps)    Min part size for multipart uploads.",
+				"multipart_retry_delay_ms (or mrd)     Delay in milliseconds between retries for multipart uploads.",
 				"concurrent_requests (or cr)           Max number of total requests in progress at once, regardless of "
 				"operation-specific concurrency limits.",
 				"concurrent_uploads (or cu)            Max concurrent uploads (part or whole) that can be in progress "
@@ -275,6 +276,9 @@ public:
 	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL
 	// parameters in addition to the passed params string
 	std::string getResourceURL(std::string resource, std::string params) const;
+
+	// Construct a resource path for S3 operations
+	std::string constructResourcePath(const std::string& bucket, const std::string& object) const;
 
 	// FIXME: add periodic connection reaper to pool
 	// local connection pool for this blobstore

@@ -366,7 +366,8 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
                                              int64_t versionLag,
                                              double lastUpdate,
                                              int64_t bytesDurable,
-                                             int64_t bytesInput) const {
+                                             int64_t bytesInput,
+                                             int ongoingBulkLoadTaskCount) const {
 	GetStorageMetricsReply rep;
 
 	// SOMEDAY: make bytes dynamic with hard disk space
@@ -398,6 +399,8 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 
 	rep.bytesDurable = bytesDurable;
 	rep.bytesInput = bytesInput;
+
+	rep.ongoingBulkLoadTaskCount = ongoingBulkLoadTaskCount;
 
 	req.reply.send(rep);
 }
