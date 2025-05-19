@@ -627,7 +627,7 @@ struct RolesInfo {
 				rocksdbMetricsObj.setKeyRawNumber("sst_reader_bytes",
 				                                  rocksdbMetrics.getValue("EstimateSstReaderBytes"));
 				rocksdbMetricsObj.setKeyRawNumber("block_cache_usage", rocksdbMetrics.getValue("BlockCacheUsage"));
-				rocksdbMetricsObj.setKey("block_cache_limit", SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
+				rocksdbMetricsObj.setKeyRawNumber("block_cache_limit", rocksdbMetrics.getValue("BlockCacheSize"));
 				rocksdbMetricsObj.setKeyRawNumber("throttled_commits", rocksdbMetrics.getValue("CommitDelayed"));
 				rocksdbMetricsObj.setKeyRawNumber("write_stall_microseconds", rocksdbMetrics.getValue("StallMicros"));
 
