@@ -1619,6 +1619,7 @@ using namespace std::chrono_literals;
 
 TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Simple") {
 	state AsyncTaskExecutor exc(1);
+	noUnseed = true;
 	ThreadReturnPromiseStream<int> stream;
 	state ThreadFutureStream<int> f = stream.getFuture();
 	state Future<Void> t = exc.post([stream = std::move(stream)]() mutable {
@@ -1652,6 +1653,7 @@ TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Simple") {
 
 TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Seq") {
 	state AsyncTaskExecutor exc(1);
+	noUnseed = true;
 	ThreadReturnPromiseStream<int> stream;
 	state ThreadFutureStream<int> f = stream.getFuture();
 	state Future<Void> t = exc.post([stream = std::move(stream)]() mutable {
@@ -1679,6 +1681,7 @@ TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Seq") {
 
 TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Error") {
 	state AsyncTaskExecutor exc(1);
+	noUnseed = true;
 
 	{
 		ThreadReturnPromiseStream<int> s1;
@@ -1721,6 +1724,8 @@ TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Error") {
 }
 
 TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream_DestroyPromise") {
+	noUnseed = true;
+
 	{
 		std::cout << "ThreadReturnPromiseStream with future > 0, promise == 0, end_of_stream sent\n";
 		// After all references to PromiseStream are gone, FutureStream should still be able to get
