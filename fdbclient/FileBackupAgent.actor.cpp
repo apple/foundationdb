@@ -7274,7 +7274,6 @@ public:
 
 	ACTOR static Future<Void> changePause(FileBackupAgent* backupAgent, Database db, bool pause) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
-		state Future<Void> change = backupAgent->taskBucket->changePause(db, pause);
 
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -7282,6 +7281,9 @@ public:
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
+				// This is the pause key is in the task bucket, for backup agents
+				backupAgent->taskBucket->changePause(tr, pause);
+				// This is backup workers' pause key.
 				tr->set(backupPausedKey, pause ? "1"_sr : "0"_sr);
 				wait(tr->commit());
 				break;
@@ -7289,7 +7291,6 @@ public:
 				wait(tr->onError(e));
 			}
 		}
-		wait(change);
 		TraceEvent("FileBackupAgentChangePaused").detail("Action", pause ? "Paused" : "Resumed");
 		return Void();
 	}

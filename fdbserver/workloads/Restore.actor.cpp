@@ -111,10 +111,9 @@ struct RestoreWorkload : TestWorkload {
 
 	// Resume the backup agent if it is paused
 	ACTOR static Future<Void> resumeAgent(Database cx, FileBackupAgent* backupAgent) {
-		bool active = wait(backupAgent->checkActive(cx));
-		if (!active) {
-			wait(backupAgent->changePause(cx, false));
-		}
+		TraceEvent("RW_AgentResuming").log();
+		wait(backupAgent->changePause(cx, false));
+		TraceEvent("RW_AgentResumed").log();
 		return Void();
 	}
 
@@ -137,7 +136,8 @@ struct RestoreWorkload : TestWorkload {
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		TraceEvent("RW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
-		    .detail("PerformRestore", self->performRestore);
+		    .detail("PerformRestore", self->performRestore)
+		    .detail("AllowPauses", self->allowPauses);
 
 		if (self->allowPauses && BUGGIFY) {
 			cp = changePaused(cx, &backupAgent);
