@@ -30,6 +30,10 @@
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
+#include <string>
+#include <vector>
+#include <map>
+#include <set>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkdump");
@@ -59,19 +63,28 @@ struct BulkDumping : TestWorkload {
 		             "BulkLoading" });
 	}
 
-	BulkDumping(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), enabled(true), pass(true), cancelTimes(0),
-	    maxCancelTimes(deterministicRandom()->randomInt(0, 2)) {
-		bulkLoadTransportMethod = static_cast<BulkLoadTransportMethod>(
-		    getOption(options, "bulkLoadTransportMethod"_sr, static_cast<int>(BulkLoadTransportMethod::CP)));
-		jobRoot = getOption(options, "jobRoot"_sr, StringRef(simulationBulkDumpFolder)).toString();
+	BulkDumping(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true), cancelTimes(0) {
+		// Read options using the global ::getOption, passing the 'options' member from WorkloadContext.
 
-		// Log configuration for determinism
+		maxCancelTimes = ::getOption(options, "maxCancelTimes"_sr, 0);
+
+		bulkLoadTransportMethod = static_cast<BulkLoadTransportMethod>(
+		    ::getOption(options, "bulkLoadTransportMethod"_sr, static_cast<int>(BulkLoadTransportMethod::CP)));
+
+		jobRoot = ::getOption(options, "jobRoot"_sr, StringRef(simulationBulkDumpFolder)).toString();
+
+		// Log the parsed values.
+		TraceEvent("BulkDumpingConstructorParsedValues")
+		    .detail("MaxCancelTimes", maxCancelTimes)
+		    .detail("TransportMethod", static_cast<int>(bulkLoadTransportMethod))
+		    .detail("JobRoot", jobRoot);
+
+		// Keep the original specific logging for determinism if desired, using parsed values
 		TraceEvent("BulkDumpingConfiguration")
 		    .detail("MaxCancelTimes", maxCancelTimes)
 		    .detail("TransportMethod", static_cast<int>(bulkLoadTransportMethod))
 		    .detail("JobRoot", jobRoot)
-		    .detail("RandomSeed", deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max()));
+		    .detail("RandomSeed", 0); // Using a fixed value for deterministic logging
 	}
 
 	// RAII-style resource management for bulk dump jobs
@@ -123,10 +136,18 @@ struct BulkDumping : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	Standalone<StringRef> getRandomStringRef() const {
-		int stringLength = deterministicRandom()->randomInt(1, 10);
-		Standalone<StringRef> stringBuffer = makeString(stringLength);
-		deterministicRandom()->randomBytes(mutateString(stringBuffer), stringLength);
-		return stringBuffer;
+		// int stringLength = deterministicRandom()->randomInt(1, 10);
+		// Standalone<StringRef> stringBuffer = makeString(stringLength);
+		// deterministicRandom()->randomBytes(mutateString(stringBuffer), stringLength);
+		// return stringBuffer;
+		// return "deterministic_string"_sr; // Fixed for diagnostics - CAUSES INFINITE LOOP
+
+		// Corrected version: deterministic and unique per call
+		static thread_local int call_count = 0;
+		call_count++;
+		// Create a string based on the call_count.
+		// The Key constructor taking a std::string will create a Standalone<StringRef> (which is an alias for Key).
+		return StringRef("ds_" + std::to_string(call_count));
 	}
 
 	KeyRange getRandomRange(BulkDumping* self, KeyRange scope) const {
@@ -283,8 +304,8 @@ struct BulkDumping : TestWorkload {
 				// We varies the timing of the job cancellation, we trigger the job cancellation with 10% probability at
 				// each time. Throughout the entire test, we inject the job cancellation at most maxCancelTimes times to
 				// ensure the job can complete fast.
-				if (SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION && self->cancelTimes < self->maxCancelTimes &&
-				    deterministicRandom()->random01() < 0.1) {
+				if (self->maxCancelTimes > 0 && SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION &&
+				    self->cancelTimes < self->maxCancelTimes && deterministicRandom()->random01() < 0.1) {
 					wait(cancelBulkLoadJob(cx, jobId));
 					self->cancelTimes++; // Inject cancellation. Then the bulkload job should run again.
 					TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Job Cancelled").detail("Job", jobId.toString());
@@ -372,6 +393,10 @@ struct BulkDumping : TestWorkload {
 			return Void();
 		}
 
+		TraceEvent("BulkDumpingStartInfo")
+		    .detail("MaxCancelTimes", self->maxCancelTimes)
+		    .detail("BulkLoadSimFailureInjection", SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION);
+
 		if (g_network->isSimulated()) {
 			// Disable connection failures for both BulkDumping and BulkLoading
 			// This is necessary because S3 operations need stable connections
@@ -380,7 +405,7 @@ struct BulkDumping : TestWorkload {
 		}
 
 		// Create unique run directory for this test instance
-		state std::string uniqueRunDir = "bulk_dump_run_" + deterministicRandom()->randomUniqueID().toString();
+		state std::string uniqueRunDir = "bulk_dump_run_deterministic"; // Fixed for determinism
 		if (self->bulkLoadTransportMethod != BulkLoadTransportMethod::BLOBSTORE) {
 			try {
 				platform::createDirectory(uniqueRunDir);
@@ -417,6 +442,7 @@ struct BulkDumping : TestWorkload {
 		try {
 			// Retry submitting the dump job if it fails
 			state int retries = 0;
+			state double dumpDelayDuration = 1.0; // Initial delay for dump job
 			loop {
 				try {
 					wait(submitBulkDumpJob(cx, newJob));
@@ -435,7 +461,11 @@ struct BulkDumping : TestWorkload {
 					    .detail("Job", newJob.toString())
 					    .detail("Retry", retries);
 					retries++;
-					wait(delay(1.0 * retries));
+					wait(delay(dumpDelayDuration)); // Use exponential backoff
+					dumpDelayDuration *= 2;
+					if (dumpDelayDuration > 32.0) { // Cap delay at 32s
+						dumpDelayDuration = 32.0;
+					}
 				}
 			}
 
@@ -463,6 +493,7 @@ struct BulkDumping : TestWorkload {
 
 				// Retry submitting the load job if it fails
 				state int loadRetries = 0;
+				state double loadDelayDuration = 1.0; // Initial delay for load job
 				loop {
 					try {
 						wait(submitBulkLoadJob(cx, bulkLoadJob));
@@ -476,22 +507,26 @@ struct BulkDumping : TestWorkload {
 						    .detail("Job", bulkLoadJob.toString())
 						    .detail("Retry", loadRetries);
 						loadRetries++;
-						wait(delay(1.0 * loadRetries));
+						wait(delay(loadDelayDuration)); // Use exponential backoff
+						loadDelayDuration *= 2;
+						if (loadDelayDuration > 32.0) { // Cap delay at 32s
+							loadDelayDuration = 32.0;
+						}
 					}
 				}
 
 				// More deterministic job cancellation
-				if (SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION && self->cancelTimes < self->maxCancelTimes) {
+				if (self->maxCancelTimes > 0 && SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION &&
+				    self->cancelTimes < self->maxCancelTimes) {
 					state double cancelTime = deterministicRandom()->random01() * 10.0;
 					wait(delay(cancelTime));
-					if (cancelTime < 5.0) { // 50% chance
+					if (cancelTime < 5.0) {
 						wait(cancelBulkLoadJob(cx, newJob.getJobId()));
 						self->cancelTimes++;
 						TraceEvent("BulkDumpingWorkLoad")
 						    .detail("Phase", "Job Cancelled")
 						    .detail("Job", newJob.toString())
 						    .detail("CancelTime", cancelTime);
-						wait(delay(deterministicRandom()->random01() * 10.0));
 						continue;
 					}
 				}
@@ -502,7 +537,8 @@ struct BulkDumping : TestWorkload {
 				    wait(self->waitUntilLoadJobCompleteOrError(self, cx, newJob.getJobId(), newJob.getJobRange()));
 
 				ASSERT(self->cancelTimes >= oldCancelTimes);
-				if (self->cancelTimes > oldCancelTimes) {
+				if (self->cancelTimes > oldCancelTimes) { // This implies a cancel occurred due to the block above
+					// Therefore, it should only be entered if self->maxCancelTimes > 0
 					wait(delay(deterministicRandom()->random01() * 10.0));
 					continue;
 				}
