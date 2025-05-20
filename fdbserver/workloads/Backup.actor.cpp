@@ -118,11 +118,9 @@ struct BackupWorkload : TestWorkload {
 
 	// Resume the backup agent if it is paused
 	ACTOR static Future<Void> resumeAgent(Database cx, FileBackupAgent* backupAgent) {
-		bool active = wait(backupAgent->checkActive(cx));
-		if (!active) {
-			wait(backupAgent->changePause(cx, false));
-			TraceEvent("BW_AgentResumed").log();
-		}
+		TraceEvent("BW_AgentResuming").log();
+		wait(backupAgent->changePause(cx, false));
+		TraceEvent("BW_AgentResumed").log();
 		return Void();
 	}
 
