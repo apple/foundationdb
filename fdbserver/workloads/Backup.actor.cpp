@@ -304,7 +304,6 @@ struct BackupWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, BackupWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Future<Void> cp;
-		state bool extraTasks = false;
 		TraceEvent("BW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
 		    .detail("BackupAfter", self->backupAfter)

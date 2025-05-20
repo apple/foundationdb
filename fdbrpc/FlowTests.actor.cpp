@@ -1663,7 +1663,6 @@ TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Seq") {
 		return Void();
 	});
 
-	state int n = 0;
 	int r0 = waitNext(f);
 	ASSERT(r0 == 0);
 	int r1 = waitNext(f);
