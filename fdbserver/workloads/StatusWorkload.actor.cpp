@@ -67,6 +67,7 @@ struct StatusWorkload : TestWorkload {
 
 		return success(timeout(fetcher(cx, this), testDuration));
 	}
+
 	Future<bool> check(Database const& cx) override { return errors.getValue() == 0; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -168,6 +169,23 @@ struct StatusWorkload : TestWorkload {
 		}
 	}
 
+	// check if cluster.layers.backup exists
+	bool checkLayerStatus(const StatusObject& obj) {
+		StatusObjectReader statusObj(obj);
+		StatusObjectReader statusObjCluster;
+		if (!statusObj.get("cluster", statusObjCluster)) {
+			std::cout << "Status no cluster" << std::endl;
+			return false;
+		}
+
+		StatusObjectReader layers;
+		if (!statusObjCluster.get("layers", layers)) {
+			std::cout << "Status no layers" << std::endl;
+			return false;
+		}
+		return layers.has("backup");
+	}
+
 	ACTOR Future<Void> fetcher(Database cx, StatusWorkload* self) {
 		state double lastTime = now();
 
@@ -192,6 +210,10 @@ struct StatusWorkload : TestWorkload {
 					std::cout << errorStr << std::endl;
 					TraceEvent(SevError, "StatusWorkloadValidationFailed")
 					    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result)));
+				}
+				if (!self->checkLayerStatus(result)) {
+					TraceEvent(SevError, "StatusWorkloadLayerStatusFailed");
+					std::cout << "Status no layer backup" << std::endl;
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
