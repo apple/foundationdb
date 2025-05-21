@@ -658,7 +658,7 @@ ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 		state FileBackupAgent fileAgent;
 		agentFutures.push_back(fileAgent.run(
 		    cx, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
-
+		TraceEvent("SimBackupAgentsStarting").log();
 		while (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
 			wait(delay(1.0));
 		}
@@ -666,6 +666,7 @@ ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 		for (auto it : agentFutures) {
 			it.cancel();
 		}
+		TraceEvent("SimBackupAgentsStopping").log();
 	}
 
 	wait(Future<Void>(Never()));

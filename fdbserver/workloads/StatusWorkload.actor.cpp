@@ -65,7 +65,7 @@ struct StatusWorkload : TestWorkload {
 		if (clientId != 0)
 			return Void();
 
-		return success(timeout(fetcher(cx, this), testDuration));
+		return fetcher(cx, this);
 	}
 
 	Future<bool> check(Database const& cx) override { return errors.getValue() == 0; }
@@ -183,7 +183,16 @@ struct StatusWorkload : TestWorkload {
 			std::cout << "Status no layers" << std::endl;
 			return false;
 		}
-		return layers.has("backup");
+		json_spirit::mObject err;
+		if (layers.get("error", err)) {
+			// std::cout << "Status error: " << err.get_obj().get_str() << std::endl;
+		}
+
+		if (!layers.has("backup")) {
+			std::cout << "Status no layer backup" << std::endl;
+			return false;
+		}
+		return true;
 	}
 
 	ACTOR Future<Void> fetcher(Database cx, StatusWorkload* self) {
@@ -214,6 +223,8 @@ struct StatusWorkload : TestWorkload {
 				if (!self->checkLayerStatus(result)) {
 					TraceEvent(SevError, "StatusWorkloadLayerStatusFailed");
 					std::cout << "Status no layer backup" << std::endl;
+				} else {
+					return Void();
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
