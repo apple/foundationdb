@@ -29,10 +29,7 @@ runConsistencyCheck=false
     testDuration = 90.0
 
     [[test.workload]]
-    testName = 'Attrition'
-    machinesToKill = 10
-    machinesToLeave = 3
-    reboot = true
+    testName = 'Status'
     testDuration = 90.0
     
 [[test]]

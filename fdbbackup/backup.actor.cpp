@@ -1832,6 +1832,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
+			TraceEvent("StatusUpdateMetaKeyError").errorUnsuppressed(e);
 			wait(tr->onError(e));
 		}
 	}
@@ -1852,6 +1853,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 					wait(tr->commit());
 					break;
 				} catch (Error& e) {
+					TraceEvent("StatusUpdateError").errorUnsuppressed(e);
 					wait(tr->onError(e));
 				}
 			}
