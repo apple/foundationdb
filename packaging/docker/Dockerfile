@@ -62,7 +62,7 @@ FROM docker.io/library/golang:1.23.8-bullseye AS go-build
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
-COPY fdb-aws-s3-credentials-fetcher/ /fdb-aws-s3-credentials-fetcher
+COPY packaging/docker/fdb-aws-s3-credentials-fetcher/ /fdb-aws-s3-credentials-fetcher
 WORKDIR /fdb-aws-s3-credentials-fetcher
 RUN go build -o /fdb-aws-s3-credentials-fetcher *.go
 
