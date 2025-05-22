@@ -444,6 +444,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					commitVersion = tr->getCommittedVersion();
 					break;
 				} catch (Error& e) {
+					TraceEvent("DRU_GetRestoreRangeError").error(e);
 					wait(tr->onError(e));
 				}
 			}
@@ -470,6 +471,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					wait(versionWatch);
 					versionCheckTr.reset();
 				} catch (Error& e) {
+					TraceEvent("DRU_GetAppliedVersionError").error(e);
 					wait(versionCheckTr.onError(e));
 				}
 			}
