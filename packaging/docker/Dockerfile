@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM docker.io/rockylinux/rockylinux:9.4-minimal AS base
+FROM docker.io/rockylinux/rockylinux:9.5-minimal AS base
 
 RUN microdnf install -y \
     bind-utils \
@@ -57,11 +57,14 @@ RUN curl -Ls "https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TA
 
 WORKDIR /
 
-FROM docker.io/library/golang:1.23.8-bullseye AS go-build
-
+FROM docker.io/library/golang:1.23.9-bookworm AS go-build
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
+
+# Build the fdb-aws-s3-credentials-fetcher in a dedicated build as we don't want to build this image
+# on a regular base until we have a release plan for it.
+FROM go-build AS go-credentials-fetcher-build
 COPY fdb-aws-s3-credentials-fetcher/ /fdb-aws-s3-credentials-fetcher
 WORKDIR /fdb-aws-s3-credentials-fetcher
 RUN go build -o /fdb-aws-s3-credentials-fetcher *.go
@@ -75,12 +78,11 @@ RUN groupadd --gid 4059 fdb && \
             --no-create-home \
             --shell /bin/bash fdb
 USER fdb
-COPY --from=go-build /fdb-aws-s3-credentials-fetcher /usr/bin/
+COPY --from=go-credentials-fetcher-build /fdb-aws-s3-credentials-fetcher /usr/bin/
 ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
 
 FROM base AS foundationdb-base
-
-ARG FDB_VERSION=6.3.22
+ARG FDB_VERSION=7.3.63
 ARG FDB_LIBRARY_VERSIONS="${FDB_VERSION}"
 ARG FDB_WEBSITE=https://github.com/apple/foundationdb/releases/download
 
@@ -228,7 +230,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
 
 # TODO: Log4J complains that it's eating the HTracer logs.  Even without it, we get per-operation
 # time series graphs of throughput, median, 90, 99, 99.9 and 99.99 (in usec).
-COPY run_ycsb.sh run_ycsb_standalone.sh /usr/local/bin
+COPY run_ycsb.sh run_ycsb_standalone.sh /usr/local/bin/
 RUN mkdir -p /var/log/fdb-trace-logs && \
     chmod +x /usr/local/bin/run_ycsb.sh && \
     chmod +x /usr/local/bin/run_ycsb_standalone.sh
