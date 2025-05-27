@@ -22,6 +22,7 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#include "flow/IRandom.h"
 #include <cstddef>
 #include <memory>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_LOADBALANCE_ACTOR_G_H)
@@ -334,11 +335,14 @@ Future<Void> replicaComparison(Req req,
 				}
 			}
 
-			if (requiredReplicas == BEST_EFFORT || requiredReplicas == ALL_REPLICAS) {
-				wait(waitForAllReady(restOfTeamFutures));
-			} else {
-				wait(waitForQuorumReplies(&restOfTeamFutures, requiredReplicas));
-			}
+			if (requiredReplicas != BEST_EFFORT && requiredReplicas != ALL_REPLICAS) {
+				// Randomly choose extra requiredReplicas to read
+				if (restOfTeamFutures.size() > requiredReplicas) {
+					deterministicRandom()->randomShuffle(restOfTeamFutures);
+					restOfTeamFutures.erase(restOfTeamFutures.begin() + requiredReplicas, restOfTeamFutures.end());
+				}
+			} // else read from all replicas
+			wait(waitForAllReady(restOfTeamFutures));
 
 			std::chrono::time_point<std::chrono::high_resolution_clock> timeBeforeCheck =
 			    std::chrono::high_resolution_clock::now();
