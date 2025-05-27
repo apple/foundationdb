@@ -286,8 +286,6 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	TransactionOptions options;
 	Optional<ReadOptions> readOptions;
 
-	std::shared_ptr<double> checkTimeSpanSec = nullptr;
-
 	TaskPriority taskID;
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;

@@ -299,7 +299,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 			try {
 				GetValueReply reply = wait(loadBalance(loc.locations->locations(),
 				                                       &StorageServerInterface::getValue,
-				                                       nullptr,
 				                                       req,
 				                                       TaskPriority::DefaultPromiseEndpoint,
 				                                       AtMostOnce::False,

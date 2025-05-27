@@ -1075,9 +1075,6 @@ public:
 		KeyRange range;
 	};
 
-	double totalReplicaCheckTimeForDataMove = 0;
-	double totalReplicaCheckTimeCount = 0;
-
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	std::unordered_map<UID, ICheckpointReader*> liveCheckpointReaders; // Active checkpoint readers
@@ -7893,15 +7890,9 @@ ACTOR Future<Void> tryGetRange(StorageServer* data,
 
 	try {
 		loop {
-			*tr->trState->checkTimeSpanSec = -1; // reset
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 			limits.minRows = 0;
 			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
-			if (*tr->trState->checkTimeSpanSec == -1) {
-				TraceEvent(SevWarnAlways, "SSGetRangeCheckTimeUnset").suppressFor(1.0);
-			}
-			data->totalReplicaCheckTimeForDataMove += *tr->trState->checkTimeSpanSec;
-			data->totalReplicaCheckTimeCount++;
 			data->counters.kvFetchRequestIssued += 1;
 			results.send(rep);
 
@@ -9160,8 +9151,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			}
 			tr.trState->readOptions = readOptions;
 			tr.trState->taskID = TaskPriority::FetchKeys;
-			state std::shared_ptr<double> checkTimeSpanSec = std::make_shared<double>(-1);
-			tr.trState->checkTimeSpanSec = checkTimeSpanSec;
 
 			// fetchVersion = data->version.get();
 			// A quick fix:
@@ -14371,8 +14360,6 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	    SERVER_KNOBS->STORAGE_LOGGING_DELAY,
 	    self->thisServerID.toString() + "/StorageMetrics",
 	    [self = self](TraceEvent& te) {
-		    te.detail("ReplicaCheckTotalTime", self->totalReplicaCheckTimeForDataMove);
-		    te.detail("ReplicaCheckTotalCount", self->totalReplicaCheckTimeCount);
 		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
 		    te.detail("RocksDBVersion", format("%d.%d.%d", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH));
 		    te.detail("Tag", self->tag.toString());
