@@ -19,7 +19,6 @@
  */
 
 #pragma once
-#include <memory>
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 #define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 #include "fdbclient/NativeAPI.actor.g.h"
