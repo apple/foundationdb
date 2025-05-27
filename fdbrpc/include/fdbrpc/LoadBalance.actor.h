@@ -290,8 +290,7 @@ Future<Void> replicaComparison(Req req,
                                uint64_t srcEndpointId,
                                Reference<MultiInterface<Multi>> ssTeam,
                                RequestStream<Req, P> Interface::* channel,
-                               int requiredReplicas,
-                               std::shared_ptr<double> checkTimeSpanSec) {
+                               int requiredReplicas) {
 	state ErrorOr<Resp> src;
 
 	if (ssTeam->size() <= 1 || requiredReplicas == 0) {
@@ -344,8 +343,6 @@ Future<Void> replicaComparison(Req req,
 			} // else read from all replicas
 			wait(waitForAllReady(restOfTeamFutures));
 
-			std::chrono::time_point<std::chrono::high_resolution_clock> timeBeforeCheck =
-			    std::chrono::high_resolution_clock::now();
 			int numError = 0;
 			int numMismatch = 0;
 			int numFetchReplicaTimeout = 0;
@@ -408,13 +405,6 @@ Future<Void> replicaComparison(Req req,
 					    .detail("SSError", error_code_wrong_shard_server);
 					throw wrong_shard_server();
 				}
-			}
-			if (checkTimeSpanSec != nullptr) {
-				if (*checkTimeSpanSec != -1) {
-					TraceEvent(SevWarnAlways, "NativeAPTCheckTimeSpanHasBeenSet").suppressFor(1.0);
-				}
-				*checkTimeSpanSec =
-				    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - timeBeforeCheck).count();
 			}
 
 			if (numMismatch) {
@@ -493,8 +483,7 @@ struct RequestData : NonCopyable {
 	                                      QueueModel* model,
 	                                      Reference<MultiInterface<Multi>> alternatives,
 	                                      RequestStream<Request, P> Interface::* channel,
-	                                      int requiredReplicas,
-	                                      std::shared_ptr<double> checkTimeSpanSec) {
+	                                      int requiredReplicas) {
 		if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
 			ASSERT(requestStream != nullptr);
 			int requiredReplicaCount =
@@ -504,8 +493,7 @@ struct RequestData : NonCopyable {
 			                         requestStream->getEndpoint().token.first(),
 			                         alternatives,
 			                         channel,
-			                         requiredReplicaCount,
-			                         checkTimeSpanSec);
+			                         requiredReplicaCount);
 		}
 
 		return Void();
@@ -670,7 +658,6 @@ ACTOR template <class Interface, class Request, class Multi, bool P>
 Future<REPLY_TYPE(Request)> loadBalance(
     Reference<MultiInterface<Multi>> alternatives,
     RequestStream<Request, P> Interface::* channel,
-    std::shared_ptr<double> checkTimeSpanSec,
     Request request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
@@ -872,8 +859,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			wait(success(firstRequestData.response));
 			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 				// Do consistency check, if requested.
-				wait(firstRequestData.maybeDoReplicaComparison(
-				    request, model, alternatives, channel, requiredReplicas, checkTimeSpanSec));
+				wait(
+				    firstRequestData.maybeDoReplicaComparison(request, model, alternatives, channel, requiredReplicas));
 
 				ASSERT(firstRequestData.response.isReady());
 				return firstRequestData.response.get().get();
@@ -921,8 +908,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				// Do consistency check, by comparing results from storage replicas, if requested.
 				state RequestData<Request, Interface, Multi, P>* requestData =
 				    firstRequestSuccessful ? &firstRequestData : &secondRequestData;
-				wait(requestData->maybeDoReplicaComparison(
-				    request, model, alternatives, channel, requiredReplicas, checkTimeSpanSec));
+				wait(requestData->maybeDoReplicaComparison(request, model, alternatives, channel, requiredReplicas));
 
 				ASSERT(requestData->response.isReady());
 				return requestData->response.get().get();
@@ -964,7 +950,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 							// Do consistency check, by comparing results from storage replicas, if requested.
 							wait(firstRequestData.maybeDoReplicaComparison(
-							    request, model, alternatives, channel, requiredReplicas, checkTimeSpanSec));
+							    request, model, alternatives, channel, requiredReplicas));
 
 							ASSERT(firstRequestData.response.isReady());
 							return firstRequestData.response.get().get();

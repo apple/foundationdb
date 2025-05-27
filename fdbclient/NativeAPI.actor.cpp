@@ -126,7 +126,6 @@ template <class Interface, class Request, bool P>
 Future<REPLY_TYPE(Request)> loadBalance(
     DatabaseContext* ctx,
     const Reference<LocationInfo> alternatives,
-    std::shared_ptr<double> checkTimeSpanSec,
     RequestStream<Request, P> Interface::* channel,
     const Request& request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
@@ -136,15 +135,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
     bool compareReplicas = false,
     int requiredReplicas = 0) {
 	if (alternatives->hasCaches) {
-		return loadBalance(alternatives->locations(),
-		                   channel,
-		                   checkTimeSpanSec,
-		                   request,
-		                   taskID,
-		                   atMostOnce,
-		                   model,
-		                   compareReplicas,
-		                   requiredReplicas);
+		return loadBalance(
+		    alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
 	}
 	return fmap(
 	    [ctx](auto const& res) {
@@ -153,15 +145,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		    }
 		    return res;
 	    },
-	    loadBalance(alternatives->locations(),
-	                channel,
-	                checkTimeSpanSec,
-	                request,
-	                taskID,
-	                atMostOnce,
-	                model,
-	                compareReplicas,
-	                requiredReplicas));
+	    loadBalance(
+	        alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas));
 }
 } // namespace
 
@@ -3710,7 +3695,6 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					when(GetValueReply _reply = wait(
 					         loadBalance(trState->cx.getPtr(),
 					                     locationInfo.locations,
-					                     nullptr,
 					                     &StorageServerInterface::getValue,
 					                     GetValueRequest(span.context,
 					                                     useTenant ? trState->getTenantInfo() : TenantInfo(),
@@ -3860,7 +3844,6 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Use
 					when(GetKeyReply _reply = wait(
 					         loadBalance(trState->cx.getPtr(),
 					                     locationInfo.locations,
-					                     nullptr,
 					                     &StorageServerInterface::getKey,
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
@@ -4009,7 +3992,6 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				when(WatchValueReply r = wait(
 				         loadBalance(cx.getPtr(),
 				                     locationInfo.locations,
-				                     nullptr,
 				                     &StorageServerInterface::watchValue,
 				                     WatchValueRequest(span.context,
 				                                       parameters->tenant,
@@ -4390,7 +4372,6 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 						when(GetKeyValuesFamilyReply _rep = wait(loadBalance(
 						         trState->cx.getPtr(),
 						         locations[shard].locations,
-						         nullptr,
 						         getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 						         req,
 						         TaskPriority::DefaultPromiseEndpoint,
@@ -4798,7 +4779,6 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					GetKeyValuesFamilyReply _rep =
 					    wait(loadBalance(trState->cx.getPtr(),
 					                     beginServer.locations,
-					                     trState->checkTimeSpanSec,
 					                     getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
@@ -7913,11 +7893,8 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		WaitMetricsRequest req(tenantInfo, version, keys, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;
-		StorageMetrics m = wait(loadBalance(locationInfo->locations(),
-		                                    &StorageServerInterface::waitMetrics,
-		                                    nullptr,
-		                                    req,
-		                                    TaskPriority::DataDistribution));
+		StorageMetrics m = wait(loadBalance(
+		    locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
 		return m;
 	} catch (Error& e) {
 		if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
@@ -7986,8 +7963,7 @@ ACTOR Future<Void> trackBoundedStorageMetrics(TenantInfo tenantInfo,
 	try {
 		loop {
 			WaitMetricsRequest req(tenantInfo, version, keys, x - halfError, x + halfError);
-			StorageMetrics nextX =
-			    wait(loadBalance(location->locations(), &StorageServerInterface::waitMetrics, nullptr, req));
+			StorageMetrics nextX = wait(loadBalance(location->locations(), &StorageServerInterface::waitMetrics, req));
 			deltaStream.send(nextX - x);
 			x = nextX;
 		}
@@ -8018,7 +7994,6 @@ ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(TenantInfo tena
 		req.max.bytes = -1;
 		fx[i] = loadBalance(locations[i].locations->locations(),
 		                    &StorageServerInterface::waitMetrics,
-		                    nullptr,
 		                    req,
 		                    TaskPriority::DataDistribution);
 	}
@@ -8088,7 +8063,6 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 				ReadHotSubRangeRequest req(KeyRangeRef(partBegin, partEnd));
 				fReplies[i] = loadBalance(locations[i].locations->locations(),
 				                          &StorageServerInterface::getReadHotRanges,
-				                          nullptr,
 				                          req,
 				                          TaskPriority::DataDistribution);
 			}
@@ -8135,7 +8109,6 @@ ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo
 		WaitMetricsRequest req(tenantInfo, version, keys, min, max);
 		fx = loadBalance(locations[0].locations->locations(),
 		                 &StorageServerInterface::waitMetrics,
-		                 nullptr,
 		                 req,
 		                 TaskPriority::DataDistribution);
 	}
@@ -8303,7 +8276,6 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 				SplitRangeRequest req(trState->getTenantInfo(), KeyRangeRef(partBegin, partEnd), chunkSize);
 				fReplies[i] = loadBalance(locations[i].locations->locations(),
 				                          &StorageServerInterface::getRangeSplitPoints,
-				                          nullptr,
 				                          req,
 				                          TaskPriority::DataDistribution);
 			}
@@ -8540,7 +8512,6 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			choose {
 				when(BlobGranuleFileReply rep = wait(loadBalance(location,
 				                                                 &BlobWorkerInterface::blobGranuleFileRequest,
-				                                                 nullptr,
 				                                                 req,
 				                                                 TaskPriority::DefaultPromiseEndpoint,
 				                                                 AtMostOnce::False,
@@ -8937,7 +8908,6 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 				                        minSplitBytes);
 				SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
 				                                         &StorageServerInterface::splitMetrics,
-				                                         nullptr,
 				                                         req,
 				                                         TaskPriority::DataDistribution));
 				if (res.splits.size() &&
@@ -9023,7 +8993,6 @@ ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLoc
 				SplitMetricsRequest req(range, limit, used, estimated, i == locations.size() - 1, minSplitBytes);
 				SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
 				                                         &StorageServerInterface::splitMetrics,
-				                                         nullptr,
 				                                         req,
 				                                         TaskPriority::DataDistribution));
 				if (res.splits.size() &&
@@ -11155,7 +11124,6 @@ ACTOR Future<OverlappingChangeFeedsReply> singleLocationOverlappingChangeFeeds(D
 
 	OverlappingChangeFeedsReply rep = wait(loadBalance(cx.getPtr(),
 	                                                   location,
-	                                                   nullptr,
 	                                                   &StorageServerInterface::overlappingChangeFeeds,
 	                                                   req,
 	                                                   TaskPriority::DefaultPromiseEndpoint,
