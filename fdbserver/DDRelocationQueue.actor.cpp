@@ -428,33 +428,53 @@ std::string Busyness::toString() {
 	return result;
 }
 
+double adjustRelocationParallelismForSrc(double srcParallelism) {
+	if (SERVER_KNOBS->ENABLE_CONSERVATIVE_RELOCATION_WHEN_REPLICA_CONSISTENCY_CHECK &&
+	    SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT &&
+	    srcParallelism >= 1.0 + SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS) {
+		return srcParallelism / (1.0 + SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS);
+	} else {
+		return srcParallelism;
+	}
+}
+
 // find the "workFactor" for this, were it launched now
 int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
-	double res = 0;
+	// RELOCATION_PARALLELISM_PER_SOURCE_SERVER is the number of concurrent replications that can be launched on a
+	// single storage server at a time, given the team size is 1 --- only this storage server is available to serve
+	// fetchKey read requests from the dest team.
+	// The real parallelism is adjusted by the number of source servers of a source team that can serve
+	// fetchKey requests.
+	// When ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT is enabled, the fetchKeys on
+	// destination servers will read from CONSISTENCY_CHECK_REQUIRED_REPLICAS + 1 replicas from the source team (suppose
+	// the team size is large enough). As a result it is possible that the source team can be overloaded by the fetchKey
+	// read requests. This is especially true when the shard split data movements are launched. So, we introduce
+	// ENABLE_CONSERVATIVE_RELOCATION_WHEN_REPLICA_CONSISTENCY_CHECK knob to adjust the relocation parallelism
+	// accordingly. The adjustment is to reduce the relocation parallelism by a factor of
+	// (1 + CONSISTENCY_CHECK_REQUIRED_REPLICAS).
 	if (relocation.bulkLoadTask.present())
-		res = 0;
+		return 0;
 	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
 	         relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
-		res = 1.0 * WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+		return WORK_FULL_UTILIZATION /
+		       adjustRelocationParallelismForSrc(SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER);
 	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
-		res = 1.0 * WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+		return WORK_FULL_UTILIZATION /
+		       adjustRelocationParallelismForSrc(2 * SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER);
 	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE)
 		// we want to set PRIORITY_PERPETUAL_STORAGE_WIGGLE to a reasonably large value
 		// to make this parallelism take effect
-		res = 1.0 * WORK_FULL_UTILIZATION / SERVER_KNOBS->WIGGLING_RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+		return WORK_FULL_UTILIZATION /
+		       adjustRelocationParallelismForSrc(SERVER_KNOBS->WIGGLING_RELOCATION_PARALLELISM_PER_SOURCE_SERVER);
 	else if (relocation.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD)
-		res = 1.0 * WORK_FULL_UTILIZATION / SERVER_KNOBS->MERGE_RELOCATION_PARALLELISM_PER_TEAM;
+		return WORK_FULL_UTILIZATION /
+		       adjustRelocationParallelismForSrc(SERVER_KNOBS->MERGE_RELOCATION_PARALLELISM_PER_TEAM);
 	else { // for now we assume that any message at a lower priority can best be assumed to have a full team left for
 		   // work
-
-		res =
-		    1.0 * WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+		return WORK_FULL_UTILIZATION /
+		       adjustRelocationParallelismForSrc(singleRegionTeamSize *
+		                                         SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER);
 	}
-	if (SERVER_KNOBS->ENABLE_CONSERVATIVE_RELOCATION_WHEN_REPLICA_CONSISTENCY_CHECK &&
-	    SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
-		res = res * (1.0 + SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS);
-	}
-	return (int)res;
 }
 
 int getDestWorkFactor() {
