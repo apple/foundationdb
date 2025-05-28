@@ -9145,7 +9145,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			if (!isFullRestore && SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
 				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
-				int64_t requiredReplicas = SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+				int64_t requiredReplicas = SERVER_KNOBS->DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
 				tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
 				             StringRef((uint8_t*)&requiredReplicas, sizeof(int64_t)));
 			}
