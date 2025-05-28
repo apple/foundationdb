@@ -431,8 +431,8 @@ std::string Busyness::toString() {
 double adjustRelocationParallelismForSrc(double srcParallelism) {
 	if (SERVER_KNOBS->ENABLE_CONSERVATIVE_RELOCATION_WHEN_REPLICA_CONSISTENCY_CHECK &&
 	    SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT &&
-	    srcParallelism >= 1.0 + SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS) {
-		return srcParallelism / (1.0 + SERVER_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS);
+	    srcParallelism >= 1.0 + SERVER_KNOBS->DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS) {
+		return srcParallelism / (1.0 + SERVER_KNOBS->DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS);
 	} else {
 		return srcParallelism;
 	}
@@ -446,12 +446,12 @@ int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 	// The real parallelism is adjusted by the number of source servers of a source team that can serve
 	// fetchKey requests.
 	// When ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT is enabled, the fetchKeys on
-	// destination servers will read from CONSISTENCY_CHECK_REQUIRED_REPLICAS + 1 replicas from the source team (suppose
-	// the team size is large enough). As a result it is possible that the source team can be overloaded by the fetchKey
-	// read requests. This is especially true when the shard split data movements are launched. So, we introduce
-	// ENABLE_CONSERVATIVE_RELOCATION_WHEN_REPLICA_CONSISTENCY_CHECK knob to adjust the relocation parallelism
+	// destination servers will read from DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS + 1 replicas from the source team
+	// (suppose the team size is large enough). As a result it is possible that the source team can be overloaded by the
+	// fetchKey read requests. This is especially true when the shard split data movements are launched. So, we
+	// introduce ENABLE_CONSERVATIVE_RELOCATION_WHEN_REPLICA_CONSISTENCY_CHECK knob to adjust the relocation parallelism
 	// accordingly. The adjustment is to reduce the relocation parallelism by a factor of
-	// (1 + CONSISTENCY_CHECK_REQUIRED_REPLICAS).
+	// (1 + DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS).
 	if (relocation.bulkLoadTask.present())
 		return 0;
 	else if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
