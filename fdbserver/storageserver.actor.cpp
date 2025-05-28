@@ -4933,10 +4933,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	if (req.taskID.present() && req.taskID.get() == TaskPriority::FetchKeys) {
-		data->counters.kvFetchRequestReplied += 1;
-	}
-
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
 
@@ -7893,7 +7889,6 @@ ACTOR Future<Void> tryGetRange(StorageServer* data,
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 			limits.minRows = 0;
 			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
-			data->counters.kvFetchRequestIssued += 1;
 			results.send(rep);
 
 			if (!rep.more) {
@@ -14465,10 +14460,6 @@ ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<G
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
 	loop {
 		GetKeyValuesRequest req = waitNext(getKeyValues);
-
-		if (req.taskID.present() && req.taskID.get() == TaskPriority::FetchKeys) {
-			self->counters.kvFetchRequestReceived += 1;
-		}
 
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
