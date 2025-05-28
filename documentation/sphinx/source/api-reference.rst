@@ -12,7 +12,7 @@ The following documents give detailed descriptions of the API for each language:
 
    api-python
    api-ruby
-   Java API <relative://javadoc/index.html>
+   Java API <https://www.javadoc.io/doc/org.foundationdb/fdb-java/latest/index.html>
    Go API <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>
    api-c
    api-error-codes
