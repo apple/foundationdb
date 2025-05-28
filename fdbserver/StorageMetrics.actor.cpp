@@ -29,9 +29,7 @@ CommonStorageCounters::CommonStorageCounters(const std::string& name,
     bytesFetched("BytesFetched", cc), bytesInput("BytesInput", cc), mutationBytes("MutationBytes", cc),
     kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
     clearRangeMutations("ClearRangeMutations", cc), kvFetchServed("KVFetchServed", cc),
-    kvFetchBytesServed("KVFetchBytesServed", cc), kvFetchRequestReplied("KVFetchRequestReplied", cc),
-    kvFetchRequestReceived("KVFetchRequestReceived", cc), kvFetchRequestIssued("KVFetchRequestIssued", cc),
-    fetchKeyErrors("FetchKeyErrors", cc) {
+    kvFetchBytesServed("KVFetchBytesServed", cc), fetchKeyErrors("FetchKeyErrors", cc) {
 	if (metrics) {
 		specialCounter(cc, "BytesStored", [metrics]() { return metrics->byteSample.getEstimate(allKeys); });
 		specialCounter(cc, "BytesReadSampleCount", [metrics]() { return metrics->bytesReadSample.queue.size(); });
