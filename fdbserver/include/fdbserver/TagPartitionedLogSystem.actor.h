@@ -109,6 +109,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	bool hasRemoteServers;
 	AsyncTrigger backupWorkerChanged;
 	std::set<UID> removedBackupWorkers; // Workers that are removed before setting them.
+	std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
 
 	Optional<Version> recoverAt;
 	Optional<Version> recoveredAt;
@@ -212,6 +213,13 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                     Optional<UID> debugID,
 	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final;
 
+	void maybeAdjustBestServer(int bestSet,
+	                           int& bestServer,
+	                           std::vector<Reference<LogSet>> const& logSets,
+	                           Optional<Version> end,
+	                           Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds =
+	                               Optional<std::map<uint8_t, std::vector<uint16_t>>>());
+
 	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 
 	Reference<IPeekCursor> peekRemote(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore);
@@ -251,7 +259,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                     Version begin,
 	                                     Tag tag,
 	                                     bool useSatellite,
-	                                     Optional<Version> end) final;
+	                                     Optional<Version> end,
+	                                     Optional<std::map<uint8_t, std::vector<uint16_t>>> knownStoppedTLogIds) final;
 
 	Version getKnownCommittedVersion() final;
 
@@ -340,11 +349,16 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                     Reference<AsyncVar<bool>> failed);
 
 	// returns the log group's knownComittedVersion, DV, and a vector of TLogLockResults for each tLog in the group.
-	Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> static getDurableVersion(
-	    UID dbgid,
-	    LogLockInfo lockInfo,
-	    std::vector<Reference<AsyncVar<bool>>> failed = std::vector<Reference<AsyncVar<bool>>>(),
-	    Optional<Version> lastEnd = Optional<Version>());
+	Optional<std::tuple<Version,
+	                    Version,
+	                    std::vector<TLogLockResult>,
+	                    bool,
+	                    std::vector<uint16_t>>> static getDurableVersion(UID dbgid,
+	                                                                     LogLockInfo lockInfo,
+	                                                                     std::vector<Reference<AsyncVar<bool>>> failed =
+	                                                                         std::vector<Reference<AsyncVar<bool>>>(),
+	                                                                     Optional<Version> lastEnd =
+	                                                                         Optional<Version>());
 
 	ACTOR static Future<Void> getDurableVersionChanged(
 	    LogLockInfo lockInfo,

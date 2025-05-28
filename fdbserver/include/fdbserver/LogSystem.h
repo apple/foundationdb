@@ -229,12 +229,15 @@ struct ILogSystem {
 		int fastReplies;
 		int unknownReplies;
 
+		bool returnEmptyIfStopped; // valid only when unicast is enabled
+
 		ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
 		                 Tag tag,
 		                 Version begin,
 		                 Version end,
 		                 bool returnIfBlocked,
-		                 bool parallelGetMore);
+		                 bool parallelGetMore,
+		                 bool returnEmtpyIfStopped = false);
 		ServerPeekCursor(TLogPeekReply const& results,
 		                 LogMessageVersion const& messageVersion,
 		                 LogMessageVersion const& end,
@@ -343,6 +346,7 @@ struct ILogSystem {
 		bool useBestSet;
 		UID randomID;
 		Future<Void> more;
+		Optional<Version> end;
 
 		SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 		              int bestSet,
@@ -557,11 +561,14 @@ struct ILogSystem {
 	// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is
 	// correspondingly less expensive)
 
-	virtual Reference<IPeekCursor> peekLogRouter(UID dbgid,
-	                                             Version begin,
-	                                             Tag tag,
-	                                             bool useSatellite,
-	                                             Optional<Version> end = Optional<Version>()) = 0;
+	virtual Reference<IPeekCursor> peekLogRouter(
+	    UID dbgid,
+	    Version begin,
+	    Tag tag,
+	    bool useSatellite,
+	    Optional<Version> end = Optional<Version>(),
+	    Optional<std::map<uint8_t, std::vector<uint16_t>>> knownStoppedTLogIds =
+	        Optional<std::map<uint8_t, std::vector<uint16_t>>>()) = 0;
 	// Same contract as peek(), but can only peek from the logs elected in the same generation.
 	// If the preferred log server is down, a different log from the same generation will merge results locally before
 	// sending them to the log router.
