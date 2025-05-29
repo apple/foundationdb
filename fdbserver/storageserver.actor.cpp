@@ -7872,10 +7872,7 @@ public:
 	}
 };
 
-ACTOR Future<Void> tryGetRange(StorageServer* data,
-                               PromiseStream<RangeResult> results,
-                               Transaction* tr,
-                               KeyRange keys) {
+ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
 	if (SERVER_KNOBS->FETCH_USING_STREAMING) {
 		wait(tr->getRangeStream(results, keys, GetRangeLimits(), Snapshot::True));
 		return Void();
@@ -9212,7 +9209,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					hold = tryGetRangeFromBlob(results, &tr, data->cx, range, version, &data->tenantData);
 					rangeEnd = range.end;
 				} else {
-					hold = tryGetRange(data, results, &tr, keys);
+					hold = tryGetRange(results, &tr, keys);
 					rangeEnd = keys.end;
 				}
 			} else if (conductBulkLoad) {
@@ -9287,7 +9284,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					rangeEnd = keys.end;
 				}
 			} else {
-				hold = tryGetRange(data, results, &tr, keys);
+				hold = tryGetRange(results, &tr, keys);
 				rangeEnd = keys.end;
 			}
 
