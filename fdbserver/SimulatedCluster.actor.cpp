@@ -646,7 +646,8 @@ T simulate(const T& in) {
 }
 
 ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
-	state std::vector<Future<Void>> agentFutures;
+	state Future<Void> agentFuture;
+	state FileBackupAgent fileAgent;
 
 	while (g_simulator->backupAgents == ISimulator::BackupAgentType::WaitForType) {
 		wait(delay(1.0));
@@ -655,17 +656,16 @@ ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 	if (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
 		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
-		state FileBackupAgent fileAgent;
-		agentFutures.push_back(fileAgent.run(
-		    cx, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
+		TraceEvent("SimBackupAgentsStarting").log();
+		agentFuture =
+		    fileAgent.run(cx, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT);
 
 		while (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
 			wait(delay(1.0));
 		}
 
-		for (auto it : agentFutures) {
-			it.cancel();
-		}
+		TraceEvent("SimBackupAgentsStopping").log();
+		agentFuture.cancel();
 	}
 
 	wait(Future<Void>(Never()));

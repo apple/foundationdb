@@ -293,7 +293,7 @@ ACTOR Future<Void> historicReader(Database cx,
 	state std::deque<Standalone<MutationsAndVersionRef>> buffered;
 	state Reference<ChangeFeedData> results = makeReference<ChangeFeedData>();
 	state Future<Void> stream = cx->getChangeFeedStream(results, data->feedID, begin, end, data->keyRange);
-	state Version poppedVersionAtStart = data->poppedVersion;
+	// state Version poppedVersionAtStart = data->poppedVersion;
 
 	if (DEBUG_CF(data->key)) {
 		fmt::print("DBG) {0} Starting historical read {1} - {2}\n", data->key.printable(), begin, end);

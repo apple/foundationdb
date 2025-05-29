@@ -501,15 +501,13 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		                                  InconsistentSnapshotOnly::False,
 		                                  ::invalidVersion,
 		                                  self->encryptionKeyFileName,
-		                                  {},
-		                                  TransformPartitionedLog::True)));
+		                                  {})));
 		printf("BackupCorrectness, backupAgent.restore finished for tag:%s\n", restoreTag.toString().c_str());
 		return Void();
 	}
 
 	ACTOR static Future<Void> _start(Database cx, BackupAndRestorePartitionedCorrectnessWorkload* self) {
 		state FileBackupAgent backupAgent;
-		state bool extraTasks = false;
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
@@ -605,7 +603,6 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 				    .detail("TargetVersion", targetVersion);
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;
-				state bool multipleRangesInOneTag = false;
 				state int restoreIndex = 0;
 				// make sure system keys are not present in the restoreRanges as they will get restored first separately
 				// from the rest
@@ -636,7 +633,6 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 				}
 				// and here
 
-				multipleRangesInOneTag = true;
 				Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 				restoreTags.push_back(restoreTag);
 				printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
@@ -659,8 +655,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 				                                       InconsistentSnapshotOnly::False,
 				                                       ::invalidVersion,
 				                                       self->encryptionKeyFileName,
-				                                       {},
-				                                       TransformPartitionedLog::True));
+				                                       {}));
 
 				wait(waitForAll(restores));
 
