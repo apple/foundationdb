@@ -310,6 +310,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOAD_BALANCE_FETCH_REPLICA_TIMEOUT,                  5.0 );
 	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS,         false ); if( randomize && BUGGIFY ) ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS = true;
 	init( READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS,             -2 ); // Do consistency check based on all available storage replicas
+	init( ENABLE_WARNING_READ_CONSISTENCY_CHECK_NOT_ENOUGH_REPLICA, false); if (randomize && BUGGIFY) { ENABLE_WARNING_READ_CONSISTENCY_CHECK_NOT_ENOUGH_REPLICA = true; }
 
 	// Health Monitor
 	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;

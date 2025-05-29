@@ -429,13 +429,16 @@ std::string Busyness::toString() {
 }
 
 double adjustRelocationParallelismForSrc(double srcParallelism) {
+	double res = srcParallelism;
 	if (SERVER_KNOBS->ENABLE_CONSERVATIVE_RELOCATION_WHEN_REPLICA_CONSISTENCY_CHECK &&
 	    SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT &&
 	    srcParallelism >= 1.0 + SERVER_KNOBS->DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS) {
-		return srcParallelism / (1.0 + SERVER_KNOBS->DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS);
-	} else {
-		return srcParallelism;
+		// DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS is the number of extra replicas that the destination
+		// servers will read from the source team.
+		res = res / (1.0 + SERVER_KNOBS->DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS);
 	}
+	ASSERT(res > 0);
+	return res;
 }
 
 // find the "workFactor" for this, were it launched now

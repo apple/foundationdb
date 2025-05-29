@@ -331,6 +331,13 @@ Future<Void> replicaComparison(Req req,
 			if (requiredReplicas != BEST_EFFORT && requiredReplicas != ALL_REPLICAS) {
 				ASSERT(requiredReplicas > 0);
 				numReplicaToRead = std::min((int)candidates.size(), requiredReplicas);
+				if (FLOW_KNOBS->ENABLE_WARNING_READ_CONSISTENCY_CHECK_NOT_ENOUGH_REPLICA &&
+				    numReplicaToRead < candidates.size()) {
+					TraceEvent(SevWarn, "ReplicaConsistencyCheckNotEnoughReplica")
+					    .suppressFor(5.0)
+					    .detail("RequiredReplicas", requiredReplicas)
+					    .detail("AvailableReplicas", candidates.size());
+				}
 			}
 			state std::vector<Future<Optional<ErrorOr<Resp>>>> restOfTeamFutures;
 			restOfTeamFutures.reserve(numReplicaToRead);
@@ -341,7 +348,8 @@ Future<Void> replicaComparison(Req req,
 
 			for (int i = 0; i < ssTeam->size(); i++) {
 				RequestStream<Req, P> const* si = &ssTeam->get(i, channel);
-				if (ssToRead.find(si->getEndpoint().token.first()) == ssToRead.end()) {
+				if (!ssToRead.contains(si->getEndpoint().token.first())) {
+					// Only send requests to the SSes that we randomly selected
 					continue;
 				}
 				resetReply(req);
@@ -496,26 +504,30 @@ struct RequestData : NonCopyable {
 	                                      int requiredReplicas) {
 		if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
 			ASSERT(requestStream != nullptr);
-			// When ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS is on, we read extra
-			// READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS replica and conduct consistency
-			// check among replica for any read request.
-			if (FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS) {
+			if (compareReplicas) {
+				// In case compareReplicas == true, we may read extra requiredReplicas replica.
+				// The value of compareReplicas is decided by the caller and the knobs.
+				// If the caller is fetchKeys, when ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT is on,
+				// the value is DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS.
+				// If the caller is backup agents, when ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS is on,
+				// the value is BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS.
+				// Otherwise, the value is 0.
 				return replicaComparison(request,
 				                         response,
 				                         requestStream->getEndpoint().token.first(),
 				                         alternatives,
 				                         channel,
-				                         FLOW_KNOBS->READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS);
+				                         requiredReplicas);
 			}
-			// In case compareReplicas == true, we may read extra requiredReplicas replica.
-			// The value of compareReplicas is decided by the caller and the knobs.
-			// If the caller is fetchKeys, when ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT is on,
-			// the value is DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS.
-			// If the caller is backup agents, when ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS is on,
-			// the value is BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS.
-			// Otherwise, the value is 0.
-			return replicaComparison(
-			    request, response, requestStream->getEndpoint().token.first(), alternatives, channel, requiredReplicas);
+			// In case ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS is on, we read extra
+			// READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS replica and conduct consistency
+			// check among replica for any read request.
+			return replicaComparison(request,
+			                         response,
+			                         requestStream->getEndpoint().token.first(),
+			                         alternatives,
+			                         channel,
+			                         FLOW_KNOBS->READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS);
 		}
 		return Void();
 	}
