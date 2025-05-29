@@ -22,8 +22,6 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#include "flow/IRandom.h"
-#include <unordered_set>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_LOADBALANCE_ACTOR_G_H)
 #define FLOW_LOADBALANCE_ACTOR_G_H
 #include "fdbrpc/LoadBalance.actor.g.h"
@@ -514,6 +512,7 @@ struct RequestData : NonCopyable {
 				                         channel,
 				                         requiredReplicas);
 			}
+			UNREACHABLE();
 		}
 		return Void();
 	}
