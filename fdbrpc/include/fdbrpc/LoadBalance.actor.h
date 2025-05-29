@@ -496,6 +496,9 @@ struct RequestData : NonCopyable {
 	                                      int requiredReplicas) {
 		if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
 			ASSERT(requestStream != nullptr);
+			// When ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS is on, we read extra
+			// READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS replica and conduct consistency
+			// check among replica for any read request.
 			if (FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS) {
 				return replicaComparison(request,
 				                         response,
@@ -504,15 +507,15 @@ struct RequestData : NonCopyable {
 				                         channel,
 				                         FLOW_KNOBS->READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS);
 			}
-			if (compareReplicas) {
-				return replicaComparison(request,
-				                         response,
-				                         requestStream->getEndpoint().token.first(),
-				                         alternatives,
-				                         channel,
-				                         requiredReplicas);
-			}
-			UNREACHABLE();
+			// In case compareReplicas == true, we may read extra requiredReplicas replica.
+			// The value of compareReplicas is decided by the caller and the knobs.
+			// If the caller is fetchKeys, when ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT is on,
+			// the value is DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS.
+			// If the caller is backup agents, when ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS is on,
+			// the value is BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS.
+			// Otherwise, the value is 0.
+			return replicaComparison(
+			    request, response, requestStream->getEndpoint().token.first(), alternatives, channel, requiredReplicas);
 		}
 		return Void();
 	}
