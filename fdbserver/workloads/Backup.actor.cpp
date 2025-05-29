@@ -29,7 +29,7 @@
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// A workload which only performs backup operations. A seperate workload is used to perform restore operations.
+// A workload which only performs backup operations. A separate workload is used to perform restore operations.
 struct BackupWorkload : TestWorkload {
 	static constexpr auto NAME = "Backup";
 	double backupAfter, restoreAfter, abortAndRestartAfter;
