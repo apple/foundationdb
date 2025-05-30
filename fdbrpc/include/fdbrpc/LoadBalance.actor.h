@@ -332,7 +332,7 @@ Future<Void> replicaComparison(Req req,
 				ASSERT(requiredReplicas > 0);
 				numReplicaToRead = std::min((int)candidates.size(), requiredReplicas);
 				if (FLOW_KNOBS->ENABLE_WARNING_READ_CONSISTENCY_CHECK_NOT_ENOUGH_REPLICA &&
-				    numReplicaToRead > candidates.size()) {
+				    candidates.size() < requiredReplicas) {
 					TraceEvent(SevWarn, "ReplicaConsistencyCheckNotEnoughReplica")
 					    .suppressFor(5.0)
 					    .detail("RequiredReplicas", requiredReplicas)
