@@ -4704,6 +4704,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.options = trState->readOptions;
 			req.version = trState->readVersion();
+			req.taskID = trState->taskID;
 
 			trState->cx->getLatestCommitVersions(beginServer.locations, trState, req.ssLatestCommitVersions);
 

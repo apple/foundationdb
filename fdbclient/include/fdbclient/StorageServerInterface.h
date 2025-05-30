@@ -391,6 +391,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
+	Optional<TaskPriority> taskID; // includes the information about read purpose
 
 	GetKeyValuesRequest() {}
 
@@ -410,6 +411,7 @@ struct GetKeyValuesRequest : TimedRequest {
 		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
+		           taskID,
 		           arena);
 	}
 };
@@ -447,6 +449,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
+	Optional<TaskPriority> taskID; // includes the information about read purpose
 
 	GetMappedKeyValuesRequest() {}
 
@@ -467,6 +470,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
+		           taskID,
 		           arena);
 	}
 };

@@ -199,8 +199,11 @@ public:
 	// STORAGE_FETCH_KEYS_RATE_LIMIT.
 	int FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD;
 
-	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT;
-	int CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT; // Enable to check replica consistency on data movement
+	int DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS; // The number of extra replicas to check for replica consistency
+	                                                  // on data movement read range requests by fetchKeys
+	bool ENABLE_CONSERVATIVE_RELOCATION_WHEN_REPLICA_CONSISTENCY_CHECK; // Enable to slow down relocation when replica
+	                                                                    // consistency check on data movement is enabled
 
 	// Probability that a team redundant data move set TrueBest when get destination team
 	double PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
