@@ -4901,11 +4901,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 				totalByteSize += r.data[i].expectedSize();
 			}
 
-			if (req.taskID.present() && req.taskID.get() == TaskPriority::FetchKeys) {
-				data->counters.kvFetchServed += r.data.size();
-				data->counters.kvFetchBytesServed += (totalByteSize + (8 - (int)sizeof(KeyValueRef)) * r.data.size());
-			}
-
 			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 				int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
 				data->metrics.notifyBytesReadPerKSecond(addPrefix(r.data[0].key, req.tenantInfo.prefix, req.arena),

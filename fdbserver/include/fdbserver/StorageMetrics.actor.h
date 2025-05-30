@@ -206,12 +206,6 @@ struct CommonStorageCounters {
 	// The number of key-value pairs fetched by fetchKeys()
 	Counter kvFetched;
 
-	// Bytes replied for fetchKeys
-	Counter kvFetchBytesServed;
-
-	// The number of key-value pairs replied for fetchKeys
-	Counter kvFetchServed;
-
 	// The number of fetchKeys errors
 	Counter fetchKeyErrors;
 
