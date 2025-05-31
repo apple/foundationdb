@@ -1149,10 +1149,6 @@ struct CLIOptions {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		for (auto& s : grpcAddressStrs) {
-			fmt::printf("gRPC Endpoint: %s\n", s);
-		}
-
 		if (role == ServerRole::ConsistencyCheck || role == ServerRole::ConsistencyCheckUrgent) {
 			if (!publicAddressStrs.empty()) {
 				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
@@ -2424,6 +2420,13 @@ int main(int argc, char* argv[]) {
 					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
 				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+
+#ifdef FLOW_GRPC_ENABLED
+				if (opts.grpcAddressStrs.size() > 0) {
+					FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
+					actors.push_back(GrpcServer::instance()->run());
+				}
+#endif
 				actors.push_back(fdbd(opts.connectionFile,
 				                      opts.localities,
 				                      opts.processClass,
@@ -2441,12 +2444,6 @@ int main(int argc, char* argv[]) {
 				actors.push_back(histogramReport());
 				actors.push_back(metricsReport());
 
-#ifdef FLOW_GRPC_ENABLED
-				if (opts.grpcAddressStrs.size() > 0) {
-					FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
-					actors.push_back(GrpcServer::instance()->run());
-				}
-#endif
 				f = stopAfter(waitForAll(actors));
 				g_network->run();
 			}

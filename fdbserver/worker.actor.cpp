@@ -41,6 +41,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/NetworkAddress.h"
+#include "fdbrpc/FlowGrpc.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -77,6 +78,10 @@
 #include "flow/serialize.h"
 #include "flow/ChaosMetrics.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
+#include "fdbclient/ThreadSafeTransaction.h"
+#include "flow/ApiVersion.h"
+#include "fdbcli_lib/CliService.h"
+
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -286,6 +291,15 @@ Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future
 	return handleIOErrors(actor, storeError, id, onClosed);
 }
 
+Future<Void> deregisterGrpcService(const UID& id) {
+#ifdef FLOW_GRPC_ENABLED
+	if (GrpcServer::instance() != nullptr) {
+		return GrpcServer::instance()->deregisterRoleServices(id);
+	}
+#endif
+	return Void();
+}
+
 ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 	loop choose {
 		when(ErrorInfo _err = waitNext(errors)) {
@@ -302,12 +316,18 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			endRole(err.role, err.id, "Error", ok, err.error);
 
+			state std::optional<Error> rethrow = std::nullopt;
 			if (err.error.code() == error_code_please_reboot ||
 			    (err.role == Role::SHARED_TRANSACTION_LOG &&
 			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)) ||
 			    (SERVER_KNOBS->STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT && err.role == Role::STORAGE_SERVER &&
-			     err.error.code() == error_code_io_timeout))
-				throw err.error;
+			     err.error.code() == error_code_io_timeout)) {
+				rethrow = err.error;
+			}
+
+			if (rethrow != std::nullopt) {
+				throw *rethrow;
+			}
 		}
 	}
 }
@@ -2194,6 +2214,20 @@ void cleanupStorageDisks(Reference<AsyncVar<ServerDBInfo>> dbInfo,
 	}
 }
 
+ACTOR Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr) {
+	if (GrpcServer::instance() == nullptr) {
+		return Never();
+	}
+
+	auto db = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION);
+	Reference<IDatabase> idb = wait(safeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(db)));
+
+	auto services = GrpcServer::ServiceList{ std::make_shared<fdbcli_lib::CliServiceImpl>(idb) };
+	GrpcServer::instance()->registerRoleServices(UID(), services);
+	TraceEvent("WorkerGrpcServerStart").detail("Address", GrpcServer::instance()->getAddress());
+	return Never();
+}
+
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
@@ -2273,6 +2307,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	// When set to true, the health monitor running in this worker starts monitor other transaction process in this
 	// cluster.
 	state Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck = makeReference<AsyncVar<bool>>(false);
+
+	wait(yield());
+	state Future<Void> grpc = registerWorkerGrpcServices(interf.id(), connRecord);
 
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		TraceEvent(SevInfo, "ChaosFeaturesEnabled");
@@ -3520,6 +3557,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			TraceEvent(SevInfo, "WorkerShutdownComplete", interf.id());
 		}
 
+		wait(deregisterGrpcService(interf.id()));
 		throw e;
 	}
 }
