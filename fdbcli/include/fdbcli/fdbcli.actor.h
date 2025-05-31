@@ -151,7 +151,7 @@ void printUsage(StringRef command);
 void printLongDesc(StringRef command);
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
-ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
+Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
 // Using \xff\xff/worker_interfaces/ special key, get all worker interfaces.
 // A worker list will be returned from CC.
 // If verify, we will try to establish connections to all workers returned.

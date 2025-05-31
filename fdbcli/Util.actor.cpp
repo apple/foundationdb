@@ -19,6 +19,7 @@
  */
 
 #include "fdbcli/fdbcli.actor.h"
+#include "fdbcli_lib/CliCommands.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/Status.h"
@@ -55,20 +56,8 @@ void printLongDesc(StringRef command) {
 		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
 }
 
-ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
-	// hold the returned standalone object's memory
-	state ThreadFuture<Optional<Value>> errorMsgF = tr->get(fdb_cli::errorMsgSpecialKey);
-	Optional<Value> errorMsg = wait(safeThreadFutureToFuture(errorMsgF));
-	// Error message should be present
-	ASSERT(errorMsg.present());
-	// Read the json string
-	auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-	// verify schema
-	auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-	std::string errorStr;
-	ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-	// return the error message
-	return valueObj["message"].get_str();
+Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
+	return fdbcli_lib::utils::getSpecialKeysFailureErrorMessage(tr);
 }
 
 void addInterfacesFromKVs(RangeResult& kvs,

@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package fdbcli_lib;
+
+message Worker {
+    message Locality {
+        optional string process_id = 1;
+        optional string zone_id = 2;
+        optional string machine_id = 3;
+        optional string dc_id = 4;
+        optional string data_hall_id = 5;
+    }
+
+    optional string address = 1;
+    optional string grpc_address = 2;
+    optional string process_class = 3;
+    optional Locality locality = 4;
+}
+
+
+//-- Coordinators ----
+
+message GetCoordinatorsRequest {}
+message GetCoordinatorsReply {
+    repeated string coordinators = 1;
+}
+
+message ChangeCoordinatorsRequest {
+    optional string cluster_description = 1;
+    optional bool disable_config_db = 2;
+    optional bool automatic_coordinators = 3;
+    repeated string new_coordinator_addresses = 4;
+}
+
+message ChangeCoordinatorsReply {
+    optional bool changed = 1;
+    repeated string coordinators = 2;
+}
+
+// -- Database Configure ----
+
+message ConfigureRequest {}
+message ConfigureReply {}
+
+message GetOptionsRequest {}
+message GetOptionsReply {}
+message SetOptionsRequest {}
+message SetOptionsReply {}
+
+message GetReadVersionRequest {}
+message GetReadVersionReply {
+    optional int64 version = 1; 
+}
+
+//-- Status ----
+
+message GetStatusRequest {}
+message GetStatusReply {}
+
+//-- Workers ----
+
+message GetWorkersRequest {}
+message GetWorkersReply {
+    repeated Worker workers = 1;
+}
+
+message IncludeRequest {
+    optional bool all = 1;
+    repeated string addresses = 2;
+    repeated string localities = 3;
+    optional bool failed = 4;
+}
+message IncludeReply {}
+
+message ExcludeRequest {
+    optional bool all = 1;
+    optional bool failed = 2;
+    optional bool no_wait = 3;
+    optional bool force = 4;
+    repeated string localities = 5;
+    repeated string processes = 6;
+    repeated string hosts = 7;
+}
+message ExcludeReply {}
+
+// TODO: Use Locality structure.
+message ExcludeStatusRequest {}
+message ExcludeStatusReply {
+    repeated string excluded_addresses = 1;
+    repeated string excluded_localities = 2;
+    repeated string failed_addresses = 3;
+    repeated string failed_localities = 4;
+    repeated string in_progress_excludes = 5;
+}
+
+message KillRequest {
+    optional bool all = 1;
+    repeated string addresses = 2;
+}
+message KillReply {}
+
+//-- RPCs ----
+
+service CliService {
+    rpc GetCoordinators(GetCoordinatorsRequest) returns (GetCoordinatorsReply);
+    rpc ChangeCoordinators(ChangeCoordinatorsRequest) returns (ChangeCoordinatorsReply);
+    
+    rpc Configure(ConfigureRequest) returns (ConfigureReply);
+    rpc GetOptions(GetOptionsRequest) returns (GetOptionsReply);
+    rpc SetOptions(SetOptionsRequest) returns (SetOptionsReply);
+    rpc GetReadVersion(GetReadVersionRequest) returns (GetReadVersionReply);
+
+    rpc GetStatus(GetStatusRequest) returns (GetStatusReply);
+
+    rpc GetWorkers(GetWorkersRequest) returns (GetWorkersReply);
+    rpc Include(IncludeRequest) returns (IncludeReply);
+    rpc Exclude(ExcludeRequest) returns (ExcludeReply);
+    rpc ExcludeStatus(ExcludeStatusRequest) returns (ExcludeStatusReply);
+    rpc Kill(KillRequest) returns (KillReply);
+}
