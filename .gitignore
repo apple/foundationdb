@@ -108,3 +108,6 @@ temp/
 /.ccls-cache
 .clangd/
 .stignore
+
+*.aider*
+*.fdq
