@@ -84,7 +84,7 @@ type ReadTransactor interface {
 
 func setOpt(setter func(*C.uint8_t, C.int) C.fdb_error_t, param []byte) error {
 	if err := setter(byteSliceToPtr(param), C.int(len(param))); err != 0 {
-		return Error{int(err)}
+		return fmt.Errorf("failed to set option: %w", Error{int(err)})
 	}
 
 	return nil
@@ -157,7 +157,7 @@ func APIVersion(version int) error {
 				}
 				return fmt.Errorf("API version %d is not supported by the installed FoundationDB C library.", version)
 			}
-			return Error{int(e)}
+			return fmt.Errorf("failed to select API version: %w", Error{int(e)})
 		}
 	}
 
@@ -428,7 +428,7 @@ func OpenWithConnectionString(connectionString string) (Database, error) {
 	var createErr error
 	if err := executeWithRunningNetworkThread(func() {
 		if err := C.fdb_create_database_from_connection_string(cf, &outdb); err != 0 {
-			createErr = Error{int(err)}
+			createErr = fmt.Errorf("failed to create database from connection string: %w", Error{int(err)})
 		}
 	}); err != nil {
 		return Database{}, err
