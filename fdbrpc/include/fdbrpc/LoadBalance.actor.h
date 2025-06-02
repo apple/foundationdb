@@ -311,31 +311,55 @@ Future<Void> replicaComparison(Req req,
 			}
 		} else if (!srcLB.present() || !srcLB.get().error.present()) {
 			// Verify that the other SS servers in the team have the same data.
-			state std::vector<Future<Optional<ErrorOr<Resp>>>> restOfTeamFutures;
-			restOfTeamFutures.reserve(ssTeam->size() - 1);
+			std::vector<uint64_t> candidates;
+			// candidates includes all healthy SS endpoints in the team except the one we already
+			// have a response from
 			for (int i = 0; i < ssTeam->size(); i++) {
 				RequestStream<Req, P> const* si = &ssTeam->get(i, channel);
-				if (si->getEndpoint().token.first() !=
-				    srcEndpointId) { // don't re-request to SS we already have a response from
-					if (!IFailureMonitor::failureMonitor().getState(si->getEndpoint()).failed) {
-						resetReply(req);
-						restOfTeamFutures.push_back((
-						    requiredReplicas == BEST_EFFORT
-						        ? timeout(si->tryGetReply(req), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)
-						        : timeout(errorOr(si->getReply(req)), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)));
-					} else if (requiredReplicas == ALL_REPLICAS) {
-						TraceEvent(SevWarnAlways, "UnreachableStorageServer")
-						    .detail("SSID", ssTeam->getInterface(i).id());
-						throw unreachable_storage_replica();
-					}
+				if (si->getEndpoint().token.first() == srcEndpointId) {
+					// Don't re-request to SS we already have a response from
+					continue;
+				}
+				if (!IFailureMonitor::failureMonitor().getState(si->getEndpoint()).failed) {
+					candidates.push_back(si->getEndpoint().token.first());
+				} else if (requiredReplicas == ALL_REPLICAS) {
+					TraceEvent(SevWarnAlways, "UnreachableStorageServer").detail("SSID", ssTeam->getInterface(i).id());
+					throw unreachable_storage_replica();
 				}
 			}
-
-			if (requiredReplicas == BEST_EFFORT || requiredReplicas == ALL_REPLICAS) {
-				wait(waitForAllReady(restOfTeamFutures));
-			} else {
-				wait(waitForQuorumReplies(&restOfTeamFutures, requiredReplicas));
+			int numReplicaToRead = candidates.size();
+			if (requiredReplicas != BEST_EFFORT && requiredReplicas != ALL_REPLICAS) {
+				ASSERT(requiredReplicas > 0);
+				numReplicaToRead = std::min((int)candidates.size(), requiredReplicas);
+				if (FLOW_KNOBS->ENABLE_WARNING_READ_CONSISTENCY_CHECK_NOT_ENOUGH_REPLICA &&
+				    candidates.size() < requiredReplicas) {
+					TraceEvent(SevWarn, "ReplicaConsistencyCheckNotEnoughReplica")
+					    .suppressFor(5.0)
+					    .detail("RequiredReplicas", requiredReplicas)
+					    .detail("AvailableReplicas", candidates.size());
+				}
 			}
+			state std::vector<Future<Optional<ErrorOr<Resp>>>> restOfTeamFutures;
+			restOfTeamFutures.reserve(numReplicaToRead);
+			// Randomly select numReplicaToRead SSes to read from
+			deterministicRandom()->randomShuffle(candidates);
+			candidates.erase(candidates.begin() + numReplicaToRead, candidates.end());
+			std::unordered_set<uint64_t> ssToRead(candidates.begin(), candidates.end());
+
+			for (int i = 0; i < ssTeam->size(); i++) {
+				RequestStream<Req, P> const* si = &ssTeam->get(i, channel);
+				if (!ssToRead.contains(si->getEndpoint().token.first())) {
+					// Only send requests to the SSes that we randomly selected
+					continue;
+				}
+				resetReply(req);
+				restOfTeamFutures.push_back(
+				    (requiredReplicas == BEST_EFFORT
+				         ? timeout(si->tryGetReply(req), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)
+				         : timeout(errorOr(si->getReply(req)), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)));
+			}
+
+			wait(waitForAllReady(restOfTeamFutures));
 
 			int numError = 0;
 			int numMismatch = 0;
@@ -480,16 +504,31 @@ struct RequestData : NonCopyable {
 	                                      int requiredReplicas) {
 		if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
 			ASSERT(requestStream != nullptr);
-			int requiredReplicaCount =
-			    compareReplicas ? requiredReplicas : FLOW_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+			if (compareReplicas) {
+				// In case compareReplicas == true, we may read extra requiredReplicas replica.
+				// The value of compareReplicas is decided by the caller and the knobs.
+				// If the caller is fetchKeys, when ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT is on,
+				// the value is DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS.
+				// If the caller is backup agents, when ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS is on,
+				// the value is BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS.
+				// Otherwise, the value is 0.
+				return replicaComparison(request,
+				                         response,
+				                         requestStream->getEndpoint().token.first(),
+				                         alternatives,
+				                         channel,
+				                         requiredReplicas);
+			}
+			// In case ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS is on, we read extra
+			// READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS replica and conduct consistency
+			// check among replica for any read request.
 			return replicaComparison(request,
 			                         response,
 			                         requestStream->getEndpoint().token.first(),
 			                         alternatives,
 			                         channel,
-			                         requiredReplicaCount);
+			                         FLOW_KNOBS->READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS);
 		}
-
 		return Void();
 	}
 
