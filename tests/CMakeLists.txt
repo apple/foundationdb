@@ -477,6 +477,15 @@ if(WITH_PYTHON)
     add_fdb_test(
       TEST_FILES restarting/to_7.4.0/CycleTestRestart-1.toml
       restarting/to_7.4.0/CycleTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/rocksdb_tests/rocksdb_from_9.7.3/CycleTestRestart-1.toml
+      restarting/rocksdb_tests/rocksdb_from_9.7.3/CycleTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/rocksdb_tests/rocksdb_from_9.7.3/ReadWriteRestart-1.toml
+      restarting/rocksdb_tests/rocksdb_from_9.7.3/ReadWriteRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/rocksdb_tests/rocksdb_from_9.7.3/UpgradeAndBackUpRestore-1.toml
+      restarting/rocksdb_tests/rocksdb_from_9.7.3/UpgradeAndBackUpRestore-2.toml)
   endif()
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
