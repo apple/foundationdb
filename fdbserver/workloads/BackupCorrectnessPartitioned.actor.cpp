@@ -501,8 +501,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		                                  InconsistentSnapshotOnly::False,
 		                                  ::invalidVersion,
 		                                  self->encryptionKeyFileName,
-		                                  {},
-		                                  TransformPartitionedLog::True)));
+		                                  {})));
 		printf("BackupCorrectness, backupAgent.restore finished for tag:%s\n", restoreTag.toString().c_str());
 		return Void();
 	}
@@ -659,8 +658,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 				                                       InconsistentSnapshotOnly::False,
 				                                       ::invalidVersion,
 				                                       self->encryptionKeyFileName,
-				                                       {},
-				                                       TransformPartitionedLog::True));
+				                                       {}));
 
 				wait(waitForAll(restores));
 
