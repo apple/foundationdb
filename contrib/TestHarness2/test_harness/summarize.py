@@ -479,6 +479,7 @@ class Summary:
         self.paired_run_fdb_logs_for_archival = paired_run_fdb_logs_for_archival
         self.paired_run_harness_files_for_archival = paired_run_harness_files_for_archival
         self.archive_logs_on_failure = archive_logs_on_failure
+        self.archival_references_added = False # Flag to indicate if archival tags were added
         self._jod_for_archive = joshua_output_dir
         self._rtd_for_archive = run_temp_dir
         # Store current run's harness output paths
@@ -1020,7 +1021,7 @@ class Summary:
                 self.out.attributes["FailReason"] = "TestKilled"
 
         # New: Check for stderr output if no other error reported yet and exit code was 0 for a positive test
-        if not self.error and not self.is_negative_test and self.exit_code == 0 and \\
+        if not self.error and not self.is_negative_test and self.exit_code == 0 and \
            self.error_out and len(self.error_out.strip()) > 0:
             logger.warning(
                 f"Test {self.test_name} (UID: {self.uid}, PartUID: {self.current_part_uid}) "
@@ -1138,6 +1139,45 @@ class Summary:
         elif "FailReason" in self.out.attributes: # Clean up FailReason if test is Ok
             del self.out.attributes["FailReason"]
         
+        if self.archive_logs_on_failure and not self.ok(): # self.ok() reflects the final status
+            logger.info(f"Test part {self.current_part_uid} (TestUID: {self.uid}, Name: {self.test_name}) failed and archive_logs_on_failure is True. Adding log location tags to summary.")
+            self.archival_references_added = True # Set flag
+
+            if self._rtd_for_archive and self._rtd_for_archive.exists():
+                log_dir_elem = SummaryTree("FDBClusterLogDir")
+                log_dir_elem.attributes["path"] = str(self._rtd_for_archive.resolve())
+                self.out.append(log_dir_elem)
+            
+            if self.current_run_stdout_path and self.current_run_stdout_path.exists():
+                stdout_elem = SummaryTree("HarnessLogFile")
+                stdout_elem.attributes["type"] = "stdout"
+                stdout_elem.attributes["path"] = str(self.current_run_stdout_path.resolve())
+                self.out.append(stdout_elem)
+
+            if self.current_run_stderr_path and self.current_run_stderr_path.exists():
+                stderr_elem = SummaryTree("HarnessLogFile")
+                stderr_elem.attributes["type"] = "stderr"
+                stderr_elem.attributes["path"] = str(self.current_run_stderr_path.resolve())
+                self.out.append(stderr_elem)
+            
+            if self.current_run_command_file_path and self.current_run_command_file_path.exists():
+                cmd_elem = SummaryTree("HarnessLogFile")
+                cmd_elem.attributes["type"] = "command"
+                cmd_elem.attributes["path"] = str(self.current_run_command_file_path.resolve())
+                self.out.append(cmd_elem)
+
+            if self.fdb_log_files_for_archival:
+                for log_file_path in self.fdb_log_files_for_archival:
+                    if log_file_path.exists():
+                        fdb_file_elem = SummaryTree("FDBLogFile")
+                        fdb_file_elem.attributes["path"] = str(log_file_path.resolve())
+                        self.out.append(fdb_file_elem)
+            
+            if self._jod_for_archive and self._jod_for_archive.exists():
+                jod_elem = SummaryTree("JoshuaOutputDirRef")
+                jod_elem.attributes["path"] = str(self._jod_for_archive.resolve())
+                self.out.append(jod_elem)
+        
         self._already_done = True # Mark as done
 
     def ok(self):
@@ -1145,6 +1185,10 @@ class Summary:
         return (not self.error) != self.is_negative_test
 
     def get_v1_stdout_line(self) -> Optional[str]:
+        if not self._already_done: # Ensure done() has run to determine ok() status and archival_references_added
+            logger.warning("get_v1_stdout_line called before self.done(). Finalizing summary state.")
+            self.done()
+
         if not hasattr(self, 'out') or not self.out or self.out.name != "Test":
             logger.error("get_v1_stdout_line: self.out is not a valid 'Test' SummaryTree.")
             return '<Test Ok="0" Error="V1SummaryGenFailed_InvalidState" PartUID="UNKNOWN_PART_UID"/>'

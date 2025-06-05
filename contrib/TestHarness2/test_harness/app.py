@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import logging
 import pathlib
@@ -10,6 +12,12 @@ import xml.etree.ElementTree as ET
 from xml.sax import saxutils # For escaping
 import io # For StreamTee fileno exception
 import copy # For deepcopy in stripping function
+from pathlib import Path
+from typing import Optional, List, Tuple
+import signal
+from datetime import datetime
+
+from test_harness.config import Config
 
 # Initialize logger at module level with a NullHandler to prevent "No handlers found" warnings
 # if the script fails before logging is fully configured in main().
@@ -22,6 +30,64 @@ original_stderr = sys.stderr # Capture at module load time
 
 # Import from summarize for stripping logic
 from test_harness.summarize import TAGS_TO_STRIP_FROM_TEST_ELEMENT_FOR_STDOUT
+
+from test_harness.config import config # Ensure config is imported for setup_logging
+from test_harness.run import TestRunner # Import TestRunner
+from test_harness.summarize import SummaryTree # Import SummaryTree
+
+# Define setup_logging function here
+def setup_logging(config, process_id: int, timestamp: int, existing_logger: Optional[logging.Logger] = None) -> logging.Logger:
+    """
+    Configures the global logger for the application.
+    If an existing_logger is passed, it reconfigures it instead of creating a new one.
+    """
+    logger = existing_logger or logging.getLogger("__main__")
+    
+    # Explicitly close and remove old handlers to release file locks
+    if logger.hasHandlers():
+        for handler in logger.handlers[:]:
+            handler.close()
+            logger.removeHandler(handler)
+
+    log_file_path: Optional[Path] = None
+
+    # Preferred path: <joshua_output_dir>/app_log.txt
+    if hasattr(config, 'joshua_output_dir') and config.joshua_output_dir:
+        try:
+            # The shell script should have already created this directory
+            jod = Path(config.joshua_output_dir)
+            jod.mkdir(parents=True, exist_ok=True)
+            log_file_path = jod / 'app_log.txt'
+        except (OSError, PermissionError) as e:
+            original_stderr.write(f"app.py setup_logging: Could not create or access joshua_output_dir '{config.joshua_output_dir}'. Error: {e}. Falling back to emergency log.\n")
+            log_file_path = None
+
+    # Fallback path if the preferred path is not usable
+    if log_file_path is None:
+        emergency_dir = Path('/tmp')
+        emergency_dir.mkdir(exist_ok=True)
+        log_file_path = emergency_dir / f"th_emergency_app_log.{process_id}.{timestamp}.log"
+        if existing_logger is None: # Only print this on the very first setup
+            original_stderr.write(f"app.py setup_logging: Using emergency log file: {log_file_path}\n")
+
+    # Basic logging config
+    log_level = logging.INFO
+    if hasattr(config, 'log_level') and isinstance(config.log_level, str):
+        level_from_config = getattr(logging, config.log_level.upper(), logging.INFO)
+        if isinstance(level_from_config, int):
+            log_level = level_from_config
+
+    formatter = logging.Formatter("%(asctime)s - %(process)d - %(name)s - %(levelname)s - %(message)s")
+    
+    file_handler = logging.FileHandler(log_file_path)
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(formatter)
+    
+    logger.setLevel(log_level)
+    logger.addHandler(file_handler)
+    
+    logger.info(f"Logger configured by setup_logging. Log file: {log_file_path}, Level: {logging.getLevelName(log_level)}")
+    return logger
 
 class StreamTee:
     """
@@ -108,10 +174,6 @@ class StreamTee:
              return self.original_stream_target.fileno()
         raise io.UnsupportedOperation("StreamTee: fileno not available on the configured original_stream_target or not passing through.")
 
-from test_harness.config import config
-from test_harness.run import TestRunner
-from test_harness.summarize import SummaryTree
-
 def strip_elements_for_v1_stdout(xml_string: str) -> str:
     """
     Parses an XML string, removes specified child elements from the root,
@@ -194,131 +256,392 @@ def create_fatal_error_xml(message: str, error_type: str = "FatalError", test_ui
         return f'<Test TestUID="{saxutils.escape(test_uid)}" JoshuaSeed="{saxutils.escape(joshua_seed)}" Ok="0" Error="EmergencyXmlCreationFail"><JoshuaMessage Severity="40" Message="XML creation itself failed: {saxutils.escape(str(e))}" /></Test>'
 
 def main():
+    """Main entry point of the TestHarnessV2 application."""
+    # =========================================================================
+    # Phase 1: Pre-Setup and Initial Checks (No File Logging)
+    # =========================================================================
+    # Until config is parsed, we cannot safely log to a file.
+    # All critical early messages will go to the original stderr.
     pid = os.getpid()
-    timestamp = int(time.time())
-    final_exit_code = 1 # Default to error
-    final_stdout_xml = '<Test Ok="0" Error="AppPy_UnhandledError_BeforeTry" />' # Fallback stdout
-    full_summary_tree_result = None
-    log_file_stream = None
-    # raw_fatal_xml_for_file is used to signal if a specific fatal error XML was already generated and should take precedence for joshua.xml
-    raw_fatal_xml_for_file_main_scope = None
+    timestamp = int(datetime.now().timestamp())
+    logger = logging.getLogger("__main__")
+    logger.addHandler(logging.NullHandler()) # Prevent "no handlers" warnings
+    config: Optional[Config] = None
+    summary_tree_for_joshua_xml: Optional[SummaryTree] = None
+    final_exit_code = 0
 
     try:
-        log_file_stream = setup_logging(pid, timestamp)
-
-        # Initial config parsing and validation (may exit)
-        # This function would internally handle its specific errors, XML generation, and sys.exit()
-        # or raise a specific exception to be caught here.
-        # For simplicity in this sketch, let's assume it raises on error.
+        # =====================================================================
+        # Phase 2: Configuration Parsing
+        # =====================================================================
+        # This is the first major step. If this fails, we exit.
         try:
-            parse_and_validate_config(pid, timestamp) # This would use the global config object
-        except ConfigError as ce: # Custom exception from parse_and_validate_config
-            raw_fatal_xml_for_file_main_scope = ce.xml_content # Assume exception carries this
-            final_stdout_xml = ce.stdout_xml
-            final_exit_code = 1
-            # original_stdout.write(final_stdout_xml + '\\n') is done in the handler or here
-            # writing to joshua.xml for this specific error is also handled in the handler or here
-            raise # Re-raise to go to the main finally block for cleanup
+            config, args = parse_and_validate_config(sys.argv)
+        except ConfigError as e:
+            original_stderr.write(f"FATAL: Configuration error: {e}\\n")
+            sys.exit(1)
+        except Exception as e:
+            original_stderr.write(f"FATAL: Unexpected error during config parsing: {e}\\n")
+            original_stderr.write(traceback.format_exc() + "\\n")
+            sys.exit(1)
 
-        setup_stream_redirection(log_file_stream) # Uses global config
+        # =====================================================================
+        # Phase 3: Setup Logging and Stream Redirection (NOW with config)
+        # =====================================================================
+        # Now that we have a valid config, we can set up file logging once.
+        logger = setup_logging(config, pid, timestamp)
+        
+        logger.info("Configuration parsed and logger initialized successfully.")
+        
+        # Now, set up stream redirection to capture stdout/stderr for archival
+        stdout_tee, stderr_tee = setup_stream_redirection(config, logger)
 
-        # Early config checks after stream redirection (may exit or raise)
-        try:
-            perform_early_config_checks_and_exit_on_error(pid, timestamp) # Uses global config
-        except EarlyExitError as eee: # Custom exception
-            raw_fatal_xml_for_file_main_scope = eee.xml_content
-            final_stdout_xml = eee.stdout_xml
-            final_exit_code = 1
-            raise
 
-        # Main test execution
-        full_summary_tree_result, final_exit_code = run_tests_and_get_summary(config)
-        # At this point, if successful, individual test summaries were written to config._v1_summary_output_stream by TestRunner/Summary.get_v1_stdout_line()
-        # We don't write a single stdout XML line here for the *overall* run in the success path.
-        # Joshua expects per-test XML lines if multiple tests/parts are run.
-        # If only one "test" (the whole app invocation) is considered, TestRunner would need to make one XML for stdout.
-        # Let's assume TestRunner/Summary handle the V1 stdout for actual tests.
-        # The `stdout_xml_final_str` is mainly for app-level fatal errors.
+        # =====================================================================
+        # Phase 4: Main Test Execution Logic
+        # =====================================================================
+        perform_early_config_checks_and_exit_on_error(config)
+        
+        summary_tree_for_joshua_xml, structural_exit_code = run_tests_and_get_summary(config, args)
+        
+        if structural_exit_code != 0:
+            final_exit_code = structural_exit_code
+            logger.warning(f"Test runner returned a non-zero structural exit code: {structural_exit_code}")
 
-    except ConfigError: # Or other specific custom exceptions from setup
-        # Already handled in terms of preparing XML, just ensure it flows to finally
-        pass # final_exit_code and raw_fatal_xml_for_file_main_scope are set
-    except EarlyExitError:
-        pass # final_exit_code and raw_fatal_xml_for_file_main_scope are set
     except Exception as e_global:
+        final_exit_code = 1
         logger.error(f"Unhandled global exception in main: {e_global}", exc_info=True)
-        is_v1_stdout = config._v1_summary_output_stream == original_stdout if hasattr(config, '_v1_summary_output_stream') else True
-        raw_fatal_xml_for_file_main_scope, final_stdout_xml, final_exit_code = handle_global_exception_outputs(
-            e_global, pid, timestamp, is_v1_stdout
-        )
-        if original_stdout and not original_stdout.closed:
-            original_stdout.write(final_stdout_xml + '\\n')
-            original_stdout.flush()
+        # Create a minimal failure summary if one doesn't exist
+        if summary_tree_for_joshua_xml is None:
+            summary_tree_for_joshua_xml = SummaryTree("TestHarnessRun")
+            summary_tree_for_joshua_xml.attributes["Ok"] = "0"
+            summary_tree_for_joshua_xml.attributes["FailReason"] = "UnhandledException"
+            summary_tree_for_joshua_xml.attributes["Exception"] = str(e_global)
+    
     finally:
-        logger.info(f"--- TestHarness2 app.py execution finishing. Exit code: {final_exit_code} ---")
-
-        if raw_fatal_xml_for_file_main_scope:
-            # A specific fatal error XML was generated (config, early exit, or global unhandled)
-            # This should be written to joshua.xml if joshua_output_dir is known
-            if hasattr(config, 'joshua_output_dir') and config.joshua_output_dir:
-                try:
-                    joshua_xml_path = config.joshua_output_dir / "joshua.xml"
-                    config.joshua_output_dir.mkdir(parents=True, exist_ok=True)
-                    with open(joshua_xml_path, "w") as f:
-                        f.write(raw_fatal_xml_for_file_main_scope)
-                    logger.info(f"Fatal error XML saved to {joshua_xml_path}")
-                except Exception as e_write_fatal_final:
-                    logger.error(f"Could not write fatal error XML to {joshua_xml_path} in finally: {e_write_fatal_final}", exc_info=True)
-            else:
-                logger.error("joshua_output_dir not configured, cannot save fatal error joshua.xml in finally.")
-
-        elif full_summary_tree_result:
-            # Normal path: tests ran, write their summary
-            write_summary_to_joshua_xml(full_summary_tree_result, config)
+        # =====================================================================
+        # Phase 5: Finalization and Cleanup
+        # =====================================================================
+        
+        # Determine final exit code based on test results
+        if summary_tree_for_joshua_xml is not None and final_exit_code == 0:
+            if summary_tree_for_joshua_xml.attributes.get("BatchSuccess") == "0":
+                logger.info("Root summary tree BatchSuccess='0', setting final_exit_code to 1.")
+                final_exit_code = 1
+        
+        # Write the final summary to joshua.xml
+        if config is not None:
+            write_summary_to_joshua_xml(summary_tree_for_joshua_xml, config)
         else:
-            # No summary tree and no specific fatal error XML recorded for joshua.xml
-            logger.warning("No test summary tree available and no specific fatal error XML generated for joshua.xml in finally.")
-            # Optionally, write a very basic failure XML to joshua.xml here if desired
-            if hasattr(config, 'joshua_output_dir') and config.joshua_output_dir and final_exit_code != 0:
-                try:
-                    fallback_xml = create_fatal_error_xml(f"App.py finished with exit code {final_exit_code} but no specific summary/error XML was designated for joshua.xml.", "AppPyGenericFinalError")
-                    joshua_xml_path = config.joshua_output_dir / "joshua.xml"
-                    config.joshua_output_dir.mkdir(parents=True, exist_ok=True)
-                    with open(joshua_xml_path, "w") as f: f.write(fallback_xml)
-                    logger.info(f"Generic fallback error XML written to {joshua_xml_path}")
-                except Exception as e_write_fallback:
-                     logger.error(f"Could not write generic fallback error XML to joshua.xml in finally: {e_write_fallback}", exc_info=True)
+            # This can happen if config parsing itself failed.
+            original_stderr.write("Could not write final joshua.xml because config was not available.\\n")
 
-
-        if log_file_stream and not log_file_stream.closed:
-            log_file_stream.close()
-
-        logger.info(f"Exiting with code {final_exit_code}.")
+        # Restore original stdout/stderr
+        if 'stdout_tee' in locals() and sys.stdout == stdout_tee:
+            sys.stdout = original_stdout
+        if 'stderr_tee' in locals() and sys.stderr == stderr_tee:
+            sys.stderr = original_stderr
+            
+        logger.info(f"--- TestHarness2 app.py execution finishing. Exit code: {final_exit_code} ---")
+        logging.shutdown()
         sys.exit(final_exit_code)
 
-# Define helper:
-def handle_global_exception_outputs(exc, pid, timestamp, is_v1_stdout):
-    joshua_seed_str = str(config.joshua_seed) if hasattr(config, 'joshua_seed') and config.joshua_seed is not None else "UNKNOWN_SEED_IN_EXCEPTION"
-    raw_xml = create_fatal_error_xml(
-        message=f"Unhandled exception: {traceback.format_exc()}",
-        error_type=type(exc).__name__,
-        joshua_seed=joshua_seed_str
-    )
-    stdout_xml = raw_xml.replace('\\n', ' ').strip()
-    if is_v1_stdout:
+def parse_and_validate_config(argv: List[str]) -> Tuple[Config, argparse.Namespace]:
+    """
+    Parses command line arguments and environment variables, validates them,
+    and returns a populated Config object. Exits on error.
+    """
+    # Custom ArgumentParser to prevent sys.exit on error and allow XML generation.
+    # --help and --version will still exit cleanly.
+    class NonExitingArgumentParser(argparse.ArgumentParser):
+        def error(self, message: str):
+            # message already contains "prog_name: error: ..."
+            # Create fatal XMLs for ConfigError.
+            # config.joshua_seed might be default int at this stage, before extract_args.
+            seed_str = str(config.joshua_seed) if hasattr(config, 'joshua_seed') and isinstance(config.joshua_seed, int) else "CONFIG_PARSE_SEED_UNAVAILABLE"
+            
+            err_type = "ArgParseError"
+            xml_message = f"Argument parsing error: {message}"
+            
+            raw_xml = create_fatal_error_xml(message=xml_message, error_type=err_type, joshua_seed=seed_str)
+            # Assume V1 stripping for stdout as this is before stream redirection decision.
+            stdout_xml = strip_elements_for_v1_stdout(raw_xml).replace('\\n', ' ').strip()
+
+            # Raise our specific ConfigError, which main() expects to have these attributes.
+            raise ConfigError(
+                message=xml_message, # Console message
+                stdout_xml=stdout_xml, # What goes to V1 stdout
+                xml_content_for_file=raw_xml # What goes to joshua.xml
+            )
+        
+        def exit(self, status=0, message=None):
+            # Handle --help, --version which also call exit.
+            if status == 0: # Typically --help output, or other clean exits.
+                 # argparse already printed the help/version message to stdout/stderr.
+                 # We should let the process exit cleanly as intended by argparse.
+                 sys.exit(status) 
+            
+            # For other non-zero status exits, treat as an error.
+            error_message = message if message else f"ArgumentParser called exit with status {status}"
+            seed_str = str(config.joshua_seed) if hasattr(config, 'joshua_seed') and isinstance(config.joshua_seed, int) else "CONFIG_EXIT_SEED_UNAVAILABLE"
+            err_type = f"ArgParseExitErrorStatus{status}"
+            xml_message = f"ArgumentParser exit: {error_message}"
+
+            raw_xml = create_fatal_error_xml(message=xml_message, error_type=err_type, joshua_seed=seed_str)
+            stdout_xml = strip_elements_for_v1_stdout(raw_xml).replace('\\n', ' ').strip()
+            
+            raise ConfigError(
+                message=xml_message,
+                stdout_xml=stdout_xml,
+                xml_content_for_file=raw_xml
+            )
+
+    try:
+        parser = NonExitingArgumentParser(
+            prog="TestHarnessV2 app.py",
+            description="Test Harness V2 Main Application",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter, # Good for help messages
+            add_help=True # Ensure --help is handled by our exit method.
+        )
+        config.build_arguments(parser)
+        
+        # parse_args() will use sys.argv[1:] by default.
+        # If NonExitingArgumentParser.error or .exit (with non-zero status) is called, it raises ConfigError.
+        parsed_args = parser.parse_args(argv[1:])
+
+        config.extract_args(parsed_args) # This populates the global 'config' object
+
+        # Log successful parsing and key config values.
+        logger.info("Configuration parsed and extracted successfully.")
+        if hasattr(config, 'joshua_output_dir') and config.joshua_output_dir is not None:
+            logger.info(f"Effective joshua_output_dir from config: {config.joshua_output_dir}")
+        else:
+            logger.warning("joshua_output_dir is not set after config parsing.")
+
+        if hasattr(config, 'log_level') and config.log_level is not None:
+            logger.info(f"Effective log_level from config: {config.log_level}")
+        else:
+            logger.warning("log_level is not set after config parsing.")
+
+        # Placeholder for any additional explicit validation checks on 'config' attributes.
+        # Example:
+        # if not config.some_critical_value:
+        #    msg = f"Critical configuration 'some_critical_value' is missing or invalid."
+        #    raw_xml = create_fatal_error_xml(message=msg, error_type="ConfigValidation", joshua_seed=str(config.joshua_seed))
+        #    stdout_xml = strip_elements_for_v1_stdout(raw_xml)
+        #    raise ConfigError(msg, stdout_xml, raw_xml)
+
+    except ConfigError: # Re-raise ConfigErrors from NonExitingArgumentParser or explicit checks.
+        # logger.debug("parse_and_validate_config is re-raising a ConfigError.")
+        raise
+    except Exception as e_config_setup: # Catch any other unexpected errors.
+        logger.error(f"Unexpected error during config parsing/validation: {type(e_config_setup).__name__} - {e_config_setup}", exc_info=True)
+        
+        joshua_seed_val = "UNKNOWN_EXC_SEED"
+        if hasattr(config, 'joshua_seed'): # Should be an int after __init__
+            joshua_seed_val = str(config.joshua_seed)
+        
+        error_message_for_xml = f"Config setup failed: {type(e_config_setup).__name__} - {str(e_config_setup)}. Traceback: {traceback.format_exc()}"
+        
+        raw_xml = create_fatal_error_xml(
+            message=error_message_for_xml,
+            error_type=f"ConfigSetupUnexpectedError_{type(e_config_setup).__name__}",
+            joshua_seed=joshua_seed_val
+        )
         stdout_xml = strip_elements_for_v1_stdout(raw_xml).replace('\\n', ' ').strip()
-    return raw_xml, stdout_xml, 1
+        
+        raise ConfigError( # Wrap in ConfigError for consistent handling in main()
+            message=f"Unexpected config setup error: {e_config_setup}",
+            stdout_xml=stdout_xml,
+            xml_content_for_file=raw_xml
+        )
 
-# Need to define ConfigError and EarlyExitError custom exceptions
-class AppPySetupError(Exception):
-    """Base class for errors during app.py setup that should produce specific XML output."""
-    def __init__(self, message, stdout_xml, xml_content_for_file, *args):
-        super().__init__(message, *args)
-        self.stdout_xml = stdout_xml
-        self.xml_content = xml_content_for_file
+    return config, parsed_args
 
-class ConfigError(AppPySetupError): pass
-class EarlyExitError(AppPySetupError): pass
+def setup_stream_redirection(config, logger):
+    # The 'config' object is now passed in as a parameter.
+    # The 'global config' declaration is no longer needed and causes a SyntaxError.
+
+    # Default to passing stdout through if config is not fully formed yet
+    pass_stdout_to_original = True
+
+    try:
+        log_file_path_from_handler = None
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                log_file_path_from_handler = handler.baseFilename
+                break
+        
+        if log_file_path_from_handler is None:
+            raise RuntimeError("Logger is not configured with a FileHandler; cannot set up stream redirection.")
+
+        # The logger has already created the file, so we open it in append mode.
+        log_file_stream_for_tee = open(log_file_path_from_handler, 'a')
+
+        # This logic determines if the V1-style stdout lines should be printed
+        # or if all stdout should be suppressed (when archival is on).
+        if hasattr(config, '_v1_summary_output_stream') and config._v1_summary_output_stream != original_stdout:
+            # This indicates V1 compatibility mode is NOT active for stdout.
+            # We check if archival is on to decide whether to suppress stdout entirely.
+            if hasattr(config, 'archive_logs_on_failure') and config.archive_logs_on_failure:
+                pass_stdout_to_original = False
+
+        logger.info(f"Stream redirection: config._v1_summary_output_stream IS original_stdout. General app stdout will pass through.")
+        
+        if hasattr(config, 'archive_logs_on_failure') and config.archive_logs_on_failure:
+             logger.info(f"Stream redirection: archive_logs_on_failure is TRUE. General app stdout will be suppressed from original stdout.")
+             pass_stdout_to_original = False
+
+
+        # Tee stdout to the log file. Pass-through to the original stdout is conditional.
+        sys.stdout = StreamTee(original_stdout, log_file_stream_for_tee, pass_to_original_target=pass_stdout_to_original)
+        logger.info(f"sys.stdout redirected. Pass to original: {pass_stdout_to_original}")
+
+        # Tee stderr to the log file. Always pass-through to original stderr.
+        sys.stderr = StreamTee(original_stderr, log_file_stream_for_tee, pass_to_original_target=True)
+        logger.info("sys.stderr redirected. Pass to original: True")
+
+        logger.info("Stream redirection configured.")
+
+    except Exception as e:
+        logger.error(f"CRITICAL: Failed to setup stream redirection: {e}", exc_info=True)
+        # We write directly to original_stderr because the logger's stream might be the problem.
+        if original_stderr and not original_stderr.closed:
+            original_stderr.write(f"app.py: CRITICAL FAILURE during stream redirection setup: {type(e).__name__}: {e}\\n{traceback.format_exc()}\\n\\n")
+        raise # Re-raise to be caught by main's exception handler.
+
+    return sys.stdout, sys.stderr
+
+def perform_early_config_checks_and_exit_on_error(config):
+    global logger
+    # The 'config' object is now passed in as a parameter.
+    # The 'global config' declaration is no longer needed and causes a SyntaxError.
+    
+    logger.info("Performing early configuration checks...")
+
+    try:
+        # Example check (can be expanded):
+        # if not config.joshua_output_dir or not os.access(config.joshua_output_dir, os.W_OK):
+        #     msg = f"joshua_output_dir '{config.joshua_output_dir}' is not set or not writable."
+        #     logger.error(msg)
+        #     raw_xml = create_fatal_error_xml(message=msg, error_type="EarlyConfigCheckFail_OutputDir", joshua_seed=str(config.joshua_seed))
+        #     stdout_xml = strip_elements_for_v1_stdout(raw_xml).replace('\\n', ' ').strip()
+        #     raise EarlyExitError(msg, stdout_xml, raw_xml)
+        
+        # Add other critical checks here as needed.
+
+        logger.info("Early configuration checks passed (or no checks implemented yet).")
+
+    except EarlyExitError: # Allow EarlyExitErrors to propagate directly.
+        raise
+    except Exception as e_check:
+        error_message = f"Unexpected error during early config checks: {type(e_check).__name__} - {e_check}"
+        logger.error(error_message, exc_info=True)
+        
+        joshua_seed_val = str(config.joshua_seed) if hasattr(config, 'joshua_seed') else "EARLY_CHECK_EXC_SEED"
+        xml_err_msg = f"{error_message}. Traceback: {traceback.format_exc()}"
+
+        raw_xml = create_fatal_error_xml(
+            message=xml_err_msg,
+            error_type=f"EarlyConfigCheckUnexpectedError_{type(e_check).__name__}",
+            joshua_seed=joshua_seed_val
+        )
+        stdout_xml = strip_elements_for_v1_stdout(raw_xml).replace('\\n', ' ').strip()
+        
+        # Wrap in EarlyExitError for consistent handling in main()
+        raise EarlyExitError(
+            message=f"Unexpected early config check error: {e_check}",
+            stdout_xml=stdout_xml,
+            xml_content_for_file=raw_xml
+        )
+
+def run_tests_and_get_summary(config, args):
+    global logger
+
+    logger.info("Initializing TestRunner and starting test execution...")
+    
+    final_summary_tree = None
+    overall_exit_code = 1 # Default to error
+
+    try:
+        runner = TestRunner(config) # Pass the global config object
+        
+        # Call run_all_tests() which returns the main SummaryTree.
+        summary_tree_result = runner.run_all_tests() # Returns a SummaryTree
+        
+        # If run_all_tests completes without an exception, we consider this stage successful.
+        # The actual pass/fail status of tests within the tree is handled by main's finally block.
+        exit_code_from_runner = 0 
+
+        if not isinstance(summary_tree_result, SummaryTree):
+            logger.error(f"TestRunner.run_all_tests() returned an invalid type for summary tree: {type(summary_tree_result)}. Expected SummaryTree.")
+            final_summary_tree = SummaryTree(config) # Initialize an empty one
+            overall_exit_code = 1 # This variable is local to the function
+        else:
+            final_summary_tree = summary_tree_result
+            logger.info("TestRunner.run_all_tests() completed. Summary tree received.")
+            overall_exit_code = exit_code_from_runner # Use the 0 from above if no type error
+
+        # This check for exit_code_from_runner type is less critical now as we set it to 0 by default
+        # but keeping it for robustness in case of future changes.
+        if not isinstance(exit_code_from_runner, int):
+            logger.error(f"run_tests_and_get_summary determined an invalid type for exit code: {type(exit_code_from_runner)}. Expected int.")
+            overall_exit_code = 1 # Ensure error exit code if something went wrong with our logic
+        # else overall_exit_code already reflects exit_code_from_runner
+
+    except Exception as e_runner:
+        logger.error(f"CRITICAL: Unhandled exception from TestRunner instantiation or run_all_tests(): {type(e_runner).__name__} - {e_runner}", exc_info=True)
+        overall_exit_code = 1 
+        # Let main's global handler create the fatal XML. final_summary_tree will be None.
+        raise
+
+    logger.info(f"run_tests_and_get_summary finished. Returning summary tree and determined structural exit code {overall_exit_code}.")
+    return final_summary_tree, overall_exit_code
+
+
+def write_summary_to_joshua_xml(summary_tree: Optional[SummaryTree], current_config: 'Config'):
+    """Serializes the final summary tree to joshua.xml."""
+    # This function uses `current_config` as its parameter, so no `global` statement is needed.
+    if summary_tree is None:
+        logger.error("write_summary_to_joshua_xml called with None summary_tree. Cannot write file.")
+        return
+
+    if not (hasattr(current_config, 'joshua_output_dir') and current_config.joshua_output_dir):
+        logger.error("write_summary_to_joshua_xml: joshua_output_dir not configured.")
+        return
+
+    try:
+        joshua_xml_path = current_config.joshua_output_dir / "joshua.xml"
+        current_config.joshua_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        xml_content_for_file = ""
+        # Prioritize to_et_element()
+        if hasattr(summary_tree, 'to_et_element') and callable(summary_tree.to_et_element):
+            xml_element = summary_tree.to_et_element()
+            if xml_element is not None:
+                xml_content_for_file = ET.tostring(xml_element, encoding='unicode', short_empty_elements=False).strip()
+            else:
+                logger.error("SummaryTree.to_et_element() returned None.")
+                xml_content_for_file = create_fatal_error_xml("SummaryTree.to_et_element() was None", "SummaryTreeXmlError", str(current_config.joshua_seed))
+        # Fallback: Check for a specific to_xml_string method
+        elif hasattr(summary_tree, 'to_xml_string') and callable(summary_tree.to_xml_string):
+            xml_content_for_file = summary_tree.to_xml_string()
+        # Generic fallback to str(), with a warning
+        else: 
+            logger.warning("SummaryTree has no .to_xml_string(), using str(). This might not be correct XML.")
+            xml_content_for_file = str(summary_tree)
+
+        if not xml_content_for_file:
+             logger.error("XML content from SummaryTree was empty. Writing a fallback error to joshua.xml.")
+             xml_content_for_file = create_fatal_error_xml("SummaryTree produced empty XML", "EmptySummaryTreeXml", str(current_config.joshua_seed))
+
+        with open(joshua_xml_path, "w", encoding='utf-8') as f:
+            f.write(xml_content_for_file)
+        logger.info(f"Final summary XML (joshua.xml) saved to {joshua_xml_path}")
+
+    except Exception as e_write_summary:
+        logger.error(f"Could not write final summary joshua.xml: {type(e_write_summary).__name__} - {e_write_summary}", exc_info=True)
+
 
 if __name__ == "__main__":
     main()

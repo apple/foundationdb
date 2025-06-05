@@ -51,15 +51,16 @@ class ConfigValue:
         kwargs = copy.copy(self.kwargs)
         long_name = self.name
         short_name = None
+        if "name" in kwargs:
+            long_name = kwargs.pop("name")
         if "long_name" in kwargs:
-            long_name = kwargs["long_name"]
-            del kwargs["long_name"]
+            long_name = kwargs.pop("long_name")
         if "short_name" in kwargs:
-            short_name = kwargs["short_name"]
-            del kwargs["short_name"]
+            short_name = kwargs.pop("short_name")
         if "action" in kwargs and kwargs["action"] in ["store_true", "store_false"]:
-            del kwargs["type"]
-        long_name = long_name.replace("_", "-")
+            if 'type' in kwargs:
+                del kwargs["type"]
+        long_name = long_name.replace("_", "-").lstrip('-')
         if short_name is None:
             parser.add_argument("--{}".format(long_name), **kwargs)
         else:
@@ -113,10 +114,11 @@ class Config:
         }
         self.joshua_output_dir: Path | None = None
         self.joshua_output_dir_args = {
-            "type": Path,
-            "help": "Directory for TestHarness output files like joshua.xml and archives.",
-            "required": True,
+            "name": "--joshua-output-dir",
             "env_name": "TH_JOSHUA_OUTPUT_DIR",
+            "type": Path,
+            "default": None,
+            "help": "Directory for TestHarnessV2 to store joshua.xml and other outputs.",
         }
         self.stats: str | None = None
         self.stats_args = {
@@ -130,8 +132,14 @@ class Config:
             "help": "Force given seed given to fdbserver -- mostly useful for debugging",
             "required": False,
         }
-        self.kill_seconds: int = 30 * 60
-        self.kill_seconds_args = {"help": "Timeout for individual test"}
+        self.kill_seconds: int = 1800
+        self.kill_seconds_args = {
+            "name": "--kill-seconds",
+            "env_name": "TH_KILL_SECONDS",
+            "type": int,
+            "default": 1800,
+            "help": "Seconds after which a test is killed.",
+        }
         self.buggify_on_ratio: float = 0.8
         self.buggify_on_ratio_args = {"help": "Probability that buggify is turned on"}
         self.write_run_times = False
@@ -262,13 +270,13 @@ class Config:
         }
         self.long_running: bool = False
         self.long_running_args = {"action": "store_true"}
-        self.log_level: str = "INFO"  # Default log level
-        self.log_level_args = { # Arguments for log_level
-            "type": str,
-            "choices": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-            "help": "Set the logging level for the test harness application.",
+        self.log_level: str = "INFO"
+        self.log_level_args = {
+            "name": "--log-level",
             "env_name": "TH_LOG_LEVEL",
-            "default": "INFO" # Explicitly set default for argparse help and consistency
+            "type": str,
+            "default": "INFO",
+            "help": "Logging level for the application (e.g., DEBUG, INFO, WARNING)",
         }
         self.archive_logs_on_failure: bool = False
         self.archive_logs_on_failure_args = {
@@ -281,6 +289,14 @@ class Config:
         self._config_map = self._build_map()
         self._read_env()
         self.random.seed(self.joshua_seed, version=2)
+        self.output_dir: Path | None = None
+        self.output_dir_args = {
+            "name": "--output-dir",
+            "env_name": "TH_OUTPUT_DIR",
+            "type": Path,
+            "default": None,
+            "help": "Top-level directory for all run outputs.",
+        }
 
     def change_default(self, attr: str, default_val):
         assert attr in self._config_map, "Unknown config attribute {}".format(attr)
@@ -353,7 +369,7 @@ class Config:
         for val in self._config_map.values():
             k, v = val.get_value(args)
             if v is not None:
-                config.__setattr__(k, v)
+                self.__setattr__(k, v)
         self.random.seed(self.joshua_seed, version=2)
 
 
