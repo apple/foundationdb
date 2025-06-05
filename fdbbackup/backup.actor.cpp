@@ -1825,14 +1825,25 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 
 	// Register the existence of this layer in the meta key space
 	loop {
+		tr->reset();
 		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->set(metaKey, rootKey);
-			wait(tr->commit());
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					tr->set(metaKey, rootKey);
+					wait(tr->commit());
+					break;
+				} catch (Error& e) {
+					TraceEvent(SevWarnAlways, "LayerStatusMetaKeyUpdateError").errorUnsuppressed(e);
+					wait(tr->onError(e)); // Non-retryable txns throws back the error.
+				}
+			}
 			break;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			// For non-retryable txns, do delay, reset txn and retry
+			TraceEvent(SevWarnAlways, "UnableToWriteLayerStatusMetaKey").errorUnsuppressed(e);
+			wait(delay(5.0));
 		}
 	}
 
@@ -1852,6 +1863,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 					wait(tr->commit());
 					break;
 				} catch (Error& e) {
+					TraceEvent(SevWarnAlways, "LayerBackupStatusUpdateError").errorUnsuppressed(e);
 					wait(tr->onError(e));
 				}
 			}
@@ -1865,7 +1877,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 			if (!pollRateUpdater.isValid())
 				pollRateUpdater = updateAgentPollRate(statusUpdateDest, rootKey, name, pollDelay);
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "UnableToWriteStatus").error(e);
+			TraceEvent(SevWarnAlways, "UnableToWriteBackupStatus").error(e);
 			wait(delay(10.0));
 		}
 	}
