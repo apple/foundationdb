@@ -850,8 +850,10 @@ class TestRunner:
 
             # If the first part was successful, proceed to potential unseed check
             if should_perform_unseed_check_based_on_ratio_and_success:
-                logger.info(f"RUN.PY: Performing unseed check for {file_path_part.name} (first part was Ok='1').")
-                unseed_part_seed = type(self.config.random)(part_seed + 1).randint(0, 2**63 - 1)
+                logger.info(f"RUN.PY: Performing determinism check for {file_path_part.name} (first part was Ok='1').")
+                # Forcing the same seed to be used for the second run
+                unseed_part_seed = part_seed
+                logger.info(f"RUN.PY: Forcing identical seed for determinism check: {unseed_part_seed}")
 
                 expected_unseed_from_first_run = current_run_part.summary.unseed
                 logger.info(f"RUN.PY: Unseed from first run (current_run_part.summary.unseed): {expected_unseed_from_first_run}")
@@ -891,6 +893,8 @@ class TestRunner:
 
                 if not unseed_run_part.success: # Check specific success of unseed run part
                     logger.info(f"RUN.PY: Unseed check FAILED for {file_path_part.name}. Error: '{unseed_run_part.summary.error}'")
+                    logger.info(f"RUN.PY: Original Run Unseed: {current_run_part.summary.unseed}")
+                    logger.info(f"RUN.PY: Determinism Check Unseed: {unseed_run_part.summary.unseed}")
                     # overall_result is already False. Return immediately.
                     return False, collected_summaries
                 else:
