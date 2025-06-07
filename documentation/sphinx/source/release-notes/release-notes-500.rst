@@ -49,7 +49,7 @@ Fixes
 
 * Logs continued to make their data persistent to disk after being removed. <rdar://problem/33852607>
 * Removed logs did not delete their data before shutting down. <rdar://problem/33852342>
-* In rare scenarios, a disk error which occured during log recruitment could cause the recruitment to hang indefinately.
+* In rare scenarios, a disk error which occurred during log recruitment could cause the recruitment to hang indefinately.
 
 5.0.3
 =====

@@ -7032,7 +7032,7 @@ SQLITE_PRIVATE int sqlite3BtreeInsert(BtCursor* pCur, /* Insert data into the ta
 	insertCell(pPage, idx, newCell, szNew, 0, 0, &rc);
 	assert(rc != SQLITE_OK || pPage->nCell > 0 || pPage->nOverflow > 0);
 
-	/* If no error has occured and pPage has an overflow cell, call balance()
+	/* If no error has occurred and pPage has an overflow cell, call balance()
 	** to redistribute the cells within the tree. Since balance() may move
 	** the cursor, zero the BtCursor.info.nSize and BtCursor.validNKey
 	** variables.

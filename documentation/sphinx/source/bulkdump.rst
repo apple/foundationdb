@@ -99,5 +99,5 @@ Invariant
 Failure handling
 ----------------
 - SS failure: DD will receive broken_promise. DD gives up working on the range at this time. DD will re-issue the request (via a different task) in the future until the range completes.
-- DD failure: It is possible that the same SS recieves two requests to work on the same range. SS uses a FlowLock to guarantee that SS handles one request at a time. So, there is no conflict.
+- DD failure: It is possible that the same SS receives two requests to work on the same range. SS uses a FlowLock to guarantee that SS handles one request at a time. So, there is no conflict.
 - S3 outage: Result in task failure. The failed task will be retried by DD.
