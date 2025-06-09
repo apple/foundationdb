@@ -12908,7 +12908,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Version newOldestVersion = data->storageVersion();
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
-		state int64_t clearRangesLeft = data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1
+		state int64_t clearRangesLeft = (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1 ||
+		                                 data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
 		                                    ? (SERVER_KNOBS->ROCKSDB_CLEARRANGES_LIMIT_PER_COMMIT > 0
 		                                           ? SERVER_KNOBS->ROCKSDB_CLEARRANGES_LIMIT_PER_COMMIT
 		                                           : INT_MAX)
@@ -13581,7 +13582,7 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
                                                     int64_t& bytesLeft,
                                                     UnlimitedCommitBytes unlimitedCommitBytes,
                                                     int64_t& clearRangesLeft) {
-	if ((!unlimitedCommitBytes && bytesLeft <= 0) || clearRangesLeft <= 0)
+	if (!unlimitedCommitBytes && (bytesLeft <= 0 || clearRangesLeft <= 0))
 		return true;
 
 	// Apply mutations from the mutationLog
