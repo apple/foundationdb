@@ -84,9 +84,15 @@ struct DurableVersionInfo {
 	Version minimumDurableVersion; // mimimum of the durable versions of available tLogs
 	std::vector<TLogLockResult> lockResults; // replies from various tLogs
 	bool policyResult; // unavailable tLogs meet the replication policy or not
+	std::vector<uint16_t> knownLockedTLogIds; // tLogs that are known to have been locked
 
-	DurableVersionInfo(Version kcv, Version dv, std::vector<TLogLockResult>& replies, bool meetsPolicy)
-	  : knownCommittedVersion(kcv), minimumDurableVersion(dv), lockResults(replies), policyResult(meetsPolicy) {}
+	DurableVersionInfo(Version kcv,
+	                   Version dv,
+	                   std::vector<TLogLockResult>& replies,
+	                   bool meetsPolicy,
+	                   std::vector<uint16_t>& lockedTLogIds)
+	  : knownCommittedVersion(kcv), minimumDurableVersion(dv), lockResults(replies), policyResult(meetsPolicy),
+	    knownLockedTLogIds(lockedTLogIds) {}
 };
 
 struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
@@ -119,6 +125,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	bool hasRemoteServers;
 	AsyncTrigger backupWorkerChanged;
 	std::set<UID> removedBackupWorkers; // Workers that are removed before setting them.
+	std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
 
 	Optional<Version> recoverAt;
 	Optional<Version> recoveredAt;
@@ -222,6 +229,12 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                     Optional<UID> debugID,
 	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final;
 
+	// Version vector/Unicast specific: reset best server if it is not known to have been locked/stopped.
+	void resetBestServerIfNotLocked(int bestSet,
+	                                int& bestServer,
+	                                Optional<Version> end,
+	                                Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds);
+
 	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 
 	Reference<IPeekCursor> peekRemote(UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore);
@@ -261,7 +274,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                     Version begin,
 	                                     Tag tag,
 	                                     bool useSatellite,
-	                                     Optional<Version> end) final;
+	                                     Optional<Version> end,
+	                                     Optional<std::map<uint8_t, std::vector<uint16_t>>> knownStoppedTLogIds) final;
 
 	Version getKnownCommittedVersion() final;
 
@@ -352,7 +366,6 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	// returns the log group's knownComittedVersion, DV, a vector of TLogLockResults for
 	// each tLog in the group, and the result of applying the replication policy check over
 	// unavailable tLogs from the group
-	// Optional<std::tuple<Version, Version, std::vector<TLogLockResult>, bool>>
 	Optional<DurableVersionInfo> static getDurableVersion(
 	    UID dbgid,
 	    LogLockInfo lockInfo,

@@ -669,10 +669,21 @@ struct InitializeLogRouterRequest {
 	int8_t locality;
 	ReplyPromise<struct TLogInterface> reply;
 	Optional<Version> recoverAt = Optional<Version>();
+	Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds =
+	    Optional<std::map<uint8_t, std::vector<uint16_t>>>();
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryCount, routerTag, startVersion, tLogLocalities, tLogPolicy, locality, reply, recoverAt);
+		serializer(ar,
+		           recoveryCount,
+		           routerTag,
+		           startVersion,
+		           tLogLocalities,
+		           tLogPolicy,
+		           locality,
+		           reply,
+		           recoverAt,
+		           knownLockedTLogIds);
 	}
 };
 
