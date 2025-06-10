@@ -49,7 +49,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "FoundationDB"
-copyright = "2013-2022 Apple, Inc and the FoundationDB project authors"
+copyright = "2013-2025 Apple, Inc and the FoundationDB project authors"
 
 version_path = os.path.join(
     os.path.dirname(sys.executable), "..", "..", "..", "versions.target"
