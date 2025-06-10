@@ -175,6 +175,7 @@ struct DataMoveMetaData {
 	int16_t phase; // DataMoveMetaData::Phase.
 	int8_t mode;
 	Optional<BulkLoadTaskState> bulkLoadTaskState; // set if the data move is a bulk load data move
+	Optional<std::unordered_map<std::string, std::string>> dcTeamIds; // map of dcId to teamId
 
 	DataMoveMetaData() = default;
 	DataMoveMetaData(UID id, Version version, KeyRange range) : id(id), version(version), priority(0), mode(0) {
@@ -202,7 +203,8 @@ struct DataMoveMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode, bulkLoadTaskState);
+		serializer(
+		    ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode, bulkLoadTaskState, dcTeamIds);
 	}
 };
 
