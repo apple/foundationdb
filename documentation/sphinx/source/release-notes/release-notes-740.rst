@@ -2,6 +2,26 @@
 Release Notes
 #############
 
+7.4.3
+=====
+* Same as 7.4.2 release with AVX enabled.
+
+7.4.2
+=====
+
+* Fixed a backup restore speed regression. `(PR #12098) <https://github.com/apple/foundationdb/issues/12098>`_
+* Added backup URL validation for directory traversals. `(PR #12143) <https://github.com/apple/foundationdb/issues/12143>`_
+* Fixed an issue where backup status update transaction would not retry in case of failure. `(PR #12175) <https://github.com/apple/foundationdb/issues/12175>`_
+* Added various improvements to bulk dump/load. `(PR #12135) <https://github.com/apple/foundationdb/issues/12135>`_
+* Turned off replica consistency check knobs by default which were overloading storage servers. `(PR #12133) <https://github.com/apple/foundationdb/issues/12133>`_, `(PR #12136) <https://github.com/apple/foundationdb/issues/12136>`_
+* Fixed an issue where source storage server could be overloaded by data movements with replica consistency check. `(PR #12176) <https://github.com/apple/foundationdb/issues/12176>`_
+* Added support for checkall command with DCID. `(PR #12100) <https://github.com/apple/foundationdb/issues/12100>`_
+* Optimized keyInfo lookup in commit proxy. `(PR #12106) <https://github.com/apple/foundationdb/issues/12106>`_
+
+7.4.1
+=====
+* Same as 7.4.0 release with AVX enabled.
+
 7.4.0
 =====
 
