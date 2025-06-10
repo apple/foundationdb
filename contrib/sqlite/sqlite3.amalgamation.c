@@ -21401,7 +21401,7 @@ static int fillInUnixFile(
     unixEnterMutex();
     rc = findInodeInfo(pNew, &pNew->pInode);
     if( rc!=SQLITE_OK ){
-      /* If an error occured in findInodeInfo(), close the file descriptor
+      /* If an error occurred in findInodeInfo(), close the file descriptor
       ** immediately, before releasing the mutex. findInodeInfo() may fail
       ** in two scenarios:
       **
@@ -24465,7 +24465,7 @@ static int seekWinFile(winFile *pFile, sqlite3_int64 iOffset){
   ** containing the lower 32-bits of the new file-offset. Or, if it fails,
   ** it returns INVALID_SET_FILE_POINTER. However according to MSDN, 
   ** INVALID_SET_FILE_POINTER may also be a valid new offset. So to determine 
-  ** whether an error has actually occured, it is also necessary to call 
+  ** whether an error has actually occurred, it is also necessary to call 
   ** GetLastError().
   */
   dwRet = SetFilePointer(pFile->h, lowerBits, &upperBits, FILE_BEGIN);
@@ -24563,7 +24563,7 @@ static int winWrite(
   int amt,                        /* Number of bytes to write */
   sqlite3_int64 offset            /* Offset into the file to begin writing at */
 ){
-  int rc;                         /* True if error has occured, else false */
+  int rc;                         /* True if error has occurred, else false */
   winFile *pFile = (winFile*)id;  /* File handle */
 
   assert( amt>0 );
@@ -28163,7 +28163,7 @@ static sqlite3_pcache *pcache1Create(int szPage, int bPurgeable){
   int sz;               /* Bytes of memory required to allocate the new cache */
 
   /*
-  ** The seperateCache variable is true if each PCache has its own private
+  ** The separateCache variable is true if each PCache has its own private
   ** PGroup.  In other words, separateCache is true for mode (1) where no
   ** mutexing is required.
   **
@@ -29399,7 +29399,7 @@ int sqlite3PagerTrace=1;  /* True to enable tracing */
 **    * A write transaction is active.
 **    * An EXCLUSIVE or greater lock is held on the database file.
 **    * All writing and syncing of journal and database data has finished.
-**      If no error occured, all that remains is to finalize the journal to
+**      If no error occurred, all that remains is to finalize the journal to
 **      commit the transaction. If an error did occur, the caller will need
 **      to rollback the transaction. 
 **
@@ -34070,7 +34070,7 @@ static void pagerUnlockIfUnused(Pager *pPager){
 ** page is initialized to all zeros. 
 **
 ** If noContent is true, it means that we do not care about the contents
-** of the page. This occurs in two seperate scenarios:
+** of the page. This occurs in two separate scenarios:
 **
 **   a) When reading a free-list leaf page from the database, and
 **
@@ -42101,7 +42101,7 @@ SQLITE_PRIVATE int sqlite3VdbeAssertMayAbort(Vdbe *v, int mayAbort){
   }
   sqlite3DbFree(v->db, sIter.apSub);
 
-  /* Return true if hasAbort==mayAbort. Or if a malloc failure occured.
+  /* Return true if hasAbort==mayAbort. Or if a malloc failure occurred.
   ** If malloc failed, then the while() loop above may not have iterated
   ** through all opcodes and hasAbort may be set incorrectly. Return
   ** true for this case to prevent the assert() in the callers frame
@@ -43646,7 +43646,7 @@ SQLITE_PRIVATE int sqlite3VdbeCloseStatement(Vdbe *p, int eOp){
 
   /* If p->iStatement is greater than zero, then this Vdbe opened a 
   ** statement transaction that should be closed here. The only exception
-  ** is that an IO error may have occured, causing an emergency rollback.
+  ** is that an IO error may have occurred, causing an emergency rollback.
   ** In this case (db->nStatement==0), and there is nothing to do.
   */
   if( db->nStatement && p->iStatement ){
@@ -43799,7 +43799,7 @@ SQLITE_PRIVATE int sqlite3VdbeHalt(Vdbe *p){
       **
       ** Even if the statement is read-only, it is important to perform
       ** a statement or transaction rollback operation. If the error 
-      ** occured while writing to the journal, sub-journal or database
+      ** occurred while writing to the journal, sub-journal or database
       ** file as part of an effort to free up cache space (see function
       ** pagerStress() in pager.c), the rollback is required to restore 
       ** the pager to a consistent state.
@@ -44182,7 +44182,7 @@ SQLITE_PRIVATE int sqlite3VdbeCursorMoveto(VdbeCursor *p){
 ** the blob of data that it corresponds to. In a table record, all serial
 ** types are stored at the start of the record, and the blobs of data at
 ** the end. Hence these functions allow the caller to handle the
-** serial-type and data blob seperately.
+** serial-type and data blob separately.
 **
 ** The following table describes the various storage classes for data:
 **
@@ -45436,7 +45436,7 @@ end_of_step:
   assert( p->rc!=SQLITE_ROW && p->rc!=SQLITE_DONE );
   if( p->isPrepareV2 && rc!=SQLITE_ROW && rc!=SQLITE_DONE ){
     /* If this statement was prepared using sqlite3_prepare_v2(), and an
-    ** error has occured, then return the error code in p->rc to the
+    ** error has occurred, then return the error code in p->rc to the
     ** caller. Set the error code in the database handle to the same value.
     */ 
     rc = db->errCode = p->rc;
@@ -63535,7 +63535,7 @@ SQLITE_PRIVATE void sqlite3DropTable(Parse *pParse, SrcList *pName, int isView, 
     /* Drop all SQLITE_MASTER table and index entries that refer to the
     ** table. The program name loops through the master table and deletes
     ** every row that refers to a table of the same name as the one being
-    ** dropped. Triggers are handled seperately because a trigger can be
+    ** dropped. Triggers are handled separately because a trigger can be
     ** created in the temp database that refers to a table in another
     ** database.
     */
@@ -77607,7 +77607,7 @@ SQLITE_PRIVATE int sqlite3IndexedByLookup(Parse *pParse, struct SrcList_item *pF
 **         without worrying about messing up the presistent representation
 **         of the view.
 **
-**    (3)  Add terms to the WHERE clause to accomodate the NATURAL keyword
+**    (3)  Add terms to the WHERE clause to accommodate the NATURAL keyword
 **         on joins and the ON and USING clause of joins.
 **
 **    (4)  Scan the list of columns in the result set (pEList) looking
@@ -92329,7 +92329,7 @@ static int binCollFunc(
 /*
 ** Another built-in collating sequence: NOCASE. 
 **
-** This collating sequence is intended to be used for "case independant
+** This collating sequence is intended to be used for "case independent
 ** comparison". SQLite's knowledge of upper and lower case equivalents
 ** extends only to the 26 characters used in the English language.
 **
@@ -96536,7 +96536,7 @@ static int fts3CursorSeek(sqlite3_context *pContext, Fts3Cursor *pCsr){
     }else{
       int rc = sqlite3_reset(pCsr->pStmt);
       if( rc==SQLITE_OK ){
-        /* If no row was found and no error has occured, then the %_content
+        /* If no row was found and no error has occurred, then the %_content
         ** table is missing a row that is present in the full-text index.
         ** The data structures are corrupt.
         */
@@ -105385,9 +105385,9 @@ static int fts3SnippetFindPositions(Fts3Expr *pExpr, int iPhrase, void *ctx){
 ** is the snippet with the highest score, where scores are calculated
 ** by adding:
 **
-**   (a) +1 point for each occurence of a matchable phrase in the snippet.
+**   (a) +1 point for each occurrence of a matchable phrase in the snippet.
 **
-**   (b) +1000 points for the first occurence of each matchable phrase in 
+**   (b) +1000 points for the first occurrence of each matchable phrase in 
 **       the snippet for which the corresponding mCovered bit is not set.
 **
 ** The selected snippet parameters are stored in structure *pFragment before

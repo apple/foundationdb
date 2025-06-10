@@ -429,10 +429,10 @@ int setEnvironmentVar(const char* name, const char* value, int overwrite);
 
 std::string getWorkingDirectory();
 
-// Returns the absolute platform-dependant path for server-based files
+// Returns the absolute platform-dependent path for server-based files
 std::string getDefaultConfigPath();
 
-// Returns the absolute platform-dependant path for the default fdb.cluster file
+// Returns the absolute platform-dependent path for the default fdb.cluster file
 std::string getDefaultClusterFilePath();
 
 struct ImageInfo {
