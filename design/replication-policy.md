@@ -9,7 +9,7 @@ shards to the team. More information on these terms can be found in [data-distri
 The commit proxy uses the shard map to derive which log servers to send committed data to. Each SS has a "buddy" with a single corresponding log server. The 
 buddy is found by taking the SS id modded by the number of tLogs in the dc.
 
-When a mutation is committed, the key(s) it modifies will logically reside within one or more shards, which physically are replicated over the SS in their team. Each such SS has a buddy 
+When a batch of transactions is committed, the modified key(s) will logically reside within one or more shards, which physically are replicated over the SS in their team. Each such SS has a buddy
 log server, and in the simple case, the CP forwards writes to those logs.
 
 For example, suppose there were 4 log servers and 10 storage servers on a cluster configured with 3 replicas, and a shard's team resides on SS 0, 3, 6. Given 
@@ -19,13 +19,13 @@ Storage servers: **0** 1 2 **3** 4 5 **6** 7 8 9
 
 TLogs: **0** 1 **2** **3**
 
-The "buddy" associations between the SS and LS are dynamic.
+The "buddy" associations between shards and log servers are dynamic:
 
 - The number of SS in the cluster can change within an epoch.
 - Shards move between SS as data is distributed.
 - New shards can be created.
 
-This means the destination team must be recalculated on each commit.
+This means the set of log servers must be recalculated on each commit.
 
 The team of log servers must meet the requirements of the replication policy. If it does not, additional logs are chosen. This is performed by "selectReplicas".
 
