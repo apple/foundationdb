@@ -56,7 +56,7 @@ function(add_documentation_target)
     COMMAND
       ${Sphinx_EXECUTABLE} -W -b ${TARGET} -d ${DOCTREE} -c
       ${SPHINX_DOCUMENT_DIR} ${SPHINX_DOCUMENT_DIR}/source ${OUTPUT_DIR}
-      -Dversion=${FDB_VERSION} -Drelease=${FDB_RELEASE}
+      -Dversion=${FDB_VERSION} -Drelease=${FDB_VERSION}
     COMMAND ${CMAKE_COMMAND} -E touch ${STAMP_FILE}
     DEPENDS ${DOC_FILES}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
