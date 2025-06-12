@@ -7,9 +7,99 @@ BulkLoad User Guide
    :titlesonly:
 
 
-.. _bulkdump:
 
-Below we describe the :command:`BulkDump` and :command:`BulkLoad` 'fdbcli' commands and basic troubleshooting tips bulkloading.
+Below we describe the :command:`BulkDump` and :command:`BulkLoad` 'fdbcli' commands and basic troubleshooting tips bulkloading
+but first a quickstart on how to use this feature.
+
+.. _quickstart:
+
+Quickstart
+=============
+Below we run a simple bulkdump, a clear of the cluster, and then a bulkload to repopulate the cluster.
+
+Start a cluster::
+
+    <FDB_SRC_FOLDER>/tests/loopback_cluster/run_custom_cluster.sh . --storage_count 8 \
+      --stateless_count 4 --stateless_taskset 0xf --logs_count 8 --logs_taskset 0xff0 --storage_taskset 0xffff000 \
+      --knobs '--knob_shard_encode_location_metadata=1 --knob_desired_teams_per_server=10 --knob_enable_read_lock_on_range=1'
+
+Start a sufficient number of SSs because too few can cause bulkload fail (In the above we started 8 SSs).
+
+Start 'fdbcli'::
+
+    <FDB_BUILD_FOLDER>/bin/fdbcli —cluster=<FDB_BUILD_FOLDER>/loopback-cluster/fdb.cluster --log-dir=/tmp/bulkload/ --log
+
+Populate some data::
+
+    fdb> writemode on
+    fdb> set a b
+    fdb> get a
+    \`a' is \`b''
+    fdb> bulkdump mode on
+    fdb> bulkdump status
+    fdb> bulkdump dump "" \xff /tmp/bulkload
+    Received Job ID: de6b2ae7197cef28cac38d7ad7a6d3e7
+
+    # Keep checking bulkdump status until…
+    fdb> bulkdump status
+    No bulk dumping job is running
+
+Check if the bulkdump folder cited above has been created and populated. It should look something like this::
+
+  find /tmp/bulkload/de6b2ae7197cef28cac38d7ad7a6d3e7
+  .
+  |____3cdf8d1534e3077f0a9d3ebd5aaa4df0
+  | |____0
+  | | |____133445450-manifest.txt
+  | | |____133445450-data.sst
+  |____job-manifest.txt
+
+
+:command:`job-manifest.txt` is the metadata file for the entire bulkdump job. This file will be used by the bulkload job to check the file path to load given a range.
+
+In each folder, there is one manifest file, at most one data file, and at most 1 byte sample file.
+If the data file is missing, it means that the range is empty. If the byte sample file is missing, it means that the number of keys in the range is too small for a sample.
+
+Now, lets clear our database and bulkload the above bulkdump::
+
+    fdb> clearrange "" \xff
+    Committed (3759447445)
+
+    fdb> get a
+    \`a\`: not found
+
+    fdb> bulkload mode on
+    fdb> bulkload status
+    No bulk loading job is running
+
+    fdb> bulkload load de6b2ae7197cef28cac38d7ad7a6d3e7 "" \xff /tmp/bulkload
+    Received Job ID: de6b2ae7197cef28cac38d7ad7a6d3e7
+
+    fdb> bulkload status
+    Running bulk loading job: de6b2ae7197cef28cac38d7ad7a6d3e7
+    Job information: [BulkLoadJobState]: [JobId]: de6b2ae7197cef28cac38d7ad7a6d3e7, [JobRoot]: /root/bulkload, [JobRange]: { begin=  end=\xff }, [Phase]: Submitted, [TransportMethod]: LocalFileCopy, [SubmitTime]: 1744830891.011401, [SinceSubmitMins]: 0.233608, [TaskCount]: 1
+    Submitted 1 tasks
+    Finished 0 tasks
+    Error 0 tasks
+    Total 1 tasks
+
+    // wait until complete
+    fdb> bulkload status
+    No bulk loading job is running
+
+    fdb> bulkload history
+    Job de6b2ae7197cef28cac38d7ad7a6d3e7 submitted at 1744830891.011401 for range { begin=  end=\xff }. The job has 1 tasks. The job ran for 1.246195 mins and exited with status Complete.
+
+    // Try with get
+    fdb> get a
+    \`a' is \`b''
+
+
+We are done. You can shutdown your cluster now::
+
+    ps auxwww|grep fdbserver |awk '{print $2}'|xargs kill -9
+
+.. _bulkdump:
 
 BulkDump
 ==========
@@ -55,7 +145,7 @@ To cancel a running job::
     fdb> bulkdump cancel c9de5a364ecc2abb6f7a8bd890a175cf
     Job c9de5a364ecc2abb6f7a8bd890a175cf has been cancelled. No new tasks will be spawned.
 
- Only one :command:`BulkDump` (or :command:`BulkLoad`) job can be run at a time.
+Only one :command:`BulkDump` (or :command:`BulkLoad`) job can be run at a time.
 
 .. _bulkload:
 

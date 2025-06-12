@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.3</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -68,7 +68,8 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">BulkLoad User Guide</a><ul>
-<li><a class="reference internal" href="#id1">BulkDump</a></li>
+<li><a class="reference internal" href="#quickstart">Quickstart</a></li>
+<li><a class="reference internal" href="#bulkdump">BulkDump</a></li>
 <li><a class="reference internal" href="#bulkload">BulkLoad</a></li>
 <li><a class="reference internal" href="#bulkdump-bulkload-and-s3">BulkDump/BulkLoad and S3</a></li>
 <li><a class="reference internal" href="#troubleshooting">Troubleshooting</a></li>
@@ -116,7 +117,8 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">BulkLoad User Guide</a><ul>
-<li><a class="reference internal" href="#id1">BulkDump</a></li>
+<li><a class="reference internal" href="#quickstart">Quickstart</a></li>
+<li><a class="reference internal" href="#bulkdump">BulkDump</a></li>
 <li><a class="reference internal" href="#bulkload">BulkLoad</a></li>
 <li><a class="reference internal" href="#bulkdump-bulkload-and-s3">BulkDump/BulkLoad and S3</a></li>
 <li><a class="reference internal" href="#troubleshooting">Troubleshooting</a></li>
@@ -132,9 +134,91 @@
 <h1>BulkLoad User Guide</h1>
 <div class="toctree-wrapper compound">
 </div>
-<p id="bulkdump">Below we describe the <strong class="command">BulkDump</strong> and <strong class="command">BulkLoad</strong> ‘fdbcli’ commands and basic troubleshooting tips bulkloading.</p>
-<section id="id1">
-<h2>BulkDump</h2>
+<p>Below we describe the <strong class="command">BulkDump</strong> and <strong class="command">BulkLoad</strong> ‘fdbcli’ commands and basic troubleshooting tips bulkloading
+but first a quickstart on how to use this feature.</p>
+<section id="quickstart">
+<span id="id1"></span><h2>Quickstart</h2>
+<p>Below we run a simple bulkdump, a clear of the cluster, and then a bulkload to repopulate the cluster.</p>
+<p>Start a cluster:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">FDB_SRC_FOLDER</span><span class="o">&gt;/</span><span class="n">tests</span><span class="o">/</span><span class="n">loopback_cluster</span><span class="o">/</span><span class="n">run_custom_cluster</span><span class="o">.</span><span class="n">sh</span> <span class="o">.</span> <span class="o">--</span><span class="n">storage_count</span> <span class="mi">8</span> \
+  <span class="o">--</span><span class="n">stateless_count</span> <span class="mi">4</span> <span class="o">--</span><span class="n">stateless_taskset</span> <span class="mh">0xf</span> <span class="o">--</span><span class="n">logs_count</span> <span class="mi">8</span> <span class="o">--</span><span class="n">logs_taskset</span> <span class="mh">0xff0</span> <span class="o">--</span><span class="n">storage_taskset</span> <span class="mh">0xffff000</span> \
+  <span class="o">--</span><span class="n">knobs</span> <span class="s1">&#39;--knob_shard_encode_location_metadata=1 --knob_desired_teams_per_server=10 --knob_enable_read_lock_on_range=1&#39;</span>
+</pre></div>
+</div>
+<p>Start a sufficient number of SSs because too few can cause bulkload fail (In the above we started 8 SSs).</p>
+<p>Start ‘fdbcli’:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>&lt;FDB_BUILD_FOLDER&gt;/bin/fdbcli —cluster=&lt;FDB_BUILD_FOLDER&gt;/loopback-cluster/fdb.cluster --log-dir=/tmp/bulkload/ --log
+</pre></div>
+</div>
+<p>Populate some data:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>fdb&gt; writemode on
+fdb&gt; set a b
+fdb&gt; get a
+\`a&#39; is \`b&#39;&#39;
+fdb&gt; bulkdump mode on
+fdb&gt; bulkdump status
+fdb&gt; bulkdump dump &quot;&quot; \xff /tmp/bulkload
+Received Job ID: de6b2ae7197cef28cac38d7ad7a6d3e7
+
+# Keep checking bulkdump status until…
+fdb&gt; bulkdump status
+No bulk dumping job is running
+</pre></div>
+</div>
+<p>Check if the bulkdump folder cited above has been created and populated. It should look something like this:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">find</span> <span class="o">/</span><span class="n">tmp</span><span class="o">/</span><span class="n">bulkload</span><span class="o">/</span><span class="n">de6b2ae7197cef28cac38d7ad7a6d3e7</span>
+<span class="o">.</span>
+<span class="o">|</span><span class="n">____3cdf8d1534e3077f0a9d3ebd5aaa4df0</span>
+<span class="o">|</span> <span class="o">|</span><span class="n">____0</span>
+<span class="o">|</span> <span class="o">|</span> <span class="o">|</span><span class="n">____133445450</span><span class="o">-</span><span class="n">manifest</span><span class="o">.</span><span class="n">txt</span>
+<span class="o">|</span> <span class="o">|</span> <span class="o">|</span><span class="n">____133445450</span><span class="o">-</span><span class="n">data</span><span class="o">.</span><span class="n">sst</span>
+<span class="o">|</span><span class="n">____job</span><span class="o">-</span><span class="n">manifest</span><span class="o">.</span><span class="n">txt</span>
+</pre></div>
+</div>
+<p><strong class="command">job-manifest.txt</strong> is the metadata file for the entire bulkdump job. This file will be used by the bulkload job to check the file path to load given a range.</p>
+<p>In each folder, there is one manifest file, at most one data file, and at most 1 byte sample file.
+If the data file is missing, it means that the range is empty. If the byte sample file is missing, it means that the number of keys in the range is too small for a sample.</p>
+<p>Now, lets clear our database and bulkload the above bulkdump:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>fdb&gt; clearrange &quot;&quot; \xff
+Committed (3759447445)
+
+fdb&gt; get a
+\`a\`: not found
+
+fdb&gt; bulkload mode on
+fdb&gt; bulkload status
+No bulk loading job is running
+
+fdb&gt; bulkload load de6b2ae7197cef28cac38d7ad7a6d3e7 &quot;&quot; \xff /tmp/bulkload
+Received Job ID: de6b2ae7197cef28cac38d7ad7a6d3e7
+
+fdb&gt; bulkload status
+Running bulk loading job: de6b2ae7197cef28cac38d7ad7a6d3e7
+Job information: [BulkLoadJobState]: [JobId]: de6b2ae7197cef28cac38d7ad7a6d3e7, [JobRoot]: /root/bulkload, [JobRange]: { begin=  end=\xff }, [Phase]: Submitted, [TransportMethod]: LocalFileCopy, [SubmitTime]: 1744830891.011401, [SinceSubmitMins]: 0.233608, [TaskCount]: 1
+Submitted 1 tasks
+Finished 0 tasks
+Error 0 tasks
+Total 1 tasks
+
+// wait until complete
+fdb&gt; bulkload status
+No bulk loading job is running
+
+fdb&gt; bulkload history
+Job de6b2ae7197cef28cac38d7ad7a6d3e7 submitted at 1744830891.011401 for range { begin=  end=\xff }. The job has 1 tasks. The job ran for 1.246195 mins and exited with status Complete.
+
+// Try with get
+fdb&gt; get a
+\`a&#39; is \`b&#39;&#39;
+</pre></div>
+</div>
+<p>We are done. You can shutdown your cluster now:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">ps</span> <span class="n">auxwww</span><span class="o">|</span><span class="n">grep</span> <span class="n">fdbserver</span> <span class="o">|</span><span class="n">awk</span> <span class="s1">&#39;{print $2}&#39;</span><span class="o">|</span><span class="n">xargs</span> <span class="n">kill</span> <span class="o">-</span><span class="mi">9</span>
+</pre></div>
+</div>
+</section>
+<section id="bulkdump">
+<span id="id2"></span><h2>BulkDump</h2>
 <p>Type <strong class="command">help bulkdump</strong> on the <strong class="command">fdbcli</strong> command-line to see the <strong class="command">bulkdump</strong> usage:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">help</span> <span class="n">bulkdump</span>
 
@@ -171,15 +255,14 @@ The :command:`status` command will return variants on the above until finally af
 </pre></div>
 </div>
 <p>To cancel a running job:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>   fdb&gt; bulkdump cancel c9de5a364ecc2abb6f7a8bd890a175cf
-   Job c9de5a364ecc2abb6f7a8bd890a175cf has been cancelled. No new tasks will be spawned.
-
-Only one :command:`BulkDump` (or :command:`BulkLoad`) job can be run at a time.
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">bulkdump</span> <span class="n">cancel</span> <span class="n">c9de5a364ecc2abb6f7a8bd890a175cf</span>
+<span class="n">Job</span> <span class="n">c9de5a364ecc2abb6f7a8bd890a175cf</span> <span class="n">has</span> <span class="n">been</span> <span class="n">cancelled</span><span class="o">.</span> <span class="n">No</span> <span class="n">new</span> <span class="n">tasks</span> <span class="n">will</span> <span class="n">be</span> <span class="n">spawned</span><span class="o">.</span>
 </pre></div>
 </div>
+<p>Only one <strong class="command">BulkDump</strong> (or <strong class="command">BulkLoad</strong>) job can be run at a time.</p>
 </section>
 <section id="bulkload">
-<span id="id2"></span><h2>BulkLoad</h2>
+<span id="id3"></span><h2>BulkLoad</h2>
 <p><strong class="command">BulkLoad</strong> is the inverse of <strong class="command">BulkDump</strong> but then adds a history dimension so you can see status or previous <strong class="command">BulkLoad</strong> runs.</p>
 <p>Type <strong class="command">help bulkload</strong> for usage:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">help</span> <span class="n">bulkload</span>
@@ -257,7 +340,7 @@ fdb&gt; bulkload status
 </div>
 </section>
 <section id="troubleshooting">
-<span id="id3"></span><h2>Troubleshooting</h2>
+<span id="id4"></span><h2>Troubleshooting</h2>
 <p><strong class="command">BulkLoad</strong> and <strong class="command">BulkDump</strong> require ‘–knob_shard_encode_location_metadata=1’.</p>
 <p>As for backup, enable ‘–knob_http_verbose_level 10’ to debug connection issues: the http request/response will be dumped on STDOUT.</p>
 <p>To watch your job in operation, search ‘DDBulkLoad*’, ‘SSBulkLoad*’, ‘DDBulkDump*’, ‘SSBulkDump*’, ‘S3Client*’ in trace events to see more details.</p>
@@ -284,7 +367,7 @@ fdb&gt; bulkload status
     </p>
     <p>
         &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 11, 2025.<br/>
+      Last updated on Jun 12, 2025.<br/>
     </p>
   </div>
 </footer>

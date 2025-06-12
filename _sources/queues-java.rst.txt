@@ -73,7 +73,7 @@ The following is a simple implementation of the basic pattern:
         private static final Random randno;
 
         static{
-            fdb = FDB.selectAPIVersion(730);
+            fdb = FDB.selectAPIVersion(740);
             db = fdb.open();
             queue = new Subspace(Tuple.from("Q"));
             randno = new Random();
