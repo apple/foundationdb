@@ -2665,34 +2665,6 @@ ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string co
 	return Void();
 }
 
-ACTOR Future<Void> disableBackupWorker(Database cx) {
-	DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
-	if (!configuration.backupWorkerEnabled) {
-		TraceEvent("BackupWorkerAlreadyDisabled");
-		return Void();
-	}
-	ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=0", true));
-	if (res != ConfigurationResult::SUCCESS) {
-		TraceEvent("BackupWorkerDisableFailed").detail("Result", res);
-		throw operation_failed();
-	}
-	return Void();
-}
-
-ACTOR Future<Void> enableBackupWorker(Database cx) {
-	DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
-	if (configuration.backupWorkerEnabled) {
-		TraceEvent("BackupWorkerAlreadyEnabled");
-		return Void();
-	}
-	ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true));
-	if (res != ConfigurationResult::SUCCESS) {
-		TraceEvent("BackupWorkerEnableFailed").detail("Result", res);
-		throw operation_failed();
-	}
-	return Void();
-}
-
 /**
  * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
  *
