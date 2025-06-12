@@ -40,7 +40,7 @@ Though users interact with only a few predefined redundancy modes (double, tripl
 replication rules**. These are defined using basic building blocks that can be **composed recursively**. They are implemented in ReplicationPolicy.cpp as 
 subclasses of IReplicationPolicy.
 
-** Core Syntax Constructs**
+**Core Syntax Constructs**
 
 - **One()**
   - Description: Select exactly one replica from the given server set.
