@@ -694,11 +694,9 @@ void printStatus(StatusObjectReader statusObj,
 
 						if (dataLoss == -1) {
 							ASSERT_WE_THINK(availLoss == -1);
-							outputString += format(
-							    "\n\n  Warning: the database may have data loss and availability loss. Please restart "
-							    "following tlog interfaces, otherwise storage servers may never be able to catch "
-							    "up.\n");
 							StatusObjectReader logs;
+							std::string epochData;
+							int32_t minFaultTolerance = 0;
 							if (statusObjCluster.has("logs")) {
 								for (StatusObjectReader logEpoch : statusObjCluster.last().get_array()) {
 									bool possiblyLosingData;
@@ -709,10 +707,13 @@ void printStatus(StatusObjectReader statusObj,
 									// Current epoch doesn't have an end version.
 									int64_t epoch, beginVersion, endVersion = invalidVersion;
 									bool current;
+									int32_t faultTolerance;
 									logEpoch.get("epoch", epoch);
 									logEpoch.get("begin_version", beginVersion);
 									logEpoch.get("end_version", endVersion);
 									logEpoch.get("current", current);
+									logEpoch.get("remote_log_fault_tolerance", faultTolerance);
+									minFaultTolerance = std::min(minFaultTolerance, faultTolerance);
 									std::string missing_log_interfaces;
 									if (logEpoch.has("log_interfaces")) {
 										for (StatusObjectReader logInterface : logEpoch.last().get_array()) {
@@ -721,11 +722,14 @@ void printStatus(StatusObjectReader statusObj,
 											if (logInterface.get("healthy", healthy) && !healthy) {
 												logInterface.get("id", id);
 												logInterface.get("address", address);
-												missing_log_interfaces += format("%s,%s ", id.c_str(), address.c_str());
+												missing_log_interfaces +=
+												    format("%s,%s ",
+												           id.c_str(),
+												           address.empty() ? "unknown" : address.c_str());
 											}
 										}
 									}
-									outputString += format(
+									epochData += format(
 									    "  %s log epoch: %lld begin: %lld end: %s, missing "
 									    "log interfaces(id,address): %s\n",
 									    current ? "Current" : "Old",
@@ -735,6 +739,14 @@ void printStatus(StatusObjectReader statusObj,
 									    missing_log_interfaces.c_str());
 								}
 							}
+							outputString += format("\n\n  ");
+							if (minFaultTolerance < 0) {
+								outputString += format("Warning: the database may have data loss and availability loss. ");
+							}
+							outputString += format(
+							    "Please restart "
+							    "following tlog interfaces, otherwise storage servers may never be able to catch "
+							    "up.\n") + epochData;
 						}
 					}
 				}
