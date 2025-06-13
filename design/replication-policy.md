@@ -40,25 +40,59 @@ Though users interact with only a few predefined redundancy modes (double, tripl
 replication rules**. These are defined using basic building blocks that can be **composed recursively**. They are implemented in ReplicationPolicy.cpp as 
 subclasses of IReplicationPolicy.
 
-** Core Syntax Constructs**
+**Core Syntax Constructs**
 
-| Syntax                  | Parameter 1                          | Parameter 2                            | Parameter 3                        | Description                                                                              |
-| ----------------------- | ------------------------------------ | -------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------- |
-| One()                   | —                                    | —                                      | —                                  | Select exactly one replica from the given server set                                    |
-| Across(n, attribute, subpolicy) | n: number of distinct attribute values | attribute: locality key (e.g., zone\_id) | subpolicy: applied within each group | Select n groups partitioned by attribute, then apply subpolicy in each                     |
-| PolicyAnd(p1, p2)       | p1: first policy                     | p2: second policy                      | —                                  | Both policies must be satisfied; results merged. This appears to be only used for testing. |
+- **One()**
+  - Description: Select exactly one replica from the given server set.
 
-** Redundancy Modes and Policy Mapping**
+- **Across(n, attribute, subpolicy)**
+  - Parameters:
+    - n: Number of distinct attribute values
+    - attribute: Locality key (e.g., `zone_id`)
+    - subpolicy: Applied within each group
+  - Description: Select `n` groups by attribute, apply subpolicy in each.
 
-User-facing redundancy modes map internally to replication policies as follows. Note the simulator tests a larger set of additional replication policies that are not exposed to the user.
+- **PolicyAnd(p1, p2)**
+  - Parameters:
+    - p1: First policy
+    - p2: Second policy
+  - Description: Both policies must be satisfied. Only used for testing.
 
-| Mode                          | Internal Policy Expression                                                                              | Description                                                                           |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| single                        | PolicyOne()                                                                                                 | Single replica; no fault tolerance                                                     |
-| double, fast\_recovery\_double | Across(2, zone\_id, One())                                                                                  | 2 replicas in 2 different zones; tolerates 1 zone failure                              |
-| triple, fast\_recovery\_triple | Across(3, zone\_id, One())                                                                                  | 3 replicas in 3 different zones; tolerates 1–2 zone failures depending on config        |
-| three\_datacenter, multi\_dc   | Storage: Across(3, dcid, Across(2, zone\_id, One())) TLog: Across(2, dcid, Across(2, zone\_id, One()))   | 6 replicas total:Storage: 3 DCs × 2 zonesTLogs: 2 DCs × 2 zones                        |
-| three\_datacenter\_fallback    | Across(2, dcid, Across(2, zone\_id, One()))                                                                 | 4 replicas total in 2 DCs with 2 zones each; fallback configuration for multi-DC setups |
-| three\_data\_hall              | Storage: Across(3, data\_hall, One()) TLog: Across(2, data\_hall, Across(2, zone\_id, One()))            | Storage: 1 replica in each of 3 data hallsTLogs: 2 data halls × 2 zones                |
-| three\_data\_hall\_fallback   | Storage: Across(2, data\_hall, One()) TLog: Across(2, data\_hall, Across(2, zone\_id, One()))            | Fallback: 2 data halls for storage and logs, with diversity across zones               |
-```
+**Redundancy Modes → Internal Policy Mapping**
+
+- **single**
+  - Policy: `One()`
+  - Description: Single replica, no fault tolerance.
+
+- **double**, **fast_recovery_double**
+  - Policy: `Across(2, zone_id, One())`
+  - Description: 2 replicas in 2 zones; tolerates 1 zone failure.
+
+- **triple**, **fast_recovery_triple**
+  - Policy: `Across(3, zone_id, One())`
+  - Description: 3 replicas in 3 zones; tolerates up to 2 zone failures.
+
+- **three_datacenter**, **multi_dc**
+  - Policy:
+    - Storage: `Across(3, dcid, Across(2, zone_id, One()))`
+    - TLogs: `Across(2, dcid, Across(2, zone_id, One()))`
+  - Description: 
+    - Storage: 3 DCs × 2 zones = 6 replicas
+    - TLogs: 2 DCs × 2 zones
+
+- **three_datacenter_fallback**
+  - Policy: `Across(2, dcid, Across(2, zone_id, One()))`
+  - Description: 4 replicas total across 2 DCs × 2 zones.
+
+- **three_data_hall**
+  - Policy:
+    - Storage: `Across(3, data_hall, One())`
+    - TLogs: `Across(2, data_hall, Across(2, zone_id, One()))`
+  - Description: 
+    - Storage: 1 replica in each of 3 halls
+    - TLogs: 2 halls × 2 zones
+
+- **three_data_hall_fallback**
+  - Policy: Same as above with fewer halls
+  - Description: 2 data halls for storage and logs, with zone diversity.
+
