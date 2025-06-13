@@ -24,6 +24,7 @@ package directory
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"math/rand"
 	"sync"
@@ -63,10 +64,10 @@ func windowSize(start int64) int64 {
 	return 8192
 }
 
-func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subspace) (subspace.Subspace, error) {
+func (hca highContentionAllocator) allocate(ctx context.Context, tr fdb.Transaction, s subspace.Subspace) (subspace.Subspace, error) {
 	for {
 		rr := tr.Snapshot().GetRange(hca.counters, fdb.RangeOptions{Limit: 1, Reverse: true})
-		kvs, err := rr.GetSliceWithError()
+		kvs, err := rr.Get(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -95,10 +96,11 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 			// Increment the allocation count for the current window
 			tr.Add(hca.counters.Sub(start), oneBytes)
 			countFuture := tr.Snapshot().Get(hca.counters.Sub(start))
+			defer countFuture.Close()
 
 			allocatorMutex.Unlock()
 
-			countStr, err := countFuture.Get()
+			countStr, err := countFuture.Get(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -134,12 +136,13 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 
 			latestCounter := tr.Snapshot().GetRange(hca.counters, fdb.RangeOptions{Limit: 1, Reverse: true})
 			candidateValue := tr.Get(key)
+			defer candidateValue.Close()
 			tr.Options().SetNextWriteNoWriteConflictRange()
 			tr.Set(key, []byte(""))
 
 			allocatorMutex.Unlock()
 
-			kvs, err = latestCounter.GetSliceWithError()
+			kvs, err = latestCounter.Get(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -154,7 +157,7 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 				}
 			}
 
-			v, err := candidateValue.Get()
+			v, err := candidateValue.Get(ctx)
 			if err != nil {
 				return nil, err
 			}
