@@ -1,0 +1,9 @@
+[[test]]
+ testTitle = 'UnitTests'
+ useDB = false
+ startDelay = 0
+
+     [[test.workload]]
+     testName = 'UnitTests'
+     maxTestCases = 10
+     testsMatching = 'noSim/determinism/checkpoint_metadata'

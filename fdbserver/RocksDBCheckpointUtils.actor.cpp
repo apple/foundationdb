@@ -733,7 +733,7 @@ ACTOR Future<Void> RocksDBColumnFamilyReader::doClose(RocksDBColumnFamilyReader*
 class RocksDBSstFileWriter : public IRocksDBSstFileWriter {
 public:
 	RocksDBSstFileWriter()
-	  : writer(std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false) {};
+	  : writer(std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false){};
 
 	void open(const std::string localFile) override;
 
@@ -789,7 +789,7 @@ bool RocksDBSstFileWriter::finish() {
 
 class RocksDBSstFileReader : public IRocksDBSstFileReader {
 public:
-	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())) {};
+	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())){};
 
 	RocksDBSstFileReader(const KeyRange& rangeBoundary, size_t rowLimit, size_t byteLimit)
 	  : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())), rowLimit(rowLimit),
@@ -1049,7 +1049,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	wait(success(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID)));
 	rocksCF.sstFiles[idx].db_path = dir;
 	rocksCF.sstFiles[idx].fetched = true;
-	metaData->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
+	metaData->setSerializedCheckpoint(ObjectWriter::toValue(rocksCF, IncludeVersion()));
 	if (cFun) {
 		wait(cFun(*metaData));
 	}
@@ -1187,7 +1187,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				} else {
 					rcp.fetchedFiles.emplace_back(emptySstFilePath, range, totalBytes);
 				}
-				metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+				metaData->setSerializedCheckpoint(ObjectWriter::toValue(rcp, IncludeVersion()));
 				if (!fileExists(localFile)) {
 					TraceEvent(SevWarn, "FetchCheckpointRangeEndFileNotFound", metaData->checkpointID)
 					    .detail("Range", range)
@@ -1436,21 +1436,21 @@ std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint) {
 	RocksDBColumnFamilyCheckpoint rocksCF;
-	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
 	reader.deserialize(rocksCF);
 	return rocksCF;
 }
 
 RocksDBCheckpoint getRocksCheckpoint(const CheckpointMetaData& checkpoint) {
 	RocksDBCheckpoint rocksCheckpoint;
-	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
 	reader.deserialize(rocksCheckpoint);
 	return rocksCheckpoint;
 }
 
 RocksDBCheckpointKeyValues getRocksKeyValuesCheckpoint(const CheckpointMetaData& checkpoint) {
 	RocksDBCheckpointKeyValues rocksCheckpoint;
-	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
 	reader.deserialize(rocksCheckpoint);
 	return rocksCheckpoint;
 }
