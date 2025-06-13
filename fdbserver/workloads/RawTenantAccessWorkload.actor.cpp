@@ -87,7 +87,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 
 	bool hasNonexistentTenant() const { return lastCreatedTenants.size() + idx2Tid.size() < tenantCount; }
 
-	bool hasExistingTenant() const { return idx2Tid.size() - lastDeletedTenants.size() > 0; }
+	bool hasExistingTenant() const { return (int64_t)idx2Tid.size() - (int64_t)lastDeletedTenants.size() > 0; }
 
 	int64_t extractTenantId(ValueRef value) const {
 		int64_t id;
