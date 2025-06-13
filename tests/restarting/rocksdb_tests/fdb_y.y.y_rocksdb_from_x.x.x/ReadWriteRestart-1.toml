@@ -1,0 +1,39 @@
+[configuration]
+tenantModes = ['disabled']
+storageEngineType = 4
+
+[[test]]
+testTitle = 'ReadWriteUpgrade'
+clearAfterTest = false
+   
+    [[test.workload]]
+    testName = 'ReadWrite'
+    testDuration = 30.0
+    transactionsPerSecond = 10
+    writesPerTransactionA = 10
+    readsPerTransactionA = 0
+    writesPerTransactionB = 10
+    readsPerTransactionB = 0
+    alpha = 1.0
+    setup = false
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 10.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'SaveAndKill'
+    restartInfoLocation = 'simfdb/restartInfo.ini'
+    testDuration = 10.0
