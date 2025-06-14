@@ -20,6 +20,7 @@ shard_encode_location_metadata = true
 # min_byte_sampling_probability = 0.99
 # rocksdb_read_range_reuse_iterators = false
 dd_physical_shard_move_probability = 1.0
+sharded_rocksdb_memtable_max_range_deletions = 50
 
 [[test]]
 testTitle = 'PhysicalShardMove'
