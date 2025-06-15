@@ -41,3 +41,5 @@ waitForQuiescence = false
 
     [[test.workload]]
     testName = 'BulkDumpingWorkload'
+    # 1 is BulkLoadTransportMethod::CP
+    bulkLoadTransportMethod = 1
