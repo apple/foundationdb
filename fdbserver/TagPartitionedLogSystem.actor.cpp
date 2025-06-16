@@ -302,6 +302,7 @@ Reference<ILogSystem> TagPartitionedLogSystem::fromLogSystemConfig(UID const& db
 
 	logSystem->logSystemType = lsConf.logSystemType;
 	logSystem->oldestBackupEpoch = lsConf.oldestBackupEpoch;
+	logSystem->knownLockedTLogIds = lsConf.knownLockedTLogIds;
 	return logSystem;
 }
 
@@ -667,11 +668,29 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 			tLogCommitResults.push_back(commitSuccess);
 			location++;
 		}
+
 		quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size() - it->tLogWriteAntiQuorum));
 		logGroupLocal++;
 	}
 
 	return minVersionWhenReady(waitForAll(quorumResults), allReplies);
+}
+
+void TagPartitionedLogSystem::resetBestServerIfNotLocked(
+    int bestSet,
+    int& bestServer,
+    Optional<Version> end,
+    Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds) {
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && bestSet >= 0 && bestServer >= 0 && end.present() &&
+	    end.get() != std::numeric_limits<Version>::max()) {
+		ASSERT_WE_THINK(knownLockedTLogIds.present() && !knownLockedTLogIds.get().empty());
+		ASSERT_WE_THINK(knownLockedTLogIds.get().contains(bestSet));
+		if (std::find(knownLockedTLogIds.get()[bestSet].begin(), knownLockedTLogIds.get()[bestSet].end(), bestServer) ==
+		    knownLockedTLogIds.get()[bestSet].end()) {
+			bestServer = -1;
+			return;
+		}
+	}
 }
 
 Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
@@ -683,6 +702,8 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 	std::vector<Reference<LogSet>> localSets;
 	Version lastBegin = 0;
 	bool foundSpecial = false;
+	int logIdx = 0;
+	int bestSetIdx = 0;
 	for (auto& log : tLogs) {
 		if (log->locality == tagLocalitySpecial) {
 			foundSpecial = true;
@@ -694,8 +715,10 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 			localSets.push_back(log);
 			if (log->locality != tagLocalitySatellite) {
 				bestSet = localSets.size() - 1;
+				bestSetIdx = logIdx;
 			}
 		}
+		logIdx++;
 	}
 
 	if (!localSets.size()) {
@@ -708,8 +731,10 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 		    .detail("Begin", begin)
 		    .detail("End", end)
 		    .detail("BestLogs", localSets[bestSet]->logServerString());
+		int bestServer = localSets[bestSet]->bestLocationFor(tag);
+		resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownLockedTLogIds);
 		return makeReference<ILogSystem::SetPeekCursor>(
-		    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, end, parallelGetMore);
+		    localSets, bestSet, bestServer, tag, begin, end, parallelGetMore);
 	} else {
 		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
@@ -1265,11 +1290,13 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekSingle(UID dbgid
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID dbgid,
-                                                                          Version begin,
-                                                                          Tag tag,
-                                                                          bool useSatellite,
-                                                                          Optional<Version> end) {
+Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
+    UID dbgid,
+    Version begin,
+    Tag tag,
+    bool useSatellite,
+    Optional<Version> end,
+    Optional<std::map<uint8_t, std::vector<uint16_t>>> knownStoppedTLogIds) {
 	bool found = false;
 	if (!end.present()) {
 		end = std::numeric_limits<Version>::max();
@@ -1286,8 +1313,13 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 	if (found) {
 		if (stopped) {
 			std::vector<Reference<LogSet>> localSets;
+			// indexes into "localSets"
 			int bestPrimarySet = 0;
 			int bestSatelliteSet = -1;
+			// indexes into "tLogs"
+			int logIdx = 0;
+			int bestPrimarySetIdx = -1;
+			int bestSatelliteSetIdx = -1;
 			for (auto& log : tLogs) {
 				if (log->isLocal && log->logServers.size()) {
 					TraceEvent("TLogPeekLogRouterLocalSet", dbgid)
@@ -1297,21 +1329,29 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 					localSets.push_back(log);
 					if (log->locality == tagLocalitySatellite) {
 						bestSatelliteSet = localSets.size() - 1;
+						bestSatelliteSetIdx = logIdx;
 					} else {
 						bestPrimarySet = localSets.size() - 1;
+						bestPrimarySetIdx = logIdx;
 					}
 				}
+				logIdx++;
 			}
 			int bestSet = bestPrimarySet;
+			int bestSetIdx = bestPrimarySetIdx;
 			if (useSatellite && bestSatelliteSet != -1 && tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
 				bestSet = bestSatelliteSet;
+				bestSetIdx = bestSatelliteSetIdx;
 			}
+
+			int bestServer = localSets[bestSet]->bestLocationFor(tag);
+			resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownStoppedTLogIds);
 
 			TraceEvent("TLogPeekLogRouterSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
 			// FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies
 			// across the WAN
 			return makeReference<ILogSystem::SetPeekCursor>(
-			    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, end.get(), true);
+			    localSets, bestSet, bestServer, tag, begin, end.get(), true);
 		} else {
 			int bestPrimarySet = -1;
 			int bestSatelliteSet = -1;
@@ -1723,6 +1763,7 @@ LogSystemConfig TagPartitionedLogSystem::getLogSystemConfig() const {
 	logSystemConfig.recoveredAt = recoveredAt;
 	logSystemConfig.pseudoLocalities = pseudoLocalities;
 	logSystemConfig.oldestBackupEpoch = oldestBackupEpoch;
+	logSystemConfig.knownLockedTLogIds = knownLockedTLogIds;
 	for (const Reference<LogSet>& logSet : tLogs) {
 		if (logSet->isLocal || remoteLogsWrittenToCoreState) {
 			logSystemConfig.tLogs.emplace_back(*logSet);
@@ -1997,11 +2038,13 @@ Optional<DurableVersionInfo> TagPartitionedLogSystem::getDurableVersion(UID dbgi
 	std::vector<TLogLockResult> results;
 	std::string sServerState;
 	LocalityGroup unResponsiveSet;
+	std::vector<uint16_t> lockedTLogIds;
 	for (int t = 0; t < logSet->logServers.size(); t++) {
 		if (lockInfo.replies[t].isReady() && !lockInfo.replies[t].isError() && (!failed.size() || !failed[t]->get())) {
 			results.push_back(lockInfo.replies[t].get());
 			availableItems.push_back(logSet->tLogLocalities[t]);
 			sServerState += 'a';
+			lockedTLogIds.push_back(t);
 		} else {
 			unResponsiveSet.add(logSet->tLogLocalities[t]);
 			TraceEvent("GetDurableResultNoResponse").detail("TLog", logSet->logServers[t]->get().id());
@@ -2081,8 +2124,11 @@ Optional<DurableVersionInfo> TagPartitionedLogSystem::getDurableVersion(UID dbgi
 			// as choosing any other version may result in not copying the correct version range to the
 			// log servers in the latest epoch and also will invalidate the changes that we made to the
 			// peek logic in the context of version vector.
-			return DurableVersionInfo(
-			    knownCommittedVersion, results[new_safe_range_begin].end, results, failedLogsCompletePolicy);
+			return DurableVersionInfo(knownCommittedVersion,
+			                          results[new_safe_range_begin].end,
+			                          results,
+			                          failedLogsCompletePolicy,
+			                          lockedTLogIds);
 		}
 	}
 	TraceEvent("GetDurableResultWaiting", dbgid)
@@ -2543,6 +2589,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		Version maxEnd = 0;
 		state std::vector<Future<Void>> changes;
 		state std::vector<std::tuple<int, std::vector<TLogLockResult>, bool>> logGroupResults;
+		state std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
 		for (int log = 0; log < logServers.size(); log++) {
 			if (!logServers[log]->isLocal) {
 				continue;
@@ -2553,6 +2600,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				logGroupResults.emplace_back(logServers[log]->tLogReplicationFactor,
 				                             durableVersionInfo.get().lockResults,
 				                             durableVersionInfo.get().policyResult);
+				knownLockedTLogIds[log] = durableVersionInfo.get().knownLockedTLogIds;
 				minDV = std::min(minDV, durableVersionInfo.get().minimumDurableVersion);
 				if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 					knownCommittedVersion =
@@ -2583,6 +2631,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->logSystemType = prevState.logSystemType;
 			logSystem->rejoins = rejoins;
 			logSystem->lockResults = lockResults;
+			logSystem->knownLockedTLogIds = knownLockedTLogIds;
 			if (knownCommittedVersion > minEnd) {
 				knownCommittedVersion = minEnd;
 			}
@@ -2656,6 +2705,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					req.tLogPolicy = tLogPolicy;
 					req.locality = locality;
 					req.recoverAt = self->recoverAt.get();
+					req.knownLockedTLogIds = self->knownLockedTLogIds;
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
