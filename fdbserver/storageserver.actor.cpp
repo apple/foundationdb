@@ -432,12 +432,13 @@ struct AddingShard : NonCopyable {
 	AddingShard(StorageServer* server,
 	            KeyRangeRef const& keys,
 	            DataMovementReason reason,
-	            const SSBulkLoadMetadata& ssBulkLoadMetadata);
+	            const SSBulkLoadMetadata& ssBulkLoadMetadata,
+	            std::string teamId);
 
 	// When fetchKeys "partially completes" (splits an adding shard in two), this is used to construct the left half
 	AddingShard(AddingShard* prev, KeyRange const& keys)
 	  : keys(keys), fetchClient(prev->fetchClient), server(prev->server), transferredVersion(prev->transferredVersion),
-	    fetchVersion(prev->fetchVersion), phase(prev->phase), reason(prev->reason),
+	    fetchVersion(prev->fetchVersion), phase(prev->phase), reason(prev->reason), teamId(prev->teamId),
 	    ssBulkLoadMetadata(prev->ssBulkLoadMetadata) {}
 	~AddingShard() {
 		if (!fetchComplete.isSet())
@@ -458,8 +459,14 @@ struct AddingShard : NonCopyable {
 };
 
 class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
-	ShardInfo(KeyRange keys, std::unique_ptr<AddingShard>&& adding, StorageServer* readWrite)
-	  : adding(std::move(adding)), readWrite(readWrite), keys(keys), shardId(0LL), desiredShardId(0LL), version(0) {}
+	ShardInfo(KeyRange keys, std::unique_ptr<AddingShard>&& prevAdding)
+	  : keys(keys), shardId(0LL), desiredShardId(0LL), version(0) {
+		ASSERT(prevAdding);
+		adding = std::move(prevAdding);
+		teamId = adding->teamId;
+	}
+	ShardInfo(KeyRange keys) : keys(keys) {}
+	ShardInfo(KeyRange keys, StorageServer* data) : keys(keys), readWrite(data) { ASSERT(data); }
 	ShardInfo(KeyRange keys, std::shared_ptr<MoveInShard> moveInShard)
 	  : adding(nullptr), readWrite(nullptr), moveInShard(moveInShard), keys(keys),
 	    shardId(moveInShard->meta->destShardId()), desiredShardId(moveInShard->meta->destShardId()),
@@ -475,19 +482,21 @@ public:
 	uint64_t shardId;
 	uint64_t desiredShardId;
 	UID dataMoveId;
-	std::string teamId = "InvalidTeam";
+	std::string teamId = "";
 	Version version;
 
-	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
-	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
+	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys); }
+	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, data); }
 	static ShardInfo* newAdding(StorageServer* data,
 	                            KeyRange keys,
 	                            DataMovementReason reason,
 	                            const SSBulkLoadMetadata& ssBulkLoadMetadata) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, reason, ssBulkLoadMetadata), nullptr);
+		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, reason, ssBulkLoadMetadata, ""));
 	}
 	static ShardInfo* addingSplitLeft(KeyRange keys, AddingShard* oldShard) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr);
+		auto shardInfo = new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys));
+		shardInfo->teamId = oldShard->teamId;
+		return shardInfo;
 	}
 
 	static ShardInfo* newShard(StorageServer* data, const StorageServerShard& shard);
@@ -530,7 +539,13 @@ public:
 				moveInShardId = this->moveInShard->id();
 			}
 		}
-		return StorageServerShard(this->keys, this->version, this->shardId, this->desiredShardId, st, moveInShardId);
+		auto ssShard =
+		    StorageServerShard(this->keys, this->version, this->shardId, this->desiredShardId, st, moveInShardId);
+		ssShard.teamId = teamId;
+		ASSERT(!ssShard.teamId.empty());
+		ASSERT(ssShard.id != 0UL);
+		ASSERT(ssShard.desiredId != 0UL);
+		return ssShard;
 	}
 
 	// Copies necessary information from `shard`.
@@ -538,6 +553,7 @@ public:
 		this->version = shard.version;
 		this->shardId = shard.id;
 		this->desiredShardId = shard.desiredId;
+		this->teamId = shard.teamId;
 	}
 
 	// Returns true if the current shard is merged with `other`.
@@ -548,6 +564,13 @@ public:
 		this->keys = KeyRangeRef(this->keys.begin, other->keys.end);
 		this->version = std::max(this->version, other->version);
 		return true;
+	}
+
+	void setTeamId(const std::string& id) {
+		teamId = id;
+		if (adding != nullptr) {
+			adding->teamId = teamId;
+		}
 	}
 
 	void validate() const {
@@ -1006,10 +1029,6 @@ public:
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	std::unordered_map<UID, ICheckpointReader*> liveCheckpointReaders; // Active checkpoint readers
 	VersionedMap<int64_t, TenantSSInfo> tenantMap;
-	std::map<Version, std::vector<PendingNewShard>>
-	    pendingAddRanges; // Pending requests to add ranges to physical shards
-	std::map<Version, std::vector<KeyRange>>
-	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
 	std::deque<std::pair<Standalone<StringRef>, Standalone<StringRef>>> constructedData;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
@@ -1289,6 +1308,11 @@ public:
 	Version rebootAfterDurableVersion;
 	int8_t primaryLocality;
 	NotifiedVersion knownCommittedVersion;
+
+	std::map<Version, std::vector<PendingNewShard>>
+	    pendingAddRanges; // Pending requests to add ranges to physical shards
+	std::map<Version, std::vector<KeyRange>>
+	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
 
 	Deque<std::pair<Version, Version>> recoveryVersionSkips;
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage
@@ -1754,6 +1778,13 @@ public:
 				}
 			}
 		}
+		if (shardAware && newShard->assigned()) {
+			ASSERT_ABORT(newShard->shardId != 0LL);
+			ASSERT(newShard->desiredShardId != 0LL);
+			if (newShard->isReadable()) {
+				ASSERT_ABORT(!newShard->teamId.empty());
+			}
+		}
 
 		Reference<ShardInfo> rShard(newShard);
 		shards.insert(newShard->keys, rShard);
@@ -2167,7 +2198,7 @@ void validate(StorageServer* data, bool force = false) {
 				}
 
 				if (shard->assigned() && data->shardAware) {
-					TraceEvent(SevVerbose, "ValidateAssignedShard", data->thisServerID)
+					TraceEvent(SevDebug, "ValidateAssignedShard", data->thisServerID)
 					    .detail("Range", shard->keys)
 					    .detailf("ShardID", "%016llx", shard->shardId)
 					    .detailf("DesiredShardID", "%016llx", shard->desiredShardId)
@@ -8961,13 +8992,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		for (auto r = ndvr.begin(); r != ndvr.end(); ++r)
 			lastAvailable = std::max(lastAvailable, r->value());
 
+		TraceEvent(SevDebug, "BeforeDurableVersion").detail("FKID", fetchKeysID);
 		if (lastAvailable != invalidVersion && lastAvailable >= data->durableVersion.get()) {
 			CODE_PROBE(true, "FetchKeys waits for previous available version to be durable");
 			wait(data->durableVersion.whenAtLeast(lastAvailable + 1));
 		}
 
 		TraceEvent(SevDebug, "FetchKeysVersionSatisfied", data->thisServerID)
-		    .detail("FKID", interval.pairID)
+		    .detail("FKID", fetchKeysID)
 		    .detail("DataMoveId", dataMoveId)
 		    .detail("ConductBulkLoad", conductBulkLoad);
 
@@ -8977,13 +9009,16 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				TraceEvent(SevWarnAlways, "TeamIdUnavailable")
 				    .detail("FKID", fetchKeysID)
 				    .detail("DurableVersion", data->durableVersion.get())
-				    .detail("Version", data->version.get());
+				    .detail("Version", data->version.get())
+				    .detail("DataMoveId", dataMoveId);
 				wait(Never());
 			}
 		}
+		TraceEvent(SevDebug, "BeforeFKLock").detail("FKID", fetchKeysID);
 		wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 		state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 
+		TraceEvent(SevDebug, "FKLockTaken").detail("FKID", fetchKeysID);
 		state double executeStart = now();
 		++data->counters.fetchWaitingCount;
 		data->counters.fetchWaitingMS += 1000 * (executeStart - startTime);
@@ -9073,7 +9108,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			ASSERT(fetchVersion >= shard->fetchVersion); // at this point, shard->fetchVersion is the last fetchVersion
 			shard->fetchVersion = fetchVersion;
 			TraceEvent(SevVerbose, "FetchKeysUnblocked", data->thisServerID)
-			    .detail("FKID", interval.pairID)
+			    .detail("FKID", fetchKeysID)
 			    .detail("Version", fetchVersion);
 
 			while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion)
@@ -9197,7 +9232,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
 
 					TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID)
-					    .detail("FKID", interval.pairID)
+					    .detail("FKID", fetchKeysID)
 					    .detail("BlockRows", this_block.size())
 					    .detail("BlockBytes", expectedBlockSize)
 					    .detail("KeyBegin", keys.begin)
@@ -9244,7 +9279,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					if (conductBulkLoad) {
 						TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
-						    .detail("FKID", interval.pairID)
+						    .detail("FKID", fetchKeysID)
 						    .detail("DataMoveId", dataMoveId.toString())
 						    .detail("Range", keys)
 						    .detail("BlockRange", blockRange)
@@ -9288,14 +9323,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					TraceEvent("FKBlockFail", data->thisServerID)
 					    .errorUnsuppressed(lastError)
 					    .suppressFor(1.0)
-					    .detail("FKID", interval.pairID);
+					    .detail("FKID", fetchKeysID);
 
 					debug_getRangeRetries++;
 					if (debug_nextRetryToLog == debug_getRangeRetries) {
 						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
 						TraceEvent(SevWarn, "FetchPast", data->thisServerID)
 						    .detail("TotalAttempts", debug_getRangeRetries)
-						    .detail("FKID", interval.pairID)
+						    .detail("FKID", fetchKeysID)
 						    .detail("N", fetchVersion)
 						    .detail("E", data->version.get());
 					}
@@ -9312,7 +9347,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						StorageServerShard rightShard = data->shards[keys.begin]->toStorageServerShard();
 						rightShard.range = KeyRangeRef(blockBegin, keys.end);
 						auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard);
+						ASSERT(!leftShard->teamId.empty());
 						leftShard->populateShard(rightShard);
+						ASSERT(!rightShard.teamId.empty());
+						ASSERT(!leftShard->teamId.empty());
 						shard->server->addShard(leftShard);
 						shard->server->addShard(ShardInfo::newShard(data, rightShard));
 					} else {
@@ -9321,7 +9359,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						    data, KeyRangeRef(blockBegin, keys.end), shard->reason, shard->getSSBulkLoadMetadata()));
 						if (conductBulkLoad) {
 							TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
-							    .detail("FKID", interval.pairID)
+							    .detail("FKID", fetchKeysID)
 							    .detail("DataMoveId", dataMoveId.toString())
 							    .detail("Range", keys)
 							    .detail("NewSplitBeginKey", blockBegin)
@@ -9331,6 +9369,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
 					AddingShard* otherShard = data->shards.rangeContaining(blockBegin).value()->adding.get();
+					ASSERT(!otherShard->teamId.empty());
 					keys = shard->keys;
 
 					// Split our prior updates.  The ones that apply to our new, restricted key range will go back
@@ -9381,7 +9420,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("FKID", fetchKeysID);
 
 		TraceEvent(SevDebug, "FKBeforeFinalCommit", data->thisServerID)
-		    .detail("FKID", interval.pairID)
+		    .detail("FKID", fetchKeysID)
 		    .detail("SV", data->storageVersion())
 		    .detail("DV", data->durableVersion.get());
 		// Directly commit()ing the IKVS would interfere with updateStorage, possibly resulting in an incomplete
@@ -9407,7 +9446,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		state std::unordered_map<Key, Version> feedFetchedVersions = wait(feedFetchMain);
 
 		TraceEvent(SevDebug, "FKAfterFinalCommit", data->thisServerID)
-		    .detail("FKID", interval.pairID)
+		    .detail("FKID", fetchKeysID)
 		    .detail("SV", data->storageVersion())
 		    .detail("DV", data->durableVersion.get());
 
@@ -9419,7 +9458,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// After we add to the promise readyFetchKeys, update() would provide a pointer to FetchInjectionInfo that
 		// we can put mutation in.
 		FetchInjectionInfo* batch = wait(p.getFuture());
-		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
+		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", fetchKeysID);
 
 		shard->phase = AddingShard::FetchingCF;
 		ASSERT(data->version.get() >= fetchVersion);
@@ -9467,7 +9506,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		                        readOptions);
 
 		TraceEvent(SevDebug, "FetchKeysHaveData", data->thisServerID)
-		    .detail("FKID", interval.pairID)
+		    .detail("FKID", fetchKeysID)
 		    .detail("Version", shard->transferredVersion)
 		    .detail("StorageVersion", data->storageVersion());
 		validate(data);
@@ -9524,7 +9563,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		Version feedTransferredVersion = data->version.get() + 1;
 
 		TraceEvent(SevDebug, "FetchKeysHaveFeedData", data->thisServerID)
-		    .detail("FKID", interval.pairID)
+		    .detail("FKID", fetchKeysID)
 		    .detail("Version", feedTransferredVersion)
 		    .detail("StorageVersion", data->storageVersion());
 
@@ -9618,9 +9657,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 AddingShard::AddingShard(StorageServer* server,
                          KeyRangeRef const& keys,
                          DataMovementReason reason,
-                         const SSBulkLoadMetadata& ssBulkLoadMetadata)
+                         const SSBulkLoadMetadata& ssBulkLoadMetadata,
+                         std::string teamId)
   : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious),
-    reason(reason), ssBulkLoadMetadata(ssBulkLoadMetadata) {
+    reason(reason), ssBulkLoadMetadata(ssBulkLoadMetadata), teamId(teamId) {
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -10623,6 +10663,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 			} else {
 				StorageServerShard rightShard = ranges[i].value->toStorageServerShard();
 				rightShard.range = range;
+				rightShard.teamId = shard.teamId;
 				data->addShard(ShardInfo::newShard(data, rightShard));
 			}
 		}
@@ -12802,8 +12843,8 @@ ACTOR Future<Void> getDataMoveMetadata(Version version,
 		}
 	}
 	for (int i = 0; i < shards.size(); ++i) {
+		auto& shard = shards[i];
 		if (fDataMoves[i].get().present()) {
-			auto& shard = shards[i];
 			DataMoveMetaData dataMove = decodeDataMoveValue(fDataMoves[i].get().get());
 
 			if (!dataMove.ranges.empty()) {
@@ -12818,10 +12859,12 @@ ACTOR Future<Void> getDataMoveMetadata(Version version,
 				ASSERT(addingShard);
 				addingShard->teamId = teamId;
 				TraceEvent(SevDebug, "GotValidTeamId").detail("Range", shard.range).detail("TeamId", teamId);
+			} else {
+				TraceEvent(SevDebug, "CancelledDataMove").detail("DataMoveId", shards[i].dataMoveId);
 			}
-
-			shard.shardInfo.clear();
 		}
+
+		shard.shardInfo.clear();
 	}
 	return Void();
 }
@@ -15440,6 +15483,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		self.ssLock->halt();
 
 		self.moveInShards.clear();
+
+		// Clear pending shards so relevant actors could be destroyed.
+		self.pendingAddRanges.clear();
 
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {

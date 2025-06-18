@@ -52,7 +52,12 @@ struct StorageServerShard {
 	                   const uint64_t id,
 	                   const uint64_t desiredId,
 	                   ShardState shardState)
-	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState) {}
+	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState) {
+		if (shardState != NotAssigned) {
+			ASSERT_ABORT(id != 0UL);
+			ASSERT_ABORT(desiredId != 0UL);
+		}
+	}
 
 	static StorageServerShard notAssigned(KeyRange range, Version version = 0) {
 		return StorageServerShard(range, version, 0, 0, NotAssigned);
@@ -86,7 +91,7 @@ struct StorageServerShard {
 		std::string res = "StorageServerShard: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
 		                  " [Shard ID]: " + format("%016llx", this->id) + " [Version]: " + std::to_string(version) +
 		                  " [State]: " + getShardStateString() +
-		                  " [Desired Shard ID]: " + format("%016llx", this->desiredId);
+		                  " [Desired Shard ID]: " + format("%016llx", this->desiredId) + " [ Team ID ]: " + teamId;
 		if (moveInShardId.present()) {
 			res += " [MoveInShard ID]: " + this->moveInShardId.get().toString();
 		}
@@ -95,7 +100,7 @@ struct StorageServerShard {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, version, id, desiredId, shardState, moveInShardId);
+		serializer(ar, range, version, id, desiredId, shardState, moveInShardId, teamId);
 	}
 
 	KeyRange range;
@@ -104,7 +109,7 @@ struct StorageServerShard {
 	uint64_t desiredId; // The intended shard ID.
 	int8_t shardState;
 	Optional<UID> moveInShardId; // If present, it is the associated MoveInShardMetaData.
-	UID teamId;
+	std::string teamId;
 };
 
 #endif
