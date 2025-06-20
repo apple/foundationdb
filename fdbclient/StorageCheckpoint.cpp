@@ -129,9 +129,8 @@ Standalone<StringRef> CheckpointMetaData::getSerializedCheckpoint() const {
 
 	// Step 3: Extract and return the original payload
 	// Create a StringRef pointing to just the payload portion
-	auto ptr = reinterpret_cast<const uint8_t*>(str.data());
-	StringRef ref(ptr, int(payloadSize));
-	auto ret = Standalone<StringRef>(ref);
+	auto ret =
+	    Standalone<StringRef>(StringRef(serializedCheckpoint.begin(), payloadSize), serializedCheckpoint.arena());
 
 	// Debug trace for verification
 	// TraceEvent("CheckpointGet")
