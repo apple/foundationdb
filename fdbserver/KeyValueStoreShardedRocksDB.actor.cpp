@@ -297,7 +297,7 @@ private:
 // could potentially cause segmentation fault.
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
-	RocksDBErrorListener(){};
+	RocksDBErrorListener() {};
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
 		if (!bg_error)
 			return;
@@ -3153,7 +3153,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			    startTime(timer_monotonic()),
 			    sample((deterministicRandom()->random01() < SERVER_KNOBS->SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
 			               ? true
-			               : false){};
+			               : false) {};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 
