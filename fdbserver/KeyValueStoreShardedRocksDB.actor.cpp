@@ -1,4 +1,6 @@
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageCheckpoint.h"
+#include "flow/Arena.h"
 #ifdef WITH_ROCKSDB
 
 #include "fdbclient/KeyRangeMap.h"
@@ -295,7 +297,7 @@ private:
 // could potentially cause segmentation fault.
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
-	RocksDBErrorListener() {};
+	RocksDBErrorListener() {}
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
 		if (!bg_error)
 			return;
@@ -693,7 +695,7 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 		}
 	}
 	checkpoint->setFormat(DataMoveRocksCF);
-	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
+	checkpoint->setSerializedCheckpoint(ObjectWriter::toValue(rocksCF, IncludeVersion()));
 }
 
 const rocksdb::Slice toSlice(StringRef s) {
@@ -3151,7 +3153,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			    startTime(timer_monotonic()),
 			    sample((deterministicRandom()->random01() < SERVER_KNOBS->SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
 			               ? true
-			               : false) {};
+			               : false) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 
@@ -3804,12 +3806,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
-		// ShardedRocks with checkpoint is known to be non-deterministic
-		// so setting noUnseed=true. See https://github.com/apple/foundationdb/pull/11841
-		// for more context.
-		if (g_network->isSimulated() && !noUnseed) {
-			noUnseed = true;
-		}
 		auto a = new Writer::CheckpointAction(&shardManager, request);
 
 		auto res = a->reply.getFuture();
@@ -4852,6 +4848,41 @@ TEST_CASE("perf/ShardedRocksDB/ConcurrentReadWrite") {
 	ASSERT(!directoryExists(rocksDBTestDir));
 	return Void();
 }
+
+// The "noSim/determinism/checkpoint_metadata/*" unit tests below
+// ensure that as a client, if you set serialized checkpoint to X,
+// you always get back X.
+void checkpointMetadataSerdeTest(const std::string& testString) {
+	Standalone<StringRef> serialized = StringRef(testString);
+	CheckpointMetaData metadata;
+	metadata.setSerializedCheckpoint(serialized);
+	Standalone<StringRef> deserialized = metadata.getSerializedCheckpoint();
+	TraceEvent("CheckpointSerde").detail("SerializedString", serialized).detail("DeserializedString", deserialized);
+	ASSERT(serialized == deserialized);
+}
+
+TEST_CASE("noSim/determinism/checkpoint_metadata/serde1") {
+	checkpointMetadataSerdeTest("some_rocksdb_checkpoint_metadata_123");
+	return Void();
+}
+
+TEST_CASE("noSim/determinism/checkpoint_metadata/serde2") {
+	checkpointMetadataSerdeTest("");
+	return Void();
+}
+
+TEST_CASE("noSim/determinism/checkpoint_metadata/serde3") {
+	checkpointMetadataSerdeTest(
+	    "some_rocksdb_checkpoint_metadata_123some_rocksdb_checkpoint_metadata_123some_rocksdb_checkpoint_"
+	    "metadata_123some_rocksdb_checkpoint_metadata_123some_rocksdb_checkpoint_metadata_123");
+	return Void();
+}
+
+TEST_CASE("noSim/determinism/checkpoint_metadata/serde4") {
+	checkpointMetadataSerdeTest("some_\nrocksdb_checkpoint_\nmetadata_123\0");
+	return Void();
+}
+
 } // namespace
 
 #endif // WITH_ROCKSDB
