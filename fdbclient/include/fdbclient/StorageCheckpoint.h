@@ -162,6 +162,7 @@ struct DataMoveMetaData {
 		Running = 2, // System keyspace has been modified, data move in action.
 		Completing = 3, // Data transfer has finished, finalizing system keyspace.
 		Deleting = 4, // Data move is cancelled.
+		Completed = 5, // Data move is finished, metadata pending deletion.
 	};
 
 	constexpr static FileIdentifier file_identifier = 13804362;

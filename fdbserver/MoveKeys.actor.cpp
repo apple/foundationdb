@@ -2386,7 +2386,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							dataMove.bulkLoadTaskState = newBulkLoadTaskState;
 						}
 						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
-						tr.clear(dataMoveKeyFor(dataMoveId));
+						// tr.clear(dataMoveKeyFor(dataMoveId));
+						dataMove.phase = DataMoveMetaData::Completed;
+						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
 						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", relocationIntervalId)
 						    .detail("DataMove", dataMove.toString());
 					} else if (!bulkLoadTaskState.present()) {

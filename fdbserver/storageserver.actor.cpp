@@ -475,23 +475,24 @@ class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
 public:
 	// A shard has 4 mutual exclusive states: adding, moveInShard, readWrite and notAssigned.
 	std::unique_ptr<AddingShard> adding;
-	struct StorageServer* readWrite;
+	struct StorageServer* readWrite = nullptr;
 	std::shared_ptr<MoveInShard> moveInShard; // The shard is being moved in via physical-shard-move.
 	KeyRange keys;
-	uint64_t changeCounter;
-	uint64_t shardId;
-	uint64_t desiredShardId;
+	uint64_t changeCounter = 0UL;
+	uint64_t shardId = 0UL;
+	uint64_t desiredShardId = 0UL;
 	UID dataMoveId;
 	std::string teamId = "";
-	Version version;
+	Version version = 0;
 
 	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys); }
 	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, data); }
 	static ShardInfo* newAdding(StorageServer* data,
 	                            KeyRange keys,
 	                            DataMovementReason reason,
-	                            const SSBulkLoadMetadata& ssBulkLoadMetadata) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, reason, ssBulkLoadMetadata, ""));
+	                            const SSBulkLoadMetadata& ssBulkLoadMetadata,
+	                            std::string teamId) {
+		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, reason, ssBulkLoadMetadata, teamId));
 	}
 	static ShardInfo* addingSplitLeft(KeyRange keys, AddingShard* oldShard) {
 		auto shardInfo = new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys));
@@ -514,7 +515,7 @@ public:
 
 	StorageServerShard toStorageServerShard() const {
 		StorageServerShard::ShardState st = StorageServerShard::NotAssigned;
-		Optional<UID> moveInShardId;
+		UID moveInShardId = anonymousShardId;
 		if (this->isReadable()) {
 			st = StorageServerShard::ReadWrite;
 		} else if (!this->assigned()) {
@@ -539,12 +540,23 @@ public:
 				moveInShardId = this->moveInShard->id();
 			}
 		}
-		auto ssShard =
-		    StorageServerShard(this->keys, this->version, this->shardId, this->desiredShardId, st, moveInShardId);
-		ssShard.teamId = teamId;
-		ASSERT(!ssShard.teamId.empty());
-		ASSERT(ssShard.id != 0UL);
-		ASSERT(ssShard.desiredId != 0UL);
+
+		StorageServerShard ssShard;
+		if (moveInShardId != anonymousShardId) {
+			ssShard =
+			    StorageServerShard(this->keys, this->version, this->shardId, this->desiredShardId, st, moveInShardId);
+			ssShard.teamId = teamId;
+		} else {
+			ssShard = StorageServerShard(this->keys, this->version, this->shardId, this->desiredShardId, st, teamId);
+		}
+		if (isReadable()) {
+			ASSERT(!ssShard.teamId.empty());
+		}
+
+		if (st != StorageServerShard::NotAssigned) {
+			ASSERT(ssShard.id != 0UL);
+			ASSERT(ssShard.desiredId != 0UL);
+		}
 		return ssShard;
 	}
 
@@ -1781,7 +1793,13 @@ public:
 		if (shardAware && newShard->assigned()) {
 			ASSERT_ABORT(newShard->shardId != 0LL);
 			ASSERT(newShard->desiredShardId != 0LL);
-			if (newShard->isReadable()) {
+			if (newShard->isReadable() && newShard->version != initialClusterVersion - 1) {
+				if (newShard->teamId.empty()) {
+					TraceEvent("TeamIdMissing")
+					    .detail("ShardId", format("%016llx", newShard->shardId))
+					    .detail("TeamId", newShard->teamId)
+					    .detail("Version", newShard->version);
+				}
 				ASSERT_ABORT(!newShard->teamId.empty());
 			}
 		}
@@ -9011,7 +9029,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("DurableVersion", data->durableVersion.get())
 				    .detail("Version", data->version.get())
 				    .detail("DataMoveId", dataMoveId);
-				wait(Never());
+				loop {
+					wait(delay(30));
+					TraceEvent(SevWarnAlways, "FKPendingCancellation").detail("FKID", fetchKeysID);
+				}
 			}
 		}
 		TraceEvent(SevDebug, "BeforeFKLock").detail("FKID", fetchKeysID);
@@ -9355,8 +9376,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						shard->server->addShard(ShardInfo::newShard(data, rightShard));
 					} else {
 						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard));
-						shard->server->addShard(ShardInfo::newAdding(
-						    data, KeyRangeRef(blockBegin, keys.end), shard->reason, shard->getSSBulkLoadMetadata()));
+						shard->server->addShard(ShardInfo::newAdding(data,
+						                                             KeyRangeRef(blockBegin, keys.end),
+						                                             shard->reason,
+						                                             shard->getSSBulkLoadMetadata(),
+						                                             ""));
 						if (conductBulkLoad) {
 							TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 							    .detail("FKID", fetchKeysID)
@@ -9369,7 +9393,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
 					AddingShard* otherShard = data->shards.rangeContaining(blockBegin).value()->adding.get();
-					ASSERT(!otherShard->teamId.empty());
+					ASSERT(!data->shardAware || !otherShard->teamId.empty());
 					keys = shard->keys;
 
 					// Split our prior updates.  The ones that apply to our new, restricted key range will go back
@@ -10560,13 +10584,13 @@ ShardInfo* ShardInfo::newShard(StorageServer* data, const StorageServerShard& sh
 		// moves. For case 1, the bulkload is available only if the encode_shard_location_metadata is on. Therefore, the
 		// old data moves is never for bulkload. For case 2, fallback happens only if fetchCheckpoint fails which is not
 		// a case for bulkload which does not do fetchCheckpoint.
-		res = newAdding(data, shard.range, DataMovementReason::INVALID, SSBulkLoadMetadata());
+		res = newAdding(data, shard.range, DataMovementReason::INVALID, SSBulkLoadMetadata(), shard.teamId);
 		break;
 	case StorageServerShard::ReadWritePending:
 		TraceEvent(SevWarnAlways, "CancellingAlmostReadyMoveInShard").detail("StorageServerShard", shard.toString());
 		ASSERT(!shard.moveInShardId.present());
 		// TODO(BulkLoad): current bulkload with ShardedRocksDB and PhysicalSharMove cannot handle this fallback case.
-		res = newAdding(data, shard.range, DataMovementReason::INVALID, SSBulkLoadMetadata());
+		res = newAdding(data, shard.range, DataMovementReason::INVALID, SSBulkLoadMetadata(), shard.teamId);
 		break;
 	case StorageServerShard::MovingIn: {
 		ASSERT(shard.moveInShardId.present());
@@ -10872,8 +10896,11 @@ void changeServerKeys(StorageServer* data,
 			data->addShard(ShardInfo::newReadWrite(ranges[i], data));
 		else {
 			ASSERT(ranges[i].value->adding);
-			data->addShard(ShardInfo::newAdding(
-			    data, ranges[i], ranges[i].value->adding->reason, ranges[i].value->adding->getSSBulkLoadMetadata()));
+			data->addShard(ShardInfo::newAdding(data,
+			                                    ranges[i],
+			                                    ranges[i].value->adding->reason,
+			                                    ranges[i].value->adding->getSSBulkLoadMetadata(),
+			                                    ""));
 			CODE_PROBE(true, "ChangeServerKeys reFetchKeys");
 		}
 	}
@@ -10928,7 +10955,7 @@ void changeServerKeys(StorageServer* data,
 			} else {
 				auto& shard = data->shards[range.begin];
 				if (!shard->assigned() || shard->keys != range)
-					data->addShard(ShardInfo::newAdding(data, range, dataMoveReason, bulkLoadInfoForAddingShard));
+					data->addShard(ShardInfo::newAdding(data, range, dataMoveReason, bulkLoadInfoForAddingShard, ""));
 			}
 		} else {
 			changeNewestAvailable.emplace_back(range, latestVersion);
@@ -11181,7 +11208,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("DataMoveId", dataMoveId);
 			newEmptyRanges.push_back(range);
 			// auto shardInfo = ShardInfo(range, cVer, desiredId, desiredId, StorageServerShard::ReadWrite);
-			updatedShards.emplace_back(range, cVer, desiredId, desiredId, StorageServerShard::ReadWrite);
+			updatedShards.emplace_back(
+			    range, cVer, desiredId, desiredId, StorageServerShard::ReadWrite, (std::string) "EmptyRange");
 			data->pendingAddRanges[cVer].emplace_back(desiredId, dataMoveId, range, Reference<ShardInfo>());
 			continue;
 		}
@@ -11214,14 +11242,21 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 
 		// Shard already available in SS. Update desired shard id.
 		if (dataAvailable) {
-			updatedShards.push_back(StorageServerShard(
-			    range, cVer, data->shards[range.begin]->shardId, desiredId, StorageServerShard::ReadWrite));
-			changeNewestAvailable.emplace_back(range, latestVersion);
+			auto& shard = data->shards[range.begin];
 			TraceEvent(sevDm, "SSAssignShardAlreadyAvailable", data->thisServerID)
 			    .detail("Range", range)
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
-			    .detail("NewShard", updatedShards.back().toString());
+			    .detail("ExistingShardId", shard->shardId)
+			    .detail("ExistingDesiredShardId", shard->desiredShardId)
+			    .detail("DataMoveId", dataMoveId);
+			updatedShards.push_back(StorageServerShard(range,
+			                                           cVer,
+			                                           data->shards[range.begin]->shardId,
+			                                           desiredId,
+			                                           StorageServerShard::ReadWrite,
+			                                           shard->teamId));
+			changeNewestAvailable.emplace_back(range, latestVersion);
 			continue;
 		}
 
@@ -11233,8 +11268,12 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("ShardID", desiredId)
 			    .detail("Range", range);
 			changeNewestAvailable.emplace_back(range, latestVersion);
-			updatedShards.push_back(
-			    StorageServerShard(range, version, desiredId, desiredId, StorageServerShard::ReadWrite));
+			updatedShards.push_back(StorageServerShard(range,
+			                                           version,
+			                                           desiredId,
+			                                           desiredId,
+			                                           StorageServerShard::ReadWrite,
+			                                           /*teamId=*/(std::string) "SeedRange"));
 			setAvailableStatus(data, range, true);
 			// Note: The initial range is available, however, the shard won't be created in the storage engine
 			// until version is committed.
@@ -11257,8 +11296,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				updatedShards.push_back(StorageServerShard(
 				    range, cVer, desiredId, desiredId, StorageServerShard::MovingIn, moveInShard->id()));
 			} else {
-				updatedShards.push_back(
-				    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::Adding));
+				updatedShards.push_back(StorageServerShard(
+				    range, cVer, desiredId, desiredId, StorageServerShard::Adding, (std::string) ""));
 				data->pendingAddRanges[cVer].emplace_back(desiredId, dataMoveId, range, Reference<ShardInfo>());
 			}
 			data->newestDirtyVersion.insert(range, cVer);
@@ -11291,8 +11330,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("ShardDebugString", shard->debugDescribeState())
 			    .detail("Version", cVer);
 			if (context == CSK_FALL_BACK) {
-				updatedShards.push_back(
-				    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::Adding));
+				updatedShards.push_back(StorageServerShard(
+				    range, cVer, desiredId, desiredId, StorageServerShard::Adding, (std::string) ""));
 				// Physical shard move fall back happens if and only if the data move is failed to get the
 				// checkpoint. However, this case never happens the bulkload. So, the bulkload does not
 				// support fall back.

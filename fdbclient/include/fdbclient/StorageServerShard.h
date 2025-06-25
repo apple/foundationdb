@@ -44,23 +44,27 @@ struct StorageServerShard {
 	                   const uint64_t id,
 	                   const uint64_t desiredId,
 	                   ShardState shardState,
-	                   Optional<UID> moveInShardId)
+	                   UID moveInShardId)
 	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState),
 	    moveInShardId(moveInShardId) {}
 	StorageServerShard(KeyRange range,
 	                   Version version,
 	                   const uint64_t id,
 	                   const uint64_t desiredId,
-	                   ShardState shardState)
-	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState) {
+	                   ShardState shardState,
+	                   std::string teamId)
+	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState), teamId(teamId) {
 		if (shardState != NotAssigned) {
 			ASSERT_ABORT(id != 0UL);
 			ASSERT_ABORT(desiredId != 0UL);
 		}
+		if (shardState == ReadWrite && version != 0) {
+			ASSERT_ABORT(!teamId.empty());
+		}
 	}
 
 	static StorageServerShard notAssigned(KeyRange range, Version version = 0) {
-		return StorageServerShard(range, version, 0, 0, NotAssigned);
+		return StorageServerShard(range, version, 0, 0, NotAssigned, (std::string) "");
 	}
 
 	ShardState getShardState() const { return static_cast<ShardState>(this->shardState); };
