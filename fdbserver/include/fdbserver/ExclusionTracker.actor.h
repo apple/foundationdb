@@ -147,10 +147,10 @@ struct ExclusionTracker {
 						}
 
 						auto addresses = decodedServer.getKeyValues.getEndpoint().addresses;
-						newExcluded.insert(AddressExclusion(addresses.address.ip, addresses.address.port));
+						newFailed.insert(AddressExclusion(addresses.address.ip, addresses.address.port));
 						if (addresses.secondaryAddress.present()) {
 							auto secondaryAddress = addresses.secondaryAddress.get();
-							newExcluded.insert(AddressExclusion(secondaryAddress.ip, secondaryAddress.port));
+							newFailed.insert(AddressExclusion(secondaryAddress.ip, secondaryAddress.port));
 						}
 					}
 				}
