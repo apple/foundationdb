@@ -61,6 +61,19 @@ var _ = Describe("Testing FDB Pod client", func() {
 
 		internalCache = &informertest.FakeInformers{}
 		internalCache.Scheme = fakeClient.Scheme()
+
+		Expect(fakeClient.Create(context.Background(), &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: namespace,
+			},
+		})).To(Succeed())
+
+		Expect(fakeClient.Create(context.Background(), &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+		})).To(Succeed())
 	})
 
 	When("the kubernetesClient was started", func() {
@@ -131,7 +144,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 					},
 				}
 				var err error
-				fakeInformer, err = internalCache.FakeInformerFor(pod)
+				fakeInformer, err = internalCache.FakeInformerFor(context.Background(), pod)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -236,7 +249,7 @@ var _ = Describe("Testing FDB Pod client", func() {
 					},
 				}
 				var err error
-				fakeInformer, err = internalCache.FakeInformerFor(node)
+				fakeInformer, err = internalCache.FakeInformerFor(context.Background(), node)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -295,24 +308,11 @@ var _ = Describe("Testing FDB Pod client", func() {
 				return fakeClient, internalCache, nil
 			})
 
+			// Currently the patch type is not supported in the fake client:
+			// https://github.com/kubernetes/kubernetes/issues/115598
+			podClient.patchType = client.Merge
+
 			Expect(err).NotTo(HaveOccurred())
-			// We have to set this value here as we haven't received any update yet and the fake implementation is not
-			// passing through the fake client.
-			podClient.podMetadata = &metav1.PartialObjectMetadata{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      podName,
-					Namespace: namespace,
-				},
-			}
-
-			// Make sure to create the Pod in the fake client otherwise it cannot be patched.
-			Expect(fakeClient.Create(context.Background(), &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      podName,
-					Namespace: namespace,
-				},
-			})).NotTo(HaveOccurred())
-
 			// Execute the update annotations.
 			Expect(podClient.updateAnnotations(mon)).NotTo(HaveOccurred())
 		})

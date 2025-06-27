@@ -39,9 +39,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	toolscache "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+var _ toolscache.ResourceEventHandler = (*kubernetesClient)(nil)
 
 // kubernetesClient is a wrapper around the Kubernetes API.
 type kubernetesClient struct {
@@ -61,6 +64,9 @@ type kubernetesClient struct {
 
 	// Adds the controller runtime client to the kubernetesClient.
 	client.Client
+
+	// patchType defines the patch type that should be used for patching the pod metadata.
+	patchType client.Patch
 }
 
 func setupCache(namespace string, podName string, nodeName string) (client.WithWatch, cache.Cache, error) {
@@ -75,25 +81,31 @@ func setupCache(namespace string, podName string, nodeName string) (client.WithW
 		return nil, nil, err
 	}
 
-	// Create the new client for writes. This client will also be used to setup the cache.
-	internalClient, err := client.NewWithWatch(config, client.Options{
-		Scheme: scheme,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-
 	internalCache, err := cache.New(config, cache.Options{
-		Scheme:    scheme,
-		Mapper:    internalClient.RESTMapper(),
-		Namespace: namespace,
-		SelectorsByObject: map[client.Object]cache.ObjectSelector{
+		Scheme: scheme,
+		DefaultNamespaces: map[string]cache.Config{
+			namespace: {},
+		},
+		ByObject: map[client.Object]cache.ByObject{
 			&corev1.Pod{}: {
 				Field: fields.OneTermEqualSelector(metav1.ObjectNameField, podName),
 			},
 			&corev1.Node{}: {
 				Field: fields.OneTermEqualSelector(metav1.ObjectNameField, nodeName),
 			},
+		},
+	})
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Create the new client for writes. This client will also be used to setup the cache.
+	internalClient, err := client.NewWithWatch(config, client.Options{
+		Scheme: scheme,
+		Cache: &client.CacheOptions{
+			Reader:       internalCache,
+			Unstructured: false,
 		},
 	})
 	if err != nil {
@@ -119,6 +131,8 @@ func createPodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 		nodeMetadata:  nil,
 		TimestampFeed: make(chan int64, 10),
 		Logger:        logger,
+		patchType:     client.Apply,
+		Client:        internalClient,
 	}
 
 	// Fetch the informer for the Pod resource.
@@ -127,7 +141,7 @@ func createPodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 		return nil, err
 	}
 
-	// Setup an event handler to make sure we get events for the Pod and directly reload the information.
+	// Set up an event handler to make sure we get events for the Pod and directly reload the information.
 	_, err = podInformer.AddEventHandler(podClient)
 	if err != nil {
 		return nil, err
@@ -141,7 +155,7 @@ func createPodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 			return nil, err
 		}
 
-		// Setup an event handler to make sure we get events for the node and directly reload the information.
+		// Set up an event handler to make sure we get events for the node and directly reload the information.
 		_, err = nodeInformer.AddEventHandler(podClient)
 		if err != nil {
 			return nil, err
@@ -154,19 +168,7 @@ func createPodClient(ctx context.Context, logger logr.Logger, enableNodeWatcher 
 	}()
 
 	// This should be fairly quick as no informers are provided by default.
-	internalCache.WaitForCacheSync(ctx)
-	controllerClient, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
-		CacheReader:       internalCache,
-		Client:            internalClient,
-		UncachedObjects:   nil,
-		CacheUnstructured: false,
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	podClient.Client = controllerClient
+	_ = internalCache.WaitForCacheSync(ctx)
 
 	// Fetch the current metadata before returning the kubernetesClient
 	currentPodMetadata := &metav1.PartialObjectMetadata{}
@@ -293,12 +295,12 @@ func (podClient *kubernetesClient) updateAnnotationsOnPod(annotationChanges map[
 				Name:        podClient.podMetadata.Name,
 				Annotations: currentAnnotations,
 			},
-		}, client.Apply, client.FieldOwner("fdb-kubernetes-monitor"), client.ForceOwnership)
+		}, podClient.patchType, client.FieldOwner("fdb-kubernetes-monitor"), client.ForceOwnership)
 	})
 }
 
 // OnAdd is called when an object is added.
-func (podClient *kubernetesClient) OnAdd(obj interface{}) {
+func (podClient *kubernetesClient) OnAdd(obj interface{}, isInInitialList bool) {
 	switch castedObj := obj.(type) {
 	case *corev1.Pod:
 		podClient.Logger.Info("Got event for OnAdd for Pod resource", "name", castedObj.Name, "namespace", castedObj.Namespace)
