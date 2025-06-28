@@ -333,7 +333,7 @@ Reference<ILogSystem> TagPartitionedLogSystem::fromOldLogSystemConfig(UID const&
 	return logSystem;
 }
 
-void TagPartitionedLogSystem::purgeOldRecoveredGenerations(DBCoreState& newState) {
+void TagPartitionedLogSystem::purgeOldRecoveredGenerationsCoreState(DBCoreState& newState) {
 	Version oldestGenerationRecoverAtVersion = std::min(recoveredVersion->get(), remoteRecoveredVersion->get());
 	TraceEvent("ToCoreStateOldestGenerationRecoverAtVersion")
 	    .detail("RecoveredVersion", recoveredVersion->get())
@@ -361,7 +361,7 @@ void TagPartitionedLogSystem::purgeOldRecoveredGenerations(DBCoreState& newState
 				}
 			}
 			for (int j = i; j < newState.oldTLogData.size(); ++j) {
-				TraceEvent("PurgeOldTLogGeneration")
+				TraceEvent("PurgeOldTLogGenerationCoreState", dbgid)
 				    .detail("Begin", newState.oldTLogData[j].epochBegin)
 				    .detail("End", newState.oldTLogData[j].epochEnd)
 				    .detail("Epoch", newState.oldTLogData[j].epoch)
@@ -371,6 +371,16 @@ void TagPartitionedLogSystem::purgeOldRecoveredGenerations(DBCoreState& newState
 			newState.oldTLogData.resize(i);
 			break;
 		}
+	}
+}
+
+void TagPartitionedLogSystem::purgeOldRecoveredGenerationsInMemory(const DBCoreState& newState) {
+	auto generations = newState.oldTLogData.size();
+	if (generations < oldLogData.size()) {
+		TraceEvent("PurgeOldTLogGenerationsInMemory", dbgid)
+		    .detail("OldGenerations", oldLogData.size())
+		    .detail("NewGenerations", generations);
+		oldLogData.resize(generations);
 	}
 }
 
