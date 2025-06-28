@@ -463,7 +463,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		// We can't purge old generations until we have the new state durable on coordinators,
 		// otherwise old tlogs can be removed before the new state is written,
 		// which may cause immediate recovery to stuck in locking old tlogs.
-		self->logSystem->purgeOldRecoveredGenerations(newState);
+		self->logSystem->purgeOldRecoveredGenerationsCoreState(newState);
 		newState.recoveryCount = recoverCount;
 
 		// Update Coordinators EncryptionAtRest status during the very first recovery of the cluster (empty database)
@@ -487,6 +487,8 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()))
 		    .detail("RecoveryCount", newState.recoveryCount);
 		wait(self->cstate.write(newState, finalUpdate));
+		// Purge in memory state after durability to avoid race conditions.
+		self->logSystem->purgeOldRecoveredGenerationsInMemory(newState);
 		if (self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
 		}

@@ -186,7 +186,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	bool remoteStorageRecovered() const final;
 
 	// Checks older TLog generations and remove no longer needed generations from the log system.
-	void purgeOldRecoveredGenerations(DBCoreState& newState) final;
+	void purgeOldRecoveredGenerationsCoreState(DBCoreState&) final;
+	void purgeOldRecoveredGenerationsInMemory(const DBCoreState&) final;
 
 	Future<Void> onCoreStateChanged() const final;
 
