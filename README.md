@@ -78,6 +78,15 @@ source /opt/rh/gcc-toolset-13/enable
 
 before executing CMake and ninja.
 
+To build FoundationDB with the clang toolchain,
+
+``` bash
+CC=clang CXX=clang++ LD=lld cmake -D USE_LD=LLD -D USE_LIBCXX=1 -G Ninja
+ninja
+```
+
+should be used instead.
+
 #### FreeBSD
 
 1. Check out this repo on your server.
