@@ -2,6 +2,15 @@
 Release Notes
 #############
 
+7.3.69
+======
+* Same as 7.3.68 release with AVX enabled.
+
+7.3.68
+======
+* Fixed a rare race that can cause recovery to be stuck. `(PR #12213) <https://github.com/apple/foundationdb/pull/12213>`_
+* Backported various go binding and documentation changes. `(PR #12146) <https://github.com/apple/foundationdb/pull/12146>`_
+
 7.3.67
 ======
 * Same as 7.3.66 release with AVX enabled.
@@ -10,6 +19,7 @@ Release Notes
 ======
 * Fixed a restore speed regression. `(PR #12088) <https://github.com/apple/foundationdb/pull/12088>`_
 * Added per DC check for fdbcli's checkall command. `(PR #12089) <https://github.com/apple/foundationdb/pull/12089>`_
+* Added periodical flushes of old column families for Sharded RocksDB engine. `(PR #12123) <https://github.com/apple/foundationdb/pull/12123>`_
 
 7.3.65
 ======
