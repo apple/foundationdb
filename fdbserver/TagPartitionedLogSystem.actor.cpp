@@ -308,19 +308,20 @@ Reference<ILogSystem> TagPartitionedLogSystem::fromOldLogSystemConfig(UID const&
 	return logSystem;
 }
 
-void TagPartitionedLogSystem::purgeOldRecoveredGenerations() {
+void TagPartitionedLogSystem::purgeOldRecoveredGenerationsCoreState(DBCoreState& newState) {
 	Version oldestGenerationRecoverAtVersion = std::min(recoveredVersion->get(), remoteRecoveredVersion->get());
 	TraceEvent("ToCoreStateOldestGenerationRecoverAtVersion")
 	    .detail("RecoveredVersion", recoveredVersion->get())
 	    .detail("RemoteRecoveredVersion", remoteRecoveredVersion->get())
 	    .detail("OldestBackupEpoch", oldestBackupEpoch);
-	for (int i = 0; i < oldLogData.size(); ++i) {
-		const auto& oldData = oldLogData[i];
+	for (int i = 0; i < newState.oldTLogData.size(); ++i) {
+		const auto& oldData = newState.oldTLogData[i];
 		// Remove earlier generation that TLog data are
 		//  - consumed by all storage servers
 		//  - no longer used by backup workers
 		if (oldData.recoverAt < oldestGenerationRecoverAtVersion && oldData.epoch < oldestBackupEpoch) {
 			if (g_network->isSimulated()) {
+				ASSERT(oldLogData.size() == newState.oldTLogData.size());
 				for (int j = 0; j < oldLogData.size(); ++j) {
 					TraceEvent("AllOldGenerations")
 					    .detail("Index", j)
@@ -328,22 +329,33 @@ void TagPartitionedLogSystem::purgeOldRecoveredGenerations() {
 					    .detail("Begin", oldLogData[j].epochBegin)
 					    .detail("RecoverAt", oldLogData[j].recoverAt);
 				}
-				for (int j = i + 1; j < oldLogData.size(); ++j) {
-					ASSERT(oldLogData[j].recoverAt < oldestGenerationRecoverAtVersion);
-					ASSERT(oldData.tLogs[0]->backupWorkers.size() == 0 || oldLogData[j].epoch < oldestBackupEpoch);
+				for (int j = i + 1; j < newState.oldTLogData.size(); ++j) {
+					ASSERT(newState.oldTLogData[j].recoverAt < oldestGenerationRecoverAtVersion);
+					ASSERT(oldLogData[i].tLogs[0]->backupWorkers.size() == 0 ||
+					       newState.oldTLogData[j].epoch < oldestBackupEpoch);
 				}
 			}
-			for (int j = i; j < oldLogData.size(); ++j) {
-				TraceEvent("PurgeOldTLogGeneration")
-				    .detail("Begin", oldLogData[j].epochBegin)
-				    .detail("End", oldLogData[j].epochEnd)
-				    .detail("Epoch", oldLogData[j].epoch)
-				    .detail("RecoverAt", oldLogData[j].recoverAt)
+			for (int j = i; j < newState.oldTLogData.size(); ++j) {
+				TraceEvent("PurgeOldTLogGenerationCoreState", dbgid)
+				    .detail("Begin", newState.oldTLogData[j].epochBegin)
+				    .detail("End", newState.oldTLogData[j].epochEnd)
+				    .detail("Epoch", newState.oldTLogData[j].epoch)
+				    .detail("RecoverAt", newState.oldTLogData[j].recoverAt)
 				    .detail("Index", j);
 			}
-			oldLogData.resize(i);
+			newState.oldTLogData.resize(i);
 			break;
 		}
+	}
+}
+
+void TagPartitionedLogSystem::purgeOldRecoveredGenerationsInMemory(const DBCoreState& newState) {
+	auto generations = newState.oldTLogData.size();
+	if (generations < oldLogData.size()) {
+		TraceEvent("PurgeOldTLogGenerationsInMemory", dbgid)
+		    .detail("OldGenerations", oldLogData.size())
+		    .detail("NewGenerations", generations);
+		oldLogData.resize(generations);
 	}
 }
 
@@ -2294,6 +2306,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		    .detail("PrimaryLocality", primaryLocality)
 		    .detail("RemoteLocality", remoteLocality)
 		    .detail("FoundRemote", foundRemote)
+		    .detail("ForceRecovery", *forceRecovery)
 		    .detail("Modified", modifiedLogSets)
 		    .detail("Removed", removedLogSets);
 		for (int i = 0; i < prevState.tLogs.size(); i++) {
