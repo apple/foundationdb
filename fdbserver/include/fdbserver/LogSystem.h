@@ -504,7 +504,8 @@ struct ILogSystem {
 
 	virtual bool remoteStorageRecovered() const = 0;
 
-	virtual void purgeOldRecoveredGenerations() = 0;
+	virtual void purgeOldRecoveredGenerationsCoreState(DBCoreState&) = 0;
+	virtual void purgeOldRecoveredGenerationsInMemory(const DBCoreState&) = 0;
 
 	virtual Future<Void> onCoreStateChanged() const = 0;
 	// Returns if and when the output of toCoreState() would change (for example, when older logs can be discarded from
