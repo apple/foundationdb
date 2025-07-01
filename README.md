@@ -58,7 +58,7 @@ To build outside of the official Docker image, you'll need at least these depend
 
 If compiling for local development, please set `-DUSE_WERROR=ON` in CMake. Our CI compiles with `-Werror` on, so this way you'll find out about compiler warnings that break the build earlier.
 
-Once you have your dependencies, you can run CMake and then build:
+Once you have your dependencies, you can run `cmake` and then build:
 
 1. Check out this repository.
 1. Create a build directory (you can place it anywhere you like).
