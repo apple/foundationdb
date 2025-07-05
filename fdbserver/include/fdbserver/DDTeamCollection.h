@@ -202,6 +202,32 @@ struct DDTeamCollectionInitParams {
 	PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 };
 
+struct TCStorageServerMachineMapCounting {
+	size_t minServerCountPerMachine = 0;
+	size_t maxServerCountPerMachine = 0;
+	size_t machineCount = 0;
+	size_t totalHealthyServerCount = 0;
+	TCStorageServerMachineMapCounting(size_t minServerCountPerMachine,
+	                                  size_t maxServerCountPerMachine,
+	                                  size_t machineCount,
+	                                  size_t totalHealthyServerCount)
+	  : minServerCountPerMachine(minServerCountPerMachine), maxServerCountPerMachine(maxServerCountPerMachine),
+	    machineCount(machineCount), totalHealthyServerCount(totalHealthyServerCount) {}
+};
+
+struct TCMachineZoneMapCounting {
+	size_t minMachineCountPerZone = 0;
+	size_t maxMachineCountPerZone = 0;
+	size_t zoneCount = 0;
+	size_t totalHealthyMachineCount = 0;
+	TCMachineZoneMapCounting(size_t minMachineCountPerZone,
+	                         size_t maxMachineCountPerZone,
+	                         size_t zoneCount,
+	                         size_t totalHealthyMachineCount)
+	  : minMachineCountPerZone(minMachineCountPerZone), maxMachineCountPerZone(maxMachineCountPerZone),
+	    zoneCount(zoneCount), totalHealthyMachineCount(totalHealthyMachineCount) {}
+};
+
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 	friend class DDTeamCollectionUnitTest;
@@ -215,6 +241,7 @@ protected:
 
 	bool doBuildTeams;
 	bool lastBuildTeamsFailed;
+	Optional<double> buildTeamsFailedStartTime;
 	Future<Void> teamBuilder;
 	AsyncTrigger restartTeamBuilder;
 	AsyncVar<bool> waitUntilRecruited; // make teambuilder wait until one new SS is recruited
@@ -348,6 +375,10 @@ protected:
 
 	void evaluateTeamQuality() const;
 
+	void traceBuildTeamFailedForLongTime();
+
+	bool isServerMachineLayoutGood() const;
+
 	int overlappingMembers(const std::vector<UID>& team) const;
 
 	int overlappingMachineMembers(std::vector<Standalone<StringRef>> const& team) const;
@@ -422,6 +453,17 @@ protected:
 	// Each server is expected to have targetTeamNumPerServer teams.
 	// Return true if there exists a server that does not have enough teams.
 	bool notEnoughTeamsForAServer() const;
+
+	std::vector<std::string> getServersOnMachineTeamDescription(
+	    const std::vector<Reference<TCMachineInfo>>& machines) const;
+
+	TCStorageServerMachineMapCounting getStorageServerMachineMapCounting() const;
+
+	TCMachineZoneMapCounting getMachineZoneMapCounting() const;
+
+	bool isMachineLayoutGood(uint64_t& maxMachineTeamCountGivenAMachine, uint64_t& maxMachineTeamCount) const;
+
+	bool isServerLayoutGood(const uint64_t maxMachineTeamCountGivenAMachine, const uint64_t maxMachineTeamCount) const;
 
 	// Use the current set of known processes (from server_info) to compute an optimized set of storage server teams.
 	// The following are guarantees of the process:
