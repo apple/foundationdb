@@ -22,6 +22,7 @@
 #define FLOW_FASTALLOC_H
 #pragma once
 
+#include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/config.h"
 
@@ -234,7 +235,7 @@ force_inline void freeOrMaybeKeepalive(void* ptr) {
 }
 
 inline constexpr int nextFastAllocatedSize(int x) {
-	assert(x > 0 && x <= 16384);
+	ASSERT(x > 0 && x <= 16384);
 	if (x <= 16)
 		return 16;
 	else if (x <= 32)
