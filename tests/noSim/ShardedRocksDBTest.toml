@@ -2,6 +2,8 @@
 rocksdb_disable_auto_compactions = true
 rocksdb_suggest_compact_clear_range = false
 rocksdb_empty_range_check = false
+sharded_rocksdb_validate_mapping_ratio=1.0
+sharded_rocksdb_allow_multiple_ranges=true
 
 [[test]]
  testTitle = 'UnitTests'
