@@ -38,7 +38,7 @@ struct MemoryLifetime : KVWorkload {
 		valueString = std::string(maxValueBytes, '.');
 	}
 
-	Value randomValue() override {
+	Value randomValue() const override {
 		return StringRef((uint8_t*)valueString.c_str(),
 		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
 	}

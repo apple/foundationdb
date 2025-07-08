@@ -33,8 +33,6 @@ struct WriteBandwidthWorkload : KVWorkload {
 
 	int keysPerTransaction;
 	double testDuration, warmingDelay, loadTime, maxInsertRate;
-	std::string valueString;
-
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
 	DDSketch<double> commitLatencies, GRVLatencies;

@@ -80,7 +80,6 @@ ACTOR Future<Void> convertStream(PromiseStream<RangeResult> input, PromiseStream
 struct StreamingRangeReadWorkload : KVWorkload {
 	static constexpr auto NAME = "StreamingRangeRead";
 	double testDuration;
-	std::string valueString;
 	Future<Void> client;
 
 	StreamingRangeReadWorkload(WorkloadContext const& wcx) : KVWorkload(wcx) {

@@ -219,7 +219,7 @@ struct KVWorkload : TestWorkload {
 	// the reverse process of keyForIndex() without division. Set absent=true to ignore the last byte in Key
 	int64_t indexForKey(const KeyRef& key, bool absent = false) const;
 
-	virtual Value randomValue() {
+	virtual Value randomValue() const {
 		int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
 		int zeroPadding = static_cast<int>(zeroPaddingRatio * length);
 		if (zeroPadding > length) {
