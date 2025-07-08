@@ -159,6 +159,7 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
 			if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/') {
 				TraceEvent(SevError, "S3ClientGetEndpointIllegalCharacter")
 				    .detail("URL", StringRef(s3url))
+				    .detail("Character", std::string(1, c))
 				    .detail("Error", error);
 				throw backup_invalid_url();
 			}
@@ -172,7 +173,7 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
 		return endpoint;
 
 	} catch (Error& e) {
-		TraceEvent(SevError, "S3ClientGetEndpointFailed").detail("URL", StringRef(s3url));
+		TraceEvent(SevError, "S3ClientGetEndpointFailed").detail("URL", StringRef(s3url)).detail("Error", e.what());
 		throw;
 	}
 }
@@ -191,7 +192,8 @@ ACTOR static Future<Void> writeChecksumWithFallback(Reference<S3BlobStoreEndpoin
                                                     std::string checksum,
                                                     PartConfig config) {
 	if (!config.enableChecksumValidation) {
-		TraceEvent(SevDebug, "S3ClientChecksumValidationDisabled")
+		TraceEvent(SevWarn, "S3ClientChecksumValidationDisabled")
+		    .suppressFor(60)
 		    .detail("Bucket", bucket)
 		    .detail("Object", objectName);
 		return Void(); // Skip checksum storage if disabled
@@ -295,6 +297,8 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 	state int attempt = 0;
 	state int maxRetries = config.maxPartRetries; // Use configurable value
 	state int delayMs = config.baseRetryDelayMs;
+	state UnsentPacketQueue packets;
+
 	TraceEvent(SevDebug, "S3ClientUploadPartStart")
 	    .detail("Bucket", StringRef(bucket))
 	    .detail("Object", StringRef(objectName))
@@ -305,7 +309,8 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 
 	loop {
 		try {
-			UnsentPacketQueue packets;
+			// Reset the packet queue for each retry attempt
+			packets.discardAll();
 			PacketWriter pw(packets.getWriteBuffer(partData.size()), nullptr, Unversioned());
 			pw.serializeBytes(partData);
 
@@ -449,11 +454,13 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 						parts[activePartIndices[i]] = completedParts[i];
 					}
 
-					// Free memory for completed part data to prevent memory blow-out
+					// Now that all uploads are complete, we can safely free memory
+					// The uploadPart actors have finished and no longer reference the partData
 					for (int i = 0; i < activePartIndices.size(); i++) {
 						partDatas[activePartIndices[i]].clear();
 						partDatas[activePartIndices[i]].shrink_to_fit();
 					}
+
 					activeFutures.clear();
 					activePartIndices.clear();
 				}
