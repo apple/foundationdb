@@ -197,7 +197,7 @@ struct KVWorkload : TestWorkload {
 	uint64_t nodeCount;
 	int64_t nodePrefix;
 	int actorCount, keyBytes, maxValueBytes, minValueBytes;
-	double absentFrac;
+	double absentFrac, zeroPaddingRatio;
 
 	explicit KVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
@@ -206,6 +206,7 @@ struct KVWorkload : TestWorkload {
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 4);
 		maxValueBytes = getOption(options, "valueBytes"_sr, 96);
 		minValueBytes = getOption(options, "minValueBytes"_sr, maxValueBytes);
+		zeroPaddingRatio = getOption(options, "zeroPaddingRatio"_sr, 0.15);
 		ASSERT(minValueBytes <= maxValueBytes);
 
 		absentFrac = getOption(options, "absentFrac"_sr, 0.0);

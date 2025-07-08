@@ -89,7 +89,10 @@ struct StreamingRangeReadWorkload : KVWorkload {
 
 	Value randomValue() {
 		int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
-		int zeroPadding = static_cast<int>(0.15 * length);
+		int zeroPadding = static_cast<int>(zeroPaddingRatio * length);
+		if (zeroPadding > length) {
+			zeroPadding = length;
+		}
 		valueString = deterministicRandom()->randomAlphaNumeric(length);
 		for (int i = 0; i < zeroPadding; ++i) {
 			valueString[i] = '\0';
