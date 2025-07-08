@@ -285,17 +285,19 @@ ACTOR static Future<Optional<std::string>> readChecksumWithFallback(Reference<S3
 }
 
 // Upload a part of a multipart upload with configurable retry logic.
+
 ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoint,
                                           std::string bucket,
                                           std::string objectName,
                                           std::string uploadID,
-                                          PartState part, // Pass by value for state management
-                                          std::string partData,
+                                          Reference<IAsyncFile> file,
+                                          PartState part,
+                                          XXH64_state_t* hashState,
                                           PartConfig config) {
 	state double startTime = now();
 	state PartState resultPart = part;
 	state int attempt = 0;
-	state int maxRetries = config.maxPartRetries; // Use configurable value
+	state int maxRetries = config.maxPartRetries;
 	state int delayMs = config.baseRetryDelayMs;
 	state UnsentPacketQueue packets;
 
@@ -309,6 +311,26 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 
 	loop {
 		try {
+			// Read part data from file (automatic memory management)
+			state std::string partData;
+			partData.resize(resultPart.size);
+
+			int bytesRead = wait(file->read(&partData[0], resultPart.size, resultPart.offset));
+			if (bytesRead != resultPart.size) {
+				TraceEvent(SevError, "S3ClientUploadPartReadError")
+				    .detail("Expected", resultPart.size)
+				    .detail("Actual", bytesRead)
+				    .detail("Offset", resultPart.offset);
+				throw io_error();
+			}
+
+			// Update checksum with this part's data
+			XXH64_update(hashState, partData.data(), bytesRead);
+
+			// Calculate MD5 for this part
+			std::string md5 = HTTP::computeMD5Sum(partData);
+			resultPart.md5 = md5;
+
 			// Reset the packet queue for each retry attempt
 			packets.discardAll();
 			PacketWriter pw(packets.getWriteBuffer(partData.size()), nullptr, Unversioned());
@@ -351,10 +373,11 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 			    .detail("DelayMs", delayMs);
 
 			wait(delay(delayMs / 1000.0));
-			delayMs = std::min(delayMs * 2, config.maxRetryDelayMs); // Use configurable cap
+			delayMs = std::min(delayMs * 2, config.maxRetryDelayMs);
 		}
 	}
 }
+
 // Copy filepath to bucket at resource in s3.
 ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
                                      std::string bucket,
@@ -365,7 +388,6 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	state Reference<IAsyncFile> file;
 	state std::string uploadID;
 	state std::vector<PartState> parts;
-	state std::vector<std::string> partDatas;
 	state int64_t size;
 	state XXH64_state_t* hashState = XXH64_createState();
 	state int retries = 0;
@@ -412,34 +434,14 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 				while (activeFutures.size() < maxConcurrentUploads && offset < size) {
 					partSize = std::min(config.partSizeBytes, size - offset);
 
-					// Store part data in our vector to keep it alive
-					partDatas.emplace_back();
-					partDatas.back().resize(partSize);
-
-					int bytesRead = wait(file->read(&partDatas.back()[0], partSize, offset));
-					if (bytesRead != partSize) {
-						TraceEvent(SevError, "S3ClientCopyUpFileReadError")
-						    .detail("Expected", partSize)
-						    .detail("Actual", bytesRead)
-						    .detail("Offset", offset)
-						    .detail("FilePath", filepath);
-						XXH64_freeState(hashState);
-						throw io_error();
-					}
-
-					// Update checksum with this part's data
-					XXH64_update(hashState, partDatas.back().data(), bytesRead);
-
-					std::string md5 = HTTP::computeMD5Sum(partDatas.back());
 					part = PartState();
 					part.partNumber = partNumber;
 					part.offset = offset;
 					part.size = partSize;
-					part.md5 = md5;
 					parts.push_back(part);
 
 					activeFutures.push_back(
-					    uploadPart(endpoint, bucket, objectName, uploadID, part, partDatas.back(), config));
+					    uploadPart(endpoint, bucket, objectName, uploadID, file, part, hashState, config));
 					activePartIndices.push_back(partNumber - 1); // Store index into parts array
 
 					offset += partSize;
@@ -453,14 +455,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 					for (int i = 0; i < completedParts.size(); i++) {
 						parts[activePartIndices[i]] = completedParts[i];
 					}
-
-					// Now that all uploads are complete, we can safely free memory
-					// The uploadPart actors have finished and no longer reference the partData
-					for (int i = 0; i < activePartIndices.size(); i++) {
-						partDatas[activePartIndices[i]].clear();
-						partDatas[activePartIndices[i]].shrink_to_fit();
-					}
-
+					// Memory is automatically freed when uploadPart actors complete
 					activeFutures.clear();
 					activePartIndices.clear();
 				}
@@ -485,7 +480,6 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			// Clear data after successful upload
 			numParts = parts.size();
 			parts.clear();
-			partDatas.clear();
 
 			// Finalize checksum - no need to read file again!
 			uint64_t hash = XXH64_digest(hashState);
@@ -524,7 +518,6 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 				// Cleanup before retry
 				XXH64_freeState(hashState);
 				hashState = XXH64_createState();
-				partDatas.clear();
 				parts.clear();
 				activeFutures.clear();
 				activePartIndices.clear();
@@ -561,8 +554,6 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 				    .detail("Error", err.what())
 				    .detail("Attempts", retries + 1);
 
-				// Clear part data to free memory
-				partDatas.clear();
 				// Close file before abort attempt
 				file = Reference<IAsyncFile>();
 
@@ -775,7 +766,6 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
                                        PartConfig config = PartConfig()) {
 	state double startTime = now();
 	state Reference<IAsyncFile> file;
-	state std::vector<Future<PartState>> downloadFutures;
 	state std::vector<PartState> parts;
 	state int64_t fileSize = 0;
 	state int64_t offset = 0;
@@ -808,7 +798,6 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 
 			int numParts = (fileSize + config.partSizeBytes - 1) / config.partSizeBytes;
 			parts.reserve(numParts);
-			downloadFutures.reserve(numParts);
 			Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
 			    filepath,
 			    IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |
@@ -821,17 +810,38 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 
 			offset = 0;
 			partNumber = 1;
-			while (offset < fileSize) {
-				partSize = std::min(config.partSizeBytes, fileSize - offset);
-				parts.emplace_back(partNumber, offset, partSize, "");
-				downloadFutures.push_back(downloadPart(endpoint, bucket, objectName, file, parts.back(), config));
-				offset += partSize;
-				partNumber++;
-			}
-			std::vector<PartState> completedParts = wait(getAll(downloadFutures));
-			downloadFutures.clear();
+			state int maxConcurrentDownloads = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_READS_PER_FILE;
+			state std::vector<Future<PartState>> activeDownloadFutures;
+			state std::vector<int> activePartIndices;
 
-			for (const auto& part : completedParts) {
+			// Process parts in batches with concurrency limit
+			while (offset < fileSize) {
+				// Fill up to maxConcurrentDownloads active downloads
+				while (activeDownloadFutures.size() < maxConcurrentDownloads && offset < fileSize) {
+					partSize = std::min(config.partSizeBytes, fileSize - offset);
+					parts.emplace_back(partNumber, offset, partSize, "");
+					activeDownloadFutures.push_back(
+					    downloadPart(endpoint, bucket, objectName, file, parts.back(), config));
+					activePartIndices.push_back(partNumber - 1); // Store index into parts array
+					offset += partSize;
+					partNumber++;
+				}
+
+				// Wait for all active downloads to complete
+				if (!activeDownloadFutures.empty()) {
+					std::vector<PartState> completedParts = wait(getAll(activeDownloadFutures));
+					// Update parts with completion status
+					for (int i = 0; i < completedParts.size(); i++) {
+						parts[activePartIndices[i]] = completedParts[i];
+					}
+					// Memory is automatically freed when downloadPart actors complete
+					activeDownloadFutures.clear();
+					activePartIndices.clear();
+				}
+			}
+
+			// Verify all parts completed
+			for (const auto& part : parts) {
 				if (!part.completed) {
 					TraceEvent(SevError, "S3ClientCopyDownFilePartNotCompleted").detail("PartNumber", part.partNumber);
 					throw http_bad_response();
@@ -877,6 +887,12 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 				    .detail("FilePath", filepath)
 				    .detail("Retries", retries);
 				retries++;
+
+				// Cleanup state for retry
+				parts.clear();
+				activeDownloadFutures.clear();
+				activePartIndices.clear();
+
 				if (file) {
 					try {
 						file = Reference<IAsyncFile>();
