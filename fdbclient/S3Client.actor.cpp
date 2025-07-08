@@ -773,6 +773,9 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 	state int64_t partSize;
 	state std::string expectedChecksum;
 	state int retries = 0;
+	state int maxConcurrentDownloads;
+	state std::vector<Future<PartState>> activeDownloadFutures;
+	state std::vector<int> activePartIndices;
 
 	loop {
 		try {
@@ -810,9 +813,9 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 
 			offset = 0;
 			partNumber = 1;
-			state int maxConcurrentDownloads = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_READS_PER_FILE;
-			state std::vector<Future<PartState>> activeDownloadFutures;
-			state std::vector<int> activePartIndices;
+			maxConcurrentDownloads = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_READS_PER_FILE;
+			activeDownloadFutures.clear();
+			activePartIndices.clear();
 
 			// Process parts in batches with concurrency limit
 			while (offset < fileSize) {
