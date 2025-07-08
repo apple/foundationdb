@@ -323,19 +323,6 @@ void ReadWriteCommon::getMetrics(std::vector<PerfMetric>& m) {
 		m.emplace_back(format("%lld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
 }
 
-Value ReadWriteCommon::randomValue() {
-	int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
-	int zeroPadding = static_cast<int>(zeroPaddingRatio * length);
-	if (zeroPadding > length) {
-		zeroPadding = length;
-	}
-	valueString = deterministicRandom()->randomAlphaNumeric(length);
-	for (int i = 0; i < zeroPadding; ++i) {
-		valueString[i] = '\0';
-	}
-	return StringRef((uint8_t*)valueString.c_str(), length);
-}
-
 Standalone<KeyValueRef> ReadWriteCommon::operator()(uint64_t n) {
 	return KeyValueRef(keyForIndex(n, false), randomValue());
 }

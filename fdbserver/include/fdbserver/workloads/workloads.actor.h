@@ -218,6 +218,19 @@ struct KVWorkload : TestWorkload {
 	Key keyForIndex(uint64_t index, bool absent) const;
 	// the reverse process of keyForIndex() without division. Set absent=true to ignore the last byte in Key
 	int64_t indexForKey(const KeyRef& key, bool absent = false) const;
+
+	virtual Value randomValue() {
+		int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
+		int zeroPadding = static_cast<int>(zeroPaddingRatio * length);
+		if (zeroPadding > length) {
+			zeroPadding = length;
+		}
+		std::string valueString = deterministicRandom()->randomAlphaNumeric(length);
+		for (int i = 0; i < zeroPadding; ++i) {
+			valueString[i] = '\0';
+		}
+		return StringRef((uint8_t*)valueString.c_str(), length);
+	}
 };
 
 struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {

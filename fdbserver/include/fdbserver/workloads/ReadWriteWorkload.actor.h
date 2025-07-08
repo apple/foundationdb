@@ -164,7 +164,6 @@ struct ReadWriteCommon : KVWorkload {
 
 	Standalone<KeyValueRef> operator()(uint64_t n);
 	bool shouldRecord(double checkTime = now());
-	Value randomValue();
 };
 
 #include "flow/unactorcompiler.h"

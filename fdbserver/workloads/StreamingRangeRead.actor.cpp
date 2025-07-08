@@ -87,19 +87,6 @@ struct StreamingRangeReadWorkload : KVWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 	}
 
-	Value randomValue() {
-		int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
-		int zeroPadding = static_cast<int>(zeroPaddingRatio * length);
-		if (zeroPadding > length) {
-			zeroPadding = length;
-		}
-		valueString = deterministicRandom()->randomAlphaNumeric(length);
-		for (int i = 0; i < zeroPadding; ++i) {
-			valueString[i] = '\0';
-		}
-		return StringRef((uint8_t*)valueString.c_str(), length);
-	}
-
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
 	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, nodeCount, Promise<double>()); }
