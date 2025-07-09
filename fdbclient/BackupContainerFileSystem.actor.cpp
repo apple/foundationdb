@@ -1298,8 +1298,10 @@ public:
 		state Reference<IAsyncFile> keyFile;
 		state StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		try {
-			Reference<IAsyncFile> _keyFile =
-			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
+			Reference<IAsyncFile> _keyFile = wait(IAsyncFileSystem::filesystem()->open(
+			    encryptionKeyFileName,
+			    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
+			    0400));
 			keyFile = _keyFile;
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
