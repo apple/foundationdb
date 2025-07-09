@@ -7,7 +7,23 @@ import os
 import random
 from enum import Enum
 from pathlib import Path
-from typing import List, Any, OrderedDict, Dict
+from typing import List, Any, OrderedDict, Dict, Optional
+import typing
+import sys
+
+class ConfigError(Exception):
+    """Custom exception for configuration and argument parsing errors."""
+    def __init__(self, message, stdout_xml=None, xml_content_for_file=None):
+        super().__init__(message)
+        self.stdout_xml = stdout_xml
+        self.xml_content_for_file = xml_content_for_file
+
+class EarlyExitError(Exception):
+    """Custom exception for recoverable errors that should lead to a clean exit."""
+    def __init__(self, message, stdout_xml=None, xml_content_for_file=None):
+        super().__init__(message)
+        self.stdout_xml = stdout_xml
+        self.xml_content_for_file = xml_content_for_file
 
 
 class BuggifyOptionValue(Enum):
@@ -40,40 +56,35 @@ class ConfigValue:
             self.value = self.kwargs["default"]
 
     def get_arg_name(self) -> str:
+        name_to_use = self.name
         if "long_name" in self.kwargs:
-            return self.kwargs["long_name"]
-        else:
-            return self.name
+            name_to_use = self.kwargs["long_name"]
+        return name_to_use.replace("-", "_")
 
     def add_to_args(self, parser: argparse.ArgumentParser):
         kwargs = copy.copy(self.kwargs)
         long_name = self.name
         short_name = None
+        if "name" in kwargs:
+            long_name = kwargs.pop("name")
         if "long_name" in kwargs:
-            long_name = kwargs["long_name"]
-            del kwargs["long_name"]
+            long_name = kwargs.pop("long_name")
         if "short_name" in kwargs:
-            short_name = kwargs["short_name"]
-            del kwargs["short_name"]
+            short_name = kwargs.pop("short_name")
         if "action" in kwargs and kwargs["action"] in ["store_true", "store_false"]:
-            del kwargs["type"]
-        long_name = long_name.replace("_", "-")
+            if 'type' in kwargs:
+                del kwargs["type"]
+        long_name = long_name.replace("_", "-").lstrip('-')
         if short_name is None:
-            # line below is useful for debugging
-            # print('add_argument(\'--{}\', [{{{}}}])'.format(long_name, ', '.join(['\'{}\': \'{}\''.format(k, v)
-            #                                                                       for k, v in kwargs.items()])))
             parser.add_argument("--{}".format(long_name), **kwargs)
         else:
-            # line below is useful for debugging
-            # print('add_argument(\'-{}\', \'--{}\', [{{{}}}])'.format(short_name, long_name,
-            #                                                          ', '.join(['\'{}\': \'{}\''.format(k, v)
-            #                                                                     for k, v in kwargs.items()])))
             parser.add_argument(
                 "-{}".format(short_name), "--{}".format(long_name), **kwargs
             )
 
     def get_value(self, args: argparse.Namespace) -> tuple[str, Any]:
-        return self.name, args.__getattribute__(self.get_arg_name())
+        arg_name_for_namespace = self.get_arg_name()
+        return self.name, args.__getattribute__(arg_name_for_namespace)
 
 
 class Config:
@@ -115,12 +126,13 @@ class Config:
             "required": False,
             "env_name": "JOSHUA_CLUSTER_FILE",
         }
-        self.joshua_dir: str | None = None
-        self.joshua_dir_args = {
-            "type": str,
-            "help": "Where to write FDB data to",
-            "required": False,
-            "env_name": "JOSHUA_APP_DIR",
+        self.joshua_output_dir: Path | None = None
+        self.joshua_output_dir_args = {
+            "name": "--joshua-output-dir",
+            "env_name": "TH_JOSHUA_OUTPUT_DIR",
+            "type": Path,
+            "default": None,
+            "help": "Directory for TestHarness2 to store joshua.xml and other outputs.",
         }
         self.stats: str | None = None
         self.stats_args = {
@@ -134,8 +146,14 @@ class Config:
             "help": "Force given seed given to fdbserver -- mostly useful for debugging",
             "required": False,
         }
-        self.kill_seconds: int = 30 * 60
-        self.kill_seconds_args = {"help": "Timeout for individual test"}
+        self.kill_seconds: int = 1800
+        self.kill_seconds_args = {
+            "name": "--kill-seconds",
+            "env_name": "TH_KILL_SECONDS",
+            "type": int,
+            "default": 1800,
+            "help": "Seconds after which a test is killed.",
+        }
         self.buggify_on_ratio: float = 0.8
         self.buggify_on_ratio_args = {"help": "Probability that buggify is turned on"}
         self.write_run_times = False
@@ -147,10 +165,17 @@ class Config:
         self.unseed_check_ratio_args = {
             "help": "Probability for doing determinism check"
         }
-        self.test_dirs: List[str] = ["slow", "fast", "restarting", "rare", "noSim"]
-        self.test_dirs_args: dict = {
+        self.test_source_dir: Path = Path("tests")
+        self.test_source_dir_args = {
+            "type": Path,
+            "help": "Root directory containing test type subdirectories (e.g., slow, fast) which hold .toml test files.",
+            "env_name": "JOSHUA_TEST_FILES_DIR",
+        }
+        self.test_types_to_run: List[str] = ["slow", "fast", "restarting", "rare", "noSim"]
+        self.test_types_to_run_args: dict = {
             "nargs": "*",
-            "help": "test_directories to look for files in",
+            "help": "List of test type subdirectories (under test_source_dir) to run tests from (e.g., slow, fast).",
+            "long_name": "test-types"
         }
         self.trace_format: str = "json"
         self.trace_format_args = {
@@ -184,12 +209,41 @@ class Config:
         self.pretty_print_args = {"short_name": "P", "action": "store_true"}
         self.clean_up: bool = True
         self.clean_up_args = {"long_name": "no_clean_up", "action": "store_false"}
-        self.run_dir: Path = Path("tmp")
+        self.run_temp_dir: Path | None = None
+        self.run_temp_dir_args = {
+            "type": Path,
+            "help": "Temporary directory for individual test run artifacts and logs.",
+            "required": True,
+            "env_name": "TH_RUN_TEMP_DIR",
+        }
         self.joshua_seed: int = random.randint(0, 2**32 - 1)
         self.joshua_seed_args = {
             "short_name": "s",
             "help": "A random seed",
             "env_name": "JOSHUA_SEED",
+        }
+        self.max_tests: int | None = None
+        self.max_tests_args = {
+            "type": int,
+            "default": None,
+            "help": "Maximum number of tests to run before stopping.",
+        }
+        self.fail_fast: int | None = None
+        self.fail_fast_args = {
+            "type": int,
+            "default": None,
+            "help": "Stop after this many test failures.",
+        }
+        self.joshua_v1_logging: bool = False
+        self.joshua_v1_logging_args = {
+            "action": "store_true",
+            "help": "If set, print V1-style stripped summary XML to stdout for each test.",
+        }
+        self.time_limit: int | None = None
+        self.time_limit_args = {
+            "type": int,
+            "default": None,
+            "help": "Stop running tests after this many seconds.",
         }
         self.print_coverage = False
         self.print_coverage_args = {"action": "store_true"}
@@ -199,7 +253,7 @@ class Config:
         self.binary_args = {"help": "Path to executable"}
         self.hit_per_runs_ratio: int = 20000
         self.hit_per_runs_ratio_args = {
-            "help": "Maximum test runs before each code probe hit at least once"
+            "help": "Maximum test runs before each code probe hit least once"
         }
         self.output_format: str = "xml"
         self.output_format_args = {
@@ -231,6 +285,11 @@ class Config:
         }
         self.success: bool = False
         self.success_args = {"help": "Print successful results", "action": "store_true"}
+        self.no_verbose_on_failure: bool = False
+        self.no_verbose_on_failure_args = {
+            "action": "store_true",
+            "help": "Do not dump all trace events to summary on test failure.",
+        }
         self.cov_include_files: str = r".*"
         self.cov_include_files_args = {
             "help": "Only consider coverage traces that originated in files matching regex"
@@ -240,6 +299,9 @@ class Config:
             "help": "Ignore coverage traces that originated in files matching regex"
         }
         self.max_stderr_bytes: int = 10000
+        self.max_stderr_bytes_args = {
+            "help": "Maximum number of bytes to include from stderr if a test fails."
+        }
         self.write_stats: bool = True
         self.read_stats: bool = True
         self.reproduce_prefix: str | None = None
@@ -250,10 +312,39 @@ class Config:
         }
         self.long_running: bool = False
         self.long_running_args = {"action": "store_true"}
-        self._env_names: Dict[str, str] = {}
+        self.log_level: str = "INFO"
+        self.log_level_args = {
+            "name": "--log-level",
+            "env_name": "TH_LOG_LEVEL",
+            "type": str,
+            "default": "INFO",
+            "help": "Logging level for the application (e.g., DEBUG, INFO, WARNING)",
+        }
+        self.archive_logs_on_failure: bool = False
+        self.archive_logs_on_failure_args = {
+            "action": "store_true",
+            "help": "If set, archive FDB logs and test harness outputs to a .tar.gz file in the joshua_output_dir on test failure.",
+            "env_name": "TH_ARCHIVE_LOGS_ON_FAILURE",
+        }
+        self.enable_joshua_logtool: bool = False
+        self.enable_joshua_logtool_args = {
+            "action": "store_true",
+            "help": "If set, run joshua_logtool when TH_ARCHIVE_LOGS_ON_FAILURE is also set and tests fail.",
+            "env_name": "TH_ENABLE_JOSHUA_LOGTOOL",
+        }
+        self._v1_summary_output_stream: Optional[typing.TextIO] = sys.stdout
+        self._env_names: typing.Dict[str, str] = {}
         self._config_map = self._build_map()
         self._read_env()
         self.random.seed(self.joshua_seed, version=2)
+        self.output_dir: Path | None = None
+        self.output_dir_args = {
+            "name": "--output-dir",
+            "env_name": "TH_OUTPUT_DIR",
+            "type": Path,
+            "default": None,
+            "help": "Top-level directory for all run outputs.",
+        }
 
     def change_default(self, attr: str, default_val):
         assert attr in self._config_map, "Unknown config attribute {}".format(attr)
@@ -326,7 +417,7 @@ class Config:
         for val in self._config_map.values():
             k, v = val.get_value(args)
             if v is not None:
-                config.__setattr__(k, v)
+                self.__setattr__(k, v)
         self.random.seed(self.joshua_seed, version=2)
 
 

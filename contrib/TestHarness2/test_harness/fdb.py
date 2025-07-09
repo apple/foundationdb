@@ -79,7 +79,7 @@ def write_coverage(
     coverage: OrderedDict[Coverage, bool],
 ):
     db = open_db(cluster_file)
-    assert config.joshua_dir is not None
+    assert config.joshua_output_dir is not None
     initialized: bool = False
     for chunk in chunkify(coverage.items(), 100):
         initialized = write_coverage_chunk(db, cov_path, metadata, chunk, initialized)
@@ -145,7 +145,7 @@ class FDBStatFetcher(StatFetcher):
     def __init__(
         self,
         tests: OrderedDict[str, TestDescription],
-        joshua_dir: Tuple[str] = str_to_tuple(config.joshua_dir),
+        joshua_dir: Tuple[str] = str_to_tuple(str(config.joshua_output_dir)),
     ):
         super().__init__(tests)
         self.statistics = Statistics(config.cluster_file, joshua_dir)
