@@ -459,6 +459,15 @@ std::string S3BlobStoreEndpoint::constructResourcePath(const std::string& bucket
 	return resource;
 }
 
+// Forward declaration for doRequest_impl to fix compilation order issue
+ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                               std::string verb,
+                                                               std::string resource,
+                                                               HTTP::Headers headers,
+                                                               UnsentPacketQueue* pContent,
+                                                               int contentLen,
+                                                               std::set<unsigned int> successCodes);
+
 ACTOR Future<bool> bucketExists_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket) {
 	wait(b->requestRateRead->getAllowance(1));
 
