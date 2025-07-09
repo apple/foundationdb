@@ -1225,6 +1225,9 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		bstore->s_stats.requests_failed++;
 		++bstore->blobStats->requestsFailed;
 
+		// Reset the resource so we don't double-encode
+		req->resource = resource;
+
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
 		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
 		// But only if our previous attempt was not the last allowable try.
