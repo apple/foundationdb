@@ -15,11 +15,11 @@ This directory contains TestHarness2, a Python-based test harness for Foundation
 For each invocation, TestHarness2 (via its `../Joshua/scripts/correctnessTest.sh` wrapper) creates a single, consolidated output directory. This makes all artifacts from a single run easy to find.
 
 *   **Location:** The base location defaults to `/tmp` but can be controlled by the `TH_OUTPUT_DIR` environment variable.
-*   **Naming Convention:** The directory is named `th_run_<ENSEMBLE_ID>_<TIMESTAMP>`, where `<ENSEMBLE_ID>` is the unique ensemble identifier and `<TIMESTAMP>` is an ISO8601 timestamp to prevent collisions when rerunning the same ensemble (e.g., `/tmp/th_run_20250706-234137-stack-b6708f02fcced157_20250706T235426Z`).
+*   **Naming Convention:** The directory is named `th_run_<ENSEMBLE_ID>`, where `<ENSEMBLE_ID>` is the unique ensemble identifier (e.g., `/tmp/th_run_20250706-234137-stack-b6708f02fcced157`).
 
 ### Directory Structure
 
-Inside each `th_run_<ENSEMBLE_ID>_<TIMESTAMP>` directory, you will find a standardized structure:
+Inside each `th_run_<ENSEMBLE_ID>` directory, you will find a standardized structure:
 
 *   `joshua_output/`:
     *   **`joshua.xml`**: A comprehensive XML file containing detailed results and parsed events from all test parts. This is the most important file for a detailed analysis of the run.

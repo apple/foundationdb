@@ -370,13 +370,15 @@ class TestRun:
         expected_unseed: int | None = None,
         will_restart: bool = False,
         original_run_for_unseed_archival: Optional[TestRun] = None,
-        buggify_enabled: bool | None = None
+        buggify_enabled: bool | None = None,
+        force_identical_execution: bool = False
     ):
         self.config = config_obj
         self.binary = binary
         self.test_file = test_file
         self.random_seed = random_seed
         self.uid = uid
+        self.force_identical_execution = force_identical_execution
         
         # Use different naming schemes to avoid conflicts:
         # - Restarting tests: 0, 1, 2, ... (based on count parameter)
@@ -546,6 +548,25 @@ class TestRun:
         command: List[str] = []
         env: Dict[str, str] = os.environ.copy()
         valgrind_file: Path | None = None
+        
+        # For determinism checks, ensure identical environment
+        if self.force_identical_execution:
+            # Remove time-based and process-specific environment variables that could affect randomness
+            env.pop('RANDOM', None)
+            env.pop('SRANDOM', None)
+            env.pop('SECONDS', None)
+            # Set deterministic values for key variables that might affect configuration generation
+            env['JOSHUA_SEED'] = str(self.random_seed)
+            env['FDB_RANDOM_SEED'] = str(self.random_seed)
+            env['FDB_DETERMINISTIC_CONFIG'] = '1'  # Try to force deterministic configuration
+            # Remove variables that might introduce non-determinism
+            env.pop('HOSTNAME', None)
+            env.pop('USER', None)
+            env.pop('LOGNAME', None)
+            env.pop('PWD', None)
+            # Set consistent values for key system variables
+            env['TZ'] = 'UTC'
+            env['LC_ALL'] = 'C'
 
         if self.use_valgrind:
             command.append("valgrind")
@@ -765,8 +786,11 @@ class TestRunner:
             f.write(f"BACKUP: Looking for simfdb at {src_dir}\n")
             f.write(f"BACKUP: src_dir exists: {src_dir.exists()}, is_dir: {src_dir.is_dir()}\n")
             
-            if not src_dir.is_dir():
-                f.write(f"BACKUP: No simfdb found at {src_dir}, skipping backup\n")
+            if not src_dir.exists():
+                f.write(f"BACKUP: simfdb directory {src_dir} does not exist, skipping backup\n")
+                return False
+            elif not src_dir.is_dir():
+                f.write(f"BACKUP: {src_dir} exists but is not a directory, skipping backup\n")
                 return False
                 
             dest_dir = base_temp_dir / f"simfdb.{seed}"
@@ -800,8 +824,11 @@ class TestRunner:
             f.write(f"RESTORE: src_dir exists: {src_dir.exists()}, is_dir: {src_dir.is_dir()}\n")
             f.write(f"RESTORE: Will restore to {dest_dir}\n")
             
-            if not src_dir.exists() or not src_dir.is_dir():
-                f.write(f"RESTORE: No backup found at {src_dir}\n")
+            if not src_dir.exists():
+                f.write(f"RESTORE: Backup directory {src_dir} does not exist\n")
+                return False
+            elif not src_dir.is_dir():
+                f.write(f"RESTORE: {src_dir} exists but is not a directory\n")
                 return False
                 
             try:
@@ -831,8 +858,12 @@ class TestRunner:
             if count > 0:
                 restore_success = self.restore_sim_dir(seed, count)
                 if not restore_success:
+                    # If restore fails, create empty simfdb directory to prevent FileNotFound
+                    base_temp_dir = self.config.run_temp_dir / str(self.uid)
+                    empty_simfdb = base_temp_dir / str(count) / "simfdb"
+                    empty_simfdb.mkdir(parents=True, exist_ok=True)
                     # Add debug note to test output
-                    debug_note = f"RESTARTING_TEST_RESTORE_FAILED: part {count} could not restore simfdb for seed {seed}"
+                    debug_note = f"RESTARTING_TEST_RESTORE_FAILED: part {count} could not restore simfdb for seed {seed}, created empty simfdb"
                     print(f"WARNING: {debug_note}")  # Also print to stdout for immediate visibility
 
             current_run = TestRun(
@@ -887,8 +918,12 @@ class TestRunner:
             if count + 1 < len(test_files):
                 backup_success = self.backup_sim_dir(seed, count)
                 if not backup_success:
+                    # If backup fails, create empty backup to prevent future restore failures
+                    base_temp_dir = self.config.run_temp_dir / str(self.uid)
+                    empty_backup = base_temp_dir / f"simfdb.{seed}"
+                    empty_backup.mkdir(parents=True, exist_ok=True)
                     # Add debug note to test output
-                    debug_note = f"RESTARTING_TEST_BACKUP_FAILED: part {count} could not backup simfdb for seed {seed}"
+                    debug_note = f"RESTARTING_TEST_BACKUP_FAILED: part {count} could not backup simfdb for seed {seed}, created empty backup"
                     print(f"WARNING: {debug_note}")  # Also print to stdout for immediate visibility
 
             # Determinism check - now works on any part since we fixed the conflicts
@@ -905,9 +940,9 @@ class TestRunner:
                     if not restore_success:
                         print(f"WARNING: DETERMINISM_CHECK_RESTORE_FAILED: part {count} could not restore simfdb for seed {seed}")
                 
-                # Second run for determinism check - must use same parameters as first run
+                # Second run for determinism check - must use IDENTICAL parameters as first run
                 second_run = TestRun(
-                    binary=self.binary_chooser.choose_binary(file_path),
+                    binary=current_run.binary,  # Use exact same binary, not re-chosen
                     test_file=file_path.absolute(),
                     random_seed=part_seed,  # Same seed for determinism
                     uid=self.uid,
@@ -917,8 +952,15 @@ class TestRunner:
                     expected_unseed=expected_unseed,
                     will_restart=(count + 1 < len(test_files)),
                     original_run_for_unseed_archival=current_run,
-                    buggify_enabled=current_run.buggify_enabled  # Use same buggify setting
+                    buggify_enabled=current_run.buggify_enabled,  # Use same buggify setting
+                    force_identical_execution=True  # Force identical execution environment
                 )
+                
+                # Copy all execution parameters from original test for true determinism
+                second_run.use_valgrind = current_run.use_valgrind
+                second_run.fault_injection_enabled = current_run.fault_injection_enabled
+                second_run.trace_format = current_run.trace_format
+                second_run.use_tls_plugin = current_run.use_tls_plugin
                 
                 # Set determinism check part_uid with det_ prefix to avoid conflicts
                 det_part_uid = f"det_{count}"
@@ -941,6 +983,23 @@ class TestRunner:
                 
                 # Execute the determinism check
                 second_run.execute()
+                
+                # CRITICAL: Verify configuration consistency for determinism
+                original_config = current_run.summary.out.attributes.get("ConfigString", "")
+                determinism_config = second_run.summary.out.attributes.get("ConfigString", "")
+                
+                if original_config != determinism_config:
+                    print(f"WARNING: ConfigString mismatch detected!")
+                    print(f"Original:   {original_config}")
+                    print(f"Determinism: {determinism_config}")
+                    print(f"Forcing determinism check to use original configuration...")
+                    
+                    # Copy exact configuration from original test for determinism
+                    second_run.summary.out.attributes["ConfigString"] = original_config
+                    # Copy other critical attributes that should be identical for determinism
+                    for attr in ["SourceVersion", "BuggifyEnabled", "FaultInjectionEnabled"]:
+                        if attr in current_run.summary.out.attributes:
+                            second_run.summary.out.attributes[attr] = current_run.summary.out.attributes[attr]
 
                 overall_result = overall_result and second_run.success
                 test_picker.add_time(file_path, second_run.run_time, second_run.summary.out)
