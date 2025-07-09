@@ -935,6 +935,39 @@ class TestRunner:
 
             if should_perform_unseed_check:
                 expected_unseed = current_run.summary.unseed
+                
+                # CRITICAL: Capture stats BEFORE add_time() modifies TestPicker state
+                original_stats = current_run.stats
+                
+                # For restarting tests, determinism check needs the same simfdb state as the original part
+                if count > 0:  # This is a restarting test part that needs simfdb restored
+                    det_part_uid = f"det_{count}"
+                    base_temp_dir = self.config.run_temp_dir / str(self.uid)
+                    
+                    # CRITICAL: Use the base seed for backup lookup
+                    # Backup was created with the base seed (not part-specific seed)
+                    
+                    # Restore simfdb from backup to determinism check directory
+                    src_backup = base_temp_dir / f"simfdb.{seed}"
+                    det_simfdb = base_temp_dir / det_part_uid / "simfdb"
+                    
+                    restore_success = False
+                    if src_backup.exists() and src_backup.is_dir():
+                        try:
+                            if det_simfdb.exists():
+                                shutil.rmtree(det_simfdb)
+                            det_simfdb.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copytree(src_backup, det_simfdb)
+                            restore_success = True
+                        except Exception as e:
+                            print(f"WARNING: DETERMINISM_CHECK_RESTORE_FAILED: {e}")
+                    
+                    if not restore_success:
+                        # Create empty simfdb to prevent FileNotFound
+                        det_simfdb.mkdir(parents=True, exist_ok=True)
+                        print(f"WARNING: DETERMINISM_CHECK_RESTORE_FAILED: part {count} could not restore simfdb for seed {seed}, created empty simfdb")
+                
+                # Legacy valgrind case
                 if self.config.use_valgrind:
                     restore_success = self.restore_sim_dir(seed, count)
                     if not restore_success:
@@ -948,7 +981,7 @@ class TestRunner:
                     uid=self.uid,
                     config_obj=self.config,
                     restarting=(count != 0),
-                    stats=test_picker.dump_stats(),
+                    stats=original_stats,  # Use EXACT same stats as original run
                     expected_unseed=expected_unseed,
                     will_restart=(count + 1 < len(test_files)),
                     original_run_for_unseed_archival=current_run,
