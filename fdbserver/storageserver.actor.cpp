@@ -11148,7 +11148,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("Range", keys)
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
-			    .detail("ResultingShard", newShard.toString());
+			    .detail("ResultingShard", newShard.toString())
+			    .detail("ShardIdDifferent", newShard.id != newShard.desiredId);
 		} else if (currentShard->adding) {
 			if (nowAssigned) {
 				TraceEvent(sev, "PhysicalShardStateError")
@@ -11248,9 +11249,10 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("NewShard", updatedShards.back().toString());
 		} else if (!dataAvailable) {
 			if (version == data->initialClusterVersion - 1) {
-				TraceEvent(sevDm, "CSKWithPhysicalShardsSeedRange", data->thisServerID)
+				TraceEvent(SevInfo, "CSKWithPhysicalShardsSeedRange", data->thisServerID)
 				    .detail("ShardID", desiredId)
-				    .detail("Range", range);
+				    .detail("Range", range)
+				    .detail("Version", cVer);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				updatedShards.push_back(
 				    StorageServerShard(range, version, desiredId, desiredId, StorageServerShard::ReadWrite));
