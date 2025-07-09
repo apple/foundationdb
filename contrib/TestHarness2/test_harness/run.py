@@ -895,6 +895,10 @@ class TestRunner:
             current_run.summary.archival_config.stderr_path = current_run.stderr_path
             current_run.summary.archival_config.command_path = current_run.command_file_path
             
+            # CRITICAL: Capture the EXACT stats used by the original TestRun BEFORE execution
+            # This ensures determinism check uses identical stats as the original run
+            original_stats_for_determinism = current_run.stats
+
             # Now execute the test with correct paths
             current_run.execute()
             overall_result = overall_result and current_run.success
@@ -936,8 +940,8 @@ class TestRunner:
             if should_perform_unseed_check:
                 expected_unseed = current_run.summary.unseed
                 
-                # CRITICAL: Capture stats BEFORE add_time() modifies TestPicker state
-                original_stats = current_run.stats
+                # Use the exact same stats that the original TestRun used
+                original_stats = original_stats_for_determinism
                 
                 # For restarting tests, determinism check needs the same simfdb state as the original part
                 if count > 0:  # This is a restarting test part that needs simfdb restored
