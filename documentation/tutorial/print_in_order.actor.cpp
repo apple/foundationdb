@@ -13,10 +13,17 @@
 #include <unordered_map>
 #include <vector>
 
+// Solution to https://leetcode.com/problems/print-in-order/description/
+
 ACTOR Future<Void> print_msg_when_ready(Future<int> ready, std::string msg) {
+	int delay_msec = deterministicRandom()->randomInt(0, 1000);
+	double delay_sec = static_cast<double>(delay_msec)/1000.0;
+	wait(delay(delay_sec));
+
 	loop choose {
 		when(int b = wait(ready)) {
 			std::cout << msg << std::endl;
+			wait(delay(0.1));
 			return Void();
 		}
 	}
@@ -32,13 +39,17 @@ ACTOR Future<Void> orchestrate() {
 	state Future<Void> second = print_msg_when_ready(second_ready, "Second");
 	state Future<Void> third = print_msg_when_ready(third_ready, "Third");
 
-	p_first.send(0);
-	p_second.send(0);
-	p_third.send(0);
+	// If we do the following, the order of output varies from run to run based on
+	// random seed chosen.  This is expected.
+	//p_first.send(0);
+	//p_second.send(0);
+	//p_third.send(0);
 
-	wait(first);
-	wait(second);
-	wait(third);
+	// So what we have to do is signal in order and wait before signaling the
+	// next.
+	p_first.send(0); wait(first);
+	p_second.send(0); wait(second);
+	p_third.send(0); wait(third);
 
 	return Void();
 }
