@@ -35,12 +35,16 @@
 
 // Flow solution to https://leetcode.com/problems/building-h2o/
 //
-// Caveat: Written on like day 2 of programming with Flow.  This seems
-// to work but may have bugs, non-idiomatic code, or generally do
-// naive stuff.
+// The description of this problem calls for threads running as
+// hydrogen and oxygen.  To do this yourself, delete the code from
+// this file other than main(), read the problem description above,
+// and implement something in the spirit of what is requested.
 //
-// The description of this problem calls for "threads" running as
-// hydrogen and oxygen.  We model these as actors and we start a lot
+// Caveat: this version was written on like day 2 of programming with
+// Flow.  This seems to work but may have bugs, non-idiomatic code, or
+// generally do naive stuff.
+//
+// Notes on this solution: we model these as actors and we start a lot
 // of them simultaneously in batches from orchestrate() below.  Bonded
 // sets of 2 H's and 1 O are supposed to complete together.  We
 // arrange this by having the H's store off a Promise<int>, then block
