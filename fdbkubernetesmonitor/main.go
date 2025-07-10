@@ -31,13 +31,13 @@ import (
 	"syscall"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
-
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var (
@@ -174,6 +174,9 @@ func main() {
 			logger.Error(err, "Error parsing container version", "currentContainerVersion", currentContainerVersion)
 			os.Exit(1)
 		}
+
+		// Update the logger for the controller-runtime.
+		ctrl.SetLogger(logger)
 		startMonitor(context.Background(), logger, path.Join(inputDir, monitorConfFile), customEnvironment, processCount, promConfig, enablePprof, parsedVersion, enableNodeWatch)
 	case executionModeInit:
 		err = copyFiles(logger, outputDir, copyDetails, requiredCopies)
