@@ -39,25 +39,22 @@
 // exercise in a new environment. To try this yourself, delete the
 // next two functions, then write a solution from scratch.
 
-ACTOR Future<Void> print_msg_when_ready(Future<int> ready, std::string msg) {
+ACTOR Future<Void> print_msg_when_ready(Future<Void> ready, std::string msg) {
 	int delay_msec = deterministicRandom()->randomInt(0, 1000);
 	double delay_sec = static_cast<double>(delay_msec)/1000.0;
 	wait(delay(delay_sec));
 
-	loop choose {
-		when(int b = wait(ready)) {
-			std::cout << msg << std::endl;
-			wait(delay(0.1));
-			return Void();
-		}
-	}
+	wait(ready);
+	std::cout << msg << std::endl;
+	wait(delay(0.1));
+	return Void();
 }
 
 ACTOR Future<Void> orchestrate() {
-	state Promise<int> p_first, p_second, p_third;
-	state Future<int> first_ready = p_first.getFuture();
-	state Future<int> second_ready = p_second.getFuture();
-	state Future<int> third_ready = p_third.getFuture();
+	state Promise<Void> p_first, p_second, p_third;
+	state Future<Void> first_ready = p_first.getFuture();
+	state Future<Void> second_ready = p_second.getFuture();
+	state Future<Void> third_ready = p_third.getFuture();
 
 	state Future<Void> first = print_msg_when_ready(first_ready, "First");
 	state Future<Void> second = print_msg_when_ready(second_ready, "Second");
@@ -71,9 +68,9 @@ ACTOR Future<Void> orchestrate() {
 
 	// So what we have to do is signal in order and wait before signaling the
 	// next.
-	p_first.send(0); wait(first);
-	p_second.send(0); wait(second);
-	p_third.send(0); wait(third);
+	p_first.send(Void()); wait(first);
+	p_second.send(Void()); wait(second);
+	p_third.send(Void()); wait(third);
 
 	return Void();
 }
