@@ -1024,8 +1024,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		resource = "/";
 	}
 
-	req->resource = resource;
-
 	// Merge extraHeaders into headers
 	for (const auto& [k, v] : bstore->extraHeaders) {
 		std::string& fieldValue = req->data.headers[k];
@@ -1057,6 +1055,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		state Reference<HTTP::IncomingResponse> r;
 		state Reference<HTTP::IncomingResponse> dryrunR;
 		state std::string canonicalURI = resource;
+		// Set the resource on each loop so we don't double-encode when we set it to `getCanonicalURI` below.
+		req->resource = resource;
 		state UID connID = UID();
 		state double reqStartTimer;
 		state double connectStartTimer = g_network->timer();
@@ -1224,9 +1224,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		// Otherwise, this request is considered failed.  Update failure count.
 		bstore->s_stats.requests_failed++;
 		++bstore->blobStats->requestsFailed;
-
-		// Reset the resource so we don't double-encode
-		req->resource = resource;
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
 		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
