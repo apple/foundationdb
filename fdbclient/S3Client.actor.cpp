@@ -138,9 +138,7 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
 		    S3BlobStoreEndpoint::fromString(s3url, proxy, &resource, &error, &parameters);
 
 		if (!endpoint) {
-			TraceEvent(SevError, "S3ClientGetEndpointNullEndpoint")
-			    .detail("URL", StringRef(s3url))
-			    .detail("Error", error);
+			TraceEvent(SevError, "S3ClientGetEndpointNullEndpoint").detail("URL", s3url).detail("Error", error);
 			throw backup_invalid_url();
 		}
 
@@ -148,25 +146,23 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
 
 		// Validate bucket parameter exists
 		if (parameters.find("bucket") == parameters.end()) {
-			TraceEvent(SevError, "S3ClientGetEndpointMissingBucket")
-			    .detail("URL", StringRef(s3url))
-			    .detail("Error", error);
+			TraceEvent(SevError, "S3ClientGetEndpointMissingBucket").detail("URL", s3url).detail("Error", error);
 			throw backup_invalid_url();
 		}
 
 		// Validate resource path characters
 		for (char c : resource) {
 			if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/') {
-				TraceEvent(SevError, "S3ClientGetEndpointIllegalCharacter")
-				    .detail("URL", StringRef(s3url))
+ 				TraceEvent(SevError, "S3ClientGetEndpointIllegalCharacter")
+				    .detail("URL", s3url)
 				    .detail("Character", std::string(1, c))
-				    .detail("Error", error);
+            .detail("Error", error);
 				throw backup_invalid_url();
 			}
 		}
 
 		if (!error.empty()) {
-			TraceEvent(SevError, "S3ClientGetEndpointError").detail("URL", StringRef(s3url)).detail("Error", error);
+			TraceEvent(SevError, "S3ClientGetEndpointError").detail("URL", s3url).detail("Error", error);
 			throw backup_invalid_url();
 		}
 
