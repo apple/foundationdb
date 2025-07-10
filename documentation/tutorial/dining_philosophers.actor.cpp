@@ -40,14 +40,20 @@ enum DPEndpoints {
 
 
 ACTOR Future<Void> dpServer() {
-
+	std::cout << format("dpServer: starting...\n");
 	wait(delay(1.0));
+
+	std::cout << format("dpServer: finished.\n");
 	return Void();
 }
 
-ACTOR Future<Void> dpClient(NetworkAddress serverAddress) {
+ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum) {
+	std::cout << format("dpClient: starting philosopher #%d, server address [%s]\n",
+						idnum, serverAddress.toString().c_str());
 
-	wait(delay(1.0));
+	wait(delay(idnum));
+
+	std::cout << format("dpClient: philosopher #%d finished.\n", idnum);
 	return Void();
 }
 
@@ -68,7 +74,7 @@ int main(int argc, char **argv) {
 	NetworkAddress serverAddress;
 	bool isServer = false;
 	std::string port;
-	Future<Void> f;
+
 	if (0 == strcmp(argv[1], "-p")) {
 		isServer = true;
 		serverAddress = NetworkAddress::parse("0.0.0.0:" + std::string(argv[2]));
@@ -80,6 +86,8 @@ int main(int argc, char **argv) {
 	}
 
 	FlowTransport::createInstance(!isServer, 0, DP_ENDPOINT_COUNT);
+
+	std::vector<Future<Void>> all;
 	if (isServer) {
 		try {
 			auto listenError = FlowTransport::transport().bind(serverAddress, serverAddress);
@@ -88,16 +96,18 @@ int main(int argc, char **argv) {
 			}
 		} catch (Error& e) {
 			std::cerr << format("Error binding to address [%s]: %d, %s\n",
-								serverAddress.toString(), e.code(), e.what());
+								serverAddress.toString().c_str(), e.code(), e.what());
 			return 2;
 		}
-		f = dpServer();
+		all.emplace_back(dpServer());
 	} else {
-		f = dpClient(serverAddress);
+		for (int i = 0; i < 5; i++) {
+			all.emplace_back(dpClient(serverAddress, i));
+		}
 	}
 
+	auto f = stopAfter(waitForAll(all));
 	g_network->run();
-	wait(f);
-			
+
 	return 0;
 }
