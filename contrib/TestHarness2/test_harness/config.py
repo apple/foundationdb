@@ -122,6 +122,12 @@ class Config:
             "required": False,
             "env_name": "JOSHUA_APP_DIR",
         }
+        self.joshua_output_dir: Path | None = None
+        self.joshua_output_dir_args = {
+            "type": Path,
+            "default": None,
+            "help": "Directory for TestHarness2 to store output files.",
+        }
         self.stats: str | None = None
         self.stats_args = {
             "type": str,
@@ -147,10 +153,16 @@ class Config:
         self.unseed_check_ratio_args = {
             "help": "Probability for doing determinism check"
         }
-        self.test_dirs: List[str] = ["slow", "fast", "restarting", "rare", "noSim"]
-        self.test_dirs_args: dict = {
+        self.test_source_dir: Path = Path("tests")
+        self.test_source_dir_args = {
+            "type": Path,
+            "help": "Root directory containing test type subdirectories (e.g., slow, fast) which hold .toml test files.",
+            "env_name": "JOSHUA_TEST_FILES_DIR",
+        }
+        self.test_types_to_run: List[str] = ["slow", "fast", "restarting", "rare", "noSim"]
+        self.test_types_to_run_args: dict = {
             "nargs": "*",
-            "help": "test_directories to look for files in",
+            "help": "List of test type subdirectories (under test_source_dir) to run tests from (e.g., slow, fast)."
         }
         self.trace_format: str = "json"
         self.trace_format_args = {
@@ -184,12 +196,23 @@ class Config:
         self.pretty_print_args = {"short_name": "P", "action": "store_true"}
         self.clean_up: bool = True
         self.clean_up_args = {"long_name": "no_clean_up", "action": "store_false"}
-        self.run_dir: Path = Path("tmp")
+        self.run_temp_dir: Path | None = None
+        self.run_temp_dir_args = {
+            "type": Path,
+            "help": "Temporary directory for individual test run artifacts and logs.",
+            "required": True,
+            "env_name": "TH_RUN_TEMP_DIR",
+        }
         self.joshua_seed: int = random.randint(0, 2**32 - 1)
         self.joshua_seed_args = {
             "short_name": "s",
             "help": "A random seed",
             "env_name": "JOSHUA_SEED",
+        }
+        self.no_verbose_on_failure: bool = False
+        self.no_verbose_on_failure_args = {
+            "action": "store_true",
+            "help": "Do not dump all trace events to summary on test failure.",
         }
         self.print_coverage = False
         self.print_coverage_args = {"action": "store_true"}
@@ -250,6 +273,13 @@ class Config:
         }
         self.long_running: bool = False
         self.long_running_args = {"action": "store_true"}
+        self.archive_logs_on_failure: bool = False
+        self.archive_logs_on_failure_args = {
+            "action": "store_true",
+            "help": "If set, archive FDB logs and test harness outputs to a .tar.gz file in the joshua_output_dir on test failure.",
+            "env_name": "TH_ARCHIVE_LOGS_ON_FAILURE",
+        }
+
         self._env_names: Dict[str, str] = {}
         self._config_map = self._build_map()
         self._read_env()
