@@ -10,3 +10,7 @@ target_link_libraries(print_in_order PUBLIC fdbclient)
 set(MAKE_H2O_SRCS make_h2o.actor.cpp)
 add_flow_target(EXECUTABLE NAME make_h2o SRCS "${MAKE_H2O_SRCS}")
 target_link_libraries(make_h2o PUBLIC fdbclient)
+
+set(DP_SRCS dining_philosophers.actor.cpp)
+add_flow_target(EXECUTABLE NAME dining_philosophers SRCS "${DP_SRCS}")
+target_link_libraries(dining_philosophers PUBLIC fdbclient)
