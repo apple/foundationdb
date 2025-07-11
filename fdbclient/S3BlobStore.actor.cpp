@@ -109,7 +109,6 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	sdk_auth = false;
 	enable_object_integrity_check = CLIENT_KNOBS->BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK;
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
-
 }
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
@@ -922,10 +921,8 @@ std::string parseErrorCodeFromS3(std::string xmlResponse) {
 		return std::string(codeNode->value());
 	} catch (Error e) {
 		TraceEvent("BackupParseS3ErrorCodeFailure").errorUnsuppressed(e);
-		printf("Failed to parse S3 error code from response: %s\n", xmlResponse.c_str());
 		throw backup_parse_s3_response_failure();
 	} catch (...) {
-		printf("Failed to parse S3 error code from response: %s\n", xmlResponse.c_str());
 		throw backup_parse_s3_response_failure();
 	}
 }
@@ -962,10 +959,10 @@ std::string getCanonicalURI(Reference<S3BlobStoreEndpoint> bstore, Reference<HTT
 		}
 	}
 
-	// if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
-	// 	// Has to be in absolute-form.
-	// 	canonicalURI = "http://" + bstore->host + ":" + bstore->service + canonicalURI;
-	// }
+	if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
+		// Has to be in absolute-form.
+		canonicalURI = "http://" + bstore->host + ":" + bstore->service + canonicalURI;
+	}
 	return canonicalURI;
 }
 
@@ -1027,6 +1024,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		resource = "/";
 	}
 
+	req->resource = resource;
+
 	// Merge extraHeaders into headers
 	for (const auto& [k, v] : bstore->extraHeaders) {
 		std::string& fieldValue = req->data.headers[k];
@@ -1057,8 +1056,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		state bool connectionEstablished = false;
 		state Reference<HTTP::IncomingResponse> r;
 		state Reference<HTTP::IncomingResponse> dryrunR;
-		// Set the resource on each loop so we don't double-encode when we set it to `getCanonicalURI` below.
-		req->resource = resource;
 		state std::string canonicalURI = resource;
 		state UID connID = UID();
 		state double reqStartTimer;
@@ -1168,11 +1165,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			setHeaders(bstore, req);
 			req->resource = getCanonicalURI(bstore, req);
 		
-
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
-
-			//printf("S3BlobStoreDoRequest: %s %s\n", req->verb.c_str(), req->resource.c_str());
 
 			Future<Reference<HTTP::IncomingResponse>> reqF =
 			    HTTP::doRequest(rconn.conn, req, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
@@ -1236,7 +1230,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		++bstore->blobStats->requestsFailed;
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
-		bool retryable = true;
+		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
 		// But only if our previous attempt was not the last allowable try.
 		retryable = retryable && (thisTry < maxTries);
 
@@ -1261,7 +1255,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 
 		if (!err.present()) {
 			event.detail("ResponseCode", r->code);
-			printf("Error from S3: %d %s\n", r->code, r->data.content.c_str());
 			std::string s3Error = parseErrorCodeFromS3(r->data.content);
 			event.detail("S3ErrorCode", s3Error);
 			if (r->code == badRequestCode) {
@@ -1383,8 +1376,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
                                           Optional<char> delimiter,
                                           int maxDepth,
                                           std::function<bool(std::string const&)> recurseFilter) {
-	state std::string resource = bstore->constructResourcePath(bucket, "");
-	printf("Max keys per page: %d\n", CLIENT_KNOBS->BLOBSTORE_LIST_MAX_KEYS_PER_PAGE);											
+	state std::string resource = bstore->constructResourcePath(bucket, "");										
 	resource.append("?list-type=2&max-keys=").append(std::to_string(CLIENT_KNOBS->BLOBSTORE_LIST_MAX_KEYS_PER_PAGE));
 
 	if (prefix.present())
@@ -1407,14 +1399,13 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		}
 
 		Reference<HTTP::IncomingResponse> r =
-		    wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, {200, 404}));
+		    wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200, 404 }));
 		listReleaser.release();
 
-		//printf("Response from S3: %d %s\n", r->code, r->data.content.c_str());
-
+	
 		try {
 			S3BlobStoreEndpoint::ListResult listResult;
-
+			// If we got a 404, throw an error to indicate the resource doesn't exist
 			if (r->code == 404) {
 				TraceEvent(SevError, "S3BlobStoreResourceNotFound")
 				    .detail("Bucket", bucket)
@@ -1424,9 +1415,11 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 			}
 
 			xml_document<> doc;
+			// Copy content because rapidxml will modify it during parse
 			std::string content = r->data.content;
 			doc.parse<0>((char*)content.c_str());
 
+			// There should be exactly one node
 			xml_node<>* result = doc.first_node();
 			if (result == nullptr || strcmp(result->name(), "ListBucketResult") != 0) {
 				throw http_bad_response();
@@ -1464,14 +1457,16 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 				} else if (strcmp(name, "CommonPrefixes") == 0) {
 					xml_node<>* prefixNode = n->first_node("Prefix");
 					while (prefixNode != nullptr) {
-						const char* prefixVal = prefixNode->value();
+						const char* prefix = prefixNode->value();
+						// If recursing, queue a sub-request, otherwise add the common prefix to the result.
 						if (maxDepth > 0) {
-							if (!recurseFilter || recurseFilter(prefixVal)) {
+							// If there is no recurse filter or the filter returns true then start listing the subfolder
+							if (!recurseFilter || recurseFilter(prefix)) {
 								subLists.push_back(bstore->listObjectsStream(
-								    bucket, results, prefixVal, delimiter, maxDepth - 1, recurseFilter));
+								    bucket, results, prefix, delimiter, maxDepth - 1, recurseFilter));
 							}
 						} else {
-							listResult.commonPrefixes.push_back(prefixVal);
+							listResult.commonPrefixes.push_back(prefix);
 						}
 						prefixNode = prefixNode->next_sibling("Prefix");
 					}

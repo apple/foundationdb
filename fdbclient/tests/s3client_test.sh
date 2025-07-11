@@ -120,8 +120,8 @@ function test_file_upload_and_download {
   local dir="${2}"
   local credentials="${3}"
   local s3client="${4}"
-  local testfileup="${dir}/testfile,2.up"
-  local testfiledown="${dir}/testfile,2.down"
+  local testfileup="${dir}/testfile.up"
+  local testfiledown="${dir}/testfile.down"
   date -Iseconds &> "${testfileup}"
   if ! upload_download "${url}" "${dir}" "${credentials}" "${s3client}" "${testfileup}" "${testfiledown}"; then
     err "Failed upload_download"
@@ -281,7 +281,6 @@ function test_nonexistent_resource {
     # We expect to see the "Contents of" header but no actual contents
     if ! (echo "${output}" | grep -q "Contents of" &&
           [[ $(echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "HTTP" | wc -l) -eq 0 ]]); then
-      log "the output is: ${output}"
       err "Failed to detect non-existent resource in S3"
       return 1
     fi
@@ -571,15 +570,11 @@ function test_ls_handling {
   #   return 1
   # fi
 
-  # log "NON-EXISTENT PASSED!"
-
   # # Test empty bucket listing (should not error)
   # local empty_bucket_url="blobstore://${host}/?${query_str}"
   # if ! test_empty_bucket "${empty_bucket_url}" "${dir}" "${credentials}" "${s3client}"; then
   #   return 1
   # fi
-
-  # log "EMPTY PASSED!"
 
   # Test positive case - create some files and verify ls works
   local test_url="blobstore://${host}/${path_prefix}/ls_test?${query_str}"
