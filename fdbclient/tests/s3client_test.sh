@@ -451,17 +451,17 @@ function test_list_with_files {
     fi
   done
 
-  # Now test with recursive listing
+  # Now test with nested structure
   local depth=3
   local files_per_level=2
   log "Running ls test with depth ${depth} and ${files_per_level} files per level"
 
 
-  local test_dir="${dir}/ls_test_recursive"
+  local test_dir="${dir}/ls_test_nested"
   mkdir -p "${test_dir}"
 
   # Recursive file creation
-  create_recursive_files() {
+  create_nested_files() {
     local current_dir="$1"
     local current_depth="$2"
 
@@ -472,11 +472,11 @@ function test_list_with_files {
     if [[ "${current_depth}" -lt "${depth}" ]]; then
       local subdir="${current_dir}/sub${current_depth}"
       mkdir -p "${subdir}"
-      create_recursive_files "${subdir}" "$((current_depth + 1))"
+      create_nested_files "${subdir}" "$((current_depth + 1))"
     fi
   }
 
-  create_recursive_files "${test_dir}" 1
+  create_nested_files "${test_dir}" 1
 
   # Upload test files
   if ! "${s3client}" \
@@ -497,10 +497,11 @@ function test_list_with_files {
   local edited_url="blobstore://o2.atla.twitter.com/bulkload/test/s3client/ls_test/?bucket=shared&region=global&secure_connection=0"
   log "url: ${edited_url}"
 
+  # Test recursive listing
   output=$("${s3client}" \
       --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
       --knob_blobstore_encryption_type=aws:kms \
-      --knob_blobstore_list_max_keys_per_page=5 \
+      --knob_blobstore_list_max_keys_per_page=1 \
       --tls-ca-file "${TLS_CA_FILE}" \
       --blob-credentials "${credentials}" \
       --log --logdir "${logsdir}" \
@@ -509,9 +510,10 @@ function test_list_with_files {
   status=$?
 
   local missing=0
-  check_recursive_files() {
+  check_nested_files() {
     local current_path="$1"
     local current_depth="$2"
+    local recurse="$3"
 
     for i in $(seq 1 "${files_per_level}"); do
       local expected="${current_path}/file${current_depth}_${i}"
@@ -523,12 +525,30 @@ function test_list_with_files {
 
     if [[ "${current_depth}" -lt "${depth}" ]]; then
       local subdir="${current_path}/sub${current_depth}"
-      check_recursive_files "${subdir}" "$((current_depth + 1))"
+      if [[ "${recurse}" == "true" ]]; then
+        check_nested_files "${subdir}" "$((current_depth + 1))" "$3"
+      fi
     fi
   }
 
-  check_recursive_files "ls_test" 1
+  check_nested_files "ls_test" 1 "true"
 
+  if [[ "${missing}" -ne 0 ]]; then
+    return 1
+  fi
+
+  # Test non-recursive listing
+  output=$("${s3client}" \
+    --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+    --knob_blobstore_encryption_type=aws:kms \
+    --knob_blobstore_list_max_keys_per_page=5 \
+    --tls-ca-file "${TLS_CA_FILE}" \
+    --blob-credentials "${credentials}" \
+    --log --logdir "${logsdir}" \
+    ls "${edited_url}" 2>&1)
+  status=$?
+
+  check_nested_files "ls_test" 1 "false"
   if [[ "${missing}" -ne 0 ]]; then
     return 1
   fi
@@ -541,10 +561,9 @@ function test_list_with_files {
       --blob-credentials "${credentials}" \
       --log --logdir "${logsdir}" \
       rm "${edited_url}"; then
-    err "Failed to clean up recursive test files"
+    err "Failed to clean up nested test files"
     return 1
   fi
-
 
   log "Successfully tested ls with existing files and directories"
 }
