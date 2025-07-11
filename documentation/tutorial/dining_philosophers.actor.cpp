@@ -40,7 +40,7 @@ struct DPServerInterface {
 	constexpr static FileIdentifier file_identifier = 9957031;
 	RequestStream<struct GetInterfaceRequest> getInterface;
 	RequestStream<struct GetForkRequest> getFork;
-	// RequestStream<struct ReleaseForkRequest> releaseFork;
+	RequestStream<struct ReleaseForkRequest> releaseFork;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -60,6 +60,7 @@ struct GetInterfaceRequest {
 
 // This is sent in both requests and responses.
 // Having a default constructor seems important for Flow RPC.
+// Having a file_identifier also seems important.
 struct ForkState {
 	constexpr static FileIdentifier file_identifier = 998236;
 	// ID [0, N) of the philospher requesting this fork.
@@ -89,23 +90,16 @@ struct GetForkRequest {
 	}
 };
 
-// struct ReleaseForkRequest {
-// 	constexpr static FileIdentifier file_identifier = 5914324;
-// 	int clientId = 0;
-// 	// Release fork numbered forkNumber. Must have been previously
-// 	// acquired by a successful call to GetForkRequest().
-// 	int forkNumber = 0;
-// 	// The reply echos the fork number.
-// 	// TODO: pass an error back in case of out-of-range forkNumber, or
-// 	// an attempt to free a fork held by somebody else, or whatever.
-// 	ReplyPromise<int> reply;
-// 
-// 	template <class Ar>
-// 	void serialize(Ar& ar) {
-// 		serializer(ar, clientId, forkNumber, reply);
-// 	}
-// };
-// 
+struct ReleaseForkRequest {
+	constexpr static FileIdentifier file_identifier = 5914324;
+	ForkState forkState;
+	ReplyPromise<ForkState> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, forkState, reply);
+	}
+};
 
 ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum) {
 	std::cout << format("dpClient: starting philosopher #%d, server address [%s]\n",
@@ -137,11 +131,11 @@ ACTOR Future<Void> dpServerLoop() {
 					// exclusion problem.  Come back later.
 					req.reply.send(req.forkState);
 				}
-				//				when(ReleaseForkRequest req = waitNext(dpServer.releaseFork.getFuture())) {
+				when(ReleaseForkRequest req = waitNext(dpServer.releaseFork.getFuture())) {
 					// XXX implement
 					// Wake up anybody waiting for this fork
-				//					req.reply.send(req.forkNumber);
-				//				}
+					req.reply.send(req.forkState);
+				}
 			}
 		} catch (Error& e) {
 			// XXX this is cargo-culted from tutorial.actor.cpp; what does this do
