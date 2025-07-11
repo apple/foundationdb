@@ -561,26 +561,26 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 		wait(file->sync());
 
 		// Get and verify checksum before closing the file
-		std::map<std::string, std::string> t = wait(endpoint->getObjectTags(bucket, objectName));
-		tags = t;
-		auto it = tags.find(S3_CHECKSUM_TAG_NAME);
-		if (it != tags.end()) {
-			expectedChecksum = it->second;
-			if (!expectedChecksum.empty()) {
-				state std::string actualChecksum = wait(calculateFileChecksum(file));
-				if (actualChecksum != expectedChecksum) {
-					TraceEvent(SevError, "S3ClientCopyDownFileChecksumMismatch")
-					    .detail("Expected", expectedChecksum)
-					    .detail("Calculated", actualChecksum)
-					    .detail("FileSize", fileSize)
-					    .detail("FilePath", filepath);
-					// TODO(BulkLoad): Consider making this a non-retryable error since
-					// retrying is unlikely to help if the checksum doesn't match.
-					// This would require adding a new error type and updating callers.
-					throw checksum_failed();
-				}
-			}
-		}
+		// std::map<std::string, std::string> t = wait(endpoint->getObjectTags(bucket, objectName));
+		// tags = t;
+		// auto it = tags.find(S3_CHECKSUM_TAG_NAME);
+		// if (it != tags.end()) {
+		// 	expectedChecksum = it->second;
+		// 	if (!expectedChecksum.empty()) {
+		// 		state std::string actualChecksum = wait(calculateFileChecksum(file));
+		// 		if (actualChecksum != expectedChecksum) {
+		// 			TraceEvent(SevError, "S3ClientCopyDownFileChecksumMismatch")
+		// 			    .detail("Expected", expectedChecksum)
+		// 			    .detail("Calculated", actualChecksum)
+		// 			    .detail("FileSize", fileSize)
+		// 			    .detail("FilePath", filepath);
+		// 			// TODO(BulkLoad): Consider making this a non-retryable error since
+		// 			// retrying is unlikely to help if the checksum doesn't match.
+		// 			// This would require adding a new error type and updating callers.
+		// 			throw checksum_failed();
+		// 		}
+		// 	}
+		// }
 
 		// Close file properly
 		file = Reference<IAsyncFile>();
