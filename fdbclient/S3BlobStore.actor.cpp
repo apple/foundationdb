@@ -1613,7 +1613,6 @@ ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEnd
 				    .errorUnsuppressed(e)
 				    .suppressFor(60)
 				    .detail("Resource", fullResource);
-			printf("Throwing bad response 1619");
 			throw http_bad_response();
 		}
 	}
@@ -1727,7 +1726,6 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 	// std::cout << "========== Starting===========" << std::endl;
 	std::string accessKey = creds.key;
 	std::string secretKey = creds.secret;
-
 	// Create a date for headers and the credential string
 	std::string amzDate;
 	std::string dateStamp;
@@ -2229,10 +2227,10 @@ ACTOR Future<Void> putObjectTags_impl(Reference<S3BlobStoreEndpoint> bstore,
 			    wait(bstore->doRequest("PUT", resource, headers, &packets, manifest.size(), { 200 }));
 
 			// Verify tags were written correctly
-			// std::map<std::string, std::string> verifyTags = wait(getObjectTags_impl(bstore, bucket, object));
-			// if (verifyTags == tags) {
-			// 	return Void();
-			// }
+			std::map<std::string, std::string> verifyTags = wait(getObjectTags_impl(bstore, bucket, object));
+			if (verifyTags == tags) {
+				return Void();
+			}
 
 			if (++retryCount >= maxRetries) {
 				TraceEvent(SevWarn, "S3BlobStorePutTagsMaxRetriesExceeded")

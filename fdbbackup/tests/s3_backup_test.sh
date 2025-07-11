@@ -259,7 +259,7 @@ if [[ "${USE_S3}" == "true" ]]; then
   readonly bucket="${configs[1]}"
   readonly blob_credentials_file="${configs[2]}"
   readonly region="${configs[3]}"
-  query_str="bucket=${bucket}&region=${region}&secure_connection=1"
+  query_str="bucket=${bucket}&region=${region}"
   # Make these environment variables available for the fdb cluster and backup_agent when s3.
   export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
   export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
