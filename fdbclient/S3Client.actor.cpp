@@ -522,7 +522,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 					file = Reference<IAsyncFile>();
 				}
 
-				// Attempt to abort the upload but do not wait for it
+				// Attempt to abort the upload but only if we have a valid uploadID
 				if (!uploadID.empty()) {
 					try {
 						wait(endpoint->abortMultiPartUpload(bucket, objectName, uploadID));
@@ -530,7 +530,9 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 						TraceEvent(SevWarn, "S3ClientCopyUpFileAbortError")
 						    .error(abortError)
 						    .detail("Bucket", bucket)
-						    .detail("Object", objectName);
+						    .detail("Object", objectName)
+						    .detail("UploadID", uploadID)
+						    .detail("OriginalError", err.what());
 					}
 					uploadID = "";
 				}
