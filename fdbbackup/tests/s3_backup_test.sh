@@ -309,6 +309,6 @@ log "Backup_agent is up"
 
 # Run tests.
 test="test_s3_backup_and_restore"
-url="blobstore://${host}/${path_prefix}/${test}/?${query_str}"
+url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
 test_s3_backup_and_restore "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}"
 log_test_result $? "test_s3_backup_and_restore"
