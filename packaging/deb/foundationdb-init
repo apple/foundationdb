@@ -15,7 +15,7 @@
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
 DESC="FoundationDB Process Monitor"
 NAME=fdbmonitor
-DAEMON=/usr/lib/foundationdb/$NAME
+DAEMON=/usr/sbin/$NAME
 PIDFILE=/var/run/$NAME.pid
 SCRIPTNAME=/etc/init.d/foundationdb
 CONFFILE=/etc/foundationdb/foundationdb.conf

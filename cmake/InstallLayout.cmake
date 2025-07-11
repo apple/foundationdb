@@ -89,15 +89,13 @@ function(symlink_files)
 endfunction()
 
 fdb_install_packages(TGZ DEB EL9 VERSIONED)
-fdb_install_dirs(BIN SBIN LIB FDBMONITOR INCLUDE ETC LOG DATA BACKUPAGENT)
+fdb_install_dirs(BIN SBIN LIB INCLUDE ETC LOG DATA)
 message(STATUS "FDB_INSTALL_DIRS -> ${FDB_INSTALL_DIRS}")
 
 install_destinations(TGZ
   BIN bin
   SBIN sbin
   LIB lib
-  FDBMONITOR sbin
-  BACKUPAGENT usr/lib/foundationdb
   INCLUDE include
   ETC etc/foundationdb
   LOG log/foundationdb
@@ -107,8 +105,6 @@ install_destinations(DEB
   BIN usr/bin
   SBIN usr/sbin
   LIB usr/lib
-  FDBMONITOR usr/lib/foundationdb
-  BACKUPAGENT usr/lib/foundationdb
   INCLUDE usr/include
   ETC etc/foundationdb
   LOG var/log/foundationdb
