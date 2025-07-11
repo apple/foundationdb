@@ -81,17 +81,6 @@ include(ConfigureCompiler)
 
 include(FDBComponents)
 
-# Workaround for macOS ARM64 builds with Xcode versions newer than 14.3.x
-# Addresses "pointer not aligned" linker errors
-# You'll see lots of 'ld: warning: -ld_classic is deprecated and will be removed in a future release'
-# but it links.
-if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-    message(STATUS "Applying macOS ARM64 linker compatibility flags for Xcode beyond 14.3.x")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-ld_classic")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-ld_classic")
-    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,-ld_classic")
-endif()
-
 ################################################################################
 # Get repository information
 ################################################################################
