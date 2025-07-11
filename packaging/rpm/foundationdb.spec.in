@@ -123,7 +123,7 @@ exit 0
 %doc /usr/share/doc/foundationdb-clients
 %attr(0775,foundationdb,foundationdb) %dir /etc/foundationdb
 %dir /usr/lib/foundationdb
-/usr/lib/foundationdb/backup_agent/backup_agent
+/usr/bin/backup_agent
 /usr/bin/dr_agent
 /usr/bin/fdbcli
 /usr/bin/fdbdr
