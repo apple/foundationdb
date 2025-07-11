@@ -147,7 +147,8 @@ public:
 		    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file,
 		    enable_read_cache, read_block_size, read_ahead_blocks, read_cache_blocks_per_file,
 		    max_send_bytes_per_second, max_recv_bytes_per_second, sdk_auth, enable_object_integrity_check,
-		    global_connection_pool, max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms;
+		    global_connection_pool, max_delay_retryable_error, max_delay_connection_failed, multipart_retry_delay_ms,
+			list_max_keys_per_page;
 
 		bool set(StringRef name, int value);
 		std::string getURLParameters() const;
@@ -190,6 +191,7 @@ public:
 				"BUILD_AWS_BACKUP is enabled.",
 				"enable_object_integrity_check (or eoic) Enable integrity check on GET requests (Default: false).",
 				"global_connection_pool (or gcp)       Enable shared connection pool between all blobstore instances."
+				"list_max_keys_per_page			       Max number of keys to return in a list response."
 			};
 		}
 

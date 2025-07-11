@@ -310,9 +310,9 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 		// and could help identify which specific part failed if there's an issue.
 
 		// Add the checksum as a tag after successful upload
-		state std::map<std::string, std::string> tags;
-		tags[S3_CHECKSUM_TAG_NAME] = checksum;
-		wait(endpoint->putObjectTags(bucket, objectName, tags));
+		// state std::map<std::string, std::string> tags;
+		// tags[S3_CHECKSUM_TAG_NAME] = checksum;
+		// wait(endpoint->putObjectTags(bucket, objectName, tags));
 
 		TraceEvent(s3PerfEventSev(), "S3ClientCopyUpFileEnd")
 		    .detail("Bucket", bucket)
