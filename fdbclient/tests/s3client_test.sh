@@ -387,14 +387,20 @@ function test_list_with_files {
   if [[ ! -d "${logsdir}" ]]; then
     mkdir "${logsdir}"
   fi
+  local file_count=2
+  local maxKeyPerPage=3
 
   # Create test files
   local test_dir="${dir}/ls_test"
   mkdir -p "${test_dir}"
-  date -Iseconds > "${test_dir}/file1"
-  date -Iseconds > "${test_dir}/file2"
+  for i in $(seq 1 "${file_count}"); do
+    date -Iseconds > "${test_dir}/file${i}"
+  done
+
   mkdir "${test_dir}/subdir"
-  date -Iseconds > "${test_dir}/subdir/file3"
+  for i in $(seq 1 "${file_count}"); do
+    date -Iseconds > "${test_dir}/subdir/file${i}"
+  done
 
   log "uploading test files"
 
@@ -420,13 +426,23 @@ function test_list_with_files {
   log "url: ${edited_url}"
 
   log "going to ls"
-  output=$("${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      ls "${edited_url}" 2>&1)
+  # output=$("${s3client}" \
+  #     --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+  #     --knob_blobstore_encryption_type=aws:kms \
+  #     --knob_blobstore_list_max_keys_per_page=10 \
+  #     --tls-ca-file "${TLS_CA_FILE}" \
+  #     --blob-credentials "${credentials}" \
+  #     --log --logdir "${logsdir}" \
+  #     ls "${edited_url}" 2>&1)
+
+  "${s3client}" \
+    --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+    --knob_blobstore_encryption_type=aws:kms \
+    --knob_blobstore_list_max_keys_per_page=10 \
+    --tls-ca-file "${TLS_CA_FILE}" \
+    --blob-credentials "${credentials}" \
+    --log --logdir "${logsdir}" \
+    ls "${edited_url}" 
 
   status=$?
 

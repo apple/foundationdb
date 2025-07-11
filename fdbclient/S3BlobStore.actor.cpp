@@ -109,7 +109,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	sdk_auth = false;
 	enable_object_integrity_check = CLIENT_KNOBS->BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK;
 	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
-	list_max_keys_per_page = CLIENT_KNOBS->BLOBSTORE_LIST_MAX_KEYS_PER_PAGE;
+
 }
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
@@ -1384,8 +1384,8 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
                                           int maxDepth,
                                           std::function<bool(std::string const&)> recurseFilter) {
 	state std::string resource = bstore->constructResourcePath(bucket, "");
-	resource.append("?list-type=2&max-keys=1000");
-	//resource.append("?list-type=2&max-keys=").append(std::to_string(bstore->knobs.list_max_keys_per_page));
+	printf("Max keys per page: %d\n", CLIENT_KNOBS->BLOBSTORE_LIST_MAX_KEYS_PER_PAGE);											
+	resource.append("?list-type=2&max-keys=").append(std::to_string(CLIENT_KNOBS->BLOBSTORE_LIST_MAX_KEYS_PER_PAGE));
 
 	if (prefix.present())
 		resource.append("&prefix=").append(prefix.get());
@@ -1403,7 +1403,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		state HTTP::Headers headers;
 		state std::string fullResource = resource;
 		if (!continuationToken.empty()) {
-			fullResource.append("&continuation-token=").append(HTTP::urlEncode(continuationToken));
+			fullResource.append("&continuation-token=").append(continuationToken);
 		}
 
 		Reference<HTTP::IncomingResponse> r =
