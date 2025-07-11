@@ -40,7 +40,7 @@ function shutdown_aws {
 function create_aws_dir {
   local dir="${1}"
   local aws_dir
-  aws_dir=$(mktemp -d -p "${dir}" -t s3.$$.XXXX)
+  aws_dir=$(mktemp -d "${dir}/s3.$$.XXXX")
   # Exit if the temp directory wasn't created successfully.
   if [[ ! -d "${aws_dir}" ]]; then
     echo "ERROR: Failed create of aws  directory ${aws_dir}" >&2
@@ -103,37 +103,37 @@ function write_blob_credentials {
 # so call it first).
 # Returns array of configurations to use contacting s3.
 function aws_setup {
-  local local_build_dir="${1}"
-  local local_aws_dir="${2}"
-  # Fetch token, region, etc. from our aws environment.
-  # On 169.254.169.254, see
-  # https://www.baeldung.com/linux/cloud-ip-meaning#169254169254-and-other-link-local-addresses-on-the-cloud
-  if ! imdsv2_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" \
-      -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"); then
-    err "Failed reading token"
-    exit 1
-  fi
-  readonly imdsv2_token
-  if ! region=$( curl -H "X-aws-ec2-metadata-token: ${imdsv2_token}" \
-      "http://169.254.169.254/latest/meta-data/placement/region"); then
-    err "Failed reading region"
-    exit 1
-  fi
-  readonly region
-  if ! account_id=$( aws --output text sts get-caller-identity --query 'Account' ); then
-    err "Failed reading account id"
-    exit 1
-  fi
-  readonly account_id
-  readonly bucket="backup-${account_id}-${region}"
-  # Add the '@' in front so we force reading of credentials file when s3
-  # When we do lookup for credentials, we don't expect a port but it is expected later going via proxy.
-  readonly host="@s3.${region}.amazonaws.com"
-  if ! blob_credentials_file=$(write_blob_credentials "${imdsv2_token}" "${host}" "${region}" "${bucket}" "${local_aws_dir}" "${local_build_dir}"); then
-    err "Failed to write credentials file"
-    exit 1
-  fi
-  results_array=("${host}" "${bucket}" "${blob_credentials_file}" "${region}")
+  # local local_build_dir="${1}"
+  # local local_aws_dir="${2}"
+  # # Fetch token, region, etc. from our aws environment.
+  # # On 169.254.169.254, see
+  # # https://www.baeldung.com/linux/cloud-ip-meaning#169254169254-and-other-link-local-addresses-on-the-cloud
+  # if ! imdsv2_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" \
+  #     -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"); then
+  #   err "Failed reading token"
+  #   exit 1
+  # fi
+  # readonly imdsv2_token
+  # if ! region=$( curl -H "X-aws-ec2-metadata-token: ${imdsv2_token}" \
+  #     "http://169.254.169.254/latest/meta-data/placement/region"); then
+  #   err "Failed reading region"
+  #   exit 1
+  # fi
+  # readonly region
+  # if ! account_id=$( aws --output text sts get-caller-identity --query 'Account' ); then
+  #   err "Failed reading account id"
+  #   exit 1
+  # fi
+  # readonly account_id
+  # readonly bucket="backup-${account_id}-${region}"
+  # # Add the '@' in front so we force reading of credentials file when s3
+  # # When we do lookup for credentials, we don't expect a port but it is expected later going via proxy.
+  # readonly host="@s3.${region}.amazonaws.com"
+  # if ! blob_credentials_file=$(write_blob_credentials "${imdsv2_token}" "${host}" "${region}" "${bucket}" "${local_aws_dir}" "${local_build_dir}"); then
+  #   err "Failed to write credentials file"
+  #   exit 1
+  # fi
+  results_array=("o2.atla.twitter.com" "shared" "fdb-scratch/blob_credentials.json" "global")
   printf "%s\n" "${results_array[@]}"
 }
 

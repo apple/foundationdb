@@ -260,6 +260,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
 
+	// Request 1000 keys at a time, the maximum allowed
+	init( BLOBSTORE_LIST_MAX_KEYS_PER_PAGE,        1000 );
+
 	// Dynamic Knobs
 	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );
 	init( GET_GENERATION_QUORUM_TIMEOUT,            3.0 );

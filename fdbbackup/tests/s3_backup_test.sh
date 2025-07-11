@@ -112,7 +112,8 @@ function test_s3_backup_and_restore {
   fi
   # Edit the url. Backup adds 'data' to the path. Need this url for
   # cleanup of test data.
-  local edited_url=$(echo "${local_url}" | sed -e "s/ctest/data\/ctest/" )
+  local edited_url=$(echo "${local_url}" | sed -e "s/ctest/data\/ctest/")
+  log "edited_url: ${edited_url}"
   readonly edited_url
   if [[ "${USE_S3}" == "true" ]]; then
     # Run this rm only if s3. In seaweed, it would fail because
@@ -259,10 +260,10 @@ if [[ "${USE_S3}" == "true" ]]; then
   readonly bucket="${configs[1]}"
   readonly blob_credentials_file="${configs[2]}"
   readonly region="${configs[3]}"
-  query_str="bucket=${bucket}&region=${region}"
+  query_str="bucket=${bucket}&region=${region}&secure_connection=0"
   # Make these environment variables available for the fdb cluster and backup_agent when s3.
   export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
-  export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
+  #export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
 else
   log "Testing against seaweedfs"
   # Now source in the seaweedfs fixture so we can use its methods in the below.
@@ -309,6 +310,6 @@ log "Backup_agent is up"
 
 # Run tests.
 test="test_s3_backup_and_restore"
-url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+url="blobstore://${host}/${path_prefix}/${test}/?${query_str}"
 test_s3_backup_and_restore "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}"
 log_test_result $? "test_s3_backup_and_restore"
