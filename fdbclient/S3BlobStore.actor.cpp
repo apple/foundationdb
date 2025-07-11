@@ -1463,12 +1463,12 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 						const char* prefix = prefixNode->value();
 						// If recursing, queue a sub-request, otherwise add the common prefix to the result.
 						if (maxDepth > 0) {
-							// If there is no recurse filter or the filter returns true then start listing the subfolder
 							if (!recurseFilter || recurseFilter(prefix)) {
+								// For recursive listing, don't use delimiter in sub-requests to get individual files
 								subLists.push_back(bstore->listObjectsStream(
-								    bucket, results, prefix, delimiter, maxDepth - 1, recurseFilter));
-							}
-						} else {
+									bucket, results, prefix, Optional<char>(), maxDepth - 1, recurseFilter));
+                            }
+						} else  {
 							listResult.commonPrefixes.push_back(prefix);
 						}
 						prefixNode = prefixNode->next_sibling("Prefix");

@@ -685,8 +685,8 @@ ACTOR Future<Void> listFiles(std::string s3url, int maxDepth) {
 		}
 
 		// Use listObjects with the resource path directly, letting S3BlobStoreEndpoint handle URL construction
-		state S3BlobStoreEndpoint::ListResult result =
-		    wait(bstore->listObjects(bucket, resource, delimiter, maxDepth > 1));
+		state S3BlobStoreEndpoint::ListResult result = 
+			wait(bstore->listObjects(bucket, resource, delimiter, maxDepth));
 
 		// Format and display the objects
 		std::cout << "Contents of " << s3url << ":" << std::endl;
