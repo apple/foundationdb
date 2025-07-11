@@ -36,7 +36,7 @@ enum DPEndpoints {
 	DP_ENDPOINT_COUNT,
 };
 
-struct DeePeeServerInterface {
+struct DPServerInterface {
 	constexpr static FileIdentifier file_identifier = 9957031;
 	RequestStream<struct GetInterfaceRequest> getInterface;
 	RequestStream<struct GetForkRequest> getFork;
@@ -44,14 +44,13 @@ struct DeePeeServerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// serializer(ar, getInterface, getFork, releaseFork);
-		serializer(ar, getFork);
+		serializer(ar, getInterface, getFork);
 	}
 };
 
 struct GetInterfaceRequest {
 	constexpr static FileIdentifier file_identifier = 13789052;
-	ReplyPromise<DeePeeServerInterface> reply;
+	ReplyPromise<DPServerInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -59,25 +58,34 @@ struct GetInterfaceRequest {
 	}
 };
 
-struct GetForkRequest {
-	constexpr static FileIdentifier file_identifier = 14904213;
+// This is sent in both requests and responses.
+// Having a default constructor seems important for Flow RPC.
+struct ForkState {
+	constexpr static FileIdentifier file_identifier = 998236;
 	// ID [0, N) of the philospher requesting this fork.
-	int clientId = 0;
-	// Request fork numbered forkNumber, from 0 to Num philosophers-1.
-	// If this fork is held by somebody else, the call will block until
-	// the other party releases it.
-
-	int forkNumber = 0;
-	// The reply echos the fork number, just to let the client assert that
-	// what the server acquired for it is the same as what it told the server.
-	// TODO: pass an error back to handle cases where the client asks
-	// for an out-of-range fork, a fork it already owns, or other
-	// error conditions.
-	ReplyPromise<int> reply;
+	int clientId;
+	// The number of the fork we are requesting, also [0, N).
+	// Philosophers numbered i request forks i and (i + 1) % N,
+	// not necessarily in that order.
+	int forkNumber;
+	ForkState() : clientId(0), forkNumber(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientId, forkNumber, reply);
+		serializer(ar, clientId, forkNumber);
+	}
+
+};
+
+struct GetForkRequest {
+	constexpr static FileIdentifier file_identifier = 14904213;
+
+	ForkState forkState;
+	ReplyPromise<ForkState> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, forkState, reply);
 	}
 };
 
@@ -110,7 +118,7 @@ ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum) {
 }
 
 ACTOR Future<Void> dpServerLoop() {
-	state DeePeeServerInterface dpServer;
+	state DPServerInterface dpServer;
 	dpServer.getInterface.makeWellKnownEndpoint(WLTOKEN_DP_SERVER, TaskPriority::DefaultEndpoint);
 
 	std::cout << format("dpServer: starting...\n");
@@ -127,7 +135,7 @@ ACTOR Future<Void> dpServerLoop() {
 					// This means that multiple clients can use the same fork
 					// at the same time and we're obviously not solving the
 					// exclusion problem.  Come back later.
-					req.reply.send(req.forkNumber);
+					req.reply.send(req.forkState);
 				}
 				//				when(ReleaseForkRequest req = waitNext(dpServer.releaseFork.getFuture())) {
 					// XXX implement
