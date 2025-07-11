@@ -179,6 +179,7 @@ struct DataMoveMetaData {
 	int16_t phase; // DataMoveMetaData::Phase.
 	int8_t mode;
 	Optional<BulkLoadTaskState> bulkLoadTaskState; // set if the data move is a bulk load data move
+	Optional<std::unordered_map<std::string, std::string>> dcTeamIds;
 
 	DataMoveMetaData() = default;
 	DataMoveMetaData(UID id, Version version, KeyRange range) : id(id), version(version), priority(0), mode(0) {
@@ -188,6 +189,11 @@ struct DataMoveMetaData {
 		this->ranges.push_back(range);
 	}
 	DataMoveMetaData(UID id) : id(id), version(invalidVersion), priority(0), mode(0) {}
+
+	DataMoveMetaData(UID id, KeyRange range, std::unordered_map<std::string, std::string> teamIds) {
+		ranges.push_back(range);
+		dcTeamIds = teamIds;
+	}
 
 	Phase getPhase() const { return static_cast<Phase>(phase); }
 

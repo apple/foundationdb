@@ -95,7 +95,7 @@ struct StorageServerShard {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, version, id, desiredId, shardState, moveInShardId);
+		serializer(ar, range, version, id, desiredId, shardState, moveInShardId, dataMoveId, teamId);
 	}
 
 	KeyRange range;
