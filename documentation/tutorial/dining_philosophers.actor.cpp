@@ -25,27 +25,79 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TLSConfig.actor.h"
+#include <functional>
+#include <unordered_map>
+#include <memory>
+#include <iostream>
 #include "flow/actorcompiler.h"
 
-#include <functional>
-#include <iostream>
-#include <memory>
-#include <unordered_map>
-#include <vector>
-
 enum DPEndpoints {
-	DP_SERVER = WLTOKEN_FIRST_AVAILABLE,
+	WLTOKEN_DP_SERVER = WLTOKEN_FIRST_AVAILABLE,
 	DP_ENDPOINT_COUNT,
 };
 
+struct DeePeeServerInterface {
+	constexpr static FileIdentifier file_identifier = 9957031;
+	RequestStream<struct GetInterfaceRequest> getInterface;
+	RequestStream<struct GetForkRequest> getFork;
+	// RequestStream<struct ReleaseForkRequest> releaseFork;
 
-ACTOR Future<Void> dpServer() {
-	std::cout << format("dpServer: starting...\n");
-	wait(delay(1.0));
+	template <class Ar>
+	void serialize(Ar& ar) {
+		// serializer(ar, getInterface, getFork, releaseFork);
+		serializer(ar, getFork);
+	}
+};
 
-	std::cout << format("dpServer: finished.\n");
-	return Void();
-}
+struct GetInterfaceRequest {
+	constexpr static FileIdentifier file_identifier = 13789052;
+	ReplyPromise<DeePeeServerInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct GetForkRequest {
+	constexpr static FileIdentifier file_identifier = 14904213;
+	// ID [0, N) of the philospher requesting this fork.
+	int clientId = 0;
+	// Request fork numbered forkNumber, from 0 to Num philosophers-1.
+	// If this fork is held by somebody else, the call will block until
+	// the other party releases it.
+
+	int forkNumber = 0;
+	// The reply echos the fork number, just to let the client assert that
+	// what the server acquired for it is the same as what it told the server.
+	// TODO: pass an error back to handle cases where the client asks
+	// for an out-of-range fork, a fork it already owns, or other
+	// error conditions.
+	ReplyPromise<int> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, clientId, forkNumber, reply);
+	}
+};
+
+// struct ReleaseForkRequest {
+// 	constexpr static FileIdentifier file_identifier = 5914324;
+// 	int clientId = 0;
+// 	// Release fork numbered forkNumber. Must have been previously
+// 	// acquired by a successful call to GetForkRequest().
+// 	int forkNumber = 0;
+// 	// The reply echos the fork number.
+// 	// TODO: pass an error back in case of out-of-range forkNumber, or
+// 	// an attempt to free a fork held by somebody else, or whatever.
+// 	ReplyPromise<int> reply;
+// 
+// 	template <class Ar>
+// 	void serialize(Ar& ar) {
+// 		serializer(ar, clientId, forkNumber, reply);
+// 	}
+// };
+// 
 
 ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum) {
 	std::cout << format("dpClient: starting philosopher #%d, server address [%s]\n",
@@ -57,8 +109,45 @@ ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum) {
 	return Void();
 }
 
+ACTOR Future<Void> dpServerLoop() {
+	state DeePeeServerInterface dpServer;
+	dpServer.getInterface.makeWellKnownEndpoint(WLTOKEN_DP_SERVER, TaskPriority::DefaultEndpoint);
+
+	std::cout << format("dpServer: starting...\n");
+
+	loop {
+		try {
+			choose {
+				when(GetInterfaceRequest req = waitNext(dpServer.getInterface.getFuture())) {
+					req.reply.send(dpServer);
+				}
+				when(GetForkRequest req = waitNext(dpServer.getFork.getFuture())) {
+					// XXX implement
+					// For now just immediately give the requested fork.
+					// This means that multiple clients can use the same fork
+					// at the same time and we're obviously not solving the
+					// exclusion problem.  Come back later.
+					req.reply.send(req.forkNumber);
+				}
+				//				when(ReleaseForkRequest req = waitNext(dpServer.releaseFork.getFuture())) {
+					// XXX implement
+					// Wake up anybody waiting for this fork
+				//					req.reply.send(req.forkNumber);
+				//				}
+			}
+		} catch (Error& e) {
+			// XXX this is cargo-culted from tutorial.actor.cpp; what does this do
+			if (e.code() != error_code_operation_obsolete) {
+				std::cerr << format("dpServerLoop: Error %d / %s\n",
+									e.code(), e.what());
+				throw e;
+			}
+		}
+	}
+}
+
 static void usage(const char *argv0) {
-	std::cerr << format("Usage: %s -p portnum | -s serverAddress\n", argv0);
+	std::cerr << format("Usage: %s -p portNum | -s serverAddress\n", argv0);
 }
 
 int main(int argc, char **argv) {
@@ -73,7 +162,6 @@ int main(int argc, char **argv) {
 
 	NetworkAddress serverAddress;
 	bool isServer = false;
-	std::string port;
 
 	if (0 == strcmp(argv[1], "-p")) {
 		isServer = true;
@@ -99,7 +187,7 @@ int main(int argc, char **argv) {
 								serverAddress.toString().c_str(), e.code(), e.what());
 			return 2;
 		}
-		all.emplace_back(dpServer());
+		all.emplace_back(dpServerLoop());
 	} else {
 		for (int i = 0; i < 5; i++) {
 			all.emplace_back(dpClient(serverAddress, i));
