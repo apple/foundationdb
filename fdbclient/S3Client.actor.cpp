@@ -503,8 +503,9 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			if ((e.code() == error_code_file_not_found || e.code() == error_code_http_request_failed ||
 			     e.code() == error_code_io_error) &&
 			    retries < config.maxFileRetries) { // Use configurable retry limit
+				state Error retryError = e;
 				TraceEvent(SevWarn, "S3ClientCopyUpFileRetry")
-				    .errorUnsuppressed(e)
+				    .errorUnsuppressed(retryError)
 				    .detail("Bucket", bucket)
 				    .detail("Object", objectName)
 				    .detail("FilePath", filepath)
@@ -532,7 +533,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 						    .detail("Bucket", bucket)
 						    .detail("Object", objectName)
 						    .detail("UploadID", uploadID)
-						    .detail("OriginalError", err.what());
+						    .detail("OriginalError", retryError.what());
 					}
 					uploadID = "";
 				}
