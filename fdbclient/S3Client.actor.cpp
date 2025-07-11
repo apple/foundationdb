@@ -218,19 +218,14 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 	state int64_t size = fileSize(filepath);
 
 	try {
-		TraceEvent(s3VerboseEventSev(), "S3ClientCopyUpFileStart")
-		    .detail("Filepath", filepath)
-		    .detail("Bucket", bucket)
-		    .detail("ObjectName", objectName)
-		    .detail("FileSize", size);
 
 		// Open file once with UNCACHED for both checksum and upload.
 		// TODO(BulkLoad): Optimize this to avoid double reading the file. Consider:
 		// 1. Using memory-mapped files if available
 		// 2. Caching the file contents in memory
 		// 3. Using the same file handle for both checksum and upload
-		Reference<IAsyncFile> f = wait(
-		    IAsyncFileSystem::filesystem()->open(filepath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
+		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
+		    filepath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0644));
 		file = f;
 
 		// Calculate checksum using the same file handle
@@ -526,12 +521,16 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 		parts.reserve(numParts);
 		downloadFutures.reserve(numParts);
 		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
-		    filepath, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED, 0644));
+		    filepath,
+		    IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |
+		        IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_NO_AIO,
+		    0644));
 		file = f;
 		// Pre-allocate file size to avoid fragmentation
 		wait(file->truncate(fileSize));
 
 		while (offset < fileSize) {
+			// Calculate part size and ensure it's aligned to 4096 bytes
 			partSize = std::min(config.partSizeBytes, fileSize - offset);
 
 			parts.emplace_back(partNumber, offset, partSize, "");
