@@ -388,69 +388,69 @@ function test_list_with_files {
     mkdir "${logsdir}"
   fi
 
-  # # Our blobstore_list_max_keys_per_page=5; test with less, equal, and more than the page size.
-  # for file_count in 2; do
-  #   log "Running ls test with ${file_count} files (flat)..."
-  #   # Create test files
-  #   local test_dir="${dir}/ls_test"
-  #   mkdir -p "${test_dir}"
-  #   for i in $(seq 1 "${file_count}"); do
-  #     date -Iseconds > "${test_dir}/file${i}"
-  #   done
+  # Our blobstore_list_max_keys_per_page=5; test with less, equal, and more than the page size.
+  for file_count in 2; do
+    log "Running ls test with ${file_count} files (flat)..."
+    # Create test files
+    local test_dir="${dir}/ls_test"
+    mkdir -p "${test_dir}"
+    for i in $(seq 1 "${file_count}"); do
+      date -Iseconds > "${test_dir}/file${i}"
+    done
 
-  #   # Upload test files
-  #   if ! "${s3client}" \
-  #       --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-  #       --knob_blobstore_encryption_type=aws:kms \
-  #       --tls-ca-file "${TLS_CA_FILE}" \
-  #       --blob-credentials "${credentials}" \
-  #       --log --logdir "${logsdir}" \
-  #       cp "${test_dir}" "${url}"; then
-  #     err "Failed to upload test files for ls test"
-  #     return 1
-  #   fi
+    # Upload test files
+    if ! "${s3client}" \
+        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+        --knob_blobstore_encryption_type=aws:kms \
+        --tls-ca-file "${TLS_CA_FILE}" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${logsdir}" \
+        cp "${test_dir}" "${url}"; then
+      err "Failed to upload test files for ls test"
+      return 1
+    fi
 
-  #   # Test ls on the uploaded directory
-  #   local output
-  #   local status
+    # Test ls on the uploaded directory
+    local output
+    local status
 
-  #   local edited_url="blobstore://o2.atla.twitter.com/bulkload/test/s3client/ls_test/?bucket=shared&region=global&secure_connection=0"
-  #   log "url: ${edited_url}"
+    local edited_url="blobstore://o2.atla.twitter.com/bulkload/test/s3client/ls_test/?bucket=shared&region=global&secure_connection=0"
+    log "url: ${edited_url}"
 
-  #   output=$("${s3client}" \
-  #       --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-  #       --knob_blobstore_encryption_type=aws:kms \
-  #       --knob_blobstore_list_max_keys_per_page=5 \
-  #       --tls-ca-file "${TLS_CA_FILE}" \
-  #       --blob-credentials "${credentials}" \
-  #       --log --logdir "${logsdir}" \
-  #       ls "${edited_url}" 2>&1)
-  #   status=$?
+    output=$("${s3client}" \
+        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+        --knob_blobstore_encryption_type=aws:kms \
+        --knob_blobstore_list_max_keys_per_page=5 \
+        --tls-ca-file "${TLS_CA_FILE}" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${logsdir}" \
+        ls "${edited_url}" 2>&1)
+    status=$?
 
-  #   local missing=0
-  #   for i in $(seq 1 "${file_count}"); do
-  #     if ! echo "${output}" | grep -q "ls_test/file${i}"; then
-  #       err "Missing file${i} in ls output"
-  #       missing=1
-  #     fi
-  #   done
+    local missing=0
+    for i in $(seq 1 "${file_count}"); do
+      if ! echo "${output}" | grep -q "ls_test/file${i}"; then
+        err "Missing file${i} in ls output"
+        missing=1
+      fi
+    done
 
-  #   if [[ "${missing}" -ne 0 ]]; then
-  #     return 1
-  #   fi
+    if [[ "${missing}" -ne 0 ]]; then
+      return 1
+    fi
 
-  #   # Clean up test files
-  #   if ! "${s3client}" \
-  #       --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-  #       --knob_blobstore_encryption_type=aws:kms \
-  #       --tls-ca-file "${TLS_CA_FILE}" \
-  #       --blob-credentials "${credentials}" \
-  #       --log --logdir "${logsdir}" \
-  #       rm "${edited_url}"; then
-  #     err "Failed to clean up test files"
-  #     return 1
-  #   fi
-  # done
+    # Clean up test files
+    if ! "${s3client}" \
+        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+        --knob_blobstore_encryption_type=aws:kms \
+        --tls-ca-file "${TLS_CA_FILE}" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${logsdir}" \
+        rm "${edited_url}"; then
+      err "Failed to clean up test files"
+      return 1
+    fi
+  done
 
   # Now test with recursive listing
   local depth=3
