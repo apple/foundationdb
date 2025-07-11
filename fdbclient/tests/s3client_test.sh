@@ -413,9 +413,6 @@ function test_list_with_files {
     local output
     local status
 
-    local edited_url="blobstore://o2.atla.twitter.com/bulkload/test/s3client/ls_test/?bucket=shared&region=global&secure_connection=0"
-    log "url: ${edited_url}"
-
     output=$("${s3client}" \
         --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
         --knob_blobstore_encryption_type=aws:kms \
@@ -423,7 +420,7 @@ function test_list_with_files {
         --tls-ca-file "${TLS_CA_FILE}" \
         --blob-credentials "${credentials}" \
         --log --logdir "${logsdir}" \
-        ls "${edited_url}" 2>&1)
+        ls "${url}" 2>&1)
     status=$?
 
     local missing=0
@@ -445,7 +442,7 @@ function test_list_with_files {
         --tls-ca-file "${TLS_CA_FILE}" \
         --blob-credentials "${credentials}" \
         --log --logdir "${logsdir}" \
-        rm "${edited_url}"; then
+        rm "${url}"; then
       err "Failed to clean up test files"
       return 1
     fi
@@ -494,9 +491,6 @@ function test_list_with_files {
   local output
   local status
 
-  local edited_url="blobstore://o2.atla.twitter.com/bulkload/test/s3client/ls_test/?bucket=shared&region=global&secure_connection=0"
-  log "url: ${edited_url}"
-
   # Test recursive listing
   output=$("${s3client}" \
       --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
@@ -505,7 +499,7 @@ function test_list_with_files {
       --tls-ca-file "${TLS_CA_FILE}" \
       --blob-credentials "${credentials}" \
       --log --logdir "${logsdir}" \
-      ls "${edited_url}" \
+      ls "${url}" \
       --recursive 2>&1)
   status=$?
 
@@ -545,7 +539,7 @@ function test_list_with_files {
     --tls-ca-file "${TLS_CA_FILE}" \
     --blob-credentials "${credentials}" \
     --log --logdir "${logsdir}" \
-    ls "${edited_url}" 2>&1)
+    ls "${url}" 2>&1)
   status=$?
 
   check_nested_files "ls_test" 1 "false"
@@ -560,7 +554,7 @@ function test_list_with_files {
       --tls-ca-file "${TLS_CA_FILE}" \
       --blob-credentials "${credentials}" \
       --log --logdir "${logsdir}" \
-      rm "${edited_url}"; then
+      rm "${url}"; then
     err "Failed to clean up nested test files"
     return 1
   fi
