@@ -310,9 +310,9 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 		// and could help identify which specific part failed if there's an issue.
 
 		// Add the checksum as a tag after successful upload
-		// state std::map<std::string, std::string> tags;
-		// tags[S3_CHECKSUM_TAG_NAME] = checksum;
-		// wait(endpoint->putObjectTags(bucket, objectName, tags));
+		state std::map<std::string, std::string> tags;
+		tags[S3_CHECKSUM_TAG_NAME] = checksum;
+		wait(endpoint->putObjectTags(bucket, objectName, tags));
 
 		TraceEvent(s3PerfEventSev(), "S3ClientCopyUpFileEnd")
 		    .detail("Bucket", bucket)
@@ -561,26 +561,26 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 		wait(file->sync());
 
 		// Get and verify checksum before closing the file
-		// std::map<std::string, std::string> t = wait(endpoint->getObjectTags(bucket, objectName));
-		// tags = t;
-		// auto it = tags.find(S3_CHECKSUM_TAG_NAME);
-		// if (it != tags.end()) {
-		// 	expectedChecksum = it->second;
-		// 	if (!expectedChecksum.empty()) {
-		// 		state std::string actualChecksum = wait(calculateFileChecksum(file));
-		// 		if (actualChecksum != expectedChecksum) {
-		// 			TraceEvent(SevError, "S3ClientCopyDownFileChecksumMismatch")
-		// 			    .detail("Expected", expectedChecksum)
-		// 			    .detail("Calculated", actualChecksum)
-		// 			    .detail("FileSize", fileSize)
-		// 			    .detail("FilePath", filepath);
-		// 			// TODO(BulkLoad): Consider making this a non-retryable error since
-		// 			// retrying is unlikely to help if the checksum doesn't match.
-		// 			// This would require adding a new error type and updating callers.
-		// 			throw checksum_failed();
-		// 		}
-		// 	}
-		// }
+		std::map<std::string, std::string> t = wait(endpoint->getObjectTags(bucket, objectName));
+		tags = t;
+		auto it = tags.find(S3_CHECKSUM_TAG_NAME);
+		if (it != tags.end()) {
+			expectedChecksum = it->second;
+			if (!expectedChecksum.empty()) {
+				state std::string actualChecksum = wait(calculateFileChecksum(file));
+				if (actualChecksum != expectedChecksum) {
+					TraceEvent(SevError, "S3ClientCopyDownFileChecksumMismatch")
+					    .detail("Expected", expectedChecksum)
+					    .detail("Calculated", actualChecksum)
+					    .detail("FileSize", fileSize)
+					    .detail("FilePath", filepath);
+					// TODO(BulkLoad): Consider making this a non-retryable error since
+					// retrying is unlikely to help if the checksum doesn't match.
+					// This would require adding a new error type and updating callers.
+					throw checksum_failed();
+				}
+			}
+		}
 
 		// Close file properly
 		file = Reference<IAsyncFile>();
