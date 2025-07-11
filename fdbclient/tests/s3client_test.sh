@@ -388,69 +388,164 @@ function test_list_with_files {
     mkdir "${logsdir}"
   fi
 
-  # Our blobstore_list_max_keys_per_page=5; test with less, equal, and more than the page size.
-  for file_count in 2; do
-    log "Running ls test with ${file_count} files..."
-    # Create test files
-    local test_dir="${dir}/ls_test"
-    mkdir -p "${test_dir}"
-    for i in $(seq 1 "${file_count}"); do
-      date -Iseconds > "${test_dir}/file${i}"
+  # # Our blobstore_list_max_keys_per_page=5; test with less, equal, and more than the page size.
+  # for file_count in 2; do
+  #   log "Running ls test with ${file_count} files (flat)..."
+  #   # Create test files
+  #   local test_dir="${dir}/ls_test"
+  #   mkdir -p "${test_dir}"
+  #   for i in $(seq 1 "${file_count}"); do
+  #     date -Iseconds > "${test_dir}/file${i}"
+  #   done
+
+  #   # Upload test files
+  #   if ! "${s3client}" \
+  #       --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+  #       --knob_blobstore_encryption_type=aws:kms \
+  #       --tls-ca-file "${TLS_CA_FILE}" \
+  #       --blob-credentials "${credentials}" \
+  #       --log --logdir "${logsdir}" \
+  #       cp "${test_dir}" "${url}"; then
+  #     err "Failed to upload test files for ls test"
+  #     return 1
+  #   fi
+
+  #   # Test ls on the uploaded directory
+  #   local output
+  #   local status
+
+  #   local edited_url="blobstore://o2.atla.twitter.com/bulkload/test/s3client/ls_test/?bucket=shared&region=global&secure_connection=0"
+  #   log "url: ${edited_url}"
+
+  #   output=$("${s3client}" \
+  #       --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+  #       --knob_blobstore_encryption_type=aws:kms \
+  #       --knob_blobstore_list_max_keys_per_page=5 \
+  #       --tls-ca-file "${TLS_CA_FILE}" \
+  #       --blob-credentials "${credentials}" \
+  #       --log --logdir "${logsdir}" \
+  #       ls "${edited_url}" 2>&1)
+  #   status=$?
+
+  #   local missing=0
+  #   for i in $(seq 1 "${file_count}"); do
+  #     if ! echo "${output}" | grep -q "ls_test/file${i}"; then
+  #       err "Missing file${i} in ls output"
+  #       missing=1
+  #     fi
+  #   done
+
+  #   if [[ "${missing}" -ne 0 ]]; then
+  #     return 1
+  #   fi
+
+  #   # Clean up test files
+  #   if ! "${s3client}" \
+  #       --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+  #       --knob_blobstore_encryption_type=aws:kms \
+  #       --tls-ca-file "${TLS_CA_FILE}" \
+  #       --blob-credentials "${credentials}" \
+  #       --log --logdir "${logsdir}" \
+  #       rm "${edited_url}"; then
+  #     err "Failed to clean up test files"
+  #     return 1
+  #   fi
+  # done
+
+  # Now test with recursive listing
+  local depth=3
+  local files_per_level=2
+  log "Running ls test with depth ${depth} and ${files_per_level} files per level"
+
+
+  local test_dir="${dir}/ls_test_recursive"
+  mkdir -p "${test_dir}"
+
+  # Recursive file creation
+  create_recursive_files() {
+    local current_dir="$1"
+    local current_depth="$2"
+
+    for i in $(seq 1 "${files_per_level}"); do
+      date -Iseconds > "${current_dir}/file${current_depth}_${i}"
     done
 
-    # Upload test files
-    if ! "${s3client}" \
-        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-        --knob_blobstore_encryption_type=aws:kms \
-        --tls-ca-file "${TLS_CA_FILE}" \
-        --blob-credentials "${credentials}" \
-        --log --logdir "${logsdir}" \
-        cp "${test_dir}" "${url}"; then
-      err "Failed to upload test files for ls test"
-      return 1
+    if [[ "${current_depth}" -lt "${depth}" ]]; then
+      local subdir="${current_dir}/sub${current_depth}"
+      mkdir -p "${subdir}"
+      create_recursive_files "${subdir}" "$((current_depth + 1))"
     fi
+  }
 
-    # Test ls on the uploaded directory
-    local output
-    local status
+  create_recursive_files "${test_dir}" 1
 
-    local edited_url="blobstore://o2.atla.twitter.com/bulkload/test/s3client/ls_test/?bucket=shared&region=global&secure_connection=0"
-    log "url: ${edited_url}"
+  # Upload test files
+  if ! "${s3client}" \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+      --knob_blobstore_encryption_type=aws:kms \
+      --tls-ca-file "${TLS_CA_FILE}" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      cp "${test_dir}" "${url}"; then
+    err "Failed to upload test files for ls test"
+    return 1
+  fi
 
-    output=$("${s3client}" \
-        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-        --knob_blobstore_encryption_type=aws:kms \
-        --knob_blobstore_list_max_keys_per_page=5 \
-        --tls-ca-file "${TLS_CA_FILE}" \
-        --blob-credentials "${credentials}" \
-        --log --logdir "${logsdir}" \
-        ls "${edited_url}" 2>&1)
-    status=$?
+  # Test ls on the uploaded directory
+  local output
+  local status
 
-    local missing=0
-    for i in $(seq 1 "${file_count}"); do
-      if ! echo "${output}" | grep -q "ls_test/file${i}"; then
-        err "Missing file${i} in ls output"
+  local edited_url="blobstore://o2.atla.twitter.com/bulkload/test/s3client/ls_test/?bucket=shared&region=global&secure_connection=0"
+  log "url: ${edited_url}"
+
+  output=$("${s3client}" \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+      --knob_blobstore_encryption_type=aws:kms \
+      --knob_blobstore_list_max_keys_per_page=5 \
+      --tls-ca-file "${TLS_CA_FILE}" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      ls "${edited_url}" \
+      --recursive 2>&1)
+  status=$?
+
+  local missing=0
+  check_recursive_files() {
+    local current_path="$1"
+    local current_depth="$2"
+
+    for i in $(seq 1 "${files_per_level}"); do
+      local expected="${current_path}/file${current_depth}_${i}"
+      if ! echo "${output}" | grep -q "${expected}"; then
+        err "Missing ${expected} in recursive ls output"
         missing=1
       fi
     done
 
-    if [[ "${missing}" -ne 0 ]]; then
-      return 1
+    if [[ "${current_depth}" -lt "${depth}" ]]; then
+      local subdir="${current_path}/sub${current_depth}"
+      check_recursive_files "${subdir}" "$((current_depth + 1))"
     fi
+  }
 
-    # Clean up test files
-    if ! "${s3client}" \
-        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-        --knob_blobstore_encryption_type=aws:kms \
-        --tls-ca-file "${TLS_CA_FILE}" \
-        --blob-credentials "${credentials}" \
-        --log --logdir "${logsdir}" \
-        rm "${edited_url}"; then
-      err "Failed to clean up test files"
-      return 1
-    fi
-  done
+  check_recursive_files "ls_test" 1
+
+  if [[ "${missing}" -ne 0 ]]; then
+    return 1
+  fi
+
+  # Cleanup
+  if ! "${s3client}" \
+      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+      --knob_blobstore_encryption_type=aws:kms \
+      --tls-ca-file "${TLS_CA_FILE}" \
+      --blob-credentials "${credentials}" \
+      --log --logdir "${logsdir}" \
+      rm "${edited_url}"; then
+    err "Failed to clean up recursive test files"
+    return 1
+  fi
+
 
   log "Successfully tested ls with existing files and directories"
 }
