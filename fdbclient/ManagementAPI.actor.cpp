@@ -3804,36 +3804,45 @@ ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerNam
 	state KeyRange rangeToRead;
 	state RangeLockStateSet currentRangeLockStateSet;
 	state KeyRange currentRange;
+	state Key beginKeyToClear;
+	state Key endKeyToClear;
 	while (beginKey < endKey) {
 		rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
+			tr.reset();
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			result.clear();
 			wait(store(result, krmGetRanges(&tr, rangeLockPrefix, rangeToRead)));
 			i = 0;
+			beginKeyToClear = result[0].key;
+			endKeyToClear = result[0].key; // Expanding when currentRange is valid to clear
 			for (; i < result.size() - 1; i++) {
 				currentRange = KeyRangeRef(result[i].key, result[i + 1].key);
 				if (result[i].value.empty()) {
-					beginKey = currentRange.end;
+					endKeyToClear = currentRange.end;
 					continue;
 				}
 				currentRangeLockStateSet = decodeRangeLockStateSet(result[i].value);
 				ASSERT(currentRangeLockStateSet.isValid());
 				if (currentRangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
 				    currentRangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId() == ownerUniqueID) {
-					// TODO(BulkLoad): krmSetRangeCoalescing per small range is inefficient especially when the lock
-					// count is over 10K. Optimize this.
-					wait(krmSetRangeCoalescing(
-					    &tr, rangeLockPrefix, currentRange, normalKeys, rangeLockStateSetValue(RangeLockStateSet())));
-					wait(tr.commit());
-					tr.reset();
-					beginKey = currentRange.end;
-					break;
-				} else {
-					beginKey = currentRange.end;
+					// If this range is exclusively locked by the input owner, we will clear it.
+					endKeyToClear = currentRange.end;
+					continue;
 				}
+				break;
 			}
+			if (beginKeyToClear != endKeyToClear) {
+				ASSERT(endKeyToClear > beginKeyToClear);
+				wait(krmSetRangeCoalescing(&tr,
+				                           rangeLockPrefix,
+				                           KeyRangeRef(beginKeyToClear, endKeyToClear),
+				                           normalKeys,
+				                           rangeLockStateSetValue(RangeLockStateSet())));
+				wait(tr.commit());
+			}
+			beginKey = currentRange.end; // We skip the currentRange if it is not locked by the input owner.
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
