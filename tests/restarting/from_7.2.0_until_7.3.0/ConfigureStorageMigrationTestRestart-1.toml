@@ -1,6 +1,6 @@
 [configuration]
 extraMachineCountDC = 2
-disableEncryption = true
+encryptModes = ['disabled']
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'
