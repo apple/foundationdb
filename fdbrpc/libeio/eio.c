@@ -2232,9 +2232,17 @@ static void eio_execute(etp_worker* self, eio_req* req) {
 	case EIO_UNLINK:
 		req->result = unlink(path);
 		break;
-	case EIO_RMDIR:
-		req->result = rmdir(path);
+	case EIO_RMDIR: {
+		int dirfd = open(path, O_DIRECTORY | O_RDONLY);
+		if (dirfd == -1) {
+			req->result = -1;
+			req->errorno = errno;
+		} else {
+			req->result = rmdir(path);
+			close(dirfd);
+		}
 		break;
+	}
 	case EIO_MKDIR:
 		req->result = mkdir(path, (mode_t)req->int2);
 		break;
