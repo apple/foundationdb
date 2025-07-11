@@ -766,7 +766,7 @@ fi
 
 # Run tests.
 test="test_file_upload_and_download"
-url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'/'"${query_str}"
+url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
 test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
 log_test_result $? "${test}"
 
