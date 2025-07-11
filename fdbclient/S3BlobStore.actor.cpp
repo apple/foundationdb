@@ -1576,7 +1576,6 @@ ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEnd
 			// There should be exactly one node
 			xml_node<>* result = doc.first_node();
 			if (result == nullptr || strcmp(result->name(), "ListAllMyBucketsResult") != 0) {
-				printf("Throwing bad response 1853");
 				throw http_bad_response();
 			}
 
@@ -1592,7 +1591,6 @@ ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEnd
 				while (bucketNode != nullptr) {
 					xml_node<>* nameNode = bucketNode->first_node("Name");
 					if (nameNode == nullptr) {
-						printf("Throwing bad response 1599");
 						throw http_bad_response();
 					}
 					const char* name = nameNode->value();
@@ -1723,7 +1721,7 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 		return;
 	}
 	Credentials creds = credentials.get();
-	std::cout << "========== Starting===========" << std::endl;
+	// std::cout << "========== Starting===========" << std::endl;
 	std::string accessKey = creds.key;
 	std::string secretKey = creds.secret;
 
@@ -2330,111 +2328,75 @@ Future<std::map<std::string, std::string>> S3BlobStoreEndpoint::getObjectTags(st
 	return getObjectTags_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-// TEST_CASE("/backup/s3/v4headers") {
-// 	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" };
-// 	// GET without query parameters
-// 	{
-// 		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
-// 		std::string verb("GET");
-// 		std::string resource("/test1,test2.txt");
-// 		HTTP::Headers headers;
-// 		headers["Host"] = "s3.amazonaws.com";
-// 		s3.setV4AuthHeaders(verb, resource, headers, "20130524T000000Z", "20130524");
-// 		printf("Authorization: %s\n", headers["Authorization"].c_str());
-// 		ASSERT(headers["Authorization"] ==
-// 		       "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/amazonaws/s3/aws4_request, "
-// 		       "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
-// 		       "Signature=7d8928a375ef606e84b08ce5401db701f8555e60599598106f6cfdd4f2a30275");
-// 		ASSERT(headers["x-amz-date"] == "20130524T000000Z");
-// 	}
-
-// 	// GET without query parameters
-// 	{
-// 		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
-// 		std::string verb("GET");
-// 		std::string resource("/test1%2Ctest2.txt");
-// 		HTTP::Headers headers;
-// 		headers["Host"] = "s3.amazonaws.com";
-// 		s3.setV4AuthHeaders(verb, resource, headers, "20130524T000000Z", "20130524");
-// 		printf("Authorization: %s\n", headers["Authorization"].c_str());
-// 		ASSERT(headers["Authorization"] ==
-// 		       "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/amazonaws/s3/aws4_request, "
-// 		       "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
-// 		       "Signature=7d8928a375ef606e84b08ce5401db701f8555e60599598106f6cfdd4f2a30275");
-// 		ASSERT(headers["x-amz-date"] == "20130524T000000Z");
-// 	}
-
-// 	// // GET with query parameters
-// 	// {
-// 	// 	S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
-// 	// 	std::string verb("GET");
-// 	// 	std::string resource("/test/examplebucket?Action=DescribeRegions&Version=2013-10-15");
-// 	// 	HTTP::Headers headers;
-// 	// 	headers["Host"] = "s3.amazonaws.com";
-// 	// 	s3.setV4AuthHeaders(verb, resource, headers, "20130524T000000Z", "20130524");
-// 	// 	ASSERT(headers["Authorization"] ==
-// 	// 	       "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/amazonaws/s3/aws4_request, "
-// 	// 	       "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
-// 	// 	       "Signature=426f04e71e191fbc30096c306fe1b11ce8f026a7be374541862bbee320cce71c");
-// 	// 	ASSERT(headers["x-amz-date"] == "20130524T000000Z");
-// 	// }
-
-// 	// // POST
-// 	// {
-// 	// 	S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "443", "us-west-2", "proxy", "port", creds);
-// 	// 	std::string verb("POST");
-// 	// 	std::string resource("/simple.json");
-// 	// 	HTTP::Headers headers;
-// 	// 	headers["Host"] = "s3.us-west-2.amazonaws.com";
-// 	// 	headers["Content-Type"] = "Application/x-amz-json-1.0";
-// 	// 	s3.setV4AuthHeaders(verb, resource, headers, "20130524T000000Z", "20130524");
-// 	// 	ASSERT(headers["Authorization"] ==
-// 	// 	       "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-west-2/s3/aws4_request, "
-// 	// 	       "SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, "
-// 	// 	       "Signature=cf095e36bed9cd3139c2e8b3e20c296a79d8540987711bf3a0d816b19ae00314");
-// 	// 	ASSERT(headers["x-amz-date"] == "20130524T000000Z");
-// 	// 	ASSERT(headers["Host"] == "s3.us-west-2.amazonaws.com");
-// 	// 	ASSERT(headers["Content-Type"] == "Application/x-amz-json-1.0");
-// 	// }
-
-// 	return Void();
-// }
-
-// TEST_CASE("/backup/s3/guess_region") {
-// 	std::string url = "blobstore://s3.us-west-2.amazonaws.com/resource_name?bucket=bucket_name&sa=1";
-
-// 	std::string resource;
-// 	std::string error;
-// 	S3BlobStoreEndpoint::ParametersT parameters;
-// 	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
-// 	ASSERT(s3->getRegion() == "us-west-2");
-
-// 	url = "blobstore://s3.us-west-2.amazonaws.com/resource_name?bucket=bucket_name&sc=922337203685477580700";
-// 	try {
-// 		s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
-// 		ASSERT(false); // not reached
-// 	} catch (Error& e) {
-// 		// conversion of 922337203685477580700 to long int will overflow
-// 		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
-// 	}
-// 	return Void();
-// }
-
 TEST_CASE("/backup/s3/v4headers") {
-	std::string url = "blobstore://o2.atla.twitter.com:80/fdb-test-cluster2-tls?bucket=shared&secure_connection=0&region=global";
+	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" };
+	// GET without query parameters
+	{
+		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
+		std::string verb("GET");
+		std::string resource("/test.txt");
+		HTTP::Headers headers;
+		headers["Host"] = "s3.amazonaws.com";
+		s3.setV4AuthHeaders(verb, resource, headers, "20130524T000000Z", "20130524");
+		ASSERT(headers["Authorization"] ==
+		       "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/amazonaws/s3/aws4_request, "
+		       "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
+		       "Signature=c6037f4b174f2019d02d7085a611cef8adfe1efe583e220954dc85d59cd31ba3");
+		ASSERT(headers["x-amz-date"] == "20130524T000000Z");
+	}
+
+	// GET with query parameters
+	{
+		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
+		std::string verb("GET");
+		std::string resource("/test/examplebucket?Action=DescribeRegions&Version=2013-10-15");
+		HTTP::Headers headers;
+		headers["Host"] = "s3.amazonaws.com";
+		s3.setV4AuthHeaders(verb, resource, headers, "20130524T000000Z", "20130524");
+		ASSERT(headers["Authorization"] ==
+		       "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/amazonaws/s3/aws4_request, "
+		       "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
+		       "Signature=426f04e71e191fbc30096c306fe1b11ce8f026a7be374541862bbee320cce71c");
+		ASSERT(headers["x-amz-date"] == "20130524T000000Z");
+	}
+
+	// POST
+	{
+		S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "443", "us-west-2", "proxy", "port", creds);
+		std::string verb("POST");
+		std::string resource("/simple.json");
+		HTTP::Headers headers;
+		headers["Host"] = "s3.us-west-2.amazonaws.com";
+		headers["Content-Type"] = "Application/x-amz-json-1.0";
+		s3.setV4AuthHeaders(verb, resource, headers, "20130524T000000Z", "20130524");
+		ASSERT(headers["Authorization"] ==
+		       "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-west-2/s3/aws4_request, "
+		       "SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, "
+		       "Signature=cf095e36bed9cd3139c2e8b3e20c296a79d8540987711bf3a0d816b19ae00314");
+		ASSERT(headers["x-amz-date"] == "20130524T000000Z");
+		ASSERT(headers["Host"] == "s3.us-west-2.amazonaws.com");
+		ASSERT(headers["Content-Type"] == "Application/x-amz-json-1.0");
+	}
+
+	return Void();
+}
+
+TEST_CASE("/backup/s3/guess_region") {
+	std::string url = "blobstore://s3.us-west-2.amazonaws.com/resource_name?bucket=bucket_name&sa=1";
 
 	std::string resource;
 	std::string error;
 	S3BlobStoreEndpoint::ParametersT parameters;
 	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
-	printf("Created S3BlobStoreEndpoint");
+	ASSERT(s3->getRegion() == "us-west-2");
 
-	S3BlobStoreEndpoint::ListResult contents = wait(listObjects_impl(s3, "shared", Optional<std::string>("data/fdb-test-cluster2-tls/logs/"), Optional<char>('/'), std::numeric_limits<int>::max(), [](std::string const& name) { return true; }));
-	std::vector<std::string> results;
-	for (const auto& f : contents.objects) {
-		printf("Object: %s\n", f.name.c_str());
+	url = "blobstore://s3.us-west-2.amazonaws.com/resource_name?bucket=bucket_name&sc=922337203685477580700";
+	try {
+		s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+		ASSERT(false); // not reached
+	} catch (Error& e) {
+		// conversion of 922337203685477580700 to long int will overflow
+		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
 	}
-
-	printf("Listing complete. Found %zu objects.\n", contents.objects.size());
 	return Void();
 }
