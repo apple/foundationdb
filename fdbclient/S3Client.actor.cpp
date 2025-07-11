@@ -153,10 +153,10 @@ Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
 		// Validate resource path characters
 		for (char c : resource) {
 			if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/') {
- 				TraceEvent(SevError, "S3ClientGetEndpointIllegalCharacter")
+				TraceEvent(SevError, "S3ClientGetEndpointIllegalCharacter")
 				    .detail("URL", s3url)
 				    .detail("Character", std::string(1, c))
-            .detail("Error", error);
+				    .detail("Error", error);
 				throw backup_invalid_url();
 			}
 		}
