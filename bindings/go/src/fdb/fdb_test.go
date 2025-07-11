@@ -406,6 +406,8 @@ func TestGetClientStatus(t *testing.T) {
 	}
 }
 
+// Skip this example because multi-version client is currently not available in CI
+/*
 func ExampleGetClientStatus() {
 	fdb.MustAPIVersion(API_VERSION)
 	err := fdb.Options().SetDisableClientBypass()
@@ -431,3 +433,4 @@ func ExampleGetClientStatus() {
 
 	// Output:
 }
+*/
