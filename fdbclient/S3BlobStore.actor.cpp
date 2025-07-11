@@ -1129,8 +1129,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 					    rconn.conn, dryrunRequest, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
 					Reference<HTTP::IncomingResponse> _dryrunR = wait(timeoutError(dryrunResponse, requestTimeout));
 					dryrunR = _dryrunR;
-					printf("error from dryrun request: %d %s\n", dryrunR->code,
-					       dryrunR->data.content.c_str());
 					std::string s3Error = parseErrorCodeFromS3(dryrunR->data.content);
 					if (dryrunR->code == badRequestCode && isS3TokenError(s3Error)) {
 						// authentication fails and s3 token error persists, retry with a HEAD dryrun request
@@ -1164,7 +1162,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 			setHeaders(bstore, req);
 			req->resource = getCanonicalURI(bstore, req);
-		
+
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
 
@@ -1222,8 +1220,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			++bstore->blobStats->requestsSuccessful;
 			return r;
 		}
-
-		req->resource = resource;
 
 		// Otherwise, this request is considered failed.  Update failure count.
 		bstore->s_stats.requests_failed++;
@@ -1402,9 +1398,9 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		    wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200, 404 }));
 		listReleaser.release();
 
-	
 		try {
 			S3BlobStoreEndpoint::ListResult listResult;
+
 			// If we got a 404, throw an error to indicate the resource doesn't exist
 			if (r->code == 404) {
 				TraceEvent(SevError, "S3BlobStoreResourceNotFound")
@@ -1415,6 +1411,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 			}
 
 			xml_document<> doc;
+
 			// Copy content because rapidxml will modify it during parse
 			std::string content = r->data.content;
 			doc.parse<0>((char*)content.c_str());
@@ -1433,7 +1430,13 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 				const char* name = n->name();
 				if (strcmp(name, "IsTruncated") == 0) {
 					const char* val = n->value();
-					more = strcmp(val, "true") == 0;
+					if (strcmp(val, "true") == 0) {
+						more = true;
+					} else if (strcmp(val, "false") == 0) {
+						more = false;
+					} else {
+						throw http_bad_response();
+					}
 				} else if (strcmp(name, "NextContinuationToken") == 0) {
 					if (n->value() != nullptr) {
 						continuationToken = n->value();
