@@ -622,7 +622,55 @@ if ! source "${cwd}/tests_common.sh"; then
   echo "ERROR: Failed to source tests_common.sh"
   exit 1
 fi
+
+blob_credentials_file=""
+bucket=""
+region=""
+host=""
+extra_url_params=""
+build_dir=""
+scratch_dir=""
+positional=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --blob-credentials-file)
+      blob_credentials_file="$2"
+      shift 2
+      ;;
+    --region)
+      region="$2"
+      shift 2
+      ;;
+    --bucket)
+      bucket="$2"
+      shift 2
+      ;;  
+    --host)
+      host="$2"
+      shift 2
+      ;;
+    --extra-url-params)
+      extra_url_params="$2"
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+    *)
+      positional+=("$1")
+      shift
+      ;;
+  esac
+done
+
 # Process command-line options.
+set -- "${positional[@]}"
 if (( $# < 1 )) || (( $# > 2 )); then
     echo "ERROR: ${0} requires the fdb build directory -- CMAKE_BUILD_DIR -- as its"
     echo "first argument and then, optionally, a directory into which we write scratch"
@@ -642,12 +690,11 @@ fi
 readonly scratch_dir
 
 # Set host, bucket, and blob_credentials_file whether seaweed or s3.
-host=
 query_str=
-blob_credentials_file=
 path_prefix=
+
 if [[ "${USE_S3}" == "true" ]]; then
-  log "Testing against s3"
+  echo "Testing against s3"
   # Now source in the aws fixture so we can use its methods in the below.
   # shellcheck source=/dev/null
   if ! source "${cwd}/aws_fixture.sh"; then
@@ -659,17 +706,30 @@ if [[ "${USE_S3}" == "true" ]]; then
     exit 1
   fi
   readonly TEST_SCRATCH_DIR
-  if ! readarray -t configs < <(aws_setup "${build_dir}" "${TEST_SCRATCH_DIR}"); then
-    err "Failed aws_setup"
-    exit 1
+
+  if [[ -n "$host" || -n "$bucket" || -n "$region" || -n "$blob_credentials_file" ]]; then
+    if [[ -n "$host" && -n "$bucket" && -n "$region" && -n "$blob_credentials_file" ]]; then
+      log "Using explicit s3 configuration"
+        query_str='bucket='"${bucket}"'&region='"${region}${extra_url_params}"
+        path_prefix="bulkload/test/s3client" 
+    else
+      echo "ERROR: If any of --host, --bucket, --region, or --blob-credentials-file are set, then all must be set." >&2
+      exit 1
+    fi
+  else
+    log "Using inferred s3 configuration"
+    if ! readarray -t configs < <(aws_setup "${build_dir}" "${TEST_SCRATCH_DIR}"); then
+      err "Failed aws_setup"
+      exit 1
+    fi
+    readonly host="${configs[0]}"
+    readonly bucket="${configs[1]}"
+    readonly blob_credentials_file="${configs[2]}"
+    readonly region="${configs[3]}"
+    # Construct query string with raw ampersands using single quotes
+    query_str='bucket='"${bucket}"'&region='"${region}"'&secure_connection=0'
+    path_prefix="bulkload/test/s3client"
   fi
-  readonly host="${configs[0]}"
-  readonly bucket="${configs[1]}"
-  readonly blob_credentials_file="${configs[2]}"
-  readonly region="${configs[3]}"
-  # Construct query string with raw ampersands using single quotes
-  query_str='bucket='"${bucket}"'&region='"${region}"'&secure_connection=0'
-  path_prefix="bulkload/test/s3client"
 else
   log "Testing against seaweedfs"
   # Now source in the seaweedfs fixture so we can use its methods in the below.
