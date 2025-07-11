@@ -217,11 +217,17 @@ if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system Boost::url)
   
-  # Add zstd library since boost::iostreams depends on it when compiled with homebrew
-  find_package(PkgConfig REQUIRED)
-  pkg_check_modules(ZSTD REQUIRED libzstd)
-  target_link_libraries(boost_target INTERFACE ${ZSTD_LIBRARIES})
-  target_link_directories(boost_target INTERFACE ${ZSTD_LIBRARY_DIRS})
+  # Add zstd library since boost::iostreams may depend on it when compiled with homebrew on macOS
+  if(APPLE)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(ZSTD QUIET libzstd)
+      if(ZSTD_FOUND)
+        target_link_libraries(boost_target INTERFACE ${ZSTD_LIBRARIES})
+        target_link_directories(boost_target INTERFACE ${ZSTD_LIBRARY_DIRS})
+      endif()
+    endif()
+  endif()
 
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
