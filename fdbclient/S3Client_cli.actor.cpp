@@ -345,7 +345,6 @@ ACTOR Future<Void> run(Reference<Params> params) {
 		wait(deleteResource(params->src));
 	} else if (params->command == "ls") {
 		if (params->ls_recursive) {
-			printf("listing recursively");
 			wait(listFiles(params->src, std::numeric_limits<int>::max()));
 		} else {
 			wait(listFiles(params->src, 1));
