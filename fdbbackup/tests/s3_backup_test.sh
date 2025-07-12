@@ -65,7 +65,7 @@ function backup {
     -k '"" \xff' \
     --log --logdir="${local_scratch_dir}" \
     --blob-credentials "${local_credentials}" \
-    "${KNOBS[*]}"
+    "${KNOBS[@]}"
   then
     err "Start fdbbackup failed"
     return 1
@@ -88,7 +88,7 @@ function restore {
     -r "${url}" \
     --log --logdir="${local_scratch_dir}" \
     --blob-credentials "${local_credentials}" \
-    "${KNOBS[*]}"
+    "${KNOBS[@]}"
   then
     err "Start fdbrestore failed"
     return 1
@@ -118,7 +118,7 @@ function test_s3_backup_and_restore {
     # Run this rm only if s3. In seaweed, it would fail because
     # bucket doesn't exist yet (they are lazily created).
     if ! "${local_build_dir}/bin/s3client" \
-        "${KNOBS[*]}" \
+        "${KNOBS[@]}" \
         --tls-ca-file "${TLS_CA_FILE}" \
         --blob-credentials "${credentials}" \
         --log --logdir "${local_scratch_dir}" \
@@ -149,7 +149,7 @@ function test_s3_backup_and_restore {
   fi
   # Cleanup test data.
   if ! "${local_build_dir}/bin/s3client" \
-      "${KNOBS[*]}" \
+      "${KNOBS[@]}" \
       --tls-ca-file "${TLS_CA_FILE}" \
       --blob-credentials "${credentials}" \
       --log --logdir "${local_scratch_dir}" \

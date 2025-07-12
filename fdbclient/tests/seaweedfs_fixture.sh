@@ -145,11 +145,11 @@ function start_weed {
   local filer_port=8888
   local max=10
   local index
-  for index in $(seq 1 ${max}); do
+  for index in $(seq 0 ${max}); do
     # Increment port numbers each time through -- even the first time
     # to get past defaults.
     ((master_port=master_port+1))
-    ((s3_port=s3_port+1))
+    ((s3_port=s3_port+${index}))
     ((volume_port=volume_port+1))
     ((volume_port_grpc=volume_port_grpc+1))
     ((filer_port=filer_port+1))
@@ -157,7 +157,7 @@ function start_weed {
     "${binary}" -logdir="${dir}" server -dir="${dir}" \
       -s3 -ip=localhost -master.port="${master_port}" -s3.port="${s3_port}" \
       -volume.port.grpc="${volume_port_grpc}" -volume.port="${volume_port}" \
-      -filer.port="${filer_port}" &> /dev/null &
+      -filer.port="${filer_port}" -volume.max=100 &> /dev/null &
     # Pick up the weed pid.
     local weed_pid=$!
     # Loop while process is coming up. It can take 25 seconds.
