@@ -109,7 +109,8 @@ struct BulkLoading : TestWorkload {
 		loop {
 			try {
 				state Transaction tr(cx);
-				wait(setBulkLoadSubmissionTransaction(&tr, bulkLoadTask, /*checkTaskExclusive=*/false));
+				wait(setBulkLoadSubmissionTransaction(&tr, bulkLoadTask));
+				wait(takeExclusiveReadLockOnRange(&tr, bulkLoadTask.getRange(), rangeLockNameForBulkLoad));
 				wait(tr.commit());
 				TraceEvent(SevDebug, "BulkLoadingSubmitBulkLoadTask")
 				    .detail("BulkLoadTaskState", bulkLoadTask.toString());
@@ -134,7 +135,8 @@ struct BulkLoading : TestWorkload {
 		loop {
 			try {
 				state Transaction tr(cx);
-				wait(setBulkLoadFinalizeTransaction(&tr, range, taskId, /*checkTaskExclusive=*/false));
+				wait(setBulkLoadFinalizeTransaction(&tr, range, taskId));
+				wait(releaseExclusiveReadLockOnRange(&tr, range, rangeLockNameForBulkLoad));
 				wait(tr.commit());
 				TraceEvent(SevDebug, "BulkLoadingAcknowledgeBulkLoadTask")
 				    .detail("TaskID", taskId.toString())

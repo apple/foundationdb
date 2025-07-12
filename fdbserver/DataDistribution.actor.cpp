@@ -2090,6 +2090,7 @@ ACTOR Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 				jobState.setEndTime(now());
 				wait(krmSetRange(&tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(BulkLoadJobState())));
 				wait(addBulkLoadJobToHistory(&tr, jobState));
+				wait(releaseExclusiveReadLockOnRange(&tr, jobState.getJobRange(), rangeLockNameForBulkLoad));
 			} else {
 				wait(krmSetRange(&tr, bulkLoadJobPrefix, jobCompleteRange, bulkLoadJobValue(jobState)));
 			}
@@ -2106,6 +2107,9 @@ ACTOR Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 			    .detail("ExistTaskRange", existTask.getRange());
 			beginKey = lastKey.get();
 		} catch (Error& e) {
+			// Currently, only bulkload job uses the range lock, and one job exists at a time.
+			// TODO(BulkLoad): support multiple jobs at a time
+			ASSERT(e.code() != error_code_range_unlock_reject);
 			wait(tr.onError(e));
 		}
 	}

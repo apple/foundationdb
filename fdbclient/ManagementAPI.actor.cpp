@@ -2861,22 +2861,12 @@ ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
 	}
 }
 
-ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr,
-                                                    BulkLoadTaskState bulkLoadTask,
-                                                    bool checkTaskExclusive) {
+ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask) {
 	ASSERT(normalKeys.contains(bulkLoadTask.getRange()) &&
 	       (bulkLoadTask.phase == BulkLoadPhase::Submitted ||
 	        (bulkLoadTask.phase == BulkLoadPhase::Complete && bulkLoadTask.hasEmptyData())));
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	try {
-		wait(takeExclusiveReadLockOnRange(tr, bulkLoadTask.getRange(), rangeLockNameForBulkLoad));
-	} catch (Error& e) {
-		ASSERT(!checkTaskExclusive || e.code() != error_code_range_lock_reject);
-		// CheckTaskExclusive is set for bulkload job.
-		// Currently, only bulkload job uses the range lock, and tasks have exclusive ranges.
-		throw e;
-	}
 	bulkLoadTask.submitTime = now();
 	wait(krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTask.getRange(), bulkLoadTaskStateValue(bulkLoadTask)));
 	return Void();
@@ -2954,10 +2944,7 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 	return bulkLoadTaskState;
 }
 
-ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr,
-                                                  KeyRange range,
-                                                  UID taskId,
-                                                  bool checkTaskExclusive) {
+ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId) {
 	state BulkLoadTaskState bulkLoadTaskState;
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2973,14 +2960,6 @@ ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr,
 	ASSERT(range == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
 	ASSERT(normalKeys.contains(range));
 	wait(krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState)));
-	try {
-		wait(releaseExclusiveReadLockOnRange(tr, bulkLoadTaskState.getRange(), rangeLockNameForBulkLoad));
-	} catch (Error& e) {
-		ASSERT(!checkTaskExclusive || e.code() != error_code_range_unlock_reject);
-		// CheckTaskExclusive is set for bulkload job.
-		// Currently, only bulkload job uses the range lock, and tasks have exclusive ranges.
-		throw e;
-	}
 	return Void();
 }
 
@@ -3143,9 +3122,13 @@ ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 			aliveJob.get().setEndTime(now());
 			aliveJob.get().setCancelledPhase();
 			wait(addBulkLoadJobToHistory(&tr, aliveJob.get()));
+			wait(releaseExclusiveReadLockOnRange(&tr, aliveJob.get().getJobRange(), rangeLockNameForBulkLoad));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
+			// Currently, only bulkload job uses the range lock, and one job exists at a time.
+			// TODO(BulkLoad): support multiple jobs at a time
+			ASSERT(e.code() != error_code_range_unlock_reject);
 			wait(tr.onError(e));
 		}
 	}
@@ -3198,11 +3181,14 @@ ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
 				    .detail("SubmitBulkLoadJob", jobState.toString());
 				throw bulkload_task_failed();
 			}
-			// Init the map of task states
 			ASSERT(!jobState.getJobRange().empty());
+			// Init the map of task states
 			wait(krmSetRange(
 			    &tr, bulkLoadTaskPrefix, jobState.getJobRange(), bulkLoadTaskStateValue(BulkLoadTaskState())));
+			// Persist job metadata
 			wait(krmSetRange(&tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(jobState)));
+			// Take lock on the job range
+			wait(takeExclusiveReadLockOnRange(&tr, jobState.getJobRange(), rangeLockNameForBulkLoad));
 			wait(tr.commit());
 			TraceEvent(SevInfo, "BulkLoadJobSubmitted")
 			    .setMaxEventLength(-1)
@@ -3210,6 +3196,9 @@ ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
 			    .detail("SubmitBulkLoadJob", jobState.toString());
 			break;
 		} catch (Error& e) {
+			// Currently, only bulkload job uses the range lock, and one job exists at a time.
+			// TODO(BulkLoad): support multiple jobs at a time
+			ASSERT(e.code() != error_code_range_lock_reject);
 			wait(tr.onError(e));
 		}
 	}

@@ -38,9 +38,17 @@ static const std::string BULK_LOAD_STATUS_USAGE = "To get status: bulkload statu
 static const std::string BULK_LOAD_CANCEL_USAGE = "To cancel current bulkload job: bulkload cancel <JOBID>\n";
 static const std::string BULK_LOAD_HISTORY_USAGE = "To print bulkload job history: bulkload history\n";
 static const std::string BULK_LOAD_HISTORY_CLEAR_USAGE = "To clear history: bulkload history clear [all|id]\n";
-static const std::string BULK_LOAD_HELP_MESSAGE = BULK_LOAD_MODE_USAGE + BULK_LOAD_LOAD_USAGE + BULK_LOAD_STATUS_USAGE +
-                                                  BULK_LOAD_CANCEL_USAGE + BULK_LOAD_HISTORY_USAGE +
-                                                  BULK_LOAD_HISTORY_CLEAR_USAGE;
+
+static const std::string BULKLOAD_ADD_LOCK_OWNER_USAGE =
+    "To add a range lock owner: bulkload addlockowner <OWNER_UNIQUE_ID>\n";
+static const std::string BULKLOAD_PRINT_LOCK_USAGE = "To print locked ranges: bulkload printlock\n";
+static const std::string BULKLOAD_PRINT_LOCK_OWNER_USAGE = "To print range lock owners: bulkload printlockowner\n";
+static const std::string BULKLOAD_CLEAR_LOCK_USAGE = "To clear a range lock: bulkload clearlock <OWNER_UNIQUE_ID>\n";
+
+static const std::string BULK_LOAD_HELP_MESSAGE =
+    BULK_LOAD_MODE_USAGE + BULK_LOAD_LOAD_USAGE + BULK_LOAD_STATUS_USAGE + BULK_LOAD_CANCEL_USAGE +
+    BULK_LOAD_HISTORY_USAGE + BULK_LOAD_HISTORY_CLEAR_USAGE + BULKLOAD_ADD_LOCK_OWNER_USAGE +
+    BULKLOAD_PRINT_LOCK_USAGE + BULKLOAD_PRINT_LOCK_OWNER_USAGE + BULKLOAD_CLEAR_LOCK_USAGE;
 
 ACTOR Future<Void> printPastBulkLoadJob(Database cx) {
 	std::vector<BulkLoadJobState> jobs = wait(getBulkLoadJobFromHistory(cx));
@@ -235,7 +243,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			return UID();
 		}
 		wait(cancelBulkLoadJob(cx, jobId));
-		fmt::println("Job {} has been cancelled. Do clearlock on the cancelled range.", jobId.toString());
+		fmt::println("Job {} has been cancelled. The job range lock has been cleared", jobId.toString());
 		return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
@@ -301,10 +309,25 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 		printLongDesc(tokens[0]);
 		return UID();
 
+	} else if (tokencmp(tokens[1], "addlockowner")) {
+		// For debugging purposes and invisible to users.
+		if (tokens.size() != 3) {
+			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
+			return UID();
+		}
+		std::string ownerUniqueID = tokens[2].toString();
+		if (ownerUniqueID.empty()) {
+			fmt::println("ERROR: Owner unique id cannot be empty");
+			fmt::println("{}", BULKLOAD_ADD_LOCK_OWNER_USAGE);
+			return UID();
+		}
+		wait(registerRangeLockOwner(cx, ownerUniqueID, ownerUniqueID));
+		return UID();
+
 	} else if (tokencmp(tokens[1], "printlock")) {
 		// For debugging purposes and invisible to users.
 		if (tokens.size() != 2) {
-			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
+			fmt::println("{}", BULKLOAD_PRINT_LOCK_USAGE);
 			return UID();
 		}
 		std::vector<std::pair<KeyRange, RangeLockState>> lockedRanges =
@@ -326,7 +349,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 	} else if (tokencmp(tokens[1], "printlockowner")) {
 		// For debugging purposes and invisible to users.
 		if (tokens.size() != 2) {
-			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
+			fmt::println("{}", BULKLOAD_PRINT_LOCK_OWNER_USAGE);
 			return UID();
 		}
 		std::vector<RangeLockOwner> owners = wait(getAllRangeLockOwners(cx));
@@ -338,7 +361,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 	} else if (tokencmp(tokens[1], "clearlock")) {
 		// For debugging purposes and invisible to users.
 		if (tokens.size() != 3) {
-			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
+			fmt::println("{}", BULKLOAD_CLEAR_LOCK_USAGE);
 			return UID();
 		}
 		std::string ownerUniqueID = tokens[2].toString();
