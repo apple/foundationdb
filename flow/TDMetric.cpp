@@ -26,15 +26,15 @@
 #include <cstddef>
 #include <string>
 
-const StringRef BaseEventMetric::metricType = "Event"_sr;
+alignas(8) const StringRef BaseEventMetric::metricType = "Event"_sr;
 template <>
-const StringRef Int64Metric::metricType = "Int64"_sr;
+alignas(8) const StringRef Int64Metric::metricType = "Int64"_sr;
 template <>
-const StringRef DoubleMetric::metricType = "Double"_sr;
+alignas(8) const StringRef DoubleMetric::metricType = "Double"_sr;
 template <>
-const StringRef BoolMetric::metricType = "Bool"_sr;
+alignas(8) const StringRef BoolMetric::metricType = "Bool"_sr;
 template <>
-const StringRef StringMetric::metricType = "String"_sr;
+alignas(8) const StringRef StringMetric::metricType = "String"_sr;
 
 std::string reduceFilename(std::string const& filename) {
 	std::string r = filename;
