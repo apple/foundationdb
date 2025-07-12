@@ -537,7 +537,7 @@ func TestGetClientStatus(t *testing.T) {
 	}
 }
 
-func ExampleGetClientStatus() {
+func ExampleDatabase_GetClientStatus() {
 	fdb.MustAPIVersion(API_VERSION)
 	err := fdb.Options().SetDisableClientBypass()
 	if err != nil {
