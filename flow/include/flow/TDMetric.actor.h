@@ -823,7 +823,7 @@ struct BaseEventMetric : BaseMetric {
 	BaseEventMetric(MetricNameRef const& name) : BaseMetric(name) {}
 
 	// Needed for MetricUtil
-	static const StringRef metricType;
+	alignas(8) static const StringRef metricType;
 	Void getValue() const { return Void(); }
 	~BaseEventMetric() override {}
 
@@ -1271,7 +1271,7 @@ struct ContinuousMetric final : NonCopyable,
                                 MetricUtil<ContinuousMetric<T>, T>,
                                 BaseMetric {
 	// Needed for MetricUtil
-	static const StringRef metricType;
+	alignas(8) static const StringRef metricType;
 
 private:
 	EventField<TimeAndValue<T>> field;

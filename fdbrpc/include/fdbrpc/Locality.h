@@ -261,11 +261,11 @@ public:
 struct LocalityData {
 	std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>> _data;
 
-	static const StringRef keyProcessId;
-	static const StringRef keyZoneId;
-	static const StringRef keyDcId;
-	static const StringRef keyMachineId;
-	static const StringRef keyDataHallId;
+	alignas(8) static const StringRef keyProcessId;
+	alignas(8) static const StringRef keyZoneId;
+	alignas(8) static const StringRef keyDcId;
+	alignas(8) static const StringRef keyMachineId;
+	alignas(8) static const StringRef keyDataHallId;
 
 public:
 	LocalityData() {}
@@ -382,7 +382,7 @@ public:
 	}
 
 	static const UID UNSET_ID;
-	static const StringRef ExcludeLocalityPrefix;
+	alignas(8) static const StringRef ExcludeLocalityPrefix;
 };
 
 static std::string describe(std::vector<LocalityData> const& items, StringRef const key, int max_items = -1) {
