@@ -40,7 +40,7 @@ function shutdown_aws {
 function create_aws_dir {
   local dir="${1}"
   local aws_dir
-  aws_dir=$(mktemp -d -p "${dir}" -t s3.$$.XXXX)
+  aws_dir=$(mktemp -d "${dir}/s3.$$.XXXX")
   # Exit if the temp directory wasn't created successfully.
   if [[ ! -d "${aws_dir}" ]]; then
     echo "ERROR: Failed create of aws  directory ${aws_dir}" >&2

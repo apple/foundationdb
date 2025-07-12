@@ -70,7 +70,8 @@ enum {
 	OPT_BUILD_FLAGS,
 	OPT_KNOB,
 	OPT_PROXY,
-	OPT_HELP
+	OPT_HELP,
+	OPT_LS_RECURSIVE
 };
 
 CSimpleOpt::SOption Options[] = { { OPT_TRACE, "--log", SO_NONE },
@@ -86,6 +87,7 @@ CSimpleOpt::SOption Options[] = { { OPT_TRACE, "--log", SO_NONE },
 	                              { OPT_PROXY, "--proxy", SO_REQ_SEP },
 	                              { OPT_HELP, "-h", SO_NONE },
 	                              { OPT_HELP, "--help", SO_NONE },
+	                              { OPT_LS_RECURSIVE, "--recursive", SO_NONE },
 	                              SO_END_OF_OPTIONS };
 
 static void printUsage(std::string const& programName) {
@@ -103,6 +105,7 @@ static void printUsage(std::string const& programName) {
 	             "  ls             List contents of SOURCE. Must be a s3/blobstore 'Backup URL'.\n"
 	             "  rm             Delete SOURCE. Must be a s3/blobstore 'Backup URL'.\n"
 	             "OPTIONS:\n"
+	             "  --recursive    Recursively list contents of SOURCE. Only valid with 'ls' command.\n"
 	             "  --log          Enables trace file logging for the CLI session.\n"
 	             "  --logdir PATH  Specifies the output directory for trace files. If\n"
 	             "                 unspecified, defaults to the current directory. Has\n"
@@ -147,6 +150,7 @@ struct Params : public ReferenceCounted<Params> {
 	std::string command;
 	int whichIsBlobstoreURL = -1;
 	const std::string blobstore_enable_object_integrity_check = "blobstore_enable_object_integrity_check";
+	bool ls_recursive = false;
 
 	std::string toString() {
 		std::string s;
@@ -239,6 +243,9 @@ static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
 			param->knobs.emplace_back(knobName.get(), args->OptionArg());
 			break;
 		}
+		case OPT_LS_RECURSIVE:
+			param->ls_recursive = true;
+			break;
 		case TLSConfig::OPT_TLS_PLUGIN:
 			args->OptionArg();
 			break;
@@ -337,8 +344,11 @@ ACTOR Future<Void> run(Reference<Params> params) {
 	} else if (params->command == "rm") {
 		wait(deleteResource(params->src));
 	} else if (params->command == "ls") {
-		// Default depth of 1 to not recursively list by default
-		wait(listFiles(params->src, 1));
+		if (params->ls_recursive) {
+			wait(listFiles(params->src, std::numeric_limits<int>::max()));
+		} else {
+			wait(listFiles(params->src, 1));
+		}
 	}
 	return Void();
 }

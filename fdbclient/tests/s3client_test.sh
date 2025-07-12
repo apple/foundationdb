@@ -398,13 +398,93 @@ function test_list_with_files {
     mkdir "${logsdir}"
   fi
 
-  # Create test files
-  local test_dir="${dir}/ls_test"
+  # Our blobstore_list_max_keys_per_page=5; test with less, equal, and more than the page size.
+  for file_count in 2; do
+    log "Running ls test with ${file_count} files (flat)..."
+    # Create test files
+    local test_dir="${dir}/ls_test"
+    mkdir -p "${test_dir}"
+    for i in $(seq 1 "${file_count}"); do
+      date -Iseconds > "${test_dir}/file${i}"
+    done
+
+    # Upload test files
+    if ! "${s3client}" \
+        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+        --knob_blobstore_encryption_type=aws:kms \
+        --tls-ca-file "${TLS_CA_FILE}" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${logsdir}" \
+        cp "${test_dir}" "${url}"; then
+      err "Failed to upload test files for ls test"
+      return 1
+    fi
+
+    # Test ls on the uploaded directory
+    local output
+    local status
+
+    output=$("${s3client}" \
+        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+        --knob_blobstore_encryption_type=aws:kms \
+        --knob_blobstore_list_max_keys_per_page=5 \
+        --tls-ca-file "${TLS_CA_FILE}" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${logsdir}" \
+        ls "${url}" 2>&1)
+    status=$?
+
+    local missing=0
+    for i in $(seq 1 "${file_count}"); do
+      if ! echo "${output}" | grep -q "ls_test/file${i}"; then
+        err "Missing file${i} in ls output"
+        missing=1
+      fi
+    done
+
+    if [[ "${missing}" -ne 0 ]]; then
+      return 1
+    fi
+
+    # Clean up test files
+    if ! "${s3client}" \
+        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+        --knob_blobstore_encryption_type=aws:kms \
+        --tls-ca-file "${TLS_CA_FILE}" \
+        --blob-credentials "${credentials}" \
+        --log --logdir "${logsdir}" \
+        rm "${url}"; then
+      err "Failed to clean up test files"
+      return 1
+    fi
+  done
+
+  # Now test with nested structure
+  local depth=3
+  local files_per_level=2
+  log "Running ls test with depth ${depth} and ${files_per_level} files per level"
+
+
+  local test_dir="${dir}/ls_test_nested"
   mkdir -p "${test_dir}"
-  date -Iseconds > "${test_dir}/file1"
-  date -Iseconds > "${test_dir}/file2"
-  mkdir "${test_dir}/subdir"
-  date -Iseconds > "${test_dir}/subdir/file3"
+
+  # Recursive file creation
+  create_nested_files() {
+    local current_dir="$1"
+    local current_depth="$2"
+
+    for i in $(seq 1 "${files_per_level}"); do
+      date -Iseconds > "${current_dir}/file${current_depth}_${i}"
+    done
+
+    if [[ "${current_depth}" -lt "${depth}" ]]; then
+      local subdir="${current_dir}/sub${current_depth}"
+      mkdir -p "${subdir}"
+      create_nested_files "${subdir}" "$((current_depth + 1))"
+    fi
+  }
+
+  create_nested_files "${test_dir}" 1
 
   # Upload test files
   if ! "${s3client}" \
@@ -421,25 +501,64 @@ function test_list_with_files {
   # Test ls on the uploaded directory
   local output
   local status
+
+  # Test recursive listing
   output=$("${s3client}" \
       --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
       --knob_blobstore_encryption_type=aws:kms \
+      --knob_blobstore_list_max_keys_per_page=1 \
       --tls-ca-file "${TLS_CA_FILE}" \
       --blob-credentials "${credentials}" \
       --log --logdir "${logsdir}" \
-      ls "${url}" 2>&1)
+      ls "${url}" \
+      --recursive 2>&1)
   status=$?
 
-  # For SeaweedFS, the output format is:
-  # Contents of blobstore://localhost:8334/s3client/ls_test?bucket=testbucket&region=all_regions&secure_connection=0:
-  #   s3client/ls_test/
-  # We need to check that we see the directory listing
-  if ! echo "${output}" | grep -q "s3client/ls_test/"; then
-    err "Failed to list directory in ls output"
+  local missing=0
+  check_nested_files() {
+    local current_path="$1"
+    local current_depth="$2"
+    local recurse="$3"
+
+    for i in $(seq 1 "${files_per_level}"); do
+      local expected="${current_path}/file${current_depth}_${i}"
+      if ! echo "${output}" | grep -q "${expected}"; then
+        err "Missing ${expected} in recursive ls output"
+        missing=1
+      fi
+    done
+
+    if [[ "${current_depth}" -lt "${depth}" ]]; then
+      local subdir="${current_path}/sub${current_depth}"
+      if [[ "${recurse}" == "true" ]]; then
+        check_nested_files "${subdir}" "$((current_depth + 1))" "$3"
+      fi
+    fi
+  }
+
+  check_nested_files "ls_test" 1 "true"
+
+  if [[ "${missing}" -ne 0 ]]; then
     return 1
   fi
 
-  # Clean up test files
+  # Test non-recursive listing
+  output=$("${s3client}" \
+    --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
+    --knob_blobstore_encryption_type=aws:kms \
+    --knob_blobstore_list_max_keys_per_page=5 \
+    --tls-ca-file "${TLS_CA_FILE}" \
+    --blob-credentials "${credentials}" \
+    --log --logdir "${logsdir}" \
+    ls "${url}" 2>&1)
+  status=$?
+
+  check_nested_files "ls_test" 1 "false"
+  if [[ "${missing}" -ne 0 ]]; then
+    return 1
+  fi
+
+  # Cleanup
   if ! "${s3client}" \
       --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
       --knob_blobstore_encryption_type=aws:kms \
@@ -447,7 +566,7 @@ function test_list_with_files {
       --blob-credentials "${credentials}" \
       --log --logdir "${logsdir}" \
       rm "${url}"; then
-    err "Failed to clean up test files"
+    err "Failed to clean up nested test files"
     return 1
   fi
 
@@ -470,7 +589,7 @@ function test_ls_handling {
   fi
 
   # Test non-existent resource in existing bucket
-  local nonexistent_path_url="blobstore://${host}/nonexistent/path?${query_str}"
+  local nonexistent_path_url="blobstore://${host}/nonexistent/path/?${query_str}"
   if ! test_nonexistent_resource "${nonexistent_path_url}" "${dir}" "${credentials}" "${s3client}"; then
     return 1
   fi
@@ -532,7 +651,55 @@ if ! source "${cwd}/tests_common.sh"; then
   echo "ERROR: Failed to source tests_common.sh"
   exit 1
 fi
+
+blob_credentials_file=""
+bucket=""
+region=""
+host=""
+extra_url_params=""
+build_dir=""
+scratch_dir=""
+positional=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --blob-credentials-file)
+      blob_credentials_file="$2"
+      shift 2
+      ;;
+    --region)
+      region="$2"
+      shift 2
+      ;;
+    --bucket)
+      bucket="$2"
+      shift 2
+      ;;  
+    --host)
+      host="$2"
+      shift 2
+      ;;
+    --extra-url-params)
+      extra_url_params="$2"
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+    *)
+      positional+=("$1")
+      shift
+      ;;
+  esac
+done
+
 # Process command-line options.
+set -- "${positional[@]}"
 if (( $# < 1 )) || (( $# > 2 )); then
     echo "ERROR: ${0} requires the fdb build directory -- CMAKE_BUILD_DIR -- as its"
     echo "first argument and then, optionally, a directory into which we write scratch"
@@ -552,10 +719,9 @@ fi
 readonly scratch_dir
 
 # Set host, bucket, and blob_credentials_file whether seaweed or s3.
-host=
 query_str=
-blob_credentials_file=
 path_prefix=
+
 if [[ "${USE_S3}" == "true" ]]; then
   log "Testing against s3"
   # Now source in the aws fixture so we can use its methods in the below.
@@ -569,17 +735,30 @@ if [[ "${USE_S3}" == "true" ]]; then
     exit 1
   fi
   readonly TEST_SCRATCH_DIR
-  if ! readarray -t configs < <(aws_setup "${build_dir}" "${TEST_SCRATCH_DIR}"); then
-    err "Failed aws_setup"
-    exit 1
+
+  if [[ -n "$host" || -n "$bucket" || -n "$region" || -n "$blob_credentials_file" ]]; then
+    if [[ -n "$host" && -n "$bucket" && -n "$region" && -n "$blob_credentials_file" ]]; then
+      log "Using explicit s3 configuration"
+        query_str='bucket='"${bucket}"'&region='"${region}${extra_url_params}"
+        path_prefix="bulkload/test/s3client" 
+    else
+      echo "ERROR: If any of --host, --bucket, --region, or --blob-credentials-file are set, then all must be set." >&2
+      exit 1
+    fi
+  else
+    log "Using inferred s3 configuration"
+    if ! readarray -t configs < <(aws_setup "${build_dir}" "${TEST_SCRATCH_DIR}"); then
+      err "Failed aws_setup"
+      exit 1
+    fi
+    readonly host="${configs[0]}"
+    readonly bucket="${configs[1]}"
+    readonly blob_credentials_file="${configs[2]}"
+    readonly region="${configs[3]}"
+    # Construct query string with raw ampersands using single quotes
+    query_str='bucket='"${bucket}"'&region='"${region}"'&secure_connection=0'
+    path_prefix="bulkload/test/s3client"
   fi
-  readonly host="${configs[0]}"
-  readonly bucket="${configs[1]}"
-  readonly blob_credentials_file="${configs[2]}"
-  readonly region="${configs[3]}"
-  # Construct query string with raw ampersands using single quotes
-  query_str='bucket='"${bucket}"'&region='"${region}"'&secure_connection=1'
-  path_prefix="bulkload/test/s3client"
 else
   log "Testing against seaweedfs"
   # Now source in the seaweedfs fixture so we can use its methods in the below.
