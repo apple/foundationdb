@@ -44,7 +44,7 @@ struct DPServerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getInterface, getFork);
+		serializer(ar, getInterface, getFork, releaseFork);
 	}
 };
 
@@ -64,18 +64,18 @@ struct GetInterfaceRequest {
 struct ForkState {
 	constexpr static FileIdentifier file_identifier = 998236;
 	// ID [0, N) of the philospher requesting this fork.
-	int clientId;
+	uint32_t clientId;
 	// The number of the fork we are requesting, also [0, N).
 	// Philosophers numbered i request forks i and (i + 1) % N,
 	// not necessarily in that order.
-	int forkNumber;
+	uint32_t forkNumber;
 	ForkState() : clientId(0), forkNumber(0) {}
+	ForkState(int c, int f) : clientId(c), forkNumber(f) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, clientId, forkNumber);
 	}
-
 };
 
 struct GetForkRequest {
@@ -83,6 +83,9 @@ struct GetForkRequest {
 
 	ForkState forkState;
 	ReplyPromise<ForkState> reply;
+
+	explicit GetForkRequest(ForkState fork_state) : forkState(fork_state) {}
+	GetForkRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -95,18 +98,86 @@ struct ReleaseForkRequest {
 	ForkState forkState;
 	ReplyPromise<ForkState> reply;
 
+	ReleaseForkRequest(ForkState fork_state) : forkState(fork_state) {}
+	ReleaseForkRequest() {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, forkState, reply);
 	}
 };
 
-ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum) {
+ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum, int numEaters) {
 	std::cout << format("dpClient: starting philosopher #%d, server address [%s]\n",
 						idnum, serverAddress.toString().c_str());
 
-	wait(delay(idnum));
+	state DPServerInterface server;
+	server.getInterface = RequestStream<GetInterfaceRequest>(Endpoint::wellKnown({serverAddress}, WLTOKEN_DP_SERVER));
+	DPServerInterface s = wait(server.getInterface.getReply(GetInterfaceRequest()));
+	server = s;
 
+	state int firstfork;
+	state int secondfork;
+	state GetForkRequest gf1;
+	state GetForkRequest gf2;
+	state ReleaseForkRequest rf1;
+	state ReleaseForkRequest rf2;
+
+	// The deadlock we must avoid is where each eater has 1 fork and is blocked
+	// trying to get one held by a person next to them.  The protocol is is that
+	// odd numbered eaters get the fork to the left of them first, then the one
+	// to the right.  Even numbered eaters get the fork to the right of them first,
+	// then the one to the left.
+	if (idnum % 2) {
+		firstfork = idnum;
+		secondfork = (idnum + 1) % numEaters;
+	} else {
+		firstfork = (idnum + 1) % numEaters;
+		secondfork = idnum;
+	}
+
+	state double msec;
+
+	try {
+		loop {
+			std::cout << format("dpClient: eater [%d] WANTS TO EAT...\n", idnum);
+
+			gf1 = GetForkRequest(ForkState(idnum, firstfork));
+			ForkState reply = wait(server.getFork.getReply(gf1));
+			ASSERT(reply.clientId == idnum);
+			ASSERT(reply.forkNumber == firstfork);
+
+			gf2 = GetForkRequest(ForkState(idnum, secondfork));
+			ForkState reply2 = wait(server.getFork.getReply(gf2));
+			ASSERT(reply2.clientId == idnum);
+			ASSERT(reply2.forkNumber == secondfork);
+
+			std::cout << format("dpClient: eater [%d] NOW EATING...\n", idnum);
+			// NOTE: We will probably see all eaters eating simultaneously with
+			// the current timing of eating for [10,11)s and pausing for only
+			// [1,2)s between eats, combined with the fact that the server
+			// currently vends unlimited forks, i.e. doesn't actually enforce that
+			// only one client holds a given fork at a given time.
+			msec = deterministicRandom()->randomInt(0, 1000)/1000.0 + 10;
+			wait(delay(msec));
+
+			rf1 = ReleaseForkRequest(ForkState(idnum, firstfork));
+			ForkState reply3 = wait(server.releaseFork.getReply(rf1));
+
+			rf2 = ReleaseForkRequest(ForkState(idnum, secondfork));
+			ForkState reply4 = wait(server.releaseFork.getReply(rf2));
+
+			// Elvis has left the bulding.
+			std::cout << format("dpClient: eater [%d] HAS RELEASED ITS FORKS\n", idnum);
+			
+			msec = deterministicRandom()->randomInt(0, 1000)/1000.0 + 1;
+			wait(delay(msec));
+		}
+	} catch (Error& e) {
+		std::cerr << format("dpClient: caught Error code %s, %s\n",
+							e.code(), e.what());
+	}
+		
 	std::cout << format("dpClient: philosopher #%d finished.\n", idnum);
 	return Void();
 }
@@ -125,6 +196,7 @@ ACTOR Future<Void> dpServerLoop() {
 				}
 				when(GetForkRequest req = waitNext(dpServer.getFork.getFuture())) {
 					// XXX implement
+
 					// For now just immediately give the requested fork.
 					// This means that multiple clients can use the same fork
 					// at the same time and we're obviously not solving the
@@ -192,7 +264,7 @@ int main(int argc, char **argv) {
 		all.emplace_back(dpServerLoop());
 	} else {
 		for (int i = 0; i < 5; i++) {
-			all.emplace_back(dpClient(serverAddress, i));
+			all.emplace_back(dpClient(serverAddress, i, 5));
 		}
 	}
 
