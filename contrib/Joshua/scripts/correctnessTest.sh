@@ -43,13 +43,21 @@ cleanup() {
         preserve_files=true
     fi
     
+    echo "DEBUG: preserve_files=$preserve_files" >> /tmp/joshua_debug.log
+    echo "DEBUG: test_failed=$test_failed" >> /tmp/joshua_debug.log
+    echo "DEBUG: PYTHON_EXIT_CODE=$PYTHON_EXIT_CODE" >> /tmp/joshua_debug.log
+    echo "DEBUG: TH_PRESERVE_TEMP_DIRS_ON_EXIT=$TH_PRESERVE_TEMP_DIRS_ON_EXIT" >> /tmp/joshua_debug.log
+    echo "DEBUG: TH_ARCHIVE_LOGS_ON_FAILURE=$TH_ARCHIVE_LOGS_ON_FAILURE" >> /tmp/joshua_debug.log
+    
     if [ "${preserve_files}" = "true" ]; then
         echo "Preserving test artifacts in: ${TOP_LEVEL_OUTPUT_DIR}" >&2
+        echo "DEBUG: PRESERVING logs in: ${TOP_LEVEL_OUTPUT_DIR}" >> /tmp/joshua_debug.log
         if [ "${test_failed}" = "true" ] || [ "${PYTHON_EXIT_CODE}" -ne "0" ]; then
             echo "Test failed - logs preserved for debugging. Use 'kubectl cp' to copy from pod." >&2
         fi
     else
         echo "Cleaning up test artifacts: ${TOP_LEVEL_OUTPUT_DIR}" >&2
+        echo "DEBUG: CLEANING UP logs in: ${TOP_LEVEL_OUTPUT_DIR}" >> /tmp/joshua_debug.log
         rm -rf "${TOP_LEVEL_OUTPUT_DIR}"
     fi
 }
@@ -95,8 +103,27 @@ chmod 777 "${TOP_LEVEL_OUTPUT_DIR}"
 
 # Setup Python path for in-tree modules
 SCRIPT_DIR=$(dirname "$0")
-REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
+# In Joshua tarball, we're already at the root of the extracted tarball
+if [ "$SCRIPT_DIR" = "." ]; then
+    # Running from tarball root (joshua_test in extracted tarball)
+    REPO_ROOT="."
+else
+    # Running from development environment
+    REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
+fi
 export PYTHONPATH="${REPO_ROOT}/contrib/TestHarness2:${REPO_ROOT}/contrib/Joshua:$PYTHONPATH"
+
+# Debug: Show actual values AFTER assignment
+echo "DEBUG: SCRIPT_DIR (after)=$SCRIPT_DIR" >> /tmp/joshua_debug.log
+echo "DEBUG: REPO_ROOT (after)=$REPO_ROOT" >> /tmp/joshua_debug.log
+echo "DEBUG: PYTHONPATH (after)=$PYTHONPATH" >> /tmp/joshua_debug.log
+echo "DEBUG: ls REPO_ROOT: $(ls -la "$REPO_ROOT" 2>/dev/null || echo 'FAILED')" >> /tmp/joshua_debug.log
+echo "DEBUG: TH_PRESERVE_TEMP_DIRS_ON_EXIT=$TH_PRESERVE_TEMP_DIRS_ON_EXIT" >> /tmp/joshua_debug.log
+echo "DEBUG: TH_ARCHIVE_LOGS_ON_FAILURE=$TH_ARCHIVE_LOGS_ON_FAILURE" >> /tmp/joshua_debug.log
+echo "DEBUG: JOSHUA_SEED=$JOSHUA_SEED" >> /tmp/joshua_debug.log
+echo "DEBUG: JOSHUA_ENSEMBLE_ID=$JOSHUA_ENSEMBLE_ID" >> /tmp/joshua_debug.log
+echo "DEBUG: UNIQUE_RUN_SUFFIX=$UNIQUE_RUN_SUFFIX" >> /tmp/joshua_debug.log
+echo "DEBUG: TOP_LEVEL_OUTPUT_DIR=$TOP_LEVEL_OUTPUT_DIR" >> /tmp/joshua_debug.log
 
 # Validate required environment
 if [ -z "${JOSHUA_SEED}" ]; then
