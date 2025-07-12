@@ -21,3 +21,9 @@ We use Joshua to simulate failures modes at the network, machine, and datacenter
 For a while, there was an informal competition within the engineering team to design failures that found the toughest bugs and issues the most easily. After a period of one-upsmanship, the reigning champion is called "swizzle-clogging". To swizzle-clog, you first pick a random subset of nodes in the cluster. Then, you "clog" (stop) each of their network connections one by one over a few seconds. Finally, you unclog them in a random order, again one by one, until they are all up. This pattern seems to be particularly good at finding deep issues that only happen in the rarest real-world cases.
 
 Joshua's success has surpassed our expectation and has been vital to our engineering team. It seems unlikely that we would have been able to build FoundationDB without this technology.
+
+*   `scripts/`: This directory contains shell scripts that serve as entry points for running tests. Joshua invokes these scripts, which then set up the environment and execute the test runner.
+    *   **`correctnessTest.sh`**: This is the primary script for running correctness tests (In the ensemble tarball, it is renamed `joshua_test`). It is responsible for invoking the Python-based `TestHarness2` and passing it the necessary configuration. It also handles the creation and cleanup of temporary output directories.
+    *   Other scripts like `bindingTest.sh` and `valgrindTest.sh` are used for different, specialized test runs.
+
+For detailed information on the operation of the Python test runner itself, including its configuration options and output structure, please see the **[TestHarness2 README](../TestHarness2/README.md)**.
