@@ -87,7 +87,7 @@ CSimpleOpt::SOption Options[] = { { OPT_TRACE, "--log", SO_NONE },
 	                              { OPT_PROXY, "--proxy", SO_REQ_SEP },
 	                              { OPT_HELP, "-h", SO_NONE },
 	                              { OPT_HELP, "--help", SO_NONE },
-								  { OPT_LS_RECURSIVE, "--recursive", SO_NONE },
+	                              { OPT_LS_RECURSIVE, "--recursive", SO_NONE },
 	                              SO_END_OF_OPTIONS };
 
 static void printUsage(std::string const& programName) {
@@ -105,7 +105,7 @@ static void printUsage(std::string const& programName) {
 	             "  ls             List contents of SOURCE. Must be a s3/blobstore 'Backup URL'.\n"
 	             "  rm             Delete SOURCE. Must be a s3/blobstore 'Backup URL'.\n"
 	             "OPTIONS:\n"
-				 "  --recursive    Recursively list contents of SOURCE. Only valid with 'ls' command.\n"
+	             "  --recursive    Recursively list contents of SOURCE. Only valid with 'ls' command.\n"
 	             "  --log          Enables trace file logging for the CLI session.\n"
 	             "  --logdir PATH  Specifies the output directory for trace files. If\n"
 	             "                 unspecified, defaults to the current directory. Has\n"
