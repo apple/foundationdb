@@ -182,6 +182,7 @@ struct LogSystemConfig {
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 	LogEpoch oldestBackupEpoch;
+	std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
 
 	LogSystemConfig(LogEpoch e = 0)
 	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e),
@@ -235,7 +236,8 @@ void LogSystemConfig::serialize(Ar& ar) {
 	           pseudoLocalities,
 	           txsTags,
 	           epoch,
-	           oldestBackupEpoch);
+	           oldestBackupEpoch,
+	           knownLockedTLogIds);
 }
 
 #endif // FDBSERVER_LOGSYSTEMCONFIG_H
