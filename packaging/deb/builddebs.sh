@@ -21,7 +21,7 @@ mkdir -p -m 0755 $SERVERDIR/usr/lib/foundationdb
 install -m 0664 packaging/foundationdb.conf $SERVERDIR/etc/foundationdb
 install -m 0755 packaging/deb/foundationdb-init $SERVERDIR/etc/init.d/foundationdb
 install -m 0755 bin/fdbserver $SERVERDIR/usr/sbin
-install -m 0755 bin/fdbmonitor $SERVERDIR/usr/lib/foundationdb
+install -m 0755 bin/fdbmonitor $SERVERDIR/usr/sbin
 install -m 0755 packaging/make_public.py $SERVERDIR/usr/lib/foundationdb
 dos2unix -q -n README.md $SERVERDIR/usr/share/doc/foundationdb-server/README
 chmod 0644 $SERVERDIR/usr/share/doc/foundationdb-server/README
@@ -49,18 +49,18 @@ mkdir -p -m 0755 $CLIENTSDIR/usr/bin
 mkdir -p -m 0755 $CLIENTSDIR/usr/lib
 mkdir -p -m 0755 $CLIENTSDIR/usr/include/foundationdb
 mkdir -p -m 0755 $CLIENTSDIR/usr/share/doc/foundationdb-clients
-mkdir -p -m 0755 $CLIENTSDIR/usr/lib/foundationdb/backup_agent
 
 install -m 0755 bin/fdbcli $CLIENTSDIR/usr/bin
 install -m 0644 lib/libfdb_c.so lib/libfdb_c_shim.so $CLIENTSDIR/usr/lib
 install -m 0644 bindings/c/foundationdb/fdb_c.h bindings/c/foundationdb/fdb_c_types.h bindings/c/foundationdb/fdb_c_internal.h bindings/c/foundationdb/fdb_c_options.g.h fdbclient/vexillographer/fdb.options bindings/c/foundationdb/fdb_c_shim.h $CLIENTSDIR/usr/include/foundationdb
 dos2unix -q -n README.md $CLIENTSDIR/usr/share/doc/foundationdb-clients/README
 chmod 0644 $CLIENTSDIR/usr/share/doc/foundationdb-clients/README
-install -m 0755 bin/fdbbackup $CLIENTSDIR/usr/lib/foundationdb/backup_agent/backup_agent
-ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/fdbbackup
-ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/fdbrestore
-ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/fdbdr
-ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/dr_agent
+install -m 0755 bin/fdbbackup $CLIENTSDIR/usr/bin/backup_agent
+
+ln -s backup_agent $CLIENTSDIR/usr/bin/fdbbackup
+ln -s backup_agent $CLIENTSDIR/usr/bin/fdbrestore
+ln -s backup_agent $CLIENTSDIR/usr/bin/fdbdr
+ln -s backup_agent $CLIENTSDIR/usr/bin/dr_agent
 
 echo "Installed-Size:" $(du -sx --exclude DEBIAN $CLIENTSDIR | awk '{print $1}') >> $CLIENTSDIR/DEBIAN/control
 
