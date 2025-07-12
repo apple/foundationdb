@@ -31,6 +31,20 @@
 #include <iostream>
 #include "flow/actorcompiler.h"
 
+// Flow solution to Dining Philosophers problem
+// (https://en.wikipedia.org/wiki/Dining_philosophers_problem; or
+// https://leetcode.com/problems/the-dining-philosophers/description/,
+// but note that that calls for a single process/threaded solution
+// and here we implement a distributed solution.)
+//
+// This uses most of the techniques illustrated in tutorial.actor.cpp.
+// A server is used to track "fork ownership".  The dining
+// philosophers are modeled as clients who must request and obtain
+// ownership of forks prior to eating.
+//
+// To do this exercise, delete the code below down to main(), then
+// implement it using techniques you see in tutorial.actor.cpp.
+
 enum DPEndpoints {
 	WLTOKEN_DP_SERVER = WLTOKEN_FIRST_AVAILABLE,
 	DP_ENDPOINT_COUNT,
@@ -123,20 +137,29 @@ ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum, int numEate
 	state ReleaseForkRequest rf1;
 	state ReleaseForkRequest rf2;
 
-	// The deadlock we must avoid is where each eater has 1 fork and is blocked
-	// trying to get one held by a person next to them.  The protocol is is that
-	// odd numbered eaters get the fork to the left of them first, then the one
-	// to the right.  Even numbered eaters get the fork to the right of them first,
-	// then the one to the left.
-	if (idnum % 2) {
+	// Change this to true and it should deadlock pretty quickly.
+	bool CAUSE_DEADLOCK = false;
+
+	if (CAUSE_DEADLOCK) {
 		firstfork = idnum;
 		secondfork = (idnum + 1) % numEaters;
 	} else {
-		firstfork = (idnum + 1) % numEaters;
-		secondfork = idnum;
+		// The deadlock we must avoid is where each eater has 1 fork and is blocked
+		// trying to get one held by a person next to them.  The protocol is is that
+		// odd numbered eaters get the fork to the left of them first, then the one
+		// to the right.  Even numbered eaters get the fork to the right of them first,
+		// then the one to the left.
+		if (idnum % 2) {
+			firstfork = idnum;
+			secondfork = (idnum + 1) % numEaters;
+		} else {
+			firstfork = (idnum + 1) % numEaters;
+			secondfork = idnum;
+		}
 	}
 
 	state double msec;
+	state int meals_eaten = 0;
 
 	try {
 		loop {
@@ -153,13 +176,9 @@ ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum, int numEate
 			ASSERT(reply2.forkNumber == secondfork);
 
 			std::cout << format("dpClient: eater [%d] NOW EATING...\n", idnum);
-			// NOTE: We will probably see all eaters eating simultaneously with
-			// the current timing of eating for [10,11)s and pausing for only
-			// [1,2)s between eats, combined with the fact that the server
-			// currently vends unlimited forks, i.e. doesn't actually enforce that
-			// only one client holds a given fork at a given time.
-			msec = deterministicRandom()->randomInt(0, 1000)/1000.0 + 10;
+			msec = deterministicRandom()->randomInt(0, 1000)/1000.0 + 1;
 			wait(delay(msec));
+			meals_eaten++;
 
 			rf1 = ReleaseForkRequest(ForkState(idnum, firstfork));
 			ForkState reply3 = wait(server.releaseFork.getReply(rf1));
@@ -168,7 +187,9 @@ ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum, int numEate
 			ForkState reply4 = wait(server.releaseFork.getReply(rf2));
 
 			// Elvis has left the bulding.
-			std::cout << format("dpClient: eater [%d] HAS RELEASED ITS FORKS\n", idnum);
+			std::cout <<
+				format("dpClient: eater [%d] HAS RELEASED ITS FORKS (%d meals eaten)\n",
+					   idnum, meals_eaten);
 			
 			msec = deterministicRandom()->randomInt(0, 1000)/1000.0 + 1;
 			wait(delay(msec));
@@ -188,6 +209,16 @@ ACTOR Future<Void> dpServerLoop() {
 
 	std::cout << format("dpServer: starting...\n");
 
+	// Maps int fork to int eaterId who owns it.
+	state std::map<int, int> forkOwners;
+
+	// Maps to eaters who are waiting for a fork.  In a more general problem
+	// of waiting for a shared resource, this might be a queue.  Because of
+	// the specifics of Dining Philosophers, at most one eater is waiting for
+	// an in-use fork, so it can be a singleton.
+	// Maps int fork to pending reply to an eater who is waiting for it to be freed.
+	state std::map<int, GetForkRequest> pending;
+
 	loop {
 		try {
 			choose {
@@ -195,18 +226,53 @@ ACTOR Future<Void> dpServerLoop() {
 					req.reply.send(dpServer);
 				}
 				when(GetForkRequest req = waitNext(dpServer.getFork.getFuture())) {
-					// XXX implement
-
-					// For now just immediately give the requested fork.
-					// This means that multiple clients can use the same fork
-					// at the same time and we're obviously not solving the
-					// exclusion problem.  Come back later.
-					req.reply.send(req.forkState);
+					int clientId = req.forkState.clientId;
+					int forkNo = req.forkState.forkNumber;
+					auto it = forkOwners.find(forkNo);
+					if (it == forkOwners.end()) {
+						// Available immediately, give it.
+						std::cout << format("dpServerLoop: eater %d gets fork %d\n",
+											clientId, forkNo);
+						forkOwners[forkNo] = clientId;
+						req.reply.send(req.forkState);
+					} else {
+						auto it2 = pending.find(forkNo);
+						ASSERT(it2 == pending.end());
+						std::cout << format("dpServerLoop: eater %d has to wait for fork %d\n",
+											clientId, forkNo);
+						pending[forkNo] = req;
+					}
 				}
 				when(ReleaseForkRequest req = waitNext(dpServer.releaseFork.getFuture())) {
-					// XXX implement
-					// Wake up anybody waiting for this fork
-					req.reply.send(req.forkState);
+					int clientId = req.forkState.clientId;
+					int forkNo = req.forkState.forkNumber;
+					auto it = forkOwners.find(forkNo);
+					if (it == forkOwners.end()) {
+						std::cerr << format("dpServerLoop: request from clientId %d to free fork %d which is not owned by anybody\n",
+											clientId, forkNo);
+					} else if (it->second != clientId) {
+						std::cerr << format("dpServerLoop: request from clientId %d to free fork %d whichis owned by somebody else [%d]\n ",
+											clientId, forkNo, it->second);
+					} else {
+						std::cout << format("dpServerLoop: eater %d is freeing fork %d\n",
+											clientId, forkNo);
+						forkOwners.erase(it);
+						auto it2 = pending.find(forkNo);
+						if (it2 == pending.end()) {
+							std::cout << format("dpServerLoop: eater %d, fork %d: nobody is waiting on this fork\n",
+												clientId, forkNo);
+							req.reply.send(req.forkState);
+						} else {
+							GetForkRequest pending_req = it2->second;
+							pending.erase(it2);
+							int nextClient = pending_req.forkState.clientId;
+							std::cout << format("dpServerLoop: eater %d fork %d: giving to waiting eater %d\n",
+												clientId, forkNo, nextClient);
+							forkOwners[forkNo] = nextClient;
+							req.reply.send(req.forkState);
+							pending_req.reply.send(pending_req.forkState);
+						}
+					}
 				}
 			}
 		} catch (Error& e) {
