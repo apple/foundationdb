@@ -74,10 +74,11 @@ struct GetInterfaceRequest {
 
 // This is sent in both requests and responses.
 // NOTE: it seems better to have reply types be structs with
-// file_identifier memebers and serialize() overrides.
+// file_identifier members and serialize() overrides.
 // tutorial.actor.cpp has an example where a std::string is sent
 // directly.  Attempts to do similar things with base types like int
-// will run into trouble.
+// will run into trouble.  (Caveat: I didn't try uint32_t or the like;
+// maybe those work.)
 struct ForkState {
 	constexpr static FileIdentifier file_identifier = 998236;
 	// ID [0, N) of the philospher requesting this fork.
