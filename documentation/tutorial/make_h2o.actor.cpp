@@ -56,7 +56,7 @@ static int o_seqno;
 std::queue<int> h_queue;
 std::map<int, Promise<int>*> wakeup;
 
-ACTOR Future<Void> hydrogen(AsyncTrigger *h_ready_trigger) {
+ACTOR Future<Void> hydrogen(AsyncTrigger* h_ready_trigger) {
 	state int h_id = h_seqno++;
 	std::cout << format("Hydrogen %d starting\n", h_id);
 	state Promise<int> promise;
@@ -67,14 +67,14 @@ ACTOR Future<Void> hydrogen(AsyncTrigger *h_ready_trigger) {
 	h_ready_trigger->trigger();
 
 	loop choose {
-		when (int o = wait(future)) {
+		when(int o = wait(future)) {
 			std::cout << format("Hydrogen %d bound to Oxygen %d, returning\n", h_id, o);
 			return Void();
 		}
 	}
 }
 
-ACTOR Future<Void> oxygen(AsyncTrigger *h_ready_trigger) {
+ACTOR Future<Void> oxygen(AsyncTrigger* h_ready_trigger) {
 	state int h_bound = 0;
 	state int o_id = o_seqno++;
 	std::cout << format("Oxygen %d starting\n", o_id);
@@ -86,8 +86,7 @@ ACTOR Future<Void> oxygen(AsyncTrigger *h_ready_trigger) {
 				h_queue.pop();
 				auto it = wakeup.find(h);
 				ASSERT(it != wakeup.end());
-				std::cout << format("Oxygen %d bound to Hydrogen %d\n",
-									o_id, h);
+				std::cout << format("Oxygen %d bound to Hydrogen %d\n", o_id, h);
 				wakeup.erase(it);
 				it->second->send(o_id);
 				h_bound++;
@@ -127,22 +126,21 @@ ACTOR Future<Void> orchestrate() {
 		// H and O workers subject to some kind of low water mark
 		// type of condition.
 		if (h_threads + o_threads >= 1000) {
-			while (2*o_threads < h_threads) {
+			while (2 * o_threads < h_threads) {
 				all.emplace_back(oxygen(&h_ready_trigger));
 				o_threads++;
 			}
-			while (h_threads < 2*o_threads) {
+			while (h_threads < 2 * o_threads) {
 				all.emplace_back(hydrogen(&h_ready_trigger));
 				h_threads++;
 			}
-			if (h_threads != 2*o_threads) {
-				std::cout << format("WEIRDNESS: h_threads [%d] != 2*o_threads [%d]\n",
-									h_threads, o_threads);
+			if (h_threads != 2 * o_threads) {
+				std::cout << format("WEIRDNESS: h_threads [%d] != 2*o_threads [%d]\n", h_threads, o_threads);
 				ASSERT(false);
 			}
 
-			std::cout << format("orchestrate: blocking with %d H threads, %d O threads; %d bigloops\n",
-								h_threads, o_threads, bigloops);
+			std::cout << format(
+			    "orchestrate: blocking with %d H threads, %d O threads; %d bigloops\n", h_threads, o_threads, bigloops);
 
 			// Without the following two lines, or if you just call
 			// waitForAll(all) without the wait (e.g. due to cargo
@@ -153,8 +151,7 @@ ACTOR Future<Void> orchestrate() {
 			wait(waitForAll(all));
 
 			if (wakeup.size() != 0) {
-				std::cout << format("WEIRDNESS: wakeup.size() != 0 [%d]\n",
-									wakeup.size());
+				std::cout << format("WEIRDNESS: wakeup.size() != 0 [%d]\n", wakeup.size());
 
 				for (auto it = wakeup.begin(); it != wakeup.end(); it++) {
 					std::cout << format("  %d -> %p\n", it->first, it->second);
@@ -176,7 +173,7 @@ ACTOR Future<Void> orchestrate() {
 	return Void();
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
 	// Cargo-culted from tutorial.actor.cpp.
 	platformInit();
 	g_network = newNet2(TLSConfig(), false, true);

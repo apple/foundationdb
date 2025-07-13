@@ -126,11 +126,11 @@ struct ReleaseForkRequest {
 };
 
 ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum, int numEaters) {
-	std::cout << format("dpClient: starting philosopher #%d, server address [%s]\n",
-						idnum, serverAddress.toString().c_str());
+	std::cout << format(
+	    "dpClient: starting philosopher #%d, server address [%s]\n", idnum, serverAddress.toString().c_str());
 
 	state DPServerInterface server;
-	server.getInterface = RequestStream<GetInterfaceRequest>(Endpoint::wellKnown({serverAddress}, WLTOKEN_DP_SERVER));
+	server.getInterface = RequestStream<GetInterfaceRequest>(Endpoint::wellKnown({ serverAddress }, WLTOKEN_DP_SERVER));
 	DPServerInterface s = wait(server.getInterface.getReply(GetInterfaceRequest()));
 	server = s;
 
@@ -180,7 +180,7 @@ ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum, int numEate
 			ASSERT(reply2.forkNumber == secondfork);
 
 			std::cout << format("dpClient: eater [%d] NOW EATING...\n", idnum);
-			msec = deterministicRandom()->randomInt(0, 1000)/1000.0 + 1;
+			msec = deterministicRandom()->randomInt(0, 1000) / 1000.0 + 1;
 			wait(delay(msec));
 			meals_eaten++;
 
@@ -191,18 +191,15 @@ ACTOR Future<Void> dpClient(NetworkAddress serverAddress, int idnum, int numEate
 			ForkState reply4 = wait(server.releaseFork.getReply(rf2));
 
 			// Elvis has left the bulding.
-			std::cout <<
-				format("dpClient: eater [%d] HAS RELEASED ITS FORKS (%d meals eaten)\n",
-					   idnum, meals_eaten);
-			
-			msec = deterministicRandom()->randomInt(0, 1000)/1000.0 + 1;
+			std::cout << format("dpClient: eater [%d] HAS RELEASED ITS FORKS (%d meals eaten)\n", idnum, meals_eaten);
+
+			msec = deterministicRandom()->randomInt(0, 1000) / 1000.0 + 1;
 			wait(delay(msec));
 		}
 	} catch (Error& e) {
-		std::cerr << format("dpClient: caught Error code %s, %s\n",
-							e.code(), e.what());
+		std::cerr << format("dpClient: caught Error code %s, %s\n", e.code(), e.what());
 	}
-		
+
 	std::cout << format("dpClient: philosopher #%d finished.\n", idnum);
 	return Void();
 }
@@ -235,15 +232,13 @@ ACTOR Future<Void> dpServerLoop() {
 					auto it = forkOwners.find(forkNo);
 					if (it == forkOwners.end()) {
 						// Available immediately, give it.
-						std::cout << format("dpServerLoop: eater %d gets fork %d\n",
-											clientId, forkNo);
+						std::cout << format("dpServerLoop: eater %d gets fork %d\n", clientId, forkNo);
 						forkOwners[forkNo] = clientId;
 						req.reply.send(req.forkState);
 					} else {
 						auto it2 = pending.find(forkNo);
 						ASSERT(it2 == pending.end());
-						std::cout << format("dpServerLoop: eater %d has to wait for fork %d\n",
-											clientId, forkNo);
+						std::cout << format("dpServerLoop: eater %d has to wait for fork %d\n", clientId, forkNo);
 						pending[forkNo] = req;
 					}
 				}
@@ -252,26 +247,32 @@ ACTOR Future<Void> dpServerLoop() {
 					int forkNo = req.forkState.forkNumber;
 					auto it = forkOwners.find(forkNo);
 					if (it == forkOwners.end()) {
-						std::cerr << format("dpServerLoop: request from clientId %d to free fork %d which is not owned by anybody\n",
-											clientId, forkNo);
+						std::cerr << format(
+						    "dpServerLoop: request from clientId %d to free fork %d which is not owned by anybody\n",
+						    clientId,
+						    forkNo);
 					} else if (it->second != clientId) {
-						std::cerr << format("dpServerLoop: request from clientId %d to free fork %d whichis owned by somebody else [%d]\n ",
-											clientId, forkNo, it->second);
+						std::cerr << format("dpServerLoop: request from clientId %d to free fork %d whichis owned by "
+						                    "somebody else [%d]\n ",
+						                    clientId,
+						                    forkNo,
+						                    it->second);
 					} else {
-						std::cout << format("dpServerLoop: eater %d is freeing fork %d\n",
-											clientId, forkNo);
+						std::cout << format("dpServerLoop: eater %d is freeing fork %d\n", clientId, forkNo);
 						forkOwners.erase(it);
 						auto it2 = pending.find(forkNo);
 						if (it2 == pending.end()) {
-							std::cout << format("dpServerLoop: eater %d, fork %d: nobody is waiting on this fork\n",
-												clientId, forkNo);
+							std::cout << format(
+							    "dpServerLoop: eater %d, fork %d: nobody is waiting on this fork\n", clientId, forkNo);
 							req.reply.send(req.forkState);
 						} else {
 							GetForkRequest pending_req = it2->second;
 							pending.erase(it2);
 							int nextClient = pending_req.forkState.clientId;
 							std::cout << format("dpServerLoop: eater %d fork %d: giving to waiting eater %d\n",
-												clientId, forkNo, nextClient);
+							                    clientId,
+							                    forkNo,
+							                    nextClient);
 							forkOwners[forkNo] = nextClient;
 							req.reply.send(req.forkState);
 							pending_req.reply.send(pending_req.forkState);
@@ -282,22 +283,21 @@ ACTOR Future<Void> dpServerLoop() {
 		} catch (Error& e) {
 			// XXX this is cargo-culted from tutorial.actor.cpp
 			if (e.code() != error_code_operation_obsolete) {
-				std::cerr << format("dpServerLoop: Error %d / %s\n",
-									e.code(), e.what());
+				std::cerr << format("dpServerLoop: Error %d / %s\n", e.code(), e.what());
 				throw e;
 			}
 		}
 	}
 }
 
-static void usage(const char *argv0) {
+static void usage(const char* argv0) {
 	std::cerr << format("Usage: %s -p portNum | -s serverAddress\n", argv0);
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
 	// Cargo-culted from tutorial.actor.cpp.
 	platformInit();
-	g_network = newNet2(TLSConfig(), /*useThreadPool=*/ false, /*useMetrics=*/true);
+	g_network = newNet2(TLSConfig(), /*useThreadPool=*/false, /*useMetrics=*/true);
 
 	if (argc != 3) {
 		usage(argv[0]);
@@ -327,8 +327,8 @@ int main(int argc, char **argv) {
 				listenError.get();
 			}
 		} catch (Error& e) {
-			std::cerr << format("Error binding to address [%s]: %d, %s\n",
-								serverAddress.toString().c_str(), e.code(), e.what());
+			std::cerr << format(
+			    "Error binding to address [%s]: %d, %s\n", serverAddress.toString().c_str(), e.code(), e.what());
 			return 2;
 		}
 		all.emplace_back(dpServerLoop());

@@ -41,7 +41,7 @@
 
 ACTOR Future<Void> print_msg_when_ready(Future<Void> ready, std::string msg) {
 	int delay_msec = deterministicRandom()->randomInt(0, 1000);
-	double delay_sec = static_cast<double>(delay_msec)/1000.0;
+	double delay_sec = static_cast<double>(delay_msec) / 1000.0;
 	wait(delay(delay_sec));
 
 	wait(ready);
@@ -62,20 +62,23 @@ ACTOR Future<Void> orchestrate() {
 
 	// If we do the following, the order of output varies from run to run based on
 	// random seed chosen.  This is expected.
-	//p_first.send(0);
-	//p_second.send(0);
-	//p_third.send(0);
+	// p_first.send(0);
+	// p_second.send(0);
+	// p_third.send(0);
 
 	// So what we have to do is signal in order and wait before signaling the
 	// next.
-	p_first.send(Void()); wait(first);
-	p_second.send(Void()); wait(second);
-	p_third.send(Void()); wait(third);
+	p_first.send(Void());
+	wait(first);
+	p_second.send(Void());
+	wait(second);
+	p_third.send(Void());
+	wait(third);
 
 	return Void();
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
 	// Cargo-culted from tutorial.actor.cpp.
 	platformInit();
 	g_network = newNet2(TLSConfig(), false, true);
