@@ -280,7 +280,7 @@ ACTOR Future<Void> dpServerLoop() {
 				}
 			}
 		} catch (Error& e) {
-			// XXX this is cargo-culted from tutorial.actor.cpp; what does this do
+			// XXX this is cargo-culted from tutorial.actor.cpp
 			if (e.code() != error_code_operation_obsolete) {
 				std::cerr << format("dpServerLoop: Error %d / %s\n",
 									e.code(), e.what());
