@@ -181,6 +181,16 @@ if(WIN32)
   find_package(Boost 1.86 COMPONENTS filesystem iostreams serialization system program_options url)
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target INTERFACE Boost::boost Boost::filesystem Boost::iostreams Boost::serialization Boost::system Boost::url)
+  
+  # Add zstd library since boost::iostreams may depend on it
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(ZSTD QUIET libzstd)
+    if(ZSTD_FOUND)
+      target_link_libraries(boost_target INTERFACE ${ZSTD_LIBRARIES})
+      target_link_directories(boost_target INTERFACE ${ZSTD_LIBRARY_DIRS})
+    endif()
+  endif()
 
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
@@ -206,6 +216,18 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system Boost::url)
+  
+  # Add zstd library since boost::iostreams may depend on it when compiled with homebrew on macOS
+  if(APPLE)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(ZSTD QUIET libzstd)
+      if(ZSTD_FOUND)
+        target_link_libraries(boost_target INTERFACE ${ZSTD_LIBRARIES})
+        target_link_directories(boost_target INTERFACE ${ZSTD_LIBRARY_DIRS})
+      endif()
+    endif()
+  endif()
 
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
