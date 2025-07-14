@@ -29,8 +29,8 @@ def setup_logging():
         format="%(asctime)s - %(process)d - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             logging.FileHandler(log_file),
-            # Only log to console if not in archival mode
-            logging.StreamHandler(sys.stderr) if not config.archive_logs_on_failure else logging.NullHandler()
+            # Only log to console if stderr is not being redirected (i.e., if it's a TTY)
+            logging.StreamHandler(sys.stderr) if sys.stderr.isatty() else logging.NullHandler()
         ]
     )
     

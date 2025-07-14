@@ -75,12 +75,6 @@ class TestPicker:
         for subdir in self.test_dir.iterdir():
             if subdir.is_dir() and subdir.name in config.test_types_to_run:
                 self.walk_test_dir(subdir)
-        
-        # Also check for test files directly in the test source directory
-        # This handles cases where tarball contains test files without subdirectory structure
-        for item in self.test_dir.iterdir():
-            if item.is_file() and (item.suffix == ".txt" or item.suffix == ".toml"):
-                self.parse_txt(item)
         self.stat_fetcher: StatFetcher
         if config.stats is not None or config.joshua_dir is None:
             self.stat_fetcher = StatFetcher(self.tests)

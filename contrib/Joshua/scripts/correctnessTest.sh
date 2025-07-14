@@ -1,27 +1,28 @@
 #!/bin/bash
 
 #
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
+# correctnessTest.sh
 #
-#   http://www.apache.org/licenses/LICENSE-2.0
+# This source file is part of the FoundationDB open source project
 #
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
+# Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 
-# Entry point for running FoundationDB correctness tests using TestHarness2.
-# Called by the Joshua testing framework.
-# See contrib/TestHarness2/README.md for detailed documentation.
+# Set defaults for key environment variables
+export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+export TH_DISABLE_ROCKSDB_CHECK="${TH_DISABLE_ROCKSDB_CHECK:-false}"
 
 # Cleanup function - preserve logs on failure if archival is enabled
 cleanup() {
@@ -37,38 +38,30 @@ cleanup() {
     
     # Preserve files if:
     # 1. Always preserve flag is set, OR
-    # 2. (Python crashed OR test failed) AND archival is enabled
+    # 2. Preserve on success flag is set and test passed, OR
+    # 3. (Python crashed OR test failed) AND archival is enabled
     if [ "${TH_PRESERVE_TEMP_DIRS_ON_EXIT}" = "true" ] || \
+       ( [ "${TH_PRESERVE_TEMP_DIRS_ON_SUCCESS}" = "true" ] && [ "${test_failed}" = "false" ] ) || \
        ( ([ "${PYTHON_EXIT_CODE}" -ne "0" ] || [ "${test_failed}" = "true" ]) && [ "${TH_ARCHIVE_LOGS_ON_FAILURE}" = "true" ] ); then
         preserve_files=true
     fi
     
-    echo "DEBUG: preserve_files=$preserve_files" >> /tmp/joshua_debug.log
-    echo "DEBUG: test_failed=$test_failed" >> /tmp/joshua_debug.log
-    echo "DEBUG: PYTHON_EXIT_CODE=$PYTHON_EXIT_CODE" >> /tmp/joshua_debug.log
-    echo "DEBUG: TH_PRESERVE_TEMP_DIRS_ON_EXIT=$TH_PRESERVE_TEMP_DIRS_ON_EXIT" >> /tmp/joshua_debug.log
-    echo "DEBUG: TH_ARCHIVE_LOGS_ON_FAILURE=$TH_ARCHIVE_LOGS_ON_FAILURE" >> /tmp/joshua_debug.log
-    
     if [ "${preserve_files}" = "true" ]; then
         echo "Preserving test artifacts in: ${TOP_LEVEL_OUTPUT_DIR}" >&2
-        echo "DEBUG: PRESERVING logs in: ${TOP_LEVEL_OUTPUT_DIR}" >> /tmp/joshua_debug.log
         if [ "${test_failed}" = "true" ] || [ "${PYTHON_EXIT_CODE}" -ne "0" ]; then
             echo "Test failed - logs preserved for debugging. Use 'kubectl cp' to copy from pod." >&2
+        else
+            echo "Test passed - logs preserved as requested." >&2
         fi
     else
         echo "Cleaning up test artifacts: ${TOP_LEVEL_OUTPUT_DIR}" >&2
-        echo "DEBUG: CLEANING UP logs in: ${TOP_LEVEL_OUTPUT_DIR}" >> /tmp/joshua_debug.log
         rm -rf "${TOP_LEVEL_OUTPUT_DIR}"
     fi
 }
 
 trap cleanup EXIT
 
-# Set defaults for key environment variables
-export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
-export TH_DISABLE_ROCKSDB_CHECK="${TH_DISABLE_ROCKSDB_CHECK:-false}"
-
-# Setup unique output directory
+# Setup unique output directory for log preservation
 TH_OUTPUT_BASE_DIR="${TH_OUTPUT_DIR:-${DIAG_LOG_DIR:-/tmp}}"
 
 # Use ensemble ID if available, otherwise fall back to joshua seed
@@ -87,8 +80,8 @@ else
     fi
 fi
 
+# Collect all logs in here.
 TOP_LEVEL_OUTPUT_DIR="${TH_OUTPUT_BASE_DIR}/th_run_${UNIQUE_RUN_SUFFIX}"
-
 APP_RUN_TEMP_DIR="${TOP_LEVEL_OUTPUT_DIR}"
 
 # Create directories
@@ -101,30 +94,6 @@ fi
 # Set permissions
 chmod 777 "${TOP_LEVEL_OUTPUT_DIR}"
 
-# Setup Python path for in-tree modules
-SCRIPT_DIR=$(dirname "$0")
-# In Joshua tarball, we're already at the root of the extracted tarball
-if [ "$SCRIPT_DIR" = "." ]; then
-    # Running from tarball root (joshua_test in extracted tarball)
-    REPO_ROOT="."
-else
-    # Running from development environment
-    REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
-fi
-export PYTHONPATH="${REPO_ROOT}/contrib/TestHarness2:${REPO_ROOT}/contrib/Joshua:$PYTHONPATH"
-
-# Debug: Show actual values AFTER assignment
-echo "DEBUG: SCRIPT_DIR (after)=$SCRIPT_DIR" >> /tmp/joshua_debug.log
-echo "DEBUG: REPO_ROOT (after)=$REPO_ROOT" >> /tmp/joshua_debug.log
-echo "DEBUG: PYTHONPATH (after)=$PYTHONPATH" >> /tmp/joshua_debug.log
-echo "DEBUG: ls REPO_ROOT: $(ls -la "$REPO_ROOT" 2>/dev/null || echo 'FAILED')" >> /tmp/joshua_debug.log
-echo "DEBUG: TH_PRESERVE_TEMP_DIRS_ON_EXIT=$TH_PRESERVE_TEMP_DIRS_ON_EXIT" >> /tmp/joshua_debug.log
-echo "DEBUG: TH_ARCHIVE_LOGS_ON_FAILURE=$TH_ARCHIVE_LOGS_ON_FAILURE" >> /tmp/joshua_debug.log
-echo "DEBUG: JOSHUA_SEED=$JOSHUA_SEED" >> /tmp/joshua_debug.log
-echo "DEBUG: JOSHUA_ENSEMBLE_ID=$JOSHUA_ENSEMBLE_ID" >> /tmp/joshua_debug.log
-echo "DEBUG: UNIQUE_RUN_SUFFIX=$UNIQUE_RUN_SUFFIX" >> /tmp/joshua_debug.log
-echo "DEBUG: TOP_LEVEL_OUTPUT_DIR=$TOP_LEVEL_OUTPUT_DIR" >> /tmp/joshua_debug.log
-
 # Validate required environment
 if [ -z "${JOSHUA_SEED}" ]; then
     echo "FATAL: JOSHUA_SEED environment variable is required" >&2
@@ -136,13 +105,9 @@ fi
 PYTHON_CMD_ARGS=(
     "--joshua-seed" "${JOSHUA_SEED}"
     "--run-temp-dir" "${APP_RUN_TEMP_DIR}"
+    "--no-clean-up"
     "--no-verbose-on-failure"
 )
-
-# Add --no-clean-up if preservation is enabled
-if [ "${TH_PRESERVE_TEMP_DIRS_ON_EXIT}" = "true" ] || [ "${TH_ARCHIVE_LOGS_ON_FAILURE}" = "true" ]; then
-    PYTHON_CMD_ARGS+=("--no-clean-up")
-fi
 
 # Add optional arguments
 if [ -n "${JOSHUA_TEST_FILES_DIR}" ]; then
@@ -164,7 +129,11 @@ else
     PYTHON_CMD_ARGS+=("--old-binaries-path" "/app/deploy/global_data/oldBinaries")
 fi
 
-# Setup output capture
+if [ "${TH_ARCHIVE_LOGS_ON_FAILURE}" = "true" ]; then
+    PYTHON_CMD_ARGS+=("--archive-logs-on-failure")
+fi
+
+# Setup joshua output capture
 PYTHON_APP_STDOUT_FILE="${APP_RUN_TEMP_DIR}/python_app_stdout.log"
 PYTHON_APP_STDERR_FILE="${APP_RUN_TEMP_DIR}/python_app_stderr.log"
 
@@ -175,7 +144,7 @@ PYTHON_EXIT_CODE=$?
 
 echo "TestHarness2 execution finished. Exit code: ${PYTHON_EXIT_CODE}" >&2
 
-# Output Python app's stdout (XML results) to this script's stdout for Joshua
+# Output Python app's stdout (XML results).
 if [ -f "${PYTHON_APP_STDOUT_FILE}" ]; then
     cat "${PYTHON_APP_STDOUT_FILE}"
     
