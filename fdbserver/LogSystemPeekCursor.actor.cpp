@@ -616,6 +616,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
 
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		resetBestServerIfNotAvailable(logServers, bestServer, end);
+		this->bestServer = bestServer;
 	}
 
 	for (int i = 0; i < logServers.size(); i++) {
@@ -888,6 +889,7 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
     end(end) {
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && bestSet >= 0) {
 		resetBestServerIfNotAvailable(logSets[bestSet]->logServers, bestServer, end);
+		this->bestServer = bestServer;
 	}
 	serverCursors.resize(logSets.size());
 	int maxServers = 0;
