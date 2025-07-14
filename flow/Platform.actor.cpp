@@ -1094,7 +1094,6 @@ void getDiskStatistics(std::string const& directory,
 	kvm_t* kd = nullptr;
 
 	etime = ts.tv_nsec * 1e-6;
-	;
 
 	int dn;
 	u_int64_t total_transfers_read, total_transfers_write;
@@ -1141,8 +1140,8 @@ void getDiskStatistics(std::string const& directory,
 		IOMilliSecs += (u_int64_t)ms_per_transaction;
 		reads += total_transfers_read;
 		writes += total_transfers_write;
-		writeSectors += total_blocks_read;
-		readSectors += total_blocks_write;
+		readSectors += total_blocks_read;
+		writeSectors += total_blocks_write;
 	}
 }
 
