@@ -239,15 +239,40 @@ set -o noclobber
 # TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
 # It gets cleaned up on the way out of the test.
 TEST_SCRATCH_DIR=
-TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
-readonly TLS_CA_FILE
 readonly HTTP_VERBOSE_LEVEL=2
-KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
-readonly KNOBS
 # Should we use S3? If USE_S3 is not defined, then check if
 # OKTETO_NAMESPACE is defined (It is defined on the okteto
 # internal apple dev environments where S3 is available).
 readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
+
+# Set KNOBS based on whether we're using real S3 or SeaweedFS
+if [[ "${USE_S3}" == "true" ]]; then
+  # Use AWS KMS encryption for real S3
+  KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+else
+  # No encryption for SeaweedFS
+  KNOBS=("--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+fi
+readonly KNOBS
+
+# Set TLS_CA_FILE only when using real S3, not for SeaweedFS
+if [[ "${USE_S3}" == "true" ]]; then
+  # Try to find a valid TLS CA file if not explicitly set
+  if [[ -z "${TLS_CA_FILE:-}" ]]; then
+    # Common locations for TLS CA files on different systems
+    for ca_file in "/etc/pki/tls/cert.pem" "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" "/usr/local/share/ca-certificates/"; do
+      if [[ -f "${ca_file}" ]]; then
+        TLS_CA_FILE="${ca_file}"
+        break
+      fi
+    done
+  fi
+  TLS_CA_FILE="${TLS_CA_FILE:-}"
+else
+  # For SeaweedFS, don't use TLS
+  TLS_CA_FILE=""
+fi
+readonly TLS_CA_FILE
 # Clear these environment variables. fdbbackup goes looking for them
 # and if EITHER is set, it will go via a proxy instead of to where we.
 # want it to go.
@@ -323,10 +348,12 @@ if [[ "${USE_S3}" == "true" ]]; then
   readonly bucket="${configs[1]}"
   readonly blob_credentials_file="${configs[2]}"
   readonly region="${configs[3]}"
-  query_str="bucket=${bucket}&region=${region}"
+  query_str="bucket=${bucket}&region=${region}&secure_connection=1"
   # Make these environment variables available for the fdb cluster when s3.
   export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
-  export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
+  if [[ -n "${TLS_CA_FILE}" ]]; then
+    export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
+  fi
 else
   log "Testing against seaweedfs"
   # Now source in the seaweedfs fixture so we can use its methods in the below.
