@@ -222,6 +222,7 @@ struct TLogPeekRequest {
 	Optional<std::pair<UID, int>> sequence;
 	ReplyPromise<TLogPeekReply> reply;
 	Optional<Version> end; // when set is exclusive to the desired range
+	// @todo investigate whether we really need this variable (and if not needed, remove it).
 	Optional<bool> returnEmptyIfStopped;
 
 	TLogPeekRequest(Version begin,

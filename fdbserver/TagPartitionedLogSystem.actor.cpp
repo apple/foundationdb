@@ -668,7 +668,6 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 			tLogCommitResults.push_back(commitSuccess);
 			location++;
 		}
-
 		quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size() - it->tLogWriteAntiQuorum));
 		logGroupLocal++;
 	}
@@ -676,17 +675,23 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 	return minVersionWhenReady(waitForAll(quorumResults), allReplies);
 }
 
+// Version vector/unicast specific: If the best server is not known to have been locked/stopped
+// then it is not guaranteed to have received all versions that are relevant to a tag(s) that it is
+// buddy of, hence do not treat such a server as the best server. This is so the peek logic
+// the peek logic will not peek exclusively from this server, and hence will correctly fetch
+// all versions that are relevant to the tag(s) that it is buddy of.
 void TagPartitionedLogSystem::resetBestServerIfNotLocked(
     int bestSet,
     int& bestServer,
     Optional<Version> end,
-    Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds) {
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && bestSet >= 0 && bestServer >= 0 && end.present() &&
-	    end.get() != std::numeric_limits<Version>::max()) {
+    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownLockedTLogIds) {
+	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST);
+	if (bestSet >= 0 && bestServer >= 0 && end.present() && end.get() != std::numeric_limits<Version>::max()) {
 		ASSERT_WE_THINK(knownLockedTLogIds.present() && !knownLockedTLogIds.get().empty());
 		ASSERT_WE_THINK(knownLockedTLogIds.get().contains(bestSet));
-		if (std::find(knownLockedTLogIds.get()[bestSet].begin(), knownLockedTLogIds.get()[bestSet].end(), bestServer) ==
-		    knownLockedTLogIds.get()[bestSet].end()) {
+		if (std::find(knownLockedTLogIds.get().at(bestSet).begin(),
+		              knownLockedTLogIds.get().at(bestSet).end(),
+		              bestServer) == knownLockedTLogIds.get().at(bestSet).end()) {
 			bestServer = -1;
 			return;
 		}
@@ -732,7 +737,9 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 		    .detail("End", end)
 		    .detail("BestLogs", localSets[bestSet]->logServerString());
 		int bestServer = localSets[bestSet]->bestLocationFor(tag);
-		resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownLockedTLogIds);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownLockedTLogIds);
+		}
 		return makeReference<ILogSystem::SetPeekCursor>(
 		    localSets, bestSet, bestServer, tag, begin, end, parallelGetMore);
 	} else {
@@ -1296,7 +1303,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
     Tag tag,
     bool useSatellite,
     Optional<Version> end,
-    Optional<std::map<uint8_t, std::vector<uint16_t>>> knownStoppedTLogIds) {
+    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds) {
 	bool found = false;
 	if (!end.present()) {
 		end = std::numeric_limits<Version>::max();
@@ -1345,7 +1352,9 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
 			}
 
 			int bestServer = localSets[bestSet]->bestLocationFor(tag);
-			resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownStoppedTLogIds);
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownStoppedTLogIds);
+			}
 
 			TraceEvent("TLogPeekLogRouterSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
 			// FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies
@@ -2039,6 +2048,7 @@ Optional<DurableVersionInfo> TagPartitionedLogSystem::getDurableVersion(UID dbgi
 	std::string sServerState;
 	LocalityGroup unResponsiveSet;
 	std::vector<uint16_t> lockedTLogIds;
+	lockedTLogIds.reserve(logSet->logServers.size());
 	for (int t = 0; t < logSet->logServers.size(); t++) {
 		if (lockInfo.replies[t].isReady() && !lockInfo.replies[t].isError() && (!failed.size() || !failed[t]->get())) {
 			results.push_back(lockInfo.replies[t].get());

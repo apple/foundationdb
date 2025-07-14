@@ -573,9 +573,10 @@ Version ILogSystem::ServerPeekCursor::popped() const {
 	return poppedVersion;
 }
 
-void resetBestServerIfNotAvailable(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
-                                   int& bestServer,
-                                   Version end) {
+static void resetBestServerIfNotAvailable(
+    std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
+    int& bestServer,
+    Version end) {
 	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST);
 	if (bestServer >= 0 && end != std::numeric_limits<Version>::max()) {
 		if (!isAvailable(logServers[bestServer])) {

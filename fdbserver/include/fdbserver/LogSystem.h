@@ -568,7 +568,7 @@ struct ILogSystem {
 	    Tag tag,
 	    bool useSatellite,
 	    Optional<Version> end = Optional<Version>(),
-	    Optional<std::map<uint8_t, std::vector<uint16_t>>> knownStoppedTLogIds =
+	    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds =
 	        Optional<std::map<uint8_t, std::vector<uint16_t>>>()) = 0;
 	// Same contract as peek(), but can only peek from the logs elected in the same generation.
 	// If the preferred log server is down, a different log from the same generation will merge results locally before

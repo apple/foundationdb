@@ -91,8 +91,8 @@ struct DurableVersionInfo {
 	                   std::vector<TLogLockResult>& replies,
 	                   bool meetsPolicy,
 	                   std::vector<uint16_t>& lockedTLogIds)
-	  : knownCommittedVersion(kcv), minimumDurableVersion(dv), lockResults(replies), policyResult(meetsPolicy),
-	    knownLockedTLogIds(lockedTLogIds) {}
+	  : knownCommittedVersion(kcv), minimumDurableVersion(dv), lockResults(std::move(replies)),
+	    policyResult(meetsPolicy), knownLockedTLogIds(std::move(lockedTLogIds)) {}
 };
 
 struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
@@ -233,7 +233,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	void resetBestServerIfNotLocked(int bestSet,
 	                                int& bestServer,
 	                                Optional<Version> end,
-	                                Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds);
+	                                const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownLockedTLogIds);
 
 	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 
@@ -270,12 +270,13 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	// The returned cursor can peek data at the "tag" from the given "begin" version to that epoch's end version or
 	// the recovery version for the latest old epoch. For the current epoch, the cursor has no end version.
 	// For the old epoch, the cursor is provided an end version.
-	Reference<IPeekCursor> peekLogRouter(UID dbgid,
-	                                     Version begin,
-	                                     Tag tag,
-	                                     bool useSatellite,
-	                                     Optional<Version> end,
-	                                     Optional<std::map<uint8_t, std::vector<uint16_t>>> knownStoppedTLogIds) final;
+	Reference<IPeekCursor> peekLogRouter(
+	    UID dbgid,
+	    Version begin,
+	    Tag tag,
+	    bool useSatellite,
+	    Optional<Version> end,
+	    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds) final;
 
 	Version getKnownCommittedVersion() final;
 
