@@ -3639,6 +3639,8 @@ public:
 				}
 			}
 
+			self->shardsAffectedByTeamFailure->traceTeamShardMapping();
+
 			// TODO: re-enable the following logging or remove them.
 			// TraceEvent("LocalityRecordKeyName", self->getDistributorId())
 			//     .detail("Size", internedLocalityRecordKeyNameStrings.size())
@@ -4942,6 +4944,7 @@ void DDTeamCollection::traceAllInfo(bool shouldPrint) const {
 	traceMachineTeamInfo();
 	traceLocalityArrayIndexName();
 	traceMachineLocalityMap();
+	shardsAffectedByTeamFailure->traceTeamShardMapping();
 }
 
 void DDTeamCollection::rebuildMachineLocalityMap() {
