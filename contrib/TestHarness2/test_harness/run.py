@@ -439,7 +439,7 @@ class TestRun:
         
         # Add appropriate upload flag based on TH_DISABLE_ROCKSDB_CHECK setting
         disable_rocksdb_check = os.getenv("TH_DISABLE_ROCKSDB_CHECK", "false").lower() in ("true", "1", "yes")
-        if disable_rocksdb_check:
+        if not disable_rocksdb_check:
             command.append("--check-rocksdb")
         result = subprocess.run(command, capture_output=True, text=True)
         return {
