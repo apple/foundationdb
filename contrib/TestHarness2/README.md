@@ -44,7 +44,7 @@ By default, TestHarness2 cleans up individual test directories after each test r
 
 TestHarness2 integrates with [`../joshua_logtool.py`](../joshua_logtool.py) to automatically upload trace logs to a FoundationDB cluster for long-term storage and analysis when test failures occur.
 
-### How `joshua_logtool.py` Works
+### How joshua_logtool.py Works
 
 The [`joshua_logtool.py`](../joshua_logtool.py) script provides three main functions:
 - **Upload**: Stores trace logs and metadata in a FoundationDB cluster using a structured key-value format
