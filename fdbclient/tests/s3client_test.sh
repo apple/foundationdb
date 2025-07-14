@@ -37,7 +37,10 @@ function run_s3client {
   local cmd_args=()
   cmd_args+=("${s3client}")
   cmd_args+=("--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
-  cmd_args+=("--knob_blobstore_encryption_type=aws:kms")
+  # Only use AWS KMS encryption with real S3, not SeaweedFS
+  if [[ "${USE_S3}" == "true" ]]; then
+    cmd_args+=("--knob_blobstore_encryption_type=aws:kms")
+  fi
   cmd_args+=("--knob_blobstore_enable_object_integrity_check=${integrity_check}")
   
   # Only add TLS CA file if it's not empty
@@ -213,12 +216,7 @@ function test_nonexistent_bucket {
   fi
   if [[ "${USE_S3}" == "true" ]]; then
     # For S3, expect "Requested resource was not found" error
-    if ! "${s3client}" \
-        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-        --knob_blobstore_encryption_type=aws:kms \
-        --tls-ca-file "${TLS_CA_FILE}" \
-        --blob-credentials "${credentials}" \
-        --log --logdir "${logsdir}" \
+    if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
         ls "${url}" \
         2>&1 | grep -q "Requested resource was not found"; then
       err "Failed to detect non-existent bucket in S3"
@@ -231,12 +229,7 @@ function test_nonexistent_bucket {
     # 3. Or successful completion with no objects listed
     local output
     local status
-    output=$("${s3client}" \
-        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-        --knob_blobstore_encryption_type=aws:kms \
-        --tls-ca-file "${TLS_CA_FILE}" \
-        --blob-credentials "${credentials}" \
-        --log --logdir "${logsdir}" \
+    output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
         ls "${url}" 2>&1)
     status=$?
 
@@ -280,12 +273,7 @@ function test_nonexistent_resource {
 
   local output
   local status
-  output=$("${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
+  output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
       ls "${url}" 2>&1)
   status=$?
 
@@ -355,12 +343,7 @@ function test_empty_bucket {
   # Run the command and capture both output and status
   local output
   local status
-  output=$("${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
+  output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
       ls "${empty_url}" 2>&1)
   status=$?
 
@@ -407,12 +390,7 @@ function test_list_with_files {
   date -Iseconds > "${test_dir}/subdir/file3"
 
   # Upload test files
-  if ! "${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
+  if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
       cp "${test_dir}" "${url}"; then
     err "Failed to upload test files for ls test"
     return 1
@@ -421,13 +399,8 @@ function test_list_with_files {
   # Test ls on the uploaded directory
   local output
   local status
-  output=$("${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      ls "${url}" 2>&1)
+      output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
+        ls "${url}" 2>&1)
   status=$?
 
   # For SeaweedFS, the output format is:
@@ -440,12 +413,7 @@ function test_list_with_files {
   fi
 
   # Clean up test files
-  if ! "${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
+  if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
       rm "${url}"; then
     err "Failed to clean up test files"
     return 1
@@ -499,23 +467,30 @@ set -o noclobber
 # TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
 # It gets cleaned up on the way out of the test.
 TEST_SCRATCH_DIR=
-# Try to find a valid TLS CA file if not explicitly set
-if [[ -z "${TLS_CA_FILE:-}" ]]; then
-  # Common locations for TLS CA files
-  for ca_file in "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" "/usr/local/share/ca-certificates/" "/etc/ssl/certs/"; do
-    if [[ -f "${ca_file}" ]]; then
-      TLS_CA_FILE="${ca_file}"
-      break
-    fi
-  done
-fi
-TLS_CA_FILE="${TLS_CA_FILE:-}"
-readonly TLS_CA_FILE
 readonly HTTP_VERBOSE_LEVEL=2
 # Should we use S3? If USE_S3 is not defined, then check if
 # OKTETO_NAMESPACE is defined (It is defined on the okteto
 # internal apple dev environments where S3 is available).
 readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
+
+# Set TLS_CA_FILE only when using real S3, not for SeaweedFS
+if [[ "${USE_S3}" == "true" ]]; then
+  # Try to find a valid TLS CA file if not explicitly set
+  if [[ -z "${TLS_CA_FILE:-}" ]]; then
+    # Common locations for TLS CA files on different systems
+    for ca_file in "/etc/pki/tls/cert.pem" "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" "/usr/local/share/ca-certificates/" "/etc/ssl/certs/"; do
+      if [[ -f "${ca_file}" ]]; then
+        TLS_CA_FILE="${ca_file}"
+        break
+      fi
+    done
+  fi
+  TLS_CA_FILE="${TLS_CA_FILE:-}"
+else
+  # For SeaweedFS, don't use TLS
+  TLS_CA_FILE=""
+fi
+readonly TLS_CA_FILE
 
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
