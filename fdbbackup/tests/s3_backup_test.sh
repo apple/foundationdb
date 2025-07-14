@@ -117,13 +117,15 @@ function test_s3_backup_and_restore {
   if [[ "${USE_S3}" == "true" ]]; then
     # Run this rm only if s3. In seaweed, it would fail because
     # bucket doesn't exist yet (they are lazily created).
-    if ! "${local_build_dir}/bin/s3client" \
-        "${KNOBS[@]}" \
-        --tls-ca-file "${TLS_CA_FILE}" \
-        --blob-credentials "${credentials}" \
-        --log --logdir "${local_scratch_dir}" \
-        rm "${edited_url}"; then
-      err "Failed rm of ${edited_url}"
+    local preclear_cmd=("${local_build_dir}/bin/s3client")
+    preclear_cmd+=("${KNOBS[@]}")
+    preclear_cmd+=("--tls-ca-file" "${TLS_CA_FILE}")
+    preclear_cmd+=("--blob-credentials" "${credentials}")
+    preclear_cmd+=("--log" "--logdir" "${local_scratch_dir}")
+    preclear_cmd+=("rm" "${edited_url}")
+    
+    if ! "${preclear_cmd[@]}"; then
+      err "Failed pre-cleanup rm of ${edited_url}"
       return 1
     fi
   fi
@@ -148,12 +150,19 @@ function test_s3_backup_and_restore {
     return 1
   fi
   # Cleanup test data.
-  if ! "${local_build_dir}/bin/s3client" \
-      "${KNOBS[@]}" \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${local_scratch_dir}" \
-      rm "${edited_url}"; then
+  local cleanup_cmd=("${local_build_dir}/bin/s3client")
+  cleanup_cmd+=("${KNOBS[@]}")
+  
+  # Only add TLS CA file for real S3, not SeaweedFS
+  if [[ "${USE_S3}" == "true" ]]; then
+    cleanup_cmd+=("--tls-ca-file" "${TLS_CA_FILE}")
+  fi
+  
+  cleanup_cmd+=("--blob-credentials" "${credentials}")
+  cleanup_cmd+=("--log" "--logdir" "${local_scratch_dir}")
+  cleanup_cmd+=("rm" "${edited_url}")
+  
+  if ! "${cleanup_cmd[@]}"; then
     err "Failed rm of ${edited_url}"
     return 1
   fi
@@ -174,16 +183,41 @@ set -o noclobber
 # TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
 # It gets cleaned up on the way out of the test.
 TEST_SCRATCH_DIR=
-TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
-readonly TLS_CA_FILE
 readonly HTTP_VERBOSE_LEVEL=10
-KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
-readonly KNOBS
 readonly TAG="test_backup"
 # Should we use S3? If USE_S3 is not defined, then check if
 # OKTETO_NAMESPACE is defined (It is defined on the okteto
 # internal apple dev environments where S3 is available).
 readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
+
+# Set KNOBS based on whether we're using real S3 or SeaweedFS
+if [[ "${USE_S3}" == "true" ]]; then
+  # Use AWS KMS encryption for real S3
+  KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+else
+  # No encryption for SeaweedFS
+  KNOBS=("--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+fi
+readonly KNOBS
+
+# Set TLS_CA_FILE only when using real S3, not for SeaweedFS
+if [[ "${USE_S3}" == "true" ]]; then
+  # Try to find a valid TLS CA file if not explicitly set
+  if [[ -z "${TLS_CA_FILE:-}" ]]; then
+    # Common locations for TLS CA files on different systems
+    for ca_file in "/etc/pki/tls/cert.pem" "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" "/usr/local/share/ca-certificates/"; do
+      if [[ -f "${ca_file}" ]]; then
+        TLS_CA_FILE="${ca_file}"
+        break
+      fi
+    done
+  fi
+  TLS_CA_FILE="${TLS_CA_FILE:-}"
+else
+  # For SeaweedFS, don't use TLS
+  TLS_CA_FILE=""
+fi
+readonly TLS_CA_FILE
 # Clear these environment variables. fdbbackup goes looking for them
 # and if EITHER is set, it will go via a proxy instead of to where we.
 # want it to go.
@@ -259,7 +293,7 @@ if [[ "${USE_S3}" == "true" ]]; then
   readonly bucket="${configs[1]}"
   readonly blob_credentials_file="${configs[2]}"
   readonly region="${configs[3]}"
-  query_str="bucket=${bucket}&region=${region}"
+  query_str="bucket=${bucket}&region=${region}&secure_connection=1"
   # Make these environment variables available for the fdb cluster and backup_agent when s3.
   export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
   export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
@@ -287,6 +321,8 @@ else
   readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
   # Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
   query_str="bucket=${bucket}&region=${region}&secure_connection=0"
+  # Set environment variables for SeaweedFS too
+  export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
 fi
 
 # Source in the fdb cluster.
