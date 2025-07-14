@@ -134,6 +134,13 @@ function bulkload {
   fi
   if ! "${local_build_dir}"/bin/fdbcli \
     -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
+    --exec "bulkload addlockowner BulkLoad"
+  then
+    err "Bulkload add BulkLoad lockower failed"
+    return 1
+  fi
+  if ! "${local_build_dir}"/bin/fdbcli \
+    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     --exec "bulkload load ${jobid} \"\" \xff \"${url}\""
   then
     err "Bulkload start failed"
