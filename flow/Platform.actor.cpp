@@ -828,23 +828,17 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 		    .detail("Guest", t_guest);
 }
 
-void getDiskStatistics(std::string const& directory,
-                       uint64_t& currentIOs,
-                       uint64_t& readMilliSecs,
-                       uint64_t& writeMilliSecs,
-                       uint64_t& IOMilliSecs,
-                       uint64_t& reads,
-                       uint64_t& writes,
-                       uint64_t& writeSectors,
-                       uint64_t& readSectors) {
+// This is inside the __linux__ ifdef
+DiskStatistics getDiskStatistics(std::string const& directory) {
 	INJECT_FAULT(platform_error, "getDiskStatistics"); // Getting disks statistics failed
-	currentIOs = 0;
 
 	struct stat buf;
 	if (stat(directory.c_str(), &buf)) {
 		TraceEvent(SevError, "GetDiskStatisticsStatError").detail("Directory", directory).GetLastError();
 		throw platform_error();
 	}
+
+	DiskStatistics diskStats;
 
 	std::ifstream proc_stream("/proc/diskstats", std::ifstream::in);
 	while (proc_stream.good()) {
@@ -917,29 +911,44 @@ void getDiskStatistics(std::string const& directory,
 			disk_stream >> ticks;
 			disk_stream >> aveq;
 
-			currentIOs = cur_ios;
-			readMilliSecs = rd_ticks;
-			writeMilliSecs = wr_ticks;
-			IOMilliSecs = ticks;
-			reads = rd_ios;
-			writes = wr_ios;
-			writeSectors = wr_sectors;
-			readSectors = rd_sectors;
+			diskStats.currentIOs = cur_ios;
+			diskStats.readMilliSecs = rd_ticks;
+			diskStats.writeMilliSecs = wr_ticks;
+			diskStats.IOMilliSecs = ticks;
+			diskStats.reads = rd_ios;
+			diskStats.writes = wr_ios;
+			diskStats.readSectors = rd_sectors;
+			diskStats.writeSectors = wr_sectors;
 
-			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("Ignore", ignore).detail("RdIos", rd_ios)
-			//	.detail("RdMerges", rd_merges).detail("RdSectors", rd_sectors).detail("RdTicks",
-			// rd_ticks).detail("WrIos", wr_ios).detail("WrMerges", wr_merges) 	.detail("WrSectors",
-			// wr_sectors).detail("WrTicks", wr_ticks).detail("CurIos", cur_ios).detail("Ticks", ticks).detail("Aveq",
-			// aveq) 	.detail("CurrentIOs", currentIOs).detail("BusyTicks", busyTicks).detail("Reads",
-			// reads).detail("Writes", writes).detail("WriteSectors", writeSectors)
-			//  .detail("ReadSectors", readSectors);
-			return;
-		} else
+			// Argument for why we believe that Linux sectors are exactly 512 bytes:
+			//
+			// 1) In general in UNIX user<->kernel interfaces I believe this has been true for 30+ years
+			//
+			// 2) Concretely, in Linux, we have the following documentation (reviewed July 2025):
+			//    a) RE: /proc/diskstats: https://www.kernel.org/doc/html/latest/admin-guide/iostats.html,
+			//       says that /proc/diskstats (which we are reading in code just above) generates
+			//       output identical to /sys/block/<device>/stat.
+			//    b) RE: /sys/block/<device>/stat: https://www.kernel.org/doc/html/latest/block/stat.html
+			//       says "The sectors in question are the standard UNIX 512-byte sectors".
+			//
+			// One might wonder, why doesn't Linux just count bytes in 64-bit counters?
+			// Well, who knows.  32 bits of quantized 512-byte sectors ought to be enough for anybody, right?
+			// It's left as an exercise for the reader to calculate how frequently these counters
+			// will overflow on a moderately busy system where a device is doing 1MB/sec.
+			diskStats.readBytes = rd_sectors * uint64_t{ 512 };
+			diskStats.writeBytes = wr_sectors * uint64_t{ 512 };
+
+			return diskStats;
+		} else {
 			disk_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+		}
 	}
 
-	if (!g_network->isSimulated())
+	if (!g_network->isSimulated()) {
 		TraceEvent(SevWarn, "GetDiskStatisticsDeviceNotFound").detail("Directory", directory);
+	}
+
+	return diskStats;
 }
 
 dev_t getDeviceId(std::string path) {
@@ -1061,24 +1070,10 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	// need to add logging here to TraceEvent
 }
 
-void getDiskStatistics(std::string const& directory,
-                       uint64_t& currentIOs,
-                       uint64_t& readMilliSecs,
-                       uint64_t& writeMilliSecs,
-                       uint64_t& IOMilliSecs,
-                       uint64_t& reads,
-                       uint64_t& writes,
-                       uint64_t& writeSectors,
-                       uint64_t& readSectors) {
+// XXX: this is inside __FreeBSD__ ifdef.
+// This is not likely to be well tested.
+DiskStatistics getDiskStatistics(std::string const& directory) {
 	INJECT_FAULT(platform_error, "getDiskStatistics"); // getting disk stats failed
-	currentIOs = 0;
-	readMilliSecs = 0; // This will not be used because we cannot get its value.
-	writeMilliSecs = 0; // This will not be used because we cannot get its value.
-	IOMilliSecs = 0;
-	reads = 0;
-	writes = 0;
-	writeSectors = 0;
-	readSectors = 0;
 
 	struct stat buf;
 	if (stat(directory.c_str(), &buf)) {
@@ -1098,9 +1093,10 @@ void getDiskStatistics(std::string const& directory,
 
 	int dn;
 	u_int64_t total_transfers_read, total_transfers_write;
-	u_int64_t total_blocks_read, total_blocks_write;
+	u_int64_t total_bytes_read, total_bytes_written;
 	u_int64_t queue_len;
 	long double ms_per_transaction;
+	DiskStatistics diskStats;
 
 	dscur.dinfo = (struct devinfo*)calloc(1, sizeof(struct devinfo));
 	if (dscur.dinfo == nullptr) {
@@ -1116,7 +1112,6 @@ void getDiskStatistics(std::string const& directory,
 	num_devices = dscur.dinfo->numdevs;
 
 	for (dn = 0; dn < num_devices; dn++) {
-
 		if (devstat_compute_statistics(&dscur.dinfo->devices[dn],
 		                               nullptr,
 		                               etime,
@@ -1126,10 +1121,10 @@ void getDiskStatistics(std::string const& directory,
 		                               &total_transfers_read,
 		                               DSM_TOTAL_TRANSFERS_WRITE,
 		                               &total_transfers_write,
-		                               DSM_TOTAL_BLOCKS_READ,
-		                               &total_blocks_read,
-		                               DSM_TOTAL_BLOCKS_WRITE,
-		                               &total_blocks_write,
+		                               DSM_TOTAL_BYTES_READ,
+		                               &total_bytes_read,
+		                               DSM_TOTAL_BYTES_WRITE,
+		                               &total_bytes_written,
 		                               DSM_QUEUE_LENGTH,
 		                               &queue_len,
 		                               DSM_NONE) != 0) {
@@ -1137,12 +1132,14 @@ void getDiskStatistics(std::string const& directory,
 			throw platform_error();
 		}
 
-		currentIOs += queue_len;
-		IOMilliSecs += (u_int64_t)ms_per_transaction;
-		reads += total_transfers_read;
-		writes += total_transfers_write;
-		writeSectors += total_blocks_read;
-		readSectors += total_blocks_write;
+		diskStats.currentIOs += queue_len;
+		diskStats.IOMilliSecs += (u_int64_t)ms_per_transaction;
+		diskStats.reads += total_transfers_read;
+		diskStats.writes += total_transfers_write;
+		diskStats.readSectors += total_bytes_read / 512;
+		diskStats.writeSectors += total_bytes_written / 512;
+		diskStats.readBytes += total_bytes_read;
+		diskStats.writeBytes += total_bytes_written;
 	}
 }
 
@@ -1245,22 +1242,9 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	            r_load.cpu_ticks[CPU_STATE_SYSTEM];
 }
 
-void getDiskStatistics(std::string const& directory,
-                       uint64_t& currentIOs,
-                       uint64_t& readMilliSecs,
-                       uint64_t& writeMilliSecs,
-                       uint64_t& IOMilliSecs,
-                       uint64_t& reads,
-                       uint64_t& writes,
-                       uint64_t& writeSectors,
-                       uint64_t& readSectors) {
+// This is inside the __APPLE__ ifdef
+DiskStatistics getDiskStatistics(std::string const& directory) {
 	INJECT_FAULT(platform_error, "getDiskStatistics"); // Getting disk stats failed (macOS)
-	currentIOs = 0; // This will not be used because we cannot get its value.
-	readMilliSecs = 0;
-	writeMilliSecs = 0;
-	IOMilliSecs = 0;
-	writeSectors = 0;
-	readSectors = 0;
 
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
@@ -1331,37 +1315,37 @@ void getDiskStatistics(std::string const& directory,
 
 	CFNumberRef number;
 
+	DiskStatistics diskStats;
+
 	if ((number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsReadsKey)))) {
-		CFNumberGetValue(number, kCFNumberSInt64Type, &reads);
+		CFNumberGetValue(number, kCFNumberSInt64Type, &diskStats.reads);
 	}
 
 	if ((number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsWritesKey)))) {
-		CFNumberGetValue(number, kCFNumberSInt64Type, &writes);
+		CFNumberGetValue(number, kCFNumberSInt64Type, &diskStats.writes);
 	}
 
 	uint64_t nanoSecs;
 	if ((number =
 	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalReadTimeKey)))) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
-		readMilliSecs += nanoSecs;
-		IOMilliSecs += nanoSecs;
+		diskStats.readMilliSecs += nanoSecs / 1000000;
+		diskStats.IOMilliSecs += nanoSecs / 1000000;
 	}
 	if ((number =
 	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalWriteTimeKey)))) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
-		writeMilliSecs += nanoSecs;
-		IOMilliSecs += nanoSecs;
+		diskStats.writeMilliSecs += nanoSecs / 1000000;
+		diskStats.IOMilliSecs += nanoSecs / 1000000;
 	}
-	// nanoseconds to milliseconds
-	readMilliSecs /= 1000000;
-	writeMilliSecs /= 1000000;
-	IOMilliSecs /= 1000000;
 
 	CFRelease(disk_dict);
 	IOObjectRelease(disk);
 	IOObjectRelease(disk_list);
+
+	return diskStats;
 }
-#endif
+#endif // __APPLE__
 
 #if defined(_WIN32)
 std::vector<std::string> expandWildcardPath(const char* wildcardPath) {
@@ -1461,17 +1445,18 @@ struct SystemStatisticsState {
 	  : Query(nullptr), QueueLengthCounter(nullptr), DiskTimeCounter(nullptr), ReadsCounter(nullptr),
 	    WritesCounter(nullptr), WriteBytesCounter(nullptr), ProcessorIdleCounter(nullptr), lastTime(0),
 	    lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0) {}
+
 #elif defined(__unixish__)
 	uint64_t machineLastSent, machineLastReceived;
 	uint64_t machineLastOutSegs, machineLastRetransSegs;
-	uint64_t lastReadMilliSecs, lastWriteMilliSecs, lastIOMilliSecs, lastReads, lastWrites, lastWriteSectors,
-	    lastReadSectors;
+
+	DiskStatistics lastDiskStats;
+
 	uint64_t lastClockIdleTime, lastClockTotalTime;
 	SystemStatisticsState()
 	  : lastTime(0), lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0),
 	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0),
-	    lastReadMilliSecs(0), lastWriteMilliSecs(0), lastIOMilliSecs(0), lastReads(0), lastWrites(0),
-	    lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0), lastClockTotalTime(0) {}
+	    lastClockIdleTime(0), lastClockTotalTime(0) {}
 #else
 #error Port me!
 #endif
@@ -1747,51 +1732,40 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	(*statState)->machineLastSent = machineNowSent;
 	(*statState)->machineLastReceived = machineNowReceived;
 	(*statState)->machineLastOutSegs = machineOutSegs;
+
 	(*statState)->machineLastRetransSegs = machineRetransSegs;
 
-	uint64_t currentIOs;
-	uint64_t nowReadMilliSecs = (*statState)->lastReadMilliSecs;
-	uint64_t nowWriteMilliSecs = (*statState)->lastWriteMilliSecs;
-	uint64_t nowIOMilliSecs = (*statState)->lastIOMilliSecs;
-	uint64_t nowReads = (*statState)->lastReads;
-	uint64_t nowWrites = (*statState)->lastWrites;
-	uint64_t nowWriteSectors = (*statState)->lastWriteSectors;
-	uint64_t nowReadSectors = (*statState)->lastReadSectors;
-
 	if (dataFolder != "") {
-		getDiskStatistics(dataFolder,
-		                  currentIOs,
-		                  nowReadMilliSecs,
-		                  nowWriteMilliSecs,
-		                  nowIOMilliSecs,
-		                  nowReads,
-		                  nowWrites,
-		                  nowWriteSectors,
-		                  nowReadSectors);
-		returnStats.processDiskQueueDepth = currentIOs;
-		returnStats.processDiskReadCount = nowReads;
-		returnStats.processDiskWriteCount = nowWrites;
+		DiskStatistics currentDiskStats = getDiskStatistics(dataFolder);
+
+		returnStats.processDiskQueueDepth = currentDiskStats.currentIOs;
+		returnStats.processDiskReadCount = currentDiskStats.reads;
+		returnStats.processDiskWriteCount = currentDiskStats.writes;
+
 		if (returnStats.initialized) {
 			returnStats.processDiskIdleSeconds = std::max<double>(
 			    0,
 			    returnStats.elapsed -
-			        std::min<double>(returnStats.elapsed, (nowIOMilliSecs - (*statState)->lastIOMilliSecs) / 1000.0));
+			        std::min<double>(returnStats.elapsed,
+			                         (currentDiskStats.IOMilliSecs - (*statState)->lastDiskStats.IOMilliSecs) /
+			                             1000.0));
 			returnStats.processDiskReadSeconds =
-			    std::min<double>(returnStats.elapsed, (nowReadMilliSecs - (*statState)->lastReadMilliSecs) / 1000.0);
-			returnStats.processDiskWriteSeconds =
-			    std::min<double>(returnStats.elapsed, (nowWriteMilliSecs - (*statState)->lastWriteMilliSecs) / 1000.0);
-			returnStats.processDiskRead = (nowReads - (*statState)->lastReads);
-			returnStats.processDiskWrite = (nowWrites - (*statState)->lastWrites);
-			returnStats.processDiskWriteSectors = (nowWriteSectors - (*statState)->lastWriteSectors);
-			returnStats.processDiskReadSectors = (nowReadSectors - (*statState)->lastReadSectors);
+			    std::min<double>(returnStats.elapsed,
+			                     (currentDiskStats.readMilliSecs - (*statState)->lastDiskStats.readMilliSecs) / 1000.0);
+			returnStats.processDiskWriteSeconds = std::min<double>(
+			    returnStats.elapsed,
+			    (currentDiskStats.writeMilliSecs - (*statState)->lastDiskStats.writeMilliSecs) / 1000.0);
+			returnStats.processDiskRead = (currentDiskStats.reads - (*statState)->lastDiskStats.reads);
+			returnStats.processDiskWrite = (currentDiskStats.writes - (*statState)->lastDiskStats.writes);
+			returnStats.processDiskReadSectors =
+			    (currentDiskStats.readSectors - (*statState)->lastDiskStats.readSectors);
+			returnStats.processDiskWriteSectors =
+			    (currentDiskStats.writeSectors - (*statState)->lastDiskStats.writeSectors);
+			returnStats.processDiskReadBytes = (currentDiskStats.readBytes - (*statState)->lastDiskStats.readBytes);
+			returnStats.processDiskWriteBytes = (currentDiskStats.writeBytes - (*statState)->lastDiskStats.writeBytes);
 		}
-		(*statState)->lastIOMilliSecs = nowIOMilliSecs;
-		(*statState)->lastReadMilliSecs = nowReadMilliSecs;
-		(*statState)->lastWriteMilliSecs = nowWriteMilliSecs;
-		(*statState)->lastReads = nowReads;
-		(*statState)->lastWrites = nowWrites;
-		(*statState)->lastWriteSectors = nowWriteSectors;
-		(*statState)->lastReadSectors = nowReadSectors;
+
+		(*statState)->lastDiskStats = currentDiskStats;
 	}
 
 	uint64_t clockIdleTime = (*statState)->lastClockIdleTime;
