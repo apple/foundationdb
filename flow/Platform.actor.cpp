@@ -1329,14 +1329,14 @@ DiskStatistics getDiskStatistics(std::string const& directory) {
 	if ((number =
 	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalReadTimeKey)))) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
-		readMilliSecs += nanoSecs / 1000000;
-		IOMilliSecs += nanoSecs / 1000000;
+		diskStats.readMilliSecs += nanoSecs / 1000000;
+		diskStats.IOMilliSecs += nanoSecs / 1000000;
 	}
 	if ((number =
 	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalWriteTimeKey)))) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
-		writeMilliSecs += nanoSecs / 1000000;
-		IOMilliSecs += nanoSecs / 1000000;
+		diskStats.writeMilliSecs += nanoSecs / 1000000;
+		diskStats.IOMilliSecs += nanoSecs / 1000000;
 	}
 
 	CFRelease(disk_dict);
