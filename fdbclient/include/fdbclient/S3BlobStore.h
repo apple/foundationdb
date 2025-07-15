@@ -23,6 +23,7 @@
 #include <map>
 #include <unordered_map>
 #include <functional>
+#include <string>
 #include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
@@ -423,11 +424,18 @@ public:
 	                               UnsentPacketQueue* pContent,
 	                               int contentLen,
 	                               std::string const& contentHash);
-	typedef std::map<int, std::string> MultiPartSetT;
-	Future<Void> finishMultiPartUpload(std::string const& bucket,
-	                                   std::string const& object,
-	                                   std::string const& uploadID,
-	                                   MultiPartSetT const& parts);
+
+	struct PartInfo {
+		std::string etag;
+		std::string checksum; // MD5 or SHA256 depending on integrity check setting
+		PartInfo() = default;
+		PartInfo(std::string e, std::string c = "") : etag(e), checksum(c) {}
+	};
+	typedef std::map<int, PartInfo> MultiPartSetT;
+	Future<Optional<std::string>> finishMultiPartUpload(std::string const& bucket,
+	                                                    std::string const& object,
+	                                                    std::string const& uploadID,
+	                                                    MultiPartSetT const& parts);
 	Future<Void> abortMultiPartUpload(std::string const& bucket,
 	                                  std::string const& object,
 	                                  std::string const& uploadID);
