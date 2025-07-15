@@ -80,17 +80,10 @@ ACTOR Future<Void> convertStream(PromiseStream<RangeResult> input, PromiseStream
 struct StreamingRangeReadWorkload : KVWorkload {
 	static constexpr auto NAME = "StreamingRangeRead";
 	double testDuration;
-	std::string valueString;
 	Future<Void> client;
 
 	StreamingRangeReadWorkload(WorkloadContext const& wcx) : KVWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
-		valueString = std::string(maxValueBytes, '.');
-	}
-
-	Value randomValue() {
-		return StringRef((uint8_t*)valueString.c_str(),
-		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
 	}
 
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }

@@ -599,7 +599,9 @@ struct StorageServerDisk {
 	                                 Version newStorageVersion,
 	                                 int64_t& bytesLeft,
 	                                 UnlimitedCommitBytes unlimitedCommitBytes,
-	                                 int64_t& clearRangesLeft);
+	                                 int64_t& clearRangesLeft,
+	                                 const UID& ssId,
+	                                 bool verbose = false);
 	void makeVersionDurable(Version version);
 	void makeAccumulativeChecksumDurable(const AccumulativeChecksumState& acsState);
 	void clearAccumulativeChecksumState(const AccumulativeChecksumState& acsState);
@@ -9899,7 +9901,7 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	localRecord.ranges = coalesceRanges;
 	rcp.fetchedFiles.emplace_back(
 	    abspath(toLocalFileSet.getDataFileFullPath()), coalesceRanges[0], bulkLoadTaskState.getTotalBytes());
-	localRecord.serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+	localRecord.setSerializedCheckpoint(ObjectWriter::toValue(rcp, IncludeVersion()));
 	localRecord.version = moveInShard->meta->createVersion;
 	if (toLocalFileSet.hasByteSampleFile()) {
 		ASSERT(fileExists(abspath(toLocalFileSet.getBytesSampleFileFullPath())));
@@ -11146,7 +11148,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("Range", keys)
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
-			    .detail("ResultingShard", newShard.toString());
+			    .detail("ResultingShard", newShard.toString())
+			    .detail("ShardIdDifferent", newShard.id != newShard.desiredId);
 		} else if (currentShard->adding) {
 			if (nowAssigned) {
 				TraceEvent(sev, "PhysicalShardStateError")
@@ -11246,9 +11249,10 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("NewShard", updatedShards.back().toString());
 		} else if (!dataAvailable) {
 			if (version == data->initialClusterVersion - 1) {
-				TraceEvent(sevDm, "CSKWithPhysicalShardsSeedRange", data->thisServerID)
+				TraceEvent(SevInfo, "CSKWithPhysicalShardsSeedRange", data->thisServerID)
 				    .detail("ShardID", desiredId)
-				    .detail("Range", range);
+				    .detail("Range", range)
+				    .detail("Version", cVer);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				updatedShards.push_back(
 				    StorageServerShard(range, version, desiredId, desiredId, StorageServerShard::ReadWrite));
@@ -12908,7 +12912,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Version newOldestVersion = data->storageVersion();
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
-		state int64_t clearRangesLeft = data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1
+		state int64_t clearRangesLeft = (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1 ||
+		                                 data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
 		                                    ? (SERVER_KNOBS->ROCKSDB_CLEARRANGES_LIMIT_PER_COMMIT > 0
 		                                           ? SERVER_KNOBS->ROCKSDB_CLEARRANGES_LIMIT_PER_COMMIT
 		                                           : INT_MAX)
@@ -12987,12 +12992,22 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			}
 		}
 
+		// When unlimitedCommitBytes is set to true, clearRangesLeft will be ignored.
+		// Make sure unlimitedCommitBytes is set to True only when storage engine is sharded rocksdb.
+		ASSERT(data->shardAware || unlimitedCommitBytes == UnlimitedCommitBytes::False);
+
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		// or until we reach clearRanges limit, in case of rocksdb.
 		state double beforeStorageUpdates = now();
 		loop {
-			state bool done = data->storage.makeVersionMutationsDurable(
-			    newOldestVersion, desiredVersion, bytesLeft, unlimitedCommitBytes, clearRangesLeft);
+			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion,
+			                                                            desiredVersion,
+			                                                            bytesLeft,
+			                                                            unlimitedCommitBytes,
+			                                                            clearRangesLeft,
+			                                                            data->thisServerID,
+			                                                            data->storage.getKeyValueStoreType() ==
+			                                                                KeyValueStoreType::SSD_ROCKSDB_V1);
 			if (data->tenantMap.getLatestVersion() < newOldestVersion) {
 				data->tenantMap.createNewVersion(newOldestVersion);
 			}
@@ -13580,10 +13595,21 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
                                                     Version newStorageVersion,
                                                     int64_t& bytesLeft,
                                                     UnlimitedCommitBytes unlimitedCommitBytes,
-                                                    int64_t& clearRangesLeft) {
-	if ((!unlimitedCommitBytes && bytesLeft <= 0) || clearRangesLeft <= 0)
+                                                    int64_t& clearRangesLeft,
+                                                    const UID& ssId,
+                                                    bool verbose) {
+	if (!unlimitedCommitBytes && (bytesLeft <= 0 || clearRangesLeft <= 0))
 		return true;
 
+	if (clearRangesLeft <= 0 && verbose) {
+		TraceEvent(SevInfo, "MakeVersionMutationsDurableClearRangesLeftZero", ssId)
+		    .suppressFor(5.0)
+		    .detail("PrevStorageVersion", prevStorageVersion)
+		    .detail("NewStorageVersion", newStorageVersion)
+		    .detail("BytesLeft", bytesLeft)
+		    .detail("ClearRangesLeft", clearRangesLeft)
+		    .detail("UnlimitedCommitBytes", unlimitedCommitBytes);
+	}
 	// Apply mutations from the mutationLog
 	auto u = data->getMutationLog().upper_bound(prevStorageVersion);
 	if (u != data->getMutationLog().end() && u->first <= newStorageVersion) {

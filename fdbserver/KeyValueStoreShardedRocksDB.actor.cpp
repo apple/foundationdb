@@ -1,4 +1,6 @@
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageCheckpoint.h"
+#include "flow/Arena.h"
 #ifdef WITH_ROCKSDB
 
 #include "fdbclient/KeyRangeMap.h"
@@ -295,7 +297,7 @@ private:
 // could potentially cause segmentation fault.
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
-	RocksDBErrorListener() {};
+	RocksDBErrorListener() {}
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
 		if (!bg_error)
 			return;
@@ -693,7 +695,7 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 		}
 	}
 	checkpoint->setFormat(DataMoveRocksCF);
-	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
+	checkpoint->setSerializedCheckpoint(ObjectWriter::toValue(rocksCF, IncludeVersion()));
 }
 
 const rocksdb::Slice toSlice(StringRef s) {
@@ -1546,7 +1548,7 @@ public:
 		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 			if (it.value()) {
 				if (it.value()->physicalShard->id == id) {
-					TraceEvent(SevError, "ShardedRocksDBAddRange")
+					TraceEvent(SevWarn, "ShardedRocksDBAddRange")
 					    .detail("ErrorType", "RangeAlreadyExist")
 					    .detail("IntersectingRange", it->range())
 					    .detail("DataShardRange", it->value()->range)
@@ -1564,15 +1566,45 @@ public:
 			}
 		}
 
-		auto currentCfOptions = active ? rState->getCFOptions() : rState->getCFOptionsForInactiveShard();
-		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, currentCfOptions));
-		std::shared_ptr<PhysicalShard>& shard = it->second;
+		auto it = physicalShards.find(id);
+		std::shared_ptr<PhysicalShard> physicalShard = nullptr;
+		if (it != physicalShards.end()) {
+			physicalShard = it->second;
+			// TODO: consider coalescing continous key ranges.
+			if (!SERVER_KNOBS->SHARDED_ROCKSDB_ALLOW_MULTIPLE_RANGES) {
+				bool continous = physicalShard->dataShards.empty();
+				std::string rangeStr = "";
+				for (auto& [_, shard] : physicalShard->dataShards) {
+					rangeStr += shard->range.toString() + ", ";
+					if (shard->range.begin < range.begin && shard->range.end == range.begin) {
+						continous = true;
+						break;
+					}
+					if (shard->range.begin > range.begin && range.end == shard->range.begin) {
+						continous = true;
+						break;
+					}
+				}
+				if (!continous) {
+					// When multiple shards are merged into a single shard, the storage server might already own a piece
+					// of the resulting shard. Because intra storage server move is disabled, the merge data move could
+					// create multiple segments in a single physcial shard.
+					TraceEvent("AddMultipleRanges")
+					    .detail("NewRange", range)
+					    .detail("OtherRanges", rangeStr)
+					    .setMaxFieldLength(1000);
+				}
+			}
+		} else {
+			auto currentCfOptions = active ? rState->getCFOptions() : rState->getCFOptionsForInactiveShard();
+			auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id, currentCfOptions));
+			physicalShard = it->second;
+		}
 
 		activePhysicalShardIds.emplace(id);
-
-		auto dataShard = std::make_unique<DataShard>(range, shard.get());
+		auto dataShard = std::make_unique<DataShard>(range, physicalShard.get());
 		dataShardMap.insert(range, dataShard.get());
-		shard->dataShards[range.begin.toString()] = std::move(dataShard);
+		physicalShard->dataShards[range.begin.toString()] = std::move(dataShard);
 
 		validate();
 
@@ -1581,7 +1613,7 @@ public:
 		    .detail("ShardId", id)
 		    .detail("Active", active);
 
-		return shard.get();
+		return physicalShard.get();
 	}
 
 	std::vector<std::string> removeRange(KeyRange range) {
@@ -1636,6 +1668,7 @@ public:
 
 			// Range modification could result in more than one segments. Remove the original segment key here.
 			existingShard->dataShards.erase(shardRange.begin.toString());
+			int count = 0;
 			if (shardRange.begin < range.begin) {
 				auto dataShard =
 				    std::make_unique<DataShard>(KeyRange(KeyRangeRef(shardRange.begin, range.begin)), existingShard);
@@ -1646,6 +1679,7 @@ public:
 
 				existingShard->dataShards[shardRange.begin.toString()] = std::move(dataShard);
 				logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE, SevInfo, msg);
+				count++;
 			}
 
 			if (shardRange.end > range.end) {
@@ -1658,6 +1692,18 @@ public:
 
 				existingShard->dataShards[range.end.toString()] = std::move(dataShard);
 				logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE, SevInfo, msg);
+				count++;
+			}
+
+			if (count > 1) {
+				// During shard split, a shard could be split into multiple key ranges. One of the key ranges will
+				// remain on the storage server, other key ranges will be moved to new server. Depending on the order of
+				// executing the split data moves, a shard could be break into multiple pieces. Eventually a single
+				// continous key range will remain on the physical shard. Data consistency is guaranteed.
+				//
+				// For team based shard placement, we expect multiple data shards to be located on the same physical
+				// shard.
+				TraceEvent("RangeSplit").detail("OriginalRange", shardRange).detail("RemovedRange", range);
 			}
 		}
 
@@ -1986,28 +2032,37 @@ public:
 		}
 
 		TraceEvent(SevVerbose, "ShardedRocksValidateShardManager", this->logId);
+		int totalDataShards = 0;
+		int expectedDataShards = 0;
 		for (auto s = dataShardMap.ranges().begin(); s != dataShardMap.ranges().end(); ++s) {
 			TraceEvent e(SevVerbose, "ShardedRocksValidateDataShardMap", this->logId);
 			e.detail("Range", s->range());
 			const DataShard* shard = s->value();
 			e.detail("ShardAddress", reinterpret_cast<std::uintptr_t>(shard));
-			if (shard != nullptr) {
-				e.detail("PhysicalShard", shard->physicalShard->id);
-			} else {
-				e.detail("Shard", "Empty");
+			if (shard == nullptr) {
+				e.detail("RangeUnassigned", "True");
+				continue;
 			}
-			if (shard != nullptr) {
-				if (shard->range != static_cast<KeyRangeRef>(s->range())) {
-					TraceEvent(SevWarnAlways, "ShardRangeMismatch").detail("Range", s->range());
-				}
+			totalDataShards++;
+			if (shard->range != static_cast<KeyRangeRef>(s->range())) {
+				TraceEvent(SevWarnAlways, "ShardRangeMismatch")
+				    .detail("Range", s->range())
+				    .detail("DataShardRange", shard->range)
+				    .detail("PhysicalShardId", shard->physicalShard->id);
+			}
 
-				ASSERT(shard->range == static_cast<KeyRangeRef>(s->range()));
-				ASSERT(shard->physicalShard != nullptr);
-				auto it = shard->physicalShard->dataShards.find(shard->range.begin.toString());
-				ASSERT(it != shard->physicalShard->dataShards.end());
-				ASSERT(it->second.get() == shard);
-			}
+			ASSERT(shard->range == static_cast<KeyRangeRef>(s->range()));
+			ASSERT(shard->physicalShard != nullptr);
+			auto it = shard->physicalShard->dataShards.find(shard->range.begin.toString());
+			ASSERT(it != shard->physicalShard->dataShards.end());
+			ASSERT(it->second.get() == shard);
 		}
+
+		for (auto [shardId, physicalShard] : physicalShards) {
+			ASSERT(physicalShard);
+			expectedDataShards += physicalShard->dataShards.size();
+		}
+		ASSERT_EQ(expectedDataShards, totalDataShards);
 	}
 
 private:
@@ -3151,7 +3206,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			    startTime(timer_monotonic()),
 			    sample((deterministicRandom()->random01() < SERVER_KNOBS->SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
 			               ? true
-			               : false) {};
+			               : false) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 
@@ -3804,12 +3859,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
-		// ShardedRocks with checkpoint is known to be non-deterministic
-		// so setting noUnseed=true. See https://github.com/apple/foundationdb/pull/11841
-		// for more context.
-		if (g_network->isSimulated() && !noUnseed) {
-			noUnseed = true;
-		}
 		auto a = new Writer::CheckpointAction(&shardManager, request);
 
 		auto res = a->reply.getFuture();
@@ -4403,6 +4452,84 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	return Void();
 }
 
+TEST_CASE("noSim/ShardedRocksDBRangeOps/RemoveSplitRange") {
+	state std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state ShardedRocksDBKeyValueStore* rocksdbStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	state IKeyValueStore* kvStore = rocksdbStore;
+	wait(kvStore->init());
+
+	// Add two ranges to the same shard.
+	{
+		std::vector<Future<Void>> addRangeFutures;
+		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("a"_sr, "d"_sr), "shard-1"));
+		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("g"_sr, "n"_sr), "shard-1"));
+
+		wait(waitForAll(addRangeFutures));
+	}
+
+	state std::set<std::string> originalKeys = { "a", "b", "c", "g", "h", "m" };
+	state std::set<std::string> currentKeys = originalKeys;
+	for (auto key : originalKeys) {
+		kvStore->set(KeyValueRef(key, key));
+	}
+	wait(kvStore->commit());
+
+	state std::string key;
+	for (auto key : currentKeys) {
+		Optional<Value> val = wait(kvStore->readValue(key));
+		ASSERT(val.present());
+		ASSERT(val.get().toString() == key);
+	}
+
+	{
+		// Remove single range.
+		auto shardIds = kvStore->removeRange(KeyRangeRef("b"_sr, "c"_sr));
+		// Remove range didn't create empty shard.
+		ASSERT_EQ(shardIds.size(), 0);
+
+		currentKeys.erase("b");
+		for (auto key : originalKeys) {
+			Optional<Value> val = wait(kvStore->readValue(key));
+			if (currentKeys.contains(key)) {
+				ASSERT(val.present());
+				ASSERT(val.get().toString() == key);
+			} else {
+				ASSERT(!val.present());
+			}
+		}
+	}
+
+	{
+		// Remove range spanning on multple sub range.
+		auto shardIds = kvStore->removeRange(KeyRangeRef("c"_sr, "k"_sr));
+		ASSERT(shardIds.empty());
+
+		currentKeys.erase("c");
+		currentKeys.erase("g");
+		currentKeys.erase("h");
+		for (auto key : originalKeys) {
+			Optional<Value> val = wait(kvStore->readValue(key));
+			if (currentKeys.contains(key)) {
+				ASSERT(val.present());
+				ASSERT(val.get().toString() == key);
+			} else {
+				ASSERT(!val.present());
+			}
+		}
+	}
+
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->dispose();
+		wait(closed);
+	}
+	ASSERT(!directoryExists(rocksDBTestDir));
+	return Void();
+}
+
 TEST_CASE("noSim/ShardedRocksDBCheckpoint/CheckpointBasic") {
 	state std::string rocksDBTestDir = "sharded-rocks-checkpoint-restore";
 	state std::map<Key, Value> kvs({ { "a"_sr, "TestValueA"_sr },
@@ -4777,7 +4904,7 @@ ACTOR Future<Void> testWrites(IKeyValueStore* kvStore, int writeCount) {
 	state int i = 0;
 
 	while (i < writeCount) {
-		state int endCount = deterministicRandom()->randomInt(i, i + 1000);
+		state int endCount = deterministicRandom()->randomInt(i + 1, i + 1000);
 		state std::string beginKey = format("key-%6d", i);
 		state std::string endKey = format("key-%6d", endCount);
 		wait(kvStore->addRange(KeyRangeRef(beginKey, endKey), deterministicRandom()->randomUniqueID().toString()));
@@ -4852,6 +4979,41 @@ TEST_CASE("perf/ShardedRocksDB/ConcurrentReadWrite") {
 	ASSERT(!directoryExists(rocksDBTestDir));
 	return Void();
 }
+
+// The "noSim/determinism/checkpoint_metadata/*" unit tests below
+// ensure that as a client, if you set serialized checkpoint to X,
+// you always get back X.
+void checkpointMetadataSerdeTest(const std::string& testString) {
+	Standalone<StringRef> serialized = StringRef(testString);
+	CheckpointMetaData metadata;
+	metadata.setSerializedCheckpoint(serialized);
+	Standalone<StringRef> deserialized = metadata.getSerializedCheckpoint();
+	TraceEvent("CheckpointSerde").detail("SerializedString", serialized).detail("DeserializedString", deserialized);
+	ASSERT(serialized == deserialized);
+}
+
+TEST_CASE("noSim/determinism/checkpoint_metadata/serde1") {
+	checkpointMetadataSerdeTest("some_rocksdb_checkpoint_metadata_123");
+	return Void();
+}
+
+TEST_CASE("noSim/determinism/checkpoint_metadata/serde2") {
+	checkpointMetadataSerdeTest("");
+	return Void();
+}
+
+TEST_CASE("noSim/determinism/checkpoint_metadata/serde3") {
+	checkpointMetadataSerdeTest(
+	    "some_rocksdb_checkpoint_metadata_123some_rocksdb_checkpoint_metadata_123some_rocksdb_checkpoint_"
+	    "metadata_123some_rocksdb_checkpoint_metadata_123some_rocksdb_checkpoint_metadata_123");
+	return Void();
+}
+
+TEST_CASE("noSim/determinism/checkpoint_metadata/serde4") {
+	checkpointMetadataSerdeTest("some_\nrocksdb_checkpoint_\nmetadata_123\0");
+	return Void();
+}
+
 } // namespace
 
 #endif // WITH_ROCKSDB
