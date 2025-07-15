@@ -116,3 +116,17 @@ With the above backup scenario, we could restore to any version from c to d or g
 Instead of going through the pain of monitoring for backup becoming too large and restarting backup, we could just
 have backup running continuously with KVrange task restarting once in a while (with some policy of course). 
 The code for continuous has already committed. The document will be added in the future.
+
+#### S3 Checksumming and Data Integrity
+
+FoundationDB implements checksum verification for S3 backup operations to ensure data integrity during upload and download. When `BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK` is enabled (default), the system uses SHA256 checksums for stronger cryptographic verification compared to MD5.
+
+**Key Features:**
+- **Upload Verification**: SHA256 checksums are calculated and sent with each part upload, verified by AWS S3
+- **Download Verification**: Different strategies based on file size and access pattern
+- **Multipart Support**: Proper handling of AWS S3 multipart upload checksum requirements
+- **Consistent Implementation**: Both low-level S3BlobStore and high-level AsyncFileS3BlobStore use SHA256
+
+**Important AWS S3 Limitation**: Range requests (used by backup restore operations) cannot use S3 checksum verification due to AWS limitations. However, FoundationDB's internal checksums still provide data integrity protection.
+
+For detailed information about S3 checksumming implementation, troubleshooting, and best practices, see `design/s3-checksumming.md`.

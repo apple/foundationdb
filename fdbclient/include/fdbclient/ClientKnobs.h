@@ -273,8 +273,9 @@ public:
 	                                             // we will check the serverside proffered hash against that we
 	                                             // calculate on the received content.  If no match, throw an error. See
 	                                             // https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html
-	                                             // (We can't depend on etags in the download because they are not the
-	                                             // md5 of the content when the upload uses encryption such as aws:kms)
+	                                             // This download check only works for small files. For large files,
+	                                             // we run a separate checksum. See design/s3-checksumming.md
+	                                             //
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX; // Available in both normal and urgent mode
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME; // Available in normal mode
 	int CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME; // Available in urgent mode
