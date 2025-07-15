@@ -38,6 +38,7 @@
 #include "fdbclient/S3BlobStore.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
+#include <openssl/sha.h>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR template <typename T>
@@ -63,36 +64,58 @@ public:
 	virtual StringRef getClassName() override { return "AsyncFileS3BlobStoreWrite"_sr; }
 
 	struct Part : ReferenceCounted<Part> {
-		Part(int n, int minSize)
-		  : number(n), writer(content.getWriteBuffer(minSize), nullptr, Unversioned()), length(0) {
+		Part(int n, int minSize, bool useSHA256)
+		  : number(n), writer(content.getWriteBuffer(minSize), nullptr, Unversioned()), length(0),
+		    use_sha256(useSHA256) {
 			etag = std::string();
-			::MD5_Init(&content_md5_buf);
+			if (use_sha256) {
+				::SHA256_Init(&content_sha256_buf);
+			} else {
+				::MD5_Init(&content_md5_buf);
+			}
 		}
 		virtual ~Part() { etag.cancel(); }
 		Future<std::string> etag;
 		int number;
 		UnsentPacketQueue content;
-		std::string md5string;
+		std::string checksumString; // Contains either MD5 or SHA256 based on use_sha256
 		PacketWriter writer;
 		int length;
 		void write(const uint8_t* buf, int len) {
 			writer.serializeBytes(buf, len);
-			::MD5_Update(&content_md5_buf, buf, len);
+			if (use_sha256) {
+				::SHA256_Update(&content_sha256_buf, buf, len);
+			} else {
+				::MD5_Update(&content_md5_buf, buf, len);
+			}
 			length += len;
 		}
-		// MD5 sum can only be finalized once, further calls will do nothing so new writes will be reflected in the sum.
-		void finalizeMD5() {
-			if (md5string.empty()) {
-				std::string sumBytes;
-				sumBytes.resize(16);
-				::MD5_Final((unsigned char*)sumBytes.data(), &content_md5_buf);
-				md5string = base64::encoder::from_string(sumBytes);
-				md5string.resize(md5string.size() - 1);
+		// Checksum can only be finalized once, further calls will do nothing so new writes will be reflected in the
+		// sum.
+		void finalizeChecksum() {
+			if (checksumString.empty()) {
+				if (use_sha256) {
+					std::string sumBytes;
+					sumBytes.resize(32);
+					::SHA256_Final((unsigned char*)sumBytes.data(), &content_sha256_buf);
+					checksumString = base64::encoder::from_string(sumBytes);
+					checksumString.resize(checksumString.size() - 1);
+				} else {
+					std::string sumBytes;
+					sumBytes.resize(16);
+					::MD5_Final((unsigned char*)sumBytes.data(), &content_md5_buf);
+					checksumString = base64::encoder::from_string(sumBytes);
+					checksumString.resize(checksumString.size() - 1);
+				}
 			}
 		}
 
 	private:
-		MD5_CTX content_md5_buf;
+		bool use_sha256;
+		union {
+			MD5_CTX content_md5_buf;
+			SHA256_CTX content_sha256_buf;
+		};
 	};
 
 	Future<int> read(void* data, int length, int64_t offset) override { throw file_not_readable(); }
@@ -135,10 +158,10 @@ public:
 	}
 
 	ACTOR static Future<std::string> doPartUpload(AsyncFileS3BlobStoreWrite* f, Part* p) {
-		p->finalizeMD5();
+		p->finalizeChecksum();
 		std::string upload_id = wait(f->getUploadID());
 		std::string etag = wait(f->m_bstore->uploadPart(
-		    f->m_bucket, f->m_object, upload_id, p->number, &p->content, p->length, p->md5string));
+		    f->m_bucket, f->m_object, upload_id, p->number, &p->content, p->length, p->checksumString));
 		return etag;
 	}
 
@@ -146,9 +169,9 @@ public:
 		// If there is only 1 part then it has not yet been uploaded so just write the whole file at once.
 		if (f->m_parts.size() == 1) {
 			Reference<Part> part = f->m_parts.back();
-			part->finalizeMD5();
+			part->finalizeChecksum();
 			wait(f->m_bstore->writeEntireFileFromBuffer(
-			    f->m_bucket, f->m_object, &part->content, part->length, part->md5string));
+			    f->m_bucket, f->m_object, &part->content, part->length, part->checksumString));
 			return Void();
 		}
 
@@ -162,13 +185,24 @@ public:
 		// upload.
 		for (p = f->m_parts.begin(); p != f->m_parts.end(); ++p) {
 			std::string tag = wait((*p)->etag);
-			if ((*p)->length > 0) // The last part might be empty and has to be omitted.
-				partSet[(*p)->number] = tag;
+			if ((*p)->length > 0) { // The last part might be empty and has to be omitted.
+				partSet[(*p)->number] = S3BlobStoreEndpoint::PartInfo(tag, (*p)->checksumString);
+			}
 		}
 
 		// No need to wait for the upload ID here because the above loop waited for all the parts and each part required
 		// the upload ID so it is ready
-		wait(f->m_bstore->finishMultiPartUpload(f->m_bucket, f->m_object, f->m_upload_id.get(), partSet));
+		Optional<std::string> checksumSHA256 =
+		    wait(f->m_bstore->finishMultiPartUpload(f->m_bucket, f->m_object, f->m_upload_id.get(), partSet));
+
+		// Log the checksum if present - this is just a hash of the multipart structure, not the object content
+		if (checksumSHA256.present()) {
+			TraceEvent(SevDebug, "AsyncFileS3BlobStoreMultipartUploadChecksum")
+			    .detail("Bucket", f->m_bucket)
+			    .detail("Object", f->m_object)
+			    .detail("ChecksumSHA256", checksumSHA256.get())
+			    .detail("Note", "This is a hash of the multipart structure, not object content");
+		}
 
 		return Void();
 	}
@@ -240,8 +274,9 @@ private:
 
 		// Make a new part to write to
 		if (startNew)
-			f->m_parts.push_back(
-			    Reference<Part>(new Part(f->m_parts.size() + 1, f->m_bstore->knobs.multipart_min_part_size)));
+			f->m_parts.push_back(Reference<Part>(new Part(f->m_parts.size() + 1,
+			                                              f->m_bstore->knobs.multipart_min_part_size,
+			                                              f->m_bstore->knobs.enable_object_integrity_check)));
 
 		return Void();
 	}
@@ -258,9 +293,43 @@ public:
 	    m_concurrentUploads(bstore->knobs.concurrent_writes_per_file) {
 
 		// Add first part
-		m_parts.push_back(makeReference<Part>(1, m_bstore->knobs.multipart_min_part_size));
+		m_parts.push_back(makeReference<Part>(
+		    1, m_bstore->knobs.multipart_min_part_size, m_bstore->knobs.enable_object_integrity_check));
 	}
 };
+
+// Different Download Approaches:
+//
+// 1. AsyncFileS3BlobStoreRead::read
+//    - Always uses range requests (Range: bytes=0-24)
+//    - ❌ NO checksum verification - can't use x-amz-checksum-mode: ENABLED
+//    - Used by backup/restore operations through BackupContainerS3BlobStore::readFile()
+//
+// 2. S3BlobStoreEndpoint::readEntireFile (for small files):
+//    - ✅ HAS checksum verification using x-amz-checksum-mode: ENABLED
+//    - Used for small file downloads where full object retrieval is efficient
+//
+// 3. S3Client::copyDownFile (for large files):
+//    - Uses range-based downloads in parallel parts
+//    - ✅ Validates overall file checksum after download using XXH64 stored in tags/companion files
+//
+// Why Range Requests Can't Use S3 Checksums:
+// - S3 limitation: x-amz-checksum-mode: ENABLED only works for full object downloads
+// - Range requests (Range: bytes=X-Y) cannot be checksum-verified by S3 because:
+//   * The checksum is calculated for the entire object, not arbitrary byte ranges
+//   * S3 doesn't know how to verify partial content against a full-object checksum
+//
+// - Upload: SHA256 checksums stored with multipart uploads ✅
+// - Download:
+//   * Small files: S3 SHA256 verification ✅
+//   * Large files: Custom XXH64 verification after complete download ✅
+//   * Range requests: No S3 verification ❌ (but still get FoundationDB's own checksums)
+//
+// - Range requests are more efficient for large files and allow parallel downloads
+// - S3's checksum verification wouldn't work with range requests anyway
+// - You still get protection through FoundationDB's XXH64 checksums
+// - The multipart upload checksums primarily protect against transmission errors during upload
+// - The XXH64 checksums are used to verify the download.
 
 // This class represents a read-only file that lives in an S3-style blob store.  It reads using the REST API.
 class AsyncFileS3BlobStoreRead final : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreRead> {
