@@ -2087,6 +2087,12 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStore
 	state HTTP::Headers headers;
 	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
 		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
+	if (bstore->knobs.enable_object_integrity_check) {
+		// CRITICAL: Adding x-amz-checksum-algorithm to multipart initiation means ALL parts
+		// must include checksums and completion request must include ChecksumSHA256 tags.
+		// AWS S3 will reject completion if any part checksum is missing.
+		headers["x-amz-checksum-algorithm"] = "SHA256";
+	}
 	Reference<HTTP::IncomingResponse> r = wait(doRequest_impl(bstore, "POST", resource, headers, nullptr, 0, { 200 }));
 
 	try {
@@ -2128,8 +2134,14 @@ ACTOR Future<std::string> uploadPart_impl(Reference<S3BlobStoreEndpoint> bstore,
 	state std::string resource = bstore->constructResourcePath(bucket, object);
 	resource += format("?partNumber=%d&uploadId=%s", partNumber, uploadID.c_str());
 	state HTTP::Headers headers;
-	// Send MD5 sum for content so blobstore can verify it
-	headers["Content-MD5"] = contentMD5;
+	// Send hash for content so blobstore can verify it
+	// Use SHA256 if integrity check is enabled, otherwise use MD5
+	if (bstore->knobs.enable_object_integrity_check) {
+		headers["x-amz-checksum-sha256"] = contentMD5;
+		headers["x-amz-checksum-algorithm"] = "SHA256";
+	} else {
+		headers["Content-MD5"] = contentMD5;
+	}
 	state Reference<HTTP::IncomingResponse> r =
 	    wait(doRequest_impl(bstore, "PUT", resource, headers, pContent, contentLen, { 200 }));
 	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then
@@ -2137,8 +2149,13 @@ ACTOR Future<std::string> uploadPart_impl(Reference<S3BlobStoreEndpoint> bstore,
 	// successful request.
 
 	// For uploads, Blobstore returns an MD5 sum of uploaded content so check it.
-	if (!HTTP::verifyMD5(&r->data, false, contentMD5))
-		throw checksum_failed();
+	// Only verify MD5 when not using integrity check (SHA256 verification is done by AWS)
+	if (!bstore->knobs.enable_object_integrity_check) {
+		if (!HTTP::verifyMD5(&r->data, false, contentMD5))
+			throw checksum_failed();
+	}
+	// Note: When using SHA256, AWS handles the verification internally
+	// and will return an error if the checksum doesn't match
 
 	// No etag -> bad response.
 	std::string etag = r->data.headers["ETag"];
@@ -2165,17 +2182,23 @@ Future<std::string> S3BlobStoreEndpoint::uploadPart(std::string const& bucket,
 	                       contentMD5);
 }
 
-ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
-                                              std::string bucket,
-                                              std::string object,
-                                              std::string uploadID,
-                                              S3BlobStoreEndpoint::MultiPartSetT parts) {
+ACTOR Future<Optional<std::string>> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                               std::string bucket,
+                                                               std::string object,
+                                                               std::string uploadID,
+                                                               S3BlobStoreEndpoint::MultiPartSetT parts) {
 	state UnsentPacketQueue part_list; // NonCopyable state var so must be declared at top of actor
 	wait(bstore->requestRateWrite->getAllowance(1));
 
 	std::string manifest = "<CompleteMultipartUpload>";
-	for (auto& p : parts)
-		manifest += format("<Part><PartNumber>%d</PartNumber><ETag>%s</ETag></Part>\n", p.first, p.second.c_str());
+	for (auto& p : parts) {
+		manifest += format("<Part><PartNumber>%d</PartNumber><ETag>%s</ETag>", p.first, p.second.etag.c_str());
+		// Include checksum if integrity check is enabled and checksum is present
+		if (bstore->knobs.enable_object_integrity_check && !p.second.checksum.empty()) {
+			manifest += format("<ChecksumSHA256>%s</ChecksumSHA256>", p.second.checksum.c_str());
+		}
+		manifest += "</Part>\n";
+	}
 	manifest += "</CompleteMultipartUpload>";
 
 	state std::string resource = bstore->constructResourcePath(bucket, object);
@@ -2185,17 +2208,22 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 	pw.serializeBytes(manifest);
 	Reference<HTTP::IncomingResponse> r =
 	    wait(doRequest_impl(bstore, "POST", resource, headers, &part_list, manifest.size(), { 200 }));
+
+	// The XML response contains a ChecksumSHA256 field, but this is just a hash of the multipart
+	// structure, not the actual object content, so it's useless for integrity verification.
+	// We skip parsing it to avoid wasted CPU cycles.
+
 	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then
 	// the next retry will see error 400.  That could be detected and handled gracefully by HEAD'ing the object before
 	// upload to get its (possibly nonexistent) eTag, then if an error 400 is seen then retrieve the eTag again and if
 	// it has changed then consider the finish complete.
-	return Void();
+	return Optional<std::string>();
 }
 
-Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucket,
-                                                        std::string const& object,
-                                                        std::string const& uploadID,
-                                                        MultiPartSetT const& parts) {
+Future<Optional<std::string>> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucket,
+                                                                         std::string const& object,
+                                                                         std::string const& uploadID,
+                                                                         MultiPartSetT const& parts) {
 	return finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID, parts);
 }
 
