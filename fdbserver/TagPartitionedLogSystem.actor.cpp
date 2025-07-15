@@ -675,11 +675,14 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 	return minVersionWhenReady(waitForAll(quorumResults), allReplies);
 }
 
-// Version vector/unicast specific: If the best server is not known to have been locked/stopped
-// then it is not guaranteed to have received all versions that are relevant to a tag(s) that it is
-// buddy of, hence do not treat such a server as the best server. This is so the peek logic
-// the peek logic will not peek exclusively from this server, and hence will correctly fetch
-// all versions that are relevant to the tag(s) that it is buddy of.
+// Version vector/unicast specific: Logic to get the peeking to work correctly during recovery.
+// If the best server is not known to have been locked/stopped then is not guaranteed to have
+// received all versions that are relevant to a tag(s) that it is buddy of, hence do not treat
+// such a server as the best server. This is so the peek logic will not peek exclusively from
+// this server, and hence will correctly fetch all versions that are relevant to the tag(s) that
+// it is buddy of. Note that this reset logic get invoked only in the context of the peeks that
+// get done during recovery, and the best server should always be available for peeking after
+// recovery is done.
 void TagPartitionedLogSystem::resetBestServerIfNotLocked(
     int bestSet,
     int& bestServer,

@@ -595,7 +595,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem:
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor(
     std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
-    int bestServer,
+    int bestServerLogId,
     int readQuorum,
     Tag tag,
     Version begin,
@@ -604,7 +604,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
     std::vector<LocalityData> const& tLogLocalities,
     Reference<IReplicationPolicy> const tLogPolicy,
     int tLogReplicationFactor)
-  : tag(tag), bestServer(bestServer), currentCursor(0), readQuorum(readQuorum), messageVersion(begin),
+  : tag(tag), bestServer(bestServerLogId), currentCursor(0), readQuorum(readQuorum), messageVersion(begin),
     hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
     tLogReplicationFactor(tLogReplicationFactor) {
 	if (tLogPolicy) {
@@ -617,7 +617,6 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
 
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		resetBestServerIfNotAvailable(logServers, bestServer, end);
-		this->bestServer = bestServer;
 	}
 
 	for (int i = 0; i < logServers.size(); i++) {
@@ -880,17 +879,16 @@ Version ILogSystem::MergedPeekCursor::popped() const {
 
 ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
                                          int bestSet,
-                                         int bestServer,
+                                         int bestServerLogId,
                                          Tag tag,
                                          Version begin,
                                          Version end,
                                          bool parallelGetMore)
-  : logSets(logSets), tag(tag), bestSet(bestSet), bestServer(bestServer), currentSet(bestSet), currentCursor(0),
+  : logSets(logSets), tag(tag), bestSet(bestSet), bestServer(bestServerLogId), currentSet(bestSet), currentCursor(0),
     messageVersion(begin), hasNextMessage(false), useBestSet(true), randomID(deterministicRandom()->randomUniqueID()),
     end(end) {
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && bestSet >= 0) {
 		resetBestServerIfNotAvailable(logSets[bestSet]->logServers, bestServer, end);
-		this->bestServer = bestServer;
 	}
 	serverCursors.resize(logSets.size());
 	int maxServers = 0;
