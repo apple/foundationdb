@@ -35,10 +35,12 @@ TestHarness2 uses directories typically created by the calling script, [`correct
 
 ### Cleanup Behavior
 
-By default, TestHarness2 cleans up individual test directories after each test run. The cleanup behavior is controlled by:
+When using [`correctnessTest.sh`](../Joshua/scripts/correctnessTest.sh), cleanup is handled by the shell script, not by TestHarness2 itself. The cleanup behavior is controlled by three environment variables:
 
-- **`--no-clean-up` flag**: Prevents cleanup of all test directories
-- **`config.clean_up`**: When `True` (default), test directories are removed after completion
+**Log Preservation Logic:**
+- **Always preserve** if `TH_PRESERVE_TEMP_DIRS_ON_EXIT=true`
+- **Preserve on success** if `TH_PRESERVE_TEMP_DIRS_ON_SUCCESS=true` AND test passed
+- **Preserve on failure** if `TH_ARCHIVE_LOGS_ON_FAILURE=true` AND (test failed OR Python crashed)
 
 ## Joshua LogTool Integration
 
@@ -61,8 +63,10 @@ When uploading, the tool:
 
 TestHarness2 automatically invokes [`joshua_logtool.py`](../joshua_logtool.py) to upload logs when **all** of the following conditions are met:
 - A test fails (and it's not a negative test expected to fail) OR `TH_FORCE_JOSHUA_LOGTOOL=true`
-- `TH_ARCHIVE_LOGS_ON_FAILURE=true` (enables joshua_logtool integration)
+- `TH_ARCHIVE_LOGS_ON_FAILURE=true` (enables joshua_logtool integration AND preserves logs on failure)
 - `TH_ENABLE_JOSHUA_LOGTOOL=true` (explicitly enables joshua_logtool)
+
+**Note:** `TH_ARCHIVE_LOGS_ON_FAILURE` serves dual purposes - it both preserves logs when tests fail AND enables joshua_logtool integration. This ensures logs are available for upload before cleanup occurs.
 
 The individual test XML output includes a `<JoshuaLogTool>` section with status on the logtool run.
 
@@ -92,7 +96,8 @@ TestHarness2 supports environment variables for configuration. There are two map
 **Example mappings:**
 - `JOSHUA_SEED` → `--joshua-seed` (via correctnessTest.sh)
 - `TH_ARCHIVE_LOGS_ON_FAILURE=true` → `--archive-logs-on-failure` (via correctnessTest.sh)
-- `TH_CLEAN_UP=false` → `config.clean_up = False` (read directly by TestHarness2)
+- `TH_PRESERVE_TEMP_DIRS_ON_EXIT=true` → Used by cleanup logic in correctnessTest.sh
+- `TH_KILL_SECONDS=3600` → `config.kill_seconds = 3600` (read directly by TestHarness2)
 
 ### Environment Variables
 
@@ -104,15 +109,18 @@ TestHarness2 supports environment variables for configuration. There are two map
 - **`JOSHUA_TEST_FILES_DIR`**: Directory containing test files (default: [`tests/`](../../tests/))
 - **`OLDBINDIR`**: Path to old FDB binaries directory (for restarting tests)
 
+**Log Preservation Control:**
+- **`TH_PRESERVE_TEMP_DIRS_ON_EXIT`**: Always preserve test artifacts regardless of test result (`true`/`false`, default: `false`)
+- **`TH_PRESERVE_TEMP_DIRS_ON_SUCCESS`**: Preserve test artifacts when test passes (`true`/`false`, default: `false`)
+- **`TH_ARCHIVE_LOGS_ON_FAILURE`**: Preserve test artifacts when test fails AND enable joshua_logtool integration (`true`/`false`, default: `false`)
+
 **Joshua LogTool Integration:**
-- **`TH_ARCHIVE_LOGS_ON_FAILURE`**: Enable joshua_logtool integration (`true`/`false`, default: `false`)
 - **`TH_ENABLE_JOSHUA_LOGTOOL`**: Enable automatic log uploads (`true`/`false`, default: `false`)
 - **`TH_FORCE_JOSHUA_LOGTOOL`**: Force log uploads even for passing tests (`true`/`false`, default: `false`)
 
 **Test Execution Control:**
 - **`TH_KILL_SECONDS`**: Timeout for individual tests in seconds (default: `1800`)
 - **`TH_BUGGIFY`**: Buggify mode (`on`, `off`, or `random`, default: `random`)
-- **`TH_CLEAN_UP`**: Clean up test directories after completion (`true`/`false`, default: `true`)
 - **`TH_USE_VALGRIND`**: Run tests under valgrind (`true`/`false`, default: `false`)
 - **`TH_LONG_RUNNING`**: Enable long-running test mode (`true`/`false`, default: `false`)
 
@@ -120,6 +128,7 @@ TestHarness2 supports environment variables for configuration. There are two map
 - **`JOSHUA_CLUSTER_FILE`**: Path to FDB cluster file (for stats and joshua_logtool)
 - **`TH_RANDOM_SEED`**: Force specific random seed for debugging
 - **`TH_OUTPUT_FORMAT`**: Output format (`xml` or `json`, default: `xml`)
+- **`TH_DISABLE_ROCKSDB_CHECK`**: Disable RocksDB filtering in joshua_logtool (`true`/`false`, default: `false`)
 
 For a complete list of all variables, run: `python3 -m test_harness.app --help`
 

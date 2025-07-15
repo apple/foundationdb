@@ -139,27 +139,20 @@ PYTHON_APP_STDERR_FILE="${APP_RUN_TEMP_DIR}/python_app_stderr.log"
 
 # Execute Python test harness
 echo "Executing TestHarness2 with seed ${JOSHUA_SEED}..." >&2
-python3 -m test_harness.app "${PYTHON_CMD_ARGS[@]}" > "${PYTHON_APP_STDOUT_FILE}" 2> "${PYTHON_APP_STDERR_FILE}"
+python3 -m test_harness.app "${PYTHON_CMD_ARGS[@]}" 2> "${PYTHON_APP_STDERR_FILE}" | tee "${PYTHON_APP_STDOUT_FILE}"
 PYTHON_EXIT_CODE=$?
 
 echo "TestHarness2 execution finished. Exit code: ${PYTHON_EXIT_CODE}" >&2
 
-# Output Python app's stdout (XML results).
-if [ -f "${PYTHON_APP_STDOUT_FILE}" ]; then
-    cat "${PYTHON_APP_STDOUT_FILE}"
-    
-    # Check if test actually failed
-    if grep -q 'Ok="0"' "${PYTHON_APP_STDOUT_FILE}"; then
-        echo "Test result: FAILED" >&2
-        TEST_FAILED=true
-    else
-        echo "Test result: PASSED" >&2
-        TEST_FAILED=false
-    fi
-else
-    echo "WARNING: No output from TestHarness2" >&2
-    echo '<Test Ok="0" Error="PythonAppNoStdout"><JoshuaMessage Severity="40" Message="TestHarness2 produced no output" /></Test>'
+# Note: stdout is already output via tee, no need to cat the file
+
+# Check if test actually failed
+if [ -f "${PYTHON_APP_STDOUT_FILE}" ] && grep -q 'Ok="0"' "${PYTHON_APP_STDOUT_FILE}"; then
+    echo "Test result: FAILED" >&2
     TEST_FAILED=true
+else
+    echo "Test result: PASSED" >&2
+    TEST_FAILED=false
 fi
 
 # Exit with appropriate code
