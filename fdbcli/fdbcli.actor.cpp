@@ -492,7 +492,7 @@ static void printProgramUsage(const char* name) {
 	       "                 are supported. Has no effect unless --log is specified.\n"
 	       "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
 	       "                 and then exits.\n"
-		   "  --no-history   Disables loading and saving the command history file.\n"
+	       "  --no-history   Disables loading and saving the command history file.\n"
 	       "  --no-status    Disables the initial status check done when starting\n"
 	       "                 the CLI.\n"
 	       "  --api-version  APIVERSION\n"
