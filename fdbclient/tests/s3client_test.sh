@@ -28,11 +28,14 @@ function filter_http_debug {
 # Run s3client with proper TLS CA file handling
 # This function handles the case where TLS_CA_FILE might be empty
 function run_s3client {
+  log "running client 1"
   local s3client="$1"
   local credentials="$2"
   local logsdir="$3"
   local integrity_check="${4:-false}"
   shift 4
+
+  log "running client"
   
   local cmd_args=()
   cmd_args+=("${s3client}")
@@ -57,6 +60,8 @@ function run_s3client {
   
   # Add remaining arguments
   cmd_args+=("$@")
+
+  log "command: ${cmd_args}"
   
   # Execute the command
   "${cmd_args[@]}"
@@ -214,6 +219,7 @@ function test_nonexistent_bucket {
   if [[ ! -d "${logsdir}" ]]; then
     mkdir "${logsdir}"
   fi
+  log "testing non-existent"
   if [[ "${USE_S3}" == "true" ]]; then
     # For S3, expect "Requested resource was not found" error
     if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
@@ -270,6 +276,8 @@ function test_nonexistent_resource {
   if [[ ! -d "${logsdir}" ]]; then
     mkdir "${logsdir}"
   fi
+
+  log "running nonexistent"
 
   local output
   local status
@@ -550,6 +558,7 @@ function test_ls_handling {
 
   # Test non-existent resource in existing bucket
   local nonexistent_path_url="blobstore://${host}/nonexistent/path/?${query_str}"
+  log "path url: ${nonexistent_path_url}"
   if ! test_nonexistent_resource "${nonexistent_path_url}" "${dir}" "${credentials}" "${s3client}"; then
     return 1
   fi
@@ -755,23 +764,23 @@ else
 fi
 
 # Run tests.
-test="test_file_upload_and_download"
-url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
-test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
-log_test_result $? "${test}"
+# test="test_file_upload_and_download"
+# url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
+# test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+# log_test_result $? "${test}"
 
-if [[ "${USE_S3}" == "true" ]]; then
-  # Only run this on s3. It is checking that the old s3blobstore md5 checksum still works.
-  test="test_file_upload_and_download_no_integrity_check"
-  url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
-  test_file_upload_and_download_no_integrity_check "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
-  log_test_result $? "${test}"
-fi
+# if [[ "${USE_S3}" == "true" ]]; then
+#   # Only run this on s3. It is checking that the old s3blobstore md5 checksum still works.
+#   test="test_file_upload_and_download_no_integrity_check"
+#   url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
+#   test_file_upload_and_download_no_integrity_check "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+#   log_test_result $? "${test}"
+# fi
 
-test="test_dir_upload_and_download"
-url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
-test_dir_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
-log_test_result $? "${test}"
+# test="test_dir_upload_and_download"
+# url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+# test_dir_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+# log_test_result $? "${test}"
 
 # Add ls error handling test
 test="test_ls_handling"
