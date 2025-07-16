@@ -277,15 +277,6 @@ function test_nonexistent_resource {
       ls "${url}" 2>&1)
   status=$?
 
-  # log "output: ${output}"
-  # local output2=$(echo "${output}" | grep "Contents of")
-  # local output3=$(filter_http_debug "${output}" | wc -l)
-  # local output4=$(echo "${output}" | grep -q "Contents of" &&
-  #         [[ $(filter_http_debug "${output}" | wc -l) -eq 0 ]])
-  # log "output2: ${output2}"
-  # log "output3: ${output3}"
-  # log "output4: ${output4}"
-
   if [[ "${USE_S3}" == "true" ]]; then
     # For S3, a non-existent path returns a 200 with empty contents
     # We expect to see the "Contents of" header but no actual contents
@@ -411,10 +402,8 @@ function test_list_with_files {
     local output
     local status
 
-    local edited_url="blobstore://o2.atla.twitter.com/bulkload/test/s3client/ls_test/?bucket=shared&region=global&secure_connection=0"
-
     output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-        ls "${edited_url}" 2>&1)
+        ls "${url}" 2>&1)
     status=$?
 
     local missing=0
@@ -431,7 +420,7 @@ function test_list_with_files {
 
     # Clean up test files
     if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-        rm "${edited_url}"; then
+        rm "${url}"; then
       err "Failed to clean up test files"
       return 1
     fi
@@ -477,7 +466,7 @@ function test_list_with_files {
 
   # Test recursive listing
   output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-    ls --recursive --knob_blobstore_list_max_keys_per_page=5 "${edited_url}" 2>&1)
+    ls --recursive --knob_blobstore_list_max_keys_per_page=5 "${url}" 2>&1)
   status=$?
 
   local missing=0
@@ -510,7 +499,7 @@ function test_list_with_files {
 
   # Test non-recursive listing
   output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-  ls --knob_blobstore_list_max_keys_per_page=5 "${edited_url}" 2>&1)
+  ls --knob_blobstore_list_max_keys_per_page=5 "${url}" 2>&1)
   status=$?
 
   check_nested_files "ls_test" 1 "false"
@@ -520,7 +509,7 @@ function test_list_with_files {
 
   # Clean up test files
   if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-      rm "${edited_url}"; then
+      rm "${url}"; then
     err "Failed to clean up nested test files"
     return 1
   fi
@@ -544,17 +533,17 @@ function test_ls_handling {
   fi
 
   # Test non-existent resource in existing bucket
-  # local nonexistent_path_url="blobstore://${host}/nonexistent/path/?${query_str}"
-  # log "path url: ${nonexistent_path_url}"
-  # if ! test_nonexistent_resource "${nonexistent_path_url}" "${dir}" "${credentials}" "${s3client}"; then
-  #   return 1
-  # fi
+  local nonexistent_path_url="blobstore://${host}/nonexistent/path/?${query_str}"
+  log "path url: ${nonexistent_path_url}"
+  if ! test_nonexistent_resource "${nonexistent_path_url}" "${dir}" "${credentials}" "${s3client}"; then
+    return 1
+  fi
 
-  # # Test empty bucket listing (should not error)
-  # local empty_bucket_url="blobstore://${host}/?${query_str}"
-  # if ! test_empty_bucket "${empty_bucket_url}" "${dir}" "${credentials}" "${s3client}"; then
-  #   return 1
-  # fi
+  # Test empty bucket listing (should not error)
+  local empty_bucket_url="blobstore://${host}/?${query_str}"
+  if ! test_empty_bucket "${empty_bucket_url}" "${dir}" "${credentials}" "${s3client}"; then
+    return 1
+  fi
 
   # Test positive case - create some files and verify ls works
   local test_url="blobstore://${host}/${path_prefix}/ls_test?${query_str}"
@@ -751,23 +740,23 @@ else
 fi
 
 # Run tests.
-# test="test_file_upload_and_download"
-# url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
-# test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
-# log_test_result $? "${test}"
+test="test_file_upload_and_download"
+url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
+test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+log_test_result $? "${test}"
 
-# if [[ "${USE_S3}" == "true" ]]; then
-#   # Only run this on s3. It is checking that the old s3blobstore md5 checksum still works.
-#   test="test_file_upload_and_download_no_integrity_check"
-#   url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
-#   test_file_upload_and_download_no_integrity_check "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
-#   log_test_result $? "${test}"
-# fi
+if [[ "${USE_S3}" == "true" ]]; then
+  # Only run this on s3. It is checking that the old s3blobstore md5 checksum still works.
+  test="test_file_upload_and_download_no_integrity_check"
+  url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
+  test_file_upload_and_download_no_integrity_check "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+  log_test_result $? "${test}"
+fi
 
-# test="test_dir_upload_and_download"
-# url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
-# test_dir_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
-# log_test_result $? "${test}"
+test="test_dir_upload_and_download"
+url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+test_dir_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+log_test_result $? "${test}"
 
 # Add ls error handling test
 test="test_ls_handling"
