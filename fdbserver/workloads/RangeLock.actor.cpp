@@ -485,8 +485,21 @@ struct RangeLocking : TestWorkload {
 			    .detail("Phase", "CheckDBCorrectness");
 			iteration++;
 		}
+		std::vector<std::pair<KeyRange, RangeLockState>> locks2 = wait(findExclusiveReadLockOnRange(cx, normalKeys));
+		for (const auto& lock : locks2) {
+			TraceEvent("RangeLockWorkloadProgress")
+			    .detail("Phase", "BeforeLockRelease")
+			    .detail("Range", lock.first)
+			    .detail("State", lock.second.toString());
+		}
 		wait(releaseExclusiveReadLockByUser(cx, self->rangeLockOwnerName));
 		std::vector<std::pair<KeyRange, RangeLockState>> locks = wait(findExclusiveReadLockOnRange(cx, normalKeys));
+		for (const auto& lock : locks) {
+			TraceEvent("RangeLockWorkloadProgress")
+			    .detail("Phase", "AfterLockRelease")
+			    .detail("Range", lock.first)
+			    .detail("State", lock.second.toString());
+		}
 		ASSERT(locks.empty());
 
 		TraceEvent("RangeLockWorkloadProgress").detail("Phase", "End");

@@ -456,6 +456,15 @@ std::string S3BlobStoreEndpoint::constructResourcePath(const std::string& bucket
 	return resource;
 }
 
+// Forward declaration for doRequest_impl to fix compilation order issue
+ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                               std::string verb,
+                                                               std::string resource,
+                                                               HTTP::Headers headers,
+                                                               UnsentPacketQueue* pContent,
+                                                               int contentLen,
+                                                               std::set<unsigned int> successCodes);
+
 ACTOR Future<bool> bucketExists_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket) {
 	wait(b->requestRateRead->getAllowance(1));
 
@@ -463,7 +472,8 @@ ACTOR Future<bool> bucketExists_impl(Reference<S3BlobStoreEndpoint> b, std::stri
 	state HTTP::Headers headers;
 
 	try {
-		Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
+		Reference<HTTP::IncomingResponse> r =
+		    wait(doRequest_impl(b, "HEAD", resource, headers, nullptr, 0, { 200, 404 }));
 		return r->code == 200;
 	} catch (Error& e) {
 		TraceEvent(SevError, "S3ClientBucketExistsError")
@@ -484,7 +494,7 @@ ACTOR Future<bool> objectExists_impl(Reference<S3BlobStoreEndpoint> b, std::stri
 	state std::string resource = b->constructResourcePath(bucket, object);
 	state HTTP::Headers headers;
 
-	Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
+	Reference<HTTP::IncomingResponse> r = wait(doRequest_impl(b, "HEAD", resource, headers, nullptr, 0, { 200, 404 }));
 	return r->code == 200;
 }
 
@@ -500,7 +510,7 @@ ACTOR Future<Void> deleteObject_impl(Reference<S3BlobStoreEndpoint> b, std::stri
 	// 200 or 204 means object successfully deleted, 404 means it already doesn't exist, so any of those are considered
 	// successful
 	Reference<HTTP::IncomingResponse> r =
-	    wait(b->doRequest("DELETE", resource, headers, nullptr, 0, { 200, 204, 404 }));
+	    wait(doRequest_impl(b, "DELETE", resource, headers, nullptr, 0, { 200, 204, 404 }));
 
 	// But if the object already did not exist then the 'delete' is assumed to be successful but a warning is logged.
 	if (r->code == 404) {
@@ -595,7 +605,7 @@ ACTOR Future<Void> createBucket_impl(Reference<S3BlobStoreEndpoint> b, std::stri
 		std::string region = b->getRegion();
 		if (region.empty()) {
 			Reference<HTTP::IncomingResponse> r =
-			    wait(b->doRequest("PUT", resource, headers, nullptr, 0, { 200, 409 }));
+			    wait(doRequest_impl(b, "PUT", resource, headers, nullptr, 0, { 200, 409 }));
 		} else {
 			Standalone<StringRef> body(
 			    format("<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
@@ -606,7 +616,7 @@ ACTOR Future<Void> createBucket_impl(Reference<S3BlobStoreEndpoint> b, std::stri
 			pw.serializeBytes(body);
 
 			Reference<HTTP::IncomingResponse> r =
-			    wait(b->doRequest("PUT", resource, headers, &packets, body.size(), { 200, 409 }));
+			    wait(doRequest_impl(b, "PUT", resource, headers, &packets, body.size(), { 200, 409 }));
 		}
 	}
 	return Void();
@@ -622,7 +632,7 @@ ACTOR Future<int64_t> objectSize_impl(Reference<S3BlobStoreEndpoint> b, std::str
 	state std::string resource = b->constructResourcePath(bucket, object);
 	state HTTP::Headers headers;
 
-	Reference<HTTP::IncomingResponse> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
+	Reference<HTTP::IncomingResponse> r = wait(doRequest_impl(b, "HEAD", resource, headers, nullptr, 0, { 200, 404 }));
 	if (r->code == 404)
 		throw file_not_found();
 	return r->data.contentLen;
@@ -1007,6 +1017,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
                                                                UnsentPacketQueue* pContent,
                                                                int contentLen,
                                                                std::set<unsigned int> successCodes) {
+
 	state UnsentPacketQueue contentCopy;
 	state UnsentPacketQueue dryrunContentCopy; // NonCopyable state var so must be declared at top of actor
 	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
@@ -1023,8 +1034,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 	if (resource.empty()) {
 		resource = "/";
 	}
-
-	req->resource = resource;
 
 	// Merge extraHeaders into headers
 	for (const auto& [k, v] : bstore->extraHeaders) {
@@ -1057,6 +1066,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		state Reference<HTTP::IncomingResponse> r;
 		state Reference<HTTP::IncomingResponse> dryrunR;
 		state std::string canonicalURI = resource;
+		// Set the resource on each loop so we don't double-encode when we set it to `getCanonicalURI` below.
+		req->resource = resource;
 		state UID connID = UID();
 		state double reqStartTimer;
 		state double connectStartTimer = g_network->timer();
@@ -1166,7 +1177,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
 
-			Future<Reference<HTTP::IncomingResponse>> reqF =
+			state Future<Reference<HTTP::IncomingResponse>> reqF =
 			    HTTP::doRequest(rconn.conn, req, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
 			// if we reused a connection from the pool, and immediately got an error, retry immediately discarding
 			// the connection
@@ -1395,7 +1406,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		}
 
 		Reference<HTTP::IncomingResponse> r =
-		    wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200, 404 }));
+		    wait(doRequest_impl(bstore, "GET", fullResource, headers, nullptr, 0, { 200, 404 }));
 		listReleaser.release();
 
 		try {
@@ -1566,7 +1577,7 @@ ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEnd
 		state HTTP::Headers headers;
 		state std::string fullResource = resource + lastName;
 		Reference<HTTP::IncomingResponse> r =
-		    wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200 }));
+		    wait(doRequest_impl(bstore, "GET", fullResource, headers, nullptr, 0, { 200 }));
 		listReleaser.release();
 
 		try {
@@ -1864,7 +1875,8 @@ ACTOR Future<std::string> readEntireFile_impl(Reference<S3BlobStoreEndpoint> bst
 	// Set this header on the GET for it to volunteer saved checksum in the response headers.
 	// See https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html#API_GetObject_RequestSyntax
 	headers["x-amz-checksum-mode"] = "ENABLED";
-	Reference<HTTP::IncomingResponse> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 404 }));
+	Reference<HTTP::IncomingResponse> r =
+	    wait(doRequest_impl(bstore, "GET", resource, headers, nullptr, 0, { 200, 404 }));
 	if (r->code == 404)
 		throw file_not_found();
 	if (bstore->knobs.enable_object_integrity_check) {
@@ -1918,7 +1930,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint>
 	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
 		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
 	Reference<HTTP::IncomingResponse> r =
-	    wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen, { 200 }));
+	    wait(doRequest_impl(bstore, "PUT", resource, headers, pContent, contentLen, { 200 }));
 	return Void();
 }
 
@@ -2004,7 +2016,7 @@ ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore,
 		// Attempt the request
 		state Reference<HTTP::IncomingResponse> r;
 		Reference<HTTP::IncomingResponse> _r =
-		    wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
+		    wait(doRequest_impl(bstore, "GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
 		r = _r;
 
 		if (r->code == 404) {
@@ -2057,7 +2069,7 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStore
 	state HTTP::Headers headers;
 	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
 		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
-	Reference<HTTP::IncomingResponse> r = wait(bstore->doRequest("POST", resource, headers, nullptr, 0, { 200 }));
+	Reference<HTTP::IncomingResponse> r = wait(doRequest_impl(bstore, "POST", resource, headers, nullptr, 0, { 200 }));
 
 	try {
 		xml_document<> doc;
@@ -2101,7 +2113,7 @@ ACTOR Future<std::string> uploadPart_impl(Reference<S3BlobStoreEndpoint> bstore,
 	// Send MD5 sum for content so blobstore can verify it
 	headers["Content-MD5"] = contentMD5;
 	state Reference<HTTP::IncomingResponse> r =
-	    wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen, { 200 }));
+	    wait(doRequest_impl(bstore, "PUT", resource, headers, pContent, contentLen, { 200 }));
 	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then
 	// the next retry will see error 400.  That could be detected and handled gracefully by retrieving the etag for the
 	// successful request.
@@ -2154,7 +2166,7 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 	PacketWriter pw(part_list.getWriteBuffer(manifest.size()), nullptr, Unversioned());
 	pw.serializeBytes(manifest);
 	Reference<HTTP::IncomingResponse> r =
-	    wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), { 200 }));
+	    wait(doRequest_impl(bstore, "POST", resource, headers, &part_list, manifest.size(), { 200 }));
 	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then
 	// the next retry will see error 400.  That could be detected and handled gracefully by HEAD'ing the object before
 	// upload to get its (possibly nonexistent) eTag, then if an error 400 is seen then retrieve the eTag again and if
@@ -2180,7 +2192,7 @@ ACTOR Future<Void> abortMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bsto
 
 	HTTP::Headers headers;
 	Reference<HTTP::IncomingResponse> r =
-	    wait(bstore->doRequest("DELETE", resource, headers, nullptr, 0, { 200, 204 }));
+	    wait(doRequest_impl(bstore, "DELETE", resource, headers, nullptr, 0, { 200, 204 }));
 	return Void();
 }
 
@@ -2224,7 +2236,7 @@ ACTOR Future<Void> putObjectTags_impl(Reference<S3BlobStoreEndpoint> bstore,
 			headers["Content-Length"] = format("%d", manifest.size());
 
 			Reference<HTTP::IncomingResponse> r =
-			    wait(bstore->doRequest("PUT", resource, headers, &packets, manifest.size(), { 200 }));
+			    wait(doRequest_impl(bstore, "PUT", resource, headers, &packets, manifest.size(), { 200 }));
 
 			// Verify tags were written correctly
 			std::map<std::string, std::string> verifyTags = wait(getObjectTags_impl(bstore, bucket, object));
@@ -2280,7 +2292,7 @@ ACTOR Future<std::map<std::string, std::string>> getObjectTags_impl(Reference<S3
 	resource += "?tagging";
 	state HTTP::Headers headers;
 
-	Reference<HTTP::IncomingResponse> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200 }));
+	Reference<HTTP::IncomingResponse> r = wait(doRequest_impl(bstore, "GET", resource, headers, nullptr, 0, { 200 }));
 
 	rapidxml::xml_document<> doc;
 	doc.parse<rapidxml::parse_default>((char*)r->data.content.c_str());

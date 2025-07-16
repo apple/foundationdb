@@ -175,16 +175,11 @@ ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
 
 // Create a bulkload task submission transaction without commit
 // Used by ManagementAPI and bulkdumpRestore at DD
-ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr,
-                                                    BulkLoadTaskState bulkLoadTask,
-                                                    bool checkTaskExclusive = true);
+ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);
 
 // Create an bulkload task acknowledge transaction without commit
 // Used by ManagementAPI and bulkdumpRestore at DD
-ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr,
-                                                  KeyRange range,
-                                                  UID taskId,
-                                                  bool checkTaskExclusive = true);
+ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);
 
 // Get bulk load task for the input range and taskId
 ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,

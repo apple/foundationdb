@@ -18,6 +18,50 @@ function cleanup {
   fi
 }
 
+# Filter out HTTP debug output from s3client output
+# $1 The output to filter
+function filter_http_debug {
+  local output="$1"
+  echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "HTTP" | grep -v "^\[.*\]" | grep -v "^Request Header:" | grep -v "^Response Header:" | grep -v "^Response Code:" | grep -v "^Response ContentLen:" | grep -v "^-- RESPONSE CONTENT--" | grep -v "^--------" | grep -v "^<?xml" | grep -v "^<.*>"
+}
+
+# Run s3client with proper TLS CA file handling
+# This function handles the case where TLS_CA_FILE might be empty
+function run_s3client {
+  local s3client="$1"
+  local credentials="$2"
+  local logsdir="$3"
+  local integrity_check="${4:-false}"
+  shift 4
+  
+  local cmd_args=()
+  cmd_args+=("${s3client}")
+  cmd_args+=("--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+  # Only use AWS KMS encryption with real S3, not SeaweedFS
+  if [[ "${USE_S3}" == "true" ]]; then
+    cmd_args+=("--knob_blobstore_encryption_type=aws:kms")
+  fi
+  cmd_args+=("--knob_blobstore_enable_object_integrity_check=${integrity_check}")
+  
+  # Only add TLS CA file if it's not empty
+  if [[ -n "${TLS_CA_FILE}" ]]; then
+    cmd_args+=("--tls-ca-file")
+    cmd_args+=("${TLS_CA_FILE}")
+  fi
+  
+  cmd_args+=("--blob-credentials")
+  cmd_args+=("${credentials}")
+  cmd_args+=("--log")
+  cmd_args+=("--logdir")
+  cmd_args+=("${logsdir}")
+  
+  # Add remaining arguments
+  cmd_args+=("$@")
+  
+  # Execute the command
+  "${cmd_args[@]}"
+}
+
 # Resolve passed in reference to an absolute path.
 # e.g. /tmp on mac is actually /private/tmp.
 # $1 path to resolve
@@ -63,48 +107,20 @@ function upload_download {
     fi
     # Run this rm only if s3. In seaweed, it would fail because
     # bucket doesn't exist yet (they are lazily created).
-    if ! "${s3client}" \
-        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-        --knob_blobstore_encryption_type=aws:kms \
-        --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
-        --tls-ca-file "${TLS_CA_FILE}" \
-        --blob-credentials "${credentials}" \
-        --log --logdir "${logsdir}" \
-        rm "${url}"; then
+    if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "${integrity_check}" rm "${url}"; then
       err "Failed rm of ${url}"
       return 1
     fi
   fi
-  if ! "${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      cp "${object}" "${url}"; then
+  if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "${integrity_check}" cp "${object}" "${url}"; then
     err "Failed cp of ${object} to ${url}"
     return 1
   fi
-  if ! "${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      cp "${url}" "${downloaded_object}"; then
+  if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "${integrity_check}" cp "${url}" "${downloaded_object}"; then
     err "Failed cp ${url} ${downloaded_object}"
     return 1
   fi
-  if ! "${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --knob_blobstore_enable_object_integrity_check="${integrity_check}" \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      rm "${url}"; then
+  if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "${integrity_check}" rm "${url}"; then
     err "Failed rm ${url}"
     return 1
   fi
@@ -200,12 +216,7 @@ function test_nonexistent_bucket {
   fi
   if [[ "${USE_S3}" == "true" ]]; then
     # For S3, expect "Requested resource was not found" error
-    if ! "${s3client}" \
-        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-        --knob_blobstore_encryption_type=aws:kms \
-        --tls-ca-file "${TLS_CA_FILE}" \
-        --blob-credentials "${credentials}" \
-        --log --logdir "${logsdir}" \
+    if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
         ls "${url}" \
         2>&1 | grep -q "Requested resource was not found"; then
       err "Failed to detect non-existent bucket in S3"
@@ -218,12 +229,7 @@ function test_nonexistent_bucket {
     # 3. Or successful completion with no objects listed
     local output
     local status
-    output=$("${s3client}" \
-        --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-        --knob_blobstore_encryption_type=aws:kms \
-        --tls-ca-file "${TLS_CA_FILE}" \
-        --blob-credentials "${credentials}" \
-        --log --logdir "${logsdir}" \
+    output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
         ls "${url}" 2>&1)
     status=$?
 
@@ -235,7 +241,7 @@ function test_nonexistent_bucket {
       # 2. The output contains the URL header
       # 3. There are no objects listed (no lines after the header)
       if echo "${output}" | grep -q "Contents of" &&
-         [[ $(echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "HTTP" | wc -l) -eq 0 ]]; then
+         [[ $(filter_http_debug "${output}" | wc -l) -eq 0 ]]; then
         # Success - we have the header and no other non-empty lines (excluding HTTP debug lines)
         return 0
       else
@@ -267,12 +273,7 @@ function test_nonexistent_resource {
 
   local output
   local status
-  output=$("${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
+  output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
       ls "${url}" 2>&1)
   status=$?
 
@@ -280,7 +281,7 @@ function test_nonexistent_resource {
     # For S3, a non-existent path returns a 200 with empty contents
     # We expect to see the "Contents of" header but no actual contents
     if ! (echo "${output}" | grep -q "Contents of" &&
-          [[ $(echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "HTTP" | wc -l) -eq 0 ]]); then
+          [[ $(filter_http_debug "${output}" | wc -l) -eq 0 ]]); then
       err "Failed to detect non-existent resource in S3"
       return 1
     fi
@@ -342,12 +343,7 @@ function test_empty_bucket {
   # Run the command and capture both output and status
   local output
   local status
-  output=$("${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
+  output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
       ls "${empty_url}" 2>&1)
   status=$?
 
@@ -357,7 +353,7 @@ function test_empty_bucket {
   if [[ ${status} -eq 0 ]]; then
     if echo "${output}" | grep -q "No objects found" || 
        (echo "${output}" | grep -q "Contents of" && 
-        [[ $(echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "HTTP" | wc -l) -eq 0 ]]); then
+        [[ $(filter_http_debug "${output}" | wc -l) -eq 0 ]]); then
       log "Successfully handled empty bucket listing"
       return 0
     else
@@ -474,12 +470,7 @@ function test_list_with_files {
   create_nested_files "${test_dir}" 1
 
   # Upload test files
-  if ! "${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
+  if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
       cp "${test_dir}" "${url}"; then
     err "Failed to upload test files for ls test"
     return 1
@@ -490,15 +481,8 @@ function test_list_with_files {
   local status
 
   # Test recursive listing
-  output=$("${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --knob_blobstore_list_max_keys_per_page=1 \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
-      ls "${url}" \
-      --recursive 2>&1)
+  output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
+    ls --recursive --knob_blobstore_list_max_keys_per_page=5 "${url}" 2>&1)
   status=$?
 
   local missing=0
@@ -530,14 +514,8 @@ function test_list_with_files {
   fi
 
   # Test non-recursive listing
-  output=$("${s3client}" \
-    --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-    --knob_blobstore_encryption_type=aws:kms \
-    --knob_blobstore_list_max_keys_per_page=5 \
-    --tls-ca-file "${TLS_CA_FILE}" \
-    --blob-credentials "${credentials}" \
-    --log --logdir "${logsdir}" \
-    ls "${url}" 2>&1)
+  output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
+  ls --knob_blobstore_list_max_keys_per_page=5 "${url}" 2>&1)
   status=$?
 
   check_nested_files "ls_test" 1 "false"
@@ -545,13 +523,8 @@ function test_list_with_files {
     return 1
   fi
 
-  # Cleanup
-  if ! "${s3client}" \
-      --knob_http_verbose_level="${HTTP_VERBOSE_LEVEL}" \
-      --knob_blobstore_encryption_type=aws:kms \
-      --tls-ca-file "${TLS_CA_FILE}" \
-      --blob-credentials "${credentials}" \
-      --log --logdir "${logsdir}" \
+  # Clean up test files
+  if ! run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
       rm "${url}"; then
     err "Failed to clean up nested test files"
     return 1
@@ -605,13 +578,30 @@ set -o noclobber
 # TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
 # It gets cleaned up on the way out of the test.
 TEST_SCRATCH_DIR=
-TLS_CA_FILE="${TLS_CA_FILE:-/etc/ssl/cert.pem}"
-readonly TLS_CA_FILE
 readonly HTTP_VERBOSE_LEVEL=2
 # Should we use S3? If USE_S3 is not defined, then check if
 # OKTETO_NAMESPACE is defined (It is defined on the okteto
 # internal apple dev environments where S3 is available).
 readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
+
+# Set TLS_CA_FILE only when using real S3, not for SeaweedFS
+if [[ "${USE_S3}" == "true" ]]; then
+  # Try to find a valid TLS CA file if not explicitly set
+  if [[ -z "${TLS_CA_FILE:-}" ]]; then
+    # Common locations for TLS CA files on different systems
+    for ca_file in "/etc/pki/tls/cert.pem" "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" "/usr/local/share/ca-certificates/" "/etc/ssl/certs/"; do
+      if [[ -f "${ca_file}" ]]; then
+        TLS_CA_FILE="${ca_file}"
+        break
+      fi
+    done
+  fi
+  TLS_CA_FILE="${TLS_CA_FILE:-}"
+else
+  # For SeaweedFS, don't use TLS
+  TLS_CA_FILE=""
+fi
+readonly TLS_CA_FILE
 
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
