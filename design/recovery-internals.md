@@ -61,7 +61,7 @@ The system tracks the information of each recovery phase via trace events. In pa
 
 This phase reads the coordinated state (cstate) from coordinators. The cstate includes the DBCoreState structure which describes the transaction systems (such as transaction logs (tLog) and tLogs’ configuration, logRouterTags (the number of log router tags), txsTags, old generations' tLogs, and recovery count) that exist before the recovery. The coordinated state can have multiple generations of tLogs.
 
-The transaction system state before the recovery is the starting point for the current recovery to construct the configuration of the next-generation transaction system. Note FDB’s transaction system’s generation increases for each recovery.
+The transaction system state before the recovery is the starting point for the current recovery to construct the configuration of the next-generation transaction system. Note FDB’s transaction system’s generation number increases for each recovery.
 
 
 ## Phase 2: LOCKING_CSTATE
@@ -90,11 +90,18 @@ CC interface is stored in `serverDBInfo`. The CC broadcasts `serverDBInfo` to al
 
 ## Phase 3: RECRUITING
 
-Once the CC locks the cstate, it will recruit the still-alive tLogs from the previous generation for the benefit of faster recovery. The CC gets the old tLogs’ interfaces from the READING_CSTATE phase and uses those interfaces to track which old tLog are still alive, the implementation of which is in `trackRejoins()`.
+Once the CC locks the cstate, it will read the transaction state store, and recruit the still-alive tLogs from the previous generation (for
+the benefit of faster recovery).
+Recruiting active tLogs is done by sending a "lock" message to each tLog. Once a tLog is locked it will not accept new commits to ingress new data, but
+old data can still be peeked by a storage server.
+The CC gets the old tLogs’ interfaces from the READING_CSTATE phase and uses those interfaces to track which old tLogs are still accessible, the implementation of which is in `trackRejoins()`. A locked tLog will reply to the CC with its `knownCommittedVersion` and `durable version`.
 
-Once the CC gets enough tLogs, it calculates the known committed version (i.e., `knownCommittedVersion` in code). `knownCommittedVersion` is the highest version that a commit proxy tells a given tLog that it had durably committed on *all* tLogs. The CC's is the maximum of all of that. `knownCommittedVersion` is  important, because it defines the lower bound of what version range of mutations need to be copied to the new generation. That is, any versions larger than the master's `knownCommittedVersion` is not guaranteed to persist on all replicas. The CC chooses a *recovery version*, which is the minimum of durable versions on all tLogs of the old generation, and recruits a new set of tLogs that copy all data between `knownCommittedVersion + 1` and `recoveryVersion` from old tLogs. This copy makes sure data within the range has enough replicas to satisfy the replication policy.
+Once the CC gets enough tLogs, it calculates the known committed version (i.e., `knownCommittedVersion`). `knownCommittedVersion` is the highest version that a commit proxy tells a given tLog that it had durably committed on *all* "local" tLogs (tLogs in remote DCs are not included).
 
-Later, the CC will use the recruited tLogs to create a new `TagPartitionedLogSystem` for the new generation.
+The CC's finds the maximum `knownCommittedVersion` of all the tLogs. This defines the lower bound of what version range of mutations needs to be copied to the new generation. That is, any versions larger than the CC's `knownCommittedVersion` are not guaranteed to persist on all replicas. The CC chooses a *recovery version*, which is the minimum of durable versions on all tLogs of the old generation, and recruits a new set of tLogs that copy all data between `knownCommittedVersion + 1` and `recoveryVersion` from old tLogs. This copy makes sure data within the range has enough replicas to satisfy the replication policy.
+
+Later, the CC will use the recruited tLogs and `recoveryVersion` to create a new `TagPartitionedLogSystem` for the new generation.
+Note that tLogs can continue to rejoin the cluster after the `recoveryVersion` has been calculated but before the log system has been created.
 
 **An example of `knownCommittedVersion` and `recoveryVersion`:**
 
@@ -123,19 +130,19 @@ At this point, we have recovered the txnStateStore, recruited new GRV proxies, c
 Recovery can get stuck at the following two steps:
 
 **Reading the txnStateStore step.**
+In parallel to recruiting tLogs, an actor to read the transaction state store is run.
 Recovery typically won’t get stuck at reading the txnStateStore step because once the CC can lock tLogs, it should always be able to read the txnStateStore for the tLogs.
 
-
-However, reading the txnStateStore can be slow because it needs to read from disk (through `openDiskQueueAdapter()` function) and the txnStateStore size increases as the cluster size increases. Recovery can take a long time if reading the txnStateStore is slow. To achieve faster recovery, we have improved the speed of reading the txnStateStore in FDB 6.2 by parallelly reading the txnStateStore on multiple tLogs based on tags.
-
+Reading the entire txnStateStore from one tLog could be slow because the disk must be read, and the txnStateStore size increases as the cluster size increases. To achieve faster recovery, each tLog stores a subset of the transaction store. When changes to the transaction state store are made (or snapshots of it are taken) these changes are sent to a random tLog team.
 
 **Recruiting roles step.**
-There are cases where the recovery can get stuck at recruiting enough roles for the txn system configuration. For example, if a cluster with replica factor equal to three has only three tLogs and one of them dies during the recovery, the cluster will not succeed in recruiting 3 tLogs and the recovery will get stuck. Another example is when a new database is created and the cluster does not have a valid txnStateStore. To get out of this situation, the CC will use an emergency transaction to forcibly change the configuration such that the recruitment can succeed. This configuration change may temporarily violate the contract of the desired configuration, but it is only temporary.
+There are cases where the recovery can get stuck at recruiting enough roles for the txn system configuration. For example, if a cluster with replica factor equal to three has only three tLogs and one of them dies during the recovery, the cluster will not succeed in recruiting 3 tLogs and the recovery will get stuck.
+
+Another example is when a new database is created and the cluster does not have a valid txnStateStore. To get out of this situation, the CC will use an emergency transaction to forcibly change the configuration such that the recruitment can succeed. This configuration change may temporarily violate the contract of the desired configuration, but it is only temporary.
 
 ServerKnob::CLUSTER_RECOVERY_EVENT_NAME_PREFIX defines the prefix for cluster recovery trace events. Hereafter, referred as 'RecoveryEventPrefix' in this document.
 
 We can use the trace event `<RecoveryEventPrefix>RecoveredConfig`, which dumps the information of the new transaction system’s configuration, to diagnose why the recovery is blocked in this phase.
-
 
 ## Phase 4: RECOVERY_TRANSACTION
 
@@ -188,8 +195,9 @@ The difference between this phase and getting to Phase 3 is that the CC is waiti
 ## Phase 8: STORAGE_RECOVERED
 
 Storage servers need old tLogs in previous generations to recover storage servers’ state. For example, a storage server may be offline for a long time, lagging behind in pulling mutations assigned to it. We have to keep the old tLogs who have those mutations until no storage server needs them.
-
-When all tLogs are no longer needed and deleted, the CC moves to the `STORAGE_RECOVERED` phase. This is done by checking if oldTLogData is empty in the `trackTlogRecovery()` actor.
+Hence a TLog process has only 1 active log and potentitally multiple non-active logs with data from old generations,
+and each old generation "shares" a disk with the tLog running in the active generation.
+When older generation tLogs are no longer needed and deleted, the CC moves to the `STORAGE_RECOVERED` phase. This is done by checking if oldTLogData is empty in the `trackTlogRecovery()` actor.
 
 
 ## Phase 9: FULLY_RECOVERED
