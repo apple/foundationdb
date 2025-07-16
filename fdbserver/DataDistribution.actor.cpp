@@ -55,7 +55,6 @@
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <string>
 
 static const std::string ddServerBulkDumpFolder = "ddBulkDumpFiles";
 static const std::string ddServerBulkLoadFolder = "ddBulkLoadFiles";
@@ -1668,9 +1667,9 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		manifests.setRootPath(jobRoot);
 		// A manifest's range is exactly the data range that the manifest covers.
 		// The task range is the union of all manifest ranges overlapping with the job range.
-		// It is possible that the task range is less than the manifests range. As a result,
-		// The manifests can contain more data outside the task range.
-		// The task range is the truth for the data that the task will cover.
+		// It is possible that the task range is smaller than the manifests range. As a result,
+		// the manifests can contain more data outside the task range.
+		// The task range is the source of truth for the data that the task will cover.
 		// The task range is used to filter out data outside the task range when the SS loading the data.
 		wait(store(bulkLoadTask, bulkLoadJobSubmitTask(self, jobId, manifests, taskRange)));
 
