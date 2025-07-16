@@ -533,8 +533,7 @@ function test_ls_handling {
   fi
 
   # Test non-existent resource in existing bucket
-  local nonexistent_path_url="blobstore://${host}/nonexistent/path/?${query_str}"
-  log "path url: ${nonexistent_path_url}"
+  local nonexistent_path_url="blobstore://${host}/nonexistent/path?${query_str}"
   if ! test_nonexistent_resource "${nonexistent_path_url}" "${dir}" "${credentials}" "${s3client}"; then
     return 1
   fi
