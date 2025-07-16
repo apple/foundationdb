@@ -1750,7 +1750,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
                               bool reqReturnIfBlocked = false,
                               bool reqOnlySpilled = false,
                               Optional<std::pair<UID, int>> reqSequence = Optional<std::pair<UID, int>>(),
-                              Optional<Version> reqEnd = Optional<Version>()) {
+                              Optional<Version> reqEnd = Optional<Version>(),
+                              Optional<bool> reqReturnEmptyIfStopped = Optional<bool>()) {
 	state BinaryWriter messages(Unversioned());
 	state BinaryWriter messages2(Unversioned());
 	state int sequence = -1;
@@ -1828,7 +1829,9 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	ASSERT(!SERVER_KNOBS->ENABLE_VERSION_VECTOR_REPLY_RECOVERY || SERVER_KNOBS->ENABLE_VERSION_VECTOR);
 	if (logData->version.get() < reqBegin) {
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_REPLY_RECOVERY && SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-		    logData->stopped() && reqEnd.present() && reqEnd.get() != std::numeric_limits<Version>::max()) {
+		    logData->stopped() && reqEnd.present() && reqEnd.get() != std::numeric_limits<Version>::max() &&
+		    reqReturnEmptyIfStopped.present() && reqReturnEmptyIfStopped.get()) {
+			ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST);
 			replyWithRecoveryVersion = reqEnd;
 		} else if (reqReturnIfBlocked) {
 			replyPromise.sendError(end_of_stream());
@@ -2214,7 +2217,8 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			                      req.returnIfBlocked,
 			                      onlySpilled,
 			                      Optional<std::pair<UID, int>>(),
-			                      req.end));
+			                      req.end,
+			                      req.returnEmptyIfStopped));
 
 			reply.rep.begin = begin;
 			req.reply.send(reply);
@@ -2849,7 +2853,8 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			                                        req.returnIfBlocked,
 			                                        req.onlySpilled,
 			                                        req.sequence,
-			                                        req.end));
+			                                        req.end,
+			                                        req.returnEmptyIfStopped));
 		}
 		when(TLogPopRequest req = waitNext(tli.popMessages.getFuture())) {
 			logData->addActor.send(tLogPop(self, req, logData));
