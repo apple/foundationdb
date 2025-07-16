@@ -73,7 +73,7 @@ class TestPicker:
         self.rare_priority: int = int(os.getenv("RARE_PRIORITY", 10))
 
         for subdir in self.test_dir.iterdir():
-            if subdir.is_dir() and subdir.name in config.test_dirs:
+            if subdir.is_dir() and subdir.name in config.test_types_to_run:
                 self.walk_test_dir(subdir)
         self.stat_fetcher: StatFetcher
         if config.stats is not None or config.joshua_dir is None:
@@ -384,7 +384,7 @@ class TestRun:
         if Version.of_binary(self.binary) < "6.1.0":
             self.trace_format = None
         self.use_tls_plugin = Version.of_binary(self.binary) < "5.2.0"
-        self.temp_path = config.run_dir / str(self.uid)
+        self.temp_path = config.run_temp_dir / str(self.uid)
         # state for the run
         self.retryable_error: bool = False
         self.summary: Summary = Summary(
@@ -415,23 +415,38 @@ class TestRun:
 
     def _run_joshua_logtool(self):
         """Calls Joshua LogTool to upload the test logs if 1) test failed 2) test is RocksDB related"""
-        if not os.path.exists("joshua_logtool.py"):
-            raise RuntimeError("joshua_logtool.py missing")
+        # Look for joshua_logtool.py in multiple locations
+        # First try: relative to this script's location (contrib/TestHarness2/test_harness/run.py)
+        script_dir = Path(__file__).parent.parent.parent  # Go up 3 levels to repo root
+        joshua_logtool_script = script_dir / "contrib" / "joshua_logtool.py"
+        
+        if not joshua_logtool_script.exists():
+            # Second try: contrib directory relative to current working directory
+            joshua_logtool_script = Path("contrib/joshua_logtool.py")
+            if not joshua_logtool_script.exists():
+                # Third try: current directory for backwards compatibility
+                joshua_logtool_script = Path("joshua_logtool.py")
+                if not joshua_logtool_script.exists():
+                    return {"stdout": "", "stderr": "joshua_logtool.py not found", "exit_code": -1, "tool_skipped": True}
+
         command = [
-            "python3",
-            "joshua_logtool.py",
+            sys.executable,
+            str(joshua_logtool_script),
             "upload",
-            "--test-uid",
-            str(self.uid),
-            "--log-directory",
-            str(self.temp_path),
-            "--check-rocksdb",
+            "--test-uid", str(self.uid),
+            "--log-directory", str(self.temp_path.parent)
         ]
+        
+        # Add appropriate upload flag based on TH_DISABLE_ROCKSDB_CHECK setting
+        disable_rocksdb_check = os.getenv("TH_DISABLE_ROCKSDB_CHECK", "false").lower() in ("true", "1", "yes")
+        if not disable_rocksdb_check:
+            command.append("--check-rocksdb")
         result = subprocess.run(command, capture_output=True, text=True)
         return {
             "stdout": result.stdout,
             "stderr": result.stderr,
             "exit_code": result.returncode,
+            "tool_skipped": False,
         }
 
     def run(self):
@@ -524,20 +539,44 @@ class TestRun:
         self.summary.valgrind_out_file = valgrind_file
         self.summary.error_out = err_out
         self.summary.summarize(self.temp_path, " ".join(command))
-        if not self.summary.is_negative_test and not self.summary.ok():
-            logtool_result = self._run_joshua_logtool()
-            child = SummaryTree("JoshuaLogTool")
-            child.attributes["ExitCode"] = str(logtool_result["exit_code"])
-            child.attributes["StdOut"] = logtool_result["stdout"]
-            child.attributes["StdErr"] = logtool_result["stderr"]
-            self.summary.out.append(child)
-        else:
-            child = SummaryTree("JoshuaLogTool")
-            child.attributes["IsNegative"] = str(self.summary.is_negative_test)
-            child.attributes["IsOk"] = str(self.summary.ok())
-            child.attributes["HasError"] = str(self.summary.error)
-            child.attributes["JoshuaLogToolIgnored"] = str(True)
-            self.summary.out.append(child)
+        # Run JoshuaLogTool if needed
+        force_joshua_logtool = os.getenv("TH_FORCE_JOSHUA_LOGTOOL", "false").lower() in ("true", "1", "yes")
+        if not self.summary.is_negative_test and (not self.summary.ok() or force_joshua_logtool):
+            archive_logs_on_failure = os.getenv("TH_ARCHIVE_LOGS_ON_FAILURE", "false").lower() in ("true", "1", "yes")
+            enable_joshua_logtool = os.getenv("TH_ENABLE_JOSHUA_LOGTOOL", "false").lower() in ("true", "1", "yes")
+            
+            if not archive_logs_on_failure or not enable_joshua_logtool:
+                child = SummaryTree("JoshuaLogTool")
+                child.attributes["ExitCode"] = "0"
+                child.attributes["Note"] = "Skipped - joshua_logtool not enabled"
+                self.summary.out.append(child)
+            else:
+                try:
+                    logtool_result = self._run_joshua_logtool()
+                except Exception as e:
+                    logtool_result = {
+                        "stdout": "",
+                        "stderr": f"joshua_logtool failed: {e}",
+                        "exit_code": -1,
+                        "tool_skipped": True
+                    }
+                
+                child = SummaryTree("JoshuaLogTool")
+                child.attributes["ExitCode"] = str(logtool_result["exit_code"])
+                if not logtool_result.get("tool_skipped", False):
+                    if logtool_result["exit_code"] == 0:
+                        stderr_lines = logtool_result["stderr"].split("\n") if logtool_result["stderr"] else []
+                        success_lines = [line for line in stderr_lines if "SUCCESS - Uploaded" in line]
+                        if success_lines:
+                            child.attributes["Note"] = success_lines[-1].replace("JOSHUA_LOGTOOL: ", "")
+                        else:
+                            child.attributes["Note"] = "Upload completed"
+                    else:
+                        child.attributes["StdOut"] = logtool_result["stdout"]
+                        child.attributes["StdErr"] = logtool_result["stderr"]
+                else:
+                    child.attributes["Note"] = logtool_result["stderr"]
+                self.summary.out.append(child)
 
         return self.summary.ok()
 
@@ -558,14 +597,14 @@ def decorate_summary(out: SummaryTree, test_file: Path, seed: int, buggify: bool
 class TestRunner:
     def __init__(self):
         self.uid = uuid.uuid4()
-        self.test_path: Path = Path("tests")
+        self.test_path: Path = config.test_source_dir
         self.cluster_file: str | None = None
         self.fdb_app_dir: str | None = None
         self.binary_chooser = OldBinaries()
         self.test_picker = TestPicker(self.test_path, self.binary_chooser.binaries)
 
     def backup_sim_dir(self, seed: int):
-        temp_dir = config.run_dir / str(self.uid)
+        temp_dir = config.run_temp_dir / str(self.uid)
         src_dir = temp_dir / "simfdb"
         assert src_dir.is_dir()
         dest_dir = temp_dir / "simfdb.{}".format(seed)
@@ -573,7 +612,7 @@ class TestRunner:
         shutil.copytree(src_dir, dest_dir)
 
     def restore_sim_dir(self, seed: int):
-        temp_dir = config.run_dir / str(self.uid)
+        temp_dir = config.run_temp_dir / str(self.uid)
         src_dir = temp_dir / "simfdb.{}".format(seed)
         assert src_dir.exists()
         dest_dir = temp_dir / "simfdb"
@@ -656,5 +695,5 @@ class TestRunner:
         test_files = self.test_picker.choose_test()
         success = self.run_tests(test_files, seed, self.test_picker)
         if config.clean_up:
-            shutil.rmtree(config.run_dir / str(self.uid))
+            shutil.rmtree(config.run_temp_dir / str(self.uid))
         return success

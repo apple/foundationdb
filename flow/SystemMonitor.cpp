@@ -132,8 +132,11 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("DiskWriteSeconds", currentStats.processDiskWriteSeconds)
 			    .detail("DiskReadsCount", currentStats.processDiskReadCount)
 			    .detail("DiskWritesCount", currentStats.processDiskWriteCount)
-			    .detail("DiskWriteSectors", currentStats.processDiskWriteSectors)
 			    .detail("DiskReadSectors", currentStats.processDiskReadSectors)
+			    .detail("DiskWriteSectors", currentStats.processDiskWriteSectors)
+			    .detail("DiskReadBytes", currentStats.processDiskReadBytes)
+			    .detail("DiskWriteBytes", currentStats.processDiskWriteBytes)
+
 			    .detail("FileWrites", netData.countFileLogicalWrites - statState->networkState.countFileLogicalWrites)
 			    .detail("FileReads", netData.countFileLogicalReads - statState->networkState.countFileLogicalReads)
 			    .detail("CacheReadBytes",

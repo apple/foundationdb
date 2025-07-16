@@ -200,41 +200,58 @@ void setThreadPriority(int pri);
 
 std::string removeWhitespace(const std::string& t);
 
-struct SystemStatistics {
-	bool initialized;
-	double elapsed;
-	double processCPUSeconds, mainThreadCPUSeconds;
-	uint64_t processMemory;
-	uint64_t processResidentMemory;
-	uint64_t processDiskTotalBytes;
-	uint64_t processDiskFreeBytes;
-	double processDiskQueueDepth;
-	double processDiskIdleSeconds;
-	double processDiskReadSeconds;
-	double processDiskWriteSeconds;
-	double processDiskRead;
-	double processDiskWrite;
-	uint64_t processDiskReadCount;
-	uint64_t processDiskWriteCount;
-	double processDiskWriteSectors;
-	double processDiskReadSectors;
-	double machineMegabitsSent;
-	double machineMegabitsReceived;
-	uint64_t machineOutSegs;
-	uint64_t machineRetransSegs;
-	double machineCPUSeconds;
-	int64_t machineTotalRAM;
-	int64_t machineCommittedRAM;
-	int64_t machineAvailableRAM;
+// Not all fields are returned on all platforms.
+// Check the implementations of getDiskStatistics to see exactly what
+// they return.
+struct DiskStatistics {
+	uint64_t currentIOs = 0;
+	uint64_t readMilliSecs = 0;
+	uint64_t writeMilliSecs = 0;
+	uint64_t IOMilliSecs = 0;
+	uint64_t reads = 0;
+	uint64_t writes = 0;
+	uint64_t readSectors = 0;
+	uint64_t writeSectors = 0;
+	uint64_t readBytes = 0;
+	uint64_t writeBytes = 0;
+};
 
-	SystemStatistics()
-	  : initialized(false), elapsed(0), processCPUSeconds(0), mainThreadCPUSeconds(0), processMemory(0),
-	    processResidentMemory(0), processDiskTotalBytes(0), processDiskFreeBytes(0), processDiskQueueDepth(0),
-	    processDiskIdleSeconds(0), processDiskReadSeconds(0), processDiskWriteSeconds(0), processDiskRead(0),
-	    processDiskWrite(0), processDiskReadCount(0), processDiskWriteCount(0), processDiskWriteSectors(0),
-	    processDiskReadSectors(0), machineMegabitsSent(0), machineMegabitsReceived(0), machineOutSegs(0),
-	    machineRetransSegs(0), machineCPUSeconds(0), machineTotalRAM(0), machineCommittedRAM(0),
-	    machineAvailableRAM(0) {}
+struct SystemStatistics {
+	bool initialized = false;
+	double elapsed = 0;
+	double processCPUSeconds = 0;
+	double mainThreadCPUSeconds = 0;
+	uint64_t processMemory = 0;
+	uint64_t processResidentMemory = 0;
+
+	// FIXME: the following are not process-specific, so the names
+	// don't make sense.
+	// FIXME: some of these are counters that just increment. Others are
+	// deltas that are computed over some recent time period.  Update the
+	// names to make it clear which are which.
+	uint64_t processDiskTotalBytes = 0;
+	uint64_t processDiskFreeBytes = 0;
+	double processDiskQueueDepth = 0;
+	double processDiskIdleSeconds = 0;
+	double processDiskReadSeconds = 0;
+	double processDiskWriteSeconds = 0;
+	double processDiskRead = 0;
+	double processDiskWrite = 0;
+	uint64_t processDiskReadCount = 0;
+	uint64_t processDiskWriteCount = 0;
+	double processDiskReadSectors = 0;
+	double processDiskWriteSectors = 0;
+	double processDiskReadBytes = 0;
+	double processDiskWriteBytes = 0;
+
+	double machineMegabitsSent = 0;
+	double machineMegabitsReceived = 0;
+	uint64_t machineOutSegs = 0;
+	uint64_t machineRetransSegs = 0;
+	double machineCPUSeconds = 0;
+	int64_t machineTotalRAM = 0;
+	int64_t machineCommittedRAM = 0;
+	int64_t machineAvailableRAM = 0;
 };
 
 struct SystemStatisticsState;
@@ -276,14 +293,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total);
 
 void getNetworkTraffic(uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs, uint64_t& retransSegs);
 
-void getDiskStatistics(std::string const& directory,
-                       uint64_t& currentIOs,
-                       uint64_t& readMilliSecs,
-                       uint64_t& writeMilliSecs,
-                       uint64_t& IOMilliSecs,
-                       uint64_t& reads,
-                       uint64_t& writes,
-                       uint64_t& writeSectors);
+DiskStatistics getDiskStatistics(std::string const& directory);
 
 void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails);
 

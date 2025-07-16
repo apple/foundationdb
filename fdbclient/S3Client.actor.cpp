@@ -37,6 +37,8 @@
 #include "flow/xxhash.h"
 #include "flow/Error.h"
 #include "rapidxml/rapidxml.hpp"
+#include <openssl/sha.h>
+#include "libb64/encode.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -54,13 +56,13 @@ struct PartState {
 	std::string etag;
 	int64_t offset = 0;
 	int64_t size = 0;
-	std::string md5;
+	std::string checksum; // MD5 or SHA256 depending on integrity check setting
 	bool completed = false;
 
 	PartState() = default; // Add explicit default constructor
 
-	PartState(int pNum, int64_t off, int64_t sz, std::string m = "")
-	  : partNumber(pNum), offset(off), size(sz), md5(m) {}
+	PartState(int pNum, int64_t off, int64_t sz, std::string checksum = "")
+	  : partNumber(pNum), offset(off), size(sz), checksum(checksum) {}
 };
 
 // Config for S3 operations with configurable parameters
@@ -323,9 +325,27 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 			// Update checksum with this part's data
 			XXH64_update(hashState, partData.data(), bytesRead);
 
-			// Calculate MD5 for this part
-			std::string md5 = HTTP::computeMD5Sum(partData);
-			resultPart.md5 = md5;
+			// Calculate hash for this part - use SHA256 if integrity check enabled, otherwise MD5
+			std::string checksum;
+			if (CLIENT_KNOBS->BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK) {
+				// Calculate SHA256 hash - inline implementation to avoid include issues
+				unsigned char hash[SHA256_DIGEST_LENGTH];
+				SHA256_CTX sha256;
+				SHA256_Init(&sha256);
+				SHA256_Update(&sha256, partData.data(), partData.size());
+				SHA256_Final(hash, &sha256);
+				std::string hashAsStr = std::string((char*)hash, SHA256_DIGEST_LENGTH);
+				std::string sig = base64::encoder::from_string(hashAsStr);
+				// base64 encoded blocks end in \n so remove last character.
+				sig.resize(sig.size() - 1);
+				checksum = sig;
+			} else {
+				// Calculate MD5 hash (original behavior)
+				checksum = HTTP::computeMD5Sum(partData);
+			}
+
+			// Store the checksum (MD5 or SHA256 depending on integrity check setting)
+			resultPart.checksum = checksum;
 
 			// Reset the packet queue for each retry attempt
 			packets.discardAll();
@@ -333,7 +353,7 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 			pw.serializeBytes(partData);
 
 			std::string etag = wait(endpoint->uploadPart(
-			    bucket, objectName, uploadID, resultPart.partNumber, &packets, partData.size(), resultPart.md5));
+			    bucket, objectName, uploadID, resultPart.partNumber, &packets, partData.size(), resultPart.checksum));
 
 			resultPart.etag = etag;
 			resultPart.completed = true;
@@ -458,7 +478,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			}
 
 			// Verify all parts completed and prepare etag map
-			std::map<int, std::string> etagMap;
+			std::map<int, S3BlobStoreEndpoint::PartInfo> etagMap;
 			for (const auto& part : parts) {
 				if (!part.completed) {
 					TraceEvent(SevWarnAlways, "S3ClientCopyUpFilePartNotCompleted")
@@ -468,10 +488,19 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 					XXH64_freeState(hashState);
 					throw http_bad_response();
 				}
-				etagMap[part.partNumber] = part.etag;
+				etagMap[part.partNumber] = S3BlobStoreEndpoint::PartInfo(part.etag, part.checksum);
 			}
 
-			wait(endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap));
+			Optional<std::string> s3Checksum =
+			    wait(endpoint->finishMultiPartUpload(bucket, objectName, uploadID, etagMap));
+
+			// Log the S3 checksum if present
+			if (s3Checksum.present()) {
+				TraceEvent(SevDebug, "S3ClientMultipartUploadChecksum")
+				    .detail("Bucket", bucket)
+				    .detail("Object", objectName)
+				    .detail("S3ChecksumSHA256", s3Checksum.get());
+			}
 
 			// Clear data after successful upload
 			numParts = parts.size();
@@ -700,12 +729,12 @@ ACTOR static Future<PartState> downloadPart(Reference<S3BlobStoreEndpoint> endpo
 				throw io_error();
 			}
 
-			// Verify MD5 checksum if provided
-			if (!resultPart.md5.empty()) {
+			// Verify checksum if provided (currently only MD5 is used for download verification)
+			if (!resultPart.checksum.empty()) {
 				std::string calculatedMD5 = HTTP::computeMD5Sum(std::string((char*)buffer.data(), totalBytesRead));
-				if (resultPart.md5 != calculatedMD5) {
-					TraceEvent(SevWarnAlways, "S3ClientDownloadPartMD5Mismatch")
-					    .detail("Expected", resultPart.md5)
+				if (resultPart.checksum != calculatedMD5) {
+					TraceEvent(SevWarnAlways, "S3ClientDownloadPartChecksumMismatch")
+					    .detail("Expected", resultPart.checksum)
 					    .detail("Calculated", calculatedMD5);
 					throw checksum_failed();
 				}
