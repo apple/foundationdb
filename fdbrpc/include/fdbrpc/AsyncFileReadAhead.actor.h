@@ -97,6 +97,7 @@ public:
 
 		state int blockNum;
 		for (blockNum = firstBlockNum; blockNum <= lastBlockToStart; ++blockNum) {
+			printf("operating on blockNum %d/%d for file of size %d\n", blockNum, firstBlockNum, fileSize);
 			Future<Reference<CacheBlock>> fblock;
 
 			// Look in the per-file cache for the block's future
