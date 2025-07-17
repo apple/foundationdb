@@ -419,7 +419,7 @@ class TestRun:
         # First try: relative to this script's location (contrib/TestHarness2/test_harness/run.py)
         script_dir = Path(__file__).parent.parent.parent  # Go up 3 levels to repo root
         joshua_logtool_script = script_dir / "contrib" / "joshua_logtool.py"
-        
+
         if not joshua_logtool_script.exists():
             # Second try: contrib directory relative to current working directory
             joshua_logtool_script = Path("contrib/joshua_logtool.py")
@@ -436,7 +436,7 @@ class TestRun:
             "--test-uid", str(self.uid),
             "--log-directory", str(self.temp_path.parent)
         ]
-        
+
         # Add appropriate upload flag based on TH_DISABLE_ROCKSDB_CHECK setting
         disable_rocksdb_check = os.getenv("TH_DISABLE_ROCKSDB_CHECK", "false").lower() in ("true", "1", "yes")
         if not disable_rocksdb_check:
@@ -482,6 +482,12 @@ class TestRun:
         ]
         if self.trace_format is not None:
             command += ["--trace_format", self.trace_format]
+
+        # NOTE: --trace_file_identifier is NOT available as a command-line option for fdbserver
+        # It's only available as a client-side network option. During determinism checks,
+        # the second run uses the same configuration and overwrites the initial trace files.
+        # The backup/restore mechanism below preserves both sets of logs for analysis.
+
         if self.use_tls_plugin:
             command += ["--tls_plugin", str(config.tls_plugin_path)]
             env["FDB_TLS_PLUGIN"] = str(config.tls_plugin_path)
@@ -544,7 +550,7 @@ class TestRun:
         if not self.summary.is_negative_test and (not self.summary.ok() or force_joshua_logtool):
             archive_logs_on_failure = os.getenv("TH_ARCHIVE_LOGS_ON_FAILURE", "false").lower() in ("true", "1", "yes")
             enable_joshua_logtool = os.getenv("TH_ENABLE_JOSHUA_LOGTOOL", "false").lower() in ("true", "1", "yes")
-            
+
             if not archive_logs_on_failure or not enable_joshua_logtool:
                 child = SummaryTree("JoshuaLogTool")
                 child.attributes["ExitCode"] = "0"
@@ -560,7 +566,7 @@ class TestRun:
                         "exit_code": -1,
                         "tool_skipped": True
                     }
-                
+
                 child = SummaryTree("JoshuaLogTool")
                 child.attributes["ExitCode"] = str(logtool_result["exit_code"])
                 if not logtool_result.get("tool_skipped", False):
@@ -619,6 +625,55 @@ class TestRunner:
         shutil.rmtree(dest_dir)
         shutil.move(src_dir, dest_dir)
 
+    def backup_trace_files(self, seed: int):
+        """Move trace files from initial run to dedicated directory before determinism check
+
+        This preserves the original trace files from the initial test run
+        before the determinism check run creates new trace files.
+        Both sets of logs will be available for analysis after the test completes.
+        """
+        temp_dir = config.run_temp_dir / str(self.uid)
+        initial_run_dir = temp_dir / "trace_initial_run"
+        initial_run_dir.mkdir(exist_ok=True)
+
+        # Find all trace files in the temp directory and move them
+        trace_pattern = re.compile(r"trace\..*\.(xml|json)")
+        moved_files = []
+        for file in temp_dir.iterdir():
+            if file.is_file() and trace_pattern.match(file.name):
+                shutil.move(file, initial_run_dir / file.name)
+                moved_files.append(file.name)
+
+        # Log the move operation for debugging
+        if moved_files:
+            print(f"DEBUG: Moved {len(moved_files)} trace files to {initial_run_dir}", file=sys.stderr)
+            for filename in moved_files:
+                print(f"DEBUG:   - {filename}", file=sys.stderr)
+        else:
+            print(f"DEBUG: No trace files found to move in {temp_dir}", file=sys.stderr)
+
+    def restore_trace_files(self, seed: int):
+        """Move determinism check trace files to dedicated directory"""
+        temp_dir = config.run_temp_dir / str(self.uid)
+        determinism_check_dir = temp_dir / "trace_determinism_check"
+        determinism_check_dir.mkdir(exist_ok=True)
+
+        # Find all trace files in the temp directory and move them to determinism check dir
+        trace_pattern = re.compile(r"trace\..*\.(xml|json)")
+        moved_files = []
+        for file in temp_dir.iterdir():
+            if file.is_file() and trace_pattern.match(file.name):
+                shutil.move(file, determinism_check_dir / file.name)
+                moved_files.append(file.name)
+
+                        # Log the move operation for debugging
+        if moved_files:
+            print(f"DEBUG: Moved {len(moved_files)} determinism check trace files to {determinism_check_dir}", file=sys.stderr)
+            for filename in moved_files:
+                print(f"DEBUG:   - {filename}", file=sys.stderr)
+        else:
+            print(f"DEBUG: No determinism check trace files found to move in {temp_dir}", file=sys.stderr)
+
     def run_tests(
         self, test_files: List[Path], seed: int, test_picker: TestPicker
     ) -> bool:
@@ -665,6 +720,10 @@ class TestRunner:
                 and run.summary.unseed is not None
                 and run.summary.unseed >= 0
             ):
+                # Backup trace files from initial run before determinism check
+                print(f"DEBUG: Starting determinism check for seed {seed + count}, unseed={run.summary.unseed}", file=sys.stderr)
+                self.backup_trace_files(seed + count)
+
                 run2 = TestRun(
                     binary,
                     file.absolute(),
@@ -682,6 +741,11 @@ class TestRunner:
                 )
                 run2.summary.out.dump(sys.stdout)
                 result = result and run2.success
+
+                # Restore trace files from initial run after determinism check
+                print(f"DEBUG: Determinism check completed, restoring trace files for seed {seed + count}", file=sys.stderr)
+                self.restore_trace_files(seed + count)
+
                 if not result:
                     return False
         return result
