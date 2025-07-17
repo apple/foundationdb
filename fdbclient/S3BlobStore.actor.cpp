@@ -1383,7 +1383,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
                                           Optional<char> delimiter,
                                           int maxDepth,
                                           std::function<bool(std::string const&)> recurseFilter) {
-	state std::string resource = bstore->constructResourcePath(bucket, "");										
+	state std::string resource = bstore->constructResourcePath(bucket, "");
 	resource.append("?list-type=2&max-keys=").append(std::to_string(CLIENT_KNOBS->BLOBSTORE_LIST_MAX_KEYS_PER_PAGE));
 
 	if (prefix.present())
@@ -1477,9 +1477,9 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 							if (!recurseFilter || recurseFilter(prefix)) {
 								// For recursive listing, don't use delimiter in sub-requests to get individual files
 								subLists.push_back(bstore->listObjectsStream(
-									bucket, results, prefix, Optional<char>(), maxDepth - 1, recurseFilter));
-                            }
-						} else  {
+								    bucket, results, prefix, Optional<char>(), maxDepth - 1, recurseFilter));
+							}
+						} else {
 							listResult.commonPrefixes.push_back(prefix);
 						}
 						prefixNode = prefixNode->next_sibling("Prefix");

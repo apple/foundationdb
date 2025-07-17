@@ -22,7 +22,7 @@ function cleanup {
 # $1 The output to filter
 function filter_http_debug {
   local output="$1"
-  echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "HTTP" | grep -v "^\[.*\]" | grep -v "^Request Header:" | grep -v "^Response Header:" | grep -v "^Response Code:" | grep -v "^Response ContentLen:" | grep -v "^-- RESPONSE CONTENT--" | grep -v "^--------" | grep -v "^<?xml" | grep -v "^<.*>"
+  echo "${output}" | grep -v "Contents of" | grep -v "^$" | grep -v "^[[:space:]]*$" | grep -v "HTTP" | grep -v "^\[.*\]" | grep -v "^Request Header:" | grep -v "^Response Header:" | grep -v "^Response Code:" | grep -v "^Response ContentLen:" | grep -v "^-- RESPONSE CONTENT--" | grep -v "^--------" | grep -v "^<?xml" | grep -v "^<.*>" | grep -v "^'$" | grep -v "^++"
 }
 
 # Run s3client with proper TLS CA file handling
@@ -280,8 +280,11 @@ function test_nonexistent_resource {
   if [[ "${USE_S3}" == "true" ]]; then
     # For S3, a non-existent path returns a 200 with empty contents
     # We expect to see the "Contents of" header but no actual contents
+    local filtered_output
+    filtered_output=$(filter_http_debug "${output}")
+    
     if ! (echo "${output}" | grep -q "Contents of" &&
-          [[ $(filter_http_debug "${output}" | wc -l) -eq 0 ]]); then
+          [[ -z "$(echo "${filtered_output}" | tr -d '[:space:]')" ]]); then
       err "Failed to detect non-existent resource in S3"
       return 1
     fi
@@ -351,9 +354,12 @@ function test_empty_bucket {
   # 1. "No objects found" message
   # 2. Or successful completion (status 0) with no objects listed
   if [[ ${status} -eq 0 ]]; then
+    local filtered_output
+    filtered_output=$(filter_http_debug "${output}")
+    
     if echo "${output}" | grep -q "No objects found" || 
        (echo "${output}" | grep -q "Contents of" && 
-        [[ $(filter_http_debug "${output}" | wc -l) -eq 0 ]]); then
+        [[ -z "$(echo "${filtered_output}" | tr -d '[:space:]')" ]]); then
       log "Successfully handled empty bucket listing"
       return 0
     else
@@ -466,7 +472,7 @@ function test_list_with_files {
 
   # Test recursive listing
   output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-    ls --recursive --knob_blobstore_list_max_keys_per_page=5 "${url}" 2>&1)
+    --knob_blobstore_list_max_keys_per_page=5 ls --recursive "${url}" 2>&1)
   status=$?
 
   local missing=0
@@ -499,7 +505,7 @@ function test_list_with_files {
 
   # Test non-recursive listing
   output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-  ls --knob_blobstore_list_max_keys_per_page=5 "${url}" 2>&1)
+  --knob_blobstore_list_max_keys_per_page=5 ls "${url}" 2>&1)
   status=$?
 
   check_nested_files "ls_test" 1 "false"
@@ -650,7 +656,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Process command-line options.
-set -- "${positional[@]}"
+set -- "${positional[@]+"${positional[@]}"}"
 if (( $# < 1 )) || (( $# > 2 )); then
     echo "ERROR: ${0} requires the fdb build directory -- CMAKE_BUILD_DIR -- as its"
     echo "first argument and then, optionally, a directory into which we write scratch"
@@ -690,8 +696,6 @@ if [[ "${USE_S3}" == "true" ]]; then
   if [[ -n "$host" || -n "$bucket" || -n "$region" || -n "$blob_credentials_file" ]]; then
     if [[ -n "$host" && -n "$bucket" && -n "$region" && -n "$blob_credentials_file" ]]; then
       log "Using explicit s3 configuration"
-        query_str='bucket='"${bucket}"'&region='"${region}${extra_url_params}"
-        path_prefix="bulkload/test/s3client" 
     else
       echo "ERROR: If any of --host, --bucket, --region, or --blob-credentials-file are set, then all must be set." >&2
       exit 1
@@ -706,10 +710,23 @@ if [[ "${USE_S3}" == "true" ]]; then
     readonly bucket="${configs[1]}"
     readonly blob_credentials_file="${configs[2]}"
     readonly region="${configs[3]}"
-    # Construct query string with raw ampersands using single quotes
-    query_str='bucket='"${bucket}"'&region='"${region}"'&secure_connection=0'
-    path_prefix="bulkload/test/s3client"
   fi
+
+  # Set common variables and build query string
+  if [[ -z "$host" ]]; then
+    readonly host="${configs[0]}"
+    readonly bucket="${configs[1]}"
+    readonly blob_credentials_file="${configs[2]}"
+    readonly region="${configs[3]}"
+  fi
+
+  # Build query string with optional extra params
+  if [[ -n "$extra_url_params" ]]; then
+    query_str='bucket='"${bucket}"'&region='"${region}${extra_url_params}"'&secure_connection=1'
+  else
+    query_str='bucket='"${bucket}"'&region='"${region}"'&secure_connection=1'
+  fi
+  path_prefix="bulkload/test/s3client"
 else
   log "Testing against seaweedfs"
   # Now source in the seaweedfs fixture so we can use its methods in the below.
@@ -738,16 +755,18 @@ else
   path_prefix="s3client"
 fi
 
+# export ASAN_OPTIONS="detect_leaks=1:abort_on_error=1:print_stats=1:log_path=./asan_log"
+
 # Run tests.
 test="test_file_upload_and_download"
-url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
+url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
 test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
 log_test_result $? "${test}"
 
 if [[ "${USE_S3}" == "true" ]]; then
   # Only run this on s3. It is checking that the old s3blobstore md5 checksum still works.
   test="test_file_upload_and_download_no_integrity_check"
-  url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
+  url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
   test_file_upload_and_download_no_integrity_check "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
   log_test_result $? "${test}"
 fi
@@ -759,6 +778,6 @@ log_test_result $? "${test}"
 
 # Add ls error handling test
 test="test_ls_handling"
-url='blobstore://'"${host}"'/'"${path_prefix}"'/'"${test}"'?'"${query_str}"
+url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
 test_ls_handling "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
 log_test_result $? "${test}"

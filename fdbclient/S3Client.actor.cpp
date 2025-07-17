@@ -426,6 +426,10 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			    .detail("FilePath", filepath)
 			    .detail("Attempt", retries);
 
+			// At the top of the loop, before any use of hashState
+			if (!hashState) {
+				hashState = XXH64_createState();
+			}
 			XXH64_reset(hashState, 0);
 
 			Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
@@ -543,7 +547,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 
 				// Cleanup before retry
 				XXH64_freeState(hashState);
-				hashState = XXH64_createState();
+				hashState = nullptr;
 				parts.clear();
 				activeFutures.clear();
 				activePartIndices.clear();
@@ -575,6 +579,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			} else {
 				state Error err = e;
 				XXH64_freeState(hashState);
+				hashState = nullptr;
 				TraceEvent(SevWarnAlways, "S3ClientCopyUpFileError")
 				    .detail("Filepath", filepath)
 				    .detail("Bucket", bucket)
@@ -1032,8 +1037,7 @@ ACTOR Future<Void> listFiles(std::string s3url, int maxDepth) {
 		}
 
 		// Use listObjects with the resource path directly, letting S3BlobStoreEndpoint handle URL construction
-		state S3BlobStoreEndpoint::ListResult result = 
-			wait(bstore->listObjects(bucket, resource, delimiter, maxDepth));
+		state S3BlobStoreEndpoint::ListResult result = wait(bstore->listObjects(bucket, resource, delimiter, maxDepth));
 
 		// Format and display the objects
 		std::cout << "Contents of " << s3url << ":" << std::endl;
