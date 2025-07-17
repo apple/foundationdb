@@ -40,6 +40,7 @@
 package directory
 
 import (
+	"context"
 	"errors"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
@@ -79,7 +80,7 @@ type Directory interface {
 	// recorded as the layer; if layer is specified and the directory already
 	// exists, it is compared against the layer specified when the directory was
 	// created, and an error is returned if they differ.
-	CreateOrOpen(t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error)
+	CreateOrOpen(ctx context.Context, t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error)
 
 	// Open opens the directory specified by path (relative to this Directory),
 	// and returns the directory and its contents as a DirectorySubspace (or ErrDirNotExists
@@ -89,7 +90,7 @@ type Directory interface {
 	// If the byte slice layer is specified, it is compared against the layer
 	// specified when the directory was created, and an error is returned if
 	// they differ.
-	Open(rt fdb.ReadTransactor, path []string, layer []byte) (DirectorySubspace, error)
+	Open(ctx context.Context, rt fdb.ReadTransactor, path []string, layer []byte) (DirectorySubspace, error)
 
 	// Create creates a directory specified by path (relative to this
 	// Directory), and returns the directory and its contents as a
@@ -97,7 +98,7 @@ type Directory interface {
 	//
 	// If the byte slice layer is specified, it is recorded as the layer and
 	// will be checked when opening the directory in the future.
-	Create(t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error)
+	Create(ctx context.Context, t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error)
 
 	// CreatePrefix behaves like Create, but uses a manually specified byte
 	// slice prefix to physically store the contents of this directory, rather
@@ -106,7 +107,7 @@ type Directory interface {
 	// If this Directory was created in a root directory that does not allow
 	// manual prefixes, CreatePrefix will return an error. The default root
 	// directory does not allow manual prefixes.
-	CreatePrefix(t fdb.Transactor, path []string, layer []byte, prefix []byte) (DirectorySubspace, error)
+	CreatePrefix(ctx context.Context, t fdb.Transactor, path []string, layer []byte, prefix []byte) (DirectorySubspace, error)
 
 	// Move moves the directory at oldPath to newPath (both relative to this
 	// Directory), and returns the directory (at its new location) and its
@@ -116,7 +117,7 @@ type Directory interface {
 	//
 	// There is no effect on the physical prefix of the given directory or on
 	// clients that already have the directory open.
-	Move(t fdb.Transactor, oldPath []string, newPath []string) (DirectorySubspace, error)
+	Move(ctx context.Context, t fdb.Transactor, oldPath []string, newPath []string) (DirectorySubspace, error)
 
 	// MoveTo moves this directory to newAbsolutePath (relative to the root
 	// directory of this Directory), and returns the directory (at its new
@@ -126,7 +127,7 @@ type Directory interface {
 	//
 	// There is no effect on the physical prefix of the given directory or on
 	// clients that already have the directory open.
-	MoveTo(t fdb.Transactor, newAbsolutePath []string) (DirectorySubspace, error)
+	MoveTo(ctx context.Context, t fdb.Transactor, newAbsolutePath []string) (DirectorySubspace, error)
 
 	// Remove removes the directory at path (relative to this Directory), its
 	// content, and all subdirectories. Remove returns true if a directory
@@ -135,16 +136,16 @@ type Directory interface {
 	//
 	// Note that clients that have already opened this directory might still
 	// insert data into its contents after removal.
-	Remove(t fdb.Transactor, path []string) (bool, error)
+	Remove(ctx context.Context, t fdb.Transactor, path []string) (bool, error)
 
 	// Exists returns true if the directory at path (relative to this Directory)
 	// exists, and false otherwise.
-	Exists(rt fdb.ReadTransactor, path []string) (bool, error)
+	Exists(ctx context.Context, rt fdb.ReadTransactor, path []string) (bool, error)
 
 	// List returns the names of the immediate subdirectories of the directory
 	// at path (relative to this Directory) as a slice of strings. Each string
 	// is the name of the last component of a subdirectory's path.
-	List(rt fdb.ReadTransactor, path []string) ([]string, error)
+	List(ctx context.Context, rt fdb.ReadTransactor, path []string) ([]string, error)
 
 	// GetLayer returns the layer specified when this Directory was created.
 	GetLayer() []byte
@@ -165,14 +166,14 @@ func stringsEqual(a, b []string) bool {
 	return true
 }
 
-func moveTo(t fdb.Transactor, dl directoryLayer, path, newAbsolutePath []string) (DirectorySubspace, error) {
+func moveTo(ctx context.Context, t fdb.Transactor, dl directoryLayer, path, newAbsolutePath []string) (DirectorySubspace, error) {
 	partition_len := len(dl.path)
 
 	if !stringsEqual(newAbsolutePath[:partition_len], dl.path) {
 		return nil, errors.New("cannot move between partitions")
 	}
 
-	return dl.Move(t, path[partition_len:], newAbsolutePath[partition_len:])
+	return dl.Move(ctx, t, path[partition_len:], newAbsolutePath[partition_len:])
 }
 
 var root = NewDirectoryLayer(subspace.FromBytes([]byte{0xFE}), subspace.AllKeys(), false)
@@ -186,8 +187,8 @@ var root = NewDirectoryLayer(subspace.FromBytes([]byte{0xFE}), subspace.AllKeys(
 // as the layer; if layer is specified and the directory already exists, it is
 // compared against the layer specified when the directory was created, and an
 // error is returned if they differ.
-func CreateOrOpen(t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error) {
-	return root.CreateOrOpen(t, path, layer)
+func CreateOrOpen(ctx context.Context, t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error) {
+	return root.CreateOrOpen(ctx, t, path, layer)
 }
 
 // Open opens the directory specified by path (resolved relative to the default
@@ -197,8 +198,8 @@ func CreateOrOpen(t fdb.Transactor, path []string, layer []byte) (DirectorySubsp
 // If the byte slice layer is specified, it is compared against the layer
 // specified when the directory was created, and an error is returned if they
 // differ.
-func Open(rt fdb.ReadTransactor, path []string, layer []byte) (DirectorySubspace, error) {
-	return root.Open(rt, path, layer)
+func Open(ctx context.Context, rt fdb.ReadTransactor, path []string, layer []byte) (DirectorySubspace, error) {
+	return root.Open(ctx, rt, path, layer)
 }
 
 // Create creates a directory specified by path (resolved relative to the
@@ -207,8 +208,8 @@ func Open(rt fdb.ReadTransactor, path []string, layer []byte) (DirectorySubspace
 //
 // If the byte slice layer is specified, it is recorded as the layer and will be
 // checked when opening the directory in the future.
-func Create(t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error) {
-	return root.Create(t, path, layer)
+func Create(ctx context.Context, t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, error) {
+	return root.Create(ctx, t, path, layer)
 }
 
 // Move moves the directory at oldPath to newPath (both resolved relative to the
@@ -219,21 +220,21 @@ func Create(t fdb.Transactor, path []string, layer []byte) (DirectorySubspace, e
 //
 // There is no effect on the physical prefix of the given directory or on
 // clients that already have the directory open.
-func Move(t fdb.Transactor, oldPath []string, newPath []string) (DirectorySubspace, error) {
-	return root.Move(t, oldPath, newPath)
+func Move(ctx context.Context, t fdb.Transactor, oldPath []string, newPath []string) (DirectorySubspace, error) {
+	return root.Move(ctx, t, oldPath, newPath)
 }
 
 // Exists returns true if the directory at path (relative to the default root
 // directory) exists, and false otherwise.
-func Exists(rt fdb.ReadTransactor, path []string) (bool, error) {
-	return root.Exists(rt, path)
+func Exists(ctx context.Context, rt fdb.ReadTransactor, path []string) (bool, error) {
+	return root.Exists(ctx, rt, path)
 }
 
 // List returns the names of the immediate subdirectories of the default root
 // directory as a slice of strings. Each string is the name of the last
 // component of a subdirectory's path.
-func List(rt fdb.ReadTransactor, path []string) ([]string, error) {
-	return root.List(rt, path)
+func List(ctx context.Context, rt fdb.ReadTransactor, path []string) ([]string, error) {
+	return root.List(ctx, rt, path)
 }
 
 // Root returns the default root directory. Any attempt to move or remove the
