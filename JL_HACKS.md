@@ -1,3 +1,12 @@
+```bash
+cd /Volumes/git/foundationdb/
+mkdir build
+cd build
+cmake -DUSE_WERROR=ON -DFORCE_BOOST_BUILD=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Debug -G Ninja ..
+ninja -j4
+```
+
+
 launch.json used to debug interactively from VSCode
 
 ```json
