@@ -1,0 +1,7 @@
+# This is the CODEOWNERS file for 7.4 branch
+# For more info about CODEOWNERS, see https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Rules below
+
+# 7.4 release manager is added to any PRs that change file(s) in 7.4 branch
+* @spraza
