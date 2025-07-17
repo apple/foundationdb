@@ -36,6 +36,8 @@ struct BulkDumping : TestWorkload {
 	bool pass = true;
 	int cancelTimes = 0;
 	int maxCancelTimes = 0;
+	int bulkLoadTransportMethod = 1; // Default to CP method
+	std::string jobRoot = "";
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -54,7 +56,9 @@ struct BulkDumping : TestWorkload {
 
 	BulkDumping(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), enabled(true), pass(true), cancelTimes(0),
-	    maxCancelTimes(deterministicRandom()->randomInt(0, 2)) {}
+	    maxCancelTimes(getOption(options, "maxCancelTimes"_sr, deterministicRandom()->randomInt(0, 2))),
+	    bulkLoadTransportMethod(getOption(options, "bulkLoadTransportMethod"_sr, 1)),
+	    jobRoot(getOption(options, "jobRoot"_sr, ""_sr).toString()) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 

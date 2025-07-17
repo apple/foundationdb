@@ -1,0 +1,50 @@
+# Test configuration for S3Client workload
+# This test verifies that the S3 client can upload, download, and delete a file to an S3 bucket.
+# Requires local instance of seaweedfs up and running and the below s3Url pointing at it.
+# One way to do this is:
+# source foundationdb/fdbclient/tests/seaweeds_fixture.sh
+#  mkdir ~/weed
+#  run_weed ~/weed/ ~/weed/
+# After the server comes up it will output where the service is running, something like
+# localhost:8335. Use this input composing the s3url below (use '127.0.0.1' in place of 'localhost').
+#  ...
+# When done, run:
+#  shutdown_weed ~/weed
+
+# Increase verbosity for debugging
+http_verbose_level = 10
+s3client_verbose_level = 10
+blobstore_verbose_level = 10
+
+# Connection and request settings
+blobstore_max_connection_life = 300
+blobstore_request_timeout_min = 300
+blobstore_request_tries = 5
+blobstore_connect_tries = 5
+blobstore_connect_timeout = 30
+
+# Network settings
+http_send_size = 1024
+http_read_size = 1024
+
+# Connection monitoring
+connection_monitor_loop_time = 0.1
+connection_monitor_timeout = 1.0
+connection_monitor_idle_timeout = 60.0
+
+[[test]]
+testTitle = 'S3Client'
+
+# Note: The blob credentials file path should be set in the environment variable FDB_BLOB_CREDENTIALS
+# when running the test, not in this configuration file. The file gets written when the test runs.
+ 
+    [[test.workload]]
+    testName = 'S3ClientWorkload'
+    # So set the base URL for the (ersatz) s3 service that we want to go against here.
+    # Add the 'bypass_simulation=1' so we bypass simulated network to get
+    # to the service from simulation. Add global_connection_pool=0 so single-threaded.
+    # Use 127.0.0.1 rather than localhost. If 'localhost', code uses the ipv6 version.
+    # if 127.0.0.1, its ipv4 which is likely where we started seaweed.
+    # If running against joshua, refer to the seaweed instance running at seaweedfs.default.svc.cluster.local.
+    s3Url = 'blobstore://seaweedfs:tot4llys3cure@seaweedfs.default.svc.cluster.local:8333/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0'
+    #s3Url = 'blobstore://127.0.0.1:8333/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=1&global_connection_pool=0' 
