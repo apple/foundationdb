@@ -2344,11 +2344,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			wait(delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD));
 			++self->counters.commitDelayed;
 			count--;
+			if (deterministicRandom()->random01() < 0.001)
+				TraceEvent(SevWarn, "RocksDBCommitsDelayed1000x", self->id)
+				    .detail("EstPendCompactBytes", estPendCompactBytes)
+				    .detail("NumImmutableMemtables", numImmutableMemtables);
 			self->db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
 			                                   &estPendCompactBytes);
 			self->db->GetAggregatedIntProperty(rocksdb::DB::Properties::kNumImmutableMemTable, &numImmutableMemtables);
-			if (deterministicRandom()->random01() < 0.001)
-				TraceEvent(SevWarn, "RocksDBCommitsDelayed1000x", self->id);
 		}
 
 		return Void();
@@ -2367,7 +2369,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		self->maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		self->deletesPerCommitHistogram->sampleRecordCounter(self->deletesPerCommit);
 		self->deleteRangesPerCommitHistogram->sampleRecordCounter(self->deleteRangesPerCommit);
-		if (self->deletesPerCommit > 1000 || self->deleteRangesPerCommit > 1000)
+		if (self->deletesPerCommit > 8000 || self->deleteRangesPerCommit > 1000)
 			TraceEvent("RocksDBDeletesCount", self->id)
 			    .detail("DeletesPerCommit", self->deletesPerCommit)
 			    .detail("DeleteRangesPerCommit", self->deleteRangesPerCommit);
