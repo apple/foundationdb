@@ -335,8 +335,18 @@ struct BulkDumping : TestWorkload {
 		// Submit a bulk dump job
 		state int oldBulkDumpMode = 0;
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
-		state BulkDumpState newJob =
-		    createBulkDumpJob(normalKeys, simulationBulkDumpFolder, BulkLoadType::SST, BulkLoadTransportMethod::CP);
+
+		// Use the configured transport method instead of hard-coding CP
+		state BulkLoadTransportMethod transportMethod =
+		    static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod);
+		state std::string jobRoot = self->jobRoot.empty() ? simulationBulkDumpFolder : self->jobRoot;
+
+		TraceEvent("BulkDumpingWorkLoadTransportMethod")
+		    .detail("ConfiguredMethod", self->bulkLoadTransportMethod)
+		    .detail("TransportMethod", static_cast<int>(transportMethod))
+		    .detail("JobRoot", jobRoot);
+
+		state BulkDumpState newJob = createBulkDumpJob(normalKeys, jobRoot, BulkLoadType::SST, transportMethod);
 		wait(submitBulkDumpJob(cx, newJob));
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Submitted").detail("Job", newJob.toString());
 
@@ -356,8 +366,8 @@ struct BulkDumping : TestWorkload {
 			// cancellation. If the job is cancelled, we should re-submit the job.
 			state bool hasError = false;
 			state int oldCancelTimes = self->cancelTimes;
-			state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
-			    newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), BulkLoadTransportMethod::CP);
+			state BulkLoadJobState bulkLoadJob =
+			    createBulkLoadJob(newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), transportMethod);
 			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
 			wait(submitBulkLoadJob(cx, bulkLoadJob));
 
