@@ -177,7 +177,6 @@ bool PolicyAcross::validate(std::vector<LocalityEntry> const& solutionSet,
 // Choose new servers from "least utilized" alsoServers and append the new servers to results
 // fromserverse are the servers that have already been chosen and
 // that should be excluded from being selected as replicas.
-// FIXME: Simplify this function, such as removing unnecessary printf
 // fromServers are the servers that must have;
 // alsoServers are the servers you can choose.
 bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
@@ -197,8 +196,7 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 	for (auto& alsoServer : alsoServers) {
 		auto value = fromServers->getValueViaGroupKey(alsoServer, groupIndexKey);
 		if (value.present()) {
-			auto lowerBound = std::lower_bound(_usedValues.begin(), _usedValues.end(), value.get());
-			if ((lowerBound == _usedValues.end()) || (*lowerBound != value.get())) {
+			if (!_usedValues.contains(value.get())) {
 				//_selected is a set of processes that have the same indexKey and indexValue (value)
 				_selected = fromServers->restrict(indexKey, value.get());
 				if (_selected->size()) {
@@ -213,7 +211,7 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 						}
 						if (count >= _count)
 							break;
-						_usedValues.insert(lowerBound, value.get());
+						_usedValues.insert(value.get());
 					}
 				}
 			}
@@ -258,15 +256,14 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 			auto& entry = mutableArray[recordIndex];
 			auto value = fromServers->getValueViaGroupKey(entry, groupIndexKey);
 			if (value.present()) {
-				auto lowerBound = std::lower_bound(_usedValues.begin(), _usedValues.end(), value.get());
-				if ((lowerBound == _usedValues.end()) || (*lowerBound != value.get())) {
+				if (!_usedValues.contains(value.get())) {
 					_selected = fromServers->restrict(indexKey, value.get());
 					if (_selected->size()) {
 						if (_policy->selectReplicas(_selected, emptyEntryArray, results)) {
 							count++;
 							if (count >= _count)
 								break;
-							_usedValues.insert(lowerBound, value.get());
+							_usedValues.insert(value.get());
 						}
 					}
 				}
