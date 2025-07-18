@@ -36,6 +36,8 @@ struct BulkDumping : TestWorkload {
 	bool pass = true;
 	int cancelTimes = 0;
 	int maxCancelTimes = 0;
+	int bulkLoadTransportMethod = 1; // Default to CP method
+	std::string jobRoot = "";
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -54,7 +56,9 @@ struct BulkDumping : TestWorkload {
 
 	BulkDumping(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), enabled(true), pass(true), cancelTimes(0),
-	    maxCancelTimes(deterministicRandom()->randomInt(0, 2)) {}
+	    maxCancelTimes(getOption(options, "maxCancelTimes"_sr, deterministicRandom()->randomInt(0, 2))),
+	    bulkLoadTransportMethod(getOption(options, "bulkLoadTransportMethod"_sr, 1)),
+	    jobRoot(getOption(options, "jobRoot"_sr, ""_sr).toString()) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -331,8 +335,18 @@ struct BulkDumping : TestWorkload {
 		// Submit a bulk dump job
 		state int oldBulkDumpMode = 0;
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
-		state BulkDumpState newJob =
-		    createBulkDumpJob(normalKeys, simulationBulkDumpFolder, BulkLoadType::SST, BulkLoadTransportMethod::CP);
+
+		// Use the configured transport method instead of hard-coding CP
+		state BulkLoadTransportMethod transportMethod =
+		    static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod);
+		state std::string jobRoot = self->jobRoot.empty() ? simulationBulkDumpFolder : self->jobRoot;
+
+		TraceEvent("BulkDumpingWorkLoadTransportMethod")
+		    .detail("ConfiguredMethod", self->bulkLoadTransportMethod)
+		    .detail("TransportMethod", static_cast<int>(transportMethod))
+		    .detail("JobRoot", jobRoot);
+
+		state BulkDumpState newJob = createBulkDumpJob(normalKeys, jobRoot, BulkLoadType::SST, transportMethod);
 		wait(submitBulkDumpJob(cx, newJob));
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Submitted").detail("Job", newJob.toString());
 
@@ -352,8 +366,8 @@ struct BulkDumping : TestWorkload {
 			// cancellation. If the job is cancelled, we should re-submit the job.
 			state bool hasError = false;
 			state int oldCancelTimes = self->cancelTimes;
-			state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
-			    newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), BulkLoadTransportMethod::CP);
+			state BulkLoadJobState bulkLoadJob =
+			    createBulkLoadJob(newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), transportMethod);
 			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
 			wait(submitBulkLoadJob(cx, bulkLoadJob));
 
