@@ -55,12 +55,18 @@ struct RWTransactor : ITransactor {
 	int minValueBytes, maxValueBytes;
 	std::string valueString;
 	int keyCount, keyBytes;
+	double zeroPaddingRatio;
 
-	RWTransactor(int reads, int writes, int keyCount, int keyBytes, int minValueBytes, int maxValueBytes)
+	RWTransactor(int reads,
+	             int writes,
+	             int keyCount,
+	             int keyBytes,
+	             int minValueBytes,
+	             int maxValueBytes,
+	             double zeroPaddingRatio)
 	  : reads(reads), writes(writes), minValueBytes(minValueBytes), maxValueBytes(maxValueBytes), keyCount(keyCount),
-	    keyBytes(keyBytes) {
+	    keyBytes(keyBytes), zeroPaddingRatio(zeroPaddingRatio) {
 		ASSERT(minValueBytes <= maxValueBytes);
-		valueString = std::string(maxValueBytes, '.');
 	}
 
 	Key randomKey() {
@@ -75,8 +81,16 @@ struct RWTransactor : ITransactor {
 	}
 
 	Value randomValue() {
-		return StringRef((const uint8_t*)valueString.c_str(),
-		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
+		int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
+		int zeroPadding = static_cast<int>(zeroPaddingRatio * length);
+		if (zeroPadding > length) {
+			zeroPadding = length;
+		}
+		valueString = deterministicRandom()->randomAlphaNumeric(length);
+		for (int i = 0; i < zeroPadding; ++i) {
+			valueString[i] = '\0';
+		}
+		return StringRef((uint8_t*)valueString.c_str(), length);
 	};
 
 	Future<Void> doTransaction(Database const& db, Stats* stats) override {
@@ -319,19 +333,22 @@ struct ThroughputWorkload : TestWorkload {
 		int minValueBytes = getOption(options, "minValueBytes"_sr, maxValueBytes);
 		double sweepDuration = getOption(options, "sweepDuration"_sr, 0);
 		double sweepDelay = getOption(options, "sweepDelay"_sr, 0);
+		double zeroPaddingRatio = getOption(options, "zeroPaddingRatio"_sr, 0.15);
 
 		auto AType = Reference<ITransactor>(new RWTransactor(getOption(options, "readsPerTransactionA"_sr, 10),
 		                                                     getOption(options, "writesPerTransactionA"_sr, 0),
 		                                                     keyCount,
 		                                                     keyBytes,
 		                                                     minValueBytes,
-		                                                     maxValueBytes));
+		                                                     maxValueBytes,
+		                                                     zeroPaddingRatio));
 		auto BType = Reference<ITransactor>(new RWTransactor(getOption(options, "readsPerTransactionB"_sr, 5),
 		                                                     getOption(options, "writesPerTransactionB"_sr, 5),
 		                                                     keyCount,
 		                                                     keyBytes,
 		                                                     minValueBytes,
-		                                                     maxValueBytes));
+		                                                     maxValueBytes,
+		                                                     zeroPaddingRatio));
 
 		if (sweepDuration > 0) {
 			op = Reference<ITransactor>(new SweepTransactor(sweepDuration, sweepDelay, AType, BType));

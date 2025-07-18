@@ -42,7 +42,7 @@ struct BulkLoadWorkload : TestWorkload {
 		actorCount = getOption(options, "actorCount"_sr, 20);
 		writesPerTransaction = getOption(options, "writesPerTransaction"_sr, 10);
 		valueBytes = std::max(getOption(options, "valueBytes"_sr, 96), 16);
-		value = Value(std::string(valueBytes, '.'));
+		value = Value(deterministicRandom()->randomAlphaNumeric(valueBytes));
 		targetBytes = getOption(options, "targetBytes"_sr, std::numeric_limits<uint64_t>::max());
 		keyPrefix = getOption(options, "keyPrefix"_sr, ""_sr);
 		keyPrefix = unprintable(keyPrefix.toString());
