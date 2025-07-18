@@ -472,7 +472,7 @@ ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 						BulkLoadJobFileManifestEntry manifestEntry(line);
 						KeyRange overlappingRange = range & manifestEntry.getRange();
 						if (!overlappingRange.empty()) {
-							auto returnV = manifestEntryMap->insert({ manifestEntry.getBeginKey(), manifestEntry });
+							auto returnV = manifestEntryMap->insert({ overlappingRange.begin, manifestEntry });
 							ASSERT(returnV.second);
 						}
 					}
@@ -500,7 +500,7 @@ ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 				BulkLoadJobFileManifestEntry manifestEntry(leftover);
 				KeyRange overlappingRange = range & manifestEntry.getRange();
 				if (!overlappingRange.empty()) {
-					auto returnV = manifestEntryMap->insert({ manifestEntry.getBeginKey(), manifestEntry });
+					auto returnV = manifestEntryMap->insert({ overlappingRange.begin, manifestEntry });
 					ASSERT(returnV.second);
 				}
 			}
