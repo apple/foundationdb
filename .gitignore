@@ -108,3 +108,5 @@ temp/
 /.ccls-cache
 .clangd/
 .stignore
+
+/tests/loopback_cluster/
