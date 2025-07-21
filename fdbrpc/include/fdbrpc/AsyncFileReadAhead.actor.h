@@ -30,6 +30,7 @@
 
 #include "flow/flow.h"
 #include "flow/IAsyncFile.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Read-only file type that wraps another file instance, reads in large blocks, and reads ahead of the actual range
@@ -104,7 +105,9 @@ public:
 			// If not found, start the read.
 			if (i == f->m_blocks.end() || (i->second.isValid() && i->second.isError())) {
 				// printf("starting read of %s block %d\n", f->getFilename().c_str(), blockNum);
-				fblock = readBlock(f.getPtr(), f->m_block_size, (int64_t)f->m_block_size * blockNum);
+				int64_t maxReadBytes = fileSize - (int64_t)blockNum * f->m_block_size;
+				int64_t readLength = std::min<int64_t>(f->m_block_size, maxReadBytes);
+				fblock = readBlock(f.getPtr(), readLength, (int64_t)f->m_block_size * blockNum);
 				f->m_blocks[blockNum] = fblock;
 			} else
 				fblock = i->second;
@@ -216,6 +219,51 @@ public:
 	  : m_f(f), m_block_size(blockSize), m_read_ahead_blocks(readAheadBlocks),
 	    m_cache_block_limit(std::max<int>(1, cacheSizeBlocks)), m_max_concurrent_reads(maxConcurrentReads) {}
 };
+
+
+TEST_CASE("fdbrpc/AsyncFileReadAhead/SmallFile") {
+	class MockBoundedFile : public IAsyncFile, public ReferenceCounted<MockBoundedFile> {
+	public:
+		MockBoundedFile(int64_t size) : fileSize(size) {}
+		void addref() override { ReferenceCounted<MockBoundedFile>::addref(); }
+		void delref() override { ReferenceCounted<MockBoundedFile>::delref(); }
+		StringRef getClassName() override { return "MockBoundedFile"_sr; }
+		
+		Future<int> read(void* data, int length, int64_t offset) override {
+			ASSERT(offset <= fileSize);
+			// AsyncFileReadAhead *cannot* read lengths beyond filesize, 
+			//	because downstream Files e.g. AsyncFileEncrypted read in
+			//  blocks, which can then cause out-of-bound errors on the next
+			//  downstream filesystem (e.g. AsyncFileS3BlobStore)
+			ASSERT(offset + length <= fileSize);
+			memset(data, 0xAB, length);
+			return length;
+		}
+
+		Future<Void> write(void const* data, int length, int64_t offset) override { throw file_not_writable(); }
+		Future<Void> truncate(int64_t size) override { throw file_not_writable(); }
+		Future<Void> sync() override { return Void(); }
+		Future<Void> flush() override { return Void(); }
+		Future<int64_t> size() const override { return fileSize; }
+		std::string getFilename() const override { return "mock-file"; }
+		Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override { throw platform_error(); }
+		void releaseZeroCopy(void* data, int length, int64_t offset) override {}
+		int64_t debugFD() const override { return -1; }
+
+	private:
+		int64_t fileSize;
+	};
+
+	Reference<MockBoundedFile> smallFile(new MockBoundedFile(1));
+	Reference<AsyncFileReadAheadCache> readAheadCache(
+		new AsyncFileReadAheadCache(smallFile, 4096, 0, 3, 2));
+	
+	uint8_t data;
+	int bytesRead = wait(readAheadCache->read(&data, 1, 0));
+	ASSERT_EQ(bytesRead, 1);
+	
+	return Void();
+}
 
 #include "flow/unactorcompiler.h"
 #endif
