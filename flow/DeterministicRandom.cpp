@@ -26,11 +26,13 @@
 
 uint64_t DeterministicRandom::gen64() {
 	uint64_t curr = next;
-	// Order of evaluation of the ^ operator is not specified, so two
-	// rng() calls in the same ^ expression may not produce a
-	// consistent 64-bit value across compilations.  This is easily
-	// avoided by writing the code so that our output here does not
-	// depend on unspecified order of operations.
+	// RE: the previous implementation of this function: order of
+	// evaluation of arguments to the ^ operator is not specified, so
+	// two rng() calls in the same ^ expression may not produce a
+	// consistent 64-bit value across compilations, because we don't
+	// know if the first call was used for the higher order bits and
+	// the second call for the low order bits, or vice-versa.
+	// See https://en.cppreference.com/w/cpp/language/eval_order.html
 	next = (uint64_t(rng()) << 32);
 	next ^= rng();
 	if (TRACE_SAMPLE())
