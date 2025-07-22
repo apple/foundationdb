@@ -38,7 +38,7 @@
 class SWIFT_CXX_REF_DETERMINISTICRANDOM DeterministicRandom final : public IRandom,
                                                                     public ReferenceCounted<DeterministicRandom> {
 private:
-	std::mt19937 random;
+	std::mt19937 rng;
 	uint64_t next;
 	bool useRandLog;
 
