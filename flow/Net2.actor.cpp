@@ -22,11 +22,15 @@
 #include "boost/asio/ip/address.hpp"
 #include "boost/system/system_error.hpp"
 #include "flow/Arena.h"
+#include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include <algorithm>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <sys/types.h>
+#include <chrono>
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
 #endif
@@ -77,6 +81,7 @@ extern "C" intptr_t g_stackYieldLimit;
 intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
+using std::chrono::high_resolution_clock;
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
@@ -113,6 +118,110 @@ DESCR struct SlowTask {
 	int64_t numYields; // count
 };
 
+struct HandShakeMetrics {
+	std::chrono::nanoseconds maxDuration;
+	std::chrono::nanoseconds minDuration;
+	std::chrono::nanoseconds totalDuration;
+	int64_t count = 0;
+
+	HandShakeMetrics()
+	  : maxDuration(std::chrono::nanoseconds::zero()), minDuration(std::chrono::nanoseconds::zero()),
+	    totalDuration(std::chrono::nanoseconds::zero()), count(0) {}
+
+	void addMetrics(const std::chrono::nanoseconds& duration) {
+		if (count == 0 || maxDuration < duration) {
+			maxDuration = duration;
+		}
+		if (count == 0 || minDuration > duration) {
+			minDuration = duration;
+		}
+		if (count == 0) {
+			totalDuration = duration;
+		} else {
+			totalDuration += duration;
+		}
+		count++;
+	}
+
+	void clear() {
+		maxDuration = std::chrono::nanoseconds::zero();
+		minDuration = std::chrono::nanoseconds::zero();
+		totalDuration = std::chrono::nanoseconds::zero();
+		count = 0;
+	}
+};
+
+struct HandShakeMetricsOverview {
+	HandShakeMetrics clientSucceed;
+	HandShakeMetrics clientFailed;
+	HandShakeMetrics serverSucceed;
+	HandShakeMetrics serverFailed;
+	double lastLogTime = 0.0;
+
+	void addMetrics(bool isClient, bool isSucceed, const std::chrono::nanoseconds& duration) {
+		if (isClient) {
+			if (isSucceed) {
+				clientSucceed.addMetrics(duration);
+			} else {
+				clientFailed.addMetrics(duration);
+			}
+		} else {
+			if (isSucceed) {
+				serverSucceed.addMetrics(duration);
+			} else {
+				serverFailed.addMetrics(duration);
+			}
+		}
+	}
+
+	void clear() {
+		clientSucceed.clear();
+		clientFailed.clear();
+		serverSucceed.clear();
+		serverFailed.clear();
+	}
+
+	std::string convertToString(const std::chrono::nanoseconds& duration) {
+		return std::to_string(std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(duration).count());
+	}
+
+	void logging() {
+		if (lastLogTime != 0 && now() - lastLogTime < 1.0) {
+			return;
+		}
+		TraceEvent(SevInfo, "N2_HandShakeMetricsOverview")
+		    .detail("ClientSucceedCount", clientSucceed.count)
+		    .detail("ClientSucceedMaxDuration", convertToString(clientSucceed.maxDuration))
+		    .detail("ClientSucceedMinDuration", convertToString(clientSucceed.minDuration))
+		    .detail("ClientSucceedTotalDuration", convertToString(clientSucceed.totalDuration))
+		    .detail("ClientFailedCount", clientFailed.count)
+		    .detail("ClientFailedMaxDuration", convertToString(clientFailed.maxDuration))
+		    .detail("ClientFailedMinDuration", convertToString(clientFailed.minDuration))
+		    .detail("ClientFailedTotalDuration", convertToString(clientFailed.totalDuration))
+		    .detail("ServerSucceedCount", serverSucceed.count)
+		    .detail("ServerSucceedMaxDuration", convertToString(serverSucceed.maxDuration))
+		    .detail("ServerSucceedMinDuration", convertToString(serverSucceed.minDuration))
+		    .detail("ServerSucceedTotalDuration", convertToString(serverSucceed.totalDuration))
+		    .detail("ServerFailedCount", serverFailed.count)
+		    .detail("ServerFailedMaxDuration", convertToString(serverFailed.maxDuration))
+		    .detail("ServerFailedMinDuration", convertToString(serverFailed.minDuration))
+		    .detail("ServerFailedTotalDuration", convertToString(serverFailed.totalDuration));
+		clear();
+		return;
+	}
+};
+
+struct HandShakeMetricsOutput {
+	Optional<std::chrono::nanoseconds> duration;
+	bool isClient = false;
+	bool isSucceed = false;
+
+	HandShakeMetricsOutput(std::chrono::nanoseconds duration, bool isClient, bool isSucceed)
+	  : duration(duration), isClient(isClient), isSucceed(isSucceed) {}
+
+	HandShakeMetricsOutput() = default;
+};
+
 namespace N2 { // No indent, it's the whole file
 
 class Net2;
@@ -137,6 +246,8 @@ public:
 	void initTLS(ETLSInitState targetState) override;
 	void run() override;
 	void initMetrics() override;
+
+	std::shared_ptr<HandShakeMetricsOverview> handShakeMetricsOverview;
 
 	// INetworkConnections interface
 	Future<Reference<IConnection>> connect(NetworkAddress toAddr, tcp::socket* existingSocket = nullptr) override;
@@ -220,7 +331,6 @@ public:
 #endif
 
 	bool useThreadPool;
-
 	// private:
 
 	ASIOReactor reactor;
@@ -241,8 +351,8 @@ public:
 	TDMetricCollection tdmetrics;
 	MetricCollection metrics;
 	ChaosMetrics chaosMetrics;
-	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms it's
-	// not. For portability this should be atomic
+	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms
+	// it's not. For portability this should be atomic
 	std::atomic<double> currentTime;
 	// May be accessed off the network thread, e.g. by onMainThread
 	std::atomic<bool> stopped;
@@ -453,8 +563,8 @@ public:
 		return f;
 	}
 
-	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might
-	// be 0)
+	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read
+	// (might be 0)
 	int read(uint8_t* begin, uint8_t* end) override {
 		boost::system::error_code err;
 		++g_net2->countReads;
@@ -475,8 +585,8 @@ public:
 		return size;
 	}
 
-	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of
-	// bytes written (might be 0)
+	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number
+	// of bytes written (might be 0)
 	int write(SendBuffer const* data, int limit) override {
 		boost::system::error_code err;
 		++g_net2->countWrites;
@@ -485,8 +595,8 @@ public:
 		    boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), err);
 
 		if (err) {
-			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is
-			// positive so check explicitly.
+			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit
+			// is positive so check explicitly.
 			ASSERT(limit > 0);
 			bool notEmpty = false;
 			for (auto p = data; p; p = p->next)
@@ -814,13 +924,19 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		}
 
 		ThreadReturnPromise<Void> done;
+		ThreadReturnPromise<HandShakeMetricsOutput> metricsOutput;
 		ssl_socket& socket;
 		ssl_socket::handshake_type type;
 		boost::system::error_code err;
 	};
 
 	void action(Handshake& h) {
+		auto start = high_resolution_clock::now();
 		try {
+			if (FLOW_KNOBS->INJECT_TLS_HANDSHAKE_BUSYNESS_SEC > 0) {
+				std::this_thread::sleep_for(
+				    std::chrono::duration<double>(FLOW_KNOBS->INJECT_TLS_HANDSHAKE_BUSYNESS_SEC));
+			}
 			h.socket.next_layer().non_blocking(false, h.err);
 			if (!h.err.failed()) {
 				h.socket.handshake(h.type, h.err);
@@ -837,8 +953,16 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 				    .detail("ErrorCode", h.err.value())
 				    .detail("ErrorMsg", h.err.message().c_str())
 				    .detail("BackgroundThread", true);
+				h.metricsOutput.send(HandShakeMetricsOutput(
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(high_resolution_clock::now() - start),
+				    (h.type == ssl_socket::handshake_type::client),
+				    false));
 				h.done.sendError(connection_failed());
 			} else {
+				h.metricsOutput.send(HandShakeMetricsOutput(
+				    std::chrono::duration_cast<std::chrono::nanoseconds>(high_resolution_clock::now() - start),
+				    (h.type == ssl_socket::handshake_type::client),
+				    true));
 				h.done.send(Void());
 			}
 		} catch (...) {
@@ -848,6 +972,10 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			    .detail("PeerAddr", h.getPeerAddress())
 			    .detail("PeerAddress", h.getPeerAddress())
 			    .detail("BackgroundThread", true);
+			h.metricsOutput.send(HandShakeMetricsOutput(
+			    std::chrono::duration_cast<std::chrono::nanoseconds>(high_resolution_clock::now() - start),
+			    (h.type == ssl_socket::handshake_type::client),
+			    false));
 			h.done.sendError(connection_failed());
 		}
 	}
@@ -922,18 +1050,24 @@ public:
 	ACTOR static void doAcceptHandshake(Reference<SSLConnection> self, Promise<Void> connected) {
 		state Hold<int> holder;
 
+		state bool executeInBackground = false;
+		state HandShakeMetricsOutput handshakeMetricsOutput;
+		state Future<HandShakeMetricsOutput> onHandShakeMetrics;
+		state Future<Void> onHandshook;
 		try {
-			Future<Void> onHandshook;
 			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
 				conn->has_trusted_peer = verifyOk;
 			});
 
 			// If the background handshakers are not all busy, use one
-			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
+			if (FLOW_KNOBS->TLS_HANDSHAKE_ALWAYS_BACKGROUND ||
+			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
 				onHandshook = handshake->done.getFuture();
+				onHandShakeMetrics = handshake->metricsOutput.getFuture();
+				executeInBackground = true;
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
@@ -941,6 +1075,19 @@ public:
 				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
+			}
+			if (executeInBackground) {
+				wait(store(handshakeMetricsOutput, onHandShakeMetrics));
+				if (handshakeMetricsOutput.duration.present()) {
+					N2::g_net2->handShakeMetricsOverview->addMetrics(handshakeMetricsOutput.isClient,
+					                                                 handshakeMetricsOutput.isSucceed,
+					                                                 handshakeMetricsOutput.duration.get());
+					N2::g_net2->handShakeMetricsOverview->logging();
+				} else {
+					TraceEvent(SevWarn, "N2_HandshakeMetricsError", self->id)
+					    .suppressFor(5.0)
+					    .detail("Message", "Handshake metrics duration not set");
+				}
 			}
 			wait(onHandshook);
 			wait(delay(0, TaskPriority::Handshake));
@@ -981,6 +1128,10 @@ public:
 					return Void();
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					TraceEvent("N2_AcceptHandshakeTimeout", self->id)
+					    .suppressFor(1.0)
+					    .detail("PeerAddr", self->getPeerAddress())
+					    .detail("PeerAddress", self->getPeerAddress());
 					throw connection_failed();
 				}
 			}
@@ -1005,18 +1156,25 @@ public:
 	ACTOR static void doConnectHandshake(Reference<SSLConnection> self, Promise<Void> connected) {
 		state Hold<int> holder;
 
+		state bool executeInBackground = false;
+		state HandShakeMetricsOutput handshakeMetricsOutput;
+		state Future<HandShakeMetricsOutput> onHandShakeMetrics;
+		state Future<Void> onHandshook;
+
 		try {
-			Future<Void> onHandshook;
 			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
 				conn->has_trusted_peer = verifyOk;
 			});
 
 			// If the background handshakers are not all busy, use one
-			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
+			if (FLOW_KNOBS->TLS_HANDSHAKE_ALWAYS_BACKGROUND ||
+			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
 				onHandshook = handshake->done.getFuture();
+				onHandShakeMetrics = handshake->metricsOutput.getFuture();
+				executeInBackground = true;
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
@@ -1024,6 +1182,19 @@ public:
 				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
+			}
+			if (executeInBackground) {
+				wait(store(handshakeMetricsOutput, onHandShakeMetrics));
+				if (handshakeMetricsOutput.duration.present()) {
+					N2::g_net2->handShakeMetricsOverview->addMetrics(handshakeMetricsOutput.isClient,
+					                                                 handshakeMetricsOutput.isSucceed,
+					                                                 handshakeMetricsOutput.duration.get());
+					N2::g_net2->handShakeMetricsOverview->logging();
+				} else {
+					TraceEvent(SevWarn, "N2_HandshakeMetricsError", self->id)
+					    .suppressFor(5.0)
+					    .detail("Message", "Connect handshake metrics duration not set");
+				}
 			}
 			wait(onHandshook);
 			wait(delay(0, TaskPriority::Handshake));
@@ -1046,6 +1217,10 @@ public:
 					return Void();
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					TraceEvent("N2_ConnectHandshakeTimeout", self->id)
+					    .suppressFor(1.0)
+					    .detail("PeerAddr", self->getPeerAddress())
+					    .detail("PeerAddress", self->getPeerAddress());
 					throw connection_failed();
 				}
 			}
@@ -1086,8 +1261,8 @@ public:
 		return f;
 	}
 
-	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might
-	// be 0)
+	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read
+	// (might be 0)
 	int read(uint8_t* begin, uint8_t* end) override {
 		boost::system::error_code err;
 		++g_net2->countReads;
@@ -1108,12 +1283,12 @@ public:
 		return size;
 	}
 
-	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of
-	// bytes written (might be 0)
+	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number
+	// of bytes written (might be 0)
 	int write(SendBuffer const* data, int limit) override {
 #ifdef __APPLE__
-		// For some reason, writing ssl_sock with more than 2016 bytes when socket is writeable sometimes results in a
-		// broken pipe error.
+		// For some reason, writing ssl_sock with more than 2016 bytes when socket is writeable sometimes results in
+		// a broken pipe error.
 		limit = std::min(limit, 2016);
 #endif
 		boost::system::error_code err;
@@ -1123,8 +1298,8 @@ public:
 		    boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), err);
 
 		if (err) {
-			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is
-			// positive so check explicitly.
+			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit
+			// is positive so check explicitly.
 			ASSERT(limit > 0);
 			bool notEmpty = false;
 			for (auto p = data; p; p = p->next)
@@ -1268,6 +1443,8 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
     lastPriorityStats(nullptr) {
 	// Until run() is called, yield() will always yield
 	TraceEvent("Net2Starting").log();
+
+	handShakeMetricsOverview = std::make_shared<HandShakeMetricsOverview>();
 
 	// Set the global members
 	if (useMetrics) {
@@ -2267,7 +2444,7 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	return Void();
 }
 
-void net2_test(){
+void net2_test() {
 	/*
 	g_network = newNet2();  // for promise serialization below
 
