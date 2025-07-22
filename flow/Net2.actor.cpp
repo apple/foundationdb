@@ -308,6 +308,8 @@ public:
 	DoubleMetricHandle countLaunchTime;
 	DoubleMetricHandle countReactTime;
 	BoolMetricHandle awakeMetric;
+	Int64MetricHandle countTLSHandshakesOnSideThreads;
+	Int64MetricHandle countTLSHandshakesOnMainThread;
 
 	EventMetricHandle<SlowTask> slowTaskMetric;
 
@@ -1012,7 +1014,16 @@ public:
 			});
 
 			// If the background handshakers are not all busy, use one
+
+			// FIXME: this should probably be changed never to use the
+			// main thread, as waiting for potentially high-RTT TLS
+			// handshakes can delay execution of everything else that
+			// runs on the main thread.  The cost of that (in terms of
+			// unpredictable system performance and reliability) is
+			// much, much higher than the cost a few hundred or
+			// thousand incremental threads.
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
+				g_net2->countTLSHandshakesOnSideThreads++;
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
@@ -1020,6 +1031,7 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
+				g_net2->countTLSHandshakesOnMainThread++;
 				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
 				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
@@ -1433,6 +1445,8 @@ void Net2::initMetrics() {
 	slowTaskMetric.init("Net2.SlowTask"_sr);
 	countLaunchTime.init("Net2.CountLaunchTime"_sr);
 	countReactTime.init("Net2.CountReactTime"_sr);
+	countTLSHandshakesOnSideThreads.init("Net2.CountTLSHandshakesOnSideThreads"_sr);
+	countTLSHandshakesOnMainThread.init("Net2.CountTLSHandshakesOnMainThread"_sr);
 	taskQueue.initMetrics();
 }
 
