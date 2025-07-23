@@ -26,6 +26,7 @@
 
 uint64_t DeterministicRandom::gen64() {
 	uint64_t curr = next;
+
 	// RE: the previous implementation of this function: order of
 	// evaluation of arguments to the ^ operator is not specified, so
 	// two rng() calls in the same ^ expression may not produce a
