@@ -308,8 +308,10 @@ public:
 	DoubleMetricHandle countLaunchTime;
 	DoubleMetricHandle countReactTime;
 	BoolMetricHandle awakeMetric;
-	Int64MetricHandle countTLSHandshakesOnSideThreads;
-	Int64MetricHandle countTLSHandshakesOnMainThread;
+	Int64MetricHandle countClientTLSHandshakesOnSideThreads;
+	Int64MetricHandle countClientTLSHandshakesOnMainThread;
+	Int64MetricHandle countServerTLSHandshakesOnSideThreads;
+	Int64MetricHandle countServerTLSHandshakesOnMainThread;
 
 	EventMetricHandle<SlowTask> slowTaskMetric;
 
@@ -931,7 +933,9 @@ public:
 			});
 
 			// If the background handshakers are not all busy, use one
+			// FIXME: see comment elsewhere about making this the only path.
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
+				g_net2->countServerTLSHandshakesOnSideThreads++;
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
@@ -939,6 +943,7 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
+				g_net2->countServerTLSHandshakesOnMainThread++;
 				BindPromise p("N2_AcceptHandshakeError"_audit, self->id);
 				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
@@ -1023,7 +1028,7 @@ public:
 			// much, much higher than the cost a few hundred or
 			// thousand incremental threads.
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
-				g_net2->countTLSHandshakesOnSideThreads++;
+				g_net2->countClientTLSHandshakesOnSideThreads++;
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
@@ -1031,7 +1036,7 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				g_net2->countTLSHandshakesOnMainThread++;
+				g_net2->countClientTLSHandshakesOnMainThread++;
 				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
 				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
@@ -1445,8 +1450,10 @@ void Net2::initMetrics() {
 	slowTaskMetric.init("Net2.SlowTask"_sr);
 	countLaunchTime.init("Net2.CountLaunchTime"_sr);
 	countReactTime.init("Net2.CountReactTime"_sr);
-	countTLSHandshakesOnSideThreads.init("Net2.CountTLSHandshakesOnSideThreads"_sr);
-	countTLSHandshakesOnMainThread.init("Net2.CountTLSHandshakesOnMainThread"_sr);
+	countClientTLSHandshakesOnSideThreads.init("Net2.CountClientTLSHandshakesOnSideThreads"_sr);
+	countClientTLSHandshakesOnMainThread.init("Net2.CountClientTLSHandshakesOnMainThread"_sr);
+	countServerTLSHandshakesOnSideThreads.init("Net2.CountServerTLSHandshakesOnSideThreads"_sr);
+	countServerTLSHandshakesOnMainThread.init("Net2.CountServerTLSHandshakesOnMainThread"_sr);
 	taskQueue.initMetrics();
 }
 
