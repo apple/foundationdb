@@ -88,22 +88,22 @@ void addErrorToDoc(rapidjson::Document& doc, const ErrorDetail& details) {
 	rapidjson::Value errorDetail(rapidjson::kObjectType);
 	if (!details.errorMsg.empty()) {
 		// Add "errorMsg"
-		rapidjson::Value key(ERROR_MSG_TAG, doc.GetAllocator());
+		rapidjson::Value msgKey(ERROR_MSG_TAG, doc.GetAllocator());
 		rapidjson::Value errMsg;
 		errMsg.SetString(details.errorMsg.data(), details.errorMsg.size(), doc.GetAllocator());
-		errorDetail.AddMember(key, errMsg, doc.GetAllocator());
+		errorDetail.AddMember(msgKey, errMsg, doc.GetAllocator());
 	}
 	if (!details.errorCode.empty()) {
 		// Add "value" - token value
-		rapidjson::Value key(ERROR_CODE_TAG, doc.GetAllocator());
+		rapidjson::Value codeKey(ERROR_CODE_TAG, doc.GetAllocator());
 		rapidjson::Value errCode;
 		errCode.SetString(details.errorCode.data(), details.errorCode.size(), doc.GetAllocator());
-		errorDetail.AddMember(key, errCode, doc.GetAllocator());
+		errorDetail.AddMember(codeKey, errCode, doc.GetAllocator());
 	}
 
 	// Append "error"
-	rapidjson::Value key(ERROR_TAG, doc.GetAllocator());
-	doc.AddMember(key, errorDetail, doc.GetAllocator());
+	rapidjson::Value errorKey(ERROR_TAG, doc.GetAllocator());
+	doc.AddMember(errorKey, errorDetail, doc.GetAllocator());
 }
 
 void prepareErrorResponse(VaultResponse* response,
@@ -168,39 +168,39 @@ void addCipherDetailToRespDoc(rapidjson::Document& doc,
 	rapidjson::Value cipherDetail(rapidjson::kObjectType);
 
 	// Add 'base_cipher_id'
-	rapidjson::Value key(BASE_CIPHER_ID_TAG, doc.GetAllocator());
+	rapidjson::Value baseCipherKey(BASE_CIPHER_ID_TAG, doc.GetAllocator());
 	rapidjson::Value baseKeyId;
 	baseKeyId.SetUint64(keyCtx->id);
-	cipherDetail.AddMember(key, baseKeyId, doc.GetAllocator());
+	cipherDetail.AddMember(baseCipherKey, baseKeyId, doc.GetAllocator());
 
 	// Add 'encrypt_domain_id'
 	if (domId.present()) {
-		key.SetString(ENCRYPT_DOMAIN_ID_TAG, doc.GetAllocator());
+		rapidjson::Value domainKey(ENCRYPT_DOMAIN_ID_TAG, doc.GetAllocator());
 		rapidjson::Value domainId;
 		domainId.SetInt64(domId.get());
-		cipherDetail.AddMember(key, domainId, doc.GetAllocator());
+		cipherDetail.AddMember(domainKey, domainId, doc.GetAllocator());
 	}
 
 	// Add 'cipher'
-	key.SetString(BASE_CIPHER_TAG, doc.GetAllocator());
+	rapidjson::Value cipherKey(BASE_CIPHER_TAG, doc.GetAllocator());
 	rapidjson::Value cipher;
 	ASSERT_EQ(keyCtx->key.size(), keyCtx->keyLen);
 	cipher.SetString(reinterpret_cast<const char*>(keyCtx->key.begin()), keyCtx->keyLen, doc.GetAllocator());
-	cipherDetail.AddMember(key, cipher, doc.GetAllocator());
+	cipherDetail.AddMember(cipherKey, cipher, doc.GetAllocator());
 
 	// Add 'refreshAt'
-	key.SetString(REFRESH_AFTER_SEC, doc.GetAllocator());
+	rapidjson::Value refreshKey(REFRESH_AFTER_SEC, doc.GetAllocator());
 	const int64_t refreshAt = getRefreshInterval(now(), FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL);
 	rapidjson::Value refreshInterval;
 	refreshInterval.SetInt64(refreshAt);
-	cipherDetail.AddMember(key, refreshInterval, doc.GetAllocator());
+	cipherDetail.AddMember(refreshKey, refreshInterval, doc.GetAllocator());
 
 	// Add 'expireAt
-	key.SetString(EXPIRE_AFTER_SEC, doc.GetAllocator());
+	rapidjson::Value expireKey(EXPIRE_AFTER_SEC, doc.GetAllocator());
 	const int64_t expireAt = getExpireInterval(refreshAt, FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL);
 	rapidjson::Value expireInterval;
 	expireInterval.SetInt64(expireAt);
-	cipherDetail.AddMember(key, expireInterval, doc.GetAllocator());
+	cipherDetail.AddMember(expireKey, expireInterval, doc.GetAllocator());
 
 	// push above object to the array
 	cipherDetails.PushBack(cipherDetail, doc.GetAllocator());
@@ -210,31 +210,31 @@ void addBlobMetadaToResDoc(rapidjson::Document& doc, rapidjson::Value& blobDetai
 	Standalone<BlobMetadataDetailsRef> detailsRef = SimKmsVault::getBlobMetadata(domId, bgUrl);
 	rapidjson::Value blobDetail(rapidjson::kObjectType);
 
-	rapidjson::Value key(BLOB_METADATA_DOMAIN_ID_TAG, doc.GetAllocator());
+	rapidjson::Value domainKey(BLOB_METADATA_DOMAIN_ID_TAG, doc.GetAllocator());
 	rapidjson::Value domainId;
 	domainId.SetInt64(domId);
-	blobDetail.AddMember(key, domainId, doc.GetAllocator());
+	blobDetail.AddMember(domainKey, domainId, doc.GetAllocator());
 
 	rapidjson::Value locations(rapidjson::kArrayType);
 	for (const auto& loc : detailsRef.locations) {
 		rapidjson::Value location(rapidjson::kObjectType);
 
 		// set location-id
-		key.SetString(BLOB_METADATA_LOCATION_ID_TAG, doc.GetAllocator());
+		rapidjson::Value locationIdKey(BLOB_METADATA_LOCATION_ID_TAG, doc.GetAllocator());
 		rapidjson::Value id;
 		id.SetInt64(loc.locationId);
-		location.AddMember(key, id, doc.GetAllocator());
+		location.AddMember(locationIdKey, id, doc.GetAllocator());
 
 		// set location-path
-		key.SetString(BLOB_METADATA_LOCATION_PATH_TAG, doc.GetAllocator());
+		rapidjson::Value locationPathKey(BLOB_METADATA_LOCATION_PATH_TAG, doc.GetAllocator());
 		rapidjson::Value path;
 		path.SetString(reinterpret_cast<const char*>(loc.path.begin()), loc.path.size(), doc.GetAllocator());
-		location.AddMember(key, path, doc.GetAllocator());
+		location.AddMember(locationPathKey, path, doc.GetAllocator());
 
 		locations.PushBack(location, doc.GetAllocator());
 	}
-	key.SetString(BLOB_METADATA_LOCATIONS_TAG, doc.GetAllocator());
-	blobDetail.AddMember(key, locations, doc.GetAllocator());
+	rapidjson::Value locationsKey(BLOB_METADATA_LOCATIONS_TAG, doc.GetAllocator());
+	blobDetail.AddMember(locationsKey, locations, doc.GetAllocator());
 
 	blobDetails.PushBack(blobDetail, doc.GetAllocator());
 }

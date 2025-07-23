@@ -95,17 +95,17 @@ void addBaseCipherIdDomIdToDoc(rapidjson::Document& doc,
 	rapidjson::Value keyIdDetail(rapidjson::kObjectType);
 
 	// Add 'base_cipher_id'
-	rapidjson::Value key(BASE_CIPHER_ID_TAG, doc.GetAllocator());
+	rapidjson::Value baseCipherKey(BASE_CIPHER_ID_TAG, doc.GetAllocator());
 	rapidjson::Value baseKeyId;
 	baseKeyId.SetUint64(baseCipherId);
-	keyIdDetail.AddMember(key, baseKeyId, doc.GetAllocator());
+	keyIdDetail.AddMember(baseCipherKey, baseKeyId, doc.GetAllocator());
 
 	if (domainId.present()) {
 		// Add 'encrypt_domain_id'
-		key.SetString(ENCRYPT_DOMAIN_ID_TAG, doc.GetAllocator());
+		rapidjson::Value domainKey(ENCRYPT_DOMAIN_ID_TAG, doc.GetAllocator());
 		rapidjson::Value domId;
 		domId.SetInt64(domainId.get());
-		keyIdDetail.AddMember(key, domId, doc.GetAllocator());
+		keyIdDetail.AddMember(domainKey, domId, doc.GetAllocator());
 	}
 
 	// push above object to the array
@@ -120,15 +120,15 @@ void addValidationTokensSectionToJsonDoc(rapidjson::Document& doc, const Validat
 		rapidjson::Value validationToken(rapidjson::kObjectType);
 
 		// Add "name" - token name
-		rapidjson::Value key(VALIDATION_TOKEN_NAME_TAG, doc.GetAllocator());
+		rapidjson::Value nameKey(VALIDATION_TOKEN_NAME_TAG, doc.GetAllocator());
 		rapidjson::Value tokenName(token.second.name.data(), doc.GetAllocator());
-		validationToken.AddMember(key, tokenName, doc.GetAllocator());
+		validationToken.AddMember(nameKey, tokenName, doc.GetAllocator());
 
 		// Add "value" - token value
-		key.SetString(VALIDATION_TOKEN_VALUE_TAG, doc.GetAllocator());
+		rapidjson::Value valueKey(VALIDATION_TOKEN_VALUE_TAG, doc.GetAllocator());
 		rapidjson::Value tokenValue;
 		tokenValue.SetString(token.second.value.data(), token.second.value.size(), doc.GetAllocator());
-		validationToken.AddMember(key, tokenValue, doc.GetAllocator());
+		validationToken.AddMember(valueKey, tokenValue, doc.GetAllocator());
 
 		validationTokens.PushBack(validationToken, doc.GetAllocator());
 	}
