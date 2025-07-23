@@ -21,6 +21,7 @@
 #include <cstdint>
 
 #include "fdbclient/ConfigTransactionInterface.h"
+#include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/ConfigNode.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -29,12 +30,15 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/Status.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/ApiVersion.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/ThreadHelper.actor.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
 
+#include "fdbcli_lib/CliService.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
@@ -757,6 +761,8 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	}
 }
 
+ACTOR Future<Void> registerCoordGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr);
+
 ACTOR Future<Void> coordinationServer(std::string dataFolder,
                                       Reference<IClusterConnectionRecord> ccr,
                                       Reference<ConfigNode> configNode,
@@ -791,6 +797,8 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	}
 
 	try {
+		wait(yield());
+		state Future<Void> grpc = registerCoordGrpcServices(myID, ccr);
 		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID, ccr) ||
 		     store.getError() || configDatabaseServer);
 		throw internal_error();
@@ -941,4 +949,18 @@ Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey,
 		futures.push_back(changeClusterDescription(processDir, newClusterKey, oldClusterKey));
 	}
 	return waitForAll(futures);
+}
+
+ACTOR Future<Void> registerCoordGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr) {
+	if (GrpcServer::instance() == nullptr) {
+		return Never();
+	}
+
+	auto db = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION);
+	Reference<IDatabase> idb = wait(safeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(db)));
+
+	auto services = GrpcServer::ServiceList{ std::make_shared<fdbcli_lib::CliServiceImpl>(idb) };
+	GrpcServer::instance()->registerRoleServices(UID(), services);
+	TraceEvent("CoordGrpcServerStart").detail("Address", GrpcServer::instance()->getAddress());
+	return Never();
 }
