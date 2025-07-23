@@ -19,6 +19,8 @@
  */
 
 #include <cstdint>
+#include <memory>
+#include <unordered_map>
 
 #include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -29,6 +31,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/Status.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/Error.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
@@ -118,12 +121,91 @@ ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr, 
 	}
 }
 
-ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandStore* pstore) {
+struct CoordinatorRequestCounter {
+	enum class RequestType {
+		leaderServer_CheckDescriptorMutableRequest,
+		leaderServer_OpenDatabaseCoordRequest,
+		leaderServer_ElectionResultRequest,
+		leaderServer_GetLeaderRequest,
+		leaderServer_CandidacyRequest,
+		leaderServer_LeaderHeartbeatRequest,
+		leaderServer_ForwardRequest,
+		localGenerationReg_GenerationRegReadRequest,
+		localGenerationReg_GenerationRegWriteRequest,
+	};
+
+	std::string typeToString(RequestType type) const {
+		switch (type) {
+		case RequestType::leaderServer_CheckDescriptorMutableRequest:
+			return "CheckDescriptorMutableRequest";
+		case RequestType::leaderServer_OpenDatabaseCoordRequest:
+			return "OpenDatabaseCoordRequest";
+		case RequestType::leaderServer_ElectionResultRequest:
+			return "ElectionResultRequest";
+		case RequestType::leaderServer_GetLeaderRequest:
+			return "GetLeaderRequest";
+		case RequestType::leaderServer_CandidacyRequest:
+			return "CandidacyRequest";
+		case RequestType::leaderServer_LeaderHeartbeatRequest:
+			return "LeaderHeartbeatRequest";
+		case RequestType::leaderServer_ForwardRequest:
+			return "ForwardRequest";
+		case RequestType::localGenerationReg_GenerationRegReadRequest:
+			return "GenerationRegReadRequest";
+		case RequestType::localGenerationReg_GenerationRegWriteRequest:
+			return "GenerationRegWriteRequest";
+		default:
+			return "Unknown";
+		}
+	}
+
+	void init() {
+		requestCounts.clear();
+		constexpr RequestType allTypes[] = {
+			RequestType::leaderServer_CheckDescriptorMutableRequest,
+			RequestType::leaderServer_OpenDatabaseCoordRequest,
+			RequestType::leaderServer_ElectionResultRequest,
+			RequestType::leaderServer_GetLeaderRequest,
+			RequestType::leaderServer_CandidacyRequest,
+			RequestType::leaderServer_LeaderHeartbeatRequest,
+			RequestType::leaderServer_ForwardRequest,
+			RequestType::localGenerationReg_GenerationRegReadRequest,
+			RequestType::localGenerationReg_GenerationRegWriteRequest,
+		};
+		for (RequestType t : allTypes) {
+			requestCounts[t] = 0;
+		}
+	}
+
+	std::unordered_map<RequestType, uint64_t> requestCounts;
+
+	void addRequest(RequestType type) {
+		auto it = requestCounts.find(type);
+		if (it == requestCounts.end()) {
+			requestCounts[type] = 1;
+		} else {
+			it->second++;
+		}
+	}
+
+	void logging() {
+		TraceEvent e("CoordinatorRequestCounter");
+		for (const auto& [type, count] : requestCounts) {
+			e.detail(typeToString(type), count);
+		}
+	}
+};
+
+ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf,
+                                      OnDemandStore* pstore,
+                                      std::shared_ptr<CoordinatorRequestCounter> requestCounter) {
 	state GenerationRegVal v;
 	state OnDemandStore& store = *pstore;
 	// SOMEDAY: concurrent access to different keys?
 	loop choose {
 		when(GenerationRegReadRequest _req = waitNext(interf.read.getFuture())) {
+			requestCounter->addRequest(
+			    CoordinatorRequestCounter::RequestType::localGenerationReg_GenerationRegReadRequest);
 			TraceEvent("GenerationRegReadRequest")
 			    .detail("From", _req.reply.getEndpoint().getPrimaryAddress())
 			    .detail("K", _req.key);
@@ -143,6 +225,8 @@ ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandSto
 			req.reply.send(GenerationRegReadReply(v.val, v.writeGen, v.readGen));
 		}
 		when(GenerationRegWriteRequest _wrq = waitNext(interf.write.getFuture())) {
+			requestCounter->addRequest(
+			    CoordinatorRequestCounter::RequestType::localGenerationReg_GenerationRegWriteRequest);
 			state GenerationRegWriteRequest wrq = _wrq;
 			Optional<Value> rawV = wait(store->readValue(wrq.kv.key));
 			v = rawV.present() ? BinaryReader::fromStringRef<GenerationRegVal>(rawV.get(), IncludeVersion())
@@ -175,7 +259,7 @@ ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandSto
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
 	state OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), "coordination-");
-	state Future<Void> actor = localGenerationReg(reg, &store);
+	state Future<Void> actor = localGenerationReg(reg, &store, std::make_shared<CoordinatorRequestCounter>());
 	state Key the_key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 10)));
 
 	state UniqueGeneration firstGen(0, deterministicRandom()->randomUniqueID());
@@ -624,7 +708,9 @@ StringRef getClusterDescriptor(Key key) {
 ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
                                 OnDemandStore* pStore,
                                 UID id,
-                                Reference<IClusterConnectionRecord> ccr) {
+                                Reference<IClusterConnectionRecord> ccr,
+                                std::shared_ptr<CoordinatorRequestCounter> requestCounter) {
+
 	state LeaderRegisterCollection regs(pStore);
 	state ActorCollection forwarders(false);
 
@@ -632,12 +718,15 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 
 	loop choose {
 		when(CheckDescriptorMutableRequest req = waitNext(interf.checkDescriptorMutable.getFuture())) {
+			requestCounter->addRequest(
+			    CoordinatorRequestCounter::RequestType::leaderServer_CheckDescriptorMutableRequest);
 			// Note the response returns the value of a knob enforced by checking only one coordinator. It is not
 			// quorum based.
 			CheckDescriptorMutableReply rep(SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 			req.reply.send(rep);
 		}
 		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
+			requestCounter->addRequest(CoordinatorRequestCounter::RequestType::leaderServer_OpenDatabaseCoordRequest);
 			Optional<LeaderInfo> forward = regs.getForward(req.clusterKey);
 			if (forward.present()) {
 				ClientDBInfo info;
@@ -660,6 +749,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			}
 		}
 		when(ElectionResultRequest req = waitNext(interf.electionResult.getFuture())) {
+			requestCounter->addRequest(CoordinatorRequestCounter::RequestType::leaderServer_ElectionResultRequest);
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present()) {
 				req.reply.send(forward.get());
@@ -679,6 +769,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			}
 		}
 		when(GetLeaderRequest req = waitNext(interf.getLeader.getFuture())) {
+			requestCounter->addRequest(CoordinatorRequestCounter::RequestType::leaderServer_GetLeaderRequest);
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present())
 				req.reply.send(forward.get());
@@ -697,6 +788,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			}
 		}
 		when(CandidacyRequest req = waitNext(interf.candidacy.getFuture())) {
+			requestCounter->addRequest(CoordinatorRequestCounter::RequestType::leaderServer_CandidacyRequest);
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present())
 				req.reply.send(forward.get());
@@ -714,6 +806,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			}
 		}
 		when(LeaderHeartbeatRequest req = waitNext(interf.leaderHeartbeat.getFuture())) {
+			requestCounter->addRequest(CoordinatorRequestCounter::RequestType::leaderServer_LeaderHeartbeatRequest);
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present())
 				req.reply.send(LeaderHeartbeatReply{ false });
@@ -731,6 +824,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			}
 		}
 		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
+			requestCounter->addRequest(CoordinatorRequestCounter::RequestType::leaderServer_ForwardRequest);
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if (forward.present()) {
 				req.reply.send(Void());
@@ -755,6 +849,14 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	}
 }
 
+ACTOR Future<Void> coordinatorRequestCounterLogger(std::shared_ptr<CoordinatorRequestCounter> requestCounter) {
+	loop {
+		requestCounter->init();
+		wait(delay(30.0));
+		requestCounter->logging();
+	}
+}
+
 ACTOR Future<Void> coordinationServer(std::string dataFolder,
                                       Reference<IClusterConnectionRecord> ccr,
                                       Reference<ConfigNode> configNode,
@@ -766,6 +868,10 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	state ConfigTransactionInterface configTransactionInterface;
 	state ConfigFollowerInterface configFollowerInterface;
 	state Future<Void> configDatabaseServer = Never();
+
+	state std::shared_ptr<CoordinatorRequestCounter> requestCounter = std::make_shared<CoordinatorRequestCounter>();
+	state Future<Void> requestCounterLogger = coordinatorRequestCounterLogger(requestCounter);
+
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder)
@@ -779,8 +885,9 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	}
 
 	try {
-		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID, ccr) ||
-		     store.getError() || configDatabaseServer);
+		wait(localGenerationReg(myInterface, &store, requestCounter) ||
+		     leaderServer(myLeaderInterface, &store, myID, ccr, requestCounter) || store.getError() ||
+		     configDatabaseServer);
 		throw internal_error();
 	} catch (Error& e) {
 		TraceEvent("CoordinationServerError", myID).errorUnsuppressed(e);
