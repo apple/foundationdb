@@ -95,8 +95,10 @@ struct NetworkData {
 	int64_t countTLSPolicyFailures;
 	double countLaunchTime;
 	double countReactTime;
-	int64_t countTLSHandshakesOnSideThreads;
-	int64_t countTLSHandshakesOnMainThread;
+	int64_t countClientTLSHandshakesOnSideThreads;
+	int64_t countClientTLSHandshakesOnMainThread;
+	int64_t countServerTLSHandshakesOnSideThreads;
+	int64_t countServerTLSHandshakesOnMainThread;
 
 	void init() {
 		bytesSent = Int64Metric::getValueOrDefault("Net2.BytesSent"_sr);
@@ -139,8 +141,14 @@ struct NetworkData {
 		countFilePageCacheHits = Int64Metric::getValueOrDefault("AsyncFile.CountCachePageReadsHit"_sr);
 		countFilePageCacheMisses = Int64Metric::getValueOrDefault("AsyncFile.CountCachePageReadsMissed"_sr);
 		countFilePageCacheEvictions = Int64Metric::getValueOrDefault("EvictablePageCache.CacheEvictions"_sr);
-		countTLSHandshakesOnSideThreads = Int64Metric::getValueOrDefault("Net2.CountTLSHandshakesOnSideThreads"_sr);
-		countTLSHandshakesOnMainThread = Int64Metric::getValueOrDefault("Net2.CountTLSHandshakesOnMainThread"_sr);
+		countClientTLSHandshakesOnSideThreads =
+		    Int64Metric::getValueOrDefault("Net2.CountClientTLSHandshakesOnSideThreads"_sr);
+		countClientTLSHandshakesOnMainThread =
+		    Int64Metric::getValueOrDefault("Net2.CountClientTLSHandshakesOnMainThread"_sr);
+		countServerTLSHandshakesOnSideThreads =
+		    Int64Metric::getValueOrDefault("Net2.CountServerTLSHandshakesOnSideThreads"_sr);
+		countServerTLSHandshakesOnMainThread =
+		    Int64Metric::getValueOrDefault("Net2.CountServerTLSHandshakesOnMainThread"_sr);
 	}
 };
 
