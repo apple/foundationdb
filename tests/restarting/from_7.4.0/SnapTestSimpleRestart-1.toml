@@ -1,0 +1,55 @@
+[configuration]
+storageEngineExcludeTypes=[4,5]
+logAntiQuorum=0
+tenantModes=['disabled']
+
+[[knobs]]
+enable_read_lock_on_range = false 
+
+[[test]]
+testTitle="SnapSimplePre"
+clearAfterTest=false
+
+        [[test.workload]]
+        testName="SnapTest"
+        numSnaps=1
+        maxSnapDelay=30.0
+        testID=0
+
+[[test]]
+testTitle="SnapSimpleTakeSnap"
+clearAfterTest=false
+
+        [[test.workload]]
+        testName="SnapTest"
+        numSnaps=1
+        maxSnapDelay=5.0
+        testID=1
+
+[[test]]
+testTitle="SnapSimplePost"
+clearAfterTest=false
+
+        [[test.workload]]
+        testName="SnapTest"
+        numSnaps=1
+        maxSnapDelay=3.0
+        testID=2
+
+[[test]]
+testTitle="SnapCreateNotWhitelistedBinaryPath"
+
+        [[test.workload]]
+        testName="SnapTest"
+        numSnaps=1
+        maxSnapDelay=3.0
+        testID=4
+
+[[test]]
+testTitle="SnapSimpleShutdown"
+
+        [[test.workload]]
+        testName="SaveAndKill"
+        restartInfoLocation="simfdb/restartInfo.ini"
+        testDuration=10.0
+        isRestoring=1
