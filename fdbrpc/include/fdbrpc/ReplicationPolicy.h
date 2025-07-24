@@ -161,7 +161,7 @@ protected:
 	Reference<IReplicationPolicy> _policy;
 
 	// Cache temporary members
-	std::unordered_set<AttribValue> _usedValues;
+	std::vector<AttribValue> _usedValues;
 	std::vector<LocalityEntry> _newResults;
 	Reference<LocalitySet> _selected;
 	VectorRef<std::pair<int, int>> _addedResults;

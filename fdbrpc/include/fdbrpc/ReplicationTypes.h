@@ -57,7 +57,8 @@ struct AttribValue {
 namespace std {
 template <>
 struct hash<AttribValue> {
-	std::size_t operator()(const AttribValue& v) const noexcept { return std::hash<int>{}(v._id); }
+	std::size_t operator()(const AttribValue& v) const noexcept { return static_cast<std::size_t>(v._id); }
+	// return std::hash<int>{}(v._id);
 };
 } // namespace std
 struct LocalityEntry {
