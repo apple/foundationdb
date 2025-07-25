@@ -39,7 +39,9 @@ constexpr int HTTP_STATUS_CODE_OK = 200;
 constexpr int HTTP_STATUS_CODE_CREATED = 201;
 constexpr int HTTP_STATUS_CODE_ACCEPTED = 202;
 constexpr int HTTP_STATUS_CODE_NO_CONTENT = 204;
+constexpr int HTTP_STATUS_CODE_BAD_REQUEST = 400;
 constexpr int HTTP_STATUS_CODE_UNAUTHORIZED = 401;
+constexpr int HTTP_STATUS_CODE_NOT_FOUND = 404;
 constexpr int HTTP_STATUS_CODE_NOT_ACCEPTABLE = 406;
 constexpr int HTTP_STATUS_CODE_TIMEOUT = 408;
 constexpr int HTTP_STATUS_CODE_TOO_MANY_REQUESTS = 429;
@@ -98,7 +100,7 @@ struct OutgoingRequest : RequestBase<UnsentPacketQueue*> {};
 
 template <class T>
 struct ResponseBase : ReferenceCounted<ResponseBase<T>> {
-	ResponseBase() {}
+	ResponseBase() : code(200) {} // Initialize code to 200 (OK) by default
 	float version;
 	int code;
 	HTTPData<T> data;
