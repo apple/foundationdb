@@ -1186,12 +1186,13 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(reqF, requestTimeout));
-			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
+			if (g_network->isSimulated() && BUGGIFY && deterministicRandom()->random01() < 0.1) {
 				// simulate an error from s3
 				_r->code = badRequestCode;
 				simulateS3TokenError = true;
 			}
 			r = _r;
+
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
 			if (r->data.headers["Connection"] != "close") {

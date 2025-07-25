@@ -24,8 +24,10 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/MockS3Server.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
+#include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkdump");
@@ -36,6 +38,8 @@ struct BulkDumping : TestWorkload {
 	bool pass = true;
 	int cancelTimes = 0;
 	int maxCancelTimes = 0;
+	int bulkLoadTransportMethod = 1; // Default to CP method
+	std::string jobRoot = "";
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -54,9 +58,11 @@ struct BulkDumping : TestWorkload {
 
 	BulkDumping(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), enabled(true), pass(true), cancelTimes(0),
-	    maxCancelTimes(deterministicRandom()->randomInt(0, 2)) {}
+	    maxCancelTimes(getOption(options, "maxCancelTimes"_sr, deterministicRandom()->randomInt(0, 2))),
+	    bulkLoadTransportMethod(getOption(options, "bulkLoadTransportMethod"_sr, 1)),
+	    jobRoot(getOption(options, "jobRoot"_sr, ""_sr).toString()) {}
 
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 
@@ -331,10 +337,18 @@ struct BulkDumping : TestWorkload {
 		// Submit a bulk dump job
 		state int oldBulkDumpMode = 0;
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
+		state std::string dumpFolder = self->jobRoot.empty() ? simulationBulkDumpFolder : self->jobRoot;
 		state BulkDumpState newJob =
-		    createBulkDumpJob(normalKeys, simulationBulkDumpFolder, BulkLoadType::SST, BulkLoadTransportMethod::CP);
+		    createBulkDumpJob(normalKeys,
+		                      dumpFolder,
+		                      BulkLoadType::SST,
+		                      static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod));
 		wait(submitBulkDumpJob(cx, newJob));
-		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Submitted").detail("Job", newJob.toString());
+		TraceEvent("BulkDumpingWorkLoad")
+		    .detail("Phase", "Dump Job Submitted")
+		    .detail("TransportMethod", self->bulkLoadTransportMethod)
+		    .detail("JobRoot", dumpFolder)
+		    .detail("Job", newJob.toString());
 
 		// Wait until the dump job completes
 		wait(self->waitUntilDumpJobComplete(cx));
@@ -352,8 +366,11 @@ struct BulkDumping : TestWorkload {
 			// cancellation. If the job is cancelled, we should re-submit the job.
 			state bool hasError = false;
 			state int oldCancelTimes = self->cancelTimes;
-			state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
-			    newJob.getJobId(), newJob.getJobRange(), newJob.getJobRoot(), BulkLoadTransportMethod::CP);
+			state BulkLoadJobState bulkLoadJob =
+			    createBulkLoadJob(newJob.getJobId(),
+			                      newJob.getJobRange(),
+			                      newJob.getJobRoot(),
+			                      static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod));
 			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Load Job Submitted").detail("Job", newJob.toString());
 			wait(submitBulkLoadJob(cx, bulkLoadJob));
 
@@ -400,6 +417,32 @@ struct BulkDumping : TestWorkload {
 		std::vector<RangeLockOwner> lockOwnersAfterRemove = wait(getAllRangeLockOwners(cx));
 		ASSERT(lockOwnersAfterRemove.empty());
 
+		return Void();
+	}
+
+	ACTOR Future<Void> _setup(BulkDumping* self, Database cx) {
+		// Only client 0 registers the MockS3Server to avoid duplicates
+		if (self->clientId == 0 && self->bulkLoadTransportMethod == 2) { // BLOBSTORE method
+			// Check if we're using a local mock server URL pattern
+			bool useMockS3 = self->jobRoot.find("127.0.0.1") != std::string::npos ||
+			                 self->jobRoot.find("localhost") != std::string::npos ||
+			                 self->jobRoot.find("mock-s3-server") != std::string::npos;
+
+			if (useMockS3 && g_network->isSimulated()) {
+				TraceEvent("BulkDumpingWorkload")
+				    .detail("Phase", "Registering MockS3Server")
+				    .detail("JobRoot", self->jobRoot);
+
+				// Register MockS3Server with IP address - simulation environment doesn't support hostname resolution
+				// See in HTTPServer.actor.cpp how the MockS3RequestHandler is implemented. Client connects to
+				// connect("127.0.0.1", "8080") and then simulation network routes it to MockS3Server.
+				wait(g_simulator->registerSimHTTPServer("127.0.0.1", "8080", makeReference<MockS3RequestHandler>()));
+
+				TraceEvent("BulkDumpingWorkload")
+				    .detail("Phase", "MockS3Server Registered")
+				    .detail("Address", "127.0.0.1:8080");
+			}
+		}
 		return Void();
 	}
 };

@@ -2028,6 +2028,8 @@ int main(int argc, char* argv[]) {
 			enableGeneralBuggify();
 		} else {
 			disableGeneralBuggify();
+			// When buggify is disabled, also disable global fault injection
+			opts.faultInjectionEnabled = false;
 		}
 		enableFaultInjection(opts.faultInjectionEnabled);
 

@@ -77,8 +77,12 @@ std::string ResponseBase<T>::getCodeDescription() {
 		return "Accepted";
 	} else if (code == HTTP_STATUS_CODE_NO_CONTENT) {
 		return "No Content";
+	} else if (code == HTTP_STATUS_CODE_BAD_REQUEST) {
+		return "Bad Request";
 	} else if (code == HTTP_STATUS_CODE_UNAUTHORIZED) {
 		return "Unauthorized";
+	} else if (code == HTTP_STATUS_CODE_NOT_FOUND) {
+		return "Not Found";
 	} else if (code == HTTP_STATUS_CODE_NOT_ACCEPTABLE) {
 		return "Not Acceptable";
 	} else if (code == HTTP_STATUS_CODE_TIMEOUT) {
@@ -522,6 +526,7 @@ void HTTP::OutgoingResponse::reset() {
 	data.headers = HTTP::Headers();
 	data.content->discardAll();
 	data.contentLen = 0;
+	code = 200; // Reset response code to default success status
 }
 
 // Reads an HTTP response from a network connection
@@ -533,17 +538,15 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::IncomingResponse> r,
 	state std::string buf;
 	state size_t pos = 0;
 
-	// Read HTTP request line
+	// Read HTTP response line
 	size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &buf, pos));
 
 	int reachedEnd = -1;
-	sscanf(buf.c_str() + pos, "HTTP/%f %d%n", &r->version, &r->code, &reachedEnd);
-	if (reachedEnd < 0) {
-		TraceEvent(SevWarn, "HTTPResponseCodeNotFound")
-		    .detail("Buffer", buf)
+	if (sscanf(buf.c_str() + pos, "HTTP/%f %d%n", &r->version, &r->code, &reachedEnd) < 2 || reachedEnd < 0) {
+		TraceEvent(SevWarn, "HTTPResponseParseFailure")
+		    .detail("Buffer", buf.substr(pos, std::min(lineLen, (size_t)100)))
 		    .detail("Pos", pos)
-		    .detail("LineLen", lineLen)
-		    .log();
+		    .detail("LineLen", lineLen);
 		throw http_bad_response();
 	}
 
