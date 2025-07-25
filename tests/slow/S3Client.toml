@@ -12,6 +12,7 @@
 #  shutdown_weed ~/weed
 
 # Disable all fault injection and network failures
+# buggify = false now controls ALL fault injection systems (BUGGIFY, failure workloads, AND global fault injection)
 buggify = false
 
 [[knobs]]
