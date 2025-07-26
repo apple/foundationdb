@@ -3276,10 +3276,6 @@ Version parseVersion(const char* str) {
 	return ver;
 }
 
-#ifdef ALLOC_INSTRUMENTATION
-extern uint8_t* g_extra_memory;
-#endif
-
 // Creates a connection to a cluster. Optionally prints an error if the connection fails.
 Optional<Database> connectToCluster(std::string const& clusterFile,
                                     LocalityData const& localities,
@@ -3323,9 +3319,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	try {
-#ifdef ALLOC_INSTRUMENTATION
-		g_extra_memory = new uint8_t[1000000];
-#endif
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error

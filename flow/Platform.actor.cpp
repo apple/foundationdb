@@ -3140,7 +3140,15 @@ std::string getDefaultClusterFilePath() {
 #ifdef __linux__
 #include <cxxabi.h>
 #endif
-uint8_t* g_extra_memory;
+static uint8_t* g_extra_memory;
+
+// Allocate some memory on startup so that we can free it if outOfMemory() is
+// called. This gives some breathing room to generate diagnostics.
+void allocInstrumentationInit(void) {
+	g_extra_memory = new uint8_t[1000000];
+}
+#else
+void allocInstrumentationInit() {}
 #endif
 
 namespace platform {
@@ -3630,6 +3638,8 @@ void platformInit() {
 		              "clock_gettime(CLOCK_MONOTONIC, ...) returned an error. Check your kernel and glibc versions.");
 	}
 #endif
+
+	allocInstrumentationInit();
 }
 
 std::vector<std::function<void()>> g_crashHandlerCallbacks;
