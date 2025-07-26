@@ -2179,36 +2179,6 @@ void* allocate(size_t length, bool allowLargePages, bool includeGuardPages) {
 	return block;
 }
 
-#if 0
-void* numaAllocate(size_t size) {
-	void* thePtr = (void*)0xA00000000LL;
-	enableLargePages();
-
-	size_t vaPageSize = 2<<20;//64<<10;
-	int nVAPages = size / vaPageSize;
-
-	int nodes;
-	if (!GetNumaHighestNodeNumber((PULONG)&nodes)) {
-		TraceEvent(SevError, "GetNumaHighestNodeNumber").getLastError();
-		throw platform_error();
-	}
-	++nodes;
-
-	for(int i=0; i<nodes; i++) {
-		char* p = (char*)thePtr + i*nVAPages/nodes*vaPageSize;
-		char* e = (char*)thePtr + (i+1)*nVAPages/nodes*vaPageSize;
-		//printf("  %p + %lld\n", p, e-p);
-		// SOMEDAY: removed NUMA extensions for compatibility with Windows Server 2003 -- make execution dynamic
-		if (!VirtualAlloc/*ExNuma*/(/*GetCurrentProcess(),*/ p, e-p, MEM_COMMIT|MEM_RESERVE|MEM_LARGE_PAGES, PAGE_READWRITE/*, i*/)) {
-			Error e = platform_error();
-			TraceEvent(e, "VirtualAlloc").GetLastError();
-			throw e;
-		}
-	}
-	return thePtr;
-}
-#endif
-
 void setAffinity(int proc) {
 #if defined(_WIN32)
 	/*if (SetProcessAffinityMask(GetCurrentProcess(), 0x5555))//0x5555555555555555UL))
