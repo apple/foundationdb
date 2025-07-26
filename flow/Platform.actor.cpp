@@ -2212,11 +2212,16 @@ int getRandomSeed() {
 	}
 #else
 	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed)) {
+	if (devRandom == -1) {
 		TraceEvent(SevError, "OpenURandom").GetLastError();
 		throw platform_error();
 	}
+	int nbytes = read(devRandom, &randomSeed, sizeof(randomSeed));
 	close(devRandom);
+	if (nbytes != sizeof(randomSeed)) {
+		TraceEvent(SevError, "ReadURandom").GetLastError();
+		throw platform_error();
+	}
 #endif
 
 	return randomSeed;
