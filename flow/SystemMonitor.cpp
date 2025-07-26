@@ -182,6 +182,23 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("TLSPolicyFailures",
 			            (netData.countTLSPolicyFailures - statState->networkState.countTLSPolicyFailures) /
 			                currentStats.elapsed)
+			    .detail("ClientTLSHandshakesOnSideThreads",
+			            (netData.countClientTLSHandshakesOnSideThreads -
+			             statState->networkState.countClientTLSHandshakesOnSideThreads) /
+			                currentStats.elapsed)
+			    .detail("ClientTLSHandshakesOnMainThread",
+			            (netData.countClientTLSHandshakesOnMainThread -
+			             statState->networkState.countClientTLSHandshakesOnMainThread) /
+			                currentStats.elapsed)
+			    .detail("ServerTLSHandshakesOnSideThreads",
+			            (netData.countServerTLSHandshakesOnSideThreads -
+			             statState->networkState.countServerTLSHandshakesOnSideThreads) /
+			                currentStats.elapsed)
+			    .detail("ServerTLSHandshakesOnMainThread",
+			            (netData.countServerTLSHandshakesOnMainThread -
+			             statState->networkState.countServerTLSHandshakesOnMainThread) /
+			                currentStats.elapsed)
+
 			    .trackLatest(eventName);
 
 			TraceEvent("MemoryMetrics")
