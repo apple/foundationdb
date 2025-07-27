@@ -196,6 +196,8 @@ void waitThread(THREAD_HANDLE thread);
 // Linux-only for now.  Set thread priority.
 void setThreadPriority(int pri);
 
+// See https://github.com/apple/foundationdb/blob/7a9217a392fdb8568b10aa430c8c55b59756b5ac/contrib/debug_determinism/README.md
+// for what this is about.
 #define DEBUG_DETERMINISM 0
 
 std::string removeWhitespace(const std::string& t);
