@@ -3422,8 +3422,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 							included = false;
 							// FIXME: address the below.  AFAICT the only thing that sends DiskStoreRequest is
 							// workloads/ConsistencyCheck.actor.cpp in code which is looking for extra (presumably
-							// stale/leftover/leaked) data stores. The code in this basic block is hard coded not to return
-							// information, on the basis of the reasoning given in the 2019 comment below.
+							// stale/leftover/leaked) data stores. The code in this basic block is hard coded not to
+							// return information, on the basis of the reasoning given in the 2019 comment below.
 							// Failure to return information will either have no effect (if there is no bug) or
 							// at worse will weaken the consistency check.  Unless some test goes and injects a
 							// TLog file leak and then checks that the consistency checker finds the leaked file,
