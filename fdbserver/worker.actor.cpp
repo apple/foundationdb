@@ -2356,6 +2356,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		for (; index < stores.size(); ++index) {
 			state DiskStore s = stores[index];
 			// FIXME: Error handling
+			// META-FIXME: what does the above comment refer to?  It dates to <= 2017.
+			// Either describe the problem(s) and (perhaps) make a plan to fix them, or take out the FIXME.
 			if (s.storedComponent == DiskStore::Storage) {
 				// Opening multiple KVSs at the same time could make worker run out of memory. Add delay to allow the
 				// extra storage process to be removed.
@@ -2493,6 +2495,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				TLogFn tLogFn = tLogFnForOptions(s.tLogOptions);
 				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
 				logData.push_back(SharedLogsValue());
+				// META-FIXME: Address or remove the 2019 comment below.
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
 				Future<Void> tl = tLogFn(kv,
@@ -3417,6 +3420,41 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						}
 						if (d.storedComponent == DiskStore::COMPONENT::TLogData && included) {
 							included = false;
+							// FIXME: address the below.  AFAICT the only thing that sends DiskStoreRequest is
+							// workloads/ConsistencyCheck.actor.cpp in code which is looking for extra (presumably
+							// stale/leftover/leaked) data stores. The code in this basic block is hard coded not to return
+							// information, on the basis of the reasoning given in the 2019 comment below.
+							// Failure to return information will either have no effect (if there is no bug) or
+							// at worse will weaken the consistency check.  Unless some test goes and injects a
+							// TLog file leak and then checks that the consistency checker finds the leaked file,
+							// the current hard-coded `included = false` risks weakening the consistency checker.
+							// I don't know if there is a checker on the consistency checker itself. Lack of a
+							// check on the checker itself would explain the 2019 comment where it says
+							// "I commented this code out and nothing broke".
+							//
+							// Also the comment below says "The previous code assumed that d.filename is a filename".
+							// It doesn't really matter, but I'm not entirely sure I agree with that.  It's using
+							// a variable called `filename` and is playing games with prefixes and suffixes
+							// on the passed-in `d.filename` path, but beyond that it's not obviously broken.
+							//
+							// A more robust way to structure this would be to move all of the checking
+							// logic to the client side.  Deep in a 4500 line file responsible for many aspects
+							// of server-side operation is not the most ideal place to encode the file- and path-name
+							// specific details of store-type-specific consistency checking logic.
+							// What we should do is have the server simply return the full list of its files
+							// along with the DiskStore details. The type information about the DiskStore details
+							// should be shared with the consistency checker but I see no problem doing that.
+							// Consistency checkers are supposed to know everything about everything.
+							//
+							// The client would then be free to make whatever consistency checks it wanted
+							// against the returned server state.  Additionally the client-side consistency
+							// checking logic could be isolated and could be unit tested
+							// against various combinations of hypothetical server-side state to ensure that
+							// it was able to detect any specific instances of brokenness that we cared to
+							// make it check for.
+							//
+							// Anyway here is the 2019 comment:
+							//
 							// The previous code assumed that d.filename is a filename.  But that is not true.
 							// d.filename is a path. Removing a prefix and adding a new one just makes a broken
 							// directory name.  So fileExists would always return false.
