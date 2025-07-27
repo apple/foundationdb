@@ -42,7 +42,7 @@ We are ready to use the database. In Python, using the ``[]`` operator on the db
 
 When this command returns without exception, the modification is durably stored in FoundationDB! Under the covers, this function creates a transaction with a single modification. We'll see later how to do multiple operations in a single transaction. For now, let's read back the data::
 
-    >>> print 'hello', db[b'hello']
+    >>> print('hello', db[b'hello'])
     hello world
 
 If this is all working, it looks like we are ready to start building a real application. For reference, here's the full code for "hello world"::
@@ -51,7 +51,7 @@ If this is all working, it looks like we are ready to start building a real appl
     fdb.api_version(740)
     db = fdb.open()
     db[b'hello'] = b'world'
-    print 'hello', db[b'hello']
+    print('hello', db[b'hello'])
 
 Class scheduling application
 ============================
