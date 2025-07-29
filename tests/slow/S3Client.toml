@@ -16,10 +16,9 @@
 buggify = false
 
 [[knobs]]
-# Disable failure injection for deterministic behavior
-bulkload_sim_failure_injection = false
-# DETERMINISM FIX: Disable buggified delays that cause timing variations in simulation
+
 [[flow_knobs]]
+# DETERMINISM FIX: Disable buggified delays that cause timing variations in simulation
 MAX_BUGGIFIED_DELAY = 0.0
 
 # Increase verbosity for debugging
