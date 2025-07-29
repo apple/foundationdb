@@ -3295,6 +3295,7 @@ ACTOR Future<Void> ddSnapCreate(
 	return Void();
 }
 
+// FIXME: explain purpose
 ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
                                           Reference<DataDistributor> self,
                                           Database cx) {
