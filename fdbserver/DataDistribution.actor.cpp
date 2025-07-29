@@ -2652,7 +2652,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			ASSERT(self->configuration.storageTeamSize > 0);
 			int replicaSize = self->configuration.storageTeamSize;
 
-			std::vector<Future<Void>> actors; // the container of ACTORs
+			std::vector<Future<Void>> actors;
 			actors.push_back(self->onConfigChange);
 
 			if (self->configuration.usableRegions > 1) {
