@@ -162,6 +162,7 @@ struct GetDataDistributorMetricsRequest {
 	}
 };
 
+// FIXME: explain purpose
 struct DistributorSnapRequest {
 	constexpr static FileIdentifier file_identifier = 5427684;
 	Arena arena;

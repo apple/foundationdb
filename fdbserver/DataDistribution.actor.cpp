@@ -3084,6 +3084,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 	}
 }
 
+// FIXME: explain what this is trying to accomplish
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 
@@ -3107,7 +3108,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 	    .detail("SnapPayload", snapReq.snapPayload)
 	    .detail("SnapUID", snapReq.snapUID);
 	try {
-		// disable tlog pop on local tlog nodes
 		state std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
 		std::vector<Future<Void>> disablePops;
 		disablePops.reserve(tlogs.size());
@@ -3122,7 +3122,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapUID", snapReq.snapUID);
 
 		state int storageFaultTolerance;
-		// snap stateful nodes
 		state std::map<NetworkAddress, std::pair<WorkerInterface, std::string>> statefulWorkers =
 		    wait(transformErrors(getStatefulWorkers(cx, db, &tlogs, &storageFaultTolerance), snap_storage_failed()));
 
@@ -3132,6 +3131,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("StorageFaultTolerance", storageFaultTolerance);
 
 		// we need to snapshot storage nodes before snapshot any tlogs
+		// FIXME: if it's non-obvious enough to comment about, then also explain why
 		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
 		for (const auto& [addr, entry] : statefulWorkers) {
 			auto& [interf, role] = entry;
@@ -3158,7 +3158,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 
-		// enable tlog pop on local tlog nodes
 		std::vector<Future<Void>> enablePops;
 		enablePops.reserve(tlogs.size());
 		for (const auto& tlog : tlogs) {
@@ -3286,13 +3285,11 @@ ACTOR Future<Void> ddSnapCreate(
 			ddSnapMap->erase(snapReq.snapUID);
 			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(e);
 		} else {
-			// enable DD should always succeed
 			bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 			ASSERT(success);
 			throw e;
 		}
 	}
-	// enable DD should always succeed
 	bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 	ASSERT(success);
 	return Void();
