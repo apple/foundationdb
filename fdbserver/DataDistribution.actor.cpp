@@ -2624,9 +2624,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Metadata Initialized");
 
-			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
-			ASSERT(self->configuration.storageTeamSize > 0);
-
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
 			state PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
@@ -2652,6 +2649,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			tcis.push_back(TeamCollectionInterface());
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
+			ASSERT(self->configuration.storageTeamSize > 0);
 			int replicaSize = self->configuration.storageTeamSize;
 
 			std::vector<Future<Void>> actors; // the container of ACTORs
