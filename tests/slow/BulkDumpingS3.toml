@@ -1,0 +1,78 @@
+[configuration]
+storageEngineExcludeTypes = [5] #FIXME: remove after allowing to do bulkloading with fetchKey and shardedrocksdb
+
+# Do not support tenant, encryption, and TSS
+tenantModes = ['disabled']
+encryptModes = ['disabled']
+disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
+
+# Instruct simulation to generate a simple, single-region config
+generateFearless = false
+simpleConfig = false
+
+# Simple network configuration - single region, no satellites
+minimumRegions = 1
+# Use ssd-2 storage engine instead of rocksdb to avoid RocksDB bulk loading crashes
+# The RocksDB assertion failure indicates incompatibility with current bulk loading implementation
+config = "single usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
+
+# Disable all fault injection and network failures
+# buggify = false now controls ALL fault injection systems (BUGGIFY, failure workloads, AND global fault injection)
+buggify = false
+
+# DETERMINISM FIX: Combined knobs section to avoid duplicates
+[[knobs]]
+# S3/Bulkload determinism fixes
+bulkload_sim_failure_injection = false
+
+# Copied from tests/fast/BulkDumping.toml
+shard_encode_location_metadata = true
+enable_read_lock_on_range = true
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+min_byte_sampling_probability = 0.5
+cc_enforce_use_unfit_dd_in_sim = true
+disable_audit_storage_final_replica_check_in_sim = true
+max_trace_lines = 5000000
+
+# DETERMINISM FIX: Disable buggified delays that cause timing variations in simulation
+[[flow_knobs]]
+MAX_BUGGIFIED_DELAY = 0.0
+
+# S3/Blobstore settings from S3Client.toml for stability/determinism
+blobstore_max_connection_life = 300
+blobstore_request_timeout_min = 300
+blobstore_request_tries = 5
+blobstore_connect_tries = 5
+blobstore_connect_timeout = 30
+http_send_size = 1024
+http_read_size = 1024
+connection_monitor_loop_time = 0.1
+connection_monitor_timeout = 1.0
+connection_monitor_idle_timeout = 60.0
+
+# Reduce team allocation issues
+dd_team_zero_server_left_log_delay = 0
+dd_rebalance_parallelism = 1
+
+[[test]]
+testTitle = 'BulkDumpingWorkloadS3'
+useDB = true
+waitForQuiescence = false
+connectionFailuresDisableDuration = 1000000
+# Completely disable fault injection workloads to prevent operation_cancelled errors
+runFailureWorkloads = false
+# Increase timeout for bulk operations - S3 bulk dumps can be slow
+timeout = 3600
+
+    [[test.workload]]
+    testName = 'BulkDumpingWorkload'
+    # 2 is BulkLoadTransportMethod::BLOBSTORE (S3) - now using MockS3Server
+    bulkLoadTransportMethod = 2
+    # S3 URL for bulk dump/load operations using MockS3Server
+    # 127.0.0.1 looks like an odd address but the simulation network actual takes care
+    # clients get routed to this server at "127.0.0.1:8080".
+    # Increase connection timeout and reduce other timeouts to prevent connection refused errors
+    jobRoot = 'blobstore://testkey:testsecret:testtoken@127.0.0.1:8080/?bucket=bulkdumping&region=us-east-1&secure_connection=0&bypass_simulation=0&global_connection_pool=0&connect_timeout=60&request_timeout=120'
+    maxCancelTimes = 0

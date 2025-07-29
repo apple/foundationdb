@@ -2132,7 +2132,7 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMinimumRegions", ""); } },
 	{ "logAntiQuorum",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedLogAntiQuorum", ""); } },
-	{ "buggify", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedBuggify", ""); } },
+	{ "buggify", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedBuggify", value); } },
 	// The test harness handles NewSeverity events specially.
 	{ "StderrSeverity", [](const std::string& value) { TraceEvent("StderrSeverity").detail("NewSeverity", value); } },
 	{ "ClientInfoLogging",
