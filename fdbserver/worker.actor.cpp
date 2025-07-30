@@ -3397,6 +3397,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(DiskStoreRequest req = waitNext(interf.diskStoreRequest.getFuture())) {
 				Standalone<VectorRef<UID>> ids;
+				// NOTE: this request is mainly for consistency checking.  The current
+				// logic below seems to be holding up OK, but if we discover bugs in this
+				// area, another approach would be to make the server here simply return
+				// everything it knows about the DiskStore, and put all the checking logic
+				// on the client side.  This makes the checking logic itself easier to test
+				// locally via test cases with defined consistency bugs.
 				for (DiskStore d : getDiskStores(folder)) {
 					bool included = true;
 					if (!req.includePartialStores) {
@@ -3418,64 +3424,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 							ASSERT(d.storeType == KeyValueStoreType::MEMORY_RADIXTREE);
 							included = fileExists(d.filename + "1.fdr");
 						}
-						if (d.storedComponent == DiskStore::COMPONENT::TLogData && included) {
+						if (d.storedComponent == DiskStore::COMPONENT::TLogData) {
 							included = false;
-							// FIXME: address the below.  AFAICT the only thing that sends DiskStoreRequest is
-							// workloads/ConsistencyCheck.actor.cpp in code which is looking for extra (presumably
-							// stale/leftover/leaked) data stores. The code in this basic block is hard coded not to
-							// return information, on the basis of the reasoning given in the 2019 comment below.
-							// Failure to return information will either have no effect (if there is no bug) or
-							// at worse will weaken the consistency check.  Unless some test goes and injects a
-							// TLog file leak and then checks that the consistency checker finds the leaked file,
-							// the current hard-coded `included = false` risks weakening the consistency checker.
-							// I don't know if there is a checker on the consistency checker itself. Lack of a
-							// check on the checker itself would explain the 2019 comment where it says
-							// "I commented this code out and nothing broke".
-							//
-							// Also the comment below says "The previous code assumed that d.filename is a filename".
-							// It doesn't really matter, but I'm not entirely sure I agree with that.  It's using
-							// a variable called `filename` and is playing games with prefixes and suffixes
-							// on the passed-in `d.filename` path, but beyond that it's not obviously broken.
-							//
-							// A more robust way to structure this would be to move all of the checking
-							// logic to the client side.  Deep in a 4500 line file responsible for many aspects
-							// of server-side operation is not the most ideal place to encode the file- and path-name
-							// specific details of store-type-specific consistency checking logic.
-							// What we should do is have the server simply return the full list of its files
-							// along with the DiskStore details. The type information about the DiskStore details
-							// should be shared with the consistency checker but I see no problem doing that.
-							// Consistency checkers are supposed to know everything about everything.
-							//
-							// The client would then be free to make whatever consistency checks it wanted
-							// against the returned server state.  Additionally the client-side consistency
-							// checking logic could be isolated and could be unit tested
-							// against various combinations of hypothetical server-side state to ensure that
-							// it was able to detect any specific instances of brokenness that we cared to
-							// make it check for.
-							//
-							// Anyway here is the 2019 comment:
-							//
-							// The previous code assumed that d.filename is a filename.  But that is not true.
-							// d.filename is a path. Removing a prefix and adding a new one just makes a broken
-							// directory name.  So fileExists would always return false.
-							// Weirdly, this doesn't break anything, as tested by taking a clean check of FDB,
-							// setting included to false always, and then running correctness.  So I'm just
-							// improving the situation by actually marking it as broken.
-							// FIXME: this whole thing
-							/*
-							std::string logDataBasename;
-							StringRef filename = d.filename;
-							if (filename.startsWith(fileLogDataPrefix)) {
-							    logDataBasename = fileLogQueuePrefix.toString() +
-							d.filename.substr(fileLogDataPrefix.size()); } else { StringRef optionsString =
-							filename.removePrefix(fileVersionedLogDataPrefix).eat("-"); logDataBasename =
-							fileLogQueuePrefix.toString() + optionsString.toString() + "-";
-							}
-							TraceEvent("DiskStoreRequest").detail("FilenameBasename", logDataBasename);
-							if (fileExists(logDataBasename + "0.fdq") && fileExists(logDataBasename + "1.fdq")) {
-							    included = true;
-							}
-							*/
 						}
 					}
 					if (included) {
