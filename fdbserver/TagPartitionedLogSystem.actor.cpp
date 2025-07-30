@@ -749,11 +749,14 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 		    .detail("End", end)
 		    .detail("BestLogs", localSets[bestSet]->logServerString());
 		int bestServer = localSets[bestSet]->bestLocationFor(tag);
+		Optional<std::vector<uint16_t>> bestKnownLockedTLogIds;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownLockedTLogIds);
+			ASSERT_WE_THINK(knownLockedTLogIds.contains(bestSetIdx));
+			bestKnownLockedTLogIds = knownLockedTLogIds[bestSetIdx];
 		}
 		return makeReference<ILogSystem::SetPeekCursor>(
-		    localSets, bestSet, bestServer, tag, begin, end, parallelGetMore, knownLockedTLogIds[bestSetIdx]);
+		    localSets, bestSet, bestServer, tag, begin, end, parallelGetMore, bestKnownLockedTLogIds);
 	} else {
 		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
@@ -765,11 +768,14 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 			    .detail("End", end)
 			    .detail("BestLogs", localSets[bestSet]->logServerString());
 			int bestServer = localSets[bestSet]->bestLocationFor(tag);
+			Optional<std::vector<uint16_t>> bestKnownLockedTLogIds;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 				resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownLockedTLogIds);
+				ASSERT_WE_THINK(knownLockedTLogIds.contains(bestSetIdx));
+				bestKnownLockedTLogIds = knownLockedTLogIds[bestSetIdx];
 			}
 			cursors.push_back(makeReference<ILogSystem::SetPeekCursor>(
-			    localSets, bestSet, bestServer, tag, lastBegin, end, parallelGetMore, knownLockedTLogIds[bestSetIdx]));
+			    localSets, bestSet, bestServer, tag, lastBegin, end, parallelGetMore, bestKnownLockedTLogIds));
 		}
 		for (int i = 0; begin < lastBegin; i++) {
 			if (i == oldLogData.size()) {
@@ -1055,8 +1061,11 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 		    .detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)]->get().id());
 		if (useMergePeekCursors) {
 			int bestServer = tLogs[bestSet]->bestLocationFor(tag);
+			Optional<std::vector<uint16_t>> bestKnownLockedTLogIds;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 				resetBestServerIfNotLocked(bestSet, bestServer, end, knownLockedTLogIds);
+				ASSERT_WE_THINK(knownLockedTLogIds.contains(bestSet));
+				bestKnownLockedTLogIds = knownLockedTLogIds[bestSet];
 			}
 			return makeReference<ILogSystem::MergedPeekCursor>(tLogs[bestSet]->logServers,
 			                                                   bestServer,
@@ -1069,7 +1078,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 			                                                   tLogs[bestSet]->tLogLocalities,
 			                                                   tLogs[bestSet]->tLogPolicy,
 			                                                   tLogs[bestSet]->tLogReplicationFactor,
-			                                                   knownLockedTLogIds[bestSet]);
+			                                                   bestKnownLockedTLogIds);
 		} else {
 			return makeReference<ILogSystem::ServerPeekCursor>(
 			    tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)], tag, begin, end, false, false);
@@ -1088,8 +1097,11 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 			    .detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)]->get().id());
 			if (useMergePeekCursors) {
 				int bestServer = tLogs[bestSet]->bestLocationFor(tag);
+				Optional<std::vector<uint16_t>> bestKnownLockedTLogIds;
 				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 					resetBestServerIfNotLocked(bestSet, bestServer, end, knownLockedTLogIds);
+					ASSERT_WE_THINK(knownLockedTLogIds.contains(bestSet));
+					bestKnownLockedTLogIds = knownLockedTLogIds[bestSet];
 				}
 				cursors.push_back(makeReference<ILogSystem::MergedPeekCursor>(tLogs[bestSet]->logServers,
 				                                                              bestServer,
@@ -1102,7 +1114,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 				                                                              tLogs[bestSet]->tLogLocalities,
 				                                                              tLogs[bestSet]->tLogPolicy,
 				                                                              tLogs[bestSet]->tLogReplicationFactor,
-				                                                              knownLockedTLogIds[bestSet]));
+				                                                              bestKnownLockedTLogIds));
 			} else {
 				cursors.push_back(makeReference<ILogSystem::ServerPeekCursor>(
 				    tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)],
@@ -1378,15 +1390,18 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
 			}
 
 			int bestServer = localSets[bestSet]->bestLocationFor(tag);
+			Optional<std::vector<uint16_t>> bestKnownStoppedTLogIds;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 				resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownStoppedTLogIds);
+				ASSERT_WE_THINK(knownStoppedTLogIds.get().contains(bestSetIdx));
+				bestKnownStoppedTLogIds = knownStoppedTLogIds.get().at(bestSetIdx);
 			}
 
 			TraceEvent("TLogPeekLogRouterSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
 			// FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies
 			// across the WAN
 			return makeReference<ILogSystem::SetPeekCursor>(
-			    localSets, bestSet, bestServer, tag, begin, end.get(), true, knownStoppedTLogIds.get().at(bestSetIdx));
+			    localSets, bestSet, bestServer, tag, begin, end.get(), true, bestKnownStoppedTLogIds);
 		} else {
 			int bestPrimarySet = -1;
 			int bestSatelliteSet = -1;

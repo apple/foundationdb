@@ -589,7 +589,7 @@ static bool canReturnEmptyVersionRange(
     int bestServer,
     int currentServer,
     Version end,
-    Optional<std::vector<uint16_t>> knownLockedTLogIds = Optional<std::vector<uint16_t>>(),
+    const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>(),
     Optional<int> bestSet = Optional<int>(),
     Optional<int> currentSet = Optional<int>()) {
 	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST);
@@ -641,7 +641,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
     std::vector<LocalityData> const& tLogLocalities,
     Reference<IReplicationPolicy> const tLogPolicy,
     int tLogReplicationFactor,
-    Optional<std::vector<uint16_t>> knownLockedTLogIds)
+    const Optional<std::vector<uint16_t>>& knownLockedTLogIds)
   : tag(tag), bestServer(bestServerLogId), currentCursor(0), readQuorum(readQuorum), messageVersion(begin),
     hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
     tLogReplicationFactor(tLogReplicationFactor) {
@@ -922,7 +922,7 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
                                          Version begin,
                                          Version end,
                                          bool parallelGetMore,
-                                         Optional<std::vector<uint16_t>> knownLockedTLogIds)
+                                         const Optional<std::vector<uint16_t>>& knownLockedTLogIds)
   : logSets(logSets), tag(tag), bestSet(bestSet), bestServer(bestServerLogId), currentSet(bestSet), currentCursor(0),
     messageVersion(begin), hasNextMessage(false), useBestSet(true), randomID(deterministicRandom()->randomUniqueID()),
     end(end) {

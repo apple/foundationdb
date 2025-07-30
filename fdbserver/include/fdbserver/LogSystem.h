@@ -299,7 +299,7 @@ struct ILogSystem {
 		                 std::vector<LocalityData> const& tLogLocalities,
 		                 Reference<IReplicationPolicy> const tLogPolicy,
 		                 int tLogReplicationFactor,
-		                 Optional<std::vector<uint16_t>> knownLockedTLogIds = Optional<std::vector<uint16_t>>());
+		                 const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
 		MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
 		                 LogMessageVersion const& messageVersion,
 		                 int bestServer,
@@ -357,7 +357,7 @@ struct ILogSystem {
 		              Version begin,
 		              Version end,
 		              bool parallelGetMore,
-		              Optional<std::vector<uint16_t>> knownLockedTLogIds = Optional<std::vector<uint16_t>>());
+		              const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
 		SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 		              std::vector<std::vector<Reference<IPeekCursor>>> const& serverCursors,
 		              LogMessageVersion const& messageVersion,
