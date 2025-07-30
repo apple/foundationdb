@@ -4,8 +4,6 @@
 
 ## Background
 
-(This assumes a basic familiarity with [FoundationDB's architecture](https://www.youtu.be/EMwhsGsxfPU).)
-
 Transaction logs are a distributed Write-Ahead-Log for FoundationDB.  They
 receive commits from commit proxies, and are responsible for durably storing 
 those commits, and making them available to storage servers for reading.
