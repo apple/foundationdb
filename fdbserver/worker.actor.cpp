@@ -3425,6 +3425,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 							included = fileExists(d.filename + "1.fdr");
 						}
 						if (d.storedComponent == DiskStore::COMPONENT::TLogData) {
+							// Changes to tlog spilling design are believed to make this check
+							// unnecessary.
 							included = false;
 						}
 					}
