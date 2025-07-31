@@ -49,7 +49,7 @@ struct StreamingReadWorkload : TestWorkload {
 		nodeCount = getOption(options, "nodeCount"_sr, 100000);
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 		valueBytes = std::max(getOption(options, "valueBytes"_sr, 96), 16);
-		std::string valueFormat = "%016llx" + std::string(valueBytes - 16, '.');
+		std::string valueFormat = "%016llx" + deterministicRandom()->randomAlphaNumeric(valueBytes - 16);
 		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
 		constantValue = Value(format(valueFormat.c_str(), 42));
 		readSequentially = getOption(options, "readSequentially"_sr, false);
