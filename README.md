@@ -77,6 +77,9 @@ cmake -G Ninja /some/fdb/source_dir
 ninja
 ```
 
+Slightly more elaborate compile commands can be found in the shell aliases
+defined in `/root.bashrc` in the container image.
+
 #### Build Locally
 
 To build outside of the official Docker image, you'll need at least these dependencies:
