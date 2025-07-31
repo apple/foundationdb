@@ -2591,12 +2591,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	if (!isMocked) {
 		Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 		cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
-		// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
-		// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
-		// SERVER_KNOBS->DD_LOCATION_CACHE_SIZE
-		// );
 		self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
-		// wait(debugCheckCoalescing(self->txnProcessor->context()));
 	} else {
 		ASSERT(self->txnProcessor.isValid() && self->txnProcessor->isMocked());
 	}
@@ -2624,9 +2619,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Metadata Initialized");
 
-			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
-			ASSERT(self->configuration.storageTeamSize > 0);
-
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
 			state PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
@@ -2652,9 +2644,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			tcis.push_back(TeamCollectionInterface());
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
+			ASSERT(self->configuration.storageTeamSize > 0);
 			int replicaSize = self->configuration.storageTeamSize;
 
-			std::vector<Future<Void>> actors; // the container of ACTORs
+			std::vector<Future<Void>> actors;
 			actors.push_back(self->onConfigChange);
 
 			if (self->configuration.usableRegions > 1) {
@@ -3019,7 +3012,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 					}
 				}
 			}
-			// calculate fault tolerance
+
 			*storageFaultTolerance = std::min(static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE),
 			                                  configuration.storageTeamSize - 1) -
 			                         storageFailures;
@@ -3027,7 +3020,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				CODE_PROBE(true, "Too many failed storage servers to complete snapshot", probe::decoration::rare);
 				throw snap_storage_failed();
 			}
-			// tlogs
+
 			for (const auto& tlog : *tlogs) {
 				TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
 				if (workersMap.find(tlog.address()) == workersMap.end()) {
@@ -3042,7 +3035,6 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				}
 			}
 
-			// get coordinators
 			Optional<Value> coordinators = wait(tr.get(coordinatorsKey));
 			if (!coordinators.present()) {
 				CODE_PROBE(true, "Failed to read the coordinatorsKey", probe::decoration::rare);
@@ -3092,6 +3084,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 	}
 }
 
+// FIXME: explain what this is trying to accomplish
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 
@@ -3115,7 +3108,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 	    .detail("SnapPayload", snapReq.snapPayload)
 	    .detail("SnapUID", snapReq.snapUID);
 	try {
-		// disable tlog pop on local tlog nodes
 		state std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
 		std::vector<Future<Void>> disablePops;
 		disablePops.reserve(tlogs.size());
@@ -3130,7 +3122,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapUID", snapReq.snapUID);
 
 		state int storageFaultTolerance;
-		// snap stateful nodes
 		state std::map<NetworkAddress, std::pair<WorkerInterface, std::string>> statefulWorkers =
 		    wait(transformErrors(getStatefulWorkers(cx, db, &tlogs, &storageFaultTolerance), snap_storage_failed()));
 
@@ -3140,6 +3131,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("StorageFaultTolerance", storageFaultTolerance);
 
 		// we need to snapshot storage nodes before snapshot any tlogs
+		// FIXME: if it's non-obvious enough to comment about, then also explain why
 		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
 		for (const auto& [addr, entry] : statefulWorkers) {
 			auto& [interf, role] = entry;
@@ -3166,7 +3158,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 
-		// enable tlog pop on local tlog nodes
 		std::vector<Future<Void>> enablePops;
 		enablePops.reserve(tlogs.size());
 		for (const auto& tlog : tlogs) {
@@ -3294,18 +3285,17 @@ ACTOR Future<Void> ddSnapCreate(
 			ddSnapMap->erase(snapReq.snapUID);
 			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(e);
 		} else {
-			// enable DD should always succeed
 			bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 			ASSERT(success);
 			throw e;
 		}
 	}
-	// enable DD should always succeed
 	bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 	ASSERT(success);
 	return Void();
 }
 
+// FIXME: explain purpose
 ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
                                           Reference<DataDistributor> self,
                                           Database cx) {

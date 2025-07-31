@@ -2,9 +2,10 @@
 
 # TLog Spill-By-Reference Design
 
-## Background
+Note: this doc contains embedded ASCII art diagrams that render poorly if the
+doc is rendered in markdown. FIXME: fix the diagrams.
 
-(This assumes a basic familiarity with [FoundationDB's architecture](https://www.youtu.be/EMwhsGsxfPU).)
+## Background
 
 Transaction logs are a distributed Write-Ahead-Log for FoundationDB.  They
 receive commits from commit proxies, and are responsible for durably storing 
