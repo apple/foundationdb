@@ -181,7 +181,7 @@ BulkLoadTaskState createBulkLoadTask(const UID& jobId,
 	    fileSet, range.begin, range.end, snapshotVersion, bytes, keyCount, byteSampleSetting, type, transportMethod);
 	BulkLoadManifestSet manifests(1);
 	manifests.addManifest(manifest);
-	return BulkLoadTaskState(jobId, manifests);
+	return BulkLoadTaskState(jobId, manifests, range);
 }
 
 BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
