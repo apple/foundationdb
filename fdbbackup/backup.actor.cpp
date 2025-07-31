@@ -1994,6 +1994,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 StopWhenDone stopWhenDone,
                                 UsePartitionedLog usePartitionedLog,
                                 IncrementalBackupOnly incrementalBackupOnly,
+                                Optional<std::string> encryptionKeyFile,
                                 Optional<std::string> blobManifestUrl) {
 	try {
 		state FileBackupAgent backupAgent;
@@ -2048,7 +2049,7 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              stopWhenDone,
 			                              usePartitionedLog,
 			                              incrementalBackupOnly,
-			                              {},
+			                              encryptionKeyFile,
 			                              blobManifestUrl));
 
 			// Wait for the backup to complete, if requested
@@ -4255,6 +4256,7 @@ int main(int argc, char* argv[]) {
 				                           stopWhenDone,
 				                           usePartitionedLog,
 				                           incrementalBackupOnly,
+				                           encryptionKeyFile,
 				                           blobManifestUrl));
 				break;
 			}
