@@ -72,6 +72,7 @@ variables ($PATH, $LD_LIBRARY_PATH, etc) to pick up the right GCC version:
 source /opt/rh/gcc-toolset-13/enable
 gcc --version  # should say 13
 mkdir /some/build_output_dir
+cd /some/build_output_dir
 cmake -G Ninja /some/fdb/source_dir
 ninja
 ```
