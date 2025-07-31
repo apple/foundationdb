@@ -54,22 +54,27 @@ recommended method of building FDB.
 
 #### Build Using the Official Docker Image
 
-The official Docker image for building is [`foundationdb/build`](https://hub.docker.com/r/foundationdb/build), which includes all necessary dependencies. The Docker image definitions used by FoundationDB team members can be found in the [dedicated repository](https://github.com/FoundationDB/fdb-build-support). When building inside the container, it is required to use the compilers in the `toolset` subdirectory. To enable the `toolset`, import the environment variables by
-
-``` bash
-source /opt/rh/gcc-toolset-13/enable
-```
-
-before executing CMake and ninja.
+The official Docker image for building is [`foundationdb/build`](https://hub.docker.com/r/foundationdb/build), which includes all necessary dependencies. The Docker image definitions used by FoundationDB team members can be found in the [dedicated repository](https://github.com/FoundationDB/fdb-build-support).
 
 To build FoundationDB with the clang toolchain,
 
 ``` bash
-CC=clang CXX=clang++ LD=lld cmake -D USE_LD=LLD -D USE_LIBCXX=1 -G Ninja
+mkdir /some/build_output_dir
+cd /some/build_output_dir
+CC=clang CXX=clang++ LD=lld cmake -D USE_LD=LLD -D USE_LIBCXX=1 -G Ninja /some/fdb/source_dir
 ninja
 ```
 
-should be used instead.
+To use GCC, a non-default version is necessary. The following modifies environment
+variables ($PATH, $LD_LIBRARY_PATH, etc) to pick up the right GCC version:
+
+``` bash
+source /opt/rh/gcc-toolset-13/enable
+gcc --version  # should say 13
+mkdir /some/build_output_dir
+cmake -G Ninja /some/fdb/source_dir
+ninja
+```
 
 #### Build Locally
 
