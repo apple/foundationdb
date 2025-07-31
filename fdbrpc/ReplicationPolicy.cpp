@@ -177,8 +177,6 @@ bool PolicyAcross::validate(std::vector<LocalityEntry> const& solutionSet,
 // Choose new servers from "least utilized" alsoServers and append the new servers to results
 // fromserverse are the servers that have already been chosen and
 // that should be excluded from being selected as replicas.
-// FIXME: Simplify this function, such as removing unnecessary printf
-// fromServers are the servers that must have;
 // alsoServers are the servers you can choose.
 bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
                                   std::vector<LocalityEntry> const& alsoServers,
@@ -190,16 +188,17 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 	int resultsInit = results.size();
 
 	// Clear the member variables
+	AttribValue firstUsedValue, secondUsedValue;
 	_usedValues.clear();
 	_newResults.clear();
 	_addedResults.resize(_arena, 0);
-
 	for (auto& alsoServer : alsoServers) {
 		auto value = fromServers->getValueViaGroupKey(alsoServer, groupIndexKey);
 		if (value.present()) {
 			auto lowerBound = std::lower_bound(_usedValues.begin(), _usedValues.end(), value.get());
-			if ((lowerBound == _usedValues.end()) || (*lowerBound != value.get())) {
-				//_selected is a set of processes that have the same indexKey and indexValue (value)
+			if ((firstUsedValue != value.get() && secondUsedValue != value.get()) &&
+			    ((lowerBound == _usedValues.end()) || (*lowerBound != value.get()))) {
+				// _selected is a set of processes that have the same indexKey and indexValue (value)
 				_selected = fromServers->restrict(indexKey, value.get());
 				if (_selected->size()) {
 					// Pass only the also array item which are valid for the value
@@ -213,7 +212,13 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 						}
 						if (count >= _count)
 							break;
-						_usedValues.insert(lowerBound, value.get());
+						if (firstUsedValue._id == -1) {
+							firstUsedValue = AttribValue(value.get());
+						} else if (secondUsedValue._id == -1) {
+							secondUsedValue = AttribValue(value.get());
+						} else {
+							_usedValues.insert(lowerBound, value.get());
+						}
 					}
 				}
 			}
@@ -259,14 +264,21 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 			auto value = fromServers->getValueViaGroupKey(entry, groupIndexKey);
 			if (value.present()) {
 				auto lowerBound = std::lower_bound(_usedValues.begin(), _usedValues.end(), value.get());
-				if ((lowerBound == _usedValues.end()) || (*lowerBound != value.get())) {
+				if ((firstUsedValue != value.get() && secondUsedValue != value.get()) &&
+				    ((lowerBound == _usedValues.end()) || (*lowerBound != value.get()))) {
 					_selected = fromServers->restrict(indexKey, value.get());
 					if (_selected->size()) {
 						if (_policy->selectReplicas(_selected, emptyEntryArray, results)) {
 							count++;
 							if (count >= _count)
 								break;
-							_usedValues.insert(lowerBound, value.get());
+							if (firstUsedValue._id == -1) {
+								firstUsedValue = AttribValue(value.get());
+							} else if (secondUsedValue._id == -1) {
+								secondUsedValue = AttribValue(value.get());
+							} else {
+								_usedValues.insert(lowerBound, value.get());
+							}
 						}
 					}
 				}
