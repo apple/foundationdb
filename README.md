@@ -78,7 +78,7 @@ ninja
 ```
 
 Slightly more elaborate compile commands can be found in the shell aliases
-defined in `/root.bashrc` in the container image.
+defined in `/root/.bashrc` in the container image.
 
 #### Build Locally
 
