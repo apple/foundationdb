@@ -48,25 +48,9 @@ Developers interested in using FoundationDB can get started by downloading and i
 
 Developers on an OS for which there is no binary package, or who would like to start hacking on the code, can get started by compiling from source.
 
-#### Build Locally
-
-To build outside of the official Docker image, you'll need at least these dependencies:
-
-1. [CMake](https://cmake.org/) version 3.24.2 or higher 
-1. [Mono](https://www.mono-project.com/download/stable/)
-1. [ninja](https://ninja-build.org/)
-
-If compiling for local development, please set `-DUSE_WERROR=ON` in CMake. Our CI compiles with `-Werror` on, so this way you'll find out about compiler warnings that break the build earlier.
-
-Once you have your dependencies, you can run `cmake` and then build:
-
-1. Check out this repository.
-1. Create a build directory (you can place it anywhere you like).
-1. `cd <FDB_BUILD_DIR>`
-1. `cmake -G Ninja <FDB_SOURCE_DIR>`
-1. `ninja`
-
-Building FoundationDB requires at least 8GB of memory. More memory is needed when building in parallel. If the computer freezes or crashes, consider disabling parallelized build using `ninja -j1`.
+NOTE: FoundationDB has a lot of dependencies.  The Docker container
+listed below tracks them and is what we use internally and is the
+recommended method of building FDB.
 
 #### Build Using the Official Docker Image
 
@@ -86,6 +70,32 @@ ninja
 ```
 
 should be used instead.
+
+#### Build Locally
+
+To build outside of the official Docker image, you'll need at least these dependencies:
+
+1. [CMake](https://cmake.org/) version 3.24.2 or higher 
+1. [Mono](https://www.mono-project.com/download/stable/)
+1. [ninja](https://ninja-build.org/)
+
+This list is likely to be incomplete. Refer to the rockylinux9
+Dockerfile in the `fdb-build-support` repo linked above for reference
+material on specific packages and versions that are likely to be
+required.
+
+If compiling for local development, please set `-DUSE_WERROR=ON` in CMake. Our CI compiles with `-Werror` on, so this way you'll find out about compiler warnings that break the build earlier.
+
+Once you have your dependencies, you can run `cmake` and then build:
+
+1. Check out this repository.
+1. Create a build directory (you can place it anywhere you like).
+1. `cd <FDB_BUILD_DIR>`
+1. `cmake -G Ninja <FDB_SOURCE_DIR>`
+1. `ninja`
+
+Building FoundationDB requires at least 8GB of memory. More memory is needed when building in parallel. If the computer freezes or crashes, consider disabling parallelized build using `ninja -j1`.
+
 
 #### FreeBSD
 
