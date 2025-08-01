@@ -5,7 +5,7 @@
 #
 # This source file is part of the FoundationDB open source project
 #
-# Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+# Copyright 2013-2025 Apple Inc. and the FoundationDB project authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,9 +20,120 @@
 # limitations under the License.
 #
 
+# FoundationDB TestHarness2 Integration Script
+#
+# This script integrates TestHarness2 with the Joshua testing framework.
+# It handles test orchestration, cleanup, and environment setup for running
+# FoundationDB tests in Kubernetes pods.
+#
+# ENVIRONMENT VARIABLES
+#
+# Required Environment Variables:
+#
+# JOSHUA_SEED                    Random seed for test execution (required)
+#                                Maps to: --joshua-seed
+#                                Used to ensure deterministic test selection and execution
+#
+# Optional Environment Variables:
+#
+# JOSHUA_ENSEMBLE_ID             Ensemble ID for organizing test runs
+#                                Maps to: (internal script logic - not a TestHarness2 option)
+#                                If not set, extracted from working directory or uses JOSHUA_SEED
+#
+# JOSHUA_TEST_FILES_DIR          Directory containing test files
+#                                Maps to: --test-source-dir
+#                                Default: extracted from working directory or current directory
+#
+# OLDBINDIR                      Path to old FDB binaries directory (for restarting tests)
+#                                Maps to: --old-binaries-path
+#                                Default: /app/deploy/global_data/oldBinaries
+#
+# Log Preservation Control:
+#
+# TH_PRESERVE_TEMP_DIRS_ON_EXIT  Always preserve test artifacts regardless of test result
+#                                Maps to: (internal script logic - not a TestHarness2 option)
+#                                Values: true/false (default: false)
+#
+# TH_PRESERVE_TEMP_DIRS_ON_SUCCESS
+#                                Preserve test artifacts when test passes
+#                                Maps to: (internal script logic - not a TestHarness2 option)
+#                                Values: true/false (default: false)
+#
+# TH_ARCHIVE_LOGS_ON_FAILURE     Preserve test artifacts when test fails AND enable joshua_logtool
+#                                Maps to: --archive-logs-on-failure
+#                                Values: true/false (default: false)
+#                                Note: This has dual purpose - both preserves logs and enables logtool
+#
+# Joshua LogTool Integration:
+#
+# TH_ENABLE_JOSHUA_LOGTOOL      Enable automatic log uploads to FDB cluster
+#                                Maps to: (internal script logic - not a TestHarness2 option)
+#                                Values: true/false (default: false)
+#
+# TH_FORCE_JOSHUA_LOGTOOL       Force log uploads even for passing tests
+#                                Maps to: (internal script logic - not a TestHarness2 option)
+#                                Values: true/false (default: false)
+#
+# TH_INCLUDE_APP_LOGS           Include app_log.txt and python_app_std* files in uploads
+#                                Maps to: (internal script logic - not a TestHarness2 option)
+#                                Values: true/false (default: false)
+#                                Note: Useful for debugging test runner crashes
+#
+
+#
+# TestHarness2 Configuration:
+#
+# TH_KILL_SECONDS               Timeout for individual tests in seconds
+#                                Maps to: --kill-seconds
+#                                Default: 1800 (30 minutes)
+#
+# TH_BUGGIFY                    Buggify mode for testing
+#                                Maps to: --buggify
+#                                Values: on/off/random (default: random)
+#
+# TH_USE_VALGRIND               Run tests under valgrind
+#                                Maps to: --use-valgrind
+#                                Values: true/false (default: false)
+#
+# TH_LONG_RUNNING               Enable long-running test mode
+#                                Maps to: --long-running
+#                                Values: true/false (default: false)
+#
+# TH_RANDOM_SEED                Force specific random seed for debugging
+#                                Maps to: --random-seed
+#                                Default: auto-generated
+#
+# TH_OUTPUT_FORMAT              Output format for test results
+#                                Maps to: --output-format
+#                                Values: xml/json (default: xml)
+#
+# Directory Configuration:
+#
+# TH_OUTPUT_DIR                 Base directory for test output
+#                                Maps to: (internal script logic - not a TestHarness2 option)
+#                                Default: DIAG_LOG_DIR or /tmp
+#
+# DIAG_LOG_DIR                  Alternative base directory for test output
+#                                Maps to: (internal script logic - not a TestHarness2 option)
+#                                Used if TH_OUTPUT_DIR is not set
+#
+# LOG PRESERVATION LOGIC
+#
+# Test artifacts are preserved if ANY of the following conditions are met:
+#
+# 1. TH_PRESERVE_TEMP_DIRS_ON_EXIT=true
+#    - Always preserve, regardless of test result
+#
+# 2. TH_PRESERVE_TEMP_DIRS_ON_SUCCESS=true AND test passed
+#    - Preserve only when test succeeds
+#
+# 3. TH_ARCHIVE_LOGS_ON_FAILURE=true AND (test failed OR Python crashed)
+#    - Preserve only when test fails or crashes
+#
+
 # Set defaults for key environment variables
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
-export TH_DISABLE_ROCKSDB_CHECK="${TH_DISABLE_ROCKSDB_CHECK:-false}"
+
 
 # Cleanup function - preserve logs on failure if archival is enabled
 cleanup() {
@@ -145,14 +256,14 @@ PYTHON_EXIT_CODE=$?
 echo "TestHarness2 execution finished. Exit code: ${PYTHON_EXIT_CODE}" >&2
 
 # Note: stdout is already output via tee, no need to cat the file
-
-# Check if test actually failed
+    
+    # Check if test actually failed
 if [ -f "${PYTHON_APP_STDOUT_FILE}" ] && grep -q 'Ok="0"' "${PYTHON_APP_STDOUT_FILE}"; then
-    echo "Test result: FAILED" >&2
-    TEST_FAILED=true
-else
-    echo "Test result: PASSED" >&2
-    TEST_FAILED=false
+        echo "Test result: FAILED" >&2
+        TEST_FAILED=true
+    else
+        echo "Test result: PASSED" >&2
+        TEST_FAILED=false
 fi
 
 # Exit with appropriate code
