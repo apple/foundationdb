@@ -78,6 +78,14 @@ extern bool validateAllCombinations(LocalityGroup const& localitySet,
                                     unsigned int nCombinationSize,
                                     bool bCheckIfValid = true);
 
+extern Reference<LocalitySet> createTestLocalityMap(std::vector<repTestType>& indexes,
+                                                    int dcTotal,
+                                                    int szTotal,
+                                                    int rackTotal,
+                                                    int slotTotal,
+                                                    int independentItems,
+                                                    int independentTotal);
+
 /// Remove all pieces of locality information from the LocalityData that will not be used when validating the policy.
 void filterLocalityDataForPolicyDcAndProcess(Reference<IReplicationPolicy> policy, LocalityData* ld);
 void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, LocalityData* ld);

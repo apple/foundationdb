@@ -174,12 +174,10 @@ bool PolicyAcross::validate(std::vector<LocalityEntry> const& solutionSet,
 	return valid;
 }
 
-// Choose new servers from "least utilized" alsoServers and append the new servers to results
-// fromserverse are the servers that have already been chosen and
-// that should be excluded from being selected as replicas.
-// FIXME: Simplify this function, such as removing unnecessary printf
-// fromServers are the servers that must have;
-// alsoServers are the servers you can choose.
+// alsoServers are the servers that have already been chosen. If "_count"
+// alsoServers match this policy with the same _attrib_key, then the policy is satisfied.
+// Otherwise, choose a different server from fromServers; such "new" servers
+// are returned in "results". If _count servers cannot be found, return false.
 bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
                                   std::vector<LocalityEntry> const& alsoServers,
                                   std::vector<LocalityEntry>& results) {
