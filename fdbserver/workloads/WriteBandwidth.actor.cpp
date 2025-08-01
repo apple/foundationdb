@@ -33,8 +33,6 @@ struct WriteBandwidthWorkload : KVWorkload {
 
 	int keysPerTransaction;
 	double testDuration, warmingDelay, loadTime, maxInsertRate;
-	std::string valueString;
-
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
 	DDSketch<double> commitLatencies, GRVLatencies;
@@ -44,8 +42,6 @@ struct WriteBandwidthWorkload : KVWorkload {
 	    GRVLatencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		keysPerTransaction = getOption(options, "keysPerTransaction"_sr, 100);
-		valueString = std::string(maxValueBytes, '.');
-
 		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
 		maxInsertRate = getOption(options, "maxInsertRate"_sr, 1e12);
 	}
@@ -80,11 +76,6 @@ struct WriteBandwidthWorkload : KVWorkload {
 		m.emplace_back("Bytes written/sec",
 		               (writes * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration,
 		               Averaged::False);
-	}
-
-	Value randomValue() {
-		return StringRef((uint8_t*)valueString.c_str(),
-		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
 	}
 
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
