@@ -73,7 +73,7 @@ ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod trans
                                                    UID logId);
 
 // Extract manifest entries from job manifest file with the input range
-ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
+ACTOR Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
     std::string localJobManifestFilePath,
     KeyRange range,
     UID logId,

@@ -1829,6 +1829,7 @@ ACTOR Future<Void> moveErrorBulkLoadJobToHistory(Reference<DataDistributor> self
 			currentJobState.setErrorPhase(errorMessage);
 			currentJobState.setEndTime(now());
 			wait(addBulkLoadJobToHistory(&tr, currentJobState));
+			wait(releaseExclusiveReadLockOnRange(&tr, jobRange, rangeLockNameForBulkLoad));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -1849,6 +1850,7 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 	       self->bulkLoadJobManager.get().manifestEntryMap->empty());
 	state double beginTime = now();
 	state KeyRange jobRange = self->bulkLoadJobManager.get().jobState.getJobRange();
+	state KeyRange manifestMapRange;
 	try {
 		if (!fileExists(abspath(localJobManifestFilePath))) {
 			TraceEvent(SevDebug, "DDBulkLoadJobManagerDownloadJobManifest", self->ddId)
@@ -1866,11 +1868,20 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 		// At this point, we have the global job manifest file stored locally at localJobManifestFilePath.
 		// This job manifest file stores all remote manifest filepath per range.
 		// Here, we want to get all manifest entries of the file with in the range specified by jobRange.
-		wait(getBulkLoadJobFileManifestEntryFromJobManifestFile(
-		    localJobManifestFilePath,
-		    jobRange,
-		    self->ddId,
-		    /*output=*/self->bulkLoadJobManager.get().manifestEntryMap));
+		wait(store(manifestMapRange,
+		           getBulkLoadJobFileManifestEntryFromJobManifestFile(
+		               localJobManifestFilePath,
+		               jobRange,
+		               self->ddId,
+		               /*output=*/self->bulkLoadJobManager.get().manifestEntryMap)));
+		// It is possible that the bulkload job is using a data set that does not entirely contain the bulkload job
+		// range. In this case, we give the bulkload job.
+		if (self->bulkLoadJobManager.get().jobState.getJobRange() != manifestMapRange) {
+			TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerManifestMapRangeMismatch", self->ddId)
+			    .detail("JobRange", jobRange)
+			    .detail("ManifestMapRange", manifestMapRange);
+			throw bulkload_dataset_not_cover_required_range();
+		}
 		self->bulkLoadJobManager.get().jobState.setTaskCount(self->bulkLoadJobManager.get().manifestEntryMap->size());
 		TraceEvent(SevInfo, "DDBulkLoadJobManagerManifestMapBuilt", self->ddId)
 		    .detail("JobTransportMethod", jobTransportMethod)
