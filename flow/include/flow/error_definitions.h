@@ -165,6 +165,7 @@ ERROR( bulkload_fileset_invalid_filepath, 1245, "Bulkload fileset provides inval
 ERROR( bulkload_manifest_decode_error, 1246, "Bulkload manifest string is failed to decode" )
 ERROR( range_lock_reject, 1247, "Range lock is rejected" )
 ERROR( range_unlock_reject, 1248, "Range unlock is rejected" )
+ERROR( bulkload_dataset_not_cover_required_range, 1249, "Bulkload dataset does not cover the required range" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

@@ -414,12 +414,14 @@ ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod trans
 }
 
 // Get manifest within the input range.
-// manifestEntryMap is the output
-ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
+// manifestEntryMap is the output.
+// Return value is the range of the manifestEntryMap.
+ACTOR Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
     std::string localJobManifestFilePath,
     KeyRange range,
     UID logId,
     std::shared_ptr<BulkLoadManifestFileMap> manifestEntryMap) {
+	state KeyRange mapRange;
 	state double startTime = now();
 	ASSERT(fileExists(abspath(localJobManifestFilePath)));
 	ASSERT(manifestEntryMap->empty());
@@ -474,6 +476,16 @@ ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 						if (!overlappingRange.empty()) {
 							auto returnV = manifestEntryMap->insert({ overlappingRange.begin, manifestEntry });
 							ASSERT(returnV.second);
+							if (mapRange.empty()) {
+								mapRange = KeyRangeRef(overlappingRange.begin, overlappingRange.end);
+							} else {
+								if (mapRange.begin > overlappingRange.begin) {
+									mapRange = KeyRangeRef(overlappingRange.begin, mapRange.end);
+								}
+								if (mapRange.end < overlappingRange.end) {
+									mapRange = KeyRangeRef(mapRange.begin, overlappingRange.end);
+								}
+							}
 						}
 					}
 				}
@@ -502,6 +514,16 @@ ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 				if (!overlappingRange.empty()) {
 					auto returnV = manifestEntryMap->insert({ overlappingRange.begin, manifestEntry });
 					ASSERT(returnV.second);
+					if (mapRange.empty()) {
+						mapRange = KeyRangeRef(overlappingRange.begin, overlappingRange.end);
+					} else {
+						if (mapRange.begin > overlappingRange.begin) {
+							mapRange = KeyRangeRef(overlappingRange.begin, mapRange.end);
+						}
+						if (mapRange.end < overlappingRange.end) {
+							mapRange = KeyRangeRef(mapRange.begin, overlappingRange.end);
+						}
+					}
 				}
 			}
 		}
@@ -514,7 +536,7 @@ ACTOR Future<Void> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 		throw e;
 	}
 
-	return Void();
+	return mapRange;
 }
 
 ACTOR Future<BulkLoadManifestSet> getBulkLoadManifestMetadataFromEntry(

@@ -3345,23 +3345,33 @@ ACTOR Future<int> getBulkDumpMode(Database cx) {
 // Those tasks share the same job Id (aka belonging to the same job).
 ACTOR Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
 	state RangeResult rangeResult;
-	wait(store(rangeResult,
-	           krmGetRanges(tr,
-	                        bulkDumpPrefix,
-	                        normalKeys,
-	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-	                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
-	// krmGetRanges splits the result into batches.
-	// Check first batch is enough since we only check if any task exists
-	for (int i = 0; i < rangeResult.size() - 1; ++i) {
-		if (rangeResult[i].value.empty()) {
-			continue;
+	state KeyRange rangeToRead = normalKeys;
+	state Key beginKey = normalKeys.begin;
+	while (beginKey < normalKeys.end) {
+		try {
+			rangeResult.clear();
+			wait(store(rangeResult,
+			           krmGetRanges(tr,
+			                        bulkDumpPrefix,
+			                        KeyRangeRef(beginKey, normalKeys.end),
+			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+			// krmGetRanges splits the result into batches.
+			// Check first batch is enough since we only check if any task exists
+			for (int i = 0; i < rangeResult.size() - 1; ++i) {
+				if (rangeResult[i].value.empty()) {
+					continue;
+				}
+				BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+				if (!bulkDumpState.isValid()) {
+					continue;
+				}
+				return bulkDumpState;
+			}
+			beginKey = rangeResult.back().key;
+		} catch (Error& e) {
+			wait(tr->onError(e));
 		}
-		BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
-		if (!bulkDumpState.isValid()) {
-			continue;
-		}
-		return bulkDumpState;
 	}
 	return Optional<BulkDumpState>();
 }
