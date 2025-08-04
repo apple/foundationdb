@@ -1875,7 +1875,7 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 		               self->ddId,
 		               /*output=*/self->bulkLoadJobManager.get().manifestEntryMap)));
 		// It is possible that the bulkload job is using a data set that does not entirely contain the bulkload job
-		// range. In this case, we give the bulkload job.
+		// range. In this case, we give up the bulkload job immediately without loading any range..
 		if (self->bulkLoadJobManager.get().jobState.getJobRange() != manifestMapRange) {
 			TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerManifestMapRangeMismatch", self->ddId)
 			    .detail("JobRange", jobRange)

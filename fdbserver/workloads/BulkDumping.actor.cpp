@@ -327,12 +327,19 @@ struct BulkDumping : TestWorkload {
 		return false;
 	}
 
-	void checkSame(BulkDumping* self,
-	               std::map<Key, Value> kvs,
-	               std::map<Key, Value> newKvs,
-	               KeyRange bulkLoadJobRange,
-	               KeyRange bulkDumpJobRange,
-	               std::vector<KeyRange> ignoreRanges) {
+	// kvs is the key value pairs generated initially in the database.
+	// newKvs is the key value pairs loaded by the bulk loading job.
+	// The workload first does bulkdump which only dumps the data within the bulkDumpJobRange.
+	// The workload then does bulkload which loads the data within the bulkLoadJobRange.
+	// The bulkLoadJob may be failed with unretryable error. So, some ranges (i.e. ignoreRanges) is not loaded.
+	// This function compares the consistency between kvs and newKvs within bulkLoadJobRange and bulkDumpJobRange and
+	// outside ignoreRanges. If a key in kvs is outside the bulkDumpJobRange, the newKvs should not contain the key.
+	void processCheck(BulkDumping* self,
+	                  std::map<Key, Value> kvs,
+	                  std::map<Key, Value> newKvs,
+	                  KeyRange bulkLoadJobRange,
+	                  KeyRange bulkDumpJobRange,
+	                  std::vector<KeyRange> ignoreRanges) {
 		std::vector<KeyValue> kvsToCheck;
 		std::vector<KeyValue> newKvsToCheck;
 		std::unordered_set<Key> keyOutsideDumpData;
@@ -396,7 +403,7 @@ struct BulkDumping : TestWorkload {
 
 		state bool bulkDumpRangeContainBulkLoadRange = true; // Will set to false if the bulk load job range is not
 		// contained in the bulk dump job range. In this case, the bulk load job will be failed fast with error.
-		// So, when set to false, skip the checkSame() in the end of the workload.
+		// So, when set to false, skip the processCheck() in the end of the workload.
 		// Also, check bulkload job history to ensure the job is failed with the expected error.
 
 		state std::map<Key, Value> kvs = self->generateOrderedKVS(self, normalKeys, 1000);
@@ -485,11 +492,11 @@ struct BulkDumping : TestWorkload {
 			// Check the loaded data in DB is same as the data in DB before dumping
 			std::map<Key, Value> newKvs = wait(self->getAllKVSFromDB(cx));
 			if (bulkDumpJobRange.contains(bulkLoadJobRange)) {
-				self->checkSame(self, kvs, newKvs, bulkLoadJobRange, bulkDumpJobRange, errorRanges);
+				self->processCheck(self, kvs, newKvs, bulkLoadJobRange, bulkDumpJobRange, errorRanges);
 				bulkDumpRangeContainBulkLoadRange = true;
 			} else {
 				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoad")
-				    .detail("Phase", "SkippedCheckSame")
+				    .detail("Phase", "SkippedCheck")
 				    .detail("BulkDumpJobRange", bulkDumpJobRange)
 				    .detail("BulkLoadJobRange", bulkLoadJobRange);
 				bulkDumpRangeContainBulkLoadRange = false;
