@@ -1244,9 +1244,9 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		// completed by itself or replaced by a data move on the overlapping range
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
 		state BulkLoadAck ack = wait(completeAck.getFuture()); // proceed when a data move completes with this task
-		if (ack.unretrievableError) {
+		if (ack.unretryableError) {
 			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
-			    .detail("Phase", "See unretrievable error")
+			    .detail("Phase", "See unretryable error")
 			    .detail("CancelledDataMovePriority", ack.dataMovePriority)
 			    .detail("Range", range)
 			    .detail("TaskID", taskId)
@@ -1602,7 +1602,7 @@ ACTOR Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistrib
 				throw bulkload_task_outdated();
 			}
 			if (currentTask.phase == BulkLoadPhase::Error) {
-				TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorFindUnretrievableError", self->ddId)
+				TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorFindUnretryableError", self->ddId)
 				    .detail("InputJobID", jobId)
 				    .detail("TaskJobID", currentTask.getJobId())
 				    .detail("TaskRange", currentTask.getRange())
@@ -1894,7 +1894,7 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 			throw e;
 		}
 		state Error err = e;
-		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerFindUnretrievableError", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerFindUnretryableError", self->ddId)
 		    .errorUnsuppressed(err)
 		    .detail("JobTransportMethod", jobTransportMethod)
 		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
@@ -1906,7 +1906,7 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 		                           ". The transport method is " +
 		                           convertBulkLoadTransportMethodToString(jobTransportMethod) + ".";
 		wait(moveErrorBulkLoadJobToHistory(self, errorMessage));
-		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerPersistUnretrievableError", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerPersistUnretryableError", self->ddId)
 		    .errorUnsuppressed(err)
 		    .detail("JobTransportMethod", jobTransportMethod)
 		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
