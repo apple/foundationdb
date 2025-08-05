@@ -232,9 +232,9 @@ TEST_CASE("fdbrpc/AsyncFileReadAhead/SmallFile") {
 		Future<int> read(void* data, int length, int64_t offset) override {
 			ASSERT(offset <= fileSize);
 			// AsyncFileReadAhead *cannot* read lengths beyond filesize, 
-			//	because downstream Files e.g. AsyncFileEncrypted read in
-			//  blocks, which can then cause out-of-bound errors on the next
-			//  downstream filesystem (e.g. AsyncFileS3BlobStore)
+			// because downstream Files e.g. AsyncFileEncrypted read in
+			// blocks, which can then cause out-of-bound errors on the next
+			// downstream filesystem (e.g. AsyncFileS3BlobStore)
 			ASSERT(offset + length <= fileSize);
 			memset(data, 0xAB, length);
 			return length;
@@ -256,7 +256,7 @@ TEST_CASE("fdbrpc/AsyncFileReadAhead/SmallFile") {
 
 	Reference<MockBoundedFile> smallFile(new MockBoundedFile(1));
 	Reference<AsyncFileReadAheadCache> readAheadCache(
-		new AsyncFileReadAheadCache(smallFile, 4096, 0, 3, 2));
+		new AsyncFileReadAheadCache(smallFile, 1024*1024, 0, 3, 2));
 	
 	uint8_t data;
 	int bytesRead = wait(readAheadCache->read(&data, 1, 0));

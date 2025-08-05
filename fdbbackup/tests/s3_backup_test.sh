@@ -54,9 +54,7 @@ function resolve_to_absolute_path {
 function create_encryption_key_file {
   local key_file="${1}"
   log "Creating encryption key file at ${key_file}"
-  # Create a random 32-byte AES-256 key
   dd if=/dev/urandom bs=32 count=1 of="${key_file}" 2>/dev/null
-  # Set appropriate permissions
   chmod 600 "${key_file}"
 }
 
