@@ -220,7 +220,6 @@ public:
 	    m_cache_block_limit(std::max<int>(1, cacheSizeBlocks)), m_max_concurrent_reads(maxConcurrentReads) {}
 };
 
-
 TEST_CASE("fdbrpc/AsyncFileReadAhead/SmallFile") {
 	class MockBoundedFile : public IAsyncFile, public ReferenceCounted<MockBoundedFile> {
 	public:
@@ -228,10 +227,10 @@ TEST_CASE("fdbrpc/AsyncFileReadAhead/SmallFile") {
 		void addref() override { ReferenceCounted<MockBoundedFile>::addref(); }
 		void delref() override { ReferenceCounted<MockBoundedFile>::delref(); }
 		StringRef getClassName() override { return "MockBoundedFile"_sr; }
-		
+
 		Future<int> read(void* data, int length, int64_t offset) override {
 			ASSERT(offset <= fileSize);
-			// AsyncFileReadAhead *cannot* read lengths beyond filesize, 
+			// AsyncFileReadAhead *cannot* read lengths beyond filesize,
 			// because downstream Files e.g. AsyncFileEncrypted read in
 			// blocks, which can then cause out-of-bound errors on the next
 			// downstream filesystem (e.g. AsyncFileS3BlobStore)
@@ -255,13 +254,12 @@ TEST_CASE("fdbrpc/AsyncFileReadAhead/SmallFile") {
 	};
 
 	Reference<MockBoundedFile> smallFile(new MockBoundedFile(1));
-	Reference<AsyncFileReadAheadCache> readAheadCache(
-		new AsyncFileReadAheadCache(smallFile, 1024*1024, 0, 3, 2));
-	
+	Reference<AsyncFileReadAheadCache> readAheadCache(new AsyncFileReadAheadCache(smallFile, 1024 * 1024, 0, 3, 2));
+
 	uint8_t data;
 	int bytesRead = wait(readAheadCache->read(&data, 1, 0));
 	ASSERT_EQ(bytesRead, 1);
-	
+
 	return Void();
 }
 
