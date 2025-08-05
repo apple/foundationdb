@@ -413,6 +413,30 @@ ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod trans
 	return Void();
 }
 
+// Update manifestEntryMap and expanding mapRange if the input line overlaps with the job range.
+KeyRange updateManifestEntryMap(const std::string& line,
+                                const KeyRange& jobRange,
+                                const KeyRange& mapRange,
+                                std::shared_ptr<BulkLoadManifestFileMap> manifestEntryMap) {
+	BulkLoadJobFileManifestEntry manifestEntry(line);
+	KeyRange overlappingRange = jobRange & manifestEntry.getRange();
+	if (!overlappingRange.empty()) {
+		auto returnV = manifestEntryMap->insert({ overlappingRange.begin, manifestEntry });
+		ASSERT(returnV.second);
+		if (mapRange.empty()) {
+			return KeyRangeRef(overlappingRange.begin, overlappingRange.end);
+		} else {
+			if (mapRange.begin > overlappingRange.begin) {
+				return KeyRangeRef(overlappingRange.begin, mapRange.end);
+			}
+			if (mapRange.end < overlappingRange.end) {
+				return KeyRangeRef(mapRange.begin, overlappingRange.end);
+			}
+		}
+	}
+	return mapRange;
+}
+
 // Get manifest within the input range.
 // manifestEntryMap is the output.
 // Return value is the range of the manifestEntryMap.
@@ -471,22 +495,7 @@ ACTOR Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 						BulkLoadJobManifestFileHeader header(line);
 						headerProcessed = true;
 					} else {
-						BulkLoadJobFileManifestEntry manifestEntry(line);
-						KeyRange overlappingRange = range & manifestEntry.getRange();
-						if (!overlappingRange.empty()) {
-							auto returnV = manifestEntryMap->insert({ overlappingRange.begin, manifestEntry });
-							ASSERT(returnV.second);
-							if (mapRange.empty()) {
-								mapRange = KeyRangeRef(overlappingRange.begin, overlappingRange.end);
-							} else {
-								if (mapRange.begin > overlappingRange.begin) {
-									mapRange = KeyRangeRef(overlappingRange.begin, mapRange.end);
-								}
-								if (mapRange.end < overlappingRange.end) {
-									mapRange = KeyRangeRef(mapRange.begin, overlappingRange.end);
-								}
-							}
-						}
+						mapRange = updateManifestEntryMap(line, range, mapRange, /*output=*/manifestEntryMap);
 					}
 				}
 				lineStart = pos + 1;
@@ -509,22 +518,7 @@ ACTOR Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
 				// If we somehow only have one line and it's the header
 				BulkLoadJobManifestFileHeader header(leftover);
 			} else {
-				BulkLoadJobFileManifestEntry manifestEntry(leftover);
-				KeyRange overlappingRange = range & manifestEntry.getRange();
-				if (!overlappingRange.empty()) {
-					auto returnV = manifestEntryMap->insert({ overlappingRange.begin, manifestEntry });
-					ASSERT(returnV.second);
-					if (mapRange.empty()) {
-						mapRange = KeyRangeRef(overlappingRange.begin, overlappingRange.end);
-					} else {
-						if (mapRange.begin > overlappingRange.begin) {
-							mapRange = KeyRangeRef(overlappingRange.begin, mapRange.end);
-						}
-						if (mapRange.end < overlappingRange.end) {
-							mapRange = KeyRangeRef(mapRange.begin, overlappingRange.end);
-						}
-					}
-				}
+				mapRange = updateManifestEntryMap(leftover, range, mapRange, /*output=*/manifestEntryMap);
 			}
 		}
 	} catch (Error& e) {
