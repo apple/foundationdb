@@ -44,6 +44,7 @@ private:
 	Mode mode;
 	Future<Void> writeLastBlockToFile();
 	friend class AsyncFileEncryptedImpl;
+	int64_t fileSize = -1;
 
 	// Reading:
 	class RandomCache {
