@@ -12,6 +12,9 @@
 # so you can manually rerun commands or peruse logs and data
 # under SCRATCH_DIR.
 #
+# Usage:
+#   s3_backup_unified.sh <source_dir> <build_dir> [scratch_dir] [--encrypt]
+#
 # See https://apple.github.io/foundationdb/backups.html
 
 # Install signal traps. Depends on globals being set.
@@ -30,6 +33,9 @@ function cleanup {
   if type shutdown_aws &> /dev/null; then
     shutdown_aws "${TEST_SCRATCH_DIR}"
   fi
+  if [[ -n "${ENCRYPTION_KEY_FILE:-}" ]] && [[ -f "${ENCRYPTION_KEY_FILE}" ]]; then
+    rm -f "${ENCRYPTION_KEY_FILE}"
+  fi
 }
 
 # Resolve passed in reference to an absolute path.
@@ -45,28 +51,47 @@ function resolve_to_absolute_path {
   realpath "${p}"
 }
 
+function create_encryption_key_file {
+  local key_file="${1}"
+  log "Creating encryption key file at ${key_file}"
+  dd if=/dev/urandom bs=32 count=1 of="${key_file}" 2>/dev/null
+  chmod 600 "${key_file}"
+}
+
 # Run the fdbbackup command.
 # $1 The build directory
 # $2 The scratch directory
 # $3 The S3 url.
 # $4 credentials file
+# $5 encryption key file (optional)
 function backup {
   local local_build_dir="${1}"
   local local_scratch_dir="${2}"
   local local_url="${3}"
   local local_credentials="${4}"
+  local local_encryption_key_file="${5:-}"
+
   # Backup to s3. Without the -k argument in the below, the backup gets
   # 'No restore target version given, will use maximum restorable version from backup description.'
   # TODO: Why is -k needed?
-  if ! "${local_build_dir}"/bin/fdbbackup start \
-    -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
-    -t "${TAG}" -w \
-    -d "${local_url}" \
-    -k '"" \xff' \
-    --log --logdir="${local_scratch_dir}" \
-    --blob-credentials "${local_credentials}" \
-    "${KNOBS[@]}"
-  then
+  local cmd_args=(
+    "-C" "${local_scratch_dir}/loopback_cluster/fdb.cluster"
+    "-t" "${TAG}" "-w"
+    "-d" "${local_url}"
+    "-k" '"" \xff'
+    "--log" "--logdir=${local_scratch_dir}"
+    "--blob-credentials" "${local_credentials}"
+  )
+
+  if [[ -n "${local_encryption_key_file}" ]]; then
+    cmd_args+=("--encryption-key-file" "${local_encryption_key_file}")
+  fi
+
+  for knob in "${KNOBS[@]}"; do
+    cmd_args+=("${knob}")
+  done
+
+  if ! "${local_build_dir}"/bin/fdbbackup start "${cmd_args[@]}"; then
     err "Start fdbbackup failed"
     return 1
   fi
@@ -77,19 +102,33 @@ function backup {
 # $2 The scratch directory
 # $3 The S3 url
 # $4 credentials file
+# $5 encryption key file (optional)
 function restore {
   local local_build_dir="${1}"
   local local_scratch_dir="${2}"
   local local_url="${3}"
   local local_credentials="${4}"
-  if ! "${local_build_dir}"/bin/fdbrestore start \
-    --dest-cluster-file "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
-    -t "${TAG}" -w \
-    -r "${url}" \
-    --log --logdir="${local_scratch_dir}" \
-    --blob-credentials "${local_credentials}" \
-    "${KNOBS[@]}"
-  then
+  local local_encryption_key_file="${5:-}"
+
+  local erc_value=$((RANDOM % 2))
+
+  local cmd_args=(
+    "--dest-cluster-file" "${local_scratch_dir}/loopback_cluster/fdb.cluster"
+    "-t" "${TAG}" "-w"
+    "-r" "${url}&erc=${erc_value}"
+    "--log" "--logdir=${local_scratch_dir}"
+    "--blob-credentials" "${local_credentials}"
+  )
+
+  if [[ -n "${local_encryption_key_file}" ]]; then
+    cmd_args+=("--encryption-key-file" "${local_encryption_key_file}")
+  fi
+
+  for knob in "${KNOBS[@]}"; do
+    cmd_args+=("${knob}")
+  done
+
+  if ! "${local_build_dir}"/bin/fdbrestore start "${cmd_args[@]}"; then
     err "Start fdbrestore failed"
     return 1
   fi
@@ -100,11 +139,14 @@ function restore {
 # $2 the scratch directory
 # $3 The credentials file.
 # $4 build directory
+# $5 encryption key file (optional)
 function test_s3_backup_and_restore {
   local local_url="${1}"
   local local_scratch_dir="${2}"
   local credentials="${3}"
   local local_build_dir="${4}"
+  local local_encryption_key_file="${5:-}" 
+
   log "Load data"
   if ! load_data "${local_build_dir}" "${local_scratch_dir}"; then
     err "Failed loading data into fdb"
@@ -130,7 +172,7 @@ function test_s3_backup_and_restore {
     fi
   fi
   log "Run s3 backup"
-  if ! backup "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}"; then
+  if ! backup "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}" "${local_encryption_key_file}"; then
     err "Failed backup"
     return 1
   fi
@@ -140,8 +182,7 @@ function test_s3_backup_and_restore {
     return 1
   fi
   log "Restore from s3"
-  if ! restore "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}"; then
-    err "Failed restore"
+  if ! restore "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}" "${local_encryption_key_file}"; then    err "Failed restore"
     return 1
   fi
   log "Verify restore"
@@ -178,6 +219,30 @@ set -o errexit  # a.k.a. set -e
 set -o nounset  # a.k.a. set -u
 set -o pipefail
 set -o noclobber
+
+# Parse command line arguments
+USE_ENCRYPTION=false
+PARAMS=()
+
+while (( "$#" )); do
+  case "$1" in
+    --encrypt)
+      USE_ENCRYPTION=true
+      shift
+      ;;
+    -*|--*=) # unsupported flags
+      echo "Error: Unsupported flag $1" >&2
+      exit 1
+      ;;
+    *) # preserve positional arguments
+      PARAMS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+# Set positional arguments in their proper place
+set -- "${PARAMS[@]}"
 
 # Globals
 # TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
@@ -248,7 +313,7 @@ if (( $# < 2 )) || (( $# > 3 )); then
     echo "leave the download of seaweed this directory for other"
     echo "tests to find if they need it. Otherwise, we clean everything"
     echo "else up on our way out."
-    echo "Example: ${0} ./foundationdb ./build_output ./scratch_dir"
+    echo "Example: ${0} ./foundationdb ./build_output ./scratch_dir [--encrypt]"
     exit 1
 fi
 if ! source_dir=$(is_fdb_source_dir "${1}"); then
@@ -266,6 +331,22 @@ if (( $# == 3 )); then
   scratch_dir="${3}"
 fi
 readonly scratch_dir
+
+
+# Decide whether to enable encryption:
+ENCRYPTION_KEY_FILE=""
+if [[ "${USE_ENCRYPTION}" == "true" ]]; then
+  # Force encryption if --encrypt was given
+  ENCRYPTION_KEY_FILE="${scratch_dir}/test_encryption_key_file"
+  create_encryption_key_file "${ENCRYPTION_KEY_FILE}"
+  log "Created encryption key file at ${ENCRYPTION_KEY_FILE} (--encrypt specified)"
+else
+  ENCRYPTION_KEY_FILE="${scratch_dir}/test_encryption_key_file"
+  create_encryption_key_file "${ENCRYPTION_KEY_FILE}"
+  log "Created encryption key file at ${ENCRYPTION_KEY_FILE} (randomly enabled)"
+fi
+
+readonly ENCRYPTION_KEY_FILE
 
 # Set host, bucket, and blob_credentials_file whether seaweed or s3.
 readonly path_prefix="ctests"
@@ -346,5 +427,5 @@ log "Backup_agent is up"
 # Run tests.
 test="test_s3_backup_and_restore"
 url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
-test_s3_backup_and_restore "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}"
+test_s3_backup_and_restore "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}" "${ENCRYPTION_KEY_FILE}"
 log_test_result $? "test_s3_backup_and_restore"
