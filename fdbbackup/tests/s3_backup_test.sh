@@ -82,10 +82,14 @@ function restore {
   local local_scratch_dir="${2}"
   local local_url="${3}"
   local local_credentials="${4}"
+
+  # enable read cache randomly to test both code paths.
+  local erc_value=$((RANDOM % 2))
+
   if ! "${local_build_dir}"/bin/fdbrestore start \
     --dest-cluster-file "${local_scratch_dir}/loopback_cluster/fdb.cluster" \
     -t "${TAG}" -w \
-    -r "${url}" \
+    -r "${url}&erc=${erc_value}" \
     --log --logdir="${local_scratch_dir}" \
     --blob-credentials "${local_credentials}" \
     "${KNOBS[@]}"
