@@ -90,6 +90,7 @@ struct NetworkData {
 	int64_t countFilePageCacheMisses;
 	int64_t countFilePageCacheEvictions;
 	int64_t countConnEstablished;
+	int64_t countConnEstablishedEvent;
 	int64_t countConnClosedWithError;
 	int64_t countConnClosedWithoutError;
 	int64_t countTLSPolicyFailures;
@@ -99,6 +100,10 @@ struct NetworkData {
 	int64_t countClientTLSHandshakesOnMainThread;
 	int64_t countServerTLSHandshakesOnSideThreads;
 	int64_t countServerTLSHandshakesOnMainThread;
+	int64_t countIncompatibleConnections;
+	int64_t countConnectionClosedEvent;
+	int64_t countIncompatibleConnectionClosedEvent;
+	int64_t countIncompatibleConnectionErrorThrown;
 
 	void init() {
 		bytesSent = Int64Metric::getValueOrDefault("Net2.BytesSent"_sr);
@@ -122,6 +127,7 @@ struct NetworkData {
 		countYieldCallsTrue = Int64Metric::getValueOrDefault("Net2.CountYieldCallsTrue"_sr);
 		countRunLoopProfilingSignals = Int64Metric::getValueOrDefault("Net2.CountRunLoopProfilingSignals"_sr);
 		countConnEstablished = Int64Metric::getValueOrDefault("Net2.CountConnEstablished"_sr);
+		countConnEstablishedEvent = Int64Metric::getValueOrDefault("Net2.CountConnEstablishedEvent"_sr);
 		countConnClosedWithError = Int64Metric::getValueOrDefault("Net2.CountConnClosedWithError"_sr);
 		countConnClosedWithoutError = Int64Metric::getValueOrDefault("Net2.CountConnClosedWithoutError"_sr);
 		countTLSPolicyFailures = Int64Metric::getValueOrDefault("Net2.CountTLSPolicyFailures"_sr);
@@ -149,6 +155,12 @@ struct NetworkData {
 		    Int64Metric::getValueOrDefault("Net2.CountServerTLSHandshakesOnSideThreads"_sr);
 		countServerTLSHandshakesOnMainThread =
 		    Int64Metric::getValueOrDefault("Net2.CountServerTLSHandshakesOnMainThread"_sr);
+		countIncompatibleConnections = Int64Metric::getValueOrDefault("Net2.CountIncompatibleConnections"_sr);
+		countConnectionClosedEvent = Int64Metric::getValueOrDefault("Net2.CountConnectionClosedEvent"_sr);
+		countIncompatibleConnectionClosedEvent =
+		    Int64Metric::getValueOrDefault("Net2.CountIncompatibleConnectionClosedEvent"_sr);
+		countIncompatibleConnectionErrorThrown =
+		    Int64Metric::getValueOrDefault("Net2.CountIncompatibleConnectionErrorThrown"_sr);
 	}
 };
 

@@ -315,6 +315,11 @@ public:
 		countConnEstablished.init("Net2.CountConnEstablished"_sr);
 		countConnClosedWithError.init("Net2.CountConnClosedWithError"_sr);
 		countConnClosedWithoutError.init("Net2.CountConnClosedWithoutError"_sr);
+		countIncompatibleConnections.init("Net2.CountIncompatibleConnections"_sr);
+		countConnEstablishedEvent.init("Net2.CountConnEstablishedEvent"_sr);
+		countConnectionClosedEvent.init("Net2.CountConnectionClosedEvent"_sr);
+		countIncompatibleConnectionClosedEvent.init("Net2.CountIncompatibleConnectionClosedEvent"_sr);
+		countIncompatibleConnectionErrorThrown.init("Net2.CountIncompatibleConnectionErrorThrown"_sr);
 	}
 
 	Reference<struct Peer> getPeer(NetworkAddress const& address);
@@ -343,6 +348,11 @@ public:
 	Int64MetricHandle countConnEstablished;
 	Int64MetricHandle countConnClosedWithError;
 	Int64MetricHandle countConnClosedWithoutError;
+	Int64MetricHandle countIncompatibleConnections;
+	Int64MetricHandle countConnEstablishedEvent;
+	Int64MetricHandle countConnectionClosedEvent;
+	Int64MetricHandle countIncompatibleConnectionClosedEvent;
+	Int64MetricHandle countIncompatibleConnectionErrorThrown;
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>> incompatiblePeers;
 	AsyncTrigger incompatiblePeersChanged;
@@ -934,6 +944,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination)
 				    .detail("PeerAddress", self->destination);
+				self->transport->countConnectionClosedEvent++;
 			} else {
 				TraceEvent(
 				    ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID())
@@ -941,7 +952,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination)
 				    .detail("PeerAddress", self->destination);
-
+				self->transport->countIncompatibleConnectionClosedEvent++;
 				// Since the connection has closed, we need to check the protocol version the next time we connect
 				self->compatible = true;
 			}
@@ -1504,6 +1515,13 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 								    now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 							}
 							compatible = false;
+							transport->countIncompatibleConnections++;
+							TraceEvent("IncompatibleConnectionFailEstablish", conn ? conn->getDebugID() : UID())
+							    .suppressFor(1.0)
+							    .detail("Peer", conn->getPeerAddress())
+							    .detail("PeerAddress", conn->getPeerAddress())
+							    .detail("InexpensiveMultiVersionClient",
+							            protocolVersion.hasInexpensiveMultiVersionClient());
 							if (!protocolVersion.hasInexpensiveMultiVersionClient()) {
 								if (peer) {
 									peer->protocolVersion->set(protocolVersion);
@@ -1511,6 +1529,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but
 								// it's safer to keep the old behavior.
+								transport->countIncompatibleConnectionErrorThrown++;
 								throw incompatible_protocol_version();
 							}
 						} else {
@@ -1520,6 +1539,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							    .detail("Peer", conn->getPeerAddress())
 							    .detail("PeerAddress", conn->getPeerAddress())
 							    .detail("ConnectionId", connectionId);
+							transport->countConnEstablishedEvent++;
 						}
 
 						if (connectionId > 1) {

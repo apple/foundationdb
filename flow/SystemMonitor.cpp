@@ -172,6 +172,14 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("ConnectionsEstablished",
 			            (double)(netData.countConnEstablished - statState->networkState.countConnEstablished) /
 			                currentStats.elapsed)
+			    .detail("ConnectionsEstablishedCount",
+			            netData.countConnEstablished - statState->networkState.countConnEstablished)
+			    .detail(
+			        "ConnectionEstablishedEvent",
+			        (double)(netData.countConnEstablishedEvent - statState->networkState.countConnEstablishedEvent) /
+			            currentStats.elapsed)
+			    .detail("ConnectionEstablishedEventCount",
+			            netData.countConnEstablishedEvent - statState->networkState.countConnEstablishedEvent)
 			    .detail("ConnectionsClosed",
 			            ((netData.countConnClosedWithError - statState->networkState.countConnClosedWithError) +
 			             (netData.countConnClosedWithoutError - statState->networkState.countConnClosedWithoutError)) /
@@ -198,6 +206,32 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			            (netData.countServerTLSHandshakesOnMainThread -
 			             statState->networkState.countServerTLSHandshakesOnMainThread) /
 			                currentStats.elapsed)
+			    .detail("IncompatibleConnections",
+			            (double)(netData.countIncompatibleConnections -
+			                     statState->networkState.countIncompatibleConnections) /
+			                currentStats.elapsed)
+			    .detail("IncompatibleConnectionsCount",
+			            netData.countIncompatibleConnections - statState->networkState.countIncompatibleConnections)
+			    .detail(
+			        "ConnectionClosedEvent",
+			        (double)(netData.countConnectionClosedEvent - statState->networkState.countConnectionClosedEvent) /
+			            currentStats.elapsed)
+			    .detail("ConnectionClosedEventCount",
+			            netData.countConnectionClosedEvent - statState->networkState.countConnectionClosedEvent)
+			    .detail("IncompatibleConnectionClosedEvent",
+			            (double)(netData.countIncompatibleConnectionClosedEvent -
+			                     statState->networkState.countIncompatibleConnectionClosedEvent) /
+			                currentStats.elapsed)
+			    .detail("IncompatibleConnectionClosedEventCount",
+			            netData.countIncompatibleConnectionClosedEvent -
+			                statState->networkState.countIncompatibleConnectionClosedEvent)
+			    .detail("IncompatibleConnectionErrorThrown",
+			            (double)(netData.countIncompatibleConnectionErrorThrown -
+			                     statState->networkState.countIncompatibleConnectionErrorThrown) /
+			                currentStats.elapsed)
+			    .detail("IncompatibleConnectionErrorThrownCount",
+			            netData.countIncompatibleConnectionErrorThrown -
+			                statState->networkState.countIncompatibleConnectionErrorThrown)
 
 			    .trackLatest(eventName);
 
