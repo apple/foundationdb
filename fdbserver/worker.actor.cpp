@@ -41,6 +41,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/NetworkAddress.h"
+#include "fdbrpc/FlowGrpc.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -286,6 +287,15 @@ Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future
 	return handleIOErrors(actor, storeError, id, onClosed);
 }
 
+Future<Void> deregisterGrpcService(const UID& id) {
+#ifdef FLOW_GRPC_ENABLED
+	if (GrpcServer::instance() != nullptr) {
+		return GrpcServer::instance()->deregisterRoleServices(id);
+	}
+#endif
+	return Void();
+}
+
 ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 	loop choose {
 		when(ErrorInfo _err = waitNext(errors)) {
@@ -302,12 +312,20 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			endRole(err.role, err.id, "Error", ok, err.error);
 
+			state std::optional<Error> rethrow = std::nullopt;
 			if (err.error.code() == error_code_please_reboot ||
 			    (err.role == Role::SHARED_TRANSACTION_LOG &&
 			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)) ||
 			    (SERVER_KNOBS->STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT && err.role == Role::STORAGE_SERVER &&
-			     err.error.code() == error_code_io_timeout))
-				throw err.error;
+			     err.error.code() == error_code_io_timeout)) {
+				rethrow = err.error;
+			}
+
+			wait(deregisterGrpcService(err.id));
+
+			if (rethrow != std::nullopt) {
+				throw *rethrow;
+			}
 		}
 	}
 }
