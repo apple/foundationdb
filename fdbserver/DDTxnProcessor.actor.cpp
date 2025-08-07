@@ -269,7 +269,6 @@ class DDTxnProcessorImpl {
 		} else {
 			if (!g_network->isSimulated()) {
 				TraceEvent(SevError, "ReadHealthyZone", distributorId)
-					.error(e)
 					.detail("AdditionalInfo", "Maintenance mode settings will be ignored");
 			}
 		}
