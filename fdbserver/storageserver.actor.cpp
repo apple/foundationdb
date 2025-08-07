@@ -9182,6 +9182,15 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
 					break;
 				} else {
+					if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
+					    data->storage.getKeyValueStore()->supportsSstIngestion()) {
+						ASSERT(!bulkloadCanIngestSSTFile);
+						TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+						    .detail("DataMoveId", dataMoveId.toString())
+						    .detail("Range", keys)
+						    .detail("Phase", "SST ingestion give up due to task range not aligned with manifests")
+						    .detail("FKID", fetchKeysID);
+					}
 					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
 					rangeEnd = keys.end;
 				}

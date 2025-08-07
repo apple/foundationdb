@@ -272,7 +272,10 @@ struct BulkDumping : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> validateBulkLoadJobHistory(Database cx, UID jobId, bool hasError) {
+	ACTOR Future<Void> validateBulkLoadJobHistory(Database cx,
+	                                              UID jobId,
+	                                              bool hasError,
+	                                              bool bulkDumpRangeContainBulkLoadRange) {
 		std::vector<BulkLoadJobState> jobHistory = wait(getBulkLoadJobFromHistory(cx));
 		Optional<BulkLoadJobState> jobInHistory;
 		for (const auto& job : jobHistory) {
@@ -282,8 +285,13 @@ struct BulkDumping : TestWorkload {
 			jobInHistory = job;
 		}
 		ASSERT(jobInHistory.present());
-		if (hasError) {
+		if (hasError || !bulkDumpRangeContainBulkLoadRange) {
 			ASSERT(jobInHistory.get().getPhase() == BulkLoadJobPhase::Error);
+			ASSERT(jobInHistory.get().getErrorMessage().present());
+			if (jobInHistory.get().getErrorMessage().get().find(
+			        std::to_string(bulkload_dataset_not_cover_required_range().code())) != std::string::npos) {
+				ASSERT(!bulkDumpRangeContainBulkLoadRange);
+			}
 		} else {
 			ASSERT(jobInHistory.get().getPhase() == BulkLoadJobPhase::Complete);
 		}
@@ -319,32 +327,66 @@ struct BulkDumping : TestWorkload {
 		return false;
 	}
 
-	bool checkSame(BulkDumping* self,
-	               std::map<Key, Value> kvs,
-	               std::map<Key, Value> newKvs,
-	               KeyRange maxRange,
-	               std::vector<KeyRange> ignoreRanges) {
+	// kvs is the key value pairs generated initially in the database.
+	// newKvs is the key value pairs loaded by the bulk loading job.
+	// The workload first does bulkdump which only dumps the data within the bulkDumpJobRange.
+	// The workload then does bulkload which loads the data within the bulkLoadJobRange.
+	// The bulkLoadJob may be failed with unretryable error. So, some ranges (i.e. ignoreRanges) is not loaded.
+	// This function compares the consistency between kvs and newKvs within bulkLoadJobRange and bulkDumpJobRange and
+	// outside ignoreRanges. If a key in kvs is outside the bulkDumpJobRange, the newKvs should not contain the key.
+	void processCheck(BulkDumping* self,
+	                  std::map<Key, Value> kvs,
+	                  std::map<Key, Value> newKvs,
+	                  KeyRange bulkLoadJobRange,
+	                  KeyRange bulkDumpJobRange,
+	                  std::vector<KeyRange> ignoreRanges) {
 		std::vector<KeyValue> kvsToCheck;
 		std::vector<KeyValue> newKvsToCheck;
+		std::unordered_set<Key> keyOutsideDumpData;
 		for (const auto& [key, value] : kvs) {
+			if (!bulkDumpJobRange.contains(key)) {
+				keyOutsideDumpData.insert(key);
+				continue; // kvs may contain keys outside the bulkDumpJobRange
+			}
 			if (self->keyContainedInRanges(key, ignoreRanges)) {
 				continue;
 			}
-			if (!maxRange.contains(key)) {
-				continue; // kvs may contain keys outside the maxRange
+			if (!bulkLoadJobRange.contains(key)) {
+				continue; // kvs may contain keys outside the bulkLoadJobRange
 			}
 			kvsToCheck.push_back(KeyValueRef(key, value));
 		}
 		for (const auto& [key, value] : newKvs) {
+			// newKvs should not contain keys outside the bulkDumpJobRange
+			ASSERT(keyOutsideDumpData.find(key) == keyOutsideDumpData.end() && bulkDumpJobRange.contains(key));
 			if (self->keyContainedInRanges(key, ignoreRanges)) {
 				continue;
 			}
-			ASSERT(maxRange.contains(key)); // newKvs should not contain keys outside the maxRange
+			// newKvs should not contain keys outside the bulkLoadJobRange nor bulkDumpJobRange
+			ASSERT(bulkLoadJobRange.contains(key));
+			ASSERT(bulkDumpJobRange.contains(key));
 			newKvsToCheck.push_back(KeyValueRef(key, value));
 		}
-		return kvsToCheck == newKvsToCheck;
+		if (kvsToCheck != newKvsToCheck) {
+			TraceEvent(SevError, "BulkDumpingWorkLoadError")
+			    .detail("KVS", kvsToCheck.size())
+			    .detail("NewKVS", newKvsToCheck.size());
+			ASSERT(false);
+		}
 	}
 
+	// This workload does following:
+	// (1) Generate 1000 key value pairs in normalKey space;
+	// (2) Randomly select a key range from normalKey space;
+	// (3) Submit a bulk dump job with the selected key range;
+	// (4) Wait until the bulk dump job completes;
+	// (5) Clear the database;
+	// (6) Randomly select a key range from normalKey space;
+	// (7) Submit a bulk load job with the selected key range;
+	// (8) Wait until the bulk load job completes;
+	// (9) Validate the loaded data in DB is same as the data in DB before dumping within the bulkdump job range and
+	// bulkload job range. Note that the bulkload job can be unretriable error. In this case, we ignore the error range;
+	// (10) Validate the bulk load job history.
 	ACTOR Future<Void> _start(BulkDumping* self, Database cx) {
 		if (self->clientId != 0) {
 			return Void();
@@ -355,6 +397,15 @@ struct BulkDumping : TestWorkload {
 			// So, this workload disable the network partition
 			disableConnectionFailures("BulkDumping");
 		}
+
+		state KeyRange bulkDumpJobRange =
+		    deterministicRandom()->coinflip() ? normalKeys : self->getRandomRange(self, normalKeys);
+
+		state bool bulkDumpRangeContainBulkLoadRange = true; // Will set to false if the bulk load job range is not
+		// contained in the bulk dump job range. In this case, the bulk load job will be failed fast with error.
+		// So, when set to false, skip the processCheck() in the end of the workload.
+		// Also, check bulkload job history to ensure the job is failed with the expected error.
+
 		state std::map<Key, Value> kvs = self->generateOrderedKVS(self, normalKeys, 1000);
 		wait(self->setKeys(cx, kvs));
 
@@ -369,7 +420,7 @@ struct BulkDumping : TestWorkload {
 		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
 		state std::string dumpFolder = self->jobRoot.empty() ? simulationBulkDumpFolder : self->jobRoot;
 		state BulkDumpState bulkDumpJob =
-		    createBulkDumpJob(normalKeys,
+		    createBulkDumpJob(bulkDumpJobRange,
 		                      dumpFolder,
 		                      BulkLoadType::SST,
 		                      static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod));
@@ -397,7 +448,9 @@ struct BulkDumping : TestWorkload {
 			state bool hasError = false;
 			state int oldCancelTimes = self->cancelTimes;
 			state KeyRange bulkLoadJobRange =
-			    deterministicRandom()->coinflip() ? bulkDumpJob.getJobRange() : self->getRandomRange(self, normalKeys);
+			    deterministicRandom()->coinflip()
+			        ? bulkDumpJob.getJobRange()
+			        : self->getRandomRange(self, deterministicRandom()->coinflip() ? normalKeys : bulkDumpJobRange);
 			state UID dataSourceId = bulkDumpJob.getJobId();
 			state std::string dataSourceRoot = bulkDumpJob.getJobRoot();
 			state BulkLoadJobState bulkLoadJob =
@@ -431,23 +484,28 @@ struct BulkDumping : TestWorkload {
 			}
 			TraceEvent("BulkDumpingWorkLoad")
 			    .detail("Phase", "Load Job Complete")
-			    .detail("JobId", dataSourceId)
-			    .detail("JobRange", bulkLoadJobRange)
-			    .detail("JobRoot", dataSourceRoot)
-			    .detail("TransportMethod", bulkLoadJob.getTransportMethod());
+			    .detail("BulkLoadJobId", dataSourceId)
+			    .detail("BulkLoadJobRange", bulkLoadJobRange)
+			    .detail("BulkLoadJobRoot", dataSourceRoot)
+			    .detail("BulkLoadTransportMethod", bulkLoadJob.getTransportMethod());
 
 			// Check the loaded data in DB is same as the data in DB before dumping
 			std::map<Key, Value> newKvs = wait(self->getAllKVSFromDB(cx));
-			if (!self->checkSame(self, kvs, newKvs, bulkLoadJobRange, errorRanges)) {
-				TraceEvent(SevError, "BulkDumpingWorkLoadError")
-				    .detail("KVS", kvs.size())
-				    .detail("NewKVS", newKvs.size());
-				ASSERT(false);
+			if (bulkDumpJobRange.contains(bulkLoadJobRange)) {
+				self->processCheck(self, kvs, newKvs, bulkLoadJobRange, bulkDumpJobRange, errorRanges);
+				bulkDumpRangeContainBulkLoadRange = true;
+			} else {
+				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoad")
+				    .detail("Phase", "SkippedCheck")
+				    .detail("BulkDumpJobRange", bulkDumpJobRange)
+				    .detail("BulkLoadJobRange", bulkLoadJobRange);
+				bulkDumpRangeContainBulkLoadRange = false;
 			}
 
 			// Acknowledge any error task of the job
 			wait(acknowledgeAllErrorBulkLoadTasks(cx, bulkLoadJob.getJobId(), bulkLoadJob.getJobRange()));
-			wait(self->validateBulkLoadJobHistory(cx, bulkLoadJob.getJobId(), hasError));
+			wait(self->validateBulkLoadJobHistory(
+			    cx, bulkLoadJob.getJobId(), hasError, bulkDumpRangeContainBulkLoadRange));
 			break;
 		}
 

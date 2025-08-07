@@ -1977,8 +1977,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
 						if (rd.bulkLoadTask.get().completeAck.canBeSet()) {
 							// Unretriable error. So, we give up the task at this time.
-							rd.bulkLoadTask.get().completeAck.send(
-							    BulkLoadAck(/*unretrievableError=*/true, rd.priority));
+							rd.bulkLoadTask.get().completeAck.send(BulkLoadAck(/*unretryableError=*/true, rd.priority));
 							throw data_move_dest_team_not_found();
 							// This relocator should silently exit. Note that if this bulkload data move is
 							// a team unhealthy data move, the bulkload engine will issue a new data move on

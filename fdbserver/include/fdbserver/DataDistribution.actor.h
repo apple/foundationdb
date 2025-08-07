@@ -228,7 +228,7 @@ struct GetMetricsListRequest {
 struct BulkLoadShardRequest {
 	BulkLoadTaskState bulkLoadTaskState;
 	Optional<int> cancelledDataMovePriority; // Set to the data move priority of the task if the task is failed for
-	                                         // unretrievable error.
+	                                         // unretryable error.
 	BulkLoadShardRequest() = default;
 
 	BulkLoadShardRequest(BulkLoadTaskState const& bulkLoadTaskState) : bulkLoadTaskState(bulkLoadTaskState) {}
@@ -566,22 +566,22 @@ private:
 	std::unordered_map<UID, int> busyMap; // <Storage Server ID, Task Count>
 };
 
-// Used to piggyback the data move priority when an unretrievable error happens to the task datamove.
+// Used to piggyback the data move priority when an unretryable error happens to the task datamove.
 // If the priority indicates the data move is a team unhealthy related data move, the bulkload engine
 // system trigger a new data move when terminate the error task.
 struct BulkLoadAck {
-	bool unretrievableError = false;
+	bool unretryableError = false;
 	int dataMovePriority = -1;
 
 	BulkLoadAck() = default;
-	BulkLoadAck(bool unretrievableError, int dataMovePriority)
-	  : unretrievableError(unretrievableError), dataMovePriority(dataMovePriority) {}
+	BulkLoadAck(bool unretryableError, int dataMovePriority)
+	  : unretryableError(unretryableError), dataMovePriority(dataMovePriority) {}
 };
 
 struct DDBulkLoadEngineTask {
 	BulkLoadTaskState coreState;
 	Version commitVersion = invalidVersion;
-	Promise<BulkLoadAck> completeAck; // Satisfied when a data move for this task completes or unretrievable error for
+	Promise<BulkLoadAck> completeAck; // Satisfied when a data move for this task completes or unretryable error for
 	                                  // the first time, where the task metadata phase is Complete or Error.
 
 	DDBulkLoadEngineTask() = default;

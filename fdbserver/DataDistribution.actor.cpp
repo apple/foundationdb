@@ -1244,9 +1244,9 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		// completed by itself or replaced by a data move on the overlapping range
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
 		state BulkLoadAck ack = wait(completeAck.getFuture()); // proceed when a data move completes with this task
-		if (ack.unretrievableError) {
+		if (ack.unretryableError) {
 			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
-			    .detail("Phase", "See unretrievable error")
+			    .detail("Phase", "See unretryable error")
 			    .detail("CancelledDataMovePriority", ack.dataMovePriority)
 			    .detail("Range", range)
 			    .detail("TaskID", taskId)
@@ -1602,7 +1602,7 @@ ACTOR Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistrib
 				throw bulkload_task_outdated();
 			}
 			if (currentTask.phase == BulkLoadPhase::Error) {
-				TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorFindUnretrievableError", self->ddId)
+				TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorFindUnretryableError", self->ddId)
 				    .detail("InputJobID", jobId)
 				    .detail("TaskJobID", currentTask.getJobId())
 				    .detail("TaskRange", currentTask.getRange())
@@ -1829,6 +1829,7 @@ ACTOR Future<Void> moveErrorBulkLoadJobToHistory(Reference<DataDistributor> self
 			currentJobState.setErrorPhase(errorMessage);
 			currentJobState.setEndTime(now());
 			wait(addBulkLoadJobToHistory(&tr, currentJobState));
+			wait(releaseExclusiveReadLockOnRange(&tr, jobRange, rangeLockNameForBulkLoad));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -1849,6 +1850,7 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 	       self->bulkLoadJobManager.get().manifestEntryMap->empty());
 	state double beginTime = now();
 	state KeyRange jobRange = self->bulkLoadJobManager.get().jobState.getJobRange();
+	state KeyRange manifestMapRange;
 	try {
 		if (!fileExists(abspath(localJobManifestFilePath))) {
 			TraceEvent(SevDebug, "DDBulkLoadJobManagerDownloadJobManifest", self->ddId)
@@ -1866,11 +1868,20 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 		// At this point, we have the global job manifest file stored locally at localJobManifestFilePath.
 		// This job manifest file stores all remote manifest filepath per range.
 		// Here, we want to get all manifest entries of the file with in the range specified by jobRange.
-		wait(getBulkLoadJobFileManifestEntryFromJobManifestFile(
-		    localJobManifestFilePath,
-		    jobRange,
-		    self->ddId,
-		    /*output=*/self->bulkLoadJobManager.get().manifestEntryMap));
+		wait(store(manifestMapRange,
+		           getBulkLoadJobFileManifestEntryFromJobManifestFile(
+		               localJobManifestFilePath,
+		               jobRange,
+		               self->ddId,
+		               /*output=*/self->bulkLoadJobManager.get().manifestEntryMap)));
+		// It is possible that the bulkload job is using a data set that does not entirely contain the bulkload job
+		// range. In this case, we give up the bulkload job immediately without loading any range..
+		if (self->bulkLoadJobManager.get().jobState.getJobRange() != manifestMapRange) {
+			TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerManifestMapRangeMismatch", self->ddId)
+			    .detail("JobRange", jobRange)
+			    .detail("ManifestMapRange", manifestMapRange);
+			throw bulkload_dataset_not_cover_required_range();
+		}
 		self->bulkLoadJobManager.get().jobState.setTaskCount(self->bulkLoadJobManager.get().manifestEntryMap->size());
 		TraceEvent(SevInfo, "DDBulkLoadJobManagerManifestMapBuilt", self->ddId)
 		    .detail("JobTransportMethod", jobTransportMethod)
@@ -1883,7 +1894,7 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 			throw e;
 		}
 		state Error err = e;
-		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerFindUnretrievableError", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerFindUnretryableError", self->ddId)
 		    .errorUnsuppressed(err)
 		    .detail("JobTransportMethod", jobTransportMethod)
 		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
@@ -1895,7 +1906,7 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 		                           ". The transport method is " +
 		                           convertBulkLoadTransportMethodToString(jobTransportMethod) + ".";
 		wait(moveErrorBulkLoadJobToHistory(self, errorMessage));
-		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerPersistUnretrievableError", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerPersistUnretryableError", self->ddId)
 		    .errorUnsuppressed(err)
 		    .detail("JobTransportMethod", jobTransportMethod)
 		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
