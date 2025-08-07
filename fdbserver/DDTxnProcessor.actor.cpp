@@ -238,8 +238,8 @@ class DDTxnProcessorImpl {
 		// Occasionally this can be slow to read.  This is due to hotspots on the \xff\x02 shard
 		// due to over-aggressive use of this feature:
 		// https://apple.github.io/foundationdb/transaction-profiler-analyzer.html
-		// All in all, it's better to succeed in starting up with a risk to future uses
-		// of maintenance mode (i.e. healthyZone) than to block DD startup indefinitely.
+		// All in all, it's better to succeed in starting up with a risk to a
+		// non-default feature (maintenance mode) than to block DD startup indefinitely.
 		state Transaction tr(cx);
 		state int maxRetries = SERVER_KNOBS->DD_HEALTHY_ZONE_READ_RETRY_COUNT;
 		state bool healthyZoneRead = false;
