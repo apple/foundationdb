@@ -233,6 +233,47 @@ class DDTxnProcessorImpl {
 		}
 	}
 
+	ACTOR static Future<Optional<Key>> getHealthyZone(Database cx, UID distributorId) {
+		// Read healthyZone value which is later used to determine on/off of failure triggered DD.
+		// Occasionally this can be slow to read.  This is due to hotspots on the \xff\x02 shard
+		// due to over-aggressive use of this feature:
+		// https://apple.github.io/foundationdb/transaction-profiler-analyzer.html
+		// All in all, it's better to succeed in starting up with a risk to future uses
+		// of maintenance mode (i.e. healthyZone) than to block DD startup indefinitely.
+		state Transaction tr(cx);
+		state int maxRetries = 5;
+		state bool healthy_zone_read = false;
+		state Error lastError;
+		state Optional<Value> healthyZoneVal;
+		state int i = 0;
+		for (; !healthy_zone_read && i < maxRetries; i++) {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				Optional<Value> _hz = wait(tr.get(healthyZoneKey));
+				healthyZoneVal = _hz;
+				healthy_zone_read = true;
+			} catch (Error& e) {
+				lastError = e;
+				TraceEvent("ReadHealthyZone", distributorId).error(e);
+				wait(tr.onError(e));
+				tr.reset();
+			}
+		}
+		if (healthy_zone_read) {
+			if (healthyZoneVal.present()) {
+				auto p = decodeHealthyZoneValue(healthyZoneVal.get());
+				if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
+					return Optional<Key>(p.first);
+				}
+			}
+		} else {
+			TraceEvent(SevWarnAlways, "ErrorReadingHealthyZone").detail("LastErrorCode", lastError.code());
+		}
+		return Optional<Key>();
+	}
+
 	// Read keyservers, return unique set of teams
 	ACTOR static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    Database cx,
@@ -258,6 +299,9 @@ class DDTxnProcessorImpl {
 		state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
 		state int numDataMoves = 0;
 
+		Optional<Key> healthyZone = wait(getHealthyZone(cx, distributorId));
+		result->initHealthyZoneValue = healthyZone;
+
 		CODE_PROBE((bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 		// causing entries to be duplicated
@@ -271,22 +315,9 @@ class DDTxnProcessorImpl {
 			team_cache.clear();
 			succeeded = false;
 			try {
-				// Read healthyZone value which is later used to determine on/off of failure triggered DD
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Optional<Value> val = wait(tr.get(healthyZoneKey));
-				if (val.present()) {
-					auto p = decodeHealthyZoneValue(val.get());
-					if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
-						result->initHealthyZoneValue = Optional<Key>(p.first);
-					} else {
-						result->initHealthyZoneValue = Optional<Key>();
-					}
-				} else {
-					result->initHealthyZoneValue = Optional<Key>();
-				}
-
 				result->mode = 1;
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
 				if (mode.present()) {
