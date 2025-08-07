@@ -110,12 +110,10 @@ function restore {
   local local_credentials="${4}"
   local local_encryption_key_file="${5:-}"
 
-  local erc_value=$((RANDOM % 2))
-
   local cmd_args=(
     "--dest-cluster-file" "${local_scratch_dir}/loopback_cluster/fdb.cluster"
     "-t" "${TAG}" "-w"
-    "-r" "${url}&erc=${erc_value}"
+    "-r" "${url}"
     "--log" "--logdir=${local_scratch_dir}"
     "--blob-credentials" "${local_credentials}"
   )
