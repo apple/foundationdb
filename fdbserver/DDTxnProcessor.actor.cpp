@@ -241,35 +241,36 @@ class DDTxnProcessorImpl {
 		// All in all, it's better to succeed in starting up with a risk to future uses
 		// of maintenance mode (i.e. healthyZone) than to block DD startup indefinitely.
 		state Transaction tr(cx);
-		state int maxRetries = 5;
-		state bool healthy_zone_read = false;
-		state Error lastError;
+		state int maxRetries = SERVER_KNOBS->DD_HEALTHY_ZONE_READ_RETRY_COUNT;
+		state bool healthyZoneRead = false;
 		state Optional<Value> healthyZoneVal;
 		state int i = 0;
-		for (; !healthy_zone_read && i < maxRetries; i++) {
+		for (; i < maxRetries; i++) {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> _hz = wait(tr.get(healthyZoneKey));
 				healthyZoneVal = _hz;
-				healthy_zone_read = true;
+				healthyZoneRead = true;
+				break;
 			} catch (Error& e) {
-				lastError = e;
 				TraceEvent("ReadHealthyZone", distributorId).error(e);
+				if (!g_network->isSimulated()) {
+					TraceEvent(SevError, "ReadHealthyZone", distributorId)
+						.error(e)
+					    .detail("AdditionalInfo", "Maintenance mode settings will be ignored");
+				}
 				wait(tr.onError(e));
-				tr.reset();
 			}
 		}
-		if (healthy_zone_read) {
+		if (healthyZoneRead) {
 			if (healthyZoneVal.present()) {
 				auto p = decodeHealthyZoneValue(healthyZoneVal.get());
 				if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
 					return Optional<Key>(p.first);
 				}
 			}
-		} else {
-			TraceEvent(SevWarnAlways, "ErrorReadingHealthyZone").detail("LastErrorCode", lastError.code());
 		}
 		return Optional<Key>();
 	}
