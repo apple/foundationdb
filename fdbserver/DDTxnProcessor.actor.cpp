@@ -256,11 +256,6 @@ class DDTxnProcessorImpl {
 				break;
 			} catch (Error& e) {
 				TraceEvent("ReadHealthyZone", distributorId).error(e);
-				if (!g_network->isSimulated()) {
-					TraceEvent(SevError, "ReadHealthyZone", distributorId)
-					    .error(e)
-					    .detail("AdditionalInfo", "Maintenance mode settings will be ignored");
-				}
 				wait(tr.onError(e));
 			}
 		}
@@ -270,6 +265,12 @@ class DDTxnProcessorImpl {
 				if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
 					return Optional<Key>(p.first);
 				}
+			}
+		} else {
+			if (!g_network->isSimulated()) {
+				TraceEvent(SevError, "ReadHealthyZone", distributorId)
+					.error(e)
+					.detail("AdditionalInfo", "Maintenance mode settings will be ignored");
 			}
 		}
 		return Optional<Key>();
