@@ -27,6 +27,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Arena.h"
@@ -47,6 +48,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 	bool checkBeginVersion;
 	bool clearBackupAgentKeys;
 	Standalone<StringRef> blobManifestUrl;
+	Optional<std::string> encryptionKeyFileName;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
@@ -59,6 +61,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 		checkBeginVersion = getOption(options, "checkBeginVersion"_sr, false);
 		clearBackupAgentKeys = getOption(options, "clearBackupAgentKeys"_sr, false);
 		blobManifestUrl = getOption(options, "blobManifestUrl"_sr, ""_sr);
+
+		if (getOption(options, "encrypted"_sr, true)) {
+			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
+		}
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -156,6 +162,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		addDefaultBackupRanges(backupRanges);
 
+		if (self->encryptionKeyFileName.present()) {
+			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
+		}
+
 		if (self->submitOnly) {
 			TraceEvent("IBackupSubmitAttempt").log();
 			try {
@@ -174,7 +184,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True,
-				                                    {},
+				                                    self->encryptionKeyFileName,
 				                                    blobManifestUrl));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
@@ -275,7 +285,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                       UnlockDB::True,
 				                                       OnlyApplyMutationLogs::True,
 				                                       InconsistentSnapshotOnly::False,
-				                                       beginVersion)));
+				                                       beginVersion,
+				                                       self->encryptionKeyFileName)));
 			}
 			TraceEvent("IBackupRestoreAttempt").detail("BeginVersion", beginVersion);
 			wait(success(self->backupAgent.restore(cx,
@@ -293,7 +304,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       UnlockDB::True,
 			                                       OnlyApplyMutationLogs::True,
 			                                       InconsistentSnapshotOnly::False,
-			                                       beginVersion)));
+			                                       beginVersion,
+			                                       self->encryptionKeyFileName)));
 			TraceEvent("IBackupRestoreSuccess").log();
 		}
 		return Void();
