@@ -161,11 +161,11 @@ ACTOR Future<Void> printPhysicalShardCount(Database cx) {
 	return Void();
 }
 
-ACTOR Future<Void> printServerShards(Database cx, UID serverId) {
-	state Key begin = allKeys.begin;
+ACTOR Future<Void> printServerShards(Database cx, UID serverId, KeyRange range = allKeys) {
+	state Key begin = range.begin;
 	state int numShards = 0;
 
-	while (begin < allKeys.end) {
+	while (begin < range.end) {
 		// RYW to optimize re-reading the same key ranges
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
@@ -176,7 +176,7 @@ ACTOR Future<Void> printServerShards(Database cx, UID serverId) {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				RangeResult serverShards =
-				    wait(krmGetRanges(tr, serverKeysPrefixFor(serverId), KeyRangeRef(begin, allKeys.end)));
+				    wait(krmGetRanges(tr, serverKeysPrefixFor(serverId), KeyRangeRef(begin, range.end)));
 
 				for (int i = 0; i < serverShards.size() - 1; ++i) {
 					KeyRangeRef currentRange(serverShards[i].key, serverShards[i + 1].key);
@@ -184,10 +184,11 @@ ACTOR Future<Void> printServerShards(Database cx, UID serverId) {
 					bool assigned, emptyRange;
 					DataMoveType dataMoveType = DataMoveType::LOGICAL;
 					decodeServerKeysValue(serverShards[i].value, assigned, emptyRange, dataMoveType, shardId);
-					printf("Range: %s, ShardID: %s, Assigned: %s\n",
+					printf("Range: %s, ShardID: %s, Assigned: %s, Empty: %s\n",
 					       Traceable<KeyRangeRef>::toString(currentRange).c_str(),
 					       shardId.toString().c_str(),
-					       assigned ? "true" : "false");
+					       assigned ? "true" : "false",
+					       emptyRange ? "true" : "false");
 				}
 
 				begin = serverShards.back().key;
@@ -198,6 +199,8 @@ ACTOR Future<Void> printServerShards(Database cx, UID serverId) {
 			}
 		}
 	}
+
+	printf("Found %d shards for server %s\n", numShards, serverId.toString().c_str());
 
 	return Void();
 }
@@ -267,6 +270,12 @@ ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringR
 			return false;
 		}
 		wait(printServerShards(cx, UID::fromString(tokens[2].toString())));
+	} else if (tokencmp(tokens[1], "perftestservershards")) {
+		if (tokens.size() != 3) {
+			printUsage(tokens[0]);
+			return false;
+		}
+		wait(printServerShards(cx, UID::fromString(tokens[2].toString()), perfTestKeys));
 	} else if (tokencmp(tokens[1], "listshards")) {
 		if (tokens.size() == 4 && !tokencmp(tokens[3], "physical")) {
 			printUsage(tokens[0]);

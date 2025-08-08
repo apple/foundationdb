@@ -495,6 +495,8 @@ extern const KeyRef tagThrottleCountKey;
 extern const KeyRangeRef tagQuotaKeys;
 extern const KeyRef tagQuotaPrefix;
 
+extern const KeyRangeRef perfTestKeys;
+
 // Log Range constant variables
 // Used in the backup pipeline to track mutations
 // \xff/logRanges/[16-byte UID][begin key] := serialize( make_pair([end key], [destination key prefix]),

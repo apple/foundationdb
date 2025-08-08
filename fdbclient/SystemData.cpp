@@ -1184,6 +1184,9 @@ const KeyRef tagThrottleAutoEnabledKey = "\xff\x02/throttledTags/autoThrottlingE
 const KeyRef tagThrottleLimitKey = "\xff\x02/throttledTags/manualThrottleLimit"_sr;
 const KeyRef tagThrottleCountKey = "\xff\x02/throttledTags/manualThrottleCount"_sr;
 
+const KeyRangeRef perfTestKeys =
+    KeyRangeRef("\x02perf\x00\x02Random\x00\x15\x01"_sr, "\x02perf\x00\x02Random\x00\x15\x02"_sr);
+
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange("\xff\x02/fdbClientInfo/"_sr, "\xff\x02/fdbClientInfo0"_sr);
 // See remaining fields in GlobalConfig.actor.h
