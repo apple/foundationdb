@@ -204,9 +204,9 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("ConnectionIncompatible",
 			            (netData.countConnIncompatible - statState->networkState.countConnIncompatible) /
 			                currentStats.elapsed)
-			    .detail("ConnectionExpensiveMultiVersionClient",
-			            (netData.countConnExpensiveMultiVersionClient -
-			             statState->networkState.countConnExpensiveMultiVersionClient) /
+			    .detail("ConnectionIncompatibleWithOldClient",
+			            (netData.countConnIncompatibleWithOldClient -
+			             statState->networkState.countConnIncompatibleWithOldClient) /
 			                currentStats.elapsed)
 			    .detail("ClientTLSHandshakesTimedout",
 			            (netData.countClientTLSHandshakesTimedout -

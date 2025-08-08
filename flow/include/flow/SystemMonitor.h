@@ -100,7 +100,9 @@ struct NetworkData {
 	int64_t countServerTLSHandshakesOnSideThreads;
 	int64_t countServerTLSHandshakesOnMainThread;
 	int64_t countConnIncompatible;
-	int64_t countConnExpensiveMultiVersionClient;
+	int64_t countConnIncompatibleWithOldClient; // Increments when a very old client connects to fdbserver with
+	                                            // incompatible protocol version error. Please check the definition of
+	                                            // hasInexpensiveMultiVersionClient.
 	int64_t countClientTLSHandshakesTimedout;
 	int64_t countServerTLSHandshakesTimedout;
 
@@ -154,8 +156,8 @@ struct NetworkData {
 		countServerTLSHandshakesOnMainThread =
 		    Int64Metric::getValueOrDefault("Net2.CountServerTLSHandshakesOnMainThread"_sr);
 		countConnIncompatible = Int64Metric::getValueOrDefault("Net2.CountConnIncompatible"_sr);
-		countConnExpensiveMultiVersionClient =
-		    Int64Metric::getValueOrDefault("Net2.CountConnExpensiveMultiVersionClient"_sr);
+		countConnIncompatibleWithOldClient =
+		    Int64Metric::getValueOrDefault("Net2.CountConnIncompatibleWithOldClient"_sr);
 		countClientTLSHandshakesTimedout = Int64Metric::getValueOrDefault("Net2.CountClientTLSHandshakesTimedout"_sr);
 		countServerTLSHandshakesTimedout = Int64Metric::getValueOrDefault("Net2.CountServerTLSHandshakesTimedout"_sr);
 	}
