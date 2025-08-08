@@ -324,6 +324,8 @@ public:
 	Int64MetricHandle countClientTLSHandshakesOnMainThread;
 	Int64MetricHandle countServerTLSHandshakesOnSideThreads;
 	Int64MetricHandle countServerTLSHandshakesOnMainThread;
+	Int64MetricHandle countClientTLSHandshakesTimedout;
+	Int64MetricHandle countServerTLSHandshakesTimedout;
 
 	EventMetricHandle<SlowTask> slowTaskMetric;
 
@@ -1002,6 +1004,7 @@ public:
 					return Void();
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					g_net2->countServerTLSHandshakesTimedout++;
 					throw connection_failed();
 				}
 			}
@@ -1078,6 +1081,7 @@ public:
 					return Void();
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					g_net2->countClientTLSHandshakesTimedout++;
 					throw connection_failed();
 				}
 			}
@@ -1471,6 +1475,8 @@ void Net2::initMetrics() {
 	countClientTLSHandshakesOnMainThread.init("Net2.CountClientTLSHandshakesOnMainThread"_sr);
 	countServerTLSHandshakesOnSideThreads.init("Net2.CountServerTLSHandshakesOnSideThreads"_sr);
 	countServerTLSHandshakesOnMainThread.init("Net2.CountServerTLSHandshakesOnMainThread"_sr);
+	countClientTLSHandshakesTimedout.init("Net2.CountClientTLSHandshakesTimedout"_sr);
+	countServerTLSHandshakesTimedout.init("Net2.CountServerTLSHandshakesTimedout"_sr);
 	taskQueue.initMetrics();
 }
 
