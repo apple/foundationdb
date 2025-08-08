@@ -268,7 +268,13 @@ class DDTxnProcessorImpl {
 			}
 		} else {
 			TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "ReadHealthyZone", distributorId)
-			    .detail("AdditionalInfo", "Maintenance mode settings will be ignored");
+			    .detail("MaxRetries", maxRetries)
+			    .detail("AdditionalInfo",
+			            "Maintenance mode settings (if any) will be ignored until the next"
+			            " cluster restart or change to maintenance mode settings."
+			            " Warning: Data distribution may happen for storage servers in maintenance zones that"
+			            " appear to be down. Data distributor/cluster restart can be used to reattempt to read"
+			            " the maintenance mode settings.");
 		}
 		return Optional<Key>();
 	}
