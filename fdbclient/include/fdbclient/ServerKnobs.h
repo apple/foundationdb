@@ -431,6 +431,7 @@ public:
 	int SS_SERVE_BULKDUMP_PARALLELISM; // the number of bulk dump tasks that can concurrently happen at a SS
 	int64_t SS_BULKDUMP_BATCH_BYTES; // the max bytes when SS creates a batch to dump
 	int SS_BULKLOAD_GETRANGE_BATCH_SIZE; // the max number of keys to scan before do context switch
+	int DD_HEALTHY_ZONE_READ_RETRY_COUNT; // numbers of attempts to read \xff\02/healthyZone on startup
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
