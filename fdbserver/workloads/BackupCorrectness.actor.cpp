@@ -93,7 +93,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
 
 		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
-		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.1)) {
+		if (getOption(options, "encrypted"_sr, true)) {
 			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
 		}
 
