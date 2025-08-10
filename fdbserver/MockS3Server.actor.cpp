@@ -207,6 +207,14 @@ public:
 			}
 		}
 
+		// MockS3Server handles S3 HTTP requests where bucket is always the first path component
+		// For bucket operations: HEAD /bucket_name
+		// For object operations: HEAD /bucket_name/object_path
+		if (bucket.empty()) {
+			TraceEvent(SevError, "MockS3MissingBucketInPath").detail("Resource", resource).detail("QueryString", query);
+			throw backup_invalid_url();
+		}
+
 		TraceEvent("MockS3ParsedPath")
 		    .detail("OriginalResource", resource)
 		    .detail("Bucket", bucket)
@@ -953,6 +961,169 @@ ACTOR Future<Void> startMockS3Server(NetworkAddress listenAddress) {
 		TraceEvent(SevError, "MockS3ServerStartError").error(e).detail("ListenAddress", listenAddress.toString());
 		throw;
 	}
+
+	return Void();
+}
+
+// Unit Tests for MockS3Server
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ValidBucketParameter") {
+	MockS3ServerImpl server;
+	std::string resource = "/test?bucket=mybucket&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "mybucket");
+	ASSERT(object == "");
+	ASSERT(queryParams["bucket"] == "mybucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/MissingBucketParameter") {
+	MockS3ServerImpl server;
+	std::string resource = "/test?region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	try {
+		server.parseS3Request(resource, bucket, object, queryParams);
+		ASSERT(false); // Should not reach here
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_backup_invalid_url);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/EmptyQueryString") {
+	MockS3ServerImpl server;
+	std::string resource = "/test";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	try {
+		server.parseS3Request(resource, bucket, object, queryParams);
+		ASSERT(false); // Should not reach here
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_backup_invalid_url);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/BucketParameterOverride") {
+	MockS3ServerImpl server;
+	std::string resource = "/pathbucket/testobject?bucket=querybucket&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "querybucket"); // Should use query parameter, not path
+	ASSERT(object == "testobject");
+	ASSERT(queryParams["bucket"] == "querybucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ComplexPath") {
+	MockS3ServerImpl server;
+	std::string resource = "/pathbucket/folder/subfolder/file.txt?bucket=querybucket&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "querybucket"); // Should use query parameter
+	ASSERT(object == "folder/subfolder/file.txt");
+	ASSERT(queryParams["bucket"] == "querybucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/URLEncodedParameters") {
+	MockS3ServerImpl server;
+	std::string resource = "/test?bucket=my%20bucket&region=us-east-1&param=value%3Dtest";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "my bucket"); // Should be URL decoded
+	ASSERT(queryParams["bucket"] == "my bucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+	ASSERT(queryParams["param"] == "value=test"); // Should be URL decoded
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/EmptyPath") {
+	MockS3ServerImpl server;
+	std::string resource = "/?bucket=mybucket&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "mybucket");
+	ASSERT(object == "");
+	ASSERT(queryParams["bucket"] == "mybucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/OnlyBucketInPath") {
+	MockS3ServerImpl server;
+	std::string resource = "/pathbucket?bucket=querybucket&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "querybucket"); // Should use query parameter
+	ASSERT(object == "");
+	ASSERT(queryParams["bucket"] == "querybucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/MultipleParameters") {
+	MockS3ServerImpl server;
+	std::string resource = "/test?bucket=mybucket&region=us-east-1&version=1&encoding=utf8";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "mybucket");
+	ASSERT(queryParams["bucket"] == "mybucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+	ASSERT(queryParams["version"] == "1");
+	ASSERT(queryParams["encoding"] == "utf8");
+	ASSERT(queryParams.size() == 4);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ParametersWithoutValues") {
+	MockS3ServerImpl server;
+	std::string resource = "/test?bucket=mybucket&flag&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "mybucket");
+	ASSERT(queryParams["bucket"] == "mybucket");
+	ASSERT(queryParams["flag"] == ""); // Parameter without value should be empty string
+	ASSERT(queryParams["region"] == "us-east-1");
 
 	return Void();
 }

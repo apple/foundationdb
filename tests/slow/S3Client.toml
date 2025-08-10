@@ -55,4 +55,4 @@ runFailureWorkloads = false
     # Use MockS3Server with IP address - simulation doesn't support hostname resolution
     # 127.0.0.1 looks like an odd address but the simulation network actual takes care
     # clients get routed to this server at "127.0.0.1:8080".
-    s3Url = 'blobstore://testkey:testsecret:testtoken@127.0.0.1:8080/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=0&global_connection_pool=0'
+    s3Url = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=0&global_connection_pool=0'

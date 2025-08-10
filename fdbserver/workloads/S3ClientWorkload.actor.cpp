@@ -48,7 +48,6 @@ struct S3ClientWorkload : TestWorkload {
 	std::string s3Url;
 	std::string credentials;
 	std::string simfdbDir;
-
 	S3ClientWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {
 		s3Url = getOption(options, "s3Url"_sr, ""_sr).toString();
 		if (s3Url.empty()) {
@@ -84,7 +83,7 @@ private:
 		// Write the credentials file content -- hardcoded and nonsense for now. It just needs to be present.
 		writeFile(
 		    credentials,
-		    "{\"accounts\":{\"@host\":{\"api_key\":\"seaweedfs\",\"secret\":\"tot4llys3cure\",\"token\":\"TOKEN\"}}}");
+		    "{\"accounts\":{\"@host\":{\"api_key\":\"mocks3\",\"secret\":\"mocksecret\",\"token\":\"mocktoken\"}}}");
 
 		// Set the credentials file path into the global network configuration
 		auto* blobCredFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
@@ -115,7 +114,8 @@ private:
 
 			// Get the current path
 			std::string currentPath = baseUrl.substr(hostEnd, queryStart - hostEnd);
-			if (!currentPath.empty() && currentPath.back() != '/') {
+			// Ensure there's always a path separator
+			if (currentPath.empty() || currentPath.back() != '/') {
 				currentPath += '/';
 			}
 
@@ -136,6 +136,7 @@ private:
 			// Only run one time workload in the simulation
 			return Void();
 		}
+
 		if (g_network->isSimulated()) {
 			// Network partition between CC and DD can cause DD no longer existing,
 			// which results in the bulk loading task cannot complete

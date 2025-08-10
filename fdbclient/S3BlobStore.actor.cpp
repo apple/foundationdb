@@ -199,6 +199,11 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 }
 
 std::string guessRegionFromDomain(std::string domain) {
+	// Special case for localhost/127.0.0.1 to prevent basic_string exception
+	if (domain == "127.0.0.1" || domain == "localhost") {
+		return "us-east-1";
+	}
+
 	static const std::vector<const char*> knownServices = { "s3.", "cos.", "oss-", "obs." };
 	boost::algorithm::to_lower(domain);
 
@@ -843,6 +848,10 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	} else {
 		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
 	}
+
+	// Ensure connection is valid before handshake
+	ASSERT(conn.isValid());
+
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnectionSuccess")
