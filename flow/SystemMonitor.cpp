@@ -201,6 +201,21 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			            (netData.countServerTLSHandshakesOnMainThread -
 			             statState->networkState.countServerTLSHandshakesOnMainThread) /
 			                currentStats.elapsed)
+			    .detail("ConnectionIncompatible",
+			            (netData.countConnIncompatible - statState->networkState.countConnIncompatible) /
+			                currentStats.elapsed)
+			    .detail("ConnectionIncompatibleWithOldClient",
+			            (netData.countConnIncompatibleWithOldClient -
+			             statState->networkState.countConnIncompatibleWithOldClient) /
+			                currentStats.elapsed)
+			    .detail("ClientTLSHandshakesTimedout",
+			            (netData.countClientTLSHandshakesTimedout -
+			             statState->networkState.countClientTLSHandshakesTimedout) /
+			                currentStats.elapsed)
+			    .detail("ServerTLSHandshakesTimedout",
+			            (netData.countServerTLSHandshakesTimedout -
+			             statState->networkState.countServerTLSHandshakesTimedout) /
+			                currentStats.elapsed)
 
 			    .trackLatest(eventName);
 
