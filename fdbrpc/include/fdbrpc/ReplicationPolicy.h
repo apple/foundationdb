@@ -117,9 +117,9 @@ struct PolicyOne final : IReplicationPolicy {
 
 struct PolicyAcross final : IReplicationPolicy {
 	friend struct serializable_traits<PolicyAcross*>;
-	PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy);
+	PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy, Optional<bool> cacheable=Optional<bool>());
 	explicit PolicyAcross();
-	explicit PolicyAcross(const PolicyAcross& other) : PolicyAcross(other._count, other._attribKey, other._policy) {}
+	explicit PolicyAcross(const PolicyAcross& other) : PolicyAcross(other._count, other._attribKey, other._policy, other._cacheable) {}
 	~PolicyAcross() override;
 	std::string name() const override { return "Across"; }
 	std::string embeddedPolicyName() const { return _policy->name(); }
@@ -156,6 +156,7 @@ struct PolicyAcross final : IReplicationPolicy {
 	const std::string& attributeKey() const { return _attribKey; }
 
 protected:
+	Optional<bool> _cacheable;
 	int _count;
 	std::string _attribKey;
 	Reference<IReplicationPolicy> _policy;
