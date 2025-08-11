@@ -825,7 +825,7 @@ private:
 	// Set by DD or users
 	BulkLoadManifestSet manifests;
 	KeyRange taskRange;
-	Optional<int> cancelledDataMovePriority; // Set when the task is failed for unretrievable error.
+	Optional<int> cancelledDataMovePriority; // Set when the task is failed for unretryable error.
 	// In this case, we want to re-issue data move on the task range if the data move is team unhealthy related.
 };
 
