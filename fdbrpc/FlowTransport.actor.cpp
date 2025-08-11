@@ -315,6 +315,8 @@ public:
 		countConnEstablished.init("Net2.CountConnEstablished"_sr);
 		countConnClosedWithError.init("Net2.CountConnClosedWithError"_sr);
 		countConnClosedWithoutError.init("Net2.CountConnClosedWithoutError"_sr);
+		countConnIncompatible.init("Net2.CountConnIncompatible"_sr);
+		countConnIncompatibleWithOldClient.init("Net2.CountConnIncompatibleWithOldClient"_sr);
 	}
 
 	Reference<struct Peer> getPeer(NetworkAddress const& address);
@@ -343,6 +345,8 @@ public:
 	Int64MetricHandle countConnEstablished;
 	Int64MetricHandle countConnClosedWithError;
 	Int64MetricHandle countConnClosedWithoutError;
+	Int64MetricHandle countConnIncompatible;
+	Int64MetricHandle countConnIncompatibleWithOldClient;
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>> incompatiblePeers;
 	AsyncTrigger incompatiblePeersChanged;
@@ -1497,11 +1501,12 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 								    now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 							}
 							compatible = false;
+							transport->countConnIncompatible++;
 							if (!protocolVersion.hasInexpensiveMultiVersionClient()) {
 								if (peer) {
 									peer->protocolVersion->set(protocolVersion);
 								}
-
+								transport->countConnIncompatibleWithOldClient++;
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but
 								// it's safer to keep the old behavior.
 								throw incompatible_protocol_version();
