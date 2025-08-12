@@ -2356,6 +2356,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		for (; index < stores.size(); ++index) {
 			state DiskStore s = stores[index];
 			// FIXME: Error handling
+			// META-FIXME: what does the above comment refer to?  It dates to <= 2017.
+			// Either describe the problem(s) and (perhaps) make a plan to fix them, or take out the FIXME.
 			if (s.storedComponent == DiskStore::Storage) {
 				// Opening multiple KVSs at the same time could make worker run out of memory. Add delay to allow the
 				// extra storage process to be removed.
@@ -2493,6 +2495,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				TLogFn tLogFn = tLogFnForOptions(s.tLogOptions);
 				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
 				logData.push_back(SharedLogsValue());
+				// META-FIXME: Address or remove the 2019 comment below.
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
 				Future<Void> tl = tLogFn(kv,
@@ -3394,6 +3397,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(DiskStoreRequest req = waitNext(interf.diskStoreRequest.getFuture())) {
 				Standalone<VectorRef<UID>> ids;
+				// NOTE: this request is mainly for consistency checking.  The current
+				// logic below seems to be holding up OK, but if we discover bugs in this
+				// area, another approach would be to make the server here simply return
+				// everything it knows about the DiskStore, and put all the checking logic
+				// on the client side.  This makes the checking logic itself easier to test
+				// locally via test cases with defined consistency bugs.
 				for (DiskStore d : getDiskStores(folder)) {
 					bool included = true;
 					if (!req.includePartialStores) {
@@ -3415,29 +3424,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 							ASSERT(d.storeType == KeyValueStoreType::MEMORY_RADIXTREE);
 							included = fileExists(d.filename + "1.fdr");
 						}
-						if (d.storedComponent == DiskStore::COMPONENT::TLogData && included) {
+						if (d.storedComponent == DiskStore::COMPONENT::TLogData) {
+							// Changes to tlog spilling design are believed to make this check
+							// unnecessary.
 							included = false;
-							// The previous code assumed that d.filename is a filename.  But that is not true.
-							// d.filename is a path. Removing a prefix and adding a new one just makes a broken
-							// directory name.  So fileExists would always return false.
-							// Weirdly, this doesn't break anything, as tested by taking a clean check of FDB,
-							// setting included to false always, and then running correctness.  So I'm just
-							// improving the situation by actually marking it as broken.
-							// FIXME: this whole thing
-							/*
-							std::string logDataBasename;
-							StringRef filename = d.filename;
-							if (filename.startsWith(fileLogDataPrefix)) {
-							    logDataBasename = fileLogQueuePrefix.toString() +
-							d.filename.substr(fileLogDataPrefix.size()); } else { StringRef optionsString =
-							filename.removePrefix(fileVersionedLogDataPrefix).eat("-"); logDataBasename =
-							fileLogQueuePrefix.toString() + optionsString.toString() + "-";
-							}
-							TraceEvent("DiskStoreRequest").detail("FilenameBasename", logDataBasename);
-							if (fileExists(logDataBasename + "0.fdq") && fileExists(logDataBasename + "1.fdq")) {
-							    included = true;
-							}
-							*/
 						}
 					}
 					if (included) {

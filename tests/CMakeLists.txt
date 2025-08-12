@@ -169,7 +169,9 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/BlobRestoreToVersion.toml)
   add_fdb_test(TEST_FILES rare/BlobRestoreTenantMode.toml)
   add_fdb_test(TEST_FILES fast/BulkDumping.toml)
+  add_fdb_test(TEST_FILES slow/BulkDumpingS3.toml)
   add_fdb_test(TEST_FILES fast/BulkLoading.toml)
+  add_fdb_test(TEST_FILES slow/S3Client.toml)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
   add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml IGNORE)
@@ -411,17 +413,29 @@ if(WITH_PYTHON)
       TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCorrectness-1.toml
       restarting/from_7.3.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
     add_fdb_test(
-      TEST_FILES restarting/from_7.3.0/SnapCycleRestart-1.toml
-      restarting/from_7.3.0/SnapCycleRestart-2.toml)
+      TEST_FILES restarting/from_7.3.0_until_7.4.0/SnapCycleRestart-1.toml
+      restarting/from_7.3.0_until_7.4.0/SnapCycleRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/from_7.3.0/SnapTestAttrition-1.toml
-      restarting/from_7.3.0/SnapTestAttrition-2.toml)
+      TEST_FILES restarting/from_7.3.0_until_7.4.0/SnapTestAttrition-1.toml
+      restarting/from_7.3.0_until_7.4.0/SnapTestAttrition-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/from_7.3.0/SnapTestSimpleRestart-1.toml
-      restarting/from_7.3.0/SnapTestSimpleRestart-2.toml)
+      TEST_FILES restarting/from_7.3.0_until_7.4.0/SnapTestSimpleRestart-1.toml
+      restarting/from_7.3.0_until_7.4.0/SnapTestSimpleRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/from_7.3.0/SnapTestRestart-1.toml
-      restarting/from_7.3.0/SnapTestRestart-2.toml)
+      TEST_FILES restarting/from_7.3.0_until_7.4.0/SnapTestRestart-1.toml
+      restarting/from_7.3.0_until_7.4.0/SnapTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.4.0/SnapCycleRestart-1.toml
+      restarting/from_7.4.0/SnapCycleRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.4.0/SnapTestAttrition-1.toml
+      restarting/from_7.4.0/SnapTestAttrition-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.4.0/SnapTestSimpleRestart-1.toml
+      restarting/from_7.4.0/SnapTestSimpleRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.4.0/SnapTestRestart-1.toml
+      restarting/from_7.4.0/SnapTestRestart-2.toml)
     add_fdb_test(
       TEST_FILES restarting/from_7.3.49/ClientMetricRestart-1.toml
       restarting/from_7.3.49/ClientMetricRestart-2.toml)

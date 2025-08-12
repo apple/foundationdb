@@ -8697,6 +8697,8 @@ ACTOR Future<Void> bulkLoadFetchKeyValueFileToLoad(StorageServer* data,
 	state std::shared_ptr<BulkLoadFileSetKeyMap> fromRemoteFileSets = std::make_shared<BulkLoadFileSetKeyMap>();
 	for (const auto& manifest : bulkLoadTaskState.getManifests()) {
 		fromRemoteFileSets->push_back(std::make_pair(manifest.getRange(), manifest.getFileSet()));
+		// Note that manifest.range may contain more than the task range. We will cut-off data outside the task
+		// range when we read the kvs.
 	}
 	wait(bulkLoadDownloadTaskFileSets(
 	    bulkLoadTaskState.getTransportMethod(), fromRemoteFileSets, localFileSets, dir, data->thisServerID));
@@ -8769,7 +8771,7 @@ ACTOR Future<Void> tryGetRangeForBulkLoadFromSST(PromiseStream<RangeResult> resu
 }
 
 ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
-                                          KeyRange keys,
+                                          KeyRange keys /* only read data within the keys */,
                                           std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
 	try {
 		// Build bulkLoadFileSetsToLoad
@@ -8805,6 +8807,7 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 
 // Utility function to process sample files during bulk load
 ACTOR static Future<Void> processSampleFiles(StorageServer* data,
+                                             KeyRange maxRange,
                                              std::string bulkLoadLocalDir,
                                              std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) {
 	state BulkLoadFileSetKeyMap::const_iterator iter = localFileSets->begin();
@@ -8841,6 +8844,10 @@ ACTOR static Future<Void> processSampleFiles(StorageServer* data,
 					// Now apply all read samples to the in-memory set and update metrics
 					for (const auto& kv : rawSamples) {
 						const KeyRef& key = kv.key;
+						if (!maxRange.contains(key)) {
+							// Skip keys outside the maxRange
+							continue;
+						}
 						int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
 						data->metrics.byteSample.sample.insert(key, size);
 						data->metrics.notifyBytes(key, size);
@@ -9124,6 +9131,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				ASSERT(bulkLoadTaskState.getDataMoveId() == dataMoveId);
 				// We download the data file to local disk and pass the data file path to read in the next step.
 				localBulkLoadFileSets = std::make_shared<BulkLoadFileSetKeyMap>();
+				// A bulkload task can do file ingestion if the task range is aligned with manifests' range.
+				state bool bulkloadCanIngestSSTFile = bulkLoadTaskState.canIngestFile();
 				wait(bulkLoadFetchKeyValueFileToLoad(
 				    data, bulkLoadLocalDir, bulkLoadTaskState, /*output=*/localBulkLoadFileSets));
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
@@ -9133,9 +9142,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("SupportsSstIngestion", data->storage.getKeyValueStore()->supportsSstIngestion())
 				    .detail("Phase", "File download")
 				    .detail("FKID", fetchKeysID);
-				// Attempt SST ingestion...
+				// Do SST ingestion if (1) the knob is enabled, (2) the storage engine supports SST ingestion, and
+				// (3) the task range is aligned with manifests' range.
 				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
-				    data->storage.getKeyValueStore()->supportsSstIngestion()) {
+				    data->storage.getKeyValueStore()->supportsSstIngestion() && bulkloadCanIngestSSTFile) {
 					TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 					    .detail("DataMoveId", dataMoveId.toString())
 					    .detail("Range", keys)
@@ -9166,12 +9176,21 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					wait(data->storage.getKeyValueStore()->compactRange(keys));
 
 					// Process sample files after SST ingestion
-					wait(processSampleFiles(data, bulkLoadLocalDir, localBulkLoadFileSets));
+					wait(processSampleFiles(data, keys, bulkLoadLocalDir, localBulkLoadFileSets));
 
 					// NOTICE: We break the 'fetchKeys' loop here if we successfully ingest the SST files.
 					// EARLY EXIT FROM 'fetchKeys' LOOP!!!
 					break;
 				} else {
+					if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
+					    data->storage.getKeyValueStore()->supportsSstIngestion()) {
+						ASSERT(!bulkloadCanIngestSSTFile);
+						TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
+						    .detail("DataMoveId", dataMoveId.toString())
+						    .detail("Range", keys)
+						    .detail("Phase", "SST ingestion give up due to task range not aligned with manifests")
+						    .detail("FKID", fetchKeysID);
+					}
 					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
 					rangeEnd = keys.end;
 				}

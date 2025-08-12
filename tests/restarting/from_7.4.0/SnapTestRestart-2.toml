@@ -1,0 +1,13 @@
+[configuration]
+storageEngineExcludeTypes=[4,5]
+buggify=false
+
+[[test]]
+testTitle="SnapTestVerify"
+
+    [[test.workload]]
+    testName="SnapTest"
+    numSnaps=1
+    maxSnapDelay=3.0
+    testID=3
+    enableDD=true

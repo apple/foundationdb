@@ -57,6 +57,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	bool success;
 	Database extraDB;
 	bool useExtraDB;
+	double zeroPaddingRatio;
 
 	WriteDuringReadWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), success(true) {
@@ -68,6 +69,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		maximumDataWritten = getOption(options, "maximumDataWritten"_sr, std::numeric_limits<int64_t>::max());
 		minNode = getOption(options, "minNode"_sr, 0);
 		useSystemKeys = getOption(options, "useSystemKeys"_sr, deterministicRandom()->random01() < 0.5);
+		zeroPaddingRatio = getOption(options, "zeroPaddingRatio"_sr, 0.15);
 		adjacentKeys = deterministicRandom()->random01() < 0.5;
 		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first
 		                                                       // transaction (and after an unknown result)
@@ -603,8 +605,16 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	Value getRandomValue() {
-		return Value(
-		    std::string(deterministicRandom()->randomInt(valueSizeRange.first, valueSizeRange.second + 1), 'x'));
+		int length = deterministicRandom()->randomInt(valueSizeRange.first, valueSizeRange.second + 1);
+		int zeroPadding = static_cast<int>(zeroPaddingRatio * length);
+		if (zeroPadding > length) {
+			zeroPadding = length;
+		}
+		std::string valueString = deterministicRandom()->randomAlphaNumeric(length);
+		for (int i = 0; i < zeroPadding; ++i) {
+			valueString[i] = '\0';
+		}
+		return StringRef((uint8_t*)valueString.c_str(), length);
 	}
 
 	// Prevent a write only transaction whose commit was previously cancelled from being reordered after this

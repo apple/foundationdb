@@ -2179,36 +2179,6 @@ void* allocate(size_t length, bool allowLargePages, bool includeGuardPages) {
 	return block;
 }
 
-#if 0
-void* numaAllocate(size_t size) {
-	void* thePtr = (void*)0xA00000000LL;
-	enableLargePages();
-
-	size_t vaPageSize = 2<<20;//64<<10;
-	int nVAPages = size / vaPageSize;
-
-	int nodes;
-	if (!GetNumaHighestNodeNumber((PULONG)&nodes)) {
-		TraceEvent(SevError, "GetNumaHighestNodeNumber").getLastError();
-		throw platform_error();
-	}
-	++nodes;
-
-	for(int i=0; i<nodes; i++) {
-		char* p = (char*)thePtr + i*nVAPages/nodes*vaPageSize;
-		char* e = (char*)thePtr + (i+1)*nVAPages/nodes*vaPageSize;
-		//printf("  %p + %lld\n", p, e-p);
-		// SOMEDAY: removed NUMA extensions for compatibility with Windows Server 2003 -- make execution dynamic
-		if (!VirtualAlloc/*ExNuma*/(/*GetCurrentProcess(),*/ p, e-p, MEM_COMMIT|MEM_RESERVE|MEM_LARGE_PAGES, PAGE_READWRITE/*, i*/)) {
-			Error e = platform_error();
-			TraceEvent(e, "VirtualAlloc").GetLastError();
-			throw e;
-		}
-	}
-	return thePtr;
-}
-#endif
-
 void setAffinity(int proc) {
 #if defined(_WIN32)
 	/*if (SetProcessAffinityMask(GetCurrentProcess(), 0x5555))//0x5555555555555555UL))
@@ -2242,11 +2212,16 @@ int getRandomSeed() {
 	}
 #else
 	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed)) {
+	if (devRandom == -1) {
 		TraceEvent(SevError, "OpenURandom").GetLastError();
 		throw platform_error();
 	}
+	int nbytes = read(devRandom, &randomSeed, sizeof(randomSeed));
 	close(devRandom);
+	if (nbytes != sizeof(randomSeed)) {
+		TraceEvent(SevError, "ReadURandom").GetLastError();
+		throw platform_error();
+	}
 #endif
 
 	return randomSeed;
@@ -3165,7 +3140,15 @@ std::string getDefaultClusterFilePath() {
 #ifdef __linux__
 #include <cxxabi.h>
 #endif
-uint8_t* g_extra_memory;
+static uint8_t* g_extra_memory;
+
+// Allocate some memory on startup so that we can free it if outOfMemory() is
+// called. This gives some breathing room to generate diagnostics.
+void allocInstrumentationInit(void) {
+	g_extra_memory = new uint8_t[1000000];
+}
+#else
+void allocInstrumentationInit() {}
 #endif
 
 namespace platform {
@@ -3655,6 +3638,8 @@ void platformInit() {
 		              "clock_gettime(CLOCK_MONOTONIC, ...) returned an error. Check your kernel and glibc versions.");
 	}
 #endif
+
+	allocInstrumentationInit();
 }
 
 std::vector<std::function<void()>> g_crashHandlerCallbacks;

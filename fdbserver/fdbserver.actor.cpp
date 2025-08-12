@@ -261,10 +261,6 @@ extern void flushTraceFileVoid();
 
 extern const int MAX_CLUSTER_FILE_BYTES;
 
-#ifdef ALLOC_INSTRUMENTATION
-extern uint8_t* g_extra_memory;
-#endif
-
 bool enableFailures = true;
 
 #define test_assert(x)                                                                                                 \
@@ -1996,9 +1992,6 @@ int main(int argc, char* argv[]) {
 	try {
 		platformInit();
 
-#ifdef ALLOC_INSTRUMENTATION
-		g_extra_memory = new uint8_t[1000000];
-#endif
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error

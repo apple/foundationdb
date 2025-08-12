@@ -46,6 +46,7 @@
 #include "fdbserver/MockDataDistributor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
+#include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
@@ -398,6 +399,11 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self);
 struct DDBulkLoadJobManager {
 	BulkLoadJobState jobState;
 	BulkLoadTransportMethod jobTransportMethod;
+	// manifestEntryMap is a map from the begin key of the manifest to the manifest entry.
+	// The end key of the current manifest is the begin key of the next manifest.
+	// When the task range is aligned with the manifest range, every key is the begin key of the corresponding manifest.
+	// When the task range is not aligned with the manifest range, the first key is the task begin key which can be
+	// larger than the corresponding manifest begin key.
 	std::shared_ptr<BulkLoadManifestFileMap> manifestEntryMap;
 	std::string manifestLocalTempFolder;
 	bool allTaskSubmitted = false;
@@ -1206,8 +1212,6 @@ ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
 }
 
 // A bulk load task is guaranteed to be either complete or overwritten by another task
-// When a bulk load task is trigged, the range traffic is turned off atomically
-// If the task completes, the task re-enables the traffic atomically
 ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
 	state Promise<BulkLoadAck> completeAck;
 	state BulkLoadTaskState triggeredBulkLoadTask;
@@ -1240,9 +1244,9 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		// completed by itself or replaced by a data move on the overlapping range
 		self->triggerShardBulkLoading.send(BulkLoadShardRequest(triggeredBulkLoadTask));
 		state BulkLoadAck ack = wait(completeAck.getFuture()); // proceed when a data move completes with this task
-		if (ack.unretrievableError) {
+		if (ack.unretryableError) {
 			TraceEvent(SevWarnAlways, "DDBulkLoadTaskDoTask", self->ddId)
-			    .detail("Phase", "See unretrievable error")
+			    .detail("Phase", "See unretryable error")
 			    .detail("CancelledDataMovePriority", ack.dataMovePriority)
 			    .detail("Range", range)
 			    .detail("TaskID", taskId)
@@ -1443,48 +1447,69 @@ ACTOR Future<Void> bulkLoadTaskCore(Reference<DataDistributor> self, Future<Void
 	}
 }
 
-ACTOR Future<Void> checkBulkLoadJob(Transaction* tr, UID jobId) {
-	state RangeResult rangeResult;
-	// At most one job at a time, so looking at the first returned range is sufficient
-	wait(store(rangeResult, krmGetRanges(tr, bulkLoadJobPrefix, normalKeys)));
-	ASSERT(rangeResult.size() >= 2 && rangeResult.size() <= 3);
-	ASSERT(rangeResult[0].key == normalKeys.begin);
-	if (rangeResult[0].value.empty()) {
-		throw bulkload_task_outdated();
+void explainBulkLoadJobGetRangeResult(const RangeResult& rangeResult) {
+	TraceEvent(SevInfo, "DDBulkLoadJobExplainRangeResult").detail("Size", rangeResult.size());
+	for (int i = 0; i < rangeResult.size(); i++) {
+		TraceEvent e(SevInfo, "DDBulkLoadJobExplainRangeResultKV");
+		e.detail("Key", rangeResult[i].key);
+		if (rangeResult[i].value.empty()) {
+			e.detail("Val", "empty");
+		} else {
+			BulkLoadJobState currentJobState = decodeBulkLoadJobState(rangeResult[i].value);
+			e.detail("Val", currentJobState.toString());
+		}
 	}
-	BulkLoadJobState currentJobState = decodeBulkLoadJobState(rangeResult[0].value);
-	if (!currentJobState.isValid()) {
-		throw bulkload_task_outdated();
-	}
-	if (currentJobState.getJobId() != jobId) {
-		throw bulkload_task_outdated();
-	}
-	return Void();
 }
 
-ACTOR Future<BulkLoadJobState> getBulkLoadJob(Transaction* tr, UID jobId) {
+// Return the current bulk load job state for the given jobId and jobRange
+// If the job is not found or outdated, throw bulkload_task_outdated error
+ACTOR Future<BulkLoadJobState> getBulkLoadJob(Transaction* tr, UID jobId, KeyRange jobRange) {
 	state RangeResult rangeResult;
-	// At most one job at a time, so looking at the first returned range is sufficient
-	wait(store(rangeResult, krmGetRanges(tr, bulkLoadJobPrefix, normalKeys)));
-	ASSERT(rangeResult.size() >= 2 && rangeResult.size() <= 3);
-	ASSERT(rangeResult[0].key == normalKeys.begin);
-	if (rangeResult[0].value.empty()) {
-		throw bulkload_task_outdated();
+	state std::string errorMessage;
+	try {
+		wait(store(rangeResult, krmGetRanges(tr, bulkLoadJobPrefix, jobRange)));
+		if (rangeResult.size() != 2 && rangeResult.size() != 3) {
+			// In the middle of finalizing a bulk load job, the size is 3
+			errorMessage = fmt::format("Expected 2 or 3 results for bulk load job {} in range {}, but got {} results",
+			                           jobId.toString(),
+			                           jobRange.toString(),
+			                           std::to_string(rangeResult.size()));
+			throw bulkload_task_outdated();
+		}
+		if (rangeResult[0].value.empty()) {
+			errorMessage = fmt::format("No bulk load job found in range {}", jobRange.toString());
+			throw bulkload_task_outdated();
+		}
+		BulkLoadJobState currentJobState = decodeBulkLoadJobState(rangeResult[0].value);
+		if (!currentJobState.isValid()) {
+			errorMessage = fmt::format("No valid bulk load job in range {}", jobRange.toString());
+			throw bulkload_task_outdated();
+		}
+		if (currentJobState.getJobId() != jobId || currentJobState.getJobRange() != jobRange) {
+			errorMessage = fmt::format("Bulk load job {} in range {} is outdated, expected jobId {}",
+			                           currentJobState.getJobId().toString(),
+			                           jobRange.toString(),
+			                           jobId.toString());
+			throw bulkload_task_outdated();
+		}
+		return currentJobState;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		if (g_network->isSimulated() && e.code() == error_code_bulkload_task_outdated) {
+			explainBulkLoadJobGetRangeResult(rangeResult);
+		}
+		TraceEvent(SevWarn, "DDBulkLoadJobGetError", jobId).errorUnsuppressed(e).detail("Message", errorMessage);
+		throw e;
 	}
-	BulkLoadJobState currentJobState = decodeBulkLoadJobState(rangeResult[0].value);
-	if (!currentJobState.isValid()) {
-		throw bulkload_task_outdated();
-	}
-	if (currentJobState.getJobId() != jobId) {
-		throw bulkload_task_outdated();
-	}
-	return currentJobState;
 }
 
 // Find task metadata for a bulk load job with jobId and input range
 ACTOR Future<Optional<BulkLoadTaskState>> bulkLoadJobFindTask(Reference<DataDistributor> self,
                                                               KeyRange range,
                                                               UID jobId,
+                                                              KeyRange jobRange,
                                                               UID logId) {
 	state BulkLoadTaskState bulkLoadTaskState;
 	state Database cx = self->txnProcessor->context();
@@ -1492,7 +1517,8 @@ ACTOR Future<Optional<BulkLoadTaskState>> bulkLoadJobFindTask(Reference<DataDist
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			wait(checkBulkLoadJob(&tr, jobId)); // Make sure the current job is the input one
+			BulkLoadJobState checkJobState =
+			    wait(getBulkLoadJob(&tr, jobId, jobRange)); // Make sure the current job is the input one
 			ASSERT(!range.empty());
 			RangeResult result = wait(krmGetRanges(&tr, bulkLoadTaskPrefix, range));
 			// The task map has been initialized when submitBulkLoadJob, so we check the invariant here.
@@ -1524,11 +1550,12 @@ ACTOR Future<Optional<BulkLoadTaskState>> bulkLoadJobFindTask(Reference<DataDist
 // Submit a bulkload task for the given jobId
 ACTOR Future<BulkLoadTaskState> bulkLoadJobSubmitTask(Reference<DataDistributor> self,
                                                       UID jobId,
-                                                      BulkLoadManifestSet manifests) {
+                                                      BulkLoadManifestSet manifests,
+                                                      KeyRange taskRange) {
 	state Database cx = self->txnProcessor->context();
 	state Transaction tr(cx);
 	// We define the task range is the range of the min begin key and the max end key among all input manifests
-	state BulkLoadTaskState bulkLoadTask(jobId, manifests);
+	state BulkLoadTaskState bulkLoadTask(jobId, manifests, taskRange);
 	loop {
 		try {
 			// At any time, there must be at most one bulkload job
@@ -1552,7 +1579,6 @@ ACTOR Future<BulkLoadTaskState> bulkLoadJobSubmitTask(Reference<DataDistributor>
 	return bulkLoadTask;
 }
 
-// If the task reaches unretrievable error, return true; otherwise, return false.
 ACTOR Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistributor> self,
                                                            UID jobId,
                                                            BulkLoadTaskState bulkLoadTask) {
@@ -1576,7 +1602,7 @@ ACTOR Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistrib
 				throw bulkload_task_outdated();
 			}
 			if (currentTask.phase == BulkLoadPhase::Error) {
-				TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorFindUnretrievableError", self->ddId)
+				TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorFindUnretryableError", self->ddId)
 				    .detail("InputJobID", jobId)
 				    .detail("TaskJobID", currentTask.getJobId())
 				    .detail("TaskRange", currentTask.getRange())
@@ -1593,12 +1619,21 @@ ACTOR Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistrib
 	}
 }
 
+// A bulkload job can contain multiple tasks. Each task can contain multiple manifests.
+// Given a job range, the bulkload task range is defined as the range between the min begin key and the max end key of
+// all manifests, overlapping with the maxRange (i.e. the job range).
+KeyRange generateBulkLoadTaskRange(const BulkLoadManifestSet& manifests, const KeyRange& maxRange) {
+	KeyRange manifestsRange = Standalone(KeyRangeRef(manifests.getMinBeginKey(), manifests.getMaxEndKey()));
+	return manifestsRange & maxRange; // ensure the task range is within the maxRange
+}
+
 // Given a list of manifestEntry, create a bulkload task.
 // There is an invariant by bulkload engine: if a task metadata is persisted, the task
 // is guaranteed to be eventually marked as complete or error.
 ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
                                       UID jobId,
                                       std::string jobRoot,
+                                      KeyRange jobRange,
                                       BulkLoadTransportMethod jobTransportMethod,
                                       std::string manifestLocalTempFolder,
                                       std::vector<BulkLoadJobFileManifestEntry> manifestEntries,
@@ -1607,17 +1642,19 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 	state BulkLoadTaskState bulkLoadTask;
 	state BulkLoadManifestSet manifests;
 	state double beginTime = now();
+	state KeyRange taskRange;
 	ASSERT(!manifestEntries.empty());
 	try {
 		// Step 1: Get manifest metadata by downloading the manifest file
 		wait(store(manifests,
 		           getBulkLoadManifestMetadataFromEntry(
 		               manifestEntries, manifestLocalTempFolder, jobTransportMethod, jobRoot, self->ddId)));
+		taskRange = generateBulkLoadTaskRange(manifests, jobRange);
 
 		// Step 2: Check if the task has been created
 		// We define the task range as the range between the min begin key and the max end key of all manifests
-		Optional<BulkLoadTaskState> bulkLoadTask_ = wait(bulkLoadJobFindTask(
-		    self, KeyRangeRef(manifests.getMinBeginKey(), manifests.getMaxEndKey()), jobId, self->ddId));
+		Optional<BulkLoadTaskState> bulkLoadTask_ =
+		    wait(bulkLoadJobFindTask(self, taskRange, jobId, jobRange, self->ddId));
 		if (bulkLoadTask_.present()) {
 			// The task was not existing in the metadata but existing now. So, we need not create the task.
 			return Void();
@@ -1628,13 +1665,20 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		// job Id. This case should never happen because before the newer job starts, the old job has
 		// completed or cancelled.
 		manifests.setRootPath(jobRoot);
-		wait(store(bulkLoadTask, bulkLoadJobSubmitTask(self, jobId, manifests)));
+		// A manifest's range is exactly the data range that the manifest covers.
+		// The task range is the union of all manifest ranges overlapping with the job range.
+		// It is possible that the task range is smaller than the manifests range. As a result,
+		// the manifests can contain more data outside the task range.
+		// The task range is the source of truth for the data that the task will cover.
+		// The task range is used to filter out data outside the task range when the SS loading the data.
+		wait(store(bulkLoadTask, bulkLoadJobSubmitTask(self, jobId, manifests, taskRange)));
 
 		TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadJobExecutorTask", self->ddId)
 		    .detail("Phase", "Task submitted")
 		    .detail("JobID", jobId)
 		    .detail("TaskID", bulkLoadTask.getTaskId())
 		    .detail("TaskRange", bulkLoadTask.getRange())
+		    .detail("JobRange", jobRange)
 		    .detail("Duration", now() - beginTime);
 
 		if (g_network->isSimulated() && SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION &&
@@ -1651,6 +1695,7 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		    .detail("JobID", jobId)
 		    .detail("TaskID", bulkLoadTask.getTaskId())
 		    .detail("TaskRange", bulkLoadTask.getRange())
+		    .detail("JobRange", jobRange)
 		    .detail("Duration", now() - beginTime);
 		if (errorOut.canBeSet()) {
 			errorOut.sendError(e);
@@ -1666,6 +1711,7 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 // is guaranteed to be eventually marked as complete or error.
 ACTOR Future<Void> bulkLoadJobMonitorTask(Reference<DataDistributor> self,
                                           UID jobId,
+                                          KeyRange jobRange,
                                           KeyRange taskRange,
                                           Promise<Void> errorOut) {
 	state Database cx = self->txnProcessor->context();
@@ -1675,7 +1721,8 @@ ACTOR Future<Void> bulkLoadJobMonitorTask(Reference<DataDistributor> self,
 	self->bulkLoadParallelismLimitor.incrementTaskCounter();
 	try {
 		// Step 1: Check if the task has been created
-		Optional<BulkLoadTaskState> bulkLoadTask_ = wait(bulkLoadJobFindTask(self, taskRange, jobId, self->ddId));
+		Optional<BulkLoadTaskState> bulkLoadTask_ =
+		    wait(bulkLoadJobFindTask(self, taskRange, jobId, jobRange, self->ddId));
 		if (!bulkLoadTask_.present()) {
 			// The task was existing in the metadata but now disappear. So, we need not monitor the task.
 			self->bulkLoadParallelismLimitor.decrementTaskCounter();
@@ -1734,7 +1781,7 @@ ACTOR Future<Void> persistBulkLoadJobTaskCount(Reference<DataDistributor> self) 
 	state BulkLoadJobState currentJobState;
 	loop {
 		try {
-			wait(store(currentJobState, getBulkLoadJob(&tr, jobId)));
+			wait(store(currentJobState, getBulkLoadJob(&tr, jobId, jobRange)));
 			if (currentJobState.getTaskCount().present()) {
 				if (currentJobState.getTaskCount().get() != taskCount) {
 					TraceEvent(SevError, "DDBulkLoadJobManagerFindTaskCountMismatch", self->ddId)
@@ -1772,15 +1819,17 @@ ACTOR Future<Void> moveErrorBulkLoadJobToHistory(Reference<DataDistributor> self
 	state BulkLoadJobState currentJobState;
 	ASSERT(self->bulkLoadJobManager.present() && self->bulkLoadJobManager.get().isValid());
 	state UID jobId = self->bulkLoadJobManager.get().jobState.getJobId();
+	state KeyRange jobRange = self->bulkLoadJobManager.get().jobState.getJobRange();
 	loop {
 		try {
 			wait(checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get()));
-			wait(store(currentJobState, getBulkLoadJob(&tr, jobId)));
+			wait(store(currentJobState, getBulkLoadJob(&tr, jobId, jobRange)));
 			wait(krmSetRange(
 			    &tr, bulkLoadJobPrefix, currentJobState.getJobRange(), bulkLoadJobValue(BulkLoadJobState())));
 			currentJobState.setErrorPhase(errorMessage);
 			currentJobState.setEndTime(now());
 			wait(addBulkLoadJobToHistory(&tr, currentJobState));
+			wait(releaseExclusiveReadLockOnRange(&tr, jobRange, rangeLockNameForBulkLoad));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -1801,6 +1850,7 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 	       self->bulkLoadJobManager.get().manifestEntryMap->empty());
 	state double beginTime = now();
 	state KeyRange jobRange = self->bulkLoadJobManager.get().jobState.getJobRange();
+	state KeyRange manifestMapRange;
 	try {
 		if (!fileExists(abspath(localJobManifestFilePath))) {
 			TraceEvent(SevDebug, "DDBulkLoadJobManagerDownloadJobManifest", self->ddId)
@@ -1818,11 +1868,20 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 		// At this point, we have the global job manifest file stored locally at localJobManifestFilePath.
 		// This job manifest file stores all remote manifest filepath per range.
 		// Here, we want to get all manifest entries of the file with in the range specified by jobRange.
-		wait(getBulkLoadJobFileManifestEntryFromJobManifestFile(
-		    localJobManifestFilePath,
-		    jobRange,
-		    self->ddId,
-		    /*output=*/self->bulkLoadJobManager.get().manifestEntryMap));
+		wait(store(manifestMapRange,
+		           getBulkLoadJobFileManifestEntryFromJobManifestFile(
+		               localJobManifestFilePath,
+		               jobRange,
+		               self->ddId,
+		               /*output=*/self->bulkLoadJobManager.get().manifestEntryMap)));
+		// It is possible that the bulkload job is using a data set that does not entirely contain the bulkload job
+		// range. In this case, we give up the bulkload job immediately without loading any range..
+		if (self->bulkLoadJobManager.get().jobState.getJobRange() != manifestMapRange) {
+			TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerManifestMapRangeMismatch", self->ddId)
+			    .detail("JobRange", jobRange)
+			    .detail("ManifestMapRange", manifestMapRange);
+			throw bulkload_dataset_not_cover_required_range();
+		}
 		self->bulkLoadJobManager.get().jobState.setTaskCount(self->bulkLoadJobManager.get().manifestEntryMap->size());
 		TraceEvent(SevInfo, "DDBulkLoadJobManagerManifestMapBuilt", self->ddId)
 		    .detail("JobTransportMethod", jobTransportMethod)
@@ -1835,7 +1894,7 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 			throw e;
 		}
 		state Error err = e;
-		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerFindUnretrievableError", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerFindUnretryableError", self->ddId)
 		    .errorUnsuppressed(err)
 		    .detail("JobTransportMethod", jobTransportMethod)
 		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
@@ -1847,7 +1906,7 @@ ACTOR Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> 
 		                           ". The transport method is " +
 		                           convertBulkLoadTransportMethodToString(jobTransportMethod) + ".";
 		wait(moveErrorBulkLoadJobToHistory(self, errorMessage));
-		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerPersistUnretrievableError", self->ddId)
+		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerPersistUnretryableError", self->ddId)
 		    .errorUnsuppressed(err)
 		    .detail("JobTransportMethod", jobTransportMethod)
 		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
@@ -1884,7 +1943,10 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 						if (task.getJobId() != self->bulkLoadJobManager.get().jobState.getJobId()) {
 							throw bulkload_task_outdated();
 						}
-						// Check key invariant, the task begin key must be in the manifestEntryMap
+						// Check key invariant, the task begin key must be in the manifestEntryMap.
+						// No matter whether the task range is aligned with the manifest entry range, the task
+						// begin key must be in the manifestEntryMap. See manifestEntryMap definition for more
+						// details.
 						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->find(task.getRange().begin) !=
 						       self->bulkLoadJobManager.get().manifestEntryMap->end());
 						if (task.onAnyPhase(
@@ -1907,8 +1969,8 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 									wait(self->bulkLoadParallelismLimitor.waitUntilCounterChanged());
 								}
 								// Monitor submitted tasks
-								actors.push_back(
-								    bulkLoadJobMonitorTask(self, task.getJobId(), task.getRange(), errorOut));
+								actors.push_back(bulkLoadJobMonitorTask(
+								    self, task.getJobId(), jobState.getJobRange(), task.getRange(), errorOut));
 							}
 							ASSERT(task.getRange().end == res[i + 1].key);
 							beginKey = task.getRange().end;
@@ -1937,15 +1999,16 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 					actors.push_back(bulkLoadJobNewTask(self,
 					                                    jobState.getJobId(),
 					                                    jobState.getJobRoot(),
+					                                    jobState.getJobRange(),
 					                                    jobState.getTransportMethod(),
 					                                    self->bulkLoadJobManager.get().manifestLocalTempFolder,
 					                                    manifestEntries,
 					                                    errorOut));
 					wait(delay(SERVER_KNOBS->DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC)); // Avoid busy loop
 				}
-				ASSERT(beginKey == res[i + 1].key);
+				ASSERT(beginKey == res[i + 1].key || beginKey > jobState.getJobRange().end);
 			}
-			if (beginKey == jobState.getJobRange().end) {
+			if (beginKey >= jobState.getJobRange().end) {
 				// last round
 				self->bulkLoadJobManager.get().allTaskSubmitted = true;
 				break;
@@ -1972,7 +2035,7 @@ ACTOR Future<bool> checkBulkLoadTaskCompleteOrError(Reference<DataDistributor> s
 		try {
 			bulkLoadTaskResult.clear();
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-			wait(checkBulkLoadJob(&tr, jobState.getJobId()));
+			BulkLoadJobState checkJobState = wait(getBulkLoadJob(&tr, jobState.getJobId(), jobState.getJobRange()));
 			wait(store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, rangeToRead)));
 			for (int i = 0; i < bulkLoadTaskResult.size() - 1; i++) {
 				ASSERT(!bulkLoadTaskResult[i].value.empty());
@@ -2034,7 +2097,7 @@ ACTOR Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 		try {
 			tr.reset();
 			bulkLoadTaskResult.clear();
-			BulkLoadJobState currentJobState = wait(getBulkLoadJob(&tr, jobState.getJobId()));
+			BulkLoadJobState currentJobState = wait(getBulkLoadJob(&tr, jobState.getJobId(), jobState.getJobRange()));
 			hasError = hasError && (currentJobState.getPhase() == BulkLoadJobPhase::Error);
 			wait(store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey))));
 			i = 0;
@@ -2202,7 +2265,7 @@ ACTOR Future<Void> bulkLoadJobCore(Reference<DataDistributor> self, Future<Void>
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-			TraceEvent(SevWarn, "DDBulkLoadJobManagerError", self->ddId).errorUnsuppressed(e);
+			TraceEvent(SevWarn, "DDBulkLoadJobManagerError", self->ddId).errorUnsuppressed(e).backtrace();
 			if (e.code() == error_code_movekeys_conflict) {
 				throw e;
 			}
@@ -2591,12 +2654,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	if (!isMocked) {
 		Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 		cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
-		// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
-		// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
-		// SERVER_KNOBS->DD_LOCATION_CACHE_SIZE
-		// );
 		self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
-		// wait(debugCheckCoalescing(self->txnProcessor->context()));
 	} else {
 		ASSERT(self->txnProcessor.isValid() && self->txnProcessor->isMocked());
 	}
@@ -2624,9 +2682,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Metadata Initialized");
 
-			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
-			ASSERT(self->configuration.storageTeamSize > 0);
-
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
 			state PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
@@ -2652,9 +2707,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			tcis.push_back(TeamCollectionInterface());
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
+			ASSERT(self->configuration.storageTeamSize > 0);
 			int replicaSize = self->configuration.storageTeamSize;
 
-			std::vector<Future<Void>> actors; // the container of ACTORs
+			std::vector<Future<Void>> actors;
 			actors.push_back(self->onConfigChange);
 
 			if (self->configuration.usableRegions > 1) {
@@ -3019,7 +3075,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 					}
 				}
 			}
-			// calculate fault tolerance
+
 			*storageFaultTolerance = std::min(static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE),
 			                                  configuration.storageTeamSize - 1) -
 			                         storageFailures;
@@ -3027,7 +3083,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				CODE_PROBE(true, "Too many failed storage servers to complete snapshot", probe::decoration::rare);
 				throw snap_storage_failed();
 			}
-			// tlogs
+
 			for (const auto& tlog : *tlogs) {
 				TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
 				if (workersMap.find(tlog.address()) == workersMap.end()) {
@@ -3042,7 +3098,6 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				}
 			}
 
-			// get coordinators
 			Optional<Value> coordinators = wait(tr.get(coordinatorsKey));
 			if (!coordinators.present()) {
 				CODE_PROBE(true, "Failed to read the coordinatorsKey", probe::decoration::rare);
@@ -3092,6 +3147,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 	}
 }
 
+// FIXME: explain what this is trying to accomplish
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 
@@ -3115,7 +3171,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 	    .detail("SnapPayload", snapReq.snapPayload)
 	    .detail("SnapUID", snapReq.snapUID);
 	try {
-		// disable tlog pop on local tlog nodes
 		state std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
 		std::vector<Future<Void>> disablePops;
 		disablePops.reserve(tlogs.size());
@@ -3130,7 +3185,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapUID", snapReq.snapUID);
 
 		state int storageFaultTolerance;
-		// snap stateful nodes
 		state std::map<NetworkAddress, std::pair<WorkerInterface, std::string>> statefulWorkers =
 		    wait(transformErrors(getStatefulWorkers(cx, db, &tlogs, &storageFaultTolerance), snap_storage_failed()));
 
@@ -3140,6 +3194,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("StorageFaultTolerance", storageFaultTolerance);
 
 		// we need to snapshot storage nodes before snapshot any tlogs
+		// FIXME: if it's non-obvious enough to comment about, then also explain why
 		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
 		for (const auto& [addr, entry] : statefulWorkers) {
 			auto& [interf, role] = entry;
@@ -3166,7 +3221,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 
-		// enable tlog pop on local tlog nodes
 		std::vector<Future<Void>> enablePops;
 		enablePops.reserve(tlogs.size());
 		for (const auto& tlog : tlogs) {
@@ -3294,18 +3348,17 @@ ACTOR Future<Void> ddSnapCreate(
 			ddSnapMap->erase(snapReq.snapUID);
 			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(e);
 		} else {
-			// enable DD should always succeed
 			bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 			ASSERT(success);
 			throw e;
 		}
 	}
-	// enable DD should always succeed
 	bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 	ASSERT(success);
 	return Void();
 }
 
+// FIXME: explain purpose
 ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
                                           Reference<DataDistributor> self,
                                           Database cx) {

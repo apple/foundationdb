@@ -1186,12 +1186,13 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(reqF, requestTimeout));
-			if (g_network->isSimulated() && deterministicRandom()->random01() < 0.1) {
+			if (g_network->isSimulated() && BUGGIFY && deterministicRandom()->random01() < 0.1) {
 				// simulate an error from s3
 				_r->code = badRequestCode;
 				simulateS3TokenError = true;
 			}
 			r = _r;
+
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
 			if (r->data.headers["Connection"] != "close") {
@@ -1383,18 +1384,16 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
                                           Optional<char> delimiter,
                                           int maxDepth,
                                           std::function<bool(std::string const&)> recurseFilter) {
-	// Request 1000 keys at a time, the maximum allowed
 	state std::string resource = bstore->constructResourcePath(bucket, "");
+	resource.append("?list-type=2&max-keys=").append(std::to_string(CLIENT_KNOBS->BLOBSTORE_LIST_MAX_KEYS_PER_PAGE));
 
-	resource.append("/?max-keys=1000");
 	if (prefix.present())
 		resource.append("&prefix=").append(prefix.get());
 	if (delimiter.present())
 		resource.append("&delimiter=").append(std::string(1, delimiter.get()));
-	resource.append("&marker=");
-	state std::string lastFile;
-	state bool more = true;
 
+	state std::string continuationToken;
+	state bool more = true;
 	state std::vector<Future<Void>> subLists;
 
 	while (more) {
@@ -1402,8 +1401,11 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
 
 		state HTTP::Headers headers;
-		state std::string fullResource = resource + lastFile;
-		lastFile.clear();
+		state std::string fullResource = resource;
+		if (!continuationToken.empty()) {
+			fullResource.append("&continuation-token=").append(continuationToken);
+		}
+
 		Reference<HTTP::IncomingResponse> r =
 		    wait(doRequest_impl(bstore, "GET", fullResource, headers, nullptr, 0, { 200, 404 }));
 		listReleaser.release();
@@ -1433,6 +1435,9 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 			}
 
 			xml_node<>* n = result->first_node();
+			more = false;
+			continuationToken.clear();
+
 			while (n != nullptr) {
 				const char* name = n->name();
 				if (strcmp(name, "IsTruncated") == 0) {
@@ -1443,6 +1448,10 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 						more = false;
 					} else {
 						throw http_bad_response();
+					}
+				} else if (strcmp(name, "NextContinuationToken") == 0) {
+					if (n->value() != nullptr) {
+						continuationToken = n->value();
 					}
 				} else if (strcmp(name, "Contents") == 0) {
 					S3BlobStoreEndpoint::ObjectInfo object;
@@ -1466,59 +1475,33 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 						const char* prefix = prefixNode->value();
 						// If recursing, queue a sub-request, otherwise add the common prefix to the result.
 						if (maxDepth > 0) {
-							// If there is no recurse filter or the filter returns true then start listing the subfolder
 							if (!recurseFilter || recurseFilter(prefix)) {
+								// For recursive listing, don't use delimiter in sub-requests to get individual files
 								subLists.push_back(bstore->listObjectsStream(
-								    bucket, results, prefix, delimiter, maxDepth - 1, recurseFilter));
+								    bucket, results, prefix, Optional<char>(), maxDepth - 1, recurseFilter));
 							}
-							// Since prefix will not be in the final listResult below we have to set lastFile here in
-							// case it's greater than the last object
-							lastFile = prefix;
 						} else {
 							listResult.commonPrefixes.push_back(prefix);
 						}
-
 						prefixNode = prefixNode->next_sibling("Prefix");
 					}
 				}
-
 				n = n->next_sibling();
 			}
 
 			results.send(listResult);
-
-			if (more) {
-				// lastFile will be the last commonprefix for which a sublist was started, if any.
-				// If there are any objects and the last one is greater than lastFile then make it the new lastFile.
-				if (!listResult.objects.empty() && lastFile < listResult.objects.back().name) {
-					lastFile = listResult.objects.back().name;
-				}
-				// If there are any common prefixes and the last one is greater than lastFile then make it the new
-				// lastFile.
-				if (!listResult.commonPrefixes.empty() && lastFile < listResult.commonPrefixes.back()) {
-					lastFile = listResult.commonPrefixes.back();
-				}
-
-				// If lastFile is empty at this point, something has gone wrong.
-				if (lastFile.empty()) {
-					TraceEvent(SevWarn, "S3BlobStoreEndpointListNoNextMarker")
-					    .suppressFor(60)
-					    .detail("Resource", fullResource);
-					throw http_bad_response();
-				}
-			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
+			if (e.code() != error_code_actor_cancelled) {
 				TraceEvent(SevWarn, "S3BlobStoreEndpointListResultParseError")
 				    .errorUnsuppressed(e)
 				    .suppressFor(60)
 				    .detail("Resource", fullResource);
+			}
 			throw http_bad_response();
 		}
 	}
 
 	wait(waitForAll(subLists));
-
 	return Void();
 }
 

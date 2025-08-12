@@ -110,7 +110,6 @@ def report_error(
     log_directory: str,
     ensemble_id: str,
     test_uid: str,
-    check_rocksdb: bool,
 ):
     logger.info(f"=== JOSHUA_LOGTOOL UPLOAD START ===")
     logger.info(f"Parameters:")
@@ -118,7 +117,6 @@ def report_error(
     logger.info(f"  log_directory: {log_directory}")
     logger.info(f"  ensemble_id: {ensemble_id}")
     logger.info(f"  test_uid: {test_uid}")
-    logger.info(f"  check_rocksdb: {check_rocksdb}")
     
     # Also print to stderr for immediate visibility
     console_log(f"Starting upload for test {test_uid}")
@@ -150,6 +148,46 @@ def report_error(
         logger.debug(f"  JSON: {json_file}")
     
     all_trace_files = xml_files + json_files
+    
+    # Check if we should include app logs from the log directory itself
+    include_app_logs = os.getenv("TH_INCLUDE_APP_LOGS", "false").lower() in ("true", "1", "yes")
+    if include_app_logs:
+        logger.info(f"Step 1.5: Including app logs from log directory")
+        logger.info(f"  Looking in directory: {log_directory_path}")
+        
+        # List all files in log directory for debugging
+        try:
+            log_dir_files = list(log_directory_path.iterdir())
+            logger.info(f"  Files in log directory: {[f.name for f in log_dir_files]}")
+        except Exception as e:
+            logger.warning(f"  Could not list log directory: {e}")
+        
+        app_log_files = []
+        
+        # Look for app_log.txt
+        app_log = log_directory_path / "app_log.txt"
+        if app_log.exists():
+            app_log_files.append(app_log)
+            logger.info(f"  Found app_log.txt: {app_log}")
+        else:
+            logger.info(f"  app_log.txt not found at: {app_log}")
+        
+        # Look for python_app_std* files (created by Joshua integration)
+        python_app_std_files = list(log_directory_path.glob("python_app_std*"))
+        for python_app_std_file in python_app_std_files:
+            app_log_files.append(python_app_std_file)
+            logger.info(f"  Found python_app_std file: {python_app_std_file}")
+        
+        if not python_app_std_files:
+            logger.info(f"  No python_app_std* files found")
+        
+        if app_log_files:
+            all_trace_files.extend(app_log_files)
+            logger.info(f"✓ Added {len(app_log_files)} app log files to upload")
+        else:
+            logger.info(f"✗ No app log files found in log directory")
+    else:
+        logger.info(f"Step 1.5: App logs inclusion disabled (set TH_INCLUDE_APP_LOGS=true to enable)")
     
     # Filter out core files (exclude any file with 'core' in the name)
     log_files = []
@@ -184,31 +222,20 @@ def report_error(
     
     logger.info(f"✓ Found {len(log_files)} total trace files")
     
-    # Step 2: Check RocksDB filtering if requested
-    if check_rocksdb:
-        logger.info(f"Step 2: RocksDB filtering enabled - checking if this is a RocksDB test")
-        if not _is_rocksdb_test(log_files):
-            logger.info(f"✗ RocksDB filtering: Test is not a RocksDB test - skipping upload")
-            console_log(f"SKIPPED - Not a RocksDB test (--check-rocksdb enabled)")
-            return
-        else:
-            logger.info(f"✓ RocksDB filtering: Test is a RocksDB test - proceeding with upload")
-    else:
-        logger.info(f"Step 2: RocksDB filtering disabled - uploading all trace files")
-    
-    # Step 3: Determine ensemble ID
-    logger.info(f"Step 3: Determining ensemble ID")
+    # Step 2: Determine ensemble ID
+    logger.info(f"Step 2: Determining ensemble ID")
     final_ensemble_id = ensemble_id or _extract_ensemble_id(work_directory)
     if not final_ensemble_id:
         logger.error(f"✗ Ensemble ID missing - provided: '{ensemble_id}', extracted: None")
         logger.error(f"Work directory pattern check: '{work_directory}'")
         console_log(f"FAILED - Ensemble ID missing")
-        raise RuntimeError(f"Ensemble ID missing in work directory {work_directory}")
+        logger.error(f"=== JOSHUA_LOGTOOL UPLOAD FAILED ===")
+        return
     
     logger.info(f"✓ Using ensemble ID: {final_ensemble_id}")
     
-    # Step 4: Create tar archive
-    logger.info(f"Step 4: Creating tar.xz archive")
+    # Step 3: Create tar archive
+    logger.info(f"Step 3: Creating tar.xz archive")
     try:
         with tempfile.NamedTemporaryFile(suffix='.tar.xz', delete=False) as archive:
             archive_path = pathlib.Path(archive.name)
@@ -224,8 +251,8 @@ def report_error(
                 console_log(f"FAILED - Archive is empty")
                 return
             
-            # Step 5: Upload to FDB
-            logger.info(f"Step 5: Uploading to FDB database")
+            # Step 4: Upload to FDB
+            logger.info(f"Step 4: Uploading to FDB database")
             subspace = _get_log_subspace(final_ensemble_id, test_uid)
             
             with open(archive_path, 'rb') as archive_file:
@@ -243,7 +270,8 @@ def report_error(
     except Exception as e:
         logger.error(f"✗ Error during archive creation or upload: {e}")
         console_log(f"FAILED - {e}")
-        raise
+        logger.error(f"=== JOSHUA_LOGTOOL UPLOAD FAILED ===")
+        return
 
 
 def download_logs(ensemble_id: str, test_uid: str):
@@ -264,9 +292,9 @@ def download_logs(ensemble_id: str, test_uid: str):
         if archive_size == 0:
             console_log(f"No logs were uploaded for test {test_uid}")
             console_log(f"This could mean:")
-            console_log(f"- The test was not a RocksDB test (if --check-rocksdb was used)")
             console_log(f"- No trace files were generated")
             console_log(f"- The upload failed")
+            console_log(f"- The test completed successfully without generating logs")
             return
         
         _tar_extract(archive.name)
@@ -316,11 +344,7 @@ def _setup_args():
         "--ensemble-id", type=str, default=None, required=False, help="Ensemble ID"
     )
     upload_parser.add_argument("--test-uid", type=str, required=True, help="Test UID")
-    upload_parser.add_argument(
-        "--check-rocksdb",
-        action="store_true",
-        help="If true, only upload logs when RocksDB is involved; otherwise, always upload logs.",
-    )
+
 
     download_parser = subparsers.add_parser(
         "download", help="Download the log file from Joshua to local directory"
@@ -332,7 +356,7 @@ def _setup_args():
 
     list_parser = subparsers.add_parser(
         "list",
-        help="List the possible download commands for failed tests in a given ensemble. NOTE: It is possible that the test is not relevant to RocksDB and no log file is available. It is the user's responsibility to verify if this happens.",
+        help="List the possible download commands for failed tests in a given ensemble. NOTE: It is possible that no log file is available if the test completed successfully or no trace files were generated. It is the user's responsibility to verify if this happens.",
     )
     list_parser.add_argument(
         "--ensemble-id", type=str, required=True, help="Joshua ensemble ID"
@@ -353,18 +377,22 @@ def _main():
     logger.debug(f"Using cluster file {args.cluster_file}")
     joshua.open(args.cluster_file)
 
-    if args.action == "upload":
-        report_error(
-            work_directory=args.work_directory,
-            log_directory=args.log_directory,
-            ensemble_id=args.ensemble_id,
-            test_uid=args.test_uid,
-            check_rocksdb=args.check_rocksdb,
-        )
-    elif args.action == "download":
-        download_logs(ensemble_id=args.ensemble_id, test_uid=args.test_uid)
-    elif args.action == "list":
-        list_commands(ensemble_id=args.ensemble_id)
+    try:
+        if args.action == "upload":
+            report_error(
+                work_directory=args.work_directory,
+                log_directory=args.log_directory,
+                ensemble_id=args.ensemble_id,
+                test_uid=args.test_uid,
+            )
+        elif args.action == "download":
+            download_logs(ensemble_id=args.ensemble_id, test_uid=args.test_uid)
+        elif args.action == "list":
+            list_commands(ensemble_id=args.ensemble_id)
+    except Exception as e:
+        logger.error(f"Unexpected error in joshua_logtool: {e}")
+        console_log(f"FAILED - Unexpected error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

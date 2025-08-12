@@ -26,7 +26,7 @@ The latest stable releases are (were) versions that are recommended for producti
 
 | Branch   |     Latest Production Release      |  Notes |
 |:--------:|:-------------:|------:|
-| 7.3      |  [7.3.63](https://github.com/apple/foundationdb/releases/tag/7.3.63) | Supported |
+| 7.3      |  [7.3.69](https://github.com/apple/foundationdb/releases/tag/7.3.69) | Supported |
 | 7.2      |   | Experimental |
 | 7.1      |  [7.1.57](https://github.com/apple/foundationdb/releases/tag/7.1.57)   |   Bug fixes |
 | 7.0      |           |   Experimental |
@@ -37,7 +37,7 @@ The latest stable releases are (were) versions that are recommended for producti
 - `Experimental` branches are those used for internal feature testing. They are not recommended for production use.
 - `Unsupported` branches are those that will no longer receive any updates.
 
-If you are running on old production releases, we recommend always upgrading to the next major release's latest version, and then continuing to the next major version, e.g., 6.2.X -> 6.3.25 -> 7.1.57 -> 7.3.63. These upgrade paths have been well tested in production (skipping a major release, not marked as `Experimental`, for an upgrade is only tested in simulation).
+If you are running on old production releases, we recommend always upgrading to the next major release's latest version, and then continuing to the next major version, e.g., 6.2.X -> 6.3.25 -> 7.1.57 -> 7.3.69. These upgrade paths have been well tested in production (skipping a major release, not marked as `Experimental`, for an upgrade is only tested in simulation).
 
 ### Binary Downloads
 
@@ -48,6 +48,38 @@ Developers interested in using FoundationDB can get started by downloading and i
 
 Developers on an OS for which there is no binary package, or who would like to start hacking on the code, can get started by compiling from source.
 
+NOTE: FoundationDB has a lot of dependencies.  The Docker container
+listed below tracks them and is what we use internally and is the
+recommended method of building FDB.
+
+#### Build Using the Official Docker Image
+
+The official Docker image for building is [`foundationdb/build`](https://hub.docker.com/r/foundationdb/build), which includes all necessary dependencies. The Docker image definitions used by FoundationDB team members can be found in the [dedicated repository](https://github.com/FoundationDB/fdb-build-support).
+
+To build FoundationDB with the clang toolchain,
+
+``` bash
+mkdir /some/build_output_dir
+cd /some/build_output_dir
+CC=clang CXX=clang++ LD=lld cmake -D USE_LD=LLD -D USE_LIBCXX=1 -G Ninja /some/fdb/source_dir
+ninja
+```
+
+To use GCC, a non-default version is necessary. The following modifies environment
+variables ($PATH, $LD_LIBRARY_PATH, etc) to pick up the right GCC version:
+
+``` bash
+source /opt/rh/gcc-toolset-13/enable
+gcc --version  # should say 13
+mkdir /some/build_output_dir
+cd /some/build_output_dir
+cmake -G Ninja /some/fdb/source_dir
+ninja
+```
+
+Slightly more elaborate compile commands can be found in the shell aliases
+defined in `/root/.bashrc` in the container image.
+
 #### Build Locally
 
 To build outside of the official Docker image, you'll need at least these dependencies:
@@ -55,6 +87,11 @@ To build outside of the official Docker image, you'll need at least these depend
 1. [CMake](https://cmake.org/) version 3.24.2 or higher 
 1. [Mono](https://www.mono-project.com/download/stable/)
 1. [ninja](https://ninja-build.org/)
+
+This list is likely to be incomplete. Refer to the rockylinux9
+Dockerfile in the `fdb-build-support` repo linked above for reference
+material on specific packages and versions that are likely to be
+required.
 
 If compiling for local development, please set `-DUSE_WERROR=ON` in CMake. Our CI compiles with `-Werror` on, so this way you'll find out about compiler warnings that break the build earlier.
 
@@ -68,24 +105,6 @@ Once you have your dependencies, you can run `cmake` and then build:
 
 Building FoundationDB requires at least 8GB of memory. More memory is needed when building in parallel. If the computer freezes or crashes, consider disabling parallelized build using `ninja -j1`.
 
-#### Build Using the Official Docker Image
-
-The official Docker image for building is [`foundationdb/build`](https://hub.docker.com/r/foundationdb/build), which includes all necessary dependencies. The Docker image definitions used by FoundationDB team members can be found in the [dedicated repository](https://github.com/FoundationDB/fdb-build-support). When building inside the container, it is required to use the compilers in the `toolset` subdirectory. To enable the `toolset`, import the environment variables by
-
-``` bash
-source /opt/rh/gcc-toolset-13/enable
-```
-
-before executing CMake and ninja.
-
-To build FoundationDB with the clang toolchain,
-
-``` bash
-CC=clang CXX=clang++ LD=lld cmake -D USE_LD=LLD -D USE_LIBCXX=1 -G Ninja
-ninja
-```
-
-should be used instead.
 
 #### FreeBSD
 

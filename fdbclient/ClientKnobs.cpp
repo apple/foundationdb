@@ -233,7 +233,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( BLOBSTORE_CONCURRENT_WRITES_PER_FILE,      5 );
 	init( BLOBSTORE_CONCURRENT_READS_PER_FILE,       3 );
-	init( BLOBSTORE_ENABLE_READ_CACHE,            true );
+	init( BLOBSTORE_ENABLE_READ_CACHE,            true ); if ( randomize && BUGGIFY ) BLOBSTORE_ENABLE_READ_CACHE = deterministicRandom()->coinflip();
 	init( BLOBSTORE_READ_BLOCK_SIZE,       1024 * 1024 );
 	init( BLOBSTORE_READ_AHEAD_BLOCKS,               0 );
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
@@ -259,6 +259,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
+
+	// Request 1000 keys at a time, the maximum allowed
+	init( BLOBSTORE_LIST_MAX_KEYS_PER_PAGE,        1000 );
 
 	// Dynamic Knobs
 	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );

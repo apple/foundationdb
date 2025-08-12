@@ -1,0 +1,58 @@
+# Test configuration for S3Client workload
+# This test verifies that the S3 client can upload, download, and delete a file to an S3 bucket.
+# Requires local instance of seaweedfs up and running and the below s3Url pointing at it.
+# One way to do this is:
+# source foundationdb/fdbclient/tests/seaweeds_fixture.sh
+#  mkdir ~/weed
+#  run_weed ~/weed/ ~/weed/
+# After the server comes up it will output where the service is running, something like
+# localhost:8335. Use this input composing the s3url below (use '127.0.0.1' in place of 'localhost').
+#  ...
+# When done, run:
+#  shutdown_weed ~/weed
+
+# Disable all fault injection and network failures
+# buggify = false now controls ALL fault injection systems (BUGGIFY, failure workloads, AND global fault injection)
+buggify = false
+
+[[knobs]]
+
+[[flow_knobs]]
+# DETERMINISM FIX: Disable buggified delays that cause timing variations in simulation
+MAX_BUGGIFIED_DELAY = 0.0
+
+# Increase verbosity for debugging
+http_verbose_level = 10
+s3client_verbose_level = 10
+blobstore_verbose_level = 10
+
+# Connection and request settings
+blobstore_max_connection_life = 300
+blobstore_request_timeout_min = 300
+blobstore_request_tries = 5
+blobstore_connect_tries = 5
+blobstore_connect_timeout = 30
+
+# Network settings
+http_send_size = 1024
+http_read_size = 1024
+
+# Connection monitoring
+connection_monitor_loop_time = 0.1
+connection_monitor_timeout = 1.0
+connection_monitor_idle_timeout = 60.0
+
+[[test]]
+testTitle = 'S3Client'
+# Completely disable fault injection workloads to prevent operation_cancelled errors
+runFailureWorkloads = false
+
+# Note: The blob credentials file path should be set in the environment variable FDB_BLOB_CREDENTIALS
+# when running the test, not in this configuration file. The file gets written when the test runs.
+ 
+    [[test.workload]]
+    testName = 'S3ClientWorkload'
+    # Use MockS3Server with IP address - simulation doesn't support hostname resolution
+    # 127.0.0.1 looks like an odd address but the simulation network actual takes care
+    # clients get routed to this server at "127.0.0.1:8080".
+    s3Url = 'blobstore://testkey:testsecret:testtoken@127.0.0.1:8080/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=0&global_connection_pool=0'

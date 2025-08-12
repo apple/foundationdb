@@ -185,6 +185,38 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("TLSPolicyFailures",
 			            (netData.countTLSPolicyFailures - statState->networkState.countTLSPolicyFailures) /
 			                currentStats.elapsed)
+			    .detail("ClientTLSHandshakesOnSideThreads",
+			            (netData.countClientTLSHandshakesOnSideThreads -
+			             statState->networkState.countClientTLSHandshakesOnSideThreads) /
+			                currentStats.elapsed)
+			    .detail("ClientTLSHandshakesOnMainThread",
+			            (netData.countClientTLSHandshakesOnMainThread -
+			             statState->networkState.countClientTLSHandshakesOnMainThread) /
+			                currentStats.elapsed)
+			    .detail("ServerTLSHandshakesOnSideThreads",
+			            (netData.countServerTLSHandshakesOnSideThreads -
+			             statState->networkState.countServerTLSHandshakesOnSideThreads) /
+			                currentStats.elapsed)
+			    .detail("ServerTLSHandshakesOnMainThread",
+			            (netData.countServerTLSHandshakesOnMainThread -
+			             statState->networkState.countServerTLSHandshakesOnMainThread) /
+			                currentStats.elapsed)
+			    .detail("ConnectionIncompatible",
+			            (netData.countConnIncompatible - statState->networkState.countConnIncompatible) /
+			                currentStats.elapsed)
+			    .detail("ConnectionIncompatibleWithOldClient",
+			            (netData.countConnIncompatibleWithOldClient -
+			             statState->networkState.countConnIncompatibleWithOldClient) /
+			                currentStats.elapsed)
+			    .detail("ClientTLSHandshakesTimedout",
+			            (netData.countClientTLSHandshakesTimedout -
+			             statState->networkState.countClientTLSHandshakesTimedout) /
+			                currentStats.elapsed)
+			    .detail("ServerTLSHandshakesTimedout",
+			            (netData.countServerTLSHandshakesTimedout -
+			             statState->networkState.countServerTLSHandshakesTimedout) /
+			                currentStats.elapsed)
+
 			    .trackLatest(eventName);
 
 			TraceEvent("MemoryMetrics")

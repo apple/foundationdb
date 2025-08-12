@@ -669,10 +669,24 @@ struct InitializeLogRouterRequest {
 	int8_t locality;
 	ReplyPromise<struct TLogInterface> reply;
 	Optional<Version> recoverAt = Optional<Version>();
+	// @todo investigate whether we really need to propagate the known locked
+	// tLog list as part of this request (or the log router can obtain this
+	// information from the logSystem).
+	Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds =
+	    Optional<std::map<uint8_t, std::vector<uint16_t>>>();
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryCount, routerTag, startVersion, tLogLocalities, tLogPolicy, locality, reply, recoverAt);
+		serializer(ar,
+		           recoveryCount,
+		           routerTag,
+		           startVersion,
+		           tLogLocalities,
+		           tLogPolicy,
+		           locality,
+		           reply,
+		           recoverAt,
+		           knownLockedTLogIds);
 	}
 };
 
@@ -969,6 +983,7 @@ struct ExecuteRequest {
 	}
 };
 
+// FIXME: describe purpose
 struct WorkerSnapRequest {
 	constexpr static FileIdentifier file_identifier = 8194122;
 	ReplyPromise<Void> reply;

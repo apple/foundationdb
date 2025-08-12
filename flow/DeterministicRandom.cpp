@@ -26,14 +26,26 @@
 
 uint64_t DeterministicRandom::gen64() {
 	uint64_t curr = next;
-	next = (uint64_t(random()) << 32) ^ random();
+
+	// RE: the previous implementation of this function: order of
+	// evaluation of arguments to the ^ operator is not specified, so
+	// two rng() calls in the same ^ expression may not produce a
+	// consistent 64-bit value across compilations, because we don't
+	// know if the first call was used for the higher order bits and
+	// the second call for the low order bits, or vice-versa.
+	// See https://en.cppreference.com/w/cpp/language/eval_order.html
+	next = (uint64_t(rng()) << 32);
+	next ^= rng();
 	if (TRACE_SAMPLE())
 		TraceEvent(SevSample, "Random").log();
 	return curr;
 }
 
 DeterministicRandom::DeterministicRandom(uint32_t seed, bool useRandLog)
-  : random((unsigned long)seed), next((uint64_t(random()) << 32) ^ random()), useRandLog(useRandLog) {}
+  : rng((unsigned long)seed), next(0), useRandLog(useRandLog) {
+	next = (uint64_t(rng()) << 32);
+	next ^= rng();
+}
 
 double DeterministicRandom::random01() {
 	double d = gen64() / double(uint64_t(-1));
@@ -94,7 +106,7 @@ uint32_t DeterministicRandom::randomSkewedUInt32(uint32_t min, uint32_t maxPlusO
 	ASSERT_LT(min, maxPlusOne);
 	std::uniform_real_distribution<double> distribution(std::log(std::max<double>(min, 1.0 / M_E)),
 	                                                    std::log(maxPlusOne));
-	double exponent = distribution(random);
+	double exponent = distribution(rng);
 	uint32_t value = static_cast<uint32_t>(std::pow(M_E, exponent));
 	return std::max(std::min(value, maxPlusOne - 1), min);
 }

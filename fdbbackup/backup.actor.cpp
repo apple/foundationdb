@@ -296,6 +296,7 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 #endif
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -1993,6 +1994,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 StopWhenDone stopWhenDone,
                                 UsePartitionedLog usePartitionedLog,
                                 IncrementalBackupOnly incrementalBackupOnly,
+                                Optional<std::string> encryptionKeyFile,
                                 Optional<std::string> blobManifestUrl) {
 	try {
 		state FileBackupAgent backupAgent;
@@ -2047,7 +2049,7 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              stopWhenDone,
 			                              usePartitionedLog,
 			                              incrementalBackupOnly,
-			                              {},
+			                              encryptionKeyFile,
 			                              blobManifestUrl));
 
 			// Wait for the backup to complete, if requested
@@ -3276,10 +3278,6 @@ Version parseVersion(const char* str) {
 	return ver;
 }
 
-#ifdef ALLOC_INSTRUMENTATION
-extern uint8_t* g_extra_memory;
-#endif
-
 // Creates a connection to a cluster. Optionally prints an error if the connection fails.
 Optional<Database> connectToCluster(std::string const& clusterFile,
                                     LocalityData const& localities,
@@ -3323,9 +3321,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	try {
-#ifdef ALLOC_INSTRUMENTATION
-		g_extra_memory = new uint8_t[1000000];
-#endif
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error
@@ -4261,6 +4256,7 @@ int main(int argc, char* argv[]) {
 				                           stopWhenDone,
 				                           usePartitionedLog,
 				                           incrementalBackupOnly,
+				                           encryptionKeyFile,
 				                           blobManifestUrl));
 				break;
 			}

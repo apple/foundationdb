@@ -162,6 +162,7 @@ struct GetDataDistributorMetricsRequest {
 	}
 };
 
+// FIXME: explain purpose
 struct DistributorSnapRequest {
 	constexpr static FileIdentifier file_identifier = 5427684;
 	Arena arena;
@@ -193,6 +194,7 @@ struct DistributorExclusionSafetyCheckReply {
 	}
 };
 
+// FIXME: explain purpose
 struct DistributorExclusionSafetyCheckRequest {
 	constexpr static FileIdentifier file_identifier = 5830931;
 	std::vector<AddressExclusion> exclusions;
