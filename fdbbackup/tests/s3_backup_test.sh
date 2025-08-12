@@ -229,8 +229,12 @@ while (( "$#" )); do
       USE_ENCRYPTION=true
       shift
       ;;
+    --encrypt-at-random)
+      USE_ENCRYPTION=$(((RANDOM % 2)) && echo true || echo false )
+      shift
+      ;;
     -*|--*=) # unsupported flags
-      echo "Error: Unsupported flag $1" >&2
+      err "Error: Unsupported flag $1" >&2
       exit 1
       ;;
     *) # preserve positional arguments
@@ -334,9 +338,12 @@ readonly scratch_dir
 # Create encryption key file if needed
 ENCRYPTION_KEY_FILE=""
 if [[ "${USE_ENCRYPTION}" == "true" ]]; then
+  log "Enabling encryption for backups"
   ENCRYPTION_KEY_FILE="${scratch_dir}/test_encryption_key_file"
   create_encryption_key_file "${ENCRYPTION_KEY_FILE}"
   log "Created encryption key file at ${ENCRYPTION_KEY_FILE}"
+else
+  log "Using plaintext for backups"
 fi
 readonly ENCRYPTION_KEY_FILE
 
