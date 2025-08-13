@@ -259,13 +259,9 @@ struct WorkloadFactory : IWorkloadFactory {
 	bool runInUntrustedClient;
 	WorkloadFactory(UntrustedMode runInUntrustedClient = UntrustedMode::False)
 	  : runInUntrustedClient(runInUntrustedClient) {
-		auto checkNameUnused = [](const std::string& name) -> bool {
-			auto f = factories();
-			return f.find(name) == f.end();
-		};
-
-		ASSERT(checkNameUnused(WorkloadType::NAME));
-		factories()[WorkloadType::NAME] = Reference<IWorkloadFactory>::addRef(this);
+		auto f = factories();
+		ASSERT(!f.contains(WorkloadType::NAME));
+		f[WorkloadType::NAME] = Reference<IWorkloadFactory>::addRef(this);
 	}
 	Reference<TestWorkload> create(WorkloadContext const& wcx) override {
 		if (g_network->isSimulated() && runInUntrustedClient) {
