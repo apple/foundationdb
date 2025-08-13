@@ -259,7 +259,10 @@ struct WorkloadFactory : IWorkloadFactory {
 	bool runInUntrustedClient;
 	WorkloadFactory(UntrustedMode runInUntrustedClient = UntrustedMode::False)
 	  : runInUntrustedClient(runInUntrustedClient) {
-		factories()[WorkloadType::NAME] = Reference<IWorkloadFactory>::addRef(this);
+		auto& f = factories();
+		std::string name = WorkloadType::NAME;
+		ASSERT(!f.contains(name));
+		f[name] = Reference<IWorkloadFactory>::addRef(this);
 	}
 	Reference<TestWorkload> create(WorkloadContext const& wcx) override {
 		if (g_network->isSimulated() && runInUntrustedClient) {

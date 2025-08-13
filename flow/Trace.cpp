@@ -76,8 +76,7 @@ struct SuppressionMap {
 
 	std::map<std::string, SuppressionInfo> suppressionMap;
 
-	// Returns -1 if this event is suppressed
-	int64_t checkAndInsertSuppression(std::string type, double duration) {
+	int64_t checkAndInsertSuppression(std::string type, double duration, bool& suppress) {
 		ASSERT(g_network);
 		if (suppressionMap.size() >= FLOW_KNOBS->MAX_TRACE_SUPPRESSIONS) {
 			TraceEvent(SevWarnAlways, "ClearingTraceSuppressionMap").log();
@@ -85,15 +84,17 @@ struct SuppressionMap {
 		}
 
 		auto insertion = suppressionMap.insert(std::make_pair(type, SuppressionInfo()));
+		int64_t suppressedEventCount;
 		if (insertion.second || insertion.first->second.endTime <= now()) {
-			int64_t suppressedEventCount = insertion.first->second.suppressedEventCount;
+			suppress = false;
+			suppressedEventCount = insertion.first->second.suppressedEventCount;
 			insertion.first->second.endTime = now() + duration;
 			insertion.first->second.suppressedEventCount = 0;
-			return suppressedEventCount;
 		} else {
-			++insertion.first->second.suppressedEventCount;
-			return -1;
+			suppress = true;
+			suppressedEventCount = ++insertion.first->second.suppressedEventCount;
 		}
+		return suppressedEventCount;
 	}
 };
 
@@ -1225,8 +1226,9 @@ BaseTraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEvent
 
 		if (g_network) {
 			if (isNetworkThread()) {
-				int64_t suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, duration);
-				if (suppressedEventCount < 0)
+				bool suppress = false;
+				int64_t suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, duration, suppress);
+				if (suppress)
 					enabled.suppress();
 				if (enabled && logSuppressedEventCount) {
 					detail("SuppressedEventCount", suppressedEventCount);
