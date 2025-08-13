@@ -84,15 +84,17 @@ struct SuppressionMap {
 		}
 
 		auto insertion = suppressionMap.insert(std::make_pair(type, SuppressionInfo()));
+		int64_t suppressedEventCount;
 		if (insertion.second || insertion.first->second.endTime <= now()) {
 			suppress = false;
+			suppressedEventCount = insertion.first->second.suppressedEventCount;
 			insertion.first->second.endTime = now() + duration;
 			insertion.first->second.suppressedEventCount = 0;
 		} else {
 			suppress = true;
-			++insertion.first->second.suppressedEventCount;
+			suppressedEventCount = ++insertion.first->second.suppressedEventCount;
 		}
-		return insertion.first->second.suppressedEventCount;
+		return suppressedEventCount;
 	}
 };
 
