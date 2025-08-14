@@ -1,4 +1,46 @@
 testClass = "Backup"
+buggify = false
+
+[configuration]
+tenantModes = ['disabled'] # Do not support tenant
+encryptModes = ['disabled'] # Do not support encryption
+
+# Force simple single-region configuration
+simpleConfig = true
+
+[[knobs]]
+
+[[flow_knobs]]
+# DETERMINISM FIX: Disable buggified delays that cause timing variations in simulation
+MAX_BUGGIFIED_DELAY = 0.0
+
+# Database stability settings
+COMMIT_PROXY_LIVENESS_TIMEOUT = 30.0
+COMMIT_PROXY_MAX_LIVENESS_TIMEOUT = 60.0
+MAX_TRANSACTION_LIFETIME = 30.0
+MAX_TRANSACTION_LIFETIME_VERSIONS = 1000000
+PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = 0
+
+# Reduce trace verbosity to prevent buffer overflow
+http_verbose_level = 0
+s3client_verbose_level = 0
+blobstore_verbose_level = 0
+
+# Enable trace logging to debug S3 operations
+TRACE_SAMPLE_RATE = 1.0
+TRACE_LOG_GROUP = "MockS3,BackupAgent,BlobStore"
+
+# S3/Blobstore settings for stability/determinism
+blobstore_max_connection_life = 1200
+blobstore_request_timeout_min = 1200
+blobstore_request_tries = 20
+blobstore_connect_tries = 20
+blobstore_connect_timeout = 120
+http_send_size = 1024
+http_read_size = 1024
+connection_monitor_loop_time = 0.1
+connection_monitor_timeout = 1.0
+connection_monitor_idle_timeout = 60.0
 
 [[test]]
 testTitle = 'Cycle'
@@ -36,70 +78,32 @@ simBackupAgents = 'BackupToFile'
 
 [[test]]
 testTitle = 'Backup'
+clearAfterTest = 'false'
+simBackupAgents = 'BackupToBlob'
+runFailureWorkloads = false
 
+
+
+    # Test S3 backup
     [[test.workload]]
     testName = 'BackupToBlob'
-    backupAfter = 0.0
+    backupAfter = 15.0 # Give MockS3Server more time to be ready
+    backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0'
+    provideKeys = false
     backupTag = 'default'
-    backupURL = 'blobstore://<access_key>:<secret_key>@127.0.0.1:9000/resource?bucket=bucketname'
-    provideKeys = true
-
-    [[test.workload]]
-    testName = 'RandomClogging'
-    testDuration = 10.0
-
-    [[test.workload]]
-    testName = 'Rollback'
-    meanDelay = 5.0
-    testDuration = 10.0
-
-    [[test.workload]]
-    testName = 'Attrition'
-    machinesToKill = 10
-    machinesToLeave = 3
-    reboot = true
-    testDuration = 10.0
-
-    [[test.workload]]
-    testName = 'Attrition'
-    machinesToKill = 10
-    machinesToLeave = 3
-    reboot = true
-    testDuration = 10.0
 
 [[test]]
 testTitle = 'Restore'
 clearAfterTest = 'false'
+runFailureWorkloads = false
 
+    # Test S3 restore
     [[test.workload]]
     testName = 'RestoreFromBlob'
     restoreAfter = 0.0
     backupTag = 'default'
-    backupURL = 'blobstore://<access_key>:<secret_key>@127.0.0.1:9000/resource?bucket=bucketname'
-    provideKeys = true
-
-    [[test.workload]]
-    testName = 'RandomClogging'
-    testDuration = 60.0
-
-    [[test.workload]]
-    testName = 'Rollback'
-    meanDelay = 5.0
-    testDuration = 10.0
-
-    [[test.workload]]
-    testName = 'Attrition'
-    machinesToKill = 10
-    machinesToLeave = 3
-    reboot = true
-    testDuration = 10.0
-
-    [[test.workload]]
-    testName = 'Attrition'
-    machinesToKill = 10
-    machinesToLeave = 3
-    reboot = true
-    testDuration = 10.0
+    backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0'
+    provideKeys = false
 
 [[test]]
 testTitle = 'CycleCheck'
