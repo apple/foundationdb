@@ -31,6 +31,8 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Arena.h"
+#include "flow/Platform.h"
+#include "flow/Trace.h"
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -105,6 +107,12 @@ struct IncrementalBackupWorkload : TestWorkload {
 				TraceEvent("IBackupWaitContainer").log();
 				wait(success(self->backupAgent.waitBackup(
 				    cx, self->tag.toString(), StopWhenDone::False, &backupContainer, &backupUID)));
+
+				state Optional<std::string> restoreEncryptionKeyFileName;
+				if (self->encryptionKeyFileName.present() && fileExists(self->encryptionKeyFileName.get())) {
+					restoreEncryptionKeyFileName = self->encryptionKeyFileName.get();
+				}
+
 				if (!backupContainer.isValid()) {
 					TraceEvent("IBackupCheckListContainersAttempt").log();
 					state std::vector<std::string> containers =
@@ -113,7 +121,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 					    .detail("Size", containers.size())
 					    .detail("First", containers.front());
 					if (containers.size()) {
-						backupContainer = IBackupContainer::openContainer(containers.front(), {}, {});
+						backupContainer =
+						    IBackupContainer::openContainer(containers.front(), {}, restoreEncryptionKeyFileName);
 					}
 				}
 				state bool e = wait(backupContainer->exists());
@@ -162,11 +171,11 @@ struct IncrementalBackupWorkload : TestWorkload {
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		addDefaultBackupRanges(backupRanges);
 
-		if (self->encryptionKeyFileName.present()) {
-			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
-		}
-
 		if (self->submitOnly) {
+			if (self->encryptionKeyFileName.present()) {
+				wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
+			}
+
 			TraceEvent("IBackupSubmitAttempt").log();
 			try {
 				Optional<std::string> blobManifestUrl;
@@ -215,6 +224,12 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state Version beginVersion = invalidVersion;
 			wait(success(self->backupAgent.waitBackup(
 			    cx, self->tag.toString(), StopWhenDone::False, &backupContainer, &backupUID)));
+
+			state Optional<std::string> restoreEncryptionKeyFileName;
+			if (self->encryptionKeyFileName.present() && fileExists(self->encryptionKeyFileName.get())) {
+				restoreEncryptionKeyFileName = self->encryptionKeyFileName.get();
+			}
+
 			if (self->checkBeginVersion) {
 				TraceEvent("IBackupReadSystemKeys").log();
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -286,7 +301,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                       OnlyApplyMutationLogs::True,
 				                                       InconsistentSnapshotOnly::False,
 				                                       beginVersion,
-				                                       self->encryptionKeyFileName)));
+				                                       restoreEncryptionKeyFileName)));
 			}
 			TraceEvent("IBackupRestoreAttempt").detail("BeginVersion", beginVersion);
 			wait(success(self->backupAgent.restore(cx,
@@ -305,7 +320,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       OnlyApplyMutationLogs::True,
 			                                       InconsistentSnapshotOnly::False,
 			                                       beginVersion,
-			                                       self->encryptionKeyFileName)));
+			                                       restoreEncryptionKeyFileName)));
 			TraceEvent("IBackupRestoreSuccess").log();
 		}
 		return Void();
