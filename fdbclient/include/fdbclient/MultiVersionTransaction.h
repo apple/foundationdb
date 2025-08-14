@@ -1053,8 +1053,6 @@ public:
 
 	// private:
 
-	struct LegacyVersionMonitor;
-
 	// Database initialization state
 	enum class InitializationState { INITIALIZING, INITIALIZATION_FAILED, CREATED, INCOMPATIBLE, CLOSED };
 
@@ -1077,10 +1075,6 @@ public:
 		// Must be called from the main thread
 		ThreadFuture<Void> monitorProtocolVersion();
 
-		// Starts version monitors for old client versions that don't support connect packet monitoring (<= 5.0).
-		// Must be called from the main thread
-		void startLegacyVersionMonitors();
-
 		// Set a new database connection
 		void setDatabase(Reference<IDatabase> db);
 
@@ -1090,7 +1084,7 @@ public:
 		// Return a JSON string containing database client-side status information
 		Standalone<StringRef> getClientStatus(ErrorOr<Standalone<StringRef>> dbContextStatus);
 
-		// Cleans up state for the legacy version monitors to break reference cycles
+		// Cleans up state for the version monitors to break reference cycles
 		void close();
 
 		Reference<IDatabase> db;
@@ -1117,15 +1111,6 @@ public:
 		Future<Void> sharedStateUpdater;
 		bool isConfigDB;
 
-		// Versions older than 6.1 do not benefit from having their database connections closed. Additionally,
-		// there are various issues that result in negative behavior in some cases if the connections are closed.
-		// Therefore, we leave them open.
-		std::map<ProtocolVersion, Reference<IDatabase>> legacyDatabaseConnections;
-
-		// Versions 5.0 and older do not support connection packet monitoring and require alternate techniques to
-		// determine the cluster version.
-		std::list<Reference<LegacyVersionMonitor>> legacyVersionMonitors;
-
 		Optional<ProtocolVersion> dbProtocolVersion;
 
 		// This maps a normalized protocol version to the client associated with it. This prevents compatible
@@ -1135,30 +1120,6 @@ public:
 		std::vector<std::pair<FDBDatabaseOptions::Option, Optional<Standalone<StringRef>>>> options;
 		UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaultOptions;
 		Mutex optionLock;
-	};
-
-	// A struct that enables monitoring whether the cluster is running an old version (<= 5.0) that doesn't support
-	// connect packet monitoring.
-	struct LegacyVersionMonitor : ThreadSafeReferenceCounted<LegacyVersionMonitor> {
-		LegacyVersionMonitor(Reference<ClientInfo> const& client) : client(client), monitorRunning(false) {}
-
-		// Terminates the version monitor to break reference cycles
-		void close();
-
-		// Starts the connection monitor by creating a database object at an old version.
-		// Must be called from the main thread
-		void startConnectionMonitor(Reference<DatabaseState> dbState);
-
-		// Runs a GRV probe on the cluster to determine if the client version is compatible with the cluster.
-		// Must be called from main thread
-		void runGrvProbe(Reference<DatabaseState> dbState);
-
-		Reference<ClientInfo> client;
-		Reference<IDatabase> db;
-		Reference<ITransaction> tr;
-
-		ThreadFuture<Void> versionMonitor;
-		bool monitorRunning;
 	};
 
 	const Reference<DatabaseState> dbState;
