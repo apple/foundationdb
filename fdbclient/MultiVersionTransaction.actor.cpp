@@ -2085,22 +2085,6 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 			}
 		});
 
-		// For clients older than 6.2 we create and maintain our database connection
-		api->runOnExternalClients(threadIdx, [this, &connectionRecord](Reference<ClientInfo> client) {
-			if (!client->protocolVersion.hasCloseUnusedConnection()) {
-				try {
-					dbState->legacyDatabaseConnections[client->protocolVersion] =
-					    connectionRecord.createDatabase(client->api);
-				} catch (Error& e) {
-					// This connection is discarded
-					TraceEvent(SevWarnAlways, "FailedToCreateLegacyDatabaseConnection")
-					    .error(e)
-					    .detail("LibraryPath", client->libPath)
-					    .detail("ConnectionRecord", connectionRecord);
-				}
-			}
-		});
-
 		Reference<DatabaseState> dbStateRef = dbState;
 		onMainThreadVoid([dbStateRef]() { dbStateRef->protocolVersionMonitor = dbStateRef->monitorProtocolVersion(); });
 	}
@@ -2327,21 +2311,11 @@ void MultiVersionDatabase::DatabaseState::addClient(Reference<ClientInfo> client
 
 		MultiVersionApi::api->updateSupportedVersions();
 	}
-
-	if (!client->protocolVersion.hasInexpensiveMultiVersionClient() && !client->failed) {
-		TraceEvent("AddingLegacyVersionMonitor")
-		    .detail("LibPath", client->libPath)
-		    .detail("ProtocolVersion", client->protocolVersion);
-
-		legacyVersionMonitors.emplace_back(new LegacyVersionMonitor(client));
-	}
 }
 
 // Watch the cluster protocol version for changes and update the database state when it does.
 // Must be called from the main thread
 ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion() {
-	startLegacyVersionMonitors();
-
 	Optional<ProtocolVersion> expected = dbProtocolVersion;
 	ThreadFuture<ProtocolVersion> f = versionMonitorDb->getServerProtocol(dbProtocolVersion);
 
@@ -2530,22 +2504,7 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 	protocolVersionMonitor = monitorProtocolVersion();
 }
 
-// Starts version monitors for old client versions that don't support connect packet monitoring (<= 5.0).
-// Must be called from the main thread
-void MultiVersionDatabase::DatabaseState::startLegacyVersionMonitors() {
-	for (auto itr = legacyVersionMonitors.begin(); itr != legacyVersionMonitors.end(); ++itr) {
-		while (itr != legacyVersionMonitors.end() && (*itr)->client->failed) {
-			(*itr)->close();
-			itr = legacyVersionMonitors.erase(itr);
-		}
-		if (itr != legacyVersionMonitors.end() &&
-		    (!dbProtocolVersion.present() || (*itr)->client->protocolVersion != dbProtocolVersion.get())) {
-			(*itr)->startConnectionMonitor(Reference<DatabaseState>::addRef(this));
-		}
-	}
-}
-
-// Cleans up state for the legacy version monitors to break reference cycles
+// Cleans up state for the version monitors to break reference cycles
 void MultiVersionDatabase::DatabaseState::close() {
 	Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
 	onMainThreadVoid([self]() {
@@ -2553,11 +2512,6 @@ void MultiVersionDatabase::DatabaseState::close() {
 		if (self->protocolVersionMonitor.isValid()) {
 			self->protocolVersionMonitor.cancel();
 		}
-		for (auto monitor : self->legacyVersionMonitors) {
-			monitor->close();
-		}
-
-		self->legacyVersionMonitors.clear();
 	});
 }
 
@@ -2645,67 +2599,6 @@ Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
 	}
 	statusObj["Healthy"] = initializationState == InitializationState::CREATED && dbContextHealthy;
 	return StringRef(json_spirit::write_string(json_spirit::mValue(statusObj)));
-}
-
-// Starts the connection monitor by creating a database object at an old version.
-// Must be called from the main thread
-void MultiVersionDatabase::LegacyVersionMonitor::startConnectionMonitor(
-    Reference<MultiVersionDatabase::DatabaseState> dbState) {
-	if (!monitorRunning) {
-		monitorRunning = true;
-
-		auto itr = dbState->legacyDatabaseConnections.find(client->protocolVersion);
-		ASSERT(itr != dbState->legacyDatabaseConnections.end());
-
-		db = itr->second;
-		tr = Reference<ITransaction>();
-
-		TraceEvent("StartingLegacyVersionMonitor").detail("ProtocolVersion", client->protocolVersion);
-		Reference<LegacyVersionMonitor> self = Reference<LegacyVersionMonitor>::addRef(this);
-		versionMonitor =
-		    mapThreadFuture<Void, Void>(db.castTo<DLDatabase>()->onReady(), [self, dbState](ErrorOr<Void> ready) {
-			    onMainThreadVoid([self, ready, dbState]() {
-				    if (ready.isError()) {
-					    if (ready.getError().code() != error_code_operation_cancelled) {
-						    TraceEvent(SevError, "FailedToOpenDatabaseOnClient")
-						        .error(ready.getError())
-						        .detail("LibPath", self->client->libPath);
-
-						    self->client->failed = true;
-						    MultiVersionApi::api->updateSupportedVersions();
-					    }
-				    } else {
-					    self->runGrvProbe(dbState);
-				    }
-			    });
-
-			    return ready;
-		    });
-	}
-}
-
-// Runs a GRV probe on the cluster to determine if the client version is compatible with the cluster.
-// Must be called from main thread
-void MultiVersionDatabase::LegacyVersionMonitor::runGrvProbe(Reference<MultiVersionDatabase::DatabaseState> dbState) {
-	tr = db->createTransaction();
-	Reference<LegacyVersionMonitor> self = Reference<LegacyVersionMonitor>::addRef(this);
-	versionMonitor = mapThreadFuture<Version, Void>(tr->getReadVersion(), [self, dbState](ErrorOr<Version> v) {
-		// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
-		if (!v.isError() || v.getError().code() != error_code_operation_cancelled) {
-			onMainThreadVoid([self, dbState]() {
-				self->monitorRunning = false;
-				dbState->protocolVersionChanged(self->client->protocolVersion);
-			});
-		}
-
-		return v.map([](Version v) { return Void(); });
-	});
-}
-
-void MultiVersionDatabase::LegacyVersionMonitor::close() {
-	if (versionMonitor.isValid()) {
-		versionMonitor.cancel();
-	}
 }
 
 // MultiVersionApi
