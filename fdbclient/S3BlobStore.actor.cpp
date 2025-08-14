@@ -1027,8 +1027,6 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		resource = "/";
 	}
 
-	req->resource = resource;
-
 	// Merge extraHeaders into headers
 	for (const auto& [k, v] : bstore->extraHeaders) {
 		std::string& fieldValue = req->data.headers[k];
@@ -1060,6 +1058,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		state Reference<HTTP::IncomingResponse> r;
 		state Reference<HTTP::IncomingResponse> dryrunR;
 		state std::string canonicalURI = resource;
+		// Set the resource on each loop so we don't double-encode when we set it to `getCanonicalURI` below.
+		req->resource = resource;
 		state UID connID = UID();
 		state double reqStartTimer;
 		state double connectStartTimer = g_network->timer();
