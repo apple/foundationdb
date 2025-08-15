@@ -781,6 +781,10 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 	state const Key clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 	state const Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 	TraceEvent(SevInfo, "DelExcessClntTxnEntriesCalled").log();
+
+	// If we don't limit it with retries, the DatabaseContext will never cleanup as Transaction
+	// object will be alive and hold reference to DatabaseContext.
+	state int retries = 0;
 	loop {
 		try {
 			tr->reset();
@@ -821,6 +825,10 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 			if (txInfoSize - numBytesToDel <= clientTxInfoSizeLimit)
 				return Void();
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled || retries++ >= 10) {
+				throw;
+			}
+
 			wait(tr->onError(e));
 		}
 	}
@@ -845,8 +853,12 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 	state int txBytes = 0;
 
 	loop {
-		// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do this because of
-		// the cyclic reference to self.
+		// Make sure we are connected to the server. Otherwise we may just try to keep reconnecting
+		// with incompatible clusters.
+		wait(cx->onConnected());
+
+		// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do
+		// this because of the cyclic reference to self.
 		wait(refreshTransaction(cx, &tr));
 		try {
 			ASSERT(cx->clientStatusUpdater.outStatusQ.empty());
@@ -931,13 +943,18 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
 
+			// Cleanup Transaction sooner than later, so that we don't hold reference to context.
+			tr = Transaction();
 			wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
 		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "UnableToWriteClientStatus").error(e);
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
-			TraceEvent(SevWarnAlways, "UnableToWriteClientStatus").error(e);
+
+			// Cleanup Transaction sooner than later, so that we don't hold reference to context.
+			tr = Transaction();
 			wait(delay(10.0));
 		}
 	}
