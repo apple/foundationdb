@@ -119,6 +119,8 @@ std::map<std::string, std::pair<int, int64_t>> hugeArenaTraces;
 
 void hugeArenaSample(int size) {
 	if (TraceEvent::isNetworkThread()) {
+		// FIXME-METRICS: count calls to this. It should be low but in case somebody
+		// leave it on by mistake (or makes it get called to frequently) we'd like to know.
 		auto& info = hugeArenaTraces[platform::get_backtrace()];
 		info.first++;
 		info.second += size;
@@ -373,6 +375,8 @@ void* FastAllocator<Size>::allocate() {
 	if (keepalive_allocator::isActive()) [[unlikely]]
 		return keepalive_allocator::allocate(Size);
 
+	// FIXME-METRICS: record calls and bytes
+
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
 	// Some usages of FastAllocator require 4096 byte alignment.
 	return aligned_alloc(Size >= 4096 ? 4096 : alignof(void*), Size);
@@ -425,6 +429,8 @@ void* FastAllocator<Size>::allocate() {
 
 template <int Size>
 void FastAllocator<Size>::release(void* ptr) {
+	// FIXME-METRICS: count calls and bytes
+
 	if (keepalive_allocator::isActive()) [[unlikely]]
 		return keepalive_allocator::invalidate(ptr);
 
@@ -568,6 +574,7 @@ void FastAllocator<Size>::getMagazine() {
 	                               MEM_COMMIT | MEM_RESERVE,
 	                               PAGE_READWRITE);
 #else
+	// FIXME-METRICS: count calls and bytes here
 	static int alt = 0;
 	alt++;
 	void* desiredBlock = (void*)(((getSizeCode(Size) << 11) + alt) * magazine_size * Size);
