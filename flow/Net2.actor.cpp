@@ -1066,7 +1066,7 @@ public:
 			// If the background handshakers are not all busy, use one
 
 			// FIXME: see comment elsewhere about making this the only path.
-			if (FLOW_KNOBS->TLS_HANDSHAKE_ALWAYS_BACKGROUND ||
+			if ((FLOW_KNOBS->TLS_HANDSHAKE_ALWAYS_BACKGROUND && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
 			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				g_net2->countServerTLSHandshakesOnSideThreads++;
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
@@ -1184,7 +1184,7 @@ public:
 			// much, much higher than the cost a few hundred or
 			// thousand incremental threads.
 
-			if (FLOW_KNOBS->TLS_HANDSHAKE_ALWAYS_BACKGROUND ||
+			if ((FLOW_KNOBS->TLS_HANDSHAKE_ALWAYS_BACKGROUND && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
 			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				g_net2->countClientTLSHandshakesOnSideThreads++;
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
