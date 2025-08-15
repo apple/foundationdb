@@ -39,6 +39,7 @@ package fdb
 import "C"
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
 	"unsafe"
@@ -165,7 +166,7 @@ func (f *futureByteSlice) Get() ([]byte, error) {
 		f.BlockUntilReady()
 
 		if err := C.fdb_future_get_value(f.ptr, &present, &value, &length); err != 0 {
-			f.e = Error{int(err)}
+			f.e = fmt.Errorf("failed to get future value: %w", Error{int(err)})
 			return
 		}
 
@@ -221,7 +222,7 @@ func (f *futureKey) Get() (Key, error) {
 		f.BlockUntilReady()
 
 		if err := C.fdb_future_get_key(f.ptr, &value, &length); err != 0 {
-			f.e = Error{int(err)}
+			f.e = fmt.Errorf("failed to get future key: %w", Error{int(err)})
 			return
 		}
 
@@ -266,7 +267,7 @@ func (f *futureNil) Get() error {
 
 	f.BlockUntilReady()
 	if err := C.fdb_future_get_error(f.ptr); err != 0 {
-		return Error{int(err)}
+		return fmt.Errorf("failed to get future error: %w", Error{int(err)})
 	}
 
 	return nil
@@ -305,7 +306,7 @@ func (f *futureKeyValueArray) Get() ([]KeyValue, bool, error) {
 	var more C.fdb_bool_t
 
 	if err := C.fdb_future_get_keyvalue_array(f.ptr, &kvs, &count, &more); err != 0 {
-		return nil, false, Error{int(err)}
+		return nil, false, fmt.Errorf("failed to get key-value array: %w", Error{int(err)})
 	}
 
 	ret := make([]KeyValue, int(count))
@@ -349,7 +350,7 @@ func (f *futureKeyArray) Get() ([]Key, error) {
 	var count C.int
 
 	if err := C.fdb_future_get_key_array(f.ptr, &ks, &count); err != 0 {
-		return nil, Error{int(err)}
+		return nil, fmt.Errorf("failed to get key array: %w", Error{int(err)})
 	}
 
 	ret := make([]Key, int(count))
@@ -399,7 +400,7 @@ func (f *futureInt64) Get() (int64, error) {
 
 	var ver C.int64_t
 	if err := C.fdb_future_get_int64(f.ptr, &ver); err != 0 {
-		return 0, Error{int(err)}
+		return 0, fmt.Errorf("failed to get int64 value: %w", Error{int(err)})
 	}
 
 	return int64(ver), nil
@@ -444,7 +445,7 @@ func (f *futureStringSlice) Get() ([]string, error) {
 	var count C.int
 
 	if err := C.fdb_future_get_string_array(f.ptr, (***C.char)(unsafe.Pointer(&strings)), &count); err != 0 {
-		return nil, Error{int(err)}
+		return nil, fmt.Errorf("failed to get string array: %w", Error{int(err)})
 	}
 
 	ret := make([]string, int(count))
