@@ -26,6 +26,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -39,12 +40,17 @@ struct RestoreBackupWorkload : TestWorkload {
 	Standalone<StringRef> tag;
 	double delayFor;
 	StopWhenDone stopWhenDone{ false };
+	Optional<std::string> encryptionKeyFileName;
 
 	RestoreBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
 		tag = getOption(options, "tag"_sr, "default"_sr);
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
+
+		if (getOption(options, "encrypted"_sr, true)) {
+			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
+		}
 	}
 
 	static constexpr auto NAME = "RestoreBackup";
@@ -115,6 +121,11 @@ struct RestoreBackupWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(RestoreBackupWorkload* self, Database cx) {
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+
+		if (self->encryptionKeyFileName.present()) {
+			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
+		}
+
 		wait(delay(self->delayFor));
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
@@ -129,7 +140,15 @@ struct RestoreBackupWorkload : TestWorkload {
 			                                       getSystemBackupRanges(),
 			                                       WaitForComplete::True,
 			                                       ::invalidVersion,
-			                                       Verbose::True)));
+			                                       Verbose::True,
+			                                       Key(),
+			                                       Key(),
+			                                       LockDB::True,
+			                                       UnlockDB::True,
+			                                       OnlyApplyMutationLogs::False,
+			                                       InconsistentSnapshotOnly::False,
+			                                       ::invalidVersion,
+			                                       self->encryptionKeyFileName)));
 			// restore user data
 			wait(success(self->backupAgent.restore(cx,
 			                                       cx,
@@ -139,7 +158,14 @@ struct RestoreBackupWorkload : TestWorkload {
 			                                       WaitForComplete::True,
 			                                       ::invalidVersion,
 			                                       Verbose::True,
-			                                       normalKeys)));
+			                                       normalKeys,
+			                                       Key(),
+			                                       Key(),
+			                                       LockDB::True,
+			                                       OnlyApplyMutationLogs::False,
+			                                       InconsistentSnapshotOnly::False,
+			                                       ::invalidVersion,
+			                                       self->encryptionKeyFileName)));
 		} else {
 			wait(success(self->backupAgent.restore(cx,
 			                                       cx,
@@ -148,7 +174,15 @@ struct RestoreBackupWorkload : TestWorkload {
 			                                       self->backupContainer->getProxy(),
 			                                       WaitForComplete::True,
 			                                       ::invalidVersion,
-			                                       Verbose::True)));
+			                                       Verbose::True,
+			                                       KeyRange(),
+			                                       Key(),
+			                                       Key(),
+			                                       LockDB::True,
+			                                       OnlyApplyMutationLogs::False,
+			                                       InconsistentSnapshotOnly::False,
+			                                       ::invalidVersion,
+			                                       self->encryptionKeyFileName)));
 		}
 
 		return Void();
