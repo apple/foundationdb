@@ -28,7 +28,7 @@
 static void bench_select_replicas(int repCount, benchmark::State& state) {
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-	    new PolicyAcross(repCount, "rack", Reference<IReplicationPolicy>(new PolicyOne())));
+	    new PolicyAcross(repCount, "rack", Reference<IReplicationPolicy>(new PolicyOne()), true));
 
 	std::vector<std::string> indexes;
 	int dcTotal = 1;

@@ -486,6 +486,9 @@ public:
 	Reference<StringToIntMap> _keymap;
 
 	virtual std::vector<std::vector<AttribValue>> const& getKeyValueArray() const { return _keyValueArray; }
+	LocalitySet* _localitygroup;
+
+	Optional<AttribKey> cachedKey;
 
 protected:
 	virtual Reference<StringToIntMap>& getGroupValueMap() { return _localitygroup->getGroupValueMap(); }
@@ -500,7 +503,7 @@ protected:
 	std::vector<AttribKey> _keyIndexArray;
 	std::vector<LocalityCacheRecord> _cacheArray;
 
-	LocalitySet* _localitygroup;
+	// LocalitySet* _localitygroup;
 	long long unsigned int _cachehits;
 	long long unsigned int _cachemisses;
 };
