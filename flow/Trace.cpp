@@ -1223,18 +1223,13 @@ BaseTraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEvent
 			return *this;
 		}
 
-		if (g_network) {
-			if (isNetworkThread()) {
-				int64_t suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, duration);
-				if (suppressedEventCount < 0)
-					enabled.suppress();
-				if (enabled && logSuppressedEventCount) {
-					detail("SuppressedEventCount", suppressedEventCount);
-				}
-			} else {
-				TraceEvent(SevWarnAlways, "SuppressionFromNonNetworkThread").detail("Event", type);
-				// Choosing a detail name that is unlikely to collide with other names
-				detail("__InvalidSuppression__", "");
+		if (g_network && isNetworkThread()) {
+			int64_t suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, duration);
+			if (suppressedEventCount < 0) {
+				enabled.suppress();
+			}
+			if (enabled && logSuppressedEventCount) {
+				detail("SuppressedEventCount", suppressedEventCount);
 			}
 		}
 

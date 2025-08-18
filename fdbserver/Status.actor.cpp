@@ -635,7 +635,9 @@ struct RolesInfo {
 			}
 
 		} catch (AttributeNotFoundError& e) {
-			TraceEvent(SevWarnAlways, "StorageServerStatusJson").detail("MissingAttribute", e.getMissingAttribute());
+			TraceEvent(SevWarnAlways, "StorageServerStatusJson")
+			    .suppressFor(5.0)
+			    .detail("MissingAttribute", e.getMissingAttribute());
 		}
 		if (pDataLagSeconds) {
 			*pDataLagSeconds = dataLagSeconds;
