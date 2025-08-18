@@ -74,7 +74,7 @@ struct BackupWorkload : TestWorkload {
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
 
-		 if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
+		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
 			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
 		}
 
