@@ -35,6 +35,7 @@
 //  and vc++ rejects "true".
 // FIXME: this has been set to true for 4+ years.  We probably do not need the "not thread safe"
 // version of the code.  Consider removing this and just making it thread safe.
+// Also, explain why thread safety is required here and not elsewhere (e.g. Arena and ArenaBlock).
 #define FASTALLOC_THREAD_SAFE (FLOW_THREAD_SAFE || (1 == 1))
 
 #if VALGRIND
