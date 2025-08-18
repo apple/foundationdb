@@ -23,6 +23,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tuple.h"
+#include "flow/Error.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
@@ -175,6 +176,10 @@ ACTOR Future<Version> GlobalConfig::refresh(GlobalConfig* self, Version lastKnow
 				wait(delay(0.25));
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
 			wait(backoff.onError());
 		}
 	}
@@ -248,6 +253,10 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 				}
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
 			// There shouldn't be any uncaught errors that fall to this point,
 			// but in case there are, catch them and restart the updater.
 			TraceEvent("GlobalConfigUpdaterError").error(e);
