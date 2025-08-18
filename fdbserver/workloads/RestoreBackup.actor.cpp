@@ -48,7 +48,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
 
-		if (getOption(options, "encrypted"_sr, true)) {
+		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
 			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
 		}
 	}

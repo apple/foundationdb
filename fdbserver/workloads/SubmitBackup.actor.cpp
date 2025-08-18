@@ -52,7 +52,7 @@ struct SubmitBackupWorkload : TestWorkload {
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, true));
 		incremental.set(getOption(options, "incremental"_sr, false));
 
-		if (getOption(options, "encrypted"_sr, true)) {
+		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
 			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
 		}
 	}

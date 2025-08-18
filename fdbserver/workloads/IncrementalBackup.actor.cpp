@@ -64,7 +64,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		clearBackupAgentKeys = getOption(options, "clearBackupAgentKeys"_sr, false);
 		blobManifestUrl = getOption(options, "blobManifestUrl"_sr, ""_sr);
 
-		if (getOption(options, "encrypted"_sr, true)) {
+		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
 			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
 		}
 	}

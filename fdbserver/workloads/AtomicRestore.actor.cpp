@@ -57,7 +57,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
 		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);
 
-		if (getOption(options, "encrypted"_sr, true)) {
+		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
 			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
 		}
 
