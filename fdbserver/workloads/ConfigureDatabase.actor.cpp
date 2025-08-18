@@ -53,6 +53,9 @@ static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_
 
 std::string generateRegions() {
 	std::string result;
+#ifdef NO_MULTIREGION_TEST
+	return result;
+#endif
 	if (g_simulator->physicalDatacenters == 1 ||
 	    (g_simulator->physicalDatacenters == 2 && deterministicRandom()->random01() < 0.25) ||
 	    g_simulator->physicalDatacenters == 3) {
