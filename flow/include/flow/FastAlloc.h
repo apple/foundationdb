@@ -33,6 +33,9 @@
 // #define ALLOC_INSTRUMENTATION ENABLED(NOT_IN_CLEAN)
 //  The form "(1==1)" in this context is used to satisfy both clang and vc++ with a single syntax.  Clang rejects "1"
 //  and vc++ rejects "true".
+// FIXME: this has been set to true for 4+ years.  We probably do not need the "not thread safe"
+// version of the code.  Consider removing this and just making it thread safe.
+// Also, explain why thread safety is required here and not elsewhere (e.g. Arena and ArenaBlock).
 #define FASTALLOC_THREAD_SAFE (FLOW_THREAD_SAFE || (1 == 1))
 
 #if VALGRIND
@@ -172,6 +175,8 @@ private:
 	}
 	static void* freelist;
 
+	// FIXME-METRICS: consider adding metrics objects here, or maybe in GlobalData.
+
 	static void getMagazine();
 	static void releaseMagazine(void*);
 };
@@ -214,6 +219,7 @@ std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet();
 } // namespace keepalive_allocator
 
 force_inline uint8_t* allocateAndMaybeKeepalive(size_t size) {
+	// FIXME-METRICS: count calls and bytes
 	uint8_t* p;
 	if (keepalive_allocator::isActive()) [[unlikely]]
 		p = static_cast<uint8_t*>(keepalive_allocator::allocate(size));
@@ -231,6 +237,7 @@ force_inline void freeOrMaybeKeepalive(void* ptr) {
 	if (keepalive_allocator::isActive()) [[unlikely]]
 		keepalive_allocator::invalidate(ptr);
 	else
+		// FIXME-METRICS: count this
 		delete[] static_cast<uint8_t*>(ptr);
 }
 
@@ -270,6 +277,7 @@ public:
 			abort();
 		INSTRUMENT_ALLOCATE(typeid(Object).name());
 
+		// FIXME-METRICS: count calls and bytes on both sides of this loop
 		if constexpr (sizeof(Object) <= 256) {
 			void* p = FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
 			return p;
@@ -281,6 +289,10 @@ public:
 
 	static void operator delete(void* s) {
 		INSTRUMENT_RELEASE(typeid(Object).name());
+
+		// FIXME-METRICS: count calls. Consider whether putting the byte count
+		// and perhaps a (say) 1% sample of the top 5 call stack addresses is
+		// a thing we should do.
 
 		if constexpr (sizeof(Object) <= 256) {
 			FastAllocator<sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object))>::release(s);
@@ -294,6 +306,9 @@ public:
 };
 
 [[nodiscard]] inline void* allocateFast(int size) {
+	// FIXME-METRICS: count objects and bytes. Make sure the
+	// allocate() method is instrumented, or just count here
+	// to also cover the `new uint8_t[size]` below.
 	if (size <= 16)
 		return FastAllocator<16>::allocate();
 	if (size <= 32)
@@ -310,6 +325,8 @@ public:
 }
 
 inline void freeFast(int size, void* ptr) {
+	// FIXME-METRICS: count objects and bytes, since we have the
+	// size from the caller.
 	if (size <= 16)
 		return FastAllocator<16>::release(ptr);
 	if (size <= 32)
@@ -328,6 +345,8 @@ inline void freeFast(int size, void* ptr) {
 // Allocate a block of memory aligned to 4096 bytes. Size must be a multiple of
 // 4096. Guaranteed not to return null. Use freeFast4kAligned to free.
 [[nodiscard]] inline void* allocateFast4kAligned(int size) {
+	// FIXME-METRICS: count calls and bytes
+
 #if !defined(USE_JEMALLOC)
 	// Use FastAllocator for sizes it supports to avoid internal fragmentation in some implementations of aligned_alloc
 	if (size <= 4096)
@@ -346,6 +365,8 @@ inline void freeFast(int size, void* ptr) {
 
 // Free a pointer returned from allocateFast4kAligned(size)
 inline void freeFast4kAligned(int size, void* ptr) {
+	// FIXME-METRICS: count calls and bytes
+
 #if !defined(USE_JEMALLOC)
 	// Sizes supported by FastAllocator must be release via FastAllocator
 	if (size <= 4096)
@@ -355,6 +376,7 @@ inline void freeFast4kAligned(int size, void* ptr) {
 	if (size <= 16384)
 		return FastAllocator<16384>::release(ptr);
 #endif
+	// FIXME-METRICS: count calls and bytes
 	aligned_free(ptr);
 }
 

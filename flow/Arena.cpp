@@ -109,6 +109,7 @@ void makeUndefined(void*, size_t) {}
 
 Arena::Arena() : impl(nullptr) {}
 Arena::Arena(size_t reservedSize) : impl(0) {
+	// FIXME-METRICS: count Arenas created and sum of reservedSize
 	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
 	if (reservedSize) {
 		allowAccess(impl.getPtr());
@@ -123,6 +124,8 @@ Arena& Arena::operator=(Arena&& r) noexcept = default;
 void Arena::dependsOn(const Arena& p) {
 	// x.dependsOn(y) is a no-op if they refer to the same ArenaBlocks.
 	// They will already have the same lifetime.
+	// METRICS-FIXME: instrument this, or in ArenaBlock::dependOn
+	// (and consider renaming that to dependsOn, with an s).
 	if (p.impl && p.impl.getPtr() != impl.getPtr()) {
 		allowAccess(impl.getPtr());
 		allowAccess(p.impl.getPtr());
@@ -138,6 +141,7 @@ void* Arena::allocate4kAlignedBuffer(uint32_t size) {
 
 size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	if (impl) {
+		// FIXME-METRICS: count times thru this code path
 		allowAccess(impl.getPtr());
 		size_t result;
 		if (fastInaccurateEstimate) {
@@ -155,6 +159,7 @@ size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 
 bool Arena::hasFree(size_t size, const void* address) {
 	if (impl) {
+		// FIXME-METRICS: count times thru this code path, or count work that the caller is doing.
 		allowAccess(impl.getPtr());
 		auto result = impl->unused() >= size && impl->getNextData() == address;
 		disallowAccess(impl.getPtr());
@@ -219,6 +224,7 @@ size_t ArenaBlock::totalSize(std::unordered_set<ArenaBlock*>& visited) const {
 	totalSizeEstimate = size();
 	int o = nextBlockOffset;
 	while (o) {
+		// FIXME-METRICS: count times thru this loop, and total calls to totalSize
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
 		if (r->aligned4kBufferSize != 0) {
@@ -244,6 +250,7 @@ size_t ArenaBlock::estimatedTotalSize() const {
 }
 
 void ArenaBlock::wipeUsed() {
+	// FIXME-METRICS: count bytes wiped
 	int dataOffset = isTiny() ? TINY_HEADER : sizeof(ArenaBlock);
 	void* dataBegin = (char*)getData() + dataOffset;
 	int dataSize = used() - dataOffset;
@@ -258,6 +265,7 @@ void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 	if (isTiny())
 		return;
 
+	// FIXME-METRICS: count loop iterations
 	int o = nextBlockOffset;
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
@@ -332,6 +340,7 @@ void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t 
 }
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem isSecure) {
+	// FIXME-METRICS: count calls and bytes
 	ArenaBlock* b = self.getPtr();
 	allowAccess(b);
 	if (!self || self->unused() < bytes) {
@@ -350,6 +359,7 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem i
 
 // Return an appropriately-sized ArenaBlock to store the given data
 ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
+	// FIXME-METRICS: count calls and bytes
 	ArenaBlock* b;
 	// all blocks are initialized with no-wipe by default. allocate() sets it, if needed.
 	if (dataSize <= SMALL - TINY_HEADER && !next) {
@@ -381,6 +391,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 		}
 
 		if (reqSize < LARGE) {
+			// FIXME-METRICS: granular metrics for the below
 			if (reqSize <= 128) {
 				b = (ArenaBlock*)FastAllocator<128>::allocate();
 				b->bigSize = 128;
@@ -461,6 +472,7 @@ void ArenaBlock::destroy() {
 	Arena stackArena;
 	VectorRef<ArenaBlock*> stack(&tinyStack, 1);
 
+	// FIXME-METRICS: callee counts 4k buffers freed.  Count loop iterations in these loops.
 	while (stack.size()) {
 		ArenaBlock* b = stack.end()[-1];
 		stack.pop_back();
@@ -503,6 +515,7 @@ void ArenaBlock::destroyLeaf() {
 			INSTRUMENT_RELEASE("Arena64");
 		}
 	} else {
+		// FIXME-METRICS: granular metrics here
 		if (bigSize <= 128) {
 			FastAllocator<128>::release(this);
 			INSTRUMENT_RELEASE("Arena128");
