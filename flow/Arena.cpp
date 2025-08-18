@@ -124,6 +124,8 @@ Arena& Arena::operator=(Arena&& r) noexcept = default;
 void Arena::dependsOn(const Arena& p) {
 	// x.dependsOn(y) is a no-op if they refer to the same ArenaBlocks.
 	// They will already have the same lifetime.
+	// METRICS-FIXME: instrument this, or in ArenaBlock::dependOn
+	// (and consider renaming that to dependsOn, with an s).
 	if (p.impl && p.impl.getPtr() != impl.getPtr()) {
 		allowAccess(impl.getPtr());
 		allowAccess(p.impl.getPtr());
