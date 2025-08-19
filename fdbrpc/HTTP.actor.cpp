@@ -28,6 +28,7 @@
 #include "libb64/encode.h"
 #include "flow/Knobs.h"
 #include <cctype>
+#include <sstream>
 #include "flow/IConnection.h"
 #include <unordered_map>
 
@@ -65,6 +66,28 @@ std::string urlEncode(const std::string& s) {
 			o.append(buf);
 		}
 	return o;
+}
+
+std::string urlDecode(const std::string& encoded) {
+	std::string decoded;
+	decoded.reserve(encoded.size());
+	for (size_t i = 0; i < encoded.length(); ++i) {
+		if (encoded[i] == '%' && i + 2 < encoded.length()) {
+			int value;
+			std::istringstream is(encoded.substr(i + 1, 2));
+			if (is >> std::hex >> value) {
+				decoded += static_cast<char>(value);
+				i += 2;
+			} else {
+				decoded += encoded[i];
+			}
+		} else if (encoded[i] == '+') {
+			decoded += ' ';
+		} else {
+			decoded += encoded[i];
+		}
+	}
+	return decoded;
 }
 
 template <typename T>

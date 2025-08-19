@@ -71,9 +71,10 @@ public:
 		}
 	};
 
-	// Storage
+	// Storage - Thread-safe access required for concurrent requests
 	std::map<std::string, std::map<std::string, ObjectData>> buckets;
 	std::map<std::string, MultipartUpload> multipartUploads;
+	mutable std::mutex storageMutex; // Protects buckets and multipartUploads
 
 	MockS3ServerImpl() { TraceEvent("MockS3ServerImpl_Constructor").detail("Address", format("%p", this)); }
 
@@ -203,8 +204,16 @@ public:
 				std::string key = iter->str(1);
 				std::string value = iter->str(2);
 				// URL decode the parameter value
-				queryParams[key] = urlDecode(value);
+				queryParams[key] = HTTP::urlDecode(value);
 			}
+		}
+
+		// MockS3Server handles S3 HTTP requests where bucket is always the first path component
+		// For bucket operations: HEAD /bucket_name
+		// For object operations: HEAD /bucket_name/object_path
+		if (bucket.empty()) {
+			TraceEvent(SevError, "MockS3MissingBucketInPath").detail("Resource", resource).detail("QueryString", query);
+			throw backup_invalid_url();
 		}
 
 		TraceEvent("MockS3ParsedPath")
@@ -463,24 +472,31 @@ public:
 	                                    std::string bucket,
 	                                    std::string object) {
 
-		TraceEvent("MockS3PutObject")
-		    .detail("Bucket", bucket)
-		    .detail("Object", object)
-		    .detail("ContentLength", req->data.contentLen);
+		// Suppressed trace to prevent too many trace events
+		// TraceEvent("MockS3PutObject")
+		//     .detail("Bucket", bucket)
+		//     .detail("Object", object)
+		//     .detail("ContentLength", req->data.contentLen);
 
-		// Create object
-		ObjectData obj(req->data.content);
-		self->buckets[bucket][object] = std::move(obj);
+		// Thread-safe object creation
+		std::string etag;
+		{
+			std::lock_guard<std::mutex> lock(self->storageMutex);
+			ObjectData obj(req->data.content);
+			etag = obj.etag;
+			self->buckets[bucket][object] = std::move(obj);
+		}
 
 		response->code = 200;
-		response->data.headers["ETag"] = self->buckets[bucket][object].etag;
+		response->data.headers["ETag"] = etag;
 		response->data.contentLen = 0;
 		response->data.content = new UnsentPacketQueue(); // Required for HTTP header transmission
 
-		TraceEvent("MockS3ObjectStored")
-		    .detail("Bucket", bucket)
-		    .detail("Object", object)
-		    .detail("ETag", self->buckets[bucket][object].etag);
+		// Suppressed trace to prevent too many trace events
+		// TraceEvent("MockS3ObjectStored")
+		//     .detail("Bucket", bucket)
+		//     .detail("Object", object)
+		//     .detail("ETag", self->buckets[bucket][object].etag);
 
 		return Void();
 	}
@@ -491,55 +507,68 @@ public:
 	                                    std::string bucket,
 	                                    std::string object) {
 
-		TraceEvent("MockS3GetObject").detail("Bucket", bucket).detail("Object", object);
+		// Suppressed trace to prevent too many trace events
+		// TraceEvent("MockS3GetObject").detail("Bucket", bucket).detail("Object", object);
 
-		auto bucketIter = self->buckets.find(bucket);
-		if (bucketIter == self->buckets.end()) {
-			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
-			return Void();
-		}
+		// Thread-safe object access
+		std::string content, etag, contentMD5;
+		{
+			std::lock_guard<std::mutex> lock(self->storageMutex);
 
-		auto objectIter = bucketIter->second.find(object);
-		if (objectIter == bucketIter->second.end()) {
-			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchKey", "Object not found");
-			return Void();
+			auto bucketIter = self->buckets.find(bucket);
+			if (bucketIter == self->buckets.end()) {
+				self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
+				return Void();
+			}
+
+			auto objectIter = bucketIter->second.find(object);
+			if (objectIter == bucketIter->second.end()) {
+				self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchKey", "Object not found");
+				return Void();
+			}
+
+			// Copy data while holding the lock
+			content = objectIter->second.content;
+			etag = objectIter->second.etag;
+			contentMD5 = HTTP::computeMD5Sum(content);
 		}
 
 		response->code = 200;
-		response->data.headers["ETag"] = objectIter->second.etag;
+		response->data.headers["ETag"] = etag;
 		response->data.headers["Content-Type"] = "binary/octet-stream";
-		response->data.headers["Content-MD5"] = HTTP::computeMD5Sum(objectIter->second.content);
+		response->data.headers["Content-MD5"] = contentMD5;
 
 		// Write content to response - CRITICAL FIX: Avoid PacketWriter to prevent malloc corruption
-		TraceEvent("MockS3GetObjectWriting")
-		    .detail("Bucket", bucket)
-		    .detail("Object", object)
-		    .detail("ContentSize", objectIter->second.content.size());
+		// Suppressed trace to prevent too many trace events
+		// TraceEvent("MockS3GetObjectWriting")
+		//     .detail("Bucket", bucket)
+		//     .detail("Object", object)
+		//     .detail("ContentSize", content.size());
 
-		if (objectIter->second.content.empty()) {
+		if (content.empty()) {
 			response->data.contentLen = 0;
 		} else {
-			// CORRUPTION FIX: Use PacketWriter with generous buffer allocation
-			size_t contentSize = objectIter->second.content.size();
-			size_t bufferSize = contentSize + 1024; // Generous padding to prevent overflow
+			// FIXED: Actually put the content data into the response
+			// The previous approach created an empty UnsentPacketQueue, causing memory corruption
+			size_t contentSize = content.size();
 
 			response->data.content = new UnsentPacketQueue();
-			PacketBuffer* buffer = response->data.content->getWriteBuffer(bufferSize);
-			PacketWriter pw(buffer, nullptr, Unversioned());
-
-			TraceEvent("MockS3GetObject_SafePacketWriter")
-			    .detail("ContentSize", contentSize)
-			    .detail("BufferSize", bufferSize)
-			    .detail("BufferPtr", format("%p", buffer))
-			    .detail("ResponseCode", response->code);
-
-			pw.serializeBytes(objectIter->second.content);
-			pw.finish(); // CRITICAL: Finalize PacketWriter to make content available
 			response->data.contentLen = contentSize;
 			response->data.headers["Content-Length"] = std::to_string(contentSize);
+
+			// CRITICAL: Use PacketWriter to properly populate the content
+			PacketBuffer* buffer = response->data.content->getWriteBuffer(contentSize);
+			PacketWriter pw(buffer, nullptr, Unversioned());
+			pw.serializeBytes(content);
+			pw.finish();
+
+			TraceEvent("MockS3GetObject_FixedContent")
+			    .detail("ContentSize", contentSize)
+			    .detail("ResponseCode", response->code);
 		}
 
-		TraceEvent("MockS3ObjectRetrieved").detail("Bucket", bucket).detail("Object", object);
+		// Suppressed trace to prevent too many trace events
+		// TraceEvent("MockS3ObjectRetrieved").detail("Bucket", bucket).detail("Object", object);
 
 		return Void();
 	}
@@ -552,9 +581,12 @@ public:
 
 		TraceEvent("MockS3DeleteObject").detail("Bucket", bucket).detail("Object", object);
 
-		auto bucketIter = self->buckets.find(bucket);
-		if (bucketIter != self->buckets.end()) {
-			bucketIter->second.erase(object);
+		{
+			std::lock_guard<std::mutex> lock(self->storageMutex);
+			auto bucketIter = self->buckets.find(bucket);
+			if (bucketIter != self->buckets.end()) {
+				bucketIter->second.erase(object);
+			}
 		}
 
 		response->code = 204; // No Content
@@ -572,48 +604,60 @@ public:
 	                                     std::string bucket,
 	                                     std::string object) {
 
-		TraceEvent("MockS3HeadObject").detail("Bucket", bucket).detail("Object", object);
+		// Suppressed trace to prevent too many trace events
+		// TraceEvent("MockS3HeadObject").detail("Bucket", bucket).detail("Object", object);
 
-		auto bucketIter = self->buckets.find(bucket);
-		if (bucketIter == self->buckets.end()) {
-			TraceEvent("MockS3HeadObjectNoBucket")
-			    .detail("Bucket", bucket)
-			    .detail("Object", object)
-			    .detail("AvailableBuckets", self->buckets.size());
-			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
-			return Void();
+		// Thread-safe object access
+		std::string etag;
+		size_t contentSize;
+		std::string preview;
+		{
+			std::lock_guard<std::mutex> lock(self->storageMutex);
+
+			auto bucketIter = self->buckets.find(bucket);
+			if (bucketIter == self->buckets.end()) {
+				TraceEvent("MockS3HeadObjectNoBucket")
+				    .detail("Bucket", bucket)
+				    .detail("Object", object)
+				    .detail("AvailableBuckets", self->buckets.size());
+				self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
+				return Void();
+			}
+
+			auto objectIter = bucketIter->second.find(object);
+			if (objectIter == bucketIter->second.end()) {
+				TraceEvent("MockS3HeadObjectNoObject")
+				    .detail("Bucket", bucket)
+				    .detail("Object", object)
+				    .detail("ObjectsInBucket", bucketIter->second.size());
+				self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchKey", "Object not found");
+				return Void();
+			}
+
+			const ObjectData& obj = objectIter->second;
+			etag = obj.etag;
+			contentSize = obj.content.size();
+			preview = contentSize > 0 ? obj.content.substr(0, std::min((size_t)20, contentSize)) : "EMPTY";
 		}
-
-		auto objectIter = bucketIter->second.find(object);
-		if (objectIter == bucketIter->second.end()) {
-			TraceEvent("MockS3HeadObjectNoObject")
-			    .detail("Bucket", bucket)
-			    .detail("Object", object)
-			    .detail("ObjectsInBucket", bucketIter->second.size());
-			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchKey", "Object not found");
-			return Void();
-		}
-
-		const ObjectData& obj = objectIter->second;
 
 		TraceEvent("MockS3HeadObjectFound")
 		    .detail("Bucket", bucket)
 		    .detail("Object", object)
-		    .detail("Size", obj.content.size())
-		    .detail("Preview",
-		            obj.content.size() > 0 ? obj.content.substr(0, std::min((size_t)20, obj.content.size())) : "EMPTY");
+		    .detail("Size", contentSize)
+		    .detail("Preview", preview);
 
 		response->code = 200;
-		response->data.headers["ETag"] = obj.etag;
-		response->data.headers["Content-Length"] = std::to_string(obj.content.size());
+		response->data.headers["ETag"] = etag;
+		response->data.headers["Content-Length"] = std::to_string(contentSize);
 		response->data.headers["Content-Type"] = "binary/octet-stream";
 		// CRITICAL FIX: HEAD requests need contentLen set to actual size for headers
-		response->data.contentLen = obj.content.size(); // This controls ResponseContentSize in HTTP logs
+		response->data.contentLen = contentSize; // This controls ResponseContentSize in HTTP logs
 
-		TraceEvent("MockS3ObjectHead")
-		    .detail("Bucket", bucket)
-		    .detail("Object", object)
-		    .detail("Size", obj.content.size());
+		// Suppressed trace to prevent too many trace events
+		// TraceEvent("MockS3ObjectHead")
+		//     .detail("Bucket", bucket)
+		//     .detail("Object", object)
+		//     .detail("Size", obj.content.size());
 
 		return Void();
 	}
@@ -638,45 +682,51 @@ public:
 		    .detail("Delimiter", delimiter)
 		    .detail("MaxKeys", maxKeys);
 
-		// Find bucket
-		auto bucketIter = self->buckets.find(bucket);
-		if (bucketIter == self->buckets.end()) {
-			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
-			return Void();
-		}
-
-		// Build list of matching objects
-		std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ListBucketResult>\n";
-		xml += "<Name>" + bucket + "</Name>\n";
-		xml += "<Prefix>" + prefix + "</Prefix>\n";
-		xml += "<MaxKeys>" + std::to_string(maxKeys) + "</MaxKeys>\n";
-		xml += "<IsTruncated>false</IsTruncated>\n";
-
+		// Thread-safe bucket access and XML generation
+		std::string xml;
 		int count = 0;
-		for (const auto& objectPair : bucketIter->second) {
-			const std::string& objectName = objectPair.first;
-			const ObjectData& objectData = objectPair.second;
+		{
+			std::lock_guard<std::mutex> lock(self->storageMutex);
 
-			// Apply prefix filter
-			if (!prefix.empty() && objectName.find(prefix) != 0) {
-				continue;
+			// Find bucket
+			auto bucketIter = self->buckets.find(bucket);
+			if (bucketIter == self->buckets.end()) {
+				self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
+				return Void();
 			}
 
-			// Apply max-keys limit
-			if (count >= maxKeys) {
-				break;
+			// Build list of matching objects
+			xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ListBucketResult>\n";
+			xml += "<Name>" + bucket + "</Name>\n";
+			xml += "<Prefix>" + prefix + "</Prefix>\n";
+			xml += "<MaxKeys>" + std::to_string(maxKeys) + "</MaxKeys>\n";
+			xml += "<IsTruncated>false</IsTruncated>\n";
+
+			for (const auto& objectPair : bucketIter->second) {
+				const std::string& objectName = objectPair.first;
+				const ObjectData& objectData = objectPair.second;
+
+				// Apply prefix filter
+				if (!prefix.empty() && objectName.find(prefix) != 0) {
+					continue;
+				}
+
+				// Apply max-keys limit
+				if (count >= maxKeys) {
+					break;
+				}
+
+				xml += "<Contents>\n";
+				xml += "<Key>" + objectName + "</Key>\n";
+				xml += "<LastModified>" + std::to_string((int64_t)objectData.lastModified) + "</LastModified>\n";
+				xml += "<ETag>" + objectData.etag + "</ETag>\n";
+				xml += "<Size>" + std::to_string(objectData.content.size()) + "</Size>\n";
+				xml += "<StorageClass>STANDARD</StorageClass>\n";
+				xml += "</Contents>\n";
+
+				count++;
 			}
-
-			xml += "<Contents>\n";
-			xml += "<Key>" + objectName + "</Key>\n";
-			xml += "<LastModified>" + std::to_string((int64_t)objectData.lastModified) + "</LastModified>\n";
-			xml += "<ETag>" + objectData.etag + "</ETag>\n";
-			xml += "<Size>" + std::to_string(objectData.content.size()) + "</Size>\n";
-			xml += "<StorageClass>STANDARD</StorageClass>\n";
-			xml += "</Contents>\n";
-
-			count++;
-		}
+		} // Lock is released here
 
 		xml += "</ListBucketResult>";
 
@@ -698,9 +748,13 @@ public:
 
 		TraceEvent("MockS3HeadBucket").detail("Bucket", bucket);
 
-		// Ensure bucket exists in our storage (implicit creation like real S3)
-		if (self->buckets.find(bucket) == self->buckets.end()) {
-			self->buckets[bucket] = std::map<std::string, ObjectData>();
+		// Thread-safe bucket creation
+		{
+			std::lock_guard<std::mutex> lock(self->storageMutex);
+			// Ensure bucket exists in our storage (implicit creation like real S3)
+			if (self->buckets.find(bucket) == self->buckets.end()) {
+				self->buckets[bucket] = std::map<std::string, ObjectData>();
+			}
 		}
 
 		response->code = 200;
@@ -736,26 +790,6 @@ public:
 	}
 
 	// Utility Methods
-	static std::string urlDecode(const std::string& encoded) {
-		std::string decoded;
-		for (size_t i = 0; i < encoded.length(); ++i) {
-			if (encoded[i] == '%' && i + 2 < encoded.length()) {
-				int value;
-				std::istringstream is(encoded.substr(i + 1, 2));
-				if (is >> std::hex >> value) {
-					decoded += static_cast<char>(value);
-					i += 2;
-				} else {
-					decoded += encoded[i];
-				}
-			} else if (encoded[i] == '+') {
-				decoded += ' ';
-			} else {
-				decoded += encoded[i];
-			}
-		}
-		return decoded;
-	}
 
 	void sendError(Reference<HTTP::OutgoingResponse> response,
 	               int code,
@@ -786,29 +820,29 @@ public:
 		response->data.headers["Content-Length"] = std::to_string(xml.size());
 		response->data.headers["Content-MD5"] = HTTP::computeMD5Sum(xml);
 
-		// CORRUPTION FIX: Use PacketWriter with generous buffer allocation
+		// FIXED: Actually put the XML content into the response
 		if (xml.empty()) {
 			response->data.contentLen = 0;
 			TraceEvent("MockS3SendXMLResponse_Empty").detail("ResponseCode", response->code);
 		} else {
-			// Use PacketWriter with generous buffer to prevent heap corruption
+			// FIXED: Use PacketWriter to properly populate the content
+			// The previous approach created an empty UnsentPacketQueue, causing memory corruption
 			size_t contentSize = xml.size();
-			size_t bufferSize = contentSize + 1024; // Generous padding to prevent overflow
 
 			response->data.content = new UnsentPacketQueue();
-			PacketBuffer* buffer = response->data.content->getWriteBuffer(bufferSize);
+			response->data.contentLen = contentSize;
+
+			// CRITICAL: Use PacketWriter to properly populate the content
+			PacketBuffer* buffer = response->data.content->getWriteBuffer(contentSize);
 			PacketWriter pw(buffer, nullptr, Unversioned());
-
-			TraceEvent("MockS3SendXMLResponse_SafePacketWriter")
-			    .detail("ContentSize", contentSize)
-			    .detail("BufferSize", bufferSize)
-			    .detail("BufferPtr", format("%p", buffer))
-			    .detail("ResponseCode", response->code)
-			    .detail("XMLPreview", xml.substr(0, std::min((size_t)50, xml.size())));
-
 			pw.serializeBytes(xml);
-			pw.finish(); // CRITICAL: Finalize PacketWriter to make content available
-			response->data.contentLen = contentSize; // Set to actual content size
+			pw.finish();
+
+			// Suppressed trace to prevent too many trace events (21,656+ per test)
+			// TraceEvent("MockS3SendXMLResponse_FixedContent")
+			//     .detail("ContentSize", contentSize)
+			//     .detail("ResponseCode", response->code)
+			//     .detail("XMLPreview", xml.substr(0, std::min((size_t)50, xml.size())));
 		}
 
 		TraceEvent("MockS3SendXMLResponse_Complete")
@@ -861,6 +895,7 @@ static MockS3ServerImpl& getSingletonInstance() {
 // Clear singleton state for clean test runs
 static void clearSingletonState() {
 	MockS3ServerImpl& instance = getSingletonInstance();
+	std::lock_guard<std::mutex> lock(instance.storageMutex);
 	instance.buckets.clear();
 	instance.multipartUploads.clear();
 	TraceEvent("MockS3ServerImpl_StateCleared");
@@ -869,17 +904,19 @@ static void clearSingletonState() {
 // Request Handler Implementation - Uses singleton to preserve state
 Future<Void> MockS3RequestHandler::handleRequest(Reference<HTTP::IncomingRequest> req,
                                                  Reference<HTTP::OutgoingResponse> response) {
-	TraceEvent("MockS3RequestHandler_GetInstance").detail("Method", req->verb).detail("Resource", req->resource);
+	// Suppressed trace to prevent too many trace events
+	// TraceEvent("MockS3RequestHandler_GetInstance").detail("Method", req->verb).detail("Resource", req->resource);
 
 	// Use singleton instance to maintain state across requests while avoiding reference counting
 	MockS3ServerImpl& serverInstance = getSingletonInstance();
 
-	TraceEvent("MockS3RequestHandler_UsingInstance")
-	    .detail("InstancePtr", format("%p", &serverInstance))
-	    .detail("Method", req->verb)
-	    .detail("Resource", req->resource);
+	// Suppressed trace to prevent too many trace events (31,180+ per test)
+	// TraceEvent("MockS3RequestHandler_UsingInstance")
+	//     .detail("InstancePtr", format("%p", &serverInstance))
+	//     .detail("Method", req->verb)
+	//     .detail("Resource", req->resource);
 
-	TraceEvent("MockS3RequestHandler").detail("Method", req->verb).detail("Resource", req->resource);
+	// TraceEvent("MockS3RequestHandler").detail("Method", req->verb).detail("Resource", req->resource);
 
 	return MockS3ServerImpl::handleRequest(&serverInstance, req, response);
 }
@@ -953,6 +990,169 @@ ACTOR Future<Void> startMockS3Server(NetworkAddress listenAddress) {
 		TraceEvent(SevError, "MockS3ServerStartError").error(e).detail("ListenAddress", listenAddress.toString());
 		throw;
 	}
+
+	return Void();
+}
+
+// Unit Tests for MockS3Server
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ValidBucketParameter") {
+	MockS3ServerImpl server;
+	std::string resource = "/test?bucket=testbucket&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket");
+	ASSERT(object == "");
+	ASSERT(queryParams["bucket"] == "testbucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/MissingBucketParameter") {
+	MockS3ServerImpl server;
+	std::string resource = "/test?region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	try {
+		server.parseS3Request(resource, bucket, object, queryParams);
+		ASSERT(false); // Should not reach here
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_backup_invalid_url);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/EmptyQueryString") {
+	MockS3ServerImpl server;
+	std::string resource = "/test";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	try {
+		server.parseS3Request(resource, bucket, object, queryParams);
+		ASSERT(false); // Should not reach here
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_backup_invalid_url);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/BucketParameterOverride") {
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket/testobject?bucket=testbucket&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket"); // Should use query parameter, not path
+	ASSERT(object == "testobject");
+	ASSERT(queryParams["bucket"] == "testbucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ComplexPath") {
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket/folder/subfolder/file.txt?bucket=testbucket&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket"); // Should use query parameter
+	ASSERT(object == "folder/subfolder/file.txt");
+	ASSERT(queryParams["bucket"] == "testbucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/URLEncodedParameters") {
+	MockS3ServerImpl server;
+	std::string resource = "/test?bucket=test%20bucket&region=us-east-1&param=value%3Dtest";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "test bucket"); // Should be URL decoded
+	ASSERT(queryParams["bucket"] == "test bucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+	ASSERT(queryParams["param"] == "value=test"); // Should be URL decoded
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/EmptyPath") {
+	MockS3ServerImpl server;
+	std::string resource = "/?bucket=testbucket&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket");
+	ASSERT(object == "");
+	ASSERT(queryParams["bucket"] == "testbucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/OnlyBucketInPath") {
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket?bucket=testbucket&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket"); // Should use query parameter
+	ASSERT(object == "");
+	ASSERT(queryParams["bucket"] == "testbucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/MultipleParameters") {
+	MockS3ServerImpl server;
+	std::string resource = "/test?bucket=testbucket&region=us-east-1&version=1&encoding=utf8";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket");
+	ASSERT(queryParams["bucket"] == "testbucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+	ASSERT(queryParams["version"] == "1");
+	ASSERT(queryParams["encoding"] == "utf8");
+	ASSERT(queryParams.size() == 4);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ParametersWithoutValues") {
+	MockS3ServerImpl server;
+	std::string resource = "/test?bucket=testbucket&flag&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket");
+	ASSERT(queryParams["bucket"] == "testbucket");
+	ASSERT(queryParams["flag"] == ""); // Parameter without value should be empty string
+	ASSERT(queryParams["region"] == "us-east-1");
 
 	return Void();
 }

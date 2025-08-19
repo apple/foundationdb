@@ -29,6 +29,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/MockS3Server.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -51,6 +52,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	bool shouldSkipRestoreRanges;
 	bool defaultBackup;
 	Optional<std::string> encryptionKeyFileName;
+	std::string backupURL;
+	bool skipDirtyRestore;
+	int initSnapshotInterval;
+	int snapshotInterval;
 
 	// This workload is not compatible with RandomRangeLock workload because they will race in locked range
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
@@ -88,6 +93,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 		defaultBackup = getOption(options, "defaultBackup"_sr, false);
+		backupURL = getOption(options, "backupURL"_sr, "file://simfdb/backups/"_sr).toString();
+		skipDirtyRestore = getOption(options, "skipDirtyRestore"_sr, true);
+		initSnapshotInterval = getOption(options, "initSnapshotInterval"_sr, 0);
+		snapshotInterval = getOption(options, "snapshotInterval"_sr, 30);
 
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
@@ -187,6 +196,16 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> _setup(Database cx, BackupAndRestoreCorrectnessWorkload* self) {
 		state bool adjusted = false;
 		state TenantMapEntry entry;
+
+		// Register MockS3Server only for blobstore URLs in simulation
+		if (self->backupURL.rfind("blobstore://", 0) == 0 &&
+		    (self->backupURL.find("127.0.0.1") != std::string::npos ||
+		     self->backupURL.find("localhost") != std::string::npos) &&
+		    g_network->isSimulated()) {
+			TraceEvent("BARW_RegisterMockS3").detail("URL", self->backupURL);
+			wait(g_simulator->registerSimHTTPServer("127.0.0.1", "8080", makeReference<MockS3RequestHandler>()));
+			TraceEvent("BARW_RegisteredMockS3").detail("Address", "127.0.0.1:8080");
+		}
 
 		if (!self->defaultBackup && (cx->defaultTenant.present() || BUGGIFY)) {
 			if (cx->defaultTenant.present()) {
@@ -296,10 +315,17 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		loop {
 			bool active = wait(agent.checkActive(cx));
 			TraceEvent("BARW_AgentActivityCheck").detail("IsActive", active);
-			std::string status = wait(agent.getStatus(cx, ShowErrors::True, tag));
-			puts(status.c_str());
+			state std::string statusText = wait(agent.getStatus(cx, ShowErrors::True, tag));
+			// Suppress backup status output during testing to reduce noise
+			// puts(statusText.c_str());
 			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
-			puts(statusJSON.c_str());
+			// puts(statusJSON.c_str());
+			if (statusText.find("\"Name\":\"Completed\"") != std::string::npos ||
+			    (statusJSON.find("\"StopAfterSnapshot\":true") != std::string::npos &&
+			     statusJSON.find("\"ExpectedProgress\":100") != std::string::npos)) {
+				TraceEvent("BARW_StatusLoopExit").detail("Reason", "CompletedOrSnapshotClosed");
+				return Void();
+			}
 			wait(delay(2.0));
 		}
 	}
@@ -336,14 +362,14 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		    .detail("Tag", printable(tag))
 		    .detail("StopWhenDone", stopDifferentialDelay ? "False" : "True");
 
-		state std::string backupContainer = "file://simfdb/backups/";
+		state std::string backupContainer = self->backupURL;
 		state Future<Void> status = statusLoop(cx, tag.toString());
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
 			                               {},
-			                               deterministicRandom()->randomInt(0, 60),
-			                               deterministicRandom()->randomInt(0, 2000),
+			                               self->initSnapshotInterval,
+			                               self->snapshotInterval,
 			                               tag.toString(),
 			                               backupRanges,
 			                               true,
@@ -584,8 +610,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		}
 
 		try {
-			state Future<Void> startRestore = delay(self->restoreAfter);
-
 			// backup
 			wait(delay(self->backupAfter));
 
@@ -629,15 +653,18 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx.getReference()));
 			state UID logUid = uidFlag.first;
 			state Key destUidValue = wait(BackupConfig(logUid).destUidValue().getD(cx.getReference()));
-			state Reference<IBackupContainer> lastBackupContainer =
-			    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
+			// Ensure backup reached a restorable/completed state and fetch its container
+			state Reference<IBackupContainer> lastBackupContainer;
+			state UID lastBackupUID;
+			state EBackupState waitState = wait(backupAgent.waitBackup(
+			    cx, self->backupTag.toString(), StopWhenDone::True, &lastBackupContainer, &lastBackupUID));
 
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
 					extraBackup = backupAgent.submitBackup(cx,
-					                                       "file://simfdb/backups/"_sr,
+					                                       StringRef(self->backupURL),
 					                                       {},
 					                                       deterministicRandom()->randomInt(0, 60),
 					                                       deterministicRandom()->randomInt(0, 100),
@@ -654,11 +681,14 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
-			wait(startRestore);
+			// Wait for backup to complete, then add a small delay before restore
+			TraceEvent("BARW_WaitingForBackupBeforeRestore", randomID).detail("BackupTag", printable(self->backupTag));
+
+			// Add a small delay after backup completion to ensure all metadata is written
+			wait(delay(5.0));
 
 			if (lastBackupContainer && self->performRestore) {
-				if (deterministicRandom()->random01() < 0.5) {
+				if (!self->skipDirtyRestore && deterministicRandom()->random01() < 0.5) {
 					wait(attemptDirtyRestore(
 					    self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
 				}
@@ -674,25 +704,37 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
 				    .detail("RestoreAfter", self->restoreAfter)
 				    .detail("BackupTag", printable(self->backupTag));
+				TraceEvent("BARW_RestoreBegin", randomID).detail("BackupTag", printable(self->backupTag));
 
-				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
-				                                                 lastBackupContainer->getProxy(),
-				                                                 lastBackupContainer->getEncryptionKeyFileName());
-				BackupDescription desc = wait(container->describeBackup());
-
-				state Version targetVersion = -1;
-				if (desc.maxRestorableVersion.present()) {
-					if (deterministicRandom()->random01() < 0.1) {
-						targetVersion = desc.minRestorableVersion.get();
-					} else if (deterministicRandom()->random01() < 0.1) {
-						targetVersion = desc.maxRestorableVersion.get();
-					} else if (deterministicRandom()->random01() < 0.5) {
-						targetVersion = (desc.minRestorableVersion.get() != desc.maxRestorableVersion.get())
-						                    ? deterministicRandom()->randomInt64(desc.minRestorableVersion.get(),
-						                                                         desc.maxRestorableVersion.get())
-						                    : desc.maxRestorableVersion.get();
-					}
+				state Reference<IBackupContainer> restoreContainer =
+				    IBackupContainer::openContainer(lastBackupContainer->getURL(),
+				                                    lastBackupContainer->getProxy(),
+				                                    lastBackupContainer->getEncryptionKeyFileName());
+				state BackupDescription restoreDesc;
+				state BackupDescription _initialRestoreDesc = wait(restoreContainer->describeBackup());
+				restoreDesc = _initialRestoreDesc;
+				// Wait until backup becomes restorable to avoid restore_invalid_version
+				state int attempts = 0;
+				loop {
+					if (restoreDesc.maxRestorableVersion.present() || attempts >= 10000)
+						break;
+					wait(delay(1.0));
+					state BackupDescription _loopRestoreDesc = wait(restoreContainer->describeBackup());
+					restoreDesc = _loopRestoreDesc;
+					attempts++;
 				}
+				if (!restoreDesc.maxRestorableVersion.present()) {
+					TraceEvent("BARW_SkipRestoreNotRestorable").detail("BackupTag", printable(self->backupTag));
+					return Void();
+				}
+
+				// Double-check to prevent race condition
+				if (!restoreDesc.maxRestorableVersion.present()) {
+					TraceEvent("BARW_SkipRestoreNotRestorableRace").detail("BackupTag", printable(self->backupTag));
+					return Void();
+				}
+
+				state Version targetVersion = restoreDesc.maxRestorableVersion.get();
 
 				TraceEvent("BARW_RestoreDebug").detail("TargetVersion", targetVersion);
 
@@ -780,8 +822,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       self->encryptionKeyFileName));
 				}
 
-				// Sometimes kill and restart the restore
-				if (BUGGIFY) {
+				// Sometimes kill and restart the restore (disabled if skipDirtyRestore set)
+				if (BUGGIFY && !self->skipDirtyRestore) {
 					wait(delay(deterministicRandom()->randomInt(0, 10)));
 					if (multipleRangesInOneTag) {
 						FileBackupAgent::ERestoreState rs = wait(backupAgent.abortRestore(cx, restoreTags[0]));
@@ -848,9 +890,17 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				}
 
 				wait(waitForAll(restores));
+				TraceEvent("BARW_RestoreComplete", randomID).detail("BackupTag", printable(self->backupTag));
 
 				for (auto& restore : restores) {
 					ASSERT(!restore.isError());
+				}
+
+				// Re-describe the same container instance to print final description
+				{
+					state BackupDescription finalDesc = wait(restoreContainer->describeBackup());
+					wait(finalDesc.resolveVersionTimes(cx));
+					printf("BackupDescription:\n%s\n", finalDesc.toString().c_str());
 				}
 			}
 

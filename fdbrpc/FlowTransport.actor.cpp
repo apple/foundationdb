@@ -1849,11 +1849,15 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream) {
 	if (!isStream || !endpoint.getPrimaryAddress().isValid() || !endpoint.getPrimaryAddress().isPublic())
 		return;
-	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
+	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
 	if (peer) {
-		peer->peerReferences--;
-		if (peer->peerReferences < 0) {
-			TraceEvent(SevError, "InvalidPeerReferences")
+		// Use getOrOpenPeer to ensure consistency with addPeerReference
+		// This eliminates race conditions between add/remove operations
+		if (peer->peerReferences > 0) {
+			peer->peerReferences--;
+		} else {
+			// This indicates a bug in our reference counting logic
+			TraceEvent(SevError, "PeerReferenceUnexpectedState")
 			    .detail("References", peer->peerReferences)
 			    .detail("Address", endpoint.getPrimaryAddress())
 			    .detail("Token", endpoint.token);
