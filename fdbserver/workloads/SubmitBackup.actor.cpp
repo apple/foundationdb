@@ -24,6 +24,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -40,6 +41,7 @@ struct SubmitBackupWorkload : TestWorkload {
 	int snapshotInterval;
 	StopWhenDone stopWhenDone{ false };
 	IncrementalBackupOnly incremental{ false };
+	Optional<std::string> encryptionKeyFileName;
 
 	SubmitBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
@@ -49,12 +51,21 @@ struct SubmitBackupWorkload : TestWorkload {
 		snapshotInterval = getOption(options, "snapshotInterval"_sr, 1e8);
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, true));
 		incremental.set(getOption(options, "incremental"_sr, false));
+
+		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
+			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
+		}
 	}
 
 	ACTOR static Future<Void> _start(SubmitBackupWorkload* self, Database cx) {
 		wait(delay(self->delayFor));
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		addDefaultBackupRanges(backupRanges);
+
+		if (self->encryptionKeyFileName.present()) {
+			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
+		}
+
 		try {
 			wait(self->backupAgent.submitBackup(cx,
 			                                    self->backupDir,
@@ -66,7 +77,8 @@ struct SubmitBackupWorkload : TestWorkload {
 			                                    true,
 			                                    self->stopWhenDone,
 			                                    UsePartitionedLog::False,
-			                                    self->incremental));
+			                                    self->incremental,
+			                                    self->encryptionKeyFileName));
 		} catch (Error& e) {
 			TraceEvent("BackupSubmitError").error(e);
 			if (e.code() != error_code_backup_duplicate) {
