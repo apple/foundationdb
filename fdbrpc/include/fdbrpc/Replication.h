@@ -486,8 +486,9 @@ public:
 	Reference<StringToIntMap> _keymap;
 
 	virtual std::vector<std::vector<AttribValue>> const& getKeyValueArray() const { return _keyValueArray; }
+	// Pointer to the "head" localitySet within the policy tree.
 	LocalitySet* _localitygroup;
-
+	// When set, avoids map lookups when there is only a single PolicyAcross in the polcy.
 	Optional<AttribKey> cachedKey;
 
 protected:
@@ -503,7 +504,6 @@ protected:
 	std::vector<AttribKey> _keyIndexArray;
 	std::vector<LocalityCacheRecord> _cacheArray;
 
-	// LocalitySet* _localitygroup;
 	long long unsigned int _cachehits;
 	long long unsigned int _cachemisses;
 };

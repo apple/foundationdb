@@ -95,7 +95,7 @@ bool PolicyOne::validate(std::vector<LocalityEntry> const& solutionSet,
 PolicyAcross::PolicyAcross(int count,
                            std::string const& attribKey,
                            Reference<IReplicationPolicy> const policy,
-                           Optional<bool> cacheable)
+                           bool cacheable)
   : _count(count), _attribKey(attribKey), _policy(policy), _cacheable(cacheable) {
 	return;
 }
@@ -194,7 +194,7 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 	} else {
 		indexKey = fromServers->keyIndex(_attribKey);
 		groupIndexKey = fromServers->getGroupKeyIndex(indexKey);
-		if (_cacheable.present()) {
+		if (_cacheable) {
 			fromServers->_localitygroup->cachedKey = groupIndexKey;
 		}
 	}
