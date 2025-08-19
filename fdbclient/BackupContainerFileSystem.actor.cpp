@@ -1267,6 +1267,12 @@ public:
 	}
 
 	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
+		if (fileExists(filename)) {
+			// Key file already exists, don't overwrite it -> only for testing between backup and restore workloads to
+			// share the key.
+			TraceEvent("EncryptionKeyFileExists").detail("FileName", filename);
+			return Void();
+		}
 		state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
 		    filename,
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,

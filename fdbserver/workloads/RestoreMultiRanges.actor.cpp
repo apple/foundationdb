@@ -23,6 +23,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -30,8 +31,13 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 
 	FileBackupAgent backupAgent;
 	Reference<IBackupContainer> backupContainer;
+	Optional<std::string> encryptionKeyFileName;
 
-	RestoreMultiRangesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	RestoreMultiRangesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
+			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
+		}
+	}
 
 	static constexpr const char* NAME = "RestoreMultiRanges";
 
@@ -119,6 +125,10 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		wait(clearDatabase(cx));
 		wait(prepareDatabase(cx));
 
+		if (self->encryptionKeyFileName.present()) {
+			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
+		}
+
 		state std::string backupContainer = "file://simfdb/backups/";
 		state std::string tagName = "default";
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -133,7 +143,10 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 			                                    tagName,
 			                                    backupRanges,
 			                                    true,
-			                                    StopWhenDone::True));
+			                                    StopWhenDone::True,
+			                                    UsePartitionedLog::False,
+			                                    IncrementalBackupOnly::False,
+			                                    self->encryptionKeyFileName));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
@@ -158,7 +171,15 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		                                       ranges,
 		                                       WaitForComplete::True,
 		                                       ::invalidVersion,
-		                                       Verbose::True)));
+		                                       Verbose::True,
+		                                       Key(),
+		                                       Key(),
+		                                       LockDB::True,
+		                                       UnlockDB::True,
+		                                       OnlyApplyMutationLogs::False,
+		                                       InconsistentSnapshotOnly::False,
+		                                       ::invalidVersion,
+		                                       self->encryptionKeyFileName)));
 		TraceEvent("RestoreMultiRanges_Success");
 		return Void();
 	}

@@ -26,6 +26,7 @@ waitForQuiescence = false
     blobManifestUrl = 'file://simfdb/fdbblob/manifest'
     submitOnly = true
     waitForBackup = true
+    encrypted = false
 
 [[test]]
 testTitle = 'BlobGranuleCorrectness'
@@ -42,6 +43,7 @@ clearAfterTest = false
     tag = 'default'
     waitForBackup = true
     stopBackup = true
+    encrypted = false
 
 [[test]]
 testTitle = 'BlobRestore'
