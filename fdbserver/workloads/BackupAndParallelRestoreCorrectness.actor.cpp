@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
@@ -47,6 +48,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	UsePartitionedLog usePartitionedLogs{ false };
 	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
 	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
+	Optional<std::string> encryptionKeyFileName;
 
 	std::map<Standalone<KeyRef>, Standalone<ValueRef>> dbKVs;
 
@@ -84,6 +86,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		usePartitionedLogs.set(getOption(options, "usePartitionedLogs"_sr, deterministicRandom()->coinflip()));
 		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
 		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);
+
+		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
+			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
+		}
 
 		KeyRef beginRange;
 		KeyRef endRange;
@@ -159,6 +165,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "BARW_Param").detail("DifferentialBackup", differentialBackup);
 		TraceEvent(SevInfo, "BARW_Param").detail("StopDifferentialAfter", stopDifferentialAfter);
 		TraceEvent(SevInfo, "BARW_Param").detail("AgentRequest", agentRequest);
+		TraceEvent(SevInfo, "BARW_Param").detail("Encrypted", encryptionKeyFileName.present());
 
 		return _start(cx, this);
 	}
@@ -230,7 +237,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                               backupRanges,
 			                               true,
 			                               StopWhenDone{ !stopDifferentialDelay },
-			                               self->usePartitionedLogs));
+			                               self->usePartitionedLogs,
+			                               IncrementalBackupOnly::False,
+			                               self->encryptionKeyFileName));
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -388,7 +397,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				                                  normalKeys,
 				                                  Key(),
 				                                  Key(),
-				                                  self->locked)));
+				                                  self->locked,
+				                                  OnlyApplyMutationLogs::False,
+				                                  InconsistentSnapshotOnly::False,
+				                                  ::invalidVersion,
+				                                  self->encryptionKeyFileName)));
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID).log();
 				ASSERT(false);
 			} catch (Error& e) {
@@ -423,6 +436,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		// Increment the backup agent requests
 		if (self->agentRequest) {
 			BackupAndParallelRestoreCorrectnessWorkload::backupAgentRequests++;
+		}
+
+		if (self->encryptionKeyFileName.present()) {
+			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
 		}
 
 		try {
@@ -489,7 +506,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       self->backupRanges,
 					                                       true,
 					                                       StopWhenDone::True,
-					                                       UsePartitionedLog::False);
+					                                       UsePartitionedLog::False,
+					                                       IncrementalBackupOnly::False,
+					                                       self->encryptionKeyFileName);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
@@ -529,8 +548,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("BackupTag", printable(self->backupTag));
 				// start restoring
 
-				auto container =
-				    IBackupContainer::openContainer(lastBackupContainer->getURL(), lastBackupContainer->getProxy(), {});
+				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
+				                                                 lastBackupContainer->getProxy(),
+				                                                 lastBackupContainer->getEncryptionKeyFileName());
 				BackupDescription desc = wait(container->describeBackup());
 				ASSERT(self->usePartitionedLogs == desc.partitioned);
 				ASSERT(desc.minRestorableVersion.present()); // We must have a valid backup now.
