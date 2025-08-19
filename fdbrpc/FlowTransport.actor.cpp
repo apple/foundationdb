@@ -1177,6 +1177,17 @@ ACTOR static void deliver(TransportData* self,
 			StringRef data = reader.arenaReadAll();
 			ASSERT(data.size() > 8);
 			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
+
+			// Defensive check: verify receiver is still valid before using it
+			// Re-fetch the receiver to ensure it hasn't been invalidated
+			auto currentReceiver = self->endpoints.get(destination.token);
+			if (currentReceiver != receiver) {
+				TraceEvent(SevWarn, "ReceiverInvalidated")
+				    .detail("Token", destination.token.toString())
+				    .detail("Peer", destination.getPrimaryAddress());
+				return;
+			}
+
 			receiver->receive(objReader);
 			g_currentDeliveryPeerAddress = NetworkAddressList();
 			g_currentDeliverPeerAddressTrusted = false;
