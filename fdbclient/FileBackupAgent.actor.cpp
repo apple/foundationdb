@@ -6134,7 +6134,8 @@ public:
 			throw restore_error();
 		}
 
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString(), proxy, {});
+		state Reference<IBackupContainer> bc =
+		    IBackupContainer::openContainer(url.toString(), proxy, encryptionKeyFileName);
 
 		state BackupDescription desc = wait(bc->describeBackup(true));
 		if (cxOrig.present()) {
@@ -6394,6 +6395,7 @@ public:
 		}
 
 		state Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
+
 		bc = fileBackup::getBackupContainerWithProxy(bc);
 
 		if (fastRestore) {
