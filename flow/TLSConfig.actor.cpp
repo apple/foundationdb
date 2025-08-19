@@ -42,6 +42,7 @@ TLSPolicy::~TLSPolicy() {}
 #include <sstream>
 #include <utility>
 #include <boost/asio/ssl/context.hpp>
+#include <thread>
 
 #include "flow/Platform.h"
 #include "flow/IAsyncFile.h"
@@ -147,6 +148,9 @@ void ConfigureSSLStream(Reference<TLSPolicy> policy,
                         std::function<void(bool)> callback) {
 	try {
 		stream.set_verify_callback([policy, callback](bool preverified, boost::asio::ssl::verify_context& ctx) {
+			if (FLOW_KNOBS->INJECT_TLS_HANDSHAKE_VERIFY_SEC > 0) {
+				std::this_thread::sleep_for(std::chrono::duration<double>(FLOW_KNOBS->INJECT_TLS_HANDSHAKE_VERIFY_SEC));
+			}
 			bool success = policy->verify_peer(preverified, ctx.native_handle());
 			if (!success) {
 				if (policy->on_failure)

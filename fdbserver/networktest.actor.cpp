@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/IRandom.h"
 #include "fmt/format.h"
 #include "fdbserver/NetworkTest.h"
 #include "flow/Knobs.h"
@@ -358,6 +359,10 @@ struct P2PNetworkTest {
 	// Random delay before socket writes
 	RandomIntRange waitWriteMilliseconds;
 
+	double randomCloseMaxDelay = -1; // Maximum delay before closing a connection
+
+	double probabilityNotCloseConn = 0;
+
 	double startTime;
 	int64_t bytesSent;
 	int64_t bytesReceived;
@@ -400,10 +405,13 @@ struct P2PNetworkTest {
 	               RandomIntRange requests,
 	               RandomIntRange idleMilliseconds,
 	               RandomIntRange waitReadMilliseconds,
-	               RandomIntRange waitWriteMilliseconds)
+	               RandomIntRange waitWriteMilliseconds,
+	               double randomCloseMaxDelay,
+	               double probabilityNotCloseConn)
 	  : connectionsOut(connectionsOut), requestBytes(sendMsgBytes), replyBytes(recvMsgBytes), requests(requests),
 	    idleMilliseconds(idleMilliseconds), waitReadMilliseconds(waitReadMilliseconds),
-	    waitWriteMilliseconds(waitWriteMilliseconds) {
+	    waitWriteMilliseconds(waitWriteMilliseconds), randomCloseMaxDelay(randomCloseMaxDelay),
+	    probabilityNotCloseConn(probabilityNotCloseConn) {
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -494,18 +502,30 @@ struct P2PNetworkTest {
 		return Void();
 	}
 
+	ACTOR static Future<Void> randomDelayedConnClose(P2PNetworkTest* self, Reference<IConnection> conn) {
+		wait(delay(deterministicRandom()->random01() * self->randomCloseMaxDelay / 1000.0));
+		conn->close();
+		return Void();
+	}
+
 	ACTOR static Future<Void> doSession(P2PNetworkTest* self, Reference<IConnection> conn, bool incoming) {
 		state int numRequests;
+		state Future<Void> randomClose;
 
 		try {
 			if (incoming) {
+				if (self->randomCloseMaxDelay > -1) {
+					randomClose = randomDelayedConnClose(self, conn);
+				}
 				wait(conn->acceptHandshake());
-
 				// Read the number of requests for the session
 				Standalone<StringRef> buf = wait(readMsg(self, conn));
 				ASSERT(buf.size() == sizeof(int));
 				numRequests = *(int*)buf.begin();
 			} else {
+				if (self->randomCloseMaxDelay > -1) {
+					randomClose = randomDelayedConnClose(self, conn);
+				}
 				wait(conn->connectHandshake());
 
 				// Pick the number of requests for the session and send it to remote
@@ -532,7 +552,9 @@ struct P2PNetworkTest {
 			}
 
 			wait(delay(self->idleMilliseconds.get() / 1e3));
-			conn->close();
+			if (deterministicRandom()->random01() > self->probabilityNotCloseConn) {
+				conn->close();
+			}
 
 			if (incoming) {
 				++self->sessionsIn;
@@ -653,7 +675,9 @@ TEST_CASE(":/network/p2ptest") {
 	                         params.get("requests").orDefault("10:10000"),
 	                         params.get("idleMilliseconds").orDefault("0"),
 	                         params.get("waitReadMilliseconds").orDefault("0"),
-	                         params.get("waitWriteMilliseconds").orDefault("0"));
+	                         params.get("waitWriteMilliseconds").orDefault("0"),
+	                         params.getDouble("randomCloseMaxDelay").orDefault(-1),
+	                         params.getDouble("probabilityNotCloseConn").orDefault(0.0));
 
 	wait(p2p.run());
 	return Void();

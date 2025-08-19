@@ -107,6 +107,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	init( TLS_HANDSHAKE_ALWAYS_BACKGROUND,                   false );
 	init( INJECT_TLS_HANDSHAKE_BUSYNESS_SEC,                   0.0 );
+	init( INJECT_TLS_HANDSHAKE_VERIFY_SEC,                     0.0 );
 
 	//FlowTransport
 	init( CONNECTION_REJECTED_MESSAGE_DELAY,                   1.0 );
