@@ -1163,9 +1163,9 @@ ACTOR static void deliver(TransportData* self,
 		g_network->setCurrentTask(priority);
 	}
 
-	auto receiver = self->endpoints.get(destination.token);
-	if (receiver && (isTrustedPeer || receiver->isPublic())) {
-		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
+	auto msgReceiver = self->endpoints.get(destination.token);
+	if (msgReceiver && (isTrustedPeer || msgReceiver->isPublic())) {
+		if (!checkCompatible(msgReceiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
 			return;
 		}
 		try {
@@ -1181,14 +1181,14 @@ ACTOR static void deliver(TransportData* self,
 			// Defensive check: verify receiver is still valid before using it
 			// Re-fetch the receiver to ensure it hasn't been invalidated
 			auto currentReceiver = self->endpoints.get(destination.token);
-			if (currentReceiver != receiver) {
+			if (currentReceiver != msgReceiver) {
 				TraceEvent(SevWarn, "ReceiverInvalidated")
 				    .detail("Token", destination.token.toString())
 				    .detail("Peer", destination.getPrimaryAddress());
 				return;
 			}
 
-			receiver->receive(objReader);
+			msgReceiver->receive(objReader);
 			g_currentDeliveryPeerAddress = NetworkAddressList();
 			g_currentDeliverPeerAddressTrusted = false;
 			g_currentDeliveryPeerDisconnect = Future<Void>();
@@ -1208,11 +1208,11 @@ ACTOR static void deliver(TransportData* self,
 		}
 	} else if (destination.token.first() & TOKEN_STREAM_FLAG) {
 		// We don't have the (stream) endpoint 'token', notify the remote machine
-		if (receiver) {
+		if (msgReceiver) {
 			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented"_audit)
 			    .detail("From", peerAddress)
 			    .detail("Token", destination.token)
-			    .detail("Receiver", typeid(*receiver).name());
+			    .detail("Receiver", typeid(*msgReceiver).name());
 			ASSERT(!self->isLocalAddress(destination.getPrimaryAddress()));
 			Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 			sendPacket(self,

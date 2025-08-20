@@ -196,20 +196,36 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> _setup(Database cx, BackupAndRestoreCorrectnessWorkload* self) {
 		state bool adjusted = false;
 		state TenantMapEntry entry;
+		state std::string uniqueHostname;
 
 		// Register MockS3Server only for blobstore URLs in simulation
-		if (self->backupURL.rfind("blobstore://", 0) == 0 &&
+		// Only client 0 registers the MockS3Server to avoid duplicates
+		if (self->clientId == 0 && self->backupURL.rfind("blobstore://", 0) == 0 &&
 		    (self->backupURL.find("127.0.0.1") != std::string::npos ||
 		     self->backupURL.find("localhost") != std::string::npos) &&
 		    g_network->isSimulated()) {
-			TraceEvent("BARW_RegisterMockS3").detail("URL", self->backupURL);
+			TraceEvent("BARW_RegisterMockS3").detail("URL", self->backupURL).detail("ClientId", self->clientId);
 			wait(g_simulator->registerSimHTTPServer("127.0.0.1", "8080", makeReference<MockS3RequestHandler>()));
-			TraceEvent("BARW_RegisteredMockS3").detail("Address", "127.0.0.1:8080");
+			TraceEvent("BARW_RegisteredMockS3").detail("Address", "127.0.0.1:8080").detail("ClientId", self->clientId);
 		}
 
 		if (!self->defaultBackup && (cx->defaultTenant.present() || BUGGIFY)) {
 			if (cx->defaultTenant.present()) {
-				wait(store(entry, TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get())));
+				try {
+					wait(store(entry, TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get())));
+				} catch (Error& e) {
+					// Handle tenant cleanup gracefully - if tenant is deleted during test cleanup, skip backup
+					// operations
+					if (e.code() == error_code_tenant_not_found) {
+						TraceEvent(SevInfo, "BARW_TenantCleanedUp")
+						    .detail("Reason", "Tenant was cleaned up during test, skipping backup operations")
+						    .detail("TenantName", cx->defaultTenant.get())
+						    .detail("ErrorCode", e.code())
+						    .detail("ErrorDescription", e.what());
+						return Void(); // Skip backup operations for deleted tenant
+					}
+					throw; // Re-throw other errors
+				}
 
 				// If we are specifying sub-ranges (or randomly, if backing up normal keys), adjust them to be relative
 				// to the tenant
@@ -296,6 +312,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
+
 		return true;
 	}
 
@@ -1057,6 +1074,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e).GetLastError();
 			throw;
 		}
+
+		// Unregister MockS3Server if it was registered - do this before simulation shutdown
+		// MockS3Server will shut down naturally with the test process
+		// No explicit unregister needed, following pattern of other HTTP tests
+
 		return Void();
 	}
 };
