@@ -490,6 +490,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 			if (peer && (peer->pingLatencies.getPopulationSize() >= 10 || peer->connectFailedCount > 0 ||
 			             peer->timeoutCount > 0)) {
 				TraceEvent("PingLatency")
+				    .suppressFor(30.0)
 				    .detail("Elapsed", now() - peer->lastLoggedTime)
 				    .detail("PeerAddr", lastAddress)
 				    .detail("PeerAddress", lastAddress)
