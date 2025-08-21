@@ -364,33 +364,50 @@ struct P2PNetworkTest {
 	double probabilityNotCloseConn = 0;
 
 	double startTime;
-	int64_t bytesSent;
-	int64_t bytesReceived;
-	int sessionsIn;
-	int sessionsOut;
-	int connectErrors;
-	int acceptErrors;
-	int sessionErrors;
+	int64_t bytesSent = 0;
+	int64_t bytesReceived = 0;
+	int sessionsIn = 0;
+	int sessionsOut = 0;
+	int connectErrors = 0;
+	int acceptErrors = 0;
+	int sessionErrors = 0;
+	int handshakeReqIn = 0;
+	int handshakeReqOut = 0;
+	int handshakeDoneIn = 0;
+	int handshakeDoneOut = 0;
 
 	Standalone<StringRef> msgBuffer;
 
 	std::string statsString() {
 		double elapsed = now() - startTime;
-		std::string s = format(
-		    "%.2f MB/s bytes in  %.2f MB/s bytes out  %.2f/s completed sessions in  %.2f/s completed sessions out  ",
-		    bytesReceived / elapsed / 1e6,
-		    bytesSent / elapsed / 1e6,
-		    sessionsIn / elapsed,
-		    sessionsOut / elapsed);
-		s += format("Total Errors %d  connect=%d  accept=%d  session=%d",
-		            connectErrors + acceptErrors + sessionErrors,
-		            connectErrors,
-		            acceptErrors,
-		            sessionErrors);
+		std::string s = format("%.2f MB/s in; %.2f MB/s out\nArrive: %.2f/s in HS req; %.2f/s "
+		                       "out HS req\nProcessed %.2f/s in HS req; %.2f/s out HS req\n"
+		                       "Completed Session %.2f/s in sessions; %.2f/s "
+		                       "out sessions\n",
+		                       bytesReceived / elapsed / 1e6,
+		                       bytesSent / elapsed / 1e6,
+		                       handshakeReqIn / elapsed,
+		                       handshakeReqOut / elapsed,
+		                       handshakeDoneIn / elapsed,
+		                       handshakeDoneOut / elapsed,
+		                       sessionsIn / elapsed,
+		                       sessionsOut / elapsed);
+		s += format("Total Errors %.2f/s  ConnectError=%.2f/s  AcceptError=%.2f/s  SessionError=%.2f/s",
+		            (connectErrors + acceptErrors + sessionErrors) / elapsed,
+		            connectErrors / elapsed,
+		            acceptErrors / elapsed,
+		            sessionErrors / elapsed);
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
 		sessionsOut = 0;
+		connectErrors = 0;
+		acceptErrors = 0;
+		sessionErrors = 0;
+		handshakeReqIn = 0;
+		handshakeReqOut = 0;
+		handshakeDoneIn = 0;
+		handshakeDoneOut = 0;
 		startTime = now();
 		return s;
 	}
@@ -419,6 +436,10 @@ struct P2PNetworkTest {
 		connectErrors = 0;
 		acceptErrors = 0;
 		sessionErrors = 0;
+		handshakeReqIn = 0;
+		handshakeReqOut = 0;
+		handshakeDoneIn = 0;
+		handshakeDoneOut = 0;
 		msgBuffer = makeString(std::max(sendMsgBytes.max, recvMsgBytes.max));
 
 		if (!remoteAddresses.empty()) {
@@ -514,19 +535,23 @@ struct P2PNetworkTest {
 
 		try {
 			if (incoming) {
+				self->handshakeReqIn++;
 				if (self->randomCloseMaxDelay > -1) {
 					randomClose = randomDelayedConnClose(self, conn);
 				}
 				wait(conn->acceptHandshake());
+				self->handshakeDoneIn++;
 				// Read the number of requests for the session
 				Standalone<StringRef> buf = wait(readMsg(self, conn));
 				ASSERT(buf.size() == sizeof(int));
 				numRequests = *(int*)buf.begin();
 			} else {
+				self->handshakeReqOut++;
 				if (self->randomCloseMaxDelay > -1) {
 					randomClose = randomDelayedConnClose(self, conn);
 				}
 				wait(conn->connectHandshake());
+				self->handshakeDoneOut++;
 
 				// Pick the number of requests for the session and send it to remote
 				numRequests = self->requests.get();
@@ -590,10 +615,8 @@ struct P2PNetworkTest {
 
 	ACTOR static Future<Void> incoming(P2PNetworkTest* self, Reference<IListener> listener) {
 		state ActorCollection sessions(false);
-
+		state uint64_t connectionCount = 0;
 		loop {
-			wait(delay(0, TaskPriority::AcceptSocket));
-
 			try {
 				state Reference<IConnection> conn = wait(listener->accept());
 				// printf("Connected from %s\n", conn->getPeerAddress().toString().c_str());
@@ -601,6 +624,10 @@ struct P2PNetworkTest {
 			} catch (Error& e) {
 				++self->acceptErrors;
 				TraceEvent(SevError, "P2PIncomingError").error(e).detail("Listener", listener->getListenAddress());
+			}
+			connectionCount++;
+			if (connectionCount % (FLOW_KNOBS->ACCEPT_BATCH_SIZE) == 0) {
+				wait(delay(0, TaskPriority::AcceptSocket));
 			}
 		}
 	}
