@@ -388,7 +388,10 @@ public:
 					else
 						traceEvent.emplace(SevWarn, std::get<const char*>(errContext), errID);
 					TraceEvent& evt = *traceEvent;
-					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
+					evt.suppressFor(1.0)
+					    .detail("ErrorCode", error.value())
+					    .detail("ErrorMsg", error.message())
+					    .detail("BackgroundThread", false);
 					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
 					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
 					// error codes should never go that high.
@@ -824,7 +827,7 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		Handshake(ssl_socket& socket, ssl_socket::handshake_type type) : socket(socket), type(type) {}
 		double getTimeEstimate() const override { return 0.001; }
 
-		std::string getPeerAddress() const {
+		std::string getPeerEndPointAddress() const {
 			std::ostringstream o;
 			boost::system::error_code ec;
 			auto addr = socket.lowest_layer().remote_endpoint(ec);
@@ -832,10 +835,15 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			return std::move(o).str();
 		}
 
+		NetworkAddress getPeerAddress() const { return peerAddr; }
+
+		void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
+
 		ThreadReturnPromise<Void> done;
 		ssl_socket& socket;
 		ssl_socket::handshake_type type;
 		boost::system::error_code err;
+		NetworkAddress peerAddr;
 	};
 
 	void action(Handshake& h) {
@@ -853,6 +861,7 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 				                                                        : "N2_AcceptHandshakeError"_audit)
 				    .detail("PeerAddr", h.getPeerAddress())
 				    .detail("PeerAddress", h.getPeerAddress())
+				    .detail("PeerEndPoint", h.getPeerEndPointAddress())
 				    .detail("ErrorCode", h.err.value())
 				    .detail("ErrorMsg", h.err.message().c_str())
 				    .detail("BackgroundThread", true);
@@ -866,6 +875,7 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			                                                        : "N2_AcceptHandshakeUnknownError"_audit)
 			    .detail("PeerAddr", h.getPeerAddress())
 			    .detail("PeerAddress", h.getPeerAddress())
+			    .detail("PeerEndPoint", h.getPeerEndPointAddress())
 			    .detail("BackgroundThread", true);
 			h.done.sendError(connection_failed());
 		}
@@ -955,6 +965,7 @@ public:
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
+				handshake->setPeerAddr(self->getPeerAddress());
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -1050,6 +1061,7 @@ public:
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
+				handshake->setPeerAddr(self->getPeerAddress());
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
