@@ -316,12 +316,12 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		redundancy = "2";
 		log_replicas = "2";
 		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		    new PolicyAcross(2, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()), true));
 	} else if (mode == "triple" || mode == "fast_recovery_triple") {
 		redundancy = "3";
 		log_replicas = "3";
 		storagePolicy = tLogPolicy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()), true));
 	} else if (mode == "three_datacenter" || mode == "multi_dc") {
 		redundancy = "6";
 		log_replicas = "4";

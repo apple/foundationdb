@@ -92,12 +92,15 @@ bool PolicyOne::validate(std::vector<LocalityEntry> const& solutionSet,
 	return ((solutionSet.size() > 0) && (fromServers->size() > 0));
 }
 
-PolicyAcross::PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy)
-  : _count(count), _attribKey(attribKey), _policy(policy) {
+PolicyAcross::PolicyAcross(int count,
+                           std::string const& attribKey,
+                           Reference<IReplicationPolicy> const policy,
+                           bool cacheable)
+  : _count(count), _attribKey(attribKey), _policy(policy), _cacheable(cacheable) {
 	return;
 }
 
-PolicyAcross::PolicyAcross() : _policy(new PolicyOne()) {}
+PolicyAcross::PolicyAcross() : _policy(new PolicyOne()), _cacheable(false) {}
 
 PolicyAcross::~PolicyAcross() {}
 
@@ -182,8 +185,19 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
                                   std::vector<LocalityEntry> const& alsoServers,
                                   std::vector<LocalityEntry>& results) {
 	int count = 0;
-	AttribKey indexKey = fromServers->keyIndex(_attribKey);
-	auto groupIndexKey = fromServers->getGroupKeyIndex(indexKey);
+
+	AttribKey indexKey;
+	AttribKey groupIndexKey;
+
+	if (fromServers->_localitygroup->cachedKey.present()) {
+		indexKey = groupIndexKey = fromServers->_localitygroup->cachedKey.get();
+	} else {
+		indexKey = fromServers->keyIndex(_attribKey);
+		groupIndexKey = fromServers->getGroupKeyIndex(indexKey);
+		if (_cacheable) {
+			fromServers->_localitygroup->cachedKey = groupIndexKey;
+		}
+	}
 	int resultsSize, resultsAdded;
 	int resultsInit = results.size();
 
