@@ -18,24 +18,24 @@
  * limitations under the License.
  */
 
-#include "flow/SimplerCounter.h"
+#include "flow/SimpleCounter.h"
 #include "flow/UnitTest.h"
 
 TEST_CASE("/flow/simplecounter/int64") {
-	SimpleCounter<int64_t> *foo = SimpleCounter<int64_t>::makeCounter("foo");
-	SimpleCounter<int64_t> *bar = SimpleCounter<int64_t>::makeCounter("bar");
-	
+	SimpleCounter<int64_t>* foo = SimpleCounter<int64_t>::makeCounter("foo");
+	SimpleCounter<int64_t>* bar = SimpleCounter<int64_t>::makeCounter("bar");
+
 	foo->increment(5);
 	foo->increment(1);
 
 	for (int i = 0; i < 100; i++) {
-		SimpleCounter<int64_t> *p = SimpleCounter<int64_t>::makeCounter(std::string("many") + std::to_string(i));
+		SimpleCounter<int64_t>* p = SimpleCounter<int64_t>::makeCounter(std::string("many") + std::to_string(i));
 		p->increment(i);
 	}
 
 	bar->increment(10);
 
-	SimpleCounter<int64_t> *conflict = SimpleCounter<int64_t>::makeCounter("lots_of_increments");
+	SimpleCounter<int64_t>* conflict = SimpleCounter<int64_t>::makeCounter("lots_of_increments");
 
 	auto int_inclots = [conflict]() {
 		for (int i = 1; i <= 1'000'000; i++) {
@@ -53,7 +53,7 @@ TEST_CASE("/flow/simplecounter/int64") {
 		threads[i].join();
 	}
 
-	int64_t int_expected_count = int64_t{10} * int64_t{1'000'000 + 1} * uint64_t{500'000};
+	int64_t int_expected_count = int64_t{ 10 } * int64_t{ 1'000'000 + 1 } * uint64_t{ 500'000 };
 	ASSERT(conflict->get() == int_expected_count);
 
 	std::vector<SimpleCounter<int64_t>*> intCounters = SimpleCounter<int64_t>::getCounters();
@@ -63,13 +63,13 @@ TEST_CASE("/flow/simplecounter/int64") {
 }
 
 TEST_CASE("/flow/simplecounter/double") {
-	SimpleCounter<double> *baz = SimpleCounter<double>::makeCounter("baz");
+	SimpleCounter<double>* baz = SimpleCounter<double>::makeCounter("baz");
 
 	// We intend to compute a floating point sum with an exact representation.
 	// A way to do this is to only add values with exact representations.
 	// Integers and powers of two (within the limits of the number of mantissa
 	// and exponent bits) do have exact representations.  Hence the 0.5 increment.
-	auto double_inclots= [baz]() {
+	auto double_inclots = [baz]() {
 		for (double i = 0.5; i <= 1'000'000; i += 0.5) {
 			baz->increment(i);
 		}

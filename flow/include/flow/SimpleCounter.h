@@ -59,19 +59,18 @@
 //
 // FIXME: add support for gauges.
 
-template<class T>
+template <class T>
 class SimpleCounter {
-    static_assert(std::is_same_v<T, int64_t> || std::is_same_v<T, double>,
-				  "T must be int64_t or double");
+	static_assert(std::is_same_v<T, int64_t> || std::is_same_v<T, double>, "T must be int64_t or double");
 
 private:
 	SimpleCounter(std::string_view n) : value(T(0)), name_(n) {}
 
 	// Not copyable or movable.
 	SimpleCounter(const SimpleCounter&) = delete;
-    SimpleCounter& operator=(const SimpleCounter&) = delete;
-    SimpleCounter(SimpleCounter&&) = delete;
-    SimpleCounter& operator=(SimpleCounter&&) = delete;
+	SimpleCounter& operator=(const SimpleCounter&) = delete;
+	SimpleCounter(SimpleCounter&&) = delete;
+	SimpleCounter& operator=(SimpleCounter&&) = delete;
 
 private:
 	std::atomic<T> value;
@@ -83,24 +82,20 @@ private:
 	// of static objects.  These members are not objects, they are statically
 	// initialized plain old data.  Thus we can count on them being initialized
 	// from the start of the process.
-	static inline int numCounters{0};
-	static inline int allCountersSize{0};
-	static inline SimpleCounter<T> **allCounters{nullptr};
+	static inline int numCounters{ 0 };
+	static inline int allCountersSize{ 0 };
+	static inline SimpleCounter<T>** allCounters{ nullptr };
 
 public:
 	// Defined in template instantiations below.
 	void increment(T delta);
 
-	T get(void) {
-		return value.load();
-	}
+	T get(void) { return value.load(); }
 
-	const std::string& name(void) {
-		return name_;
-	}
+	const std::string& name(void) { return name_; }
 
-	static SimpleCounter<T> *makeCounter(std::string_view name) {
-		SimpleCounter<T> *rv = new SimpleCounter<T>(name);
+	static SimpleCounter<T>* makeCounter(std::string_view name) {
+		SimpleCounter<T>* rv = new SimpleCounter<T>(name);
 
 		std::lock_guard<std::mutex> lock(mutex);
 		ASSERT(numCounters <= allCountersSize);
@@ -111,7 +106,8 @@ public:
 				allCountersSize *= 2;
 			}
 			// printf("allCountersSize now [%d]; numCounters now [%d]\n", allCountersSize, numCounters);
-			allCounters = static_cast<SimpleCounter<T>**>(realloc(allCounters, allCountersSize * sizeof(SimpleCounter<T>*)));
+			allCounters =
+			    static_cast<SimpleCounter<T>**>(realloc(allCounters, allCountersSize * sizeof(SimpleCounter<T>*)));
 		}
 		ASSERT(numCounters < allCountersSize);
 		allCounters[numCounters++] = rv;
@@ -128,14 +124,16 @@ public:
 		}
 		return rv;
 	}
+
+	// FIXME: actually use this interface to log the metrics somewhere.
 };
 
-template<>
+template <>
 void SimpleCounter<int64_t>::increment(int64_t delta) {
 	value.fetch_add(delta, std::memory_order_relaxed);
 }
 
-template<>
+template <>
 void SimpleCounter<double>::increment(double delta) {
 	double old = value.load();
 	while (!value.compare_exchange_weak(old, old + delta)) {
