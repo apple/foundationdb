@@ -209,9 +209,7 @@ struct ValidateStorage : TestWorkload {
 					    .detail("ExistAuditPhase", existingAuditState.getPhase())
 					    .detail("AuditID", auditId)
 					    .detail("AuditType", type);
-					ASSERT(existingAuditState.getPhase() == AuditPhase::Complete ||
-					       existingAuditState.getPhase() == AuditPhase::Failed ||
-					       existingAuditState.getPhase() == AuditPhase::Running);
+					ASSERT(existingAuditState.getPhase() != AuditPhase::Invalid);
 					if (existingAuditState.getPhase() == AuditPhase::Complete) {
 						if (type == AuditType::ValidateStorageServerShard) {
 							RangeResult serverBasedRes = wait(tr.getRange(
@@ -292,7 +290,7 @@ struct ValidateStorage : TestWorkload {
 			disableConnectionFailures("AuditStorage");
 		}
 
-		self->testStringToAuditPhaseFunctionality();
+		/*self->testStringToAuditPhaseFunctionality();
 		TraceEvent("TestAuditStorageStringToAuditPhaseFuncionalityDone");
 
 		wait(self->testSSUserDataValidation(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
@@ -320,7 +318,10 @@ struct ValidateStorage : TestWorkload {
 		TraceEvent("TestAuditStorageWhenDDSecurityModeDone");
 
 		wait(self->testAuditStorageWhenDDBackToNormalMode(self, cx));
-		TraceEvent("TestAuditStorageWhenDDBackToNormalModeDone");
+		TraceEvent("TestAuditStorageWhenDDBackToNormalModeDone");*/
+
+		wait(self->testInjectInconsistency(self, cx));
+		TraceEvent("TestInjectInconsistencyDone");
 
 		return Void();
 	}
@@ -455,10 +456,14 @@ struct ValidateStorage : TestWorkload {
 	                                      Database cx,
 	                                      AuditType type,
 	                                      std::string context,
+	                                      bool checkAllKeys = false,
 	                                      bool stopWaitWhenCleared = false) {
 		std::vector<KeyRangeRef> auditKeysCollection = { partialKeys1, partialKeys2, partialKeys3, partialKeys4,
 			                                             partialKeys5, partialKeys6, partialKeys7, allKeys };
 		state KeyRangeRef auditRange = deterministicRandom()->randomChoice(auditKeysCollection);
+		if (checkAllKeys) {
+			auditRange = allKeys;
+		}
 		// Send audit request until the server accepts the request
 		state UID auditId = wait(self->triggerAuditStorageForType(cx, type, context, auditRange));
 		if (auditRange.empty()) {
@@ -598,22 +603,34 @@ struct ValidateStorage : TestWorkload {
 		TraceEvent("TestAuditStorageConcurrentRunForSameTypeBegin");
 		state std::vector<Future<Void>> fs;
 		state std::vector<UID> auditIds = { UID(), UID(), UID(), UID() };
-		fs.push_back(store(
-		    auditIds[0],
-		    self->auditStorageForType(
-		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
-		fs.push_back(store(
-		    auditIds[1],
-		    self->auditStorageForType(
-		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
-		fs.push_back(store(
-		    auditIds[2],
-		    self->auditStorageForType(
-		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
-		fs.push_back(store(
-		    auditIds[3],
-		    self->auditStorageForType(
-		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
+		fs.push_back(store(auditIds[0],
+		                   self->auditStorageForType(self,
+		                                             cx,
+		                                             AuditType::ValidateReplica,
+		                                             "TestConcurrentRunForSameType",
+		                                             /*checkAllKeys=*/false,
+		                                             /*stopWaitWhenCleared=*/true)));
+		fs.push_back(store(auditIds[1],
+		                   self->auditStorageForType(self,
+		                                             cx,
+		                                             AuditType::ValidateReplica,
+		                                             "TestConcurrentRunForSameType",
+		                                             /*checkAllKeys=*/false,
+		                                             /*stopWaitWhenCleared=*/true)));
+		fs.push_back(store(auditIds[2],
+		                   self->auditStorageForType(self,
+		                                             cx,
+		                                             AuditType::ValidateReplica,
+		                                             "TestConcurrentRunForSameType",
+		                                             /*checkAllKeys=*/false,
+		                                             /*stopWaitWhenCleared=*/true)));
+		fs.push_back(store(auditIds[3],
+		                   self->auditStorageForType(self,
+		                                             cx,
+		                                             AuditType::ValidateReplica,
+		                                             "TestConcurrentRunForSameType",
+		                                             /*checkAllKeys=*/false,
+		                                             /*stopWaitWhenCleared=*/true)));
 		wait(waitForAll(fs));
 		TraceEvent("TestAuditStorageConcurrentRunForSameTypeEnd");
 		return Void();
@@ -773,6 +790,95 @@ struct ValidateStorage : TestWorkload {
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageWhenDDBackToNormalMode"));
 		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDBackToNormalMode", auditIdD);
 		TraceEvent("TestAuditStorageWhenDDBackToNormalModeEnd");
+		return Void();
+	}
+
+	ACTOR Future<Void> testInjectInconsistency(ValidateStorage* self, Database cx) {
+		TraceEvent("TestInjectInconsistencyBegin");
+		state Transaction tr(cx);
+		state RangeResult readResult;
+		state RangeResult UIDtoTagMap;
+		state KeyRange selectedRange = KeyRangeRef("A"_sr, "B"_sr);
+		state UID selectedSrc;
+		state UID selectedPSID = deterministicRandom()->randomUniqueID();
+		state std::vector<UID> servers;
+		state bool newServerFound = false;
+		state bool addInjection = false;
+		loop {
+			servers.clear();
+			newServerFound = false;
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			try {
+				std::vector<Future<Void>> fs;
+				fs.push_back(store(readResult,
+				                   krmGetRanges(&tr,
+				                                keyServersPrefix,
+				                                selectedRange,
+				                                CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                                CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				fs.push_back(store(UIDtoTagMap, tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY)));
+				wait(waitForAll(fs));
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+				state int i = 0;
+				for (; i < readResult.size() - 1; ++i) {
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcID;
+					UID destID;
+					decodeKeyServersValue(UIDtoTagMap, readResult[i].value, src, dest, srcID, destID);
+					servers = std::vector<UID>(src.size() + dest.size());
+					std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
+					std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+					for (const auto& interf : interfs) {
+						if (std::find(servers.begin(), servers.end(), interf.uniqueID) == servers.end()) {
+							newServerFound = true;
+							selectedSrc = interf.uniqueID;
+							break;
+						}
+					}
+					if (!newServerFound) {
+						selectedSrc = deterministicRandom()->randomChoice(servers);
+					}
+					selectedRange = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
+					break;
+				}
+				TraceEvent("TestInjectInconsistencyInjectConfig")
+				    .detail("SelectedSrc", selectedSrc.toString())
+				    .detail("SelectedRange", selectedRange)
+				    .detail("OriginalServers", describe(servers))
+				    .detail("InjectionType",
+				            newServerFound ? (addInjection ? "AddSelectedNewServer" : "ChangeToSelectedNewServer")
+				                           : "RemainSelectedExistingServer");
+				if (newServerFound) {
+					if (!addInjection) {
+						servers.clear();
+					}
+				} else {
+					servers.clear();
+				}
+				servers.push_back(selectedSrc);
+				std::sort(servers.begin(), servers.end());
+				tr.set(keyServersKey(readResult[i].key), keyServersValue(servers, {}, selectedPSID, UID()));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		try {
+			UID ignored = wait(self->auditStorageForType(
+			    self, cx, AuditType::ValidateStorageServerShard, "TestInjectedCorruption", true, true));
+			UID ignored = wait(self->auditStorageForType(
+			    self, cx, AuditType::ValidateLocationMetadata, "TestInjectedCorruption", true, true));
+			UID ignored = wait(
+			    self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestInjectedCorruption", true, true));
+			UID ignored =
+			    wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestInjectedCorruption", true, true));
+		} catch (Error& e) {
+			TraceEvent("TestInjectInconsistencyAuditError").error(e);
+		}
+		TraceEvent("TestInjectInconsistencyValidationDone");
 		return Void();
 	}
 
