@@ -189,13 +189,17 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 	AttribKey indexKey;
 	AttribKey groupIndexKey;
 
-	if (fromServers->_localitygroup->cachedKey.present()) {
-		indexKey = groupIndexKey = fromServers->_localitygroup->cachedKey.get();
+	if (_cacheable && fromServers->_localitygroup->_cachedAttribName.present() &&
+	    fromServers->_localitygroup->_cachedAttribName.get() == _attribKey &&
+	    fromServers->_localitygroup->_cachedKey.present()) {
+		indexKey = groupIndexKey = fromServers->_localitygroup->_cachedKey.get();
 	} else {
 		indexKey = fromServers->keyIndex(_attribKey);
 		groupIndexKey = fromServers->getGroupKeyIndex(indexKey);
 		if (_cacheable) {
-			fromServers->_localitygroup->cachedKey = groupIndexKey;
+			ASSERT_WE_THINK(indexKey == groupIndexKey);
+			fromServers->_localitygroup->_cachedAttribName = _attribKey;
+			fromServers->_localitygroup->_cachedKey = groupIndexKey;
 		}
 	}
 	int resultsSize, resultsAdded;
