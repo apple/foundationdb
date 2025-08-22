@@ -20,6 +20,8 @@
 
 #include "fdbclient/S3BlobStore.h"
 
+#include <sstream>
+#include "fdbrpc/HTTP.h"
 #include "fdbclient/ClientKnobs.h"
 #include "fdbclient/Knobs.h"
 #include "flow/FastRef.h"
@@ -199,6 +201,11 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 }
 
 std::string guessRegionFromDomain(std::string domain) {
+	// Special case for localhost/127.0.0.1 to prevent basic_string exception
+	if (domain == "127.0.0.1" || domain == "localhost") {
+		return "us-east-1";
+	}
+
 	static const std::vector<const char*> knownServices = { "s3.", "cos.", "oss-", "obs." };
 	boost::algorithm::to_lower(domain);
 
@@ -843,6 +850,10 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	} else {
 		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
 	}
+
+	// Ensure connection is valid before handshake
+	ASSERT(conn.isValid());
+
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnectionSuccess")
@@ -1460,7 +1471,8 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 					if (key == nullptr) {
 						throw http_bad_response();
 					}
-					object.name = key->value();
+					// URL decode the object name since S3 XML responses contain URL-encoded names
+					object.name = HTTP::urlDecode(key->value());
 
 					xml_node<>* size = n->first_node("Size");
 					if (size == nullptr) {
