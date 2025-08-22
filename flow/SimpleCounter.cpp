@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2025 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,9 @@ TEST_CASE("/flow/simplecounter/int64") {
 
 	bar->increment(10);
 
+	ASSERT(foo->get() == 6);
+	ASSERT(bar->get() == 10);
+
 	SimpleCounter<int64_t>* conflict = SimpleCounter<int64_t>::makeCounter("lots_of_increments");
 
 	auto int_inclots = [conflict]() {
@@ -53,11 +56,12 @@ TEST_CASE("/flow/simplecounter/int64") {
 		threads[i].join();
 	}
 
+	// 10 threads * sum of series ==>  10 threads * (min + max) * (num entries in series)/2
 	int64_t int_expected_count = int64_t{ 10 } * int64_t{ 1'000'000 + 1 } * uint64_t{ 500'000 };
 	ASSERT(conflict->get() == int_expected_count);
 
 	std::vector<SimpleCounter<int64_t>*> intCounters = SimpleCounter<int64_t>::getCounters();
-	ASSERT(intCounters.size() == 102);
+	ASSERT(intCounters.size() == 103);
 
 	return Void();
 }
@@ -96,3 +100,5 @@ TEST_CASE("/flow/simplecounter/double") {
 
 	return Void();
 }
+
+void forceLinkSimpleCounterTests() {}
