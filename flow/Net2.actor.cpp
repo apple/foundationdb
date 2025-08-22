@@ -363,13 +363,18 @@ class BindPromise {
 	std::variant<const char*, AuditedEvent> errContext;
 	UID errID;
 	NetworkAddress peerAddr;
+	double createTime = 0.0;
+	double startTime = 0.0;
 
 public:
 	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
 	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
-	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	BindPromise(BindPromise const& r)
+	  : p(r.p), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr), createTime(r.createTime),
+	    startTime(r.startTime) {}
 	BindPromise(BindPromise&& r) noexcept
-	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr), createTime(r.createTime),
+	    startTime(r.startTime) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
 
@@ -377,18 +382,28 @@ public:
 
 	void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
 
+	void setTimeMetrics(double inputCreateTime, double inputStartTime) {
+		createTime = inputCreateTime;
+		startTime = inputStartTime;
+	}
+
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
 			if (error) {
 				// Log the error...
 				{
+					double currentTime = now();
 					std::optional<TraceEvent> traceEvent;
 					if (std::holds_alternative<AuditedEvent>(errContext))
 						traceEvent.emplace(SevWarn, std::get<AuditedEvent>(errContext), errID);
 					else
 						traceEvent.emplace(SevWarn, std::get<const char*>(errContext), errID);
 					TraceEvent& evt = *traceEvent;
-					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
+					evt.suppressFor(1.0)
+					    .detail("ErrorCode", error.value())
+					    .detail("Message", error.message())
+					    .detail("Duration", currentTime - createTime)
+					    .detail("ProcessTime", currentTime - startTime);
 					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
 					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
 					// error codes should never go that high.
@@ -832,10 +847,17 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			return std::move(o).str();
 		}
 
+		void setTimeMetrics(double inputCreateTime, double inputStartTime) {
+			createTime = inputCreateTime;
+			startTime = inputStartTime;
+		}
+
 		ThreadReturnPromise<Void> done;
 		ssl_socket& socket;
 		ssl_socket::handshake_type type;
 		boost::system::error_code err;
+		double createTime = 0.0;
+		double startTime = 0.0;
 	};
 
 	void action(Handshake& h) {
@@ -848,6 +870,7 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 				h.socket.next_layer().non_blocking(true, h.err);
 			}
 			if (h.err.failed()) {
+				double currentTime = now();
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
 				                                                        : "N2_AcceptHandshakeError"_audit)
@@ -855,7 +878,9 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 				    .detail("PeerAddress", h.getPeerAddress())
 				    .detail("ErrorCode", h.err.value())
 				    .detail("ErrorMsg", h.err.message().c_str())
-				    .detail("BackgroundThread", true);
+				    .detail("BackgroundThread", true)
+				    .detail("Duration", currentTime - h.createTime)
+				    .detail("ProcessTime", currentTime - h.startTime);
 				h.done.sendError(connection_failed());
 			} else {
 				h.done.send(Void());
@@ -882,11 +907,11 @@ public:
 	explicit SSLConnection(boost::asio::io_service& io_service,
 	                       Reference<ReferencedObject<boost::asio::ssl::context>> context)
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service), ssl_sock(socket, context->mutate()),
-	    sslContext(context), has_trusted_peer(false) {}
+	    sslContext(context), has_trusted_peer(false), createTime(now()) {}
 
 	explicit SSLConnection(Reference<ReferencedObject<boost::asio::ssl::context>> context, tcp::socket* existingSocket)
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(std::move(*existingSocket)),
-	    ssl_sock(socket, context->mutate()), sslContext(context) {}
+	    ssl_sock(socket, context->mutate()), sslContext(context), createTime(now()) {}
 
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
 	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
@@ -924,6 +949,7 @@ public:
 
 			wait(onConnected);
 			self->init();
+			self->startTime = now();
 			return self;
 		} catch (Error&) {
 			// Either the connection failed, or was cancelled by the caller
@@ -955,6 +981,7 @@ public:
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
+				handshake->setTimeMetrics(self->createTime, self->startTime);
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -962,6 +989,7 @@ public:
 				g_net2->countServerTLSHandshakesOnMainThread++;
 				BindPromise p("N2_AcceptHandshakeError"_audit, self->id);
 				p.setPeerAddr(self->getPeerAddress());
+				p.setTimeMetrics(self->createTime, self->startTime);
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
@@ -1052,6 +1080,7 @@ public:
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
+				handshake->setTimeMetrics(self->createTime, self->startTime);
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -1059,6 +1088,7 @@ public:
 				g_net2->countClientTLSHandshakesOnMainThread++;
 				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
 				p.setPeerAddr(self->getPeerAddress());
+				p.setTimeMetrics(self->createTime, self->startTime);
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
@@ -1196,6 +1226,9 @@ public:
 
 	ssl_socket& getSSLSocket() { return ssl_sock; }
 
+	double createTime = 0.0;
+	double startTime = 0.0;
+
 private:
 	UID id;
 	tcp::socket socket;
@@ -1286,7 +1319,7 @@ private:
 			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
 
 			conn->accept(NetworkAddress(peer_address, peer_endpoint.port(), false, true));
-
+			conn->startTime = now();
 			return conn;
 		} catch (...) {
 			conn->close();
