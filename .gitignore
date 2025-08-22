@@ -94,6 +94,7 @@ flow/coveragetool/obj
 /.ccls-cache
 /.clangd
 /.cache
+TAGS
 
 # Temporary and user configuration files
 *~
