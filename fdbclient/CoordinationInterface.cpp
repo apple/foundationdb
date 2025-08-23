@@ -37,7 +37,7 @@
 IPAddress ClusterConnectionString::determineLocalSourceIP() const {
 	int size = coords.size() + hostnames.size();
 	int index = 0;
-	loop {
+	while (true) {
 		try {
 			using namespace boost::asio;
 

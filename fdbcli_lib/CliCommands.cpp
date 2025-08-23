@@ -274,6 +274,8 @@ Future<grpc::Status> getWorkers(Reference<IDatabase> db, const GetWorkersRequest
 					Worker* w = rep->add_workers();
 					w->set_address(data.address.toString());
 					w->set_process_class(data.processClass.toString());
+					if (data.grpcAddress.present())
+						w->set_grpc_address(data.grpcAddress->toString());
 
 					auto* lc = w->mutable_locality();
 					localityDataToProto(data.locality, lc);
