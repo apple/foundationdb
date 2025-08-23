@@ -44,20 +44,19 @@
 // synchronous work in side threads, but is intended to generally be very
 // light weight.
 //
-// FIXME: periodically log the counters, and give the name of the TraceEvent
-// where they can be found.
+// FIXME: periodically log the counters, and here, document the name
+// of the TraceEvent where they can be found.
 //
 // More background: https://quip-apple.com/PyfZA6Qkbc7w
 //
 // Caveat: if you allocate two different counters with the same name, they will
 // accumulate updates independently. You probably don't want to do that.
 //
-// FIXME: add support for metric labels.  This needs some type of
-// variadic template to let callers specify a set of <type, name> tuples
-// for each label dimension.  Alternatively, make all label types be
-// strings and have users specify a set of 0 or more label dimension names.
-//
-// FIXME: add support for gauges.
+// FIXME: add support for metric labels.  This can be done by letting the
+// template take 0 or more additional string typed arguments which represent
+// label dimension names. The increment() API below would require that the
+// same number of string-valued arguments (or arguments convertable to string)
+// be provided and would remember those as labels.
 
 template <class T>
 class SimpleCounter {
@@ -124,8 +123,6 @@ public:
 		}
 		return rv;
 	}
-
-	// FIXME: actually use this interface to log the metrics somewhere.
 };
 
 template <>
