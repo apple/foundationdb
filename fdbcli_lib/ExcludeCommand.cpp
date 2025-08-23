@@ -345,7 +345,7 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 			else if (addr.port > 0 && worker->second.count(addr.port) == 0)
 				absentExclusions.insert(addr);
 		}
-		
+
 		co_return grpc::Status::OK;
 	} catch (const Error& e) {
 		co_return grpc::Status(grpc::StatusCode::INTERNAL,
