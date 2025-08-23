@@ -780,28 +780,28 @@ std::vector<Reference<IReplicationPolicy>> const& getStaticPolicies() {
 			// Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1,
 			//"zoneid", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
 
-			// '(dc^1 x sz^3 x 1)'
+			// 20 '(dc^1 x sz^3 x 1)'
 			Reference<IReplicationPolicy>(
 			    new PolicyAcross(1,
 			                     "dc",
 			                     Reference<IReplicationPolicy>(
 			                         new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))),
 
-			// '(dc^2 x sz^3 x 1)'
+			// 21 '(dc^2 x sz^3 x 1)'
 			Reference<IReplicationPolicy>(
 			    new PolicyAcross(2,
 			                     "dc",
 			                     Reference<IReplicationPolicy>(
 			                         new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))),
 
-			// '(dc^2 x az^3 x 1)'
+			// 22 '(dc^2 x az^3 x 1)'
 			Reference<IReplicationPolicy>(
 			    new PolicyAcross(2,
 			                     "dc",
 			                     Reference<IReplicationPolicy>(
 			                         new PolicyAcross(3, "az", Reference<IReplicationPolicy>(new PolicyOne()))))),
 
-			// '(sz^1 x 1) + (dc^2 x az^3 x 1)'
+			// 23 '(sz^1 x 1) + (dc^2 x az^3 x 1)'
 			Reference<IReplicationPolicy>(
 			    new PolicyAnd({ Reference<IReplicationPolicy>(
 			                        new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))),
@@ -817,12 +817,14 @@ std::vector<Reference<IReplicationPolicy>> const& getStaticPolicies() {
 			// PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new
 			// PolicyOne())))}))) ),
 
-			// Require backtracking
+			// 24 Require backtracking
 			Reference<IReplicationPolicy>(new PolicyAcross(
 			    8,
 			    "zoneid",
 			    Reference<IReplicationPolicy>(
 			        new PolicyAcross(1, "az", Reference<IReplicationPolicy>(new PolicyOne()))))),
+
+			// 25
 			Reference<IReplicationPolicy>(new PolicyAcross(
 			    8,
 			    "zoneid",
@@ -1009,7 +1011,8 @@ int testReplication() {
 				alsoServers.resize(alsoSize);
 			}
 		}
-
+		testServers->_cachedAttribName = Optional<std::string>();
+		testServers->_cachedKey = Optional<AttribKey>();
 		policyIndex =
 		    (policyIndexStatic >= 0) ? policyIndexStatic : deterministicRandom()->randomInt(0, policies.size());
 
