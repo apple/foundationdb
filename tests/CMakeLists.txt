@@ -426,14 +426,14 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.3.50_until_7.4.0/SnapTestRestart-1.toml
     restarting/from_7.3.50_until_7.4.0/SnapTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/ClientTransactionProfilingCorrectness-1.toml
-    restarting/from_7.3.50/ClientTransactionProfilingCorrectness-2.toml)
+    TEST_FILES restarting/from_7.3.50_until_7.4.0/ClientTransactionProfilingCorrectness-1.toml
+    restarting/from_7.3.50_until_7.4.0/ClientTransactionProfilingCorrectness-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.50/CycleTestRestart-1.toml
     restarting/from_7.3.50/CycleTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/StorefrontTestRestart-1.toml
-    restarting/from_7.3.50/StorefrontTestRestart-2.toml)
+    TEST_FILES restarting/from_7.3.50_until_7.4.0/StorefrontTestRestart-1.toml
+    restarting/from_7.3.50_until_7.4.0/StorefrontTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.50/ClientMetricRestart-1.toml
     restarting/from_7.3.50/ClientMetricRestart-2.toml)
