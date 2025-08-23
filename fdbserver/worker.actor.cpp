@@ -82,7 +82,6 @@
 #include "flow/ApiVersion.h"
 #include "fdbcli_lib/CliService.h"
 
-
 #ifdef __linux__
 #include <fcntl.h>
 #include <stdio.h>

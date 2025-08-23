@@ -85,6 +85,7 @@ struct WorkerInterface {
 	NetworkAddress stableAddress() const { return tLog.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return tLog.getEndpoint().addresses.secondaryAddress; }
 	NetworkAddressList addresses() const { return tLog.getEndpoint().addresses; }
+	Optional<NetworkAddress> grpcAddress() const { return clientInterface.grpcAddress; }
 
 	WorkerInterface() {}
 	WorkerInterface(const LocalityData& locality) : locality(locality) {}
