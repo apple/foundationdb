@@ -34,8 +34,8 @@ import cli_service_pb2_grpc
 FDB_CLUSTER_SCRIPT = "/root/src/foundationdb/tests/loopback_cluster/run_custom_cluster.sh"
 FDB_BUILD_DIRECTORY = "/root/build_output"
 FDB_CLUSTER_OPTIONS = [
-    "--stateless_count", "3",
-    "--storage_count", "5",
+    "--stateless_count", "7",
+    "--storage_count", "7",
     "--logs_count", "3",
 ]
 
@@ -65,19 +65,19 @@ def handle_exit(signum=None, frame=None):
     sys.exit(0)
 
 def test_get_workers():
-    print("GetWorkers:")
+    print("Testing GetWorkers:")
     stub = create_stub()
     response = stub.GetWorkers(cli_service_pb2.GetWorkersRequest())
     print("Server replied:", response)
 
 def test_get_coordinators():
-    print("GetCoordinators:")
+    print("Testing GetCoordinators:")
     stub = create_stub()
     response = stub.GetCoordinators(cli_service_pb2.GetCoordinatorsRequest())
     print("Server replied:", response)
 
 def test_change_coordinators():
-    print("ChangeCoordinators:")
+    print("Testing ChangeCoordinators:")
     stub = create_stub()
 
     req = cli_service_pb2.ChangeCoordinatorsRequest()
@@ -88,17 +88,44 @@ def test_change_coordinators():
     print("Server replied:", response)
 
 def test_get_version():
-    print("GetReadVersion:")
+    print("Testing GetReadVersion:")
     stub = create_stub()
 
     req = cli_service_pb2.GetReadVersionRequest()
     response = stub.GetReadVersion(req)
     print("Read Version:", response.version)
 
+def test_configure():
+    print("Testing Configure:")
+    stub = create_stub()
+
+    # Test basic configuration using structured fields
+    req = cli_service_pb2.ConfigureRequest()
+    req.redundancy_mode = cli_service_pb2.ConfigureRequest.TRIPLE
+
+    try:
+        response = stub.Configure(req)
+        print("Configure result:", response.result)
+        print("Configure message:", response.message)
+    except grpc.RpcError as e:
+        print(f"Configure RPC failed: {e.code()}: {e.details()}")
+
+    # Test process count configuration
+    print("Testing process count configuration:")
+    req2 = cli_service_pb2.ConfigureRequest()
+    req2.grv_proxies = 2
+
+    try:
+        response2 = stub.Configure(req2)
+        print("Configure process counts result:", response2.result)
+        print("Configure process counts message:", response2.message)
+    except grpc.RpcError as e:
+        print(f"Configure process counts RPC failed: {e.code()}: {e.details()}")
+
 def test_exclude_include():
     print("Testing Exclude/Include functionality:")
     stub = create_stub()
-    
+
     # Get initial list of workers
     print("Getting initial worker list...")
     initial_workers = []
@@ -106,26 +133,26 @@ def test_exclude_include():
         response = stub.GetWorkers(cli_service_pb2.GetWorkersRequest())
         initial_workers = [worker.address for worker in response.workers]
         print(f"Initial workers: {initial_workers}")
-    
+
     # Pick a random worker to exclude. Make sure its not a coordinator.
     worker_to_exclude = random.choice(initial_workers)
     print(f"Excluding worker: {worker_to_exclude}")
-    
+
     # Exclude the worker
     exclude_req = cli_service_pb2.ExcludeRequest()
     exclude_req.processes.append(worker_to_exclude)
     exclude_req.no_wait = True  # Don't wait for exclusion to complete
-    
+
     try:
         exclude_response = stub.Exclude(exclude_req)
         print(f"Successfully excluded {worker_to_exclude}")
     except grpc.RpcError as e:
         print(f"Failed to exclude {worker_to_exclude}: {e}")
         return
-    
+
     # Wait a bit for the exclusion to take effect
     time.sleep(2)
-    
+
     # Verify the worker was excluded (note: worker might still appear but be marked as excluded)
     while True:
         # Get updated worker list to verify exclusion
@@ -142,7 +169,7 @@ def test_exclude_include():
 
         print(f"Confirmed: {worker_to_exclude} removed from worker list")
         break
-    
+
     # Include the worker back
     print(f"Including worker back: {worker_to_exclude}")
     try:
@@ -153,22 +180,22 @@ def test_exclude_include():
     except grpc.RpcError as e:
         print(f"Failed to include {worker_to_exclude}: {e}")
         return
-    
+
     # Wait a bit for the inclusion to take effect
     time.sleep(2)
-    
+
     # Get the excluded workers.
     print("Getting final exclude list")
     response = stub.ExcludeStatus(cli_service_pb2.ExcludeStatusRequest())
     excluded_addresses = [addr for addr in response.excluded_addresses]
     print(f"Exclude list after including worker: {excluded_addresses}")
-    
+
     # Verify the worker was included back
     if worker_to_exclude not in excluded_addresses:
         print(f"Confirmed: {worker_to_exclude} successfully included back")
     else:
         print(f"Warning: {worker_to_exclude} not found in final worker list")
-    
+
     print("Exclude/Include test completed\n")
 
 def main():
@@ -187,6 +214,7 @@ def main():
 
     try:
         shell_process.wait()
+        test_configure()
         test_get_workers()
         test_get_coordinators()
         test_get_version()

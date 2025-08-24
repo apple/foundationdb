@@ -39,8 +39,137 @@ message ChangeCoordinatorsReply {
 
 // -- Database Configure ----
 
-message ConfigureRequest {}
-message ConfigureReply {}
+message ConfigureRequest {
+    // Database creation
+    optional bool new_database = 1; // Initialize new database
+    optional bool tss = 2; // Configure testing storage server
+
+    // Redundancy mode
+    enum RedundancyMode {
+        UNSET_REDUNDANCY = 0;
+        SINGLE = 1;          // one copy, not fault tolerant
+        DOUBLE = 2;          // two copies, survive one failure
+        TRIPLE = 3;          // three copies, survive two failures
+        THREE_DATA_HALL = 4; // three data hall configuration
+        THREE_DATACENTER = 5; // three datacenter configuration
+    }
+    optional RedundancyMode redundancy_mode = 3;
+
+    // Storage engine
+    enum StorageEngine {
+        UNSET_STORAGE = 0;
+        SSD = 1;              // B-Tree optimized for SSDs
+        SSD_1 = 2;            // ssd-1
+        SSD_2 = 3;            // ssd-2
+        MEMORY = 4;           // In-memory storage
+        MEMORY_1 = 5;         // memory-1
+        MEMORY_2 = 6;         // memory-2
+        MEMORY_RADIXTREE = 7; // memory-radixtree
+    }
+    optional StorageEngine storage_engine = 4;
+
+    // Process counts (-1 means restore to default)
+    optional int32 logs = 5;
+    optional int32 commit_proxies = 6;
+    optional int32 grv_proxies = 7;
+    optional int32 resolvers = 8;
+
+    // Perpetual storage wiggle settings
+    optional int32 perpetual_storage_wiggle = 9; // 0=disabled, 1=enabled
+    optional string perpetual_storage_wiggle_locality = 10; // "locality_key:locality_value" or "0"
+    optional string perpetual_storage_wiggle_engine = 11;
+
+    // Migration and tenant settings
+    enum StorageMigrationType {
+        UNSET_MIGRATION = 0;
+        DISABLED = 1;
+        GRADUAL = 2;
+        AGGRESSIVE = 3;
+    }
+    optional StorageMigrationType storage_migration_type = 12;
+
+    enum TenantMode {
+        UNSET_TENANT = 0;
+        DISABLED_TENANT = 1;
+        OPTIONAL_EXPERIMENTAL = 2;
+        REQUIRED_EXPERIMENTAL = 3;
+    }
+    optional TenantMode tenant_mode = 13;
+
+    // Security settings
+    enum EncryptionAtRestMode {
+        UNSET_ENCRYPTION = 0;
+        DISABLED_ENCRYPTION = 1;
+        DOMAIN_AWARE = 2;
+        CLUSTER_AWARE = 3;
+    }
+    optional EncryptionAtRestMode encryption_at_rest_mode = 14;
+
+    // Other settings
+    optional bool blob_granules_enabled = 15;
+    repeated string exclude_addresses = 16; // Addresses to exclude during recruitment
+    optional int32 tss_count = 17; // Testing storage server count
+
+    // Control flags
+    optional bool force = 18; // Skip safety checks
+    optional bool auto_configure = 19; // Use automatic configuration
+}
+
+message ConfigureReply {
+    enum Result {
+        SUCCESS = 0;
+        NO_OPTIONS_PROVIDED = 1;
+        CONFLICTING_OPTIONS = 2;
+        UNKNOWN_OPTION = 3;
+        INCOMPLETE_CONFIGURATION = 4;
+        INVALID_CONFIGURATION = 5;
+        STORAGE_MIGRATION_DISABLED = 6;
+        DATABASE_ALREADY_CREATED = 7;
+        DATABASE_CREATED = 8;
+        DATABASE_UNAVAILABLE = 9;
+        STORAGE_IN_UNKNOWN_DCID = 10;
+        REGION_NOT_FULLY_REPLICATED = 11;
+        MULTIPLE_ACTIVE_REGIONS = 12;
+        REGIONS_CHANGED = 13;
+        NOT_ENOUGH_WORKERS = 14;
+        REGION_REPLICATION_MISMATCH = 15;
+        DCID_MISSING = 16;
+        LOCKED_NOT_NEW = 17;
+        SUCCESS_WARN_PPW_GRADUAL = 18;
+        SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL = 19;
+        DATABASE_IS_REGISTERED = 20;
+        ENCRYPTION_AT_REST_MODE_ALREADY_SET = 21;
+        INVALID_STORAGE_TYPE = 22;
+    }
+
+    Result result = 1;
+    optional string message = 2; // Additional details for errors or warnings
+
+    // Auto-configure analysis results (if auto_configure was true)
+    message AutoConfigAnalysis {
+        int32 processes = 1;
+        int32 machines = 2;
+        string old_replication = 3;
+        string auto_replication = 4;
+        int32 old_logs = 5;
+        int32 auto_logs = 6;
+        int32 desired_logs = 7;
+        int32 old_commit_proxies = 8;
+        int32 auto_commit_proxies = 9;
+        int32 desired_commit_proxies = 10;
+        int32 old_grv_proxies = 11;
+        int32 auto_grv_proxies = 12;
+        int32 desired_grv_proxies = 13;
+        int32 old_resolvers = 14;
+        int32 auto_resolvers = 15;
+        int32 desired_resolvers = 16;
+        int32 old_processes_with_transaction = 17;
+        int32 auto_processes_with_transaction = 18;
+        int32 old_machines_with_transaction = 19;
+        int32 auto_machines_with_transaction = 20;
+    }
+    optional AutoConfigAnalysis analysis = 3;
+}
 
 message GetOptionsRequest {}
 message GetOptionsReply {}
@@ -49,7 +178,7 @@ message SetOptionsReply {}
 
 message GetReadVersionRequest {}
 message GetReadVersionReply {
-    optional int64 version = 1; 
+    optional int64 version = 1;
 }
 
 //-- Status ----
@@ -104,7 +233,7 @@ message KillReply {}
 service CliService {
     rpc GetCoordinators(GetCoordinatorsRequest) returns (GetCoordinatorsReply);
     rpc ChangeCoordinators(ChangeCoordinatorsRequest) returns (ChangeCoordinatorsReply);
-    
+
     rpc Configure(ConfigureRequest) returns (ConfigureReply);
     rpc GetOptions(GetOptionsRequest) returns (GetOptionsReply);
     rpc SetOptions(SetOptionsRequest) returns (SetOptionsReply);
