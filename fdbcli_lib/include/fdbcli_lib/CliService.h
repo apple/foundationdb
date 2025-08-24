@@ -22,10 +22,6 @@
 #define FDBCLI_LIB_CLI_COMMAND_SERVER_H
 
 #include "fdbcli_lib/CliCommands.h"
-#include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/IClientApi.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "flow/FastRef.h"
 #include <grpcpp/support/status.h>
 
 #define DEFINE_GRPC_HANDLER(rpcName, handlerName)                                                                      \
@@ -41,6 +37,7 @@ public:
 	DEFINE_GRPC_HANDLER(GetCoordinators, getCoordinators);
 	DEFINE_GRPC_HANDLER(ChangeCoordinators, changeCoordinators);
 
+	DEFINE_GRPC_HANDLER(Configure, configure);
 	DEFINE_GRPC_HANDLER(GetReadVersion, getReadVersion);
 
 	DEFINE_GRPC_HANDLER(GetWorkers, getWorkers);

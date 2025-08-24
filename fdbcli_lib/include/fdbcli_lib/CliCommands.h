@@ -23,8 +23,6 @@
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbrpc/Locality.h"
-#include "flow/FastRef.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbcli_lib/cli_service/cli_service.pb.h"
 #include "fdbcli_lib/cli_service/cli_service.grpc.pb.h"
