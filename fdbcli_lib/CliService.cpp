@@ -20,17 +20,9 @@
 
 #include "fdbcli_lib/CliService.h"
 #include "fdbclient/ClientKnobs.h"
-#include "fdbclient/IClientApi.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/ThreadSafeTransaction.h"
-#include "flow/ApiVersion.h"
-#include "flow/Error.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/genericactors.actor.h"
 #include <fmt/format.h>
-#include <functional>
-#include <grpcpp/support/status.h>
-#include <thread>
 #include <chrono>
 
 namespace fdbcli_lib {
