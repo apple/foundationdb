@@ -65,6 +65,10 @@ Future<grpc::Status> getCoordinators(Reference<IDatabase> db,
 
 			co_return grpc::Status::OK;
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
 			err = e;
 		}
 
@@ -116,7 +120,7 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 							if (new_coordinators_hostnames.count(hostname)) {
 								co_return grpc::Status(
 								    grpc::StatusCode::INVALID_ARGUMENT,
-								    fmt::format("ERROR: passed redundant coordinators: {}", hostname.toString()));
+								    fmt::format("passed redundant coordinators: {}", hostname.toString()));
 							}
 							new_coordinators_hostnames.insert(hostname);
 							newCoordinatorsList.push_back(hostname.toString());
@@ -125,7 +129,7 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 							if (new_coordinators_addresses.count(addr)) {
 								co_return grpc::Status(
 								    grpc::StatusCode::INVALID_ARGUMENT,
-								    fmt::format("ERROR: passed redundant coordinators: {}", addr.toString()));
+								    fmt::format("passed redundant coordinators: {}", addr.toString()));
 							}
 							new_coordinators_addresses.insert(addr);
 							newCoordinatorsList.push_back(addr.toString());
@@ -134,8 +138,9 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 						if (e.code() == error_code_connection_string_invalid) {
 							co_return grpc::Status(
 							    grpc::StatusCode::INVALID_ARGUMENT,
-							    fmt::format("ERROR: '{}' is not a valid network endpoint address", new_coord));
+							    fmt::format("'{}' is not a valid network endpoint address", new_coord));
 						}
+
 						throw;
 					}
 				}
@@ -149,12 +154,14 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 			// the commit will fail with commit_unknown_result().
 			ASSERT(false);
 		} catch (Error& e) {
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
+			}
+
 			err = Error(e);
 		}
 
-		if (err.code() == error_code_commit_unknown_result) {
-			co_return grpc::Status::OK;
-		} else if (err.code() == error_code_special_keys_api_failure) {
+		if (err.code() == error_code_special_keys_api_failure) {
 			std::string errorMsgStr = co_await utils::getSpecialKeysFailureErrorMessage(tr);
 			if (errorMsgStr == ManagementAPI::generateErrorMessage(CoordinatorsResult::NOT_ENOUGH_MACHINES) &&
 			    notEnoughMachineResults < 1) {
@@ -177,10 +184,8 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 				rep->set_changed(retries > 0);
 				co_return grpc::Status::OK;
 			} else {
-				co_return grpc::Status(grpc::StatusCode::INTERNAL, fmt::format("ERROR: {}", errorMsgStr));
+				throw err;
 			}
-		} else if (err.code() == error_code_actor_cancelled) {
-			throw err;
 		}
 
 		++retries;
@@ -240,13 +245,13 @@ Future<grpc::Status> getWorkers(Reference<IDatabase> db, const GetWorkersRequest
 			ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
 			ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
-			co_await success(safeThreadFutureToFuture(processClasses));
-			co_await success(safeThreadFutureToFuture(processData));
+			co_await (success(safeThreadFutureToFuture(processClasses)) &&
+			          success(safeThreadFutureToFuture(processData)));
 
 			ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
 			ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
 
-			if ((processData.get().empty() || processClasses.get().empty()) && numRetries < 3) {
+			if ((processData.get().empty() || processClasses.get().empty()) && numRetries < 5) {
 				co_await delay((1 << numRetries++) * 0.01 * deterministicRandom()->random01());
 				tr->reset();
 				continue;
@@ -258,7 +263,8 @@ Future<grpc::Status> getWorkers(Reference<IDatabase> db, const GetWorkersRequest
 					id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
 					    decodeProcessClassValue(processClasses.get()[i].value);
 				} catch (Error& e) {
-					co_return grpc::Status(grpc::StatusCode::ABORTED, e.name());
+					co_return grpc::Status(grpc::StatusCode::ABORTED,
+					                       fmt::format("error decoding process class: {}", e.name()));
 				}
 			}
 
@@ -305,7 +311,7 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 		if (!a.isValid()) {
 			co_return grpc::Status(
 			    grpc::StatusCode::INVALID_ARGUMENT,
-			    fmt::format("ERROR: '{}' is neither a valid network endpoint address nor a locality", addr_str));
+			    fmt::format("'{}' is neither a valid network endpoint address nor a locality", addr_str));
 		}
 		addresses.push_back(a);
 	}
@@ -348,6 +354,10 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 			co_await safeThreadFutureToFuture(tr->commit());
 			co_return grpc::Status::OK;
 		} catch (Error& e) {
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
+			}
+
 			err = e;
 		}
 
@@ -358,14 +368,8 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 void addInterfacesFromKVs(RangeResult& kvs,
                           std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	for (const auto& kv : kvs) {
-		ClientWorkerInterface workerInterf;
-		try {
-			// the interface is back-ward compatible, thus if parsing failed, it needs to upgrade cli version
-			workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
-		} catch (Error& e) {
-			fprintf(stderr, "Error: %s; CLI version is too old, please update to use a newer version\n", e.what());
-			return;
-		}
+		ClientWorkerInterface workerInterf =
+		    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 		ClientLeaderRegInterface leaderInterf(workerInterf.address());
 		StringRef ip_port = (kv.key.endsWith(":tls"_sr) ? kv.key.removeSuffix(":tls"_sr) : kv.key)
 		                        .removePrefix("\xff\xff/worker_interfaces/"_sr);
@@ -480,6 +484,10 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 			}
 			co_return;
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
 			err = e;
 			TraceEvent(SevWarn, "GetStorageServerInterfacesError").error(e);
 		}
@@ -511,7 +519,6 @@ Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* worke
 					id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
 					    decodeProcessClassValue(processClasses.get()[i].value);
 				} catch (Error& e) {
-					fprintf(stderr, "Error: %s; Client version is too old, please use a newer version\n", e.what());
 					co_return false;
 				}
 			}
@@ -530,7 +537,10 @@ Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* worke
 
 			co_return true;
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "GetWorkersError").error(e);
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
 			err = e;
 		}
 

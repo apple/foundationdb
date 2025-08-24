@@ -30,7 +30,7 @@
 
 #define DEFINE_GRPC_HANDLER(rpcName, handlerName)                                                                      \
 	grpc::Status rpcName(grpc::ServerContext* context, const rpcName##Request* req, rpcName##Reply* rep) override {    \
-		return handleRequestOnMainThread(&handlerName, req, rep);                                                      \
+		return handleRequestOnMainThread(&handlerName, req, rep, context);                                             \
 	}
 
 namespace fdbcli_lib {
@@ -51,7 +51,7 @@ public:
 
 private:
 	template <class Handler, class Request, class Reply>
-	grpc::Status handleRequestOnMainThread(Handler* h, const Request* req, Reply* rep);
+	grpc::Status handleRequestOnMainThread(Handler* h, const Request* req, Reply* rep, grpc::ServerContext* context);
 
 private:
 	Reference<IDatabase> db_;
