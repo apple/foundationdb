@@ -19,6 +19,7 @@
  */
 
 #include "fdbcli_lib/CliService.h"
+#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -45,7 +46,22 @@ Future<grpc::Status> grpcHandlerWrapper(Reference<IDatabase> db,
                                         Reply* rep,
                                         grpc::ServerContext* context) {
 	try {
-		co_return co_await timeoutError((*h)(db, req, rep), 5.0); // TODO (vishesh): Use ServerContext deadline.
+		double timeout = CLIENT_KNOBS->GRPC_CLISERVICE_DEFAULT_TIMEOUT; // Default timeout when no deadline is set
+		auto deadline = context->deadline();
+		auto now = std::chrono::system_clock::now();
+
+		// TODO: Should use FDBs now(), but in this world we are breaking determinism anyway at this
+		//   point.
+		if (deadline != std::chrono::system_clock::time_point::max()) {
+			auto grpc_timeout = std::chrono::duration_cast<std::chrono::seconds>(deadline - now).count();
+			timeout = static_cast<double>(grpc_timeout);
+		}
+
+		if (timeout <= 0) {
+			co_return grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED, "Request deadline already exceeded");
+		}
+
+		co_return co_await timeoutError((*h)(db, req, rep), timeout);
 	} catch (Error& e) {
 		if (e.code() == error_code_timed_out) {
 			co_return grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED, "Operation timed out");
