@@ -23,7 +23,9 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ApiVersion.h"
+#include "flow/Error.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/genericactors.actor.h"
 #include <fmt/format.h>
 #include <functional>
 #include <grpcpp/support/status.h>
@@ -37,17 +39,28 @@ using namespace std::chrono_literals;
 CliServiceImpl::CliServiceImpl(Reference<IDatabase> db) : Service(), db_(db) {}
 
 template <class Handler, class Request, class Reply>
-Future<grpc::Status> grpcHandlerWrapper(Reference<IDatabase> db, Handler* h, const Request* req, Reply* rep) {
+Future<grpc::Status> grpcHandlerWrapper(Reference<IDatabase> db,
+                                        Handler* h,
+                                        const Request* req,
+                                        Reply* rep,
+                                        grpc::ServerContext* context) {
 	try {
-		co_return co_await (*h)(db, req, rep);
+		co_return co_await timeoutError((*h)(db, req, rep), 5.0); // TODO (vishesh): Use ServerContext deadline.
 	} catch (Error& e) {
-		co_return grpc::Status(grpc::StatusCode::INTERNAL, fmt::format("ERROR: Unknown error {}", e.name()));
+		if (e.code() == error_code_timed_out) {
+			co_return grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED, "Operation timed out");
+		}
+
+		co_return grpc::Status(grpc::StatusCode::INTERNAL, fmt::format("Unknown error '{}'", e.name()));
 	}
 }
 
 template <class Handler, class Request, class Reply>
-grpc::Status CliServiceImpl::handleRequestOnMainThread(Handler* h, const Request* req, Reply* rep) {
-	return onMainThread([=]() { return grpcHandlerWrapper(db_, h, req, rep); }).getBlocking();
+grpc::Status CliServiceImpl::handleRequestOnMainThread(Handler* h,
+                                                       const Request* req,
+                                                       Reply* rep,
+                                                       grpc::ServerContext* context) {
+	return onMainThread([=]() { return grpcHandlerWrapper(db_, h, req, rep, context); }).getBlocking();
 }
 
 } // namespace fdbcli_lib
