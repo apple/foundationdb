@@ -179,3 +179,5 @@ if(NOT OPEN_FOR_IDE)
     fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbserver DESTINATION sbin COMPONENT server)
   endif()
 endif()
+
+target_link_libraries(fdbserver PUBLIC fdbcli_lib)
