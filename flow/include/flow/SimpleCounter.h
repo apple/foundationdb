@@ -24,7 +24,6 @@
 
 #include <atomic>
 #include <mutex>
-#include <thread>
 #include <vector>
 
 #include "flow/Error.h"
@@ -42,7 +41,10 @@
 //
 // This class is thread safe, i.e. can be used by code which does limited-scope
 // synchronous work in side threads, but is intended to generally be very
-// light weight.
+// light weight.  `makeCounter` can be called in constructors of global objects.
+//
+// SimpleCounter<T>* returned by `makeCounter` are intended to live
+// for the duration of the process lifetime.
 //
 // FIXME: periodically log the counters, and here, document the name
 // of the TraceEvent where they can be found.
@@ -75,67 +77,41 @@ private:
 	std::atomic<T> value;
 	std::string name_;
 
-	static inline std::mutex mutex; // protects 3 static values below
-	// Track all counters of type T.  This isn't a std::vector because
-	// 1) it's static, and 2) we want no dependency on order of initialization
-	// of static objects.  These members are not objects, they are statically
-	// initialized plain old data.  Thus we can count on them being initialized
-	// from the start of the process.
-	static inline int numCounters{ 0 };
-	static inline int allCountersSize{ 0 };
-	static inline SimpleCounter<T>** allCounters{ nullptr };
+	// Protects the static object returned by counters() below.
+	// https://chatgpt.com/share/68acec3c-21d4-800b-b315-ff6fc45ec806
+	// explains why this is necessary.
+	static inline std::mutex& mutex() {
+		static std::mutex m;
+		return m;
+	}
+	static inline std::vector<SimpleCounter<T>*>& counters() {
+		static std::vector<SimpleCounter<T>*> v;
+		return v;
+	}
 
 public:
-	// Defined in template instantiations below.
-	void increment(T delta);
+	inline void increment(T delta) { value.fetch_add(delta, std::memory_order_relaxed); }
 
-	T get(void) { return value.load(); }
+	inline T get(void) const { return value.load(); }
 
-	const std::string& name(void) { return name_; }
+	inline const std::string& name(void) const { return name_; }
 
-	static SimpleCounter<T>* makeCounter(std::string_view name) {
+	static inline SimpleCounter<T>* makeCounter(std::string_view name) {
 		SimpleCounter<T>* rv = new SimpleCounter<T>(name);
 
-		std::lock_guard<std::mutex> lock(mutex);
-		ASSERT(numCounters <= allCountersSize);
-		if (numCounters == allCountersSize) {
-			if (allCountersSize == 0) {
-				allCountersSize = 64;
-			} else {
-				allCountersSize *= 2;
-			}
-			// printf("allCountersSize now [%d]; numCounters now [%d]\n", allCountersSize, numCounters);
-			allCounters =
-			    static_cast<SimpleCounter<T>**>(realloc(allCounters, allCountersSize * sizeof(SimpleCounter<T>*)));
-		}
-		ASSERT(numCounters < allCountersSize);
-		allCounters[numCounters++] = rv;
+		std::lock_guard<std::mutex> lock(mutex());
+		std::vector<SimpleCounter<T>*>& v = counters();
+		v.push_back(rv);
 
 		return rv;
 	}
 
-	static std::vector<SimpleCounter<T>*> getCounters() {
+	static inline std::vector<SimpleCounter<T>*> getCounters() {
 		std::vector<SimpleCounter<T>*> rv;
-		std::lock_guard<std::mutex> lock(mutex);
-		rv.reserve(numCounters);
-		for (int i = 0; i < numCounters; i++) {
-			rv.push_back(allCounters[i]);
-		}
+		std::lock_guard<std::mutex> lock(mutex());
+		rv = counters();
 		return rv;
 	}
 };
-
-template <>
-void SimpleCounter<int64_t>::increment(int64_t delta) {
-	value.fetch_add(delta, std::memory_order_relaxed);
-}
-
-template <>
-void SimpleCounter<double>::increment(double delta) {
-	double old = value.load();
-	while (!value.compare_exchange_weak(old, old + delta)) {
-		;
-	}
-}
 
 #endif
