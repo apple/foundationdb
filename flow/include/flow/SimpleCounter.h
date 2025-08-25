@@ -43,8 +43,8 @@
 // synchronous work in side threads, but is intended to generally be very
 // light weight.  `makeCounter` can be called in constructors of global objects.
 //
-// SimpleCounter<T>* returned by `makeCounter` are intended to live
-// for the duration of the process lifetime.
+// SimpleCounter<T>* returned by `makeCounter` are intended to live for the
+// duration of the process, i.e. they are not intended to be freed/destroyed.
 //
 // FIXME: periodically log the counters, and here, document the name
 // of the TraceEvent where they can be found.
