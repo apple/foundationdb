@@ -365,16 +365,17 @@ class BindPromise {
 	NetworkAddress peerAddr;
 	double createTime = 0.0;
 	double startTime = 0.0;
+	double startHandshakeTime = 0.0;
 
 public:
 	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
 	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
 	BindPromise(BindPromise const& r)
 	  : p(r.p), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr), createTime(r.createTime),
-	    startTime(r.startTime) {}
+	    startTime(r.startTime), startHandshakeTime(r.startHandshakeTime) {}
 	BindPromise(BindPromise&& r) noexcept
 	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr), createTime(r.createTime),
-	    startTime(r.startTime) {}
+	    startTime(r.startTime), startHandshakeTime(r.startHandshakeTime) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
 
@@ -382,9 +383,10 @@ public:
 
 	void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
 
-	void setTimeMetrics(double inputCreateTime, double inputStartTime) {
+	void setTimeMetrics(double inputCreateTime, double inputStartTime, double inputStartHandshakeTime) {
 		createTime = inputCreateTime;
 		startTime = inputStartTime;
+		startHandshakeTime = inputStartHandshakeTime;
 	}
 
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
@@ -399,11 +401,7 @@ public:
 					else
 						traceEvent.emplace(SevWarn, std::get<const char*>(errContext), errID);
 					TraceEvent& evt = *traceEvent;
-					evt.suppressFor(1.0)
-					    .detail("ErrorCode", error.value())
-					    .detail("Message", error.message())
-					    .detail("Duration", currentTime - createTime)
-					    .detail("ProcessTime", currentTime - startTime);
+					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
 					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
 					// error codes should never go that high.
@@ -414,6 +412,15 @@ public:
 					if (peerAddr.isValid()) {
 						evt.detail("PeerAddr", peerAddr);
 						evt.detail("PeerAddress", peerAddr);
+					}
+					if (createTime > 0) {
+						evt.detail("Duration", currentTime - createTime);
+					}
+					if (startTime > 0) {
+						evt.detail("QueuingTime", currentTime - startTime);
+					}
+					if (startHandshakeTime > 0) {
+						evt.detail("ServiceTime", currentTime - startHandshakeTime);
 					}
 				}
 
@@ -847,9 +854,10 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			return std::move(o).str();
 		}
 
-		void setTimeMetrics(double inputCreateTime, double inputStartTime) {
+		void setTimeMetrics(double inputCreateTime, double inputStartTime, double inputStartHandshakeTime) {
 			createTime = inputCreateTime;
 			startTime = inputStartTime;
+			startHandshakeTime = inputStartHandshakeTime;
 		}
 
 		ThreadReturnPromise<Void> done;
@@ -858,10 +866,12 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		boost::system::error_code err;
 		double createTime = 0.0;
 		double startTime = 0.0;
+		double startHandshakeTime = 0.0;
 	};
 
 	void action(Handshake& h) {
 		try {
+			double currentTime = now();
 			h.socket.next_layer().non_blocking(false, h.err);
 			if (!h.err.failed()) {
 				h.socket.handshake(h.type, h.err);
@@ -870,17 +880,23 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 				h.socket.next_layer().non_blocking(true, h.err);
 			}
 			if (h.err.failed()) {
-				double currentTime = now();
-				TraceEvent(SevWarn,
-				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
-				                                                        : "N2_AcceptHandshakeError"_audit)
-				    .detail("PeerAddr", h.getPeerAddress())
-				    .detail("PeerAddress", h.getPeerAddress())
-				    .detail("ErrorCode", h.err.value())
-				    .detail("ErrorMsg", h.err.message().c_str())
-				    .detail("BackgroundThread", true)
-				    .detail("Duration", currentTime - h.createTime)
-				    .detail("ProcessTime", currentTime - h.startTime);
+				TraceEvent evt(SevWarn,
+				               h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
+				                                                            : "N2_AcceptHandshakeError"_audit);
+				evt.detail("PeerAddr", h.getPeerAddress());
+				evt.detail("PeerAddress", h.getPeerAddress());
+				evt.detail("ErrorCode", h.err.value());
+				evt.detail("ErrorMsg", h.err.message().c_str());
+				evt.detail("BackgroundThread", true);
+				if (h.createTime > 0) {
+					evt.detail("Duration", currentTime - h.createTime);
+				}
+				if (h.startTime > 0) {
+					evt.detail("QueuingTime", currentTime - h.startTime);
+				}
+				if (h.startHandshakeTime > 0) {
+					evt.detail("ServiceTime", currentTime - h.startHandshakeTime);
+				}
 				h.done.sendError(connection_failed());
 			} else {
 				h.done.send(Void());
@@ -966,6 +982,8 @@ public:
 
 	ACTOR static void doAcceptHandshake(Reference<SSLConnection> self, Promise<Void> connected) {
 		state Hold<int> holder;
+		state double startHandshakeTime = now();
+		state bool doBackgroundHandshake = false;
 
 		try {
 			Future<Void> onHandshook;
@@ -981,20 +999,31 @@ public:
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
-				handshake->setTimeMetrics(self->createTime, self->startTime);
+				handshake->setTimeMetrics(self->createTime, self->startTime, startHandshakeTime);
 				onHandshook = handshake->done.getFuture();
+				doBackgroundHandshake = true;
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
 				g_net2->countServerTLSHandshakesOnMainThread++;
 				BindPromise p("N2_AcceptHandshakeError"_audit, self->id);
 				p.setPeerAddr(self->getPeerAddress());
-				p.setTimeMetrics(self->createTime, self->startTime);
+				p.setTimeMetrics(self->createTime, self->startTime, startHandshakeTime);
 				onHandshook = p.getFuture();
+				doBackgroundHandshake = false;
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
 			wait(onHandshook);
 			wait(delay(0, TaskPriority::Handshake));
+			double currentTime = now();
+			TraceEvent(SevInfo, "N2_AcceptHandshakeComplete"_audit)
+			    .suppressFor(1.0)
+			    .detail("PeerAddr", self->getPeerAddress())
+			    .detail("PeerAddress", self->getPeerAddress())
+			    .detail("BackgroundThread", doBackgroundHandshake)
+			    .detail("Duration", currentTime - self->createTime)
+			    .detail("QueuingTime", currentTime - self->startTime)
+			    .detail("ServiceTime", currentTime - startHandshakeTime);
 			connected.send(Void());
 		} catch (...) {
 			self->closeSocket();
@@ -1021,9 +1050,7 @@ public:
 			}
 		}
 
-		wait(g_network->networkInfo.handshakeLock->take(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_HIGH_PRIORITY
-		                                                    ? TaskPriority::AcceptSocket
-		                                                    : TaskPriority::DefaultYield));
+		wait(g_network->networkInfo.handshakeLock->take());
 		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
 		Promise<Void> connected;
@@ -1058,6 +1085,8 @@ public:
 
 	ACTOR static void doConnectHandshake(Reference<SSLConnection> self, Promise<Void> connected) {
 		state Hold<int> holder;
+		state double startHandshakeTime = now();
+		state bool doBackgroundHandshake = false;
 
 		try {
 			Future<Void> onHandshook;
@@ -1080,20 +1109,31 @@ public:
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
-				handshake->setTimeMetrics(self->createTime, self->startTime);
+				handshake->setTimeMetrics(self->createTime, self->startTime, startHandshakeTime);
 				onHandshook = handshake->done.getFuture();
+				doBackgroundHandshake = true;
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
 				g_net2->countClientTLSHandshakesOnMainThread++;
 				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
 				p.setPeerAddr(self->getPeerAddress());
-				p.setTimeMetrics(self->createTime, self->startTime);
+				p.setTimeMetrics(self->createTime, self->startTime, startHandshakeTime);
 				onHandshook = p.getFuture();
+				doBackgroundHandshake = false;
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
 			wait(onHandshook);
 			wait(delay(0, TaskPriority::Handshake));
+			double currentTime = now();
+			TraceEvent(SevInfo, "N2_ConnectHandshakeComplete"_audit)
+			    .suppressFor(1.0)
+			    .detail("PeerAddr", self->getPeerAddress())
+			    .detail("PeerAddress", self->getPeerAddress())
+			    .detail("BackgroundThread", doBackgroundHandshake)
+			    .detail("Duration", currentTime - self->createTime)
+			    .detail("QueuingTime", currentTime - self->startTime)
+			    .detail("ServiceTime", currentTime - startHandshakeTime);
 			connected.send(Void());
 		} catch (...) {
 			self->closeSocket();
