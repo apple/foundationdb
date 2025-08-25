@@ -90,7 +90,8 @@ private:
 	}
 
 public:
-	inline void increment(T delta) { value.fetch_add(delta, std::memory_order_relaxed); }
+	// Defined in template instantiations below.
+	inline void increment(T delta);
 
 	inline T get(void) const { return value.load(); }
 
@@ -113,5 +114,21 @@ public:
 		return rv;
 	}
 };
+
+template <>
+inline void SimpleCounter<int64_t>::increment(int64_t delta) {
+	value.fetch_add(delta, std::memory_order_relaxed);
+}
+
+// Newer versions of C++ allow `fetch_add` on double, but older
+// versions don't. This is not expected to cause performance issues in
+// practice.
+template <>
+inline void SimpleCounter<double>::increment(double delta) {
+	double old = value.load();
+	while (!value.compare_exchange_weak(old, old + delta)) {
+		;
+	}
+}
 
 #endif
