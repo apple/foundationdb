@@ -122,7 +122,13 @@ TEST_CASE("/flow/simplecounter/int64") {
 	ASSERT(conflict->get() == expectedSum);
 
 	std::vector<SimpleCounter<int64_t>*> intCounters = SimpleCounter<int64_t>::getCounters();
-	ASSERT(intCounters.size() == 103);
+
+	// NOTE: the following is written as >= 103 and not == 103 because
+	// "unit tests" actually run in fdbserver, so any background
+	// logic, like for example simpleCounterReport() being called
+	// above from fdbserver.actor.cpp, will affect the execution
+	// environment.
+	ASSERT(intCounters.size() >= 103);
 
 	return Void();
 }
@@ -153,7 +159,7 @@ TEST_CASE("/flow/simplecounter/double") {
 	ASSERT(baz->get() == expectedSum);
 
 	std::vector<SimpleCounter<double>*> doubleCounters = SimpleCounter<double>::getCounters();
-	ASSERT(doubleCounters.size() == 1);
+	ASSERT(doubleCounters.size() >= 1);
 
 	return Void();
 }
