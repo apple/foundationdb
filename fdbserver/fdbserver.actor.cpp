@@ -87,6 +87,7 @@
 #include "flow/FaultInjection.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "flow/SimpleCounter.h"
 
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
@@ -403,6 +404,14 @@ ACTOR Future<Void> histogramReport() {
 		wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
 
 		GetHistogramRegistry().logReport();
+	}
+}
+
+ACTOR Future<Void> metricsReport() {
+	loop {
+		wait(delay(SERVER_KNOBS->GENERIC_METRICS_REPORT_INTERVAL));
+
+		simpleCounterReport();
 	}
 }
 
@@ -2001,11 +2010,6 @@ int main(int argc, char* argv[]) {
 		// Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
 
-#ifdef _WIN32
-		// Windows needs a gentle nudge to format floats correctly
-		//_set_output_format(_TWO_DIGIT_EXPONENT);
-#endif
-
 		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
@@ -2078,8 +2082,8 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
 
-		// Initialize the thread pool
 		CoroThreadPool::init();
+
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents
 		// are logged. This thread will eventually run the network, so call it now.
 		TraceEvent::setNetworkThread();
@@ -2245,6 +2249,7 @@ int main(int argc, char* argv[]) {
 			TraceEvent("Simulation").detail("TestFile", opts.testFile);
 
 			auto histogramReportActor = histogramReport();
+			auto metricsReportActor = metricsReport();
 
 			CLIENT_KNOBS->trace();
 			FLOW_KNOBS->trace();
@@ -2434,7 +2439,8 @@ int main(int argc, char* argv[]) {
 				                      opts.configDBType,
 				                      opts.consistencyCheckUrgentMode));
 				actors.push_back(histogramReport());
-				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+				actors.push_back(metricsReport());
+
 #ifdef FLOW_GRPC_ENABLED
 				if (opts.grpcAddressStrs.size() > 0) {
 					FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));

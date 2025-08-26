@@ -23,6 +23,62 @@
 #include "flow/SimpleCounter.h"
 #include "flow/UnitTest.h"
 
+// Trace.cpp::validateField insists on applying some rules to trace
+// field names.  Instead of fighting this, for now just make our
+// hierarchical names comply by converting / to 'U'.  Yes, 'U'.
+//
+// If this annoys you, there are several options:
+// 1) Don't use hierarchical metric names.
+// 2) Go figure out why Trace.cpp has this restriction (it itself offers
+// no explanation whatsoever), and consider relaxing it. HOWEVER: consider that
+// Prometheus imposes very strict rules on metric names.  The most useful thing one
+// can do with Prometheus-compatible metric names and still retain some manner
+// of hierarchical naming is to use underscore as the component separator.
+// Longer term, if we are emitting Prometheus-compatible metrics, then replacing
+// '/' with '_' could be a strategy.  However, we would want to ensure that we don't end
+// up with random naming collisions from people who might use '_' for its normal purpose of
+// separating any old words anywhere, including within the same path component.
+//
+// So basically, Trace.cpp rules suck, and Prometheus rules suck, but we should be
+// aware of them and play ball.
+static std::string mungeName(const std::string input) {
+	std::string output;
+	for (char ch : input) {
+		if (ch == '/' || ch == ':') {
+			output += "U";
+		} else {
+			output += ch;
+		}
+	}
+	return output;
+}
+
+// This should be called periodically by higher level code somewhere.
+void simpleCounterReport(void) {
+	static SimpleCounter<int64_t>* reportCount = SimpleCounter<int64_t>::makeCounter("/flow/counters/reports");
+	reportCount->increment(1);
+
+	std::vector<SimpleCounter<int64_t>*> intCounters = SimpleCounter<int64_t>::getCounters();
+	std::vector<SimpleCounter<double>*> doubleCounters = SimpleCounter<double>::getCounters();
+	auto traceEvent = TraceEvent("SimpleCounters");
+	for (SimpleCounter<int64_t>* ic : intCounters) {
+		std::string n = ic->name();
+		if (g_network->isSimulated()) {
+			n = mungeName(n);
+		}
+		traceEvent.detail(std::move(n), ic->get());
+	}
+	for (SimpleCounter<double>* dc : doubleCounters) {
+		std::string n = dc->name();
+		if (g_network->isSimulated()) {
+			n = mungeName(n);
+		}
+		traceEvent.detail(std::move(n), dc->get());
+	}
+	int total = intCounters.size() + doubleCounters.size();
+	traceEvent.detail("SimpleCountersTotalCounters", total);
+}
+
 TEST_CASE("/flow/simplecounter/int64") {
 	SimpleCounter<int64_t>* foo = SimpleCounter<int64_t>::makeCounter("foo");
 	SimpleCounter<int64_t>* bar = SimpleCounter<int64_t>::makeCounter("bar");
