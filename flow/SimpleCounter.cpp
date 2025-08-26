@@ -38,6 +38,7 @@
 // '/' with '_' could be a strategy.  However, we would want to ensure that we don't end
 // up with random naming collisions from people who might use '_' for its normal purpose of
 // separating any old words anywhere, including within the same path component.
+// More background: https://chatgpt.com/share/68ad3e33-00b0-800b-9fa9-644ef201feb9
 //
 // So basically, Trace.cpp rules suck, and Prometheus rules suck, but we should be
 // aware of them and play ball.
