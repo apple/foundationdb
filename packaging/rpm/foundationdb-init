@@ -10,10 +10,12 @@
 
 . /etc/rc.d/init.d/functions
 
+FDBMONITOR_BIN="/usr/sbin/fdbmonitor"
+
 start()
 {
     echo -n $"Starting FoundationDB: "
-    eval daemon /usr/lib/foundationdb/fdbmonitor --conffile /etc/foundationdb/foundationdb.conf --lockfile /var/run/fdbmonitor.pid --daemonize
+    eval daemon $FDBMONITOR_BIN --conffile /etc/foundationdb/foundationdb.conf --lockfile /var/run/fdbmonitor.pid --daemonize
     RETVAL=$?
     echo
     [ $RETVAL -eq 0 ] && touch /var/lock/subsys/foundationdb
@@ -22,7 +24,7 @@ start()
 stop()
 {
     echo -n $"Stopping FoundationDB: "
-    killproc -p /var/run/fdbmonitor.pid -d 300 /usr/lib/foundationdb/fdbmonitor
+    killproc -p /var/run/fdbmonitor.pid -d 300 $FDBMONITOR_BIN
     RETVAL=$?
     echo
     [ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/foundationdb
@@ -47,7 +49,7 @@ case "$1" in
         [ -f /var/lock/subsys/foundationdb ] && restart || :
         ;;
     status)
-        status /usr/lib/foundationdb/fdbmonitor
+        status $FDBMONITOR_BIN
         RETVAL=$?
         ;;
     *)

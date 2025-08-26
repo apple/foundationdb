@@ -8,7 +8,7 @@ chown -R foundationdb:foundationdb /var/lib/foundationdb /var/log/foundationdb
 chmod -R 0750 /var/lib/foundationdb/data /var/log/foundationdb
 
 update-alternatives --install /usr/sbin/fdbserver fdbserver /usr/lib/foundationdb-@FDB_VERSION@@FDB_BUILDTIME_STRING@/sbin/fdbserver @ALTERNATIVES_PRIORITY@ \
-    --slave /usr/lib/foundationdb/fdbmonitor fdbmonitor /usr/lib/foundationdb-@FDB_VERSION@@FDB_BUILDTIME_STRING@/sbin/fdbmonitor \
+    --slave /usr/sbin/fdbmonitor fdbmonitor /usr/lib/foundationdb-@FDB_VERSION@@FDB_BUILDTIME_STRING@/sbin/fdbmonitor \
     --slave /etc/init.d/foundationdb foundationdb.service /usr/lib/foundationdb-@FDB_VERSION@@FDB_BUILDTIME_STRING@/etc/init.d/foundationdb
 
 if mkdir /etc/foundationdb
