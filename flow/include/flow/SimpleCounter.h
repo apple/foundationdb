@@ -43,11 +43,24 @@
 // synchronous work in side threads, but is intended to generally be very
 // light weight.  `makeCounter` can be called in constructors of global objects.
 //
+// If you want to use hierarchical metric names (e.g., '/'-separated
+// components), please use ALL LOWER CASE METRIC NAMES AS PER THE EXAMPLE ABOVE.
+// This enables the implementation to smuggle path component
+// separators into the trace output by replacing path separaters like '/' with
+// carefully chosen capital letters.  This obtains compatibility with current FDB
+// "field name" naming conventions.
+//
+// In the future we might replace '/' with '_' to obtain Prometheus-compatible
+// metric names that don't actually look terrible.
+//
+// If you don't want to use hierarchical metric names, then your counter
+// names should be ReallyVerboseConcatenatedNamesWithCaps and must be globally
+// unique.
+//
 // SimpleCounter<T>* returned by `makeCounter` are intended to live for the
 // duration of the process, i.e. they are not intended to be freed/destroyed.
 //
-// FIXME: periodically log the counters, and here, document the name
-// of the TraceEvent where they can be found.
+// Counters are periodically logged as "SimpleCounters".
 //
 // More background: https://quip-apple.com/PyfZA6Qkbc7w
 //
@@ -130,5 +143,7 @@ inline void SimpleCounter<double>::increment(double delta) {
 		;
 	}
 }
+
+void simpleCounterReport(void);
 
 #endif
