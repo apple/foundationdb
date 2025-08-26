@@ -1223,10 +1223,12 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 	state KeyBackedMap<Tuple, std::string> tssMismatchDB = KeyBackedMap<Tuple, std::string>(tssMismatchKeys.begin);
 	loop {
+		// return to calling actor, cx might be destroyed already with the tr reset below.
+		// This gives ~DatabaseContext a chance to cancel this actor.
+		wait(delay(0));
+
 		// <tssid, list of detailed mismatch data>
 		state std::pair<UID, std::vector<DetailedTSSMismatch>> data = waitNext(cx->tssMismatchStream.getFuture());
-		// return to calling actor, don't do this as part of metrics loop
-		wait(delay(0));
 		// find ss pair id so we can remove it from the mapping
 		state UID tssPairID;
 		bool found = false;
