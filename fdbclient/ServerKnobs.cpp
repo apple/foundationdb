@@ -1182,6 +1182,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
 	init( DISABLE_DUPLICATE_LOG_WARNING,                       false );
 	init( HISTOGRAM_REPORT_INTERVAL,                           300.0 );
+	init( GENERIC_METRICS_REPORT_INTERVAL,                     isSimulated ? 10.0 : 300.0 );
 
 	// Timekeeper
 	init( TIME_KEEPER_DELAY,                                      10 );
