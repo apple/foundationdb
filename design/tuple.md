@@ -179,9 +179,21 @@ Status: Reserved
 Typecode: `0x33`
 Length: 12 bytes  
 Encoding: Big endian 12-byte integer. First/high 8 bytes are a database version, next two are batch version, next two are ordering within transaction.  
-Status: Python, Java
+Status: Python, Java, Go
 
 The two versionstamp typecodes are reserved for ongoing work adding compatibility between the tuple layer and versionstamp operations. Note that the first 80 bits of the 96 bit versionstamp are the same as the contents of the 80 bit versionstamp, and they correspond to what the `SET_VERSIONSTAMP_KEY` mutation will write into a database key , i.e., the first 8 bytes are a big-endian, unsigned version corresponding to the commit version of a transaction, and the next two bytes are a big-endian, unsigned batch number ordering transactions are committed at the same version. The final two bytes of the 96 bit versionstamp are written by the client and should order writes within a single transaction, thereby providing a global order for all versions.
+
+### **Length-Prefixed Byte String**
+
+Typecodes: `0x34`, `0x35`
+Length: Variable
+Encoding: A big-endian integer encoding the length (1 byte for `0x34`, 2 bytes for `0x35`) followed by the given number of bytes.
+Status: Reserved
+
+This type was added to accomodate use cases that do not need range scans or deal with fixed-length identifiers, such as hashes and EC public keys.  
+This typecode only allows range searches if the length is known beforehand.
+
+Support is currently not included in the first-party bindings. 
 
 ### **User type codes**
 
@@ -193,6 +205,14 @@ Status: Reserved
 These type codes may be used by third party extenders without coordinating with us. If used in shipping software, the software should use the directory layer and specify a specific layer name when opening its directories to eliminate the possibility of conflicts.
 
 The only way in which future official, otherwise backward-compatible versions of the tuple layer would be expected to use these type codes is to implement some kind of actual extensibility point for this purpose - they will not be used for standard types.
+
+### **End of Tuple**
+
+Typecodes: `0xF0`
+Length: 0 bytes
+Status: Reserved
+
+This type indicates that the following bytes are not part of the tuple and are handled using a custom key encoding.
 
 ### **Escape Character**
 
