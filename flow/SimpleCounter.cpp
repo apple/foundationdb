@@ -100,7 +100,8 @@ TEST_CASE("/flow/simplecounter/int64") {
 	ASSERT(bar->get() == 10);
 
 	for (int i = 0; i < 100; i++) {
-		SimpleCounter<int64_t>* p = SimpleCounter<int64_t>::makeCounter(std::string("/flow/counters/many") + std::to_string(i));
+		SimpleCounter<int64_t>* p =
+		    SimpleCounter<int64_t>::makeCounter(std::string("/flow/counters/many") + std::to_string(i));
 		p->increment(i);
 		ASSERT(p->get() == i);
 	}
@@ -141,7 +142,7 @@ TEST_CASE("/flow/simplecounter/int64") {
 }
 
 TEST_CASE("/flow/simplecounter/double") {
-	SimpleCounter<double>* baz = SimpleCounter<double>::makeCounter("baz");
+	SimpleCounter<double>* baz = SimpleCounter<double>::makeCounter("/flow/counters/baz");
 
 	// We intend to compute a floating point sum with an exact representation.
 	// A way to do this is to only add values with exact representations.
