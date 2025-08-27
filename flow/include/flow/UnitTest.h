@@ -25,7 +25,7 @@
 /*
  * Flow unit testing framework
  *
- * This is an simple framework for writing optionally asynchronous,
+ * This is a simple framework for writing optionally asynchronous,
  * optionally randomized unit tests.
  *
  * This framework is not trivial to use correctly. For example, your
@@ -33,7 +33,7 @@
  * fdbserver process. If things done in your unit test are not in
  * accordance with global expectations that are only enabled in
  * simulation, then you may break simulation even though your unit
- * test runs fine via fdbserver -r unittests.  As a result, to test
+ * test itself runs fine via fdbserver -r unittests.  As a result, to test
  * that your unit tests themselves do not break simulation, you should
  * also run a 100k simulation run.  If you think this sounds
  * backwards, you may be right.
