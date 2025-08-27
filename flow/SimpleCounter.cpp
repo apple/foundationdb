@@ -23,6 +23,13 @@
 #include "flow/SimpleCounter.h"
 #include "flow/UnitTest.h"
 
+// NOTE: this code emits trace events with modified trace field names.
+// To ensure that this does not run afoul of poorly documented invariants
+// in Trace.cpp, run a 100k simulation run even if the unit tests in
+// this file pass.  Run this specifically to ensure that the unit tests
+// themselves do not break expectations embedded elsewhere in any code
+// that enables itself in simulation.
+
 // Trace.cpp::validateField insists on applying some rules to trace
 // field names.  Instead of fighting this, for now just make our
 // hierarchical names comply by converting / to 'U'.  Yes, 'U'.
@@ -81,8 +88,8 @@ void simpleCounterReport(void) {
 }
 
 TEST_CASE("/flow/simplecounter/int64") {
-	SimpleCounter<int64_t>* foo = SimpleCounter<int64_t>::makeCounter("foo");
-	SimpleCounter<int64_t>* bar = SimpleCounter<int64_t>::makeCounter("bar");
+	SimpleCounter<int64_t>* foo = SimpleCounter<int64_t>::makeCounter("/flow/counters/foo");
+	SimpleCounter<int64_t>* bar = SimpleCounter<int64_t>::makeCounter("/flow/counters/bar");
 
 	foo->increment(5);
 	foo->increment(1);
@@ -93,12 +100,12 @@ TEST_CASE("/flow/simplecounter/int64") {
 	ASSERT(bar->get() == 10);
 
 	for (int i = 0; i < 100; i++) {
-		SimpleCounter<int64_t>* p = SimpleCounter<int64_t>::makeCounter(std::string("many") + std::to_string(i));
+		SimpleCounter<int64_t>* p = SimpleCounter<int64_t>::makeCounter(std::string("/flow/counters/many") + std::to_string(i));
 		p->increment(i);
 		ASSERT(p->get() == i);
 	}
 
-	SimpleCounter<int64_t>* conflict = SimpleCounter<int64_t>::makeCounter("lots_of_increments");
+	SimpleCounter<int64_t>* conflict = SimpleCounter<int64_t>::makeCounter("/flow/counters/lots_of_increments");
 
 	// Increment by all values in [1, 1000000] across 10 threads.
 	// Expected sum: 10 * (min + max) * (num entries in series)/2
