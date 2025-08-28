@@ -1806,9 +1806,7 @@ bool validateField(const char* key, bool allowUnderscores) {
 }
 
 void TraceEventFields::validateFormat() const {
-	// FIXME: have a way to call validateField even if simulation is
-	// not enabled.  Currently this code does not run in fdbserver -r
-	// unittest mode.
+	// FIXME: this condition should be expanded to include any unit test mode.
 	if (g_network && g_network->isSimulated()) {
 		for (Field field : fields) {
 			if (!validateField(field.first.c_str(), false)) {

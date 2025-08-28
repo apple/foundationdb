@@ -67,7 +67,7 @@ void simpleCounterReport(void) {
 		if (g_network->isSimulated()) {
 			n = mungeName(n);
 		}
-		ASSERT(validateField(n))
+		ASSERT(validateField(n.c_str()));
 		traceEvent.detail(std::move(n), ic->get());
 	}
 	for (SimpleCounter<double>* dc : doubleCounters) {
@@ -75,7 +75,7 @@ void simpleCounterReport(void) {
 		if (g_network->isSimulated()) {
 			n = mungeName(n);
 		}
-		ASSERT(validateField(n));
+		ASSERT(validateField(n.c_str()));
 		traceEvent.detail(std::move(n), dc->get());
 	}
 	int total = intCounters.size() + doubleCounters.size();
