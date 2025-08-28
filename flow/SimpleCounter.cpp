@@ -64,17 +64,13 @@ void simpleCounterReport(void) {
 	auto traceEvent = TraceEvent("SimpleCounters");
 	for (SimpleCounter<int64_t>* ic : intCounters) {
 		std::string n = ic->name();
-		if (g_network->isSimulated()) {
-			n = mungeName(n);
-		}
+		n = mungeName(n);
 		ASSERT(validateField(n.c_str(), /* allowUnderscores= */ true));
 		traceEvent.detail(std::move(n), ic->get());
 	}
 	for (SimpleCounter<double>* dc : doubleCounters) {
 		std::string n = dc->name();
-		if (g_network->isSimulated()) {
-			n = mungeName(n);
-		}
+		n = mungeName(n);
 		ASSERT(validateField(n.c_str(), /* allowUnderscores= */ true));
 		traceEvent.detail(std::move(n), dc->get());
 	}
