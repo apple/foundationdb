@@ -360,11 +360,11 @@ func testGetRangeBytes() async throws {
     try await FdbClient.initialize()
     let database = try FdbClient.openDatabase()
     let transaction = try database.createTransaction()
-    
+
     // Clear test key range
     transaction.clearRange(beginKey: "test_", endKey: "test`")
     _ = try await transaction.commit()
-    
+
     let newTransaction = try database.createTransaction()
     // Set up test data with byte arrays
     let key1: Fdb.Key = [UInt8]("test_byte_range_001".utf8)
@@ -373,21 +373,21 @@ func testGetRangeBytes() async throws {
     let value1: Fdb.Value = [UInt8]("byte_value1".utf8)
     let value2: Fdb.Value = [UInt8]("byte_value2".utf8)
     let value3: Fdb.Value = [UInt8]("byte_value3".utf8)
-    
+
     newTransaction.setValue(value1, for: key1)
     newTransaction.setValue(value2, for: key2)
     newTransaction.setValue(value3, for: key3)
     _ = try await newTransaction.commit()
-    
+
     // Test range query with byte arrays
     let readTransaction = try database.createTransaction()
     let beginKey: Fdb.Key = [UInt8]("test_byte_range_001".utf8)
     let endKey: Fdb.Key = [UInt8]("test_byte_range_003".utf8)
     let result = try await readTransaction.getRange(beginKey: beginKey, endKey: endKey)
-    
+
     #expect(!result.more)
     try #require(result.kvs.count == 2, "Should return 2 key-value pairs (end key is exclusive)")
-    
+
     // Sort results by key for predictable testing
     let sortedResults = result.kvs.sorted { $0.0.lexicographicallyPrecedes($1.0) }
     #expect(sortedResults[0].0 == key1, "First key should match key1")
@@ -401,11 +401,11 @@ func testGetRangeWithLimit() async throws {
     try await FdbClient.initialize()
     let database = try FdbClient.openDatabase()
     let transaction = try database.createTransaction()
-    
+
     // Clear test key range
     transaction.clearRange(beginKey: "test_", endKey: "test`")
     _ = try await transaction.commit()
-    
+
     let newTransaction = try database.createTransaction()
     // Set up test data with more entries
     for i in 1...10 {
@@ -414,17 +414,17 @@ func testGetRangeWithLimit() async throws {
         newTransaction.setValue(value, for: key)
     }
     _ = try await newTransaction.commit()
-    
+
     // Test with limit
     let readTransaction = try database.createTransaction()
     let result = try await readTransaction.getRange(beginKey: "test_limit_key_001", endKey: "test_limit_key_999", limit: 3)
     #expect(result.kvs.count == 3, "Should return exactly 3 key-value pairs due to limit")
-    
+
     // Verify we got the first 3 keys
     let sortedResults = result.kvs.sorted { String(bytes: $0.0, encoding: .utf8)! < String(bytes: $1.0, encoding: .utf8)! }
-    
+
     #expect(String(bytes: sortedResults[0].0, encoding: .utf8) == "test_limit_key_001", "First key should be test_limit_key_001")
-    #expect(String(bytes: sortedResults[1].0, encoding: .utf8) == "test_limit_key_002", "Second key should be test_limit_key_002")  
+    #expect(String(bytes: sortedResults[1].0, encoding: .utf8) == "test_limit_key_002", "Second key should be test_limit_key_002")
     #expect(String(bytes: sortedResults[2].0, encoding: .utf8) == "test_limit_key_003", "Third key should be test_limit_key_003")
 }
 
@@ -433,16 +433,160 @@ func testGetRangeEmpty() async throws {
     try await FdbClient.initialize()
     let database = try FdbClient.openDatabase()
     let transaction = try database.createTransaction()
-    
+
     // Clear test key range
     transaction.clearRange(beginKey: "test_", endKey: "test`")
     _ = try await transaction.commit()
-    
+
     let newTransaction = try database.createTransaction()
     // Test empty range
     let result = try await newTransaction.getRange(beginKey: "test_empty_start", endKey: "test_empty_end")
-    
+
     #expect(result.kvs.count == 0, "Empty range should return no results")
     #expect(result.kvs.isEmpty, "Results should be empty")
     #expect(result.more == false, "Should indicate no more results")
+}
+
+@Test("getRange with KeySelectors - firstGreaterOrEqual")
+func testGetRangeWithKeySelectors() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    // Set up test data
+    let key1: Fdb.Key = [UInt8]("test_selector_001".utf8)
+    let key2: Fdb.Key = [UInt8]("test_selector_002".utf8)
+    let key3: Fdb.Key = [UInt8]("test_selector_003".utf8)
+    let value1: Fdb.Value = [UInt8]("selector_value1".utf8)
+    let value2: Fdb.Value = [UInt8]("selector_value2".utf8)
+    let value3: Fdb.Value = [UInt8]("selector_value3".utf8)
+
+    newTransaction.setValue(value1, for: key1)
+    newTransaction.setValue(value2, for: key2)
+    newTransaction.setValue(value3, for: key3)
+    _ = try await newTransaction.commit()
+
+    // Test with KeySelectors using firstGreaterOrEqual
+    let readTransaction = try database.createTransaction()
+    let beginSelector = Fdb.KeySelector.firstGreaterOrEqual(key1)
+    let endSelector = Fdb.KeySelector.firstGreaterOrEqual(key3)
+    let result = try await readTransaction.getRange(beginSelector: beginSelector, endSelector: endSelector)
+
+    #expect(!result.more)
+    try #require(result.kvs.count == 2, "Should return 2 key-value pairs (end selector is exclusive)")
+
+    // Sort results by key for predictable testing
+    let sortedResults = result.kvs.sorted { $0.0.lexicographicallyPrecedes($1.0) }
+    #expect(sortedResults[0].0 == key1, "First key should match key1")
+    #expect(sortedResults[0].1 == value1, "First value should match value1")
+    #expect(sortedResults[1].0 == key2, "Second key should match key2")
+    #expect(sortedResults[1].1 == value2, "Second value should match value2")
+}
+
+@Test("getRange with KeySelectors - String keys")
+func testGetRangeWithStringSelectorKeys() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    // Set up test data with string keys
+    newTransaction.setValue("str_value1", for: "test_str_selector_001")
+    newTransaction.setValue("str_value2", for: "test_str_selector_002")
+    newTransaction.setValue("str_value3", for: "test_str_selector_003")
+    _ = try await newTransaction.commit()
+
+    // Test with String-based KeySelectors
+    let readTransaction = try database.createTransaction()
+    let beginSelector = Fdb.KeySelector.firstGreaterOrEqual("test_str_selector_001")
+    let endSelector = Fdb.KeySelector.firstGreaterOrEqual("test_str_selector_003")
+    let result = try await readTransaction.getRange(beginSelector: beginSelector, endSelector: endSelector)
+
+    #expect(!result.more)
+    try #require(result.kvs.count == 2, "Should return 2 key-value pairs")
+
+    // Convert back to strings for easier testing
+    let keys = result.kvs.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
+    let values = result.kvs.map { String(bytes: $0.1, encoding: .utf8)! }
+
+    #expect(keys.contains("test_str_selector_001"), "Should contain first key")
+    #expect(keys.contains("test_str_selector_002"), "Should contain second key")
+    #expect(!keys.contains("test_str_selector_003"), "Should not contain end key (exclusive)")
+}
+
+@Test("getRange with Selectable protocol - mixed types")
+func testGetRangeWithSelectable() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    // Set up test data
+    newTransaction.setValue("mixed_value1", for: "test_mixed_001")
+    newTransaction.setValue("mixed_value2", for: "test_mixed_002")
+    newTransaction.setValue("mixed_value3", for: "test_mixed_003")
+    _ = try await newTransaction.commit()
+
+    // Test using the general Selectable protocol with mixed key types
+    let readTransaction = try database.createTransaction()
+    let beginKey: Fdb.Key = [UInt8]("test_mixed_001".utf8)
+    let endString = "test_mixed_003"
+    let result = try await readTransaction.getRange(begin: beginKey, end: endString)
+
+    #expect(!result.more)
+    try #require(result.kvs.count == 2, "Should return 2 key-value pairs")
+
+    let keys = result.kvs.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
+    #expect(keys.contains("test_mixed_001"), "Should contain first key")
+    #expect(keys.contains("test_mixed_002"), "Should contain second key")
+}
+
+@Test("KeySelector static methods with different offsets")
+func testKeySelectorMethods() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    // Set up test data
+    newTransaction.setValue("offset_value1", for: "test_offset_001")
+    newTransaction.setValue("offset_value2", for: "test_offset_002")
+    newTransaction.setValue("offset_value3", for: "test_offset_003")
+    _ = try await newTransaction.commit()
+
+    let readTransaction = try database.createTransaction()
+
+    // Test firstGreaterThan vs firstGreaterOrEqual
+    let beginSelectorGTE = Fdb.KeySelector.firstGreaterOrEqual("test_offset_002")
+    let beginSelectorGT = Fdb.KeySelector.firstGreaterThan("test_offset_002")
+    let endSelector = Fdb.KeySelector.firstGreaterOrEqual("test_offset_999")
+
+    let resultGTE = try await readTransaction.getRange(beginSelector: beginSelectorGTE, endSelector: endSelector)
+    let resultGT = try await readTransaction.getRange(beginSelector: beginSelectorGT, endSelector: endSelector)
+
+    // firstGreaterOrEqual should include test_offset_002
+    let keysGTE = resultGTE.kvs.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
+    #expect(keysGTE.contains("test_offset_002"), "firstGreaterOrEqual should include the key")
+
+    // firstGreaterThan should exclude test_offset_002 and start from test_offset_003
+    let keysGT = resultGT.kvs.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
+    #expect(!keysGT.contains("test_offset_002"), "firstGreaterThan should exclude the key")
+    #expect(keysGT.contains("test_offset_003"), "firstGreaterThan should include next key")
 }

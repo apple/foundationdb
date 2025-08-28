@@ -21,12 +21,76 @@
 typealias CFuturePtr = OpaquePointer
 typealias CCallback = @convention(c) (UnsafeRawPointer?, UnsafeRawPointer?) -> Void
 
+public protocol Selectable {
+    func toKeySelector() -> Fdb.KeySelector
+}
+
+extension Fdb.Key: Selectable {
+    public func toKeySelector() -> Fdb.KeySelector {
+        return Fdb.KeySelector.firstGreaterOrEqual(self)
+    }
+}
+
+extension String: Selectable {
+    public func toKeySelector() -> Fdb.KeySelector {
+        return Fdb.KeySelector.firstGreaterOrEqual([UInt8](self.utf8))
+    }  
+}
+
 public struct Fdb {
     public typealias Bytes = [UInt8]
     public typealias Key = Bytes
     public typealias Value = Bytes
     public typealias KeyValue = (Key, Value)
     public typealias KeyValueArray = [KeyValue]
+
+    public struct KeySelector: Selectable {
+        public let key: Key
+        public let orEqual: Bool
+        public let offset: Int32
+        
+        public init(key: Key, orEqual: Bool, offset: Int32) {
+            self.key = key
+            self.orEqual = orEqual
+            self.offset = offset
+        }
+        
+        public func toKeySelector() -> KeySelector {
+            return self
+        }
+        
+        public static func firstGreaterOrEqual(_ key: Key) -> KeySelector {
+            return KeySelector(key: key, orEqual: false, offset: 1)
+        }
+        
+        public static func firstGreaterOrEqual(_ key: String) -> KeySelector {
+            return KeySelector(key: [UInt8](key.utf8), orEqual: false, offset: 1)
+        }
+        
+        public static func firstGreaterThan(_ key: Key) -> KeySelector {
+            return KeySelector(key: key, orEqual: true, offset: 1)
+        }
+        
+        public static func firstGreaterThan(_ key: String) -> KeySelector {
+            return KeySelector(key: [UInt8](key.utf8), orEqual: true, offset: 1)
+        }
+        
+        public static func lastLessOrEqual(_ key: Key) -> KeySelector {
+            return KeySelector(key: key, orEqual: true, offset: 0)
+        }
+        
+        public static func lastLessOrEqual(_ key: String) -> KeySelector {
+            return KeySelector(key: [UInt8](key.utf8), orEqual: true, offset: 0)
+        }
+        
+        public static func lastLessThan(_ key: Key) -> KeySelector {
+            return KeySelector(key: key, orEqual: false, offset: 0)
+        }
+        
+        public static func lastLessThan(_ key: String) -> KeySelector {
+            return KeySelector(key: [UInt8](key.utf8), orEqual: false, offset: 0)
+        }
+    }
 
     public struct RangeResult: Sendable {
         public let kvs: KeyValueArray

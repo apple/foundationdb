@@ -153,6 +153,40 @@ public class FdbTransaction {
         ).getAsync() ?? 0
     }
 
+    public func getRange(begin: Selectable, end: Selectable, limit: Int32 = 0, snapshot: Bool = false) async throws -> Fdb.RangeResult {
+        let beginSelector = begin.toKeySelector()
+        let endSelector = end.toKeySelector()
+        return try await getRange(beginSelector: beginSelector, endSelector: endSelector, limit: limit, snapshot: snapshot)
+    }
+
+    public func getRange(beginSelector: Fdb.KeySelector, endSelector: Fdb.KeySelector, limit: Int32 = 0, snapshot: Bool = false) async throws -> Fdb.RangeResult {
+        let future = beginSelector.key.withUnsafeBytes { beginKeyBytes in
+            endSelector.key.withUnsafeBytes { endKeyBytes in
+                Fdb.Future<Fdb.RangeResult>(
+                    fdb_transaction_get_range(
+                        transaction,
+                        beginKeyBytes.bindMemory(to: UInt8.self).baseAddress,
+                        Int32(beginSelector.key.count),
+                        beginSelector.orEqual ? 1 : 0,
+                        beginSelector.offset,
+                        endKeyBytes.bindMemory(to: UInt8.self).baseAddress,
+                        Int32(endSelector.key.count),
+                        endSelector.orEqual ? 1 : 0,
+                        endSelector.offset,
+                        limit,
+                        0, // target_bytes = 0 (no limit)
+                        FDBStreamingMode(-1), // mode = FDB_STREAMING_MODE_ITERATOR
+                        1, // iteration = 1
+                        snapshot ? 1 : 0,
+                        0  // reverse = false
+                    )
+                )
+            }
+        }
+
+        return try await future.getAsync() ?? Fdb.RangeResult(kvs: [], more: false)
+    }
+
     public func getRange(beginKey: String, endKey: String, limit: Int32 = 0, snapshot: Bool = false) async throws -> Fdb.RangeResult {
         let beginKeyBytes = [UInt8](beginKey.utf8)
         let endKeyBytes = [UInt8](endKey.utf8)
