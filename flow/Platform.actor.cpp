@@ -2115,17 +2115,21 @@ static void mprotectSafe(void* p, size_t s, int prot) {
 }
 
 static void* mmapInternal(size_t length, int flags, bool guardPages) {
+	static SimpleCounter<int64_t>* bytes = SimpleCounter<int64_t>::makeCounter("/flow/platform/mmapBytes");
+
 	if (guardPages && FLOW_KNOBS->FAST_ALLOC_ALLOW_GUARD_PAGES) {
 		static size_t pageSize = sysconf(_SC_PAGESIZE);
 		length = RightAlign(length, pageSize);
 		length += 2 * pageSize; // Map enough for the guard pages
 		void* resultWithGuardPages = mmapSafe(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+		bytes->increment(length);
 		// left guard page
 		mprotectSafe(resultWithGuardPages, pageSize, PROT_NONE);
 		// right guard page
 		mprotectSafe((void*)(uintptr_t(resultWithGuardPages) + length - pageSize), pageSize, PROT_NONE);
 		return (void*)(uintptr_t(resultWithGuardPages) + pageSize);
 	} else {
+		bytes->increment(length);
 		return mmapSafe(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
 	}
 }
