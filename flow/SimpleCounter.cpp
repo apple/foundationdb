@@ -106,7 +106,7 @@ TEST_CASE("/flow/simplecounter/int64") {
 		ASSERT(p->get() == i);
 	}
 
-	SimpleCounter<int64_t>* conflict = SimpleCounter<int64_t>::makeCounter("/flow/counters/lots_of_increments");
+	SimpleCounter<int64_t>* conflict = SimpleCounter<int64_t>::makeCounter("/flow/counters/lots");
 
 	// Increment by all values in [1, 1000000] across 10 threads.
 	// Expected sum: 10 * (min + max) * (num entries in series)/2
