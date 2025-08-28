@@ -20,7 +20,7 @@
 
 #include <string>
 #include <utility>
-#include <boost/process/pipe.hpp>
+#include <boost/process/v1/pipe.hpp>
 #include <boost/optional.hpp>
 #include <boost/variant.hpp>
 #include <boost/archive/binary_iarchive.hpp>
