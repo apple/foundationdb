@@ -1785,6 +1785,7 @@ std::string TraceEventFields::toString() const {
 	return str;
 }
 
+// FIXME: give the rationale for the naming scheme that this is enforcing
 bool validateField(const char* key, bool allowUnderscores) {
 	if ((key[0] < 'A' || key[0] > 'Z') && key[0] != '_') {
 		return false;
@@ -1803,6 +1804,7 @@ bool validateField(const char* key, bool allowUnderscores) {
 }
 
 void TraceEventFields::validateFormat() const {
+	// FIXME: this condition should be expanded to include any unit test mode.
 	if (g_network && g_network->isSimulated()) {
 		for (Field field : fields) {
 			if (!validateField(field.first.c_str(), false)) {
