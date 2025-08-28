@@ -133,6 +133,9 @@ TEST_CASE("/flow/simplecounter/int64") {
 	// environment.
 	ASSERT(intCounters.size() >= 103);
 
+	// Give asserts here a chance to run.
+	simpleCounterReport();
+
 	return Void();
 }
 
@@ -163,6 +166,9 @@ TEST_CASE("/flow/simplecounter/double") {
 
 	std::vector<SimpleCounter<double>*> doubleCounters = SimpleCounter<double>::getCounters();
 	ASSERT(doubleCounters.size() >= 1);
+
+	// Give asserts here a chance to run.
+	simpleCounterReport();
 
 	return Void();
 }
