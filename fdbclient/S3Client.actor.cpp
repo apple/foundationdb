@@ -532,6 +532,9 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 
 			break; // Success - exit retry loop
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			// File-level retry for specific errors, matching download behavior
 			if ((e.code() == error_code_file_not_found || e.code() == error_code_http_request_failed ||
 			     e.code() == error_code_io_error) &&
