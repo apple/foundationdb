@@ -48,7 +48,7 @@ class FdbNetwork {
 
     func setupNetwork() throws {
         guard !networkSetup else {
-            throw FdbError(code: 2201)
+            throw FdbError(.networkError)
         }
 
         let error = fdb_setup_network()

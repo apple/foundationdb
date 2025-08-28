@@ -19,11 +19,30 @@
  */
 import CFoundationDB
 
+// TODO: These should be auto-generated like other bindings
+public enum FdbErrorCode: Int32, CaseIterable {
+    case notCommitted = 1007
+    case transactionTooOld = 1020
+    case futureVersion = 1021
+    case transactionCancelled = 1025
+    case transactionTimedOut = 1031
+    case processBehind = 1037
+    case tagThrottled = 1213
+    case internalError = 2000
+    case networkError = 2201
+    case clientError = 4100
+    case unknownError = 9999
+}
+
 public struct FdbError: Error, CustomStringConvertible {
     public let code: Int32
 
     public init(code: Int32) {
         self.code = code
+    }
+
+    public init(_ errorCode: FdbErrorCode) {
+        self.code = errorCode.rawValue
     }
 
     public var description: String {
@@ -35,19 +54,19 @@ public struct FdbError: Error, CustomStringConvertible {
 
     public var isRetryable: Bool {
         switch code {
-        case 1007:  // not_committed
+        case FdbErrorCode.notCommitted.rawValue:
             return true
-        case 1020:  // transaction_too_old
+        case FdbErrorCode.transactionTooOld.rawValue:
             return true
-        case 1021:  // future_version
+        case FdbErrorCode.futureVersion.rawValue:
             return true
-        case 1025:  // transaction_cancelled
+        case FdbErrorCode.transactionCancelled.rawValue:
             return false
-        case 1031:  // transaction_timed_out
+        case FdbErrorCode.transactionTimedOut.rawValue:
             return true
-        case 1037:  // process_behind
+        case FdbErrorCode.processBehind.rawValue:
             return true
-        case 1213:  // tag_throttled
+        case FdbErrorCode.tagThrottled.rawValue:
             return true
         default:
             return false

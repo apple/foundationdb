@@ -38,7 +38,7 @@ public class FdbDatabase {
         }
 
         guard let tr = transaction else {
-            throw FdbError(code: 2000)  // internal_error
+            throw FdbError(.internalError)
         }
 
         return FdbTransaction(transaction: tr)
@@ -73,6 +73,6 @@ public class FdbDatabase {
             }
         }
 
-        throw FdbError(code: 1020)  // transaction_too_old
+        throw FdbError(.transactionTooOld)
     }
 }

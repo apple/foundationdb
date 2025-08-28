@@ -38,7 +38,7 @@ public class FdbClient {
         }
 
         guard let db = database else {
-            throw FdbError(code: 4100)
+            throw FdbError(.clientError)
         }
 
         return FdbDatabase(database: db)

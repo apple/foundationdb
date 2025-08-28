@@ -706,11 +706,11 @@ func testWithTransactionNonRetryableError() async throws {
         let _ = try await database.withTransaction { transaction in
             transaction.setValue("non_retryable_value", for: "test_with_transaction_non_retryable")
             // Throw a non-retryable FDB error (transaction_cancelled)
-            throw FdbError(code: 1025)
+            throw FdbError(.transactionCancelled)
         }
         #expect(Bool(false), "withTransaction should propagate non-retryable errors")
     } catch let error as FdbError {
-        #expect(error.code == 1025, "Should propagate the exact FdbError")
+        #expect(error.code == FdbErrorCode.transactionCancelled.rawValue, "Should propagate the exact FdbError")
         #expect(!error.isRetryable, "Error should be non-retryable")
     } catch {
         #expect(Bool(false), "Should catch FdbError, got \(error)")
@@ -775,31 +775,31 @@ func testWithTransactionSendable() async throws {
 @Test("FdbError isRetryable property")
 func testFdbErrorRetryable() {
     // Test retryable errors
-    let notCommittedError = FdbError(code: 1007)
+    let notCommittedError = FdbError(.notCommitted)
     #expect(notCommittedError.isRetryable, "not_committed should be retryable")
 
-    let transactionTooOldError = FdbError(code: 1020)
+    let transactionTooOldError = FdbError(.transactionTooOld)
     #expect(transactionTooOldError.isRetryable, "transaction_too_old should be retryable")
 
-    let futureVersionError = FdbError(code: 1021)
+    let futureVersionError = FdbError(.futureVersion)
     #expect(futureVersionError.isRetryable, "future_version should be retryable")
 
-    let transactionTimedOutError = FdbError(code: 1031)
+    let transactionTimedOutError = FdbError(.transactionTimedOut)
     #expect(transactionTimedOutError.isRetryable, "transaction_timed_out should be retryable")
 
-    let processBehindError = FdbError(code: 1037)
+    let processBehindError = FdbError(.processBehind)
     #expect(processBehindError.isRetryable, "process_behind should be retryable")
 
-    let tagThrottledError = FdbError(code: 1213)
+    let tagThrottledError = FdbError(.tagThrottled)
     #expect(tagThrottledError.isRetryable, "tag_throttled should be retryable")
 
     // Test non-retryable errors
-    let transactionCancelledError = FdbError(code: 1025)
+    let transactionCancelledError = FdbError(.transactionCancelled)
     #expect(!transactionCancelledError.isRetryable, "transaction_cancelled should not be retryable")
 
-    let unknownError = FdbError(code: 9999)
+    let unknownError = FdbError(.unknownError)
     #expect(!unknownError.isRetryable, "unknown error should not be retryable")
 
-    let internalError = FdbError(code: 2000)
+    let internalError = FdbError(.internalError)
     #expect(!internalError.isRetryable, "internal_error should not be retryable")
 }
