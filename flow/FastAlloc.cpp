@@ -427,6 +427,19 @@ void* FastAllocator<Size>::allocate() {
 	return p;
 }
 
+void* wrappedNew(size_t nbytes) {
+	// FIXME: metrics
+
+	void* p = new uint8_t[nbytes];
+	return p;
+}
+
+void wrappedDelete(size_t nbytes, void* ptr) {
+	// FIXME: metrics
+
+	delete[] reinterpret_cast<uint8_t*>(ptr);
+}
+
 template <int Size>
 void FastAllocator<Size>::release(void* ptr) {
 	// FIXME-METRICS: count calls and bytes
