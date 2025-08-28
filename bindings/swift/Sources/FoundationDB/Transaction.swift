@@ -103,28 +103,24 @@ public class FdbTransaction {
         clearRange(beginKey: beginKeyBytes, endKey: endKeyBytes)
     }
 
-    public func getKey(
-        for selector: String, orEqual: Bool = false, offset: Int32 = 0, snapshot: Bool = false
-    ) async throws -> Fdb.Key? {
-        let keyBytes = [UInt8](selector.utf8)
-        return try await getKey(for: keyBytes, orEqual: orEqual, offset: offset, snapshot: snapshot)
+    public func getKey(selector: Selectable, snapshot: Bool = false) async throws -> Fdb.Key? {
+        let keySelector = selector.toKeySelector()
+        return try await getKey(selector: keySelector, snapshot: snapshot)
     }
 
-    public func getKey(
-        for selector: Fdb.Key, orEqual: Bool = false, offset: Int32 = 0, snapshot: Bool = false
-    ) async throws -> Fdb.Key? {
-        try await selector.withUnsafeBytes { keyBytes in
-            Fdb.Future<Fdb.Key>(
+    public func getKey(selector: Fdb.KeySelector, snapshot: Bool = false) async throws -> Fdb.Key? {
+        try await selector.key.withUnsafeBytes { keyBytes in
+            Fdb.Future<Fdb.KeyResult>(
                 fdb_transaction_get_key(
                     transaction,
                     keyBytes.bindMemory(to: UInt8.self).baseAddress,
-                    Int32(selector.count),
-                    orEqual ? 1 : 0,
-                    offset,
+                    Int32(selector.key.count),
+                    selector.orEqual ? 1 : 0,
+                    selector.offset,
                     snapshot ? 1 : 0
                 )
             )
-        }.getAsync()
+        }.getAsync()?.key
     }
 
     public func commit() async throws -> Bool {

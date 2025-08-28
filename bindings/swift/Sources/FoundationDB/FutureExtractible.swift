@@ -91,3 +91,21 @@ extension Fdb.RangeResult: FutureExtractible {
         return Fdb.RangeResult(kvs: keyValueArray, more: more > 0)
     }
 }
+
+extension Fdb.KeyResult: FutureExtractible {
+    static func extract(fromFuture: CFuturePtr) throws -> Fdb.KeyResult? {
+        var keyPtr: UnsafePointer<UInt8>?
+        var keyLen: Int32 = 0
+
+        let err = fdb_future_get_key(fromFuture, &keyPtr, &keyLen)
+        if err != 0 {
+            throw FdbError(code: err)
+        }
+
+        if let keyPtr {
+            return Fdb.KeyResult(key: Array(UnsafeBufferPointer(start: keyPtr, count: Int(keyLen))))
+        }
+
+        return nil
+    }
+}

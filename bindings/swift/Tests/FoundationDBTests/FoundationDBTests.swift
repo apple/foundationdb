@@ -208,51 +208,97 @@ func testClearRangeStrings() async throws {
     #expect(value3After == expectedValue, "Value3 should still exist (end key is exclusive)")
 }
 
-// @Test("getKey with string selector")
-// func testGetKeyString() async throws {
-//     try await FdbClient.initialize()
-//     let database = try FdbClient.openDatabase()
-//     let transaction = try database.createTransaction()
+@Test("getKey with KeySelector")
+func testGetKeyWithKeySelector() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
 
-//     // Clear test key range
-//     transaction.clearRange(beginKey: "test_", endKey: "test`")
-//     _ = try await transaction.commit()
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
 
-//     let newTransaction = try database.createTransaction()
-//     // Set up some test data
-//     newTransaction.setValue("value1", for: "test_key_a")
-//     newTransaction.setValue("value2", for: "test_key_b")
-//     newTransaction.setValue("value3", for: "test_key_c")
+    let newTransaction = try database.createTransaction()
+    // Set up some test data
+    newTransaction.setValue("value1", for: "test_getkey_a")
+    newTransaction.setValue("value2", for: "test_getkey_b")
+    newTransaction.setValue("value3", for: "test_getkey_c")
+    _ = try await newTransaction.commit()
 
-//     // Test getting key with selector
-//     let resultKey = try await newTransaction.getKey(for: "test_key_b", orEqual: true, offset: 0)
-//     let expectedKey = [UInt8]("test_key_b".utf8)
-//     #expect(resultKey == expectedKey, "getKey should find exact key")
-// }
+    let readTransaction = try database.createTransaction()
+    // Test getting key with KeySelector - firstGreaterOrEqual
+    let selector = Fdb.KeySelector.firstGreaterOrEqual("test_getkey_b")
+    let resultKey = try await readTransaction.getKey(selector: selector)
+    let expectedKey = [UInt8]("test_getkey_b".utf8)
+    #expect(resultKey == expectedKey, "getKey with KeySelector should find exact key")
+}
 
-// @Test("getKey with byte selector")
-// func testGetKeyBytes() async throws {
-//     try await FdbClient.initialize()
-//     let database = try FdbClient.openDatabase()
-//     let transaction = try database.createTransaction()
+@Test("getKey with different KeySelector methods")
+func testGetKeyWithDifferentSelectors() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
 
-//     // Clear test key range
-//     transaction.clearRange(beginKey: "test_", endKey: "test`")
-//     _ = try await transaction.commit()
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
 
-//     let newTransaction = try database.createTransaction()
-//     let keyA: Fdb.Key = [UInt8]("test_byte_key_a".utf8)
-//     let keyB: Fdb.Key = [UInt8]("test_byte_key_b".utf8)
-//     let keyC: Fdb.Key = [UInt8]("test_byte_key_c".utf8)
-//     let value: Fdb.Value = [UInt8]("test_value".utf8)
+    let newTransaction = try database.createTransaction()
+    newTransaction.setValue("value1", for: "test_selector_a")
+    newTransaction.setValue("value2", for: "test_selector_b")  
+    newTransaction.setValue("value3", for: "test_selector_c")
+    _ = try await newTransaction.commit()
 
-//     newTransaction.setValue(value, for: keyA)
-//     newTransaction.setValue(value, for: keyB)
-//     newTransaction.setValue(value, for: keyC)
+    let readTransaction = try database.createTransaction()
+    
+    // Test firstGreaterOrEqual
+    let selectorGTE = Fdb.KeySelector.firstGreaterOrEqual("test_selector_b")
+    let resultGTE = try await readTransaction.getKey(selector: selectorGTE)
+    #expect(resultGTE == [UInt8]("test_selector_b".utf8), "firstGreaterOrEqual should find exact key")
+    
+    // Test firstGreaterThan 
+    let selectorGT = Fdb.KeySelector.firstGreaterThan("test_selector_b")
+    let resultGT = try await readTransaction.getKey(selector: selectorGT)
+    #expect(resultGT == [UInt8]("test_selector_c".utf8), "firstGreaterThan should find next key")
+    
+    // Test lastLessOrEqual
+    let selectorLTE = Fdb.KeySelector.lastLessOrEqual("test_selector_b")
+    let resultLTE = try await readTransaction.getKey(selector: selectorLTE)
+    #expect(resultLTE == [UInt8]("test_selector_b".utf8), "lastLessOrEqual should find exact key")
+    
+    // Test lastLessThan
+    let selectorLT = Fdb.KeySelector.lastLessThan("test_selector_b")
+    let resultLT = try await readTransaction.getKey(selector: selectorLT)
+    #expect(resultLT == [UInt8]("test_selector_a".utf8), "lastLessThan should find previous key")
+}
 
-//     let resultKey = try await newTransaction.getKey(for: keyB, orEqual: true, offset: 0)
-//     #expect(resultKey == keyB, "getKey should find exact key with bytes")
-// }
+@Test("getKey with Selectable protocol")
+func testGetKeyWithSelectable() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    let key: Fdb.Key = [UInt8]("test_selectable_key".utf8)
+    let value: Fdb.Value = [UInt8]("test_selectable_value".utf8)
+    newTransaction.setValue(value, for: key)
+    _ = try await newTransaction.commit()
+
+    let readTransaction = try database.createTransaction()
+    
+    // Test with Fdb.Key (which implements Selectable)
+    let resultWithKey = try await readTransaction.getKey(selector: key)
+    #expect(resultWithKey == key, "getKey with Fdb.Key should work")
+    
+    // Test with String (which implements Selectable)
+    let stringKey = "test_selectable_key"
+    let resultWithString = try await readTransaction.getKey(selector: stringKey)
+    #expect(resultWithString == key, "getKey with String should work")
+}
 
 @Test("commit transaction")
 func testCommit() async throws {

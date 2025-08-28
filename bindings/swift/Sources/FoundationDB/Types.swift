@@ -102,5 +102,9 @@ public struct Fdb {
         }
     }
 
+    struct KeyResult: Sendable {
+        public let key: Key
+    }
+
     typealias Future<T: FutureExtractible> = SwiftFuture<T>
 }
