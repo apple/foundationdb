@@ -23,13 +23,6 @@
 #include "flow/SimpleCounter.h"
 #include "flow/UnitTest.h"
 
-// NOTE: this code emits trace events with modified trace field names.
-// To ensure that this does not run afoul of poorly documented invariants
-// in Trace.cpp, run a 100k simulation run even if the unit tests in
-// this file pass.  Run this specifically to ensure that the unit tests
-// themselves do not break expectations embedded elsewhere in any code
-// that enables itself in simulation.
-
 // Trace.cpp::validateField insists on applying some rules to trace
 // field names.  Instead of fighting this, for now just make our
 // hierarchical names comply by converting / to 'U'.  Yes, 'U'.
@@ -74,6 +67,7 @@ void simpleCounterReport(void) {
 		if (g_network->isSimulated()) {
 			n = mungeName(n);
 		}
+		ASSERT(validateField(n))
 		traceEvent.detail(std::move(n), ic->get());
 	}
 	for (SimpleCounter<double>* dc : doubleCounters) {
@@ -81,6 +75,7 @@ void simpleCounterReport(void) {
 		if (g_network->isSimulated()) {
 			n = mungeName(n);
 		}
+		ASSERT(validateField(n));
 		traceEvent.detail(std::move(n), dc->get());
 	}
 	int total = intCounters.size() + doubleCounters.size();
