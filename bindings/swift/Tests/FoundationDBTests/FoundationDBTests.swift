@@ -245,27 +245,27 @@ func testGetKeyWithDifferentSelectors() async throws {
 
     let newTransaction = try database.createTransaction()
     newTransaction.setValue("value1", for: "test_selector_a")
-    newTransaction.setValue("value2", for: "test_selector_b")  
+    newTransaction.setValue("value2", for: "test_selector_b")
     newTransaction.setValue("value3", for: "test_selector_c")
     _ = try await newTransaction.commit()
 
     let readTransaction = try database.createTransaction()
-    
+
     // Test firstGreaterOrEqual
     let selectorGTE = Fdb.KeySelector.firstGreaterOrEqual("test_selector_b")
     let resultGTE = try await readTransaction.getKey(selector: selectorGTE)
     #expect(resultGTE == [UInt8]("test_selector_b".utf8), "firstGreaterOrEqual should find exact key")
-    
-    // Test firstGreaterThan 
+
+    // Test firstGreaterThan
     let selectorGT = Fdb.KeySelector.firstGreaterThan("test_selector_b")
     let resultGT = try await readTransaction.getKey(selector: selectorGT)
     #expect(resultGT == [UInt8]("test_selector_c".utf8), "firstGreaterThan should find next key")
-    
+
     // Test lastLessOrEqual
     let selectorLTE = Fdb.KeySelector.lastLessOrEqual("test_selector_b")
     let resultLTE = try await readTransaction.getKey(selector: selectorLTE)
     #expect(resultLTE == [UInt8]("test_selector_b".utf8), "lastLessOrEqual should find exact key")
-    
+
     // Test lastLessThan
     let selectorLT = Fdb.KeySelector.lastLessThan("test_selector_b")
     let resultLT = try await readTransaction.getKey(selector: selectorLT)
@@ -289,11 +289,11 @@ func testGetKeyWithSelectable() async throws {
     _ = try await newTransaction.commit()
 
     let readTransaction = try database.createTransaction()
-    
+
     // Test with Fdb.Key (which implements Selectable)
     let resultWithKey = try await readTransaction.getKey(selector: key)
     #expect(resultWithKey == key, "getKey with Fdb.Key should work")
-    
+
     // Test with String (which implements Selectable)
     let stringKey = "test_selectable_key"
     let resultWithString = try await readTransaction.getKey(selector: stringKey)
@@ -635,4 +635,171 @@ func testKeySelectorMethods() async throws {
     let keysGT = resultGT.records.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
     #expect(!keysGT.contains("test_offset_002"), "firstGreaterThan should exclude the key")
     #expect(keysGT.contains("test_offset_003"), "firstGreaterThan should include next key")
+}
+
+@Test("withTransaction success")
+func testWithTransactionSuccess() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+
+    // Clear test key range first
+    let clearTransaction = try database.createTransaction()
+    clearTransaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await clearTransaction.commit()
+
+    // Test successful withTransaction
+    let result = try await database.withTransaction { transaction in
+        transaction.setValue("success_value", for: "test_with_transaction_key")
+        return "operation_completed"
+    }
+
+    #expect(result == "operation_completed", "withTransaction should return the operation result")
+
+    // Verify the value was committed
+    let verifyTransaction = try database.createTransaction()
+    let retrievedValue = try await verifyTransaction.getValue(for: "test_with_transaction_key")
+    let expectedValue = [UInt8]("success_value".utf8)
+    #expect(retrievedValue == expectedValue, "Value should be committed after withTransaction")
+}
+
+@Test("withTransaction with exception in operation")
+func testWithTransactionException() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+
+    // Clear test key range first
+    let clearTransaction = try database.createTransaction()
+    clearTransaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await clearTransaction.commit()
+
+    struct TestError: Error {}
+
+    do {
+        let _ = try await database.withTransaction { transaction in
+            transaction.setValue("exception_value", for: "test_with_transaction_exception")
+            throw TestError()
+        }
+        #expect(Bool(false), "withTransaction should propagate thrown exceptions")
+    } catch is TestError {
+        // Expected behavior
+    } catch {
+        #expect(Bool(false), "Should catch TestError, got \(error)")
+    }
+
+    // Verify the value was NOT committed due to exception
+    let verifyTransaction = try database.createTransaction()
+    let retrievedValue = try await verifyTransaction.getValue(for: "test_with_transaction_exception")
+    #expect(retrievedValue == nil, "Value should not be committed when exception occurs")
+}
+
+@Test("withTransaction with non-retryable error")
+func testWithTransactionNonRetryableError() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+
+    // Clear test key range first
+    let clearTransaction = try database.createTransaction()
+    clearTransaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await clearTransaction.commit()
+
+    do {
+        let _ = try await database.withTransaction { transaction in
+            transaction.setValue("non_retryable_value", for: "test_with_transaction_non_retryable")
+            // Throw a non-retryable FDB error (transaction_cancelled)
+            throw FdbError(code: 1025)
+        }
+        #expect(Bool(false), "withTransaction should propagate non-retryable errors")
+    } catch let error as FdbError {
+        #expect(error.code == 1025, "Should propagate the exact FdbError")
+        #expect(!error.isRetryable, "Error should be non-retryable")
+    } catch {
+        #expect(Bool(false), "Should catch FdbError, got \(error)")
+    }
+}
+
+@Test("withTransaction returns value from operation")
+func testWithTransactionReturnValue() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+
+    // Clear test key range first
+    let clearTransaction = try database.createTransaction()
+    clearTransaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await clearTransaction.commit()
+
+    // Test that withTransaction returns the correct value
+    let stringResult = try await database.withTransaction { transaction in
+        transaction.setValue("return_test_value", for: "test_return_key")
+        return "success"
+    }
+    #expect(stringResult == "success", "Should return string value from operation")
+
+    let intResult = try await database.withTransaction { transaction in
+        transaction.setValue("return_test_value2", for: "test_return_key2")
+        return 42
+    }
+    #expect(intResult == 42, "Should return integer value from operation")
+
+    let arrayResult = try await database.withTransaction { transaction in
+        return try await transaction.getValue(for: "test_return_key")
+    }
+    let expectedValue = [UInt8]("return_test_value".utf8)
+    #expect(arrayResult == expectedValue, "Should return retrieved value from operation")
+}
+
+@Test("withTransaction Sendable compliance")
+func testWithTransactionSendable() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+
+    // Clear test key range first
+    let clearTransaction = try database.createTransaction()
+    clearTransaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await clearTransaction.commit()
+
+    // Test with Sendable types
+    struct SendableData: Sendable {
+        let id: Int
+        let name: String
+    }
+
+    let result = try await database.withTransaction { transaction in
+        transaction.setValue("sendable_value", for: "test_sendable_key")
+        return SendableData(id: 123, name: "test")
+    }
+
+    #expect(result.id == 123, "Should return sendable struct with correct id")
+    #expect(result.name == "test", "Should return sendable struct with correct name")
+}
+
+@Test("FdbError isRetryable property")
+func testFdbErrorRetryable() {
+    // Test retryable errors
+    let notCommittedError = FdbError(code: 1007)
+    #expect(notCommittedError.isRetryable, "not_committed should be retryable")
+
+    let transactionTooOldError = FdbError(code: 1020)
+    #expect(transactionTooOldError.isRetryable, "transaction_too_old should be retryable")
+
+    let futureVersionError = FdbError(code: 1021)
+    #expect(futureVersionError.isRetryable, "future_version should be retryable")
+
+    let transactionTimedOutError = FdbError(code: 1031)
+    #expect(transactionTimedOutError.isRetryable, "transaction_timed_out should be retryable")
+
+    let processBehindError = FdbError(code: 1037)
+    #expect(processBehindError.isRetryable, "process_behind should be retryable")
+
+    let tagThrottledError = FdbError(code: 1213)
+    #expect(tagThrottledError.isRetryable, "tag_throttled should be retryable")
+
+    // Test non-retryable errors
+    let transactionCancelledError = FdbError(code: 1025)
+    #expect(!transactionCancelledError.isRetryable, "transaction_cancelled should not be retryable")
+
+    let unknownError = FdbError(code: 9999)
+    #expect(!unknownError.isRetryable, "unknown error should not be retryable")
+
+    let internalError = FdbError(code: 2000)
+    #expect(!internalError.isRetryable, "internal_error should not be retryable")
 }

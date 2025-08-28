@@ -32,4 +32,25 @@ public struct FdbError: Error, CustomStringConvertible {
         }
         return String(cString: errorCString)
     }
+
+    public var isRetryable: Bool {
+        switch code {
+        case 1007:  // not_committed
+            return true
+        case 1020:  // transaction_too_old
+            return true
+        case 1021:  // future_version
+            return true
+        case 1025:  // transaction_cancelled
+            return false
+        case 1031:  // transaction_timed_out
+            return true
+        case 1037:  // process_behind
+            return true
+        case 1213:  // tag_throttled
+            return true
+        default:
+            return false
+        }
+    }
 }
