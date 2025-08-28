@@ -20,7 +20,7 @@
 import CFoundationDB
 
 // TODO: Explore ways to use Span and avoid copying bytes from CFuture into Swift.
-class SwiftFuture<T: FutureExtractible & Sendable> {
+class SwiftFuture<T: Fdb.FutureResult> {
     private let cFuture: CFuturePtr
 
     init(_ cFuture: CFuturePtr) {

@@ -432,10 +432,10 @@ func testGetRangeBytes() async throws {
     let result = try await readTransaction.getRange(beginKey: beginKey, endKey: endKey)
 
     #expect(!result.more)
-    try #require(result.kvs.count == 2, "Should return 2 key-value pairs (end key is exclusive)")
+    try #require(result.records.count == 2, "Should return 2 key-value pairs (end key is exclusive)")
 
     // Sort results by key for predictable testing
-    let sortedResults = result.kvs.sorted { $0.0.lexicographicallyPrecedes($1.0) }
+    let sortedResults = result.records.sorted { $0.0.lexicographicallyPrecedes($1.0) }
     #expect(sortedResults[0].0 == key1, "First key should match key1")
     #expect(sortedResults[0].1 == value1, "First value should match value1")
     #expect(sortedResults[1].0 == key2, "Second key should match key2")
@@ -464,10 +464,10 @@ func testGetRangeWithLimit() async throws {
     // Test with limit
     let readTransaction = try database.createTransaction()
     let result = try await readTransaction.getRange(beginKey: "test_limit_key_001", endKey: "test_limit_key_999", limit: 3)
-    #expect(result.kvs.count == 3, "Should return exactly 3 key-value pairs due to limit")
+    #expect(result.records.count == 3, "Should return exactly 3 key-value pairs due to limit")
 
     // Verify we got the first 3 keys
-    let sortedResults = result.kvs.sorted { String(bytes: $0.0, encoding: .utf8)! < String(bytes: $1.0, encoding: .utf8)! }
+    let sortedResults = result.records.sorted { String(bytes: $0.0, encoding: .utf8)! < String(bytes: $1.0, encoding: .utf8)! }
 
     #expect(String(bytes: sortedResults[0].0, encoding: .utf8) == "test_limit_key_001", "First key should be test_limit_key_001")
     #expect(String(bytes: sortedResults[1].0, encoding: .utf8) == "test_limit_key_002", "Second key should be test_limit_key_002")
@@ -488,8 +488,8 @@ func testGetRangeEmpty() async throws {
     // Test empty range
     let result = try await newTransaction.getRange(beginKey: "test_empty_start", endKey: "test_empty_end")
 
-    #expect(result.kvs.count == 0, "Empty range should return no results")
-    #expect(result.kvs.isEmpty, "Results should be empty")
+    #expect(result.records.count == 0, "Empty range should return no results")
+    #expect(result.records.isEmpty, "Results should be empty")
     #expect(result.more == false, "Should indicate no more results")
 }
 
@@ -524,10 +524,10 @@ func testGetRangeWithKeySelectors() async throws {
     let result = try await readTransaction.getRange(beginSelector: beginSelector, endSelector: endSelector)
 
     #expect(!result.more)
-    try #require(result.kvs.count == 2, "Should return 2 key-value pairs (end selector is exclusive)")
+    try #require(result.records.count == 2, "Should return 2 key-value pairs (end selector is exclusive)")
 
     // Sort results by key for predictable testing
-    let sortedResults = result.kvs.sorted { $0.0.lexicographicallyPrecedes($1.0) }
+    let sortedResults = result.records.sorted { $0.0.lexicographicallyPrecedes($1.0) }
     #expect(sortedResults[0].0 == key1, "First key should match key1")
     #expect(sortedResults[0].1 == value1, "First value should match value1")
     #expect(sortedResults[1].0 == key2, "Second key should match key2")
@@ -558,11 +558,11 @@ func testGetRangeWithStringSelectorKeys() async throws {
     let result = try await readTransaction.getRange(beginSelector: beginSelector, endSelector: endSelector)
 
     #expect(!result.more)
-    try #require(result.kvs.count == 2, "Should return 2 key-value pairs")
+    try #require(result.records.count == 2, "Should return 2 key-value pairs")
 
     // Convert back to strings for easier testing
-    let keys = result.kvs.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
-    let values = result.kvs.map { String(bytes: $0.1, encoding: .utf8)! }
+    let keys = result.records.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
+    let values = result.records.map { String(bytes: $0.1, encoding: .utf8)! }
 
     #expect(keys.contains("test_str_selector_001"), "Should contain first key")
     #expect(keys.contains("test_str_selector_002"), "Should contain second key")
@@ -593,9 +593,9 @@ func testGetRangeWithSelectable() async throws {
     let result = try await readTransaction.getRange(begin: beginKey, end: endString)
 
     #expect(!result.more)
-    try #require(result.kvs.count == 2, "Should return 2 key-value pairs")
+    try #require(result.records.count == 2, "Should return 2 key-value pairs")
 
-    let keys = result.kvs.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
+    let keys = result.records.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
     #expect(keys.contains("test_mixed_001"), "Should contain first key")
     #expect(keys.contains("test_mixed_002"), "Should contain second key")
 }
@@ -628,11 +628,11 @@ func testKeySelectorMethods() async throws {
     let resultGT = try await readTransaction.getRange(beginSelector: beginSelectorGT, endSelector: endSelector)
 
     // firstGreaterOrEqual should include test_offset_002
-    let keysGTE = resultGTE.kvs.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
+    let keysGTE = resultGTE.records.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
     #expect(keysGTE.contains("test_offset_002"), "firstGreaterOrEqual should include the key")
 
     // firstGreaterThan should exclude test_offset_002 and start from test_offset_003
-    let keysGT = resultGT.kvs.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
+    let keysGT = resultGT.records.map { String(bytes: $0.0, encoding: .utf8)! }.sorted()
     #expect(!keysGT.contains("test_offset_002"), "firstGreaterThan should exclude the key")
     #expect(keysGT.contains("test_offset_003"), "firstGreaterThan should include next key")
 }

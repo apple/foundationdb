@@ -37,7 +37,7 @@ public class FdbTransaction {
 
     public func getValue(for key: Fdb.Key, snapshot: Bool = false) async throws -> Fdb.Value? {
         try await key.withUnsafeBytes { keyBytes in
-            Fdb.Future<Fdb.Value>(
+            Fdb.Future<Fdb.ResultValue>(
                 fdb_transaction_get(
                     transaction,
                     keyBytes.bindMemory(to: UInt8.self).baseAddress,
@@ -45,7 +45,7 @@ public class FdbTransaction {
                     snapshot ? 1 : 0
                 )
             )
-        }.getAsync()
+        }.getAsync()?.value
     }
 
     public func setValue(_ value: Fdb.Value, for key: Fdb.Key) {
@@ -110,7 +110,7 @@ public class FdbTransaction {
 
     public func getKey(selector: Fdb.KeySelector, snapshot: Bool = false) async throws -> Fdb.Key? {
         try await selector.key.withUnsafeBytes { keyBytes in
-            Fdb.Future<Fdb.KeyResult>(
+            Fdb.Future<Fdb.ResultKey>(
                 fdb_transaction_get_key(
                     transaction,
                     keyBytes.bindMemory(to: UInt8.self).baseAddress,
@@ -120,11 +120,11 @@ public class FdbTransaction {
                     snapshot ? 1 : 0
                 )
             )
-        }.getAsync()?.key
+        }.getAsync()?.value
     }
 
     public func commit() async throws -> Bool {
-        try await Fdb.Future<FdbVoid>(
+        try await Fdb.Future<Fdb.ResultVoid>(
             fdb_transaction_commit(transaction)
         ).getAsync() != nil
     }
@@ -134,9 +134,9 @@ public class FdbTransaction {
     }
 
     public func getVersionstamp() async throws -> Fdb.Key? {
-        try await Fdb.Future<Fdb.Key>(
+        try await Fdb.Future<Fdb.ResultKey>(
             fdb_transaction_get_versionstamp(transaction)
-        ).getAsync()
+        ).getAsync()?.value
     }
 
     public func setReadVersion(_ version: Int64) {
@@ -144,21 +144,21 @@ public class FdbTransaction {
     }
 
     public func getReadVersion() async throws -> Int64 {
-        try await Fdb.Future<Int64>(
+        try await Fdb.Future<Fdb.ResultVersion>(
             fdb_transaction_get_read_version(transaction)
-        ).getAsync() ?? 0
+        ).getAsync()?.value ?? 0
     }
 
-    public func getRange(begin: Selectable, end: Selectable, limit: Int32 = 0, snapshot: Bool = false) async throws -> Fdb.RangeResult {
+    public func getRange(begin: Selectable, end: Selectable, limit: Int32 = 0, snapshot: Bool = false) async throws -> Fdb.ResultRange {
         let beginSelector = begin.toKeySelector()
         let endSelector = end.toKeySelector()
         return try await getRange(beginSelector: beginSelector, endSelector: endSelector, limit: limit, snapshot: snapshot)
     }
 
-    public func getRange(beginSelector: Fdb.KeySelector, endSelector: Fdb.KeySelector, limit: Int32 = 0, snapshot: Bool = false) async throws -> Fdb.RangeResult {
+    public func getRange(beginSelector: Fdb.KeySelector, endSelector: Fdb.KeySelector, limit: Int32 = 0, snapshot: Bool = false) async throws -> Fdb.ResultRange {
         let future = beginSelector.key.withUnsafeBytes { beginKeyBytes in
             endSelector.key.withUnsafeBytes { endKeyBytes in
-                Fdb.Future<Fdb.RangeResult>(
+                Fdb.Future<Fdb.ResultRange>(
                     fdb_transaction_get_range(
                         transaction,
                         beginKeyBytes.bindMemory(to: UInt8.self).baseAddress,
@@ -180,10 +180,10 @@ public class FdbTransaction {
             }
         }
 
-        return try await future.getAsync() ?? Fdb.RangeResult(kvs: [], more: false)
+        return try await future.getAsync() ?? Fdb.ResultRange(records: [], more: false)
     }
 
-    public func getRange(beginKey: String, endKey: String, limit: Int32 = 0, snapshot: Bool = false) async throws -> Fdb.RangeResult {
+    public func getRange(beginKey: String, endKey: String, limit: Int32 = 0, snapshot: Bool = false) async throws -> Fdb.ResultRange {
         let beginKeyBytes = [UInt8](beginKey.utf8)
         let endKeyBytes = [UInt8](endKey.utf8)
         return try await getRange(beginKey: beginKeyBytes, endKey: endKeyBytes, limit: limit, snapshot: snapshot)
@@ -191,10 +191,10 @@ public class FdbTransaction {
 
     public func getRange(
         beginKey: Fdb.Key, endKey: Fdb.Key, limit: Int32 = 0, snapshot: Bool = false
-    ) async throws -> Fdb.RangeResult {
+    ) async throws -> Fdb.ResultRange {
         let future = beginKey.withUnsafeBytes { beginKeyBytes in
             endKey.withUnsafeBytes { endKeyBytes in
-                Fdb.Future<Fdb.RangeResult>(
+                Fdb.Future<Fdb.ResultRange>(
                     fdb_transaction_get_range(
                         transaction,
                         beginKeyBytes.bindMemory(to: UInt8.self).baseAddress,
@@ -216,6 +216,6 @@ public class FdbTransaction {
             }
         }
 
-        return try await future.getAsync() ?? Fdb.RangeResult(kvs: [], more: false)
+        return try await future.getAsync() ?? Fdb.ResultRange(records: [], more: false)
     }
 }
