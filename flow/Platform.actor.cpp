@@ -54,6 +54,7 @@
 #include "flow/Knobs.h"
 #include "flow/Platform.actor.h"
 #include "flow/ScopeExit.h"
+#include "flow/SimpleCounter.h"
 #include "flow/StreamCipher.h"
 #include "flow/Trace.h"
 #include "flow/Trace.h"
@@ -3250,6 +3251,9 @@ void outOfMemory() {
 	TRACEALLOCATOR(8192);
 	g_traceBatch.dump();
 #endif
+
+	TraceEvent(SevWarn, "OutOfMemorySimpleCounterReportFollows");
+	simpleCounterReport(SevWarn);
 
 	criticalError(FDB_EXIT_NO_MEM, "OutOfMemory", "Out of memory");
 }

@@ -55,13 +55,13 @@ static std::string mungeName(const std::string input) {
 }
 
 // This should be called periodically by higher level code somewhere.
-void simpleCounterReport(void) {
+void simpleCounterReport(Severity severity) {
 	static SimpleCounter<int64_t>* reportCount = SimpleCounter<int64_t>::makeCounter("/flow/counters/reports");
 	reportCount->increment(1);
 
 	std::vector<SimpleCounter<int64_t>*> intCounters = SimpleCounter<int64_t>::getCounters();
 	std::vector<SimpleCounter<double>*> doubleCounters = SimpleCounter<double>::getCounters();
-	auto traceEvent = TraceEvent("SimpleCounters");
+	auto traceEvent = TraceEvent(severity, "SimpleCounters");
 	for (SimpleCounter<int64_t>* ic : intCounters) {
 		std::string n = ic->name();
 		n = mungeName(n);
