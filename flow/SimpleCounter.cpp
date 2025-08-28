@@ -64,16 +64,14 @@ void simpleCounterReport(void) {
 	auto traceEvent = TraceEvent("SimpleCounters");
 	for (SimpleCounter<int64_t>* ic : intCounters) {
 		std::string n = ic->name();
-		if (g_network->isSimulated()) {
-			n = mungeName(n);
-		}
+		n = mungeName(n);
+		ASSERT(validateField(n.c_str(), /* allowUnderscores= */ true));
 		traceEvent.detail(std::move(n), ic->get());
 	}
 	for (SimpleCounter<double>* dc : doubleCounters) {
 		std::string n = dc->name();
-		if (g_network->isSimulated()) {
-			n = mungeName(n);
-		}
+		n = mungeName(n);
+		ASSERT(validateField(n.c_str(), /* allowUnderscores= */ true));
 		traceEvent.detail(std::move(n), dc->get());
 	}
 	int total = intCounters.size() + doubleCounters.size();
@@ -81,8 +79,8 @@ void simpleCounterReport(void) {
 }
 
 TEST_CASE("/flow/simplecounter/int64") {
-	SimpleCounter<int64_t>* foo = SimpleCounter<int64_t>::makeCounter("foo");
-	SimpleCounter<int64_t>* bar = SimpleCounter<int64_t>::makeCounter("bar");
+	SimpleCounter<int64_t>* foo = SimpleCounter<int64_t>::makeCounter("/flow/counters/foo");
+	SimpleCounter<int64_t>* bar = SimpleCounter<int64_t>::makeCounter("/flow/counters/bar");
 
 	foo->increment(5);
 	foo->increment(1);
@@ -93,12 +91,13 @@ TEST_CASE("/flow/simplecounter/int64") {
 	ASSERT(bar->get() == 10);
 
 	for (int i = 0; i < 100; i++) {
-		SimpleCounter<int64_t>* p = SimpleCounter<int64_t>::makeCounter(std::string("many") + std::to_string(i));
+		SimpleCounter<int64_t>* p =
+		    SimpleCounter<int64_t>::makeCounter(std::string("/flow/counters/many") + std::to_string(i));
 		p->increment(i);
 		ASSERT(p->get() == i);
 	}
 
-	SimpleCounter<int64_t>* conflict = SimpleCounter<int64_t>::makeCounter("lots_of_increments");
+	SimpleCounter<int64_t>* conflict = SimpleCounter<int64_t>::makeCounter("/flow/counters/lots");
 
 	// Increment by all values in [1, 1000000] across 10 threads.
 	// Expected sum: 10 * (min + max) * (num entries in series)/2
@@ -130,11 +129,14 @@ TEST_CASE("/flow/simplecounter/int64") {
 	// environment.
 	ASSERT(intCounters.size() >= 103);
 
+	// Give asserts here a chance to run.
+	simpleCounterReport();
+
 	return Void();
 }
 
 TEST_CASE("/flow/simplecounter/double") {
-	SimpleCounter<double>* baz = SimpleCounter<double>::makeCounter("baz");
+	SimpleCounter<double>* baz = SimpleCounter<double>::makeCounter("/flow/counters/baz");
 
 	// We intend to compute a floating point sum with an exact representation.
 	// A way to do this is to only add values with exact representations.
@@ -160,6 +162,9 @@ TEST_CASE("/flow/simplecounter/double") {
 
 	std::vector<SimpleCounter<double>*> doubleCounters = SimpleCounter<double>::getCounters();
 	ASSERT(doubleCounters.size() >= 1);
+
+	// Give asserts here a chance to run.
+	simpleCounterReport();
 
 	return Void();
 }

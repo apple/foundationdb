@@ -586,6 +586,8 @@ void disposeTraceFileWriter();
 std::string getTraceFormatExtension();
 uint64_t getTraceThreadId();
 
+bool validateField(const char* key, bool allowUnderscores);
+
 template <class T>
 class Future;
 class Void;
