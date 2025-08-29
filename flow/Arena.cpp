@@ -107,40 +107,16 @@ void makeUndefined(void*, size_t) {}
 #endif
 } // namespace
 
-static SimpleCounter<int64_t>* arenasCreated() {
-	static SimpleCounter<int64_t>* created =
-		SimpleCounter<int64_t>::makeCounter("/flow/arena/arenasCreated");
-	return created;
-}
-static SimpleCounter<int64_t>* arenaBytesReserved() {
-	static SimpleCounter<int64_t>* bytes =
-		SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBytesReserved");
-	return bytes;
-}
-static SimpleCounter<int64_t>* arenaBlocksCreated() {
-	static SimpleCounter<int64_t>* created =
-		SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBlocksCreated");
-	return created;
-}
-static SimpleCounter<int64_t>* createBlocksDestroyed() {
-	static SimpleCounter<int64_t>* destroyed =
-		SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBlocksDestroyed");
-	return destroyed;
-}
-static SimpleCounter<int64_t>* getSizeCalls() {
-	static SimpleCounter<int64_t>* calls =
-		SimpleCounter<int64_t>::makeCounter("/flow/arena/getSizeCalls");
-	return calls;
-}
-
 Arena::Arena() : impl(nullptr) {}
 Arena::Arena(size_t reservedSize) : impl(0) {
 	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
-	arenasCreated()->increment(1);
+	static SimpleCounter<int64_t>* created = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenasCreated");
+	created->increment(1);
 	if (reservedSize) {
 		allowAccess(impl.getPtr());
 		ArenaBlock::create((int)reservedSize, impl);
-		arenaBytesReserved()->increment(reservedSize);
+		static SimpleCounter<int64_t>* bytes = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBytesReserved");
+		bytes->increment(reservedSize);
 		disallowAccess(impl.getPtr());
 	}
 }
@@ -154,7 +130,7 @@ void Arena::dependsOn(const Arena& p) {
 	if (p.impl && p.impl.getPtr() != impl.getPtr()) {
 		allowAccess(impl.getPtr());
 		allowAccess(p.impl.getPtr());
-		ArenaBlock::dependsOn(impl, p.impl.getPtr());
+		ArenaBlock::dependOn(impl, p.impl.getPtr());
 		disallowAccess(p.impl.getPtr());
 		disallowAccess(impl.getPtr());
 	}
@@ -166,7 +142,8 @@ void* Arena::allocate4kAlignedBuffer(uint32_t size) {
 
 size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	if (impl) {
-		getSizeCalls()->increment(1);
+		static SimpleCounter<int64_t>* calls = SimpleCounter<int64_t>::makeCounter("/flow/arena/getSizeCalls");
+		calls->increment(1);
 		allowAccess(impl.getPtr());
 		size_t result;
 		if (fastInaccurateEstimate) {
@@ -248,7 +225,9 @@ size_t ArenaBlock::totalSize(std::unordered_set<ArenaBlock*>& visited) const {
 	totalSizeEstimate = size();
 	int o = nextBlockOffset;
 	while (o) {
-		totalSizeBlocksExamined()->increment(1);
+		static SimpleCounter<int64_t>* count =
+		    SimpleCounter<int64_t>::makeCounter("/flow/arena/totalSizeBlocksExamined");
+		count->increment(1);
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
 		if (r->aligned4kBufferSize != 0) {
@@ -277,7 +256,8 @@ void ArenaBlock::wipeUsed() {
 	int dataOffset = isTiny() ? TINY_HEADER : sizeof(ArenaBlock);
 	void* dataBegin = (char*)getData() + dataOffset;
 	int dataSize = used() - dataOffset;
-	bytesWiped()->increment(dataSize);
+	static SimpleCounter<int64_t>* bytesWiped = SimpleCounter<int64_t>::makeCounter("/flow/arena/bytesWiped");
+	bytesWiped->increment(dataSize);
 	makeDefined(dataBegin, dataSize);
 	::memset(dataBegin, 0, dataSize);
 	makeNoAccess(dataBegin, dataSize);
@@ -344,7 +324,7 @@ void* ArenaBlock::make4kAlignedBuffer(uint32_t size) {
 	return result;
 }
 
-void ArenaBlock::dependsOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
+void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 	other->addref();
 	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef)) {
 		create(SMALL, self)->makeReference(other);
@@ -363,8 +343,13 @@ void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t 
 }
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem isSecure) {
-	arenaAllocations()->increment(1);
-	arenaAllocatedBytes()->increment(bytes);
+	static SimpleCounter<int64_t>* arenaBlockAllocations =
+	    SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBlockAllocations");
+	static SimpleCounter<int64_t>* arenaBlockBytesAllocated =
+	    SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBlockBytesAllocated");
+	arenaBlockAllocations->increment(1);
+	arenaBlockBytesAllocated->increment(bytes);
+
 	ArenaBlock* b = self.getPtr();
 	allowAccess(b);
 	if (!self || self->unused() < bytes) {
@@ -384,7 +369,8 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem i
 // Return an appropriately-sized ArenaBlock to store the given data
 ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
-	arenaBlocksCreated()->increment(1);
+	static SimpleCounter<int64_t>* created = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBlocksCreated");
+	created->increment(1);
 	// all blocks are initialized with no-wipe by default. allocate() sets it, if needed.
 	if (dataSize <= SMALL - TINY_HEADER && !next) {
 		static_assert(sizeof(ArenaBlock) <= 32); // Need to allocate at least sizeof(ArenaBlock) for an ArenaBlock*. See
@@ -522,7 +508,9 @@ void ArenaBlock::destroy() {
 			}
 		}
 		b->destroyLeaf();
-		arenaBlocksDestroyed()->increment(1);
+		static SimpleCounter<int64_t>* destroyed =
+		    SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBlocksDestroyed");
+		destroyed->increment(1);
 	}
 }
 
