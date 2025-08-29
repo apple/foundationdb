@@ -1,6 +1,6 @@
 [configuration]
 extraDatabaseMode = "Local"
-disableEncryption = true
+encryptModes = ['disabled']
 # In 7.2, DR is not supported in required tenant mode
 allowDefaultTenant = false
 
