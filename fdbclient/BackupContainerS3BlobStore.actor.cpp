@@ -22,6 +22,7 @@
 #include "fdbclient/BackupContainerS3BlobStore.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
+#include "fdbrpc/HTTP.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class BackupContainerS3BlobStoreImpl {
@@ -38,8 +39,10 @@ public:
 		S3BlobStoreEndpoint::ListResult contents = wait(bstore->listObjects(bucket, basePath));
 		std::vector<std::string> results;
 		for (const auto& f : contents.objects) {
+			// URL decode the object name since S3 XML responses contain URL-encoded names
+			std::string decodedName = HTTP::urlDecode(f.name);
 			results.push_back(
-			    bstore->getResourceURL(f.name.substr(basePath.size()), format("bucket=%s", bucket.c_str())));
+			    bstore->getResourceURL(decodedName.substr(basePath.size()), format("bucket=%s", bucket.c_str())));
 		}
 		return results;
 	}
@@ -85,12 +88,15 @@ public:
 			return pathFilter(folderPath.substr(prefixTrim));
 		};
 
-		state S3BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listObjects(
-		    bc->m_bucket, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
+		// Use flat listing for backup files to ensure all files are found regardless of directory structure
+		state S3BlobStoreEndpoint::ListResult result =
+		    wait(bc->m_bstore->listObjects(bc->m_bucket, bc->dataPath(path), Optional<char>(), 0, rawPathFilter));
 		BackupContainerFileSystem::FilesAndSizesT files;
 		for (const auto& o : result.objects) {
 			ASSERT(o.name.size() >= prefixTrim);
-			files.push_back({ o.name.substr(prefixTrim), o.size });
+			// URL decode the object name since S3 XML responses contain URL-encoded names
+			std::string decodedName = HTTP::urlDecode(o.name);
+			files.push_back({ decodedName.substr(prefixTrim), o.size });
 		}
 		return files;
 	}
