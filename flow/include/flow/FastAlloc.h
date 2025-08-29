@@ -187,8 +187,8 @@ int64_t getTotalUnusedAllocatedMemory();
 
 // These are thin wrappers around operator new and operator delete
 // and exist so that we can update metrics inside them.
-void* wrappedNew(size_t nbytes);
-void wrappedDelete(size_t nbytes, void* ptr);
+void* countedNew(size_t nbytes);
+void countedDelete(size_t nbytes, void* ptr);
 
 // Allow temporary overriding of default allocators used by arena to let memory survive deallocation and test
 // correctness of memory policy (e.g. zeroing out sensitive contents after use)
@@ -280,10 +280,12 @@ inline constexpr int nextFastAllocatedSize(int x) {
 		return 16384;
 }
 
-// NOTE: for maintaining metrics on objects/bytes allocated and deleted,
-// we rely on FastAllocated<T>::allocate, wrappedNew(), and wrappedDelete()
-// to update metrics for code paths that do cause allocations or frees.
-// Do not add uninstrumented operator new or operator delete invocations.
+// NOTE: for maintaining metrics on objects/bytes allocated and
+// deleted, we rely on FastAllocated<T>::allocate,
+// FastAllocated<T>::release, countedNew(), and countedDelete() to
+// update metrics for code paths that do cause allocations or frees.
+// Do not add uninstrumented operator new or operator delete
+// invocations.
 
 template <class Object>
 class FastAllocated {
@@ -297,7 +299,7 @@ public:
 			void* p = FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
 			return p;
 		} else {
-			void* p = wrappedNew(nextFastAllocatedSize(sizeof(Object)));
+			void* p = countedNew(nextFastAllocatedSize(sizeof(Object)));
 			return p;
 		}
 	}
@@ -308,7 +310,7 @@ public:
 		if constexpr (sizeof(Object) <= 256) {
 			FastAllocator<sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object))>::release(s);
 		} else {
-			wrappedDelete(nextFastAllocatedSize(sizeof(Object)), s);
+			countedDelete(nextFastAllocatedSize(sizeof(Object)), s);
 		}
 	}
 	// Redefine placement new so you can still use it
@@ -329,7 +331,7 @@ public:
 		return FastAllocator<128>::allocate();
 	if (size <= 256)
 		return FastAllocator<256>::allocate();
-	return wrappedNew(size);
+	return countedNew(size);
 }
 
 inline void freeFast(int size, void* ptr) {
@@ -345,7 +347,7 @@ inline void freeFast(int size, void* ptr) {
 		return FastAllocator<128>::release(ptr);
 	if (size <= 256)
 		return FastAllocator<256>::release(ptr);
-	wrappedDelete(size, ptr);
+	countedDelete(size, ptr);
 }
 
 // Allocate a block of memory aligned to 4096 bytes. Size must be a multiple of

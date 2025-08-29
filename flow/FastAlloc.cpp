@@ -435,9 +435,9 @@ void* FastAllocator<Size>::allocate() {
 	return p;
 }
 
-void* wrappedNew(size_t nbytes) {
-	static SimpleCounter<int64_t>* calls = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/wrappedNewCalls");
-	static SimpleCounter<int64_t>* bytes = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/wrappedNewBytes");
+void* countedNew(size_t nbytes) {
+	static SimpleCounter<int64_t>* calls = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/newCalls");
+	static SimpleCounter<int64_t>* bytes = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/newBytes");
 	calls->increment(1);
 	bytes->increment(nbytes);
 
@@ -445,9 +445,9 @@ void* wrappedNew(size_t nbytes) {
 	return p;
 }
 
-void wrappedDelete(size_t nbytes, void* ptr) {
-	static SimpleCounter<int64_t>* calls = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/wrappedDeleteCalls");
-	static SimpleCounter<int64_t>* bytes = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/wrappedDeleteBytes");
+void countedDelete(size_t nbytes, void* ptr) {
+	static SimpleCounter<int64_t>* calls = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/deleteCalls");
+	static SimpleCounter<int64_t>* bytes = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/deleteBytes");
 	calls->increment(1);
 	bytes->increment(nbytes);
 
