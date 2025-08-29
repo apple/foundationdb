@@ -19,7 +19,7 @@
  */
 import CFoundationDB
 
-public class FdbDatabase {
+public class FdbDatabase: IDatabase {
     private let database: OpaquePointer
 
     init(database: OpaquePointer) {
@@ -30,7 +30,7 @@ public class FdbDatabase {
         fdb_database_destroy(database)
     }
 
-    public func createTransaction() throws -> FdbTransaction {
+    public func createTransaction() throws -> any ITransaction {
         var transaction: OpaquePointer?
         let error = fdb_database_create_transaction(database, &transaction)
         if error != 0 {
@@ -42,37 +42,5 @@ public class FdbDatabase {
         }
 
         return FdbTransaction(transaction: tr)
-    }
-
-    public func withTransaction<T: Sendable>(
-        _ operation: (FdbTransaction) async throws -> T
-    ) async throws -> T {
-        let maxRetries = 100  // TODO: Remove this.
-
-        for attempt in 0..<maxRetries {
-            let transaction = try createTransaction()
-
-            do {
-                let result = try await operation(transaction)
-                let committed = try await transaction.commit()
-
-                if committed {
-                    return result
-                }
-            } catch {
-                // TODO: If user wants to cancel, don't retry.
-                transaction.cancel()
-
-                if let fdbError = error as? FdbError, fdbError.isRetryable {
-                    if attempt < maxRetries - 1 {
-                        continue
-                    }
-                }
-
-                throw error
-            }
-        }
-
-        throw FdbError(.transactionTooOld)
     }
 }

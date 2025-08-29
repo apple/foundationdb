@@ -19,7 +19,7 @@
  */
 import CFoundationDB
 
-public class FdbTransaction {
+public class FdbTransaction: ITransaction {
     private let transaction: OpaquePointer
 
     init(transaction: OpaquePointer) {
@@ -30,12 +30,7 @@ public class FdbTransaction {
         fdb_transaction_destroy(transaction)
     }
 
-    public func getValue(for key: String, snapshot: Bool = false) async throws -> Fdb.Value? {
-        let keyBytes = [UInt8](key.utf8)
-        return try await getValue(for: keyBytes, snapshot: snapshot)
-    }
-
-    public func getValue(for key: Fdb.Key, snapshot: Bool = false) async throws -> Fdb.Value? {
+    public func getValue(for key: Fdb.Key, snapshot: Bool) async throws -> Fdb.Value? {
         try await key.withUnsafeBytes { keyBytes in
             Future<ResultValue>(
                 fdb_transaction_get(
@@ -62,12 +57,6 @@ public class FdbTransaction {
         }
     }
 
-    public func setValue(_ value: String, for key: String) {
-        let keyBytes = [UInt8](key.utf8)
-        let valueBytes = [UInt8](value.utf8)
-        setValue(valueBytes, for: keyBytes)
-    }
-
     public func clear(key: Fdb.Key) {
         key.withUnsafeBytes { keyBytes in
             fdb_transaction_clear(
@@ -76,11 +65,6 @@ public class FdbTransaction {
                 Int32(key.count)
             )
         }
-    }
-
-    public func clear(key: String) {
-        let keyBytes = [UInt8](key.utf8)
-        clear(key: keyBytes)
     }
 
     public func clearRange(beginKey: Fdb.Key, endKey: Fdb.Key) {
@@ -97,18 +81,7 @@ public class FdbTransaction {
         }
     }
 
-    public func clearRange(beginKey: String, endKey: String) {
-        let beginKeyBytes = [UInt8](beginKey.utf8)
-        let endKeyBytes = [UInt8](endKey.utf8)
-        clearRange(beginKey: beginKeyBytes, endKey: endKeyBytes)
-    }
-
-    public func getKey(selector: Fdb.Selectable, snapshot: Bool = false) async throws -> Fdb.Key? {
-        let keySelector = selector.toKeySelector()
-        return try await getKey(selector: keySelector, snapshot: snapshot)
-    }
-
-    public func getKey(selector: Fdb.KeySelector, snapshot: Bool = false) async throws -> Fdb.Key? {
+    public func getKey(selector: Fdb.KeySelector, snapshot: Bool) async throws -> Fdb.Key? {
         try await selector.key.withUnsafeBytes { keyBytes in
             Future<ResultKey>(
                 fdb_transaction_get_key(
@@ -150,18 +123,8 @@ public class FdbTransaction {
     }
 
     public func getRange(
-        begin: Fdb.Selectable, end: Fdb.Selectable, limit: Int32 = 0, snapshot: Bool = false
-    ) async throws -> ResultRange {
-        let beginSelector = begin.toKeySelector()
-        let endSelector = end.toKeySelector()
-        return try await getRange(
-            beginSelector: beginSelector, endSelector: endSelector, limit: limit, snapshot: snapshot
-        )
-    }
-
-    public func getRange(
         beginSelector: Fdb.KeySelector, endSelector: Fdb.KeySelector, limit: Int32 = 0,
-        snapshot: Bool = false
+        snapshot: Bool
     ) async throws -> ResultRange {
         let future = beginSelector.key.withUnsafeBytes { beginKeyBytes in
             endSelector.key.withUnsafeBytes { endKeyBytes in
@@ -190,17 +153,8 @@ public class FdbTransaction {
         return try await future.getAsync() ?? ResultRange(records: [], more: false)
     }
 
-    public func getRange(beginKey: String, endKey: String, limit: Int32 = 0, snapshot: Bool = false)
-        async throws -> ResultRange
-    {
-        let beginKeyBytes = [UInt8](beginKey.utf8)
-        let endKeyBytes = [UInt8](endKey.utf8)
-        return try await getRange(
-            beginKey: beginKeyBytes, endKey: endKeyBytes, limit: limit, snapshot: snapshot)
-    }
-
     public func getRange(
-        beginKey: Fdb.Key, endKey: Fdb.Key, limit: Int32 = 0, snapshot: Bool = false
+        beginKey: Fdb.Key, endKey: Fdb.Key, limit: Int32 = 0, snapshot: Bool
     ) async throws -> ResultRange {
         let future = beginKey.withUnsafeBytes { beginKeyBytes in
             endKey.withUnsafeBytes { endKeyBytes in

@@ -1,5 +1,5 @@
 /*
- * FdbClient.swift
+ * Client.swift
  *
  * This source file is part of the FoundationDB open source project
  *
