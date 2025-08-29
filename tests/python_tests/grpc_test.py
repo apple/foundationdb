@@ -34,9 +34,10 @@ import cli_service_pb2_grpc
 FDB_CLUSTER_SCRIPT = "/root/src/foundationdb/tests/loopback_cluster/run_custom_cluster.sh"
 FDB_BUILD_DIRECTORY = "/root/build_output"
 FDB_CLUSTER_OPTIONS = [
-    "--stateless_count", "7",
-    "--storage_count", "7",
+    "--stateless_count", "5",
+    "--storage_count", "5",
     "--logs_count", "3",
+    "--replication_count", "3",
 ]
 
 # Track the shell subprocess
@@ -65,19 +66,19 @@ def handle_exit(signum=None, frame=None):
     sys.exit(0)
 
 def test_get_workers():
-    print("Testing GetWorkers:")
+    print("---- Testing GetWorkers:")
     stub = create_stub()
     response = stub.GetWorkers(cli_service_pb2.GetWorkersRequest())
-    print("Server replied:", response)
+    # print("Server replied:", response)
 
 def test_get_coordinators():
-    print("Testing GetCoordinators:")
+    print("---- Testing GetCoordinators:")
     stub = create_stub()
     response = stub.GetCoordinators(cli_service_pb2.GetCoordinatorsRequest())
     print("Server replied:", response)
 
 def test_change_coordinators():
-    print("Testing ChangeCoordinators:")
+    print("---- Testing ChangeCoordinators:")
     stub = create_stub()
 
     req = cli_service_pb2.ChangeCoordinatorsRequest()
@@ -88,7 +89,7 @@ def test_change_coordinators():
     print("Server replied:", response)
 
 def test_get_version():
-    print("Testing GetReadVersion:")
+    print("---- Testing GetReadVersion:")
     stub = create_stub()
 
     req = cli_service_pb2.GetReadVersionRequest()
@@ -96,7 +97,7 @@ def test_get_version():
     print("Read Version:", response.version)
 
 def test_configure():
-    print("Testing Configure:")
+    print("---- Testing Configure:")
     stub = create_stub()
 
     # Test basic configuration using structured fields
@@ -107,13 +108,17 @@ def test_configure():
         response = stub.Configure(req)
         print("Configure result:", response.result)
         print("Configure message:", response.message)
+        assert(response.result == cli_service_pb2.ConfigureReply.SUCCESS)
     except grpc.RpcError as e:
         print(f"Configure RPC failed: {e.code()}: {e.details()}")
+        assert(False)
 
     # Test process count configuration
-    print("Testing process count configuration:")
+    print("---- Testing process count configuration:")
     req2 = cli_service_pb2.ConfigureRequest()
     req2.grv_proxies = 2
+    req2.commit_proxies = 2
+    req2.logs = 3
 
     try:
         response2 = stub.Configure(req2)
@@ -121,9 +126,10 @@ def test_configure():
         print("Configure process counts message:", response2.message)
     except grpc.RpcError as e:
         print(f"Configure process counts RPC failed: {e.code()}: {e.details()}")
+        assert(False)
 
 def test_exclude_include():
-    print("Testing Exclude/Include functionality:")
+    print("---- Testing Exclude/Include functionality:")
     stub = create_stub()
 
     # Get initial list of workers

@@ -19,6 +19,7 @@
  */
 #include "fdbcli_lib/CliCommands.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "flow/Arena.h"
 #include "fmt/format.h"
 
 namespace fdbcli_lib {
@@ -77,35 +78,35 @@ ConfigureReply::Result configurationResultToProto(ConfigurationResult result) {
 
 Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* req, ConfigureReply* rep) {
 	// Build configuration tokens from structured fields
-	std::vector<StringRef> tokens;
+	std::vector<std::string> tokens;
 
 	// Handle new database creation
 	if (req->has_new_database() && req->new_database()) {
-		tokens.push_back("new"_sr);
+		tokens.push_back("new");
 	}
 
 	// Handle TSS configuration
 	if (req->has_tss() && req->tss()) {
-		tokens.push_back("tss"_sr);
+		tokens.push_back("tss");
 	}
 
-	// Handle redundancy mode
+	// handle redundancy mode
 	if (req->has_redundancy_mode()) {
 		switch (req->redundancy_mode()) {
 		case ConfigureRequest::SINGLE:
-			tokens.push_back("single"_sr);
+			tokens.push_back("single");
 			break;
 		case ConfigureRequest::DOUBLE:
-			tokens.push_back("double"_sr);
+			tokens.push_back("double");
 			break;
 		case ConfigureRequest::TRIPLE:
-			tokens.push_back("triple"_sr);
+			tokens.push_back("triple");
 			break;
 		case ConfigureRequest::THREE_DATA_HALL:
-			tokens.push_back("three_data_hall"_sr);
+			tokens.push_back("three_data_hall");
 			break;
 		case ConfigureRequest::THREE_DATACENTER:
-			tokens.push_back("three_datacenter"_sr);
+			tokens.push_back("three_datacenter");
 			break;
 		default:
 			break;
@@ -116,25 +117,25 @@ Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* 
 	if (req->has_storage_engine()) {
 		switch (req->storage_engine()) {
 		case ConfigureRequest::SSD:
-			tokens.push_back("ssd"_sr);
+			tokens.push_back("ssd");
 			break;
 		case ConfigureRequest::SSD_1:
-			tokens.push_back("ssd-1"_sr);
+			tokens.push_back("ssd-1");
 			break;
 		case ConfigureRequest::SSD_2:
-			tokens.push_back("ssd-2"_sr);
+			tokens.push_back("ssd-2");
 			break;
 		case ConfigureRequest::MEMORY:
-			tokens.push_back("memory"_sr);
+			tokens.push_back("memory");
 			break;
 		case ConfigureRequest::MEMORY_1:
-			tokens.push_back("memory-1"_sr);
+			tokens.push_back("memory-1");
 			break;
 		case ConfigureRequest::MEMORY_2:
-			tokens.push_back("memory-2"_sr);
+			tokens.push_back("memory-2");
 			break;
 		case ConfigureRequest::MEMORY_RADIXTREE:
-			tokens.push_back("memory-radixtree"_sr);
+			tokens.push_back("memory-radixtree");
 			break;
 		default:
 			break;
@@ -143,42 +144,41 @@ Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* 
 
 	// Handle process counts
 	if (req->has_logs()) {
-		tokens.push_back(StringRef(fmt::format("logs={}", req->logs())));
+		tokens.push_back(fmt::format("logs={}", req->logs()));
 	}
 	if (req->has_commit_proxies()) {
-		tokens.push_back(StringRef(fmt::format("commit_proxies={}", req->commit_proxies())));
+		tokens.push_back(fmt::format("commit_proxies={}", req->commit_proxies()));
 	}
 	if (req->has_grv_proxies()) {
-		tokens.push_back(StringRef(fmt::format("grv_proxies={}", req->grv_proxies())));
+		tokens.push_back(fmt::format("grv_proxies={}", req->grv_proxies()));
+		std::cout << "Added: " << tokens.back() << std::endl;
 	}
 	if (req->has_resolvers()) {
-		tokens.push_back(StringRef(fmt::format("resolvers={}", req->resolvers())));
+		tokens.push_back(fmt::format("resolvers={}", req->resolvers()));
 	}
 
 	// Handle perpetual storage wiggle
 	if (req->has_perpetual_storage_wiggle()) {
-		tokens.push_back(StringRef(fmt::format("perpetual_storage_wiggle={}", req->perpetual_storage_wiggle())));
+		tokens.push_back(fmt::format("perpetual_storage_wiggle={}", req->perpetual_storage_wiggle()));
 	}
 	if (req->has_perpetual_storage_wiggle_locality()) {
-		tokens.push_back(
-		    StringRef(fmt::format("perpetual_storage_wiggle_locality={}", req->perpetual_storage_wiggle_locality())));
+		tokens.push_back(fmt::format("perpetual_storage_wiggle_locality={}", req->perpetual_storage_wiggle_locality()));
 	}
 	if (req->has_perpetual_storage_wiggle_engine()) {
-		tokens.push_back(
-		    StringRef(fmt::format("perpetual_storage_wiggle_engine={}", req->perpetual_storage_wiggle_engine())));
+		tokens.push_back(fmt::format("perpetual_storage_wiggle_engine={}", req->perpetual_storage_wiggle_engine()));
 	}
 
 	// Handle storage migration type
 	if (req->has_storage_migration_type()) {
 		switch (req->storage_migration_type()) {
 		case ConfigureRequest::DISABLED:
-			tokens.push_back("storage_migration_type=disabled"_sr);
+			tokens.push_back("storage_migration_type=disabled");
 			break;
 		case ConfigureRequest::GRADUAL:
-			tokens.push_back("storage_migration_type=gradual"_sr);
+			tokens.push_back("storage_migration_type=gradual");
 			break;
 		case ConfigureRequest::AGGRESSIVE:
-			tokens.push_back("storage_migration_type=aggressive"_sr);
+			tokens.push_back("storage_migration_type=aggressive");
 			break;
 		default:
 			break;
@@ -189,13 +189,13 @@ Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* 
 	if (req->has_tenant_mode()) {
 		switch (req->tenant_mode()) {
 		case ConfigureRequest::DISABLED_TENANT:
-			tokens.push_back("tenant_mode=disabled"_sr);
+			tokens.push_back("tenant_mode=disabled");
 			break;
 		case ConfigureRequest::OPTIONAL_EXPERIMENTAL:
-			tokens.push_back("tenant_mode=optional_experimental"_sr);
+			tokens.push_back("tenant_mode=optional_experimental");
 			break;
 		case ConfigureRequest::REQUIRED_EXPERIMENTAL:
-			tokens.push_back("tenant_mode=required_experimental"_sr);
+			tokens.push_back("tenant_mode=required_experimental");
 			break;
 		default:
 			break;
@@ -206,13 +206,13 @@ Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* 
 	if (req->has_encryption_at_rest_mode()) {
 		switch (req->encryption_at_rest_mode()) {
 		case ConfigureRequest::DISABLED_ENCRYPTION:
-			tokens.push_back("encryption_at_rest_mode=disabled"_sr);
+			tokens.push_back("encryption_at_rest_mode=disabled");
 			break;
 		case ConfigureRequest::DOMAIN_AWARE:
-			tokens.push_back("encryption_at_rest_mode=domain_aware"_sr);
+			tokens.push_back("encryption_at_rest_mode=domain_aware");
 			break;
 		case ConfigureRequest::CLUSTER_AWARE:
-			tokens.push_back("encryption_at_rest_mode=cluster_aware"_sr);
+			tokens.push_back("encryption_at_rest_mode=cluster_aware");
 			break;
 		default:
 			break;
@@ -221,12 +221,12 @@ Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* 
 
 	// Handle blob granules
 	if (req->has_blob_granules_enabled()) {
-		tokens.push_back(StringRef(fmt::format("blob_granules_enabled={}", req->blob_granules_enabled() ? 1 : 0)));
+		tokens.push_back(fmt::format("blob_granules_enabled={}", req->blob_granules_enabled() ? 1 : 0));
 	}
 
 	// Handle TSS count
 	if (req->has_tss_count()) {
-		tokens.push_back(StringRef(fmt::format("count={}", req->tss_count())));
+		tokens.push_back(fmt::format("count={}", req->tss_count()));
 	}
 
 	// Handle excluded addresses
@@ -237,7 +237,7 @@ Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* 
 				exclude_list += ",";
 			exclude_list += req->exclude_addresses(i);
 		}
-		tokens.push_back(StringRef(fmt::format("exclude={}", exclude_list)));
+		tokens.push_back(fmt::format("exclude={}", exclude_list));
 	}
 
 	// Check if we have any configuration options
@@ -252,13 +252,18 @@ Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* 
 	// Handle auto-configure mode
 	if (req->has_auto_configure() && req->auto_configure()) {
 		tokens.clear();
-		tokens.push_back("auto"_sr);
+		tokens.push_back("auto");
 	}
 
 	try {
 		Optional<ConfigureAutoResult> conf;
-		ConfigurationResult result = co_await ManagementAPI::changeConfig(db, tokens, conf, force);
+		std::vector<StringRef> token_refs;
+		Arena ar;
+		for (auto t : tokens) {
+			token_refs.push_back(StringRef(ar, t));
+		}
 
+		ConfigurationResult result = co_await ManagementAPI::changeConfig(db, token_refs, conf, force);
 		rep->set_result(configurationResultToProto(result));
 
 		// Set appropriate messages for different results
