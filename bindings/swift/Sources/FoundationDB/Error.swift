@@ -42,7 +42,7 @@ public struct FdbError: Error, CustomStringConvertible {
     }
 
     public init(_ errorCode: FdbErrorCode) {
-        self.code = errorCode.rawValue
+        code = errorCode.rawValue
     }
 
     public var description: String {

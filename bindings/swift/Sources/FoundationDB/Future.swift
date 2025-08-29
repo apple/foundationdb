@@ -36,7 +36,7 @@ class Future<T: FutureResult> {
         fdb_future_destroy(cFuture)
     }
 
-    public func getAsync() async throws -> T? {
+    func getAsync() async throws -> T? {
         try await withCheckedThrowingContinuation {
             (continuation: CheckedContinuation<T?, Error>) in
             let box = CallbackBox { [continuation] future in
@@ -53,7 +53,7 @@ class Future<T: FutureResult> {
                 }
             }
 
-            let userdata = Unmanaged.passRetained(box).toOpaque()  // TODO: If future is canceled, this will not cleanup?
+            let userdata = Unmanaged.passRetained(box).toOpaque() // TODO: If future is canceled, this will not cleanup?
             fdb_future_set_callback(cFuture, fdbFutureCallback, userdata)
         }
     }
@@ -82,7 +82,6 @@ struct ResultVoid: FutureResult {
         return Self()
     }
 }
-
 
 struct ResultVersion: FutureResult {
     let value: Fdb.Version
@@ -159,7 +158,7 @@ public struct ResultRange: FutureResult {
         }
 
         var keyValueArray: Fdb.KeyValueArray = []
-        for i in 0..<Int(count) {
+        for i in 0 ..< Int(count) {
             let kv = kvPtr[i]
             let key = Array(UnsafeBufferPointer(start: kv.key, count: Int(kv.key_length)))
             let value = Array(UnsafeBufferPointer(start: kv.value, count: Int(kv.value_length)))

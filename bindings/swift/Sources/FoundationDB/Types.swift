@@ -22,7 +22,7 @@ import CFoundationDB
 typealias CFuturePtr = OpaquePointer
 typealias CCallback = @convention(c) (UnsafeRawPointer?, UnsafeRawPointer?) -> Void
 
-public struct Fdb {
+public enum Fdb {
     public typealias Version = Int64
     public typealias Bytes = [UInt8]
     public typealias Key = Bytes
@@ -91,6 +91,6 @@ extension Fdb.Key: Fdb.Selectable {
 
 extension String: Fdb.Selectable {
     public func toKeySelector() -> Fdb.KeySelector {
-        return Fdb.KeySelector.firstGreaterOrEqual([UInt8](self.utf8))
+        return Fdb.KeySelector.firstGreaterOrEqual([UInt8](utf8))
     }
 }

@@ -140,11 +140,11 @@ public class FdbTransaction: ITransaction {
                         endSelector.orEqual ? 1 : 0,
                         endSelector.offset,
                         limit,
-                        0,  // target_bytes = 0 (no limit)
-                        FDBStreamingMode(-1),  // mode = FDB_STREAMING_MODE_ITERATOR
-                        1,  // iteration = 1
+                        0, // target_bytes = 0 (no limit)
+                        FDBStreamingMode(-1), // mode = FDB_STREAMING_MODE_ITERATOR
+                        1, // iteration = 1
                         snapshot ? 1 : 0,
-                        0  // reverse = false
+                        0 // reverse = false
                     )
                 )
             }
@@ -163,18 +163,18 @@ public class FdbTransaction: ITransaction {
                         transaction,
                         beginKeyBytes.bindMemory(to: UInt8.self).baseAddress,
                         Int32(beginKey.count),
-                        1,  // begin_or_equal = true
-                        0,  // begin_offset = 0
+                        1, // begin_or_equal = true
+                        0, // begin_offset = 0
                         endKeyBytes.bindMemory(to: UInt8.self).baseAddress,
                         Int32(endKey.count),
-                        1,  // end_or_equal = false (exclusive)
-                        0,  // end_offset = 0
+                        1, // end_or_equal = false (exclusive)
+                        0, // end_offset = 0
                         limit,
-                        0,  // target_bytes = 0 (no limit)
-                        FDBStreamingMode(-1),  // mode = FDB_STREAMING_MODE_ITERATOR
-                        1,  // iteration = 1
+                        0, // target_bytes = 0 (no limit)
+                        FDBStreamingMode(-1), // mode = FDB_STREAMING_MODE_ITERATOR
+                        1, // iteration = 1
                         snapshot ? 1 : 0,
-                        0  // reverse = false
+                        0 // reverse = false
                     )
                 )
             }

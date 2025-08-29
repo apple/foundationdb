@@ -81,42 +81,42 @@ public protocol ITransaction {
     func getReadVersion() async throws -> Int64
 }
 
-extension ITransaction {
-    public func getValue(for key: String, snapshot: Bool = false) async throws -> Fdb.Value? {
+public extension ITransaction {
+    func getValue(for key: String, snapshot: Bool = false) async throws -> Fdb.Value? {
         let keyBytes = [UInt8](key.utf8)
         return try await getValue(for: keyBytes, snapshot: snapshot)
     }
 
-    public func getValue(for key: Fdb.Key, snapshot: Bool = false) async throws -> Fdb.Value? {
+    func getValue(for key: Fdb.Key, snapshot: Bool = false) async throws -> Fdb.Value? {
         try await getValue(for: key, snapshot: snapshot)
     }
 
-    public func setValue(_ value: String, for key: String) {
+    func setValue(_ value: String, for key: String) {
         let keyBytes = [UInt8](key.utf8)
         let valueBytes = [UInt8](value.utf8)
         setValue(valueBytes, for: keyBytes)
     }
 
-    public func clear(key: String) {
+    func clear(key: String) {
         let keyBytes = [UInt8](key.utf8)
         clear(key: keyBytes)
     }
 
-    public func clearRange(beginKey: String, endKey: String) {
+    func clearRange(beginKey: String, endKey: String) {
         let beginKeyBytes = [UInt8](beginKey.utf8)
         let endKeyBytes = [UInt8](endKey.utf8)
         clearRange(beginKey: beginKeyBytes, endKey: endKeyBytes)
     }
 
-    public func getKey(selector: Fdb.Selectable, snapshot: Bool = false) async throws -> Fdb.Key? {
+    func getKey(selector: Fdb.Selectable, snapshot: Bool = false) async throws -> Fdb.Key? {
         try await getKey(selector: selector.toKeySelector(), snapshot: snapshot)
     }
 
-    public func getKey(selector: Fdb.KeySelector, snapshot: Bool = false) async throws -> Fdb.Key? {
+    func getKey(selector: Fdb.KeySelector, snapshot: Bool = false) async throws -> Fdb.Key? {
         try await getKey(selector: selector, snapshot: snapshot)
     }
 
-    public func getRange(
+    func getRange(
         begin: Fdb.Selectable, end: Fdb.Selectable, limit: Int32 = 0, snapshot: Bool = false
     ) async throws -> ResultRange {
         let beginSelector = begin.toKeySelector()
@@ -126,7 +126,7 @@ extension ITransaction {
         )
     }
 
-    public func getRange(
+    func getRange(
         beginSelector: Fdb.KeySelector, endSelector: Fdb.KeySelector, limit: Int32 = 0,
         snapshot: Bool = false
     ) async throws -> ResultRange {
@@ -135,29 +135,30 @@ extension ITransaction {
         )
     }
 
-    public func getRange(
+    func getRange(
         beginKey: String, endKey: String, limit: Int32 = 0, snapshot: Bool = false
     ) async throws -> ResultRange {
         let beginKeyBytes = [UInt8](beginKey.utf8)
         let endKeyBytes = [UInt8](endKey.utf8)
         return try await getRange(
-            beginKey: beginKeyBytes, endKey: endKeyBytes, limit: limit, snapshot: snapshot)
+            beginKey: beginKeyBytes, endKey: endKeyBytes, limit: limit, snapshot: snapshot
+        )
     }
 
-    public func getRange(
+    func getRange(
         beginKey: Fdb.Key, endKey: Fdb.Key, limit: Int32 = 0, snapshot: Bool = false
     ) async throws -> ResultRange {
         try await getRange(beginKey: beginKey, endKey: endKey, limit: limit, snapshot: snapshot)
     }
 }
 
-extension IDatabase {
-    public func withTransaction<T: Sendable>(
+public extension IDatabase {
+    func withTransaction<T: Sendable>(
         _ operation: (ITransaction) async throws -> T
     ) async throws -> T {
-        let maxRetries = 100  // TODO: Remove this.
+        let maxRetries = 100 // TODO: Remove this.
 
-        for attempt in 0..<maxRetries {
+        for attempt in 0 ..< maxRetries {
             let transaction = try createTransaction()
 
             do {

@@ -24,7 +24,7 @@ import PackageDescription
 let package = Package(
     name: "FoundationDB",
     products: [
-        .library(name: "FoundationDB", targets: ["FoundationDB"])
+        .library(name: "FoundationDB", targets: ["FoundationDB"]),
     ],
     targets: [
         .systemLibrary(
@@ -38,6 +38,6 @@ let package = Package(
         .testTarget(
             name: "FoundationDBTests",
             dependencies: ["FoundationDB"]
-        )
+        ),
     ]
 )
