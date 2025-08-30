@@ -28,7 +28,11 @@
 static void bench_select_replicas(int repCount, benchmark::State& state) {
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-	    new PolicyAcross(repCount, "rack", Reference<IReplicationPolicy>(new PolicyOne()), true));
+	    new PolicyAcross(repCount, "rack", Reference<IReplicationPolicy>(new PolicyOne())));
+
+	// Pre-warm the depth cache to avoid measuring lazy initialization overhead
+	policy->depth();
+	policy->maxdepth();
 
 	std::vector<std::string> indexes;
 	int dcTotal = 1;
