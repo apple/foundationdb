@@ -3396,7 +3396,16 @@ extern "C" void flushAndExit(int exitCode) {
 	crashAndDie();
 }
 
-#ifdef __unixish__
+#ifndef __unixish__
+namespace platform {
+std::string get_backtrace() {
+	return std::string();
+}
+ImageInfo getImageInfo() {
+	return ImageInfo();
+}
+} // namespace platform
+#else
 #include <dlfcn.h>
 
 #ifdef __linux__
@@ -3451,6 +3460,15 @@ size_t raw_backtrace(void** addresses, int maxStackDepth) {
 #endif
 }
 
+std::string get_backtrace() {
+	void* addresses[50];
+	size_t size = raw_backtrace(addresses, 50);
+	return format_backtrace(addresses, size);
+}
+} // namespace platform
+#endif  // __unixish__
+
+namespace platform {
 std::string format_backtrace(void** addresses, int numAddresses) {
 	ImageInfo const& imageInfo = getCachedImageInfo();
 
@@ -3488,27 +3506,7 @@ std::string format_backtrace(void** addresses, int numAddresses) {
 #endif	
 	return s;
 }
-
-std::string get_backtrace() {
-	void* addresses[50];
-	size_t size = raw_backtrace(addresses, 50);
-	return format_backtrace(addresses, size);
-}
 } // namespace platform
-#else
-
-namespace platform {
-std::string get_backtrace() {
-	return std::string();
-}
-std::string format_backtrace(void** addresses, int numAddresses) {
-	return std::string();
-}
-ImageInfo getImageInfo() {
-	return ImageInfo();
-}
-} // namespace platform
-#endif
 
 bool isLibraryLoaded(const char* lib_path) {
 #if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
