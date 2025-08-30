@@ -168,6 +168,24 @@ else()
 endif()
 
 ################################################################################
+# Swift
+################################################################################
+
+option(BUILD_SWIFT_BINDING "build swift binding" ON)
+if(BUILD_SWIFT_BINDING AND NOT WITH_C_BINDING)
+  message(WARNING "Swift binding depends on C binding, but C binding is not enabled")
+endif()
+if(NOT BUILD_SWIFT_BINDING OR NOT WITH_C_BINDING OR WIN32)
+  set(WITH_SWIFT_BINDING OFF)
+else()
+  find_program(SWIFT_EXECUTABLE swift)
+  set(WITH_SWIFT_BINDING OFF)
+  if(SWIFT_EXECUTABLE AND NOT WIN32)
+    set(WITH_SWIFT_BINDING ON)
+  endif()
+endif()
+
+################################################################################
 # RocksDB
 ################################################################################
 
@@ -294,6 +312,7 @@ function(print_components)
   message(STATUS "Build Java Bindings:                  ${WITH_JAVA_BINDING}")
   message(STATUS "Build Go bindings:                    ${WITH_GO_BINDING}")
   message(STATUS "Build Ruby bindings:                  ${WITH_RUBY_BINDING}")
+  message(STATUS "Build Swift bindings:                 ${WITH_SWIFT_BINDING}")
   message(STATUS "Build Swift (depends on Swift):       ${WITH_SWIFT}")
   message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
   message(STATUS "Build Python sdist (make package):    ${WITH_PYTHON_BINDING}")
