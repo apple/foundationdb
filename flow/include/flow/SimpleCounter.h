@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "flow/Error.h"
+#include "flow/Trace.h"
 
 // SimpleCounter metrics class for atomic counters of int64_t or
 // double.  Example usage:
@@ -144,6 +145,6 @@ inline void SimpleCounter<double>::increment(double delta) {
 	}
 }
 
-void simpleCounterReport(void);
+void simpleCounterReport(Severity severity = SevInfo);
 
 #endif

@@ -119,8 +119,9 @@ std::map<std::string, std::pair<int, int64_t>> hugeArenaTraces;
 
 void hugeArenaSample(int size) {
 	if (TraceEvent::isNetworkThread()) {
-		// FIXME-METRICS: count calls to this. It should be low but in case somebody
-		// leave it on by mistake (or makes it get called to frequently) we'd like to know.
+		static SimpleCounter<int64_t>* calls = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/hugeArenaSample");
+		calls->increment(1);
+
 		auto& info = hugeArenaTraces[platform::get_backtrace()];
 		info.first++;
 		info.second += size;
@@ -375,7 +376,14 @@ void* FastAllocator<Size>::allocate() {
 	if (keepalive_allocator::isActive()) [[unlikely]]
 		return keepalive_allocator::allocate(Size);
 
-	// FIXME-METRICS: record calls and bytes
+	// Accounting should mirror release() below.
+	static int size = Size;
+	static SimpleCounter<int64_t>* calls =
+	    SimpleCounter<int64_t>::makeCounter(format("/flow/fastalloc/allocateCallsSize%d", size));
+	static SimpleCounter<int64_t>* bytes =
+	    SimpleCounter<int64_t>::makeCounter(format("/flow/fastalloc/allocateBytesSize%d", size));
+	calls->increment(1);
+	bytes->increment(size);
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
 	// Some usages of FastAllocator require 4096 byte alignment.
@@ -427,12 +435,39 @@ void* FastAllocator<Size>::allocate() {
 	return p;
 }
 
+void* countedNew(size_t nbytes) {
+	static SimpleCounter<int64_t>* calls = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/newCalls");
+	static SimpleCounter<int64_t>* bytes = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/newBytes");
+	calls->increment(1);
+	bytes->increment(nbytes);
+
+	void* p = new uint8_t[nbytes];
+	return p;
+}
+
+void countedDelete(size_t nbytes, void* ptr) {
+	static SimpleCounter<int64_t>* calls = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/deleteCalls");
+	static SimpleCounter<int64_t>* bytes = SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/deleteBytes");
+	calls->increment(1);
+	bytes->increment(nbytes);
+
+	delete[] reinterpret_cast<uint8_t*>(ptr);
+}
+
 template <int Size>
 void FastAllocator<Size>::release(void* ptr) {
-	// FIXME-METRICS: count calls and bytes
-
 	if (keepalive_allocator::isActive()) [[unlikely]]
 		return keepalive_allocator::invalidate(ptr);
+
+	// Accounting should mirror allocate() above.  Only count paths where we
+	// allocated/free memory from lower levels or from our magazine cache.
+	static int size = Size;
+	static SimpleCounter<int64_t>* calls =
+	    SimpleCounter<int64_t>::makeCounter(format("/flow/fastalloc/releaseCallsSize%d", size));
+	static SimpleCounter<int64_t>* bytes =
+	    SimpleCounter<int64_t>::makeCounter(format("/flow/fastalloc/releaseBytesSize%d", size));
+	calls->increment(1);
+	bytes->increment(size);
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
 	return aligned_free(ptr);
@@ -574,7 +609,6 @@ void FastAllocator<Size>::getMagazine() {
 	                               MEM_COMMIT | MEM_RESERVE,
 	                               PAGE_READWRITE);
 #else
-	// FIXME-METRICS: count calls and bytes here
 	static int alt = 0;
 	alt++;
 	void* desiredBlock = (void*)(((getSizeCode(Size) << 11) + alt) * magazine_size * Size);
@@ -599,6 +633,8 @@ void FastAllocator<Size>::getMagazine() {
 #else
 	const bool includeGuardPages = true;
 #endif
+	// NOTE: rely on lower level metrics in allocate() (and whatever it calls)
+	// for accounting the allocations it does.
 	block = (void**)::allocate(magazine_size * Size, /*allowLargePages*/ false, includeGuardPages);
 #endif
 

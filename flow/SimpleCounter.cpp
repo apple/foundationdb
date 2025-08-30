@@ -55,27 +55,43 @@ static std::string mungeName(const std::string input) {
 }
 
 // This should be called periodically by higher level code somewhere.
-void simpleCounterReport(void) {
+void simpleCounterReport(Severity severity) {
 	static SimpleCounter<int64_t>* reportCount = SimpleCounter<int64_t>::makeCounter("/flow/counters/reports");
 	reportCount->increment(1);
 
 	std::vector<SimpleCounter<int64_t>*> intCounters = SimpleCounter<int64_t>::getCounters();
 	std::vector<SimpleCounter<double>*> doubleCounters = SimpleCounter<double>::getCounters();
-	auto traceEvent = TraceEvent("SimpleCounters");
-	for (SimpleCounter<int64_t>* ic : intCounters) {
-		std::string n = ic->name();
-		n = mungeName(n);
-		ASSERT(validateField(n.c_str(), /* allowUnderscores= */ true));
-		traceEvent.detail(std::move(n), ic->get());
+
+	int i = 0;
+	// Avoid trace buffer overflow by assuming average field is O(100) bytes or less.
+	int countersPerTrace = FLOW_KNOBS->MAX_TRACE_EVENT_LENGTH / 100;
+	while (i < intCounters.size()) {
+		auto traceEvent = TraceEvent(severity, "SimpleCounters");
+		int c = 0;
+		do {
+			SimpleCounter<int64_t>* ic = intCounters[i];
+			std::string n = ic->name();
+			n = mungeName(n);
+			ASSERT(validateField(n.c_str(), /* allowUnderscores= */ true));
+			traceEvent.detail(std::move(n), ic->get());
+			i++;
+			c++;
+		} while (i < intCounters.size() && c < countersPerTrace);
 	}
-	for (SimpleCounter<double>* dc : doubleCounters) {
-		std::string n = dc->name();
-		n = mungeName(n);
-		ASSERT(validateField(n.c_str(), /* allowUnderscores= */ true));
-		traceEvent.detail(std::move(n), dc->get());
+	i = 0;
+	while (i < doubleCounters.size()) {
+		auto traceEvent = TraceEvent(severity, "SimpleCounters");
+		int c = 0;
+		do {
+			SimpleCounter<double>* dc = doubleCounters[i];
+			std::string n = dc->name();
+			n = mungeName(n);
+			ASSERT(validateField(n.c_str(), /* allowUnderscores= */ true));
+			traceEvent.detail(std::move(n), dc->get());
+			i++;
+			c++;
+		} while (i < doubleCounters.size() && c < countersPerTrace);
 	}
-	int total = intCounters.size() + doubleCounters.size();
-	traceEvent.detail("SimpleCountersTotalCounters", total);
 }
 
 TEST_CASE("/flow/simplecounter/int64") {
