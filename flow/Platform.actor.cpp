@@ -3473,7 +3473,7 @@ std::string format_backtrace(void** addresses, int numAddresses) {
 	// /root/.bashrc.  It is easier to change the code here to
 	// emit a better command than it is to edit or remove that alias
 	// from the .bashrc, so that is what we are going to do.
-	// Also, one less moving part means confusion.
+	// Also, one less moving part means less confusion.
 	std::string addr2linePath;
 #ifdef __clang__
 	addr2linePath = "/usr/local/bin/llvm-addr2line";
