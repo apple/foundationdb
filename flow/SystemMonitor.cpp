@@ -432,17 +432,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			uint64_t totalCount = 0;
 			for (auto i = traceCounts.begin(); i != traceCounts.end(); ++i) {
 				std::vector<void*>* frames = i->second.backTrace;
-				std::string backTraceStr;
-#if defined(_WIN32)
-				char buf[1024];
-				for (int j = 1; j < frames->size(); j++) {
-					_snprintf(buf, 1024, "%p ", frames->at(j));
-					backTraceStr += buf;
-				}
-#else
-				backTraceStr = platform::format_backtrace(&(*frames)[0], frames->size());
-#endif
-
+				std::string backTraceStr = platform::format_backtrace(&(*frames)[0], frames->size());
 				TraceEvent("MemSample")
 				    .detail("Count", (int64_t)i->second.count)
 				    .detail("TotalSize", i->second.totalSize)
