@@ -3419,7 +3419,7 @@ platform::ImageInfo getImageInfo(const void* symbol) {
 		// Previously this code would guess "debug" related binary name suffixes.
 		// If you run a binary called fdbserver.debug, it would emit an addr2line
 		// command referencing a binary called "fdbserver.debug.debug".
-		// That is just brain dead.  If the developer needs to point the command
+		// This is not helpful.  If the developer needs to point the command
 		// to a different binary than then one they executed, then they can
 		// simply edit the emitted command.
 		imageInfo.symbolFileName = info.dli_fname;
