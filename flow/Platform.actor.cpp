@@ -3466,7 +3466,7 @@ std::string get_backtrace() {
 	return format_backtrace(addresses, size);
 }
 } // namespace platform
-#endif  // __unixish__
+#endif // __unixish__
 
 namespace platform {
 std::string format_backtrace(void** addresses, int numAddresses) {
@@ -3503,7 +3503,7 @@ std::string format_backtrace(void** addresses, int numAddresses) {
 		s += format(" %p", (char*)addresses[i] - (char*)imageInfo.offset);
 	}
 #endif
-#endif	
+#endif
 	return s;
 }
 } // namespace platform
