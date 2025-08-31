@@ -3475,7 +3475,7 @@ std::string format_backtrace(void** addresses, int numAddresses) {
 	std::string s;
 #if defined(_WIN32)
 	char buf[32];
-	for (int j = 1; j < numAddresses; j++) {
+	for (int i = 1; i < numAddresses; i++) {
 		_snprintf(buf, sizeof(buf), "%p ", addresses[i]);
 		s += buf;
 	}
