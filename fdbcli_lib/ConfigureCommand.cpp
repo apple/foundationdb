@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 #include "fdbcli_lib/CliCommands.h"
+#include "fdbcli_lib/cli_service/cli_service.pb.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/Arena.h"
 #include "fmt/format.h"
+#include <grpcpp/support/status.h>
 
 namespace fdbcli_lib {
 ConfigureReply::Result configurationResultToProto(ConfigurationResult result) {
@@ -74,6 +76,13 @@ ConfigureReply::Result configurationResultToProto(ConfigurationResult result) {
 	default:
 		return ConfigureReply::UNKNOWN_OPTION;
 	}
+}
+
+Future<grpc::Status> configureAuto(Reference<IDatabase> db,
+                                   const ConfigureAutoSuggestRequest* req,
+                                   ConfigureAutoSuggestReply* rep) {
+
+	return grpc::Status::OK;
 }
 
 Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* req, ConfigureReply* rep) {
@@ -185,23 +194,6 @@ Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* 
 		}
 	}
 
-	// Handle tenant mode
-	if (req->has_tenant_mode()) {
-		switch (req->tenant_mode()) {
-		case ConfigureRequest::DISABLED_TENANT:
-			tokens.push_back("tenant_mode=disabled");
-			break;
-		case ConfigureRequest::OPTIONAL_EXPERIMENTAL:
-			tokens.push_back("tenant_mode=optional_experimental");
-			break;
-		case ConfigureRequest::REQUIRED_EXPERIMENTAL:
-			tokens.push_back("tenant_mode=required_experimental");
-			break;
-		default:
-			break;
-		}
-	}
-
 	// Handle encryption at rest mode
 	if (req->has_encryption_at_rest_mode()) {
 		switch (req->encryption_at_rest_mode()) {
@@ -241,19 +233,13 @@ Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* 
 	}
 
 	// Check if we have any configuration options
-	if (tokens.empty() && !(req->has_auto_configure() && req->auto_configure())) {
+	if (tokens.empty()) {
 		rep->set_result(ConfigureReply::NO_OPTIONS_PROVIDED);
 		rep->set_message("No configuration options provided");
 		co_return grpc::Status::OK;
 	}
 
 	bool force = req->has_force() ? req->force() : false;
-
-	// Handle auto-configure mode
-	if (req->has_auto_configure() && req->auto_configure()) {
-		tokens.clear();
-		tokens.push_back("auto");
-	}
 
 	try {
 		Optional<ConfigureAutoResult> conf;
