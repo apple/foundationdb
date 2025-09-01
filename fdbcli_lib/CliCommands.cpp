@@ -195,6 +195,35 @@ Future<grpc::Status> getReadVersion(Reference<IDatabase> db,
 	co_return grpc::Status::OK;
 }
 
+//-- Status ----
+
+Future<grpc::Status> getStatus(Reference<IDatabase> db, const GetStatusRequest* req, GetStatusReply* rep) {
+	Reference<ITransaction> tr = db->createTransaction();
+
+	loop {
+		Error err;
+		try {
+			ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
+			Optional<Value> statusValue = co_await safeThreadFutureToFuture(statusValueF);
+
+			if (!statusValue.present()) {
+				co_return grpc::Status(grpc::StatusCode::INTERNAL, "Failed to get status json from the cluster");
+			}
+
+			rep->set_result(statusValue.get().toString());
+			co_return grpc::Status::OK;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
+			err = e;
+		}
+
+		co_await safeThreadFutureToFuture(tr->onError(err));
+	}
+}
+
 //-- Workers ----
 
 void localityDataToProto(const LocalityData& loc, Worker::Locality* proto) {

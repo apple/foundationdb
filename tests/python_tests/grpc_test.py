@@ -96,6 +96,32 @@ def test_get_version():
     response = stub.GetReadVersion(req)
     print("Read Version:", response.version)
 
+def test_get_status():
+    print("---- Testing GetStatus:")
+    stub = create_stub()
+
+    req = cli_service_pb2.GetStatusRequest()
+    response = stub.GetStatus(req)
+
+    # Verify we got a JSON response
+    assert response.result is not None and len(response.result) > 0, "Status result should not be empty"
+
+    # Try to parse as JSON to verify it's valid JSON
+    import json
+    try:
+        status_json = json.loads(response.result)
+        print(json.dumps(status_json, indent=4))
+
+        # Basic validation that it looks like a valid FDB status
+        assert "client" in status_json, "Status should contain 'client' section"
+        assert "cluster" in status_json, "Status should contain 'cluster' section"
+
+        print("Status test passed - received valid JSON status")
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse status as JSON: {e}")
+        print(f"Raw status result (first 200 chars): {response.result[:200]}")
+        assert False, "Status result should be valid JSON"
+
 def test_configure():
     print("---- Testing Configure:")
     stub = create_stub()
@@ -224,6 +250,7 @@ def main():
         test_get_workers()
         test_get_coordinators()
         test_get_version()
+        test_get_status()
         test_change_coordinators()
         test_exclude_include()
     except Exception as e:

@@ -40,6 +40,8 @@ public:
 	DEFINE_GRPC_HANDLER(Configure, configure);
 	DEFINE_GRPC_HANDLER(GetReadVersion, getReadVersion);
 
+	DEFINE_GRPC_HANDLER(GetStatus, getStatus);
+
 	DEFINE_GRPC_HANDLER(GetWorkers, getWorkers);
 	DEFINE_GRPC_HANDLER(Include, include);
 	DEFINE_GRPC_HANDLER(Exclude, exclude);
