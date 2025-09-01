@@ -46,6 +46,11 @@ class CliServiceStub(object):
                 request_serializer=cli__service__pb2.ChangeCoordinatorsRequest.SerializeToString,
                 response_deserializer=cli__service__pb2.ChangeCoordinatorsReply.FromString,
                 _registered_method=True)
+        self.ConfigureAutoSuggest = channel.unary_unary(
+                '/fdbcli_lib.CliService/ConfigureAutoSuggest',
+                request_serializer=cli__service__pb2.ConfigureAutoSuggestRequest.SerializeToString,
+                response_deserializer=cli__service__pb2.ConfigureAutoSuggestReply.FromString,
+                _registered_method=True)
         self.Configure = channel.unary_unary(
                 '/fdbcli_lib.CliService/Configure',
                 request_serializer=cli__service__pb2.ConfigureRequest.SerializeToString,
@@ -110,6 +115,12 @@ class CliServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def ChangeCoordinators(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ConfigureAutoSuggest(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -187,6 +198,11 @@ def add_CliServiceServicer_to_server(servicer, server):
                     servicer.ChangeCoordinators,
                     request_deserializer=cli__service__pb2.ChangeCoordinatorsRequest.FromString,
                     response_serializer=cli__service__pb2.ChangeCoordinatorsReply.SerializeToString,
+            ),
+            'ConfigureAutoSuggest': grpc.unary_unary_rpc_method_handler(
+                    servicer.ConfigureAutoSuggest,
+                    request_deserializer=cli__service__pb2.ConfigureAutoSuggestRequest.FromString,
+                    response_serializer=cli__service__pb2.ConfigureAutoSuggestReply.SerializeToString,
             ),
             'Configure': grpc.unary_unary_rpc_method_handler(
                     servicer.Configure,
@@ -295,6 +311,33 @@ class CliService(object):
             '/fdbcli_lib.CliService/ChangeCoordinators',
             cli__service__pb2.ChangeCoordinatorsRequest.SerializeToString,
             cli__service__pb2.ChangeCoordinatorsReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ConfigureAutoSuggest(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/fdbcli_lib.CliService/ConfigureAutoSuggest',
+            cli__service__pb2.ConfigureAutoSuggestRequest.SerializeToString,
+            cli__service__pb2.ConfigureAutoSuggestReply.FromString,
             options,
             channel_credentials,
             insecure,

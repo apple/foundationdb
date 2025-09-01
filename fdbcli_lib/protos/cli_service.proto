@@ -156,7 +156,9 @@ message GetReadVersionReply {
 //-- Status ----
 
 message GetStatusRequest {}
-message GetStatusReply {}
+message GetStatusReply {
+    optional string result = 1;
+}
 
 //-- Workers ----
 
