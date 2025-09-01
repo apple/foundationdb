@@ -39,6 +39,12 @@ message ChangeCoordinatorsReply {
 
 // -- Database Configure ----
 
+message ConfigureAutoSuggestRequest {}
+
+message ConfigureAutoSuggestReply {
+    ConfigureRequest configure_request = 1;
+}
+
 message ConfigureRequest {
     // Database creation
     optional bool new_database = 1; // Initialize new database
@@ -88,14 +94,6 @@ message ConfigureRequest {
     }
     optional StorageMigrationType storage_migration_type = 12;
 
-    enum TenantMode {
-        UNSET_TENANT = 0;
-        DISABLED_TENANT = 1;
-        OPTIONAL_EXPERIMENTAL = 2;
-        REQUIRED_EXPERIMENTAL = 3;
-    }
-    optional TenantMode tenant_mode = 13;
-
     // Security settings
     enum EncryptionAtRestMode {
         UNSET_ENCRYPTION = 0;
@@ -103,16 +101,15 @@ message ConfigureRequest {
         DOMAIN_AWARE = 2;
         CLUSTER_AWARE = 3;
     }
-    optional EncryptionAtRestMode encryption_at_rest_mode = 14;
+    optional EncryptionAtRestMode encryption_at_rest_mode = 13;
 
     // Other settings
-    optional bool blob_granules_enabled = 15;
-    repeated string exclude_addresses = 16; // Addresses to exclude during recruitment
-    optional int32 tss_count = 17; // Testing storage server count
+    optional bool blob_granules_enabled = 14;
+    repeated string exclude_addresses = 15; // Addresses to exclude during recruitment
+    optional int32 tss_count = 16; // Testing storage server count
 
     // Control flags
     optional bool force = 18; // Skip safety checks
-    optional bool auto_configure = 19; // Use automatic configuration
 }
 
 message ConfigureReply {
@@ -144,31 +141,6 @@ message ConfigureReply {
 
     Result result = 1;
     optional string message = 2; // Additional details for errors or warnings
-
-    // Auto-configure analysis results (if auto_configure was true)
-    message AutoConfigAnalysis {
-        int32 processes = 1;
-        int32 machines = 2;
-        string old_replication = 3;
-        string auto_replication = 4;
-        int32 old_logs = 5;
-        int32 auto_logs = 6;
-        int32 desired_logs = 7;
-        int32 old_commit_proxies = 8;
-        int32 auto_commit_proxies = 9;
-        int32 desired_commit_proxies = 10;
-        int32 old_grv_proxies = 11;
-        int32 auto_grv_proxies = 12;
-        int32 desired_grv_proxies = 13;
-        int32 old_resolvers = 14;
-        int32 auto_resolvers = 15;
-        int32 desired_resolvers = 16;
-        int32 old_processes_with_transaction = 17;
-        int32 auto_processes_with_transaction = 18;
-        int32 old_machines_with_transaction = 19;
-        int32 auto_machines_with_transaction = 20;
-    }
-    optional AutoConfigAnalysis analysis = 3;
 }
 
 message GetOptionsRequest {}
@@ -234,6 +206,7 @@ service CliService {
     rpc GetCoordinators(GetCoordinatorsRequest) returns (GetCoordinatorsReply);
     rpc ChangeCoordinators(ChangeCoordinatorsRequest) returns (ChangeCoordinatorsReply);
 
+    rpc ConfigureAutoSuggest(ConfigureAutoSuggestRequest) returns (ConfigureAutoSuggestReply);
     rpc Configure(ConfigureRequest) returns (ConfigureReply);
     rpc GetOptions(GetOptionsRequest) returns (GetOptionsReply);
     rpc SetOptions(SetOptionsRequest) returns (SetOptionsReply);
