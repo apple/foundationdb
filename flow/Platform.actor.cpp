@@ -3211,16 +3211,7 @@ void outOfMemory() {
 
 	for (auto i = traceCounts.begin(); i != traceCounts.end(); ++i) {
 		std::vector<void*>* frames = i->second.backTrace;
-		std::string backTraceStr;
-#if defined(_WIN32)
-		char buf[1024];
-		for (int j = 1; j < frames->size(); j++) {
-			_snprintf(buf, 1024, "%p ", frames->at(j));
-			backTraceStr += buf;
-		}
-#else
-		backTraceStr = format_backtrace(&(*frames)[0], frames->size());
-#endif
+		std::string backTraceStr = format_backtrace(&(*frames)[0], frames->size());
 		TraceEvent("MemSample")
 		    .detail("Count", (int64_t)i->second.count)
 		    .detail("TotalSize", i->second.totalSize)
@@ -3405,7 +3396,16 @@ extern "C" void flushAndExit(int exitCode) {
 	crashAndDie();
 }
 
-#ifdef __unixish__
+#ifndef __unixish__
+namespace platform {
+std::string get_backtrace() {
+	return std::string();
+}
+ImageInfo getImageInfo() {
+	return ImageInfo();
+}
+} // namespace platform
+#else
 #include <dlfcn.h>
 
 #ifdef __linux__
@@ -3425,23 +3425,13 @@ platform::ImageInfo getImageInfo(const void* symbol) {
 
 	if (res != 0) {
 		imageInfo.fileName = info.dli_fname;
-		std::string imageFile = basename(info.dli_fname);
-		// If we have a client library that doesn't end in the appropriate extension, we will get the wrong debug
-		// suffix. This should only be a cosmetic problem, though.
-#ifdef __linux__
-		imageInfo.offset = (void*)linkMap->l_addr;
-		if (imageFile.length() >= 3 && imageFile.rfind(".so") == imageFile.length() - 3) {
-			imageInfo.symbolFileName = imageFile + "-debug";
-		}
-#else
-		imageInfo.offset = info.dli_fbase;
-		if (imageFile.length() >= 6 && imageFile.rfind(".dylib") == imageFile.length() - 6) {
-			imageInfo.symbolFileName = imageFile + "-debug";
-		}
-#endif
-		else {
-			imageInfo.symbolFileName = imageFile + ".debug";
-		}
+		// Previously this code would guess "debug" related binary name suffixes.
+		// If you run a binary called fdbserver.debug, it would emit an addr2line
+		// command referencing a binary called "fdbserver.debug.debug".
+		// This is not helpful.  If the developer needs to point the command
+		// to a different binary than then one they executed, then they can
+		// simply edit the emitted command.
+		imageInfo.symbolFileName = info.dli_fname;
 	}
 
 	return imageInfo;
@@ -3470,42 +3460,53 @@ size_t raw_backtrace(void** addresses, int maxStackDepth) {
 #endif
 }
 
-std::string format_backtrace(void** addresses, int numAddresses) {
-	ImageInfo const& imageInfo = getCachedImageInfo();
-#ifdef __APPLE__
-	std::string s = format("atos -o %s -arch x86_64 -l %p", imageInfo.symbolFileName.c_str(), imageInfo.offset);
-	for (int i = 1; i < numAddresses; i++) {
-		s += format(" %p", addresses[i]);
-	}
-#else
-	std::string s = format("addr2line -e %s -p -C -f -i", imageInfo.symbolFileName.c_str());
-	for (int i = 1; i < numAddresses; i++) {
-		s += format(" %p", (char*)addresses[i] - (char*)imageInfo.offset);
-	}
-#endif
-	return s;
-}
-
 std::string get_backtrace() {
 	void* addresses[50];
 	size_t size = raw_backtrace(addresses, 50);
 	return format_backtrace(addresses, size);
 }
 } // namespace platform
-#else
+#endif // __unixish__
 
 namespace platform {
-std::string get_backtrace() {
-	return std::string();
-}
 std::string format_backtrace(void** addresses, int numAddresses) {
-	return std::string();
-}
-ImageInfo getImageInfo() {
-	return ImageInfo();
+	ImageInfo const& imageInfo = getCachedImageInfo();
+
+	std::string s;
+#if defined(_WIN32)
+	char buf[32];
+	for (int i = 1; i < numAddresses; i++) {
+		_snprintf(buf, sizeof(buf), "%p ", addresses[i]);
+		s += buf;
+	}
+#else
+#ifdef __APPLE__
+	s = format("atos -o %s -arch x86_64 -l %p", imageInfo.symbolFileName.c_str(), imageInfo.offset);
+	for (int i = 1; i < numAddresses; i++) {
+		s += format(" %p", addresses[i]);
+	}
+#else
+	// Specify an absolute addr2line path to avoid the unhelpful
+	// `addr2line` shell alias that is baked into the FDB dev VM
+	// /root/.bashrc.  It is easier to change the code here to
+	// emit a better command than it is to edit or remove that alias
+	// from the .bashrc, so that is what we are going to do.
+	// Also, one less moving part means less confusion.
+	std::string addr2linePath;
+#ifdef __clang__
+	addr2linePath = "/usr/local/bin/llvm-addr2line";
+#else
+	addr2linePath = "/usr/bin/addr2line";
+#endif
+	s = format("%s -e %s -p -C -f -i", addr2linePath.c_str(), imageInfo.symbolFileName.c_str());
+	for (int i = 1; i < numAddresses; i++) {
+		s += format(" %p", (char*)addresses[i] - (char*)imageInfo.offset);
+	}
+#endif
+#endif
+	return s;
 }
 } // namespace platform
-#endif
 
 bool isLibraryLoaded(const char* lib_path) {
 #if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
