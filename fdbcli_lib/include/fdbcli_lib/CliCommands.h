@@ -44,8 +44,6 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 
 //-- Database Configure ----
 Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* req, ConfigureReply* rep);
-Future<grpc::Status> getOption(Reference<IDatabase> db, const GetOptionsRequest* req, GetOptionsReply* rep);
-Future<grpc::Status> setOption(Reference<IDatabase> db, const SetOptionsRequest* req, SetOptionsReply* rep);
 Future<grpc::Status> getReadVersion(Reference<IDatabase> db,
                                     const GetReadVersionRequest* req,
                                     GetReadVersionReply* rep);

@@ -40,7 +40,6 @@ message ChangeCoordinatorsReply {
 // -- Database Configure ----
 
 message ConfigureAutoSuggestRequest {}
-
 message ConfigureAutoSuggestReply {
     ConfigureRequest configure_request = 1;
 }
@@ -143,11 +142,6 @@ message ConfigureReply {
     optional string message = 2; // Additional details for errors or warnings
 }
 
-message GetOptionsRequest {}
-message GetOptionsReply {}
-message SetOptionsRequest {}
-message SetOptionsReply {}
-
 message GetReadVersionRequest {}
 message GetReadVersionReply {
     optional int64 version = 1;
@@ -210,8 +204,6 @@ service CliService {
 
     rpc ConfigureAutoSuggest(ConfigureAutoSuggestRequest) returns (ConfigureAutoSuggestReply);
     rpc Configure(ConfigureRequest) returns (ConfigureReply);
-    rpc GetOptions(GetOptionsRequest) returns (GetOptionsReply);
-    rpc SetOptions(SetOptionsRequest) returns (SetOptionsReply);
     rpc GetReadVersion(GetReadVersionRequest) returns (GetReadVersionReply);
 
     rpc GetStatus(GetStatusRequest) returns (GetStatusReply);
