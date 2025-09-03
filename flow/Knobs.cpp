@@ -136,6 +136,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TLS_MALLOC_ARENA_MAX,                                  6 );
 	init( TLS_HANDSHAKE_LIMIT,                                1000 );
 	init( DISABLE_MAINTHREAD_TLS_HANDSHAKE,                  false );
+	init( TLS_HANDSHAKE_FLOWLOCK_PRIORITY,                    7000 ); // 7000 is the value of TaskPriority::DefaultYield
 
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );

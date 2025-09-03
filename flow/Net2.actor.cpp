@@ -1006,7 +1006,8 @@ public:
 			}
 		}
 
-		wait(g_network->networkInfo.handshakeLock->take());
+		wait(g_network->networkInfo.handshakeLock->take(
+		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY)));
 		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
 		Promise<Void> connected;
@@ -1085,7 +1086,8 @@ public:
 	}
 
 	ACTOR static Future<Void> connectHandshakeWrapper(Reference<SSLConnection> self) {
-		wait(g_network->networkInfo.handshakeLock->take());
+		wait(g_network->networkInfo.handshakeLock->take(
+		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY)));
 		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
 		Promise<Void> connected;
