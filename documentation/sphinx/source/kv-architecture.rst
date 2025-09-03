@@ -10,12 +10,12 @@ All clients and servers connect to a FoundationDB cluster with a cluster file, w
 Cluster Controller
 ==================
 
-The cluster controller is a singleton elected by a majority of coordinators. It is the entry point for all processes in the cluster. It is responsible for determining when a process has failed, telling processes which roles they should become, and passing system information between all of the processes.
+The cluster controller is a singleton elected by a majority of coordinators. It is the entry point for all processes in the cluster. It is responsible for determining when a process has failed, telling processes which roles they should become, and passing system information between all of the processes. The cluster controller is responsible for coordinating the transition of the write sub-system from one generation to the next. The write sub-system includes the master, GRV (i.e., Get-Read-Version) proxies, commit proxies, resolvers, and transaction logs. These five roles are treated as a unit, and if any of them fail, we will recruit a replacement for all five roles. 
 
 Master
 ======
 
-The master is responsible for coordinating the transition of the write sub-system from one generation to the next. The write sub-system includes the master, GRV (i.e., Get-Read-Version) proxies, commit proxies, resolvers, and transaction logs. These five roles are treated as a unit, and if any of them fail, we will recruit a replacement for all five roles. The master keeps commit proxies' committed version, provides read version for GRV proxies, provides the commit versions for batches of the mutations to the commit proxies.
+The master is a singleton that keeps commit proxies' committed version, provides read version for GRV proxies, and provides the commit versions for batches of the mutations to the commit proxies.
 
 GRV Proxies and Commit Proxies
 ==============================
