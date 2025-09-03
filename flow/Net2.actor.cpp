@@ -22,6 +22,7 @@
 #include "boost/asio/ip/address.hpp"
 #include "boost/system/system_error.hpp"
 #include "flow/Arena.h"
+#include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/swift.h"
@@ -960,7 +961,8 @@ public:
 
 			// If the background handshakers are not all busy, use one
 			// FIXME: see comment elsewhere about making this the only path.
-			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
+			if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
+			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				g_net2->countServerTLSHandshakesOnSideThreads++;
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
@@ -1004,7 +1006,8 @@ public:
 			}
 		}
 
-		wait(g_network->networkInfo.handshakeLock->take());
+		wait(g_network->networkInfo.handshakeLock->take(
+		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY)));
 		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
 		Promise<Void> connected;
@@ -1056,7 +1059,8 @@ public:
 			// unpredictable system performance and reliability) is
 			// much, much higher than the cost a few hundred or
 			// thousand incremental threads.
-			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
+			if ((FLOW_KNOBS->DISABLE_MAINTHREAD_TLS_HANDSHAKE && N2::g_net2->sslHandshakerThreadsStarted > 0) ||
+			    N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				g_net2->countClientTLSHandshakesOnSideThreads++;
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake =
@@ -1082,7 +1086,8 @@ public:
 	}
 
 	ACTOR static Future<Void> connectHandshakeWrapper(Reference<SSLConnection> self) {
-		wait(g_network->networkInfo.handshakeLock->take());
+		wait(g_network->networkInfo.handshakeLock->take(
+		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY)));
 		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
 		Promise<Void> connected;
