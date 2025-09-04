@@ -38,7 +38,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 	UsePartitionedLog usePartitionedLogs{ false };
 	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
 	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
-	Optional<std::string> encryptionKeyFileName;
 
 	AtomicRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 
@@ -56,10 +55,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
 		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);
-
-		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
-			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
-		}
 
 		// Correctness is not clean for addPrefix feature yet. Uncomment below to enable the test
 		// Generate addPrefix
@@ -101,10 +96,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 		wait(delay(self->startAfter * deterministicRandom()->random01()));
 		TraceEvent("AtomicRestore_Start").detail("UsePartitionedLog", self->usePartitionedLogs);
 
-		if (self->encryptionKeyFileName.present()) {
-			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
-		}
-
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
 			wait(backupAgent.submitBackup(cx,
@@ -118,7 +109,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              StopWhenDone::False,
 			                              self->usePartitionedLogs,
 			                              IncrementalBackupOnly::False,
-			                              self->encryptionKeyFileName));
+			                              {}));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
