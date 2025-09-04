@@ -803,3 +803,288 @@ func fdbErrorRetryable() {
     let internalError = FdbError(.internalError)
     #expect(!internalError.isRetryable, "internal_error should not be retryable")
 }
+
+@Test("atomic operation ADD")
+func atomicOpAdd() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    let key: Fdb.Key = [UInt8]("test_atomic_add".utf8)
+
+    // Initial value: little-endian 64-bit integer 10
+    let initialValue: Fdb.Value = withUnsafeBytes(of: Int64(10).littleEndian) { Array($0) }
+    newTransaction.setValue(initialValue, for: key)
+
+    // Add 5 using atomic operation
+    let addValue: Fdb.Value = withUnsafeBytes(of: Int64(5).littleEndian) { Array($0) }
+    newTransaction.atomicOp(key: key, param: addValue, mutationType: .add)
+
+    _ = try await newTransaction.commit()
+
+    // Verify result
+    let readTransaction = try database.createTransaction()
+    let result = try await readTransaction.getValue(for: key)
+    try #require(result != nil, "Result should not be nil")
+
+    let resultValue = result!.withUnsafeBytes { $0.load(as: Int64.self) }
+    #expect(Int64(littleEndian: resultValue) == 15, "10 + 5 should equal 15")
+}
+
+@Test("atomic operation BIT_AND")
+func atomicOpBitAnd() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    let key: Fdb.Key = [UInt8]("test_atomic_and".utf8)
+
+    // Initial value: 0xFF (255)
+    let initialValue: Fdb.Value = [0xFF]
+    newTransaction.setValue(initialValue, for: key)
+
+    // AND with 0x0F (15)
+    let andValue: Fdb.Value = [0x0F]
+    newTransaction.atomicOp(key: key, param: andValue, mutationType: .bitAnd)
+
+    _ = try await newTransaction.commit()
+
+    // Verify result
+    let readTransaction = try database.createTransaction()
+    let result = try await readTransaction.getValue(for: key)
+    try #require(result != nil, "Result should not be nil")
+
+    #expect(result! == [0x0F], "0xFF AND 0x0F should equal 0x0F")
+}
+
+@Test("atomic operation BIT_OR")
+func atomicOpBitOr() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    let key: Fdb.Key = [UInt8]("test_atomic_or".utf8)
+
+    // Initial value: 0x0F (15)
+    let initialValue: Fdb.Value = [0x0F]
+    newTransaction.setValue(initialValue, for: key)
+
+    // OR with 0xF0 (240)
+    let orValue: Fdb.Value = [0xF0]
+    newTransaction.atomicOp(key: key, param: orValue, mutationType: .bitOr)
+
+    _ = try await newTransaction.commit()
+
+    // Verify result
+    let readTransaction = try database.createTransaction()
+    let result = try await readTransaction.getValue(for: key)
+    try #require(result != nil, "Result should not be nil")
+
+    #expect(result! == [0xFF], "0x0F OR 0xF0 should equal 0xFF")
+}
+
+@Test("atomic operation BIT_XOR")
+func atomicOpBitXor() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    let key: Fdb.Key = [UInt8]("test_atomic_xor".utf8)
+
+    // Initial value: 0xFF (255)
+    let initialValue: Fdb.Value = [0xFF]
+    newTransaction.setValue(initialValue, for: key)
+
+    // XOR with 0x0F (15)
+    let xorValue: Fdb.Value = [0x0F]
+    newTransaction.atomicOp(key: key, param: xorValue, mutationType: .bitXor)
+
+    _ = try await newTransaction.commit()
+
+    // Verify result
+    let readTransaction = try database.createTransaction()
+    let result = try await readTransaction.getValue(for: key)
+    try #require(result != nil, "Result should not be nil")
+
+    #expect(result! == [0xF0], "0xFF XOR 0x0F should equal 0xF0")
+}
+
+@Test("atomic operation MAX")
+func atomicOpMax() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    let key: Fdb.Key = [UInt8]("test_atomic_max".utf8)
+
+    // Initial value: little-endian 64-bit integer 10
+    let initialValue: Fdb.Value = withUnsafeBytes(of: Int64(10).littleEndian) { Array($0) }
+    newTransaction.setValue(initialValue, for: key)
+
+    // Max with 15
+    let maxValue: Fdb.Value = withUnsafeBytes(of: Int64(15).littleEndian) { Array($0) }
+    newTransaction.atomicOp(key: key, param: maxValue, mutationType: .max)
+
+    _ = try await newTransaction.commit()
+
+    // Verify result
+    let readTransaction = try database.createTransaction()
+    let result = try await readTransaction.getValue(for: key)
+    try #require(result != nil, "Result should not be nil")
+
+    let resultValue = result!.withUnsafeBytes { $0.load(as: Int64.self) }
+    #expect(Int64(littleEndian: resultValue) == 15, "max(10, 15) should equal 15")
+}
+
+@Test("atomic operation MIN")
+func atomicOpMin() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    let key: Fdb.Key = [UInt8]("test_atomic_min".utf8)
+
+    // Initial value: little-endian 64-bit integer 10
+    let initialValue: Fdb.Value = withUnsafeBytes(of: Int64(10).littleEndian) { Array($0) }
+    newTransaction.setValue(initialValue, for: key)
+
+    // Min with 5
+    let minValue: Fdb.Value = withUnsafeBytes(of: Int64(5).littleEndian) { Array($0) }
+    newTransaction.atomicOp(key: key, param: minValue, mutationType: .min)
+
+    _ = try await newTransaction.commit()
+
+    // Verify result
+    let readTransaction = try database.createTransaction()
+    let result = try await readTransaction.getValue(for: key)
+    try #require(result != nil, "Result should not be nil")
+
+    let resultValue = result!.withUnsafeBytes { $0.load(as: Int64.self) }
+    #expect(Int64(littleEndian: resultValue) == 5, "min(10, 5) should equal 5")
+}
+
+@Test("atomic operation APPEND_IF_FITS")
+func atomicOpAppendIfFits() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    let key: Fdb.Key = [UInt8]("test_atomic_append".utf8)
+
+    // Initial value: "Hello"
+    let initialValue: Fdb.Value = [UInt8]("Hello".utf8)
+    newTransaction.setValue(initialValue, for: key)
+
+    // Append " World"
+    let appendValue: Fdb.Value = [UInt8](" World".utf8)
+    newTransaction.atomicOp(key: key, param: appendValue, mutationType: .appendIfFits)
+
+    _ = try await newTransaction.commit()
+
+    // Verify result
+    let readTransaction = try database.createTransaction()
+    let result = try await readTransaction.getValue(for: key)
+    try #require(result != nil, "Result should not be nil")
+
+    let resultString = String(bytes: result!, encoding: .utf8)
+    #expect(resultString == "Hello World", "Should append ' World' to 'Hello'")
+}
+
+@Test("atomic operation BYTE_MIN")
+func atomicOpByteMin() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    let key: Fdb.Key = [UInt8]("test_atomic_byte_min".utf8)
+
+    // Initial value: "zebra"
+    let initialValue: Fdb.Value = [UInt8]("zebra".utf8)
+    newTransaction.setValue(initialValue, for: key)
+
+    // Compare with "apple" (lexicographically smaller)
+    let compareValue: Fdb.Value = [UInt8]("apple".utf8)
+    newTransaction.atomicOp(key: key, param: compareValue, mutationType: .byteMin)
+
+    _ = try await newTransaction.commit()
+
+    // Verify result
+    let readTransaction = try database.createTransaction()
+    let result = try await readTransaction.getValue(for: key)
+    try #require(result != nil, "Result should not be nil")
+
+    let resultString = String(bytes: result!, encoding: .utf8)
+    #expect(resultString == "apple", "byte_min should choose lexicographically smaller value")
+}
+
+@Test("atomic operation BYTE_MAX")
+func atomicOpByteMax() async throws {
+    try await FdbClient.initialize()
+    let database = try FdbClient.openDatabase()
+    let transaction = try database.createTransaction()
+
+    // Clear test key range
+    transaction.clearRange(beginKey: "test_", endKey: "test`")
+    _ = try await transaction.commit()
+
+    let newTransaction = try database.createTransaction()
+    let key: Fdb.Key = [UInt8]("test_atomic_byte_max".utf8)
+
+    // Initial value: "apple"
+    let initialValue: Fdb.Value = [UInt8]("apple".utf8)
+    newTransaction.setValue(initialValue, for: key)
+
+    // Compare with "zebra" (lexicographically larger)
+    let compareValue: Fdb.Value = [UInt8]("zebra".utf8)
+    newTransaction.atomicOp(key: key, param: compareValue, mutationType: .byteMax)
+
+    _ = try await newTransaction.commit()
+
+    // Verify result
+    let readTransaction = try database.createTransaction()
+    let result = try await readTransaction.getValue(for: key)
+    try #require(result != nil, "Result should not be nil")
+
+    let resultString = String(bytes: result!, encoding: .utf8)
+    #expect(resultString == "zebra", "byte_max should choose lexicographically larger value")
+}

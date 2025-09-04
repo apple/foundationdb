@@ -79,6 +79,8 @@ public protocol ITransaction {
     func setReadVersion(_ version: Int64)
     /// Gets the read version used by this transaction
     func getReadVersion() async throws -> Int64
+
+    func atomicOp(key: Fdb.Key, param: Fdb.Value, mutationType: FdbMutationType)
 }
 
 public extension ITransaction {

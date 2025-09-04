@@ -94,3 +94,18 @@ extension String: Fdb.Selectable {
         return Fdb.KeySelector.firstGreaterOrEqual([UInt8](utf8))
     }
 }
+
+public enum FdbMutationType: UInt32 {
+    case add = 2
+    case bitAnd = 6
+    case bitOr = 7
+    case bitXor = 8
+    case appendIfFits = 9
+    case max = 12
+    case min = 13
+    case setVersionstampedKey = 14
+    case setVersionstampedValue = 15
+    case byteMin = 16
+    case byteMax = 17
+    case compareAndClear = 20
+}

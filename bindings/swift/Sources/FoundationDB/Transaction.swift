@@ -81,6 +81,21 @@ public class FdbTransaction: ITransaction {
         }
     }
 
+    public func atomicOp(key: Fdb.Key, param: Fdb.Value, mutationType: FdbMutationType) {
+        key.withUnsafeBytes { keyBytes in
+            param.withUnsafeBytes { paramBytes in
+                fdb_transaction_atomic_op(
+                    transaction,
+                    keyBytes.bindMemory(to: UInt8.self).baseAddress,
+                    Int32(key.count),
+                    paramBytes.bindMemory(to: UInt8.self).baseAddress,
+                    Int32(param.count),
+                    FDBMutationType(mutationType.rawValue)
+                )
+            }
+        }
+    }
+
     public func getKey(selector: Fdb.KeySelector, snapshot: Bool) async throws -> Fdb.Key? {
         try await selector.key.withUnsafeBytes { keyBytes in
             Future<ResultKey>(
