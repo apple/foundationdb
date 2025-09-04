@@ -508,7 +508,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                                  normalKeys,
 				                                  Key(),
 				                                  Key(),
-				                                  self->locked)));
+				                                  self->locked,
+				                                  OnlyApplyMutationLogs::False,
+				                                  InconsistentSnapshotOnly::False,
+				                                  ::invalidVersion,
+				                                  self->encryptionKeyFileName)));
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID).log();
 				ASSERT(false);
 			} catch (Error& e) {
@@ -518,6 +522,49 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			}
 		}
 
+		return Void();
+	}
+
+	/**
+		This actor attempts to restore an encrypted backup without providing the encryption key and vice versa.
+	**/
+	ACTOR static Future<Void> attemptRestoreWithConflictingEncryption(BackupAndRestoreCorrectnessWorkload* self,
+		                                                              Database cx,
+		                                                              FileBackupAgent* backupAgent,
+		                                                              Standalone<StringRef> lastBackupContainer,
+		                                                              UID randomID) {
+		// If encryption key is not provided, try to restore the backup with encryption key and expect it to fail and vice versa.
+		Optional<std::string> tempEncryptionKey;
+		if (!self->encryptionKeyFileName.present()) {
+			tempEncryptionKey = "simfdb/" + getTestEncryptionFileName();
+		}
+		try {
+			printf("!!!!!!!!!!!! Trying Restore Without Encryption Key\n");
+			wait(success(backupAgent->restore(cx,
+												cx,
+												self->backupTag,
+												KeyRef(lastBackupContainer),
+												{},
+												WaitForComplete::True,
+												::invalidVersion,
+												Verbose::True,
+												normalKeys,
+												Key(),
+												Key(),
+												self->locked,
+												OnlyApplyMutationLogs::False,
+												InconsistentSnapshotOnly::False,
+												::invalidVersion,
+												tempEncryptionKey
+												)));
+			TraceEvent(SevError, "BARW_RestoreAllowedWithoutEncryptionKey", randomID).log();
+			ASSERT(false);
+		} catch (Error& e) {
+			// Expected errors when trying to restore encrypted backup without key
+			if (e.code() != error_code_restore_error) {
+				throw;
+			}
+		}
 		return Void();
 	}
 
@@ -662,6 +709,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					wait(attemptDirtyRestore(
 					    self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
 				}
+				// if (deterministicRandom()->random01() < 1.0) {
+				// 	wait(attemptRestoreWithConflictingEncryption(
+				// 	    self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
+				// }
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					for (auto& kvrange : self->backupRanges)

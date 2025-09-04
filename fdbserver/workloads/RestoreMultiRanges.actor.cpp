@@ -34,8 +34,10 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 	Optional<std::string> encryptionKeyFileName;
 
 	RestoreMultiRangesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
-			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
+		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
+		// Only set encryptionKeyFileName if the encryption key file exists during backup.
+		if (fileExists(keyFileName)) {
+			encryptionKeyFileName = keyFileName;
 		}
 	}
 

@@ -2419,6 +2419,17 @@ ACTOR Future<Void> runRestore(Database db,
 				    "No restore target version given, will use maximum restorable version from backup description.\n");
 
 			BackupDescription desc = wait(bc->describeBackup());
+
+			/*
+			if (desc.fileLevelEncryption && !encryptionKeyFile.present()) {
+				fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
+				throw restore_error();
+			} else if (!desc.fileLevelEncryption && encryptionKeyFile.present()) {
+				fprintf(stderr, "ERROR: Backup is not encrypted, please do not provide the encr`yption key file path.\n");
+				throw restore_error();
+			}
+			*/
+
 			if (blobManifestUrl.present()) {
 				onlyApplyMutationLogs = OnlyApplyMutationLogs::True;
 			}

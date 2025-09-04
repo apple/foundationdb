@@ -57,8 +57,10 @@ struct AtomicRestoreWorkload : TestWorkload {
 		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
 		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);
 
-		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
-			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
+		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
+		// Only set encryptionKeyFileName if the encryption key file exists during backup.
+		if (fileExists(keyFileName)) {
+			encryptionKeyFileName = keyFileName;
 		}
 
 		// Correctness is not clean for addPrefix feature yet. Uncomment below to enable the test
