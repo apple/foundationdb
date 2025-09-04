@@ -315,6 +315,10 @@ public:
 	Int64MetricHandle countServerTLSHandshakesOnMainThread;
 	Int64MetricHandle countClientTLSHandshakesTimedout;
 	Int64MetricHandle countServerTLSHandshakesTimedout;
+	Int64MetricHandle countServerTLSHandshakeThrottled;
+	Int64MetricHandle countClientTLSHandshakeThrottled;
+	Int64MetricHandle countServerTLSHandshakeLocked;
+	Int64MetricHandle countClientTLSHandshakeLocked;
 
 	EventMetricHandle<SlowTask> slowTaskMetric;
 
@@ -888,6 +892,7 @@ public:
 				if (iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
 					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", addr);
 					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+					g_net2->countClientTLSHandshakeThrottled++;
 					throw connection_failed();
 				}
 			} else {
@@ -974,6 +979,7 @@ public:
 					    .detail("PeerIP", peerIP.first.toString());
 					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 					self->closeSocket();
+					g_net2->countServerTLSHandshakeThrottled++;
 					throw connection_failed();
 				}
 			} else {
@@ -984,6 +990,7 @@ public:
 		wait(g_network->networkInfo.handshakeLock->take(
 		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY)));
 		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+		g_net2->countServerTLSHandshakeLocked++;
 
 		Promise<Void> connected;
 		doAcceptHandshake(self, connected);
@@ -1062,6 +1069,7 @@ public:
 		wait(g_network->networkInfo.handshakeLock->take(
 		    getTaskPriorityFromInt(FLOW_KNOBS->TLS_HANDSHAKE_FLOWLOCK_PRIORITY)));
 		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+		g_net2->countClientTLSHandshakeLocked++;
 
 		Promise<Void> connected;
 		doConnectHandshake(self, connected);
@@ -1465,6 +1473,10 @@ void Net2::initMetrics() {
 	countServerTLSHandshakesOnMainThread.init("Net2.CountServerTLSHandshakesOnMainThread"_sr);
 	countClientTLSHandshakesTimedout.init("Net2.CountClientTLSHandshakesTimedout"_sr);
 	countServerTLSHandshakesTimedout.init("Net2.CountServerTLSHandshakesTimedout"_sr);
+	countServerTLSHandshakeThrottled.init("Net2.CountServerTLSHandshakeThrottled"_sr);
+	countClientTLSHandshakeThrottled.init("Net2.CountClientTLSHandshakeThrottled"_sr);
+	countServerTLSHandshakeLocked.init("Net2.CountServerTLSHandshakeLocked"_sr);
+	countClientTLSHandshakeLocked.init("Net2.CountClientTLSHandshakeLocked"_sr);
 	taskQueue.initMetrics();
 }
 
