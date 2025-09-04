@@ -105,6 +105,18 @@ struct NetworkData {
 	                                            // hasInexpensiveMultiVersionClient.
 	int64_t countClientTLSHandshakesTimedout;
 	int64_t countServerTLSHandshakesTimedout;
+	int64_t countConnHandshakeAccepted;
+	int64_t countConnHandshakeRequested;
+	int64_t countIncomingConnRequested;
+	int64_t countIncomingConnAccepted;
+	int64_t countServerTLSHandshakeThrottled;
+	int64_t countClientTLSHandshakeThrottled;
+	int64_t countOutgoingConnHandshakeComplete;
+	int64_t countOutgoingConnHandshakeRequested;
+	int64_t countIncomingConnectionTimedout;
+	int64_t countServerTLSHandshakeLocked;
+	int64_t countClientTLSHandshakeLocked;
+	int64_t countIncomingConnConnected;
 
 	void init() {
 		bytesSent = Int64Metric::getValueOrDefault("Net2.BytesSent"_sr);
@@ -160,6 +172,20 @@ struct NetworkData {
 		    Int64Metric::getValueOrDefault("Net2.CountConnIncompatibleWithOldClient"_sr);
 		countClientTLSHandshakesTimedout = Int64Metric::getValueOrDefault("Net2.CountClientTLSHandshakesTimedout"_sr);
 		countServerTLSHandshakesTimedout = Int64Metric::getValueOrDefault("Net2.CountServerTLSHandshakesTimedout"_sr);
+		countConnHandshakeAccepted = Int64Metric::getValueOrDefault("Net2.CountConnHandshakeAccepted"_sr);
+		countConnHandshakeRequested = Int64Metric::getValueOrDefault("Net2.CountConnHandshakeRequested"_sr);
+		countIncomingConnRequested = Int64Metric::getValueOrDefault("Net2.CountIncomingConnRequested"_sr);
+		countIncomingConnAccepted = Int64Metric::getValueOrDefault("Net2.CountIncomingConnAccepted"_sr);
+		countServerTLSHandshakeThrottled = Int64Metric::getValueOrDefault("Net2.CountServerTLSHandshakeThrottled"_sr);
+		countClientTLSHandshakeThrottled = Int64Metric::getValueOrDefault("Net2.CountClientTLSHandshakeThrottled"_sr);
+		countOutgoingConnHandshakeComplete =
+		    Int64Metric::getValueOrDefault("Net2.CountOutgoingConnHandshakeComplete"_sr);
+		countOutgoingConnHandshakeRequested =
+		    Int64Metric::getValueOrDefault("Net2.CountOutgoingConnHandshakeRequested"_sr);
+		countIncomingConnectionTimedout = Int64Metric::getValueOrDefault("Net2.CountIncomingConnectionTimedout"_sr);
+		countServerTLSHandshakeLocked = Int64Metric::getValueOrDefault("Net2.CountServerTLSHandshakeLocked"_sr);
+		countClientTLSHandshakeLocked = Int64Metric::getValueOrDefault("Net2.CountClientTLSHandshakeLocked"_sr);
+		countIncomingConnConnected = Int64Metric::getValueOrDefault("Net2.CountIncomingConnConnected"_sr);
 	}
 };
 
