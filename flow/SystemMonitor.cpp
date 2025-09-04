@@ -216,6 +216,49 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			            (netData.countServerTLSHandshakesTimedout -
 			             statState->networkState.countServerTLSHandshakesTimedout) /
 			                currentStats.elapsed)
+			    .detail("ConnectionHandshakeAccepted",
+			            (netData.countConnHandshakeAccepted - statState->networkState.countConnHandshakeAccepted) /
+			                currentStats.elapsed)
+			    .detail("ConnectionHandshakeRequested",
+			            (netData.countConnHandshakeRequested - statState->networkState.countConnHandshakeRequested) /
+			                currentStats.elapsed)
+			    .detail("IncomingConnRequested",
+			            (netData.countIncomingConnRequested - statState->networkState.countIncomingConnRequested) /
+			                currentStats.elapsed)
+			    .detail("IncomingConnAccepted",
+			            (netData.countIncomingConnAccepted - statState->networkState.countIncomingConnAccepted) /
+			                currentStats.elapsed)
+			    .detail("ServerTLSHandshakeThrottled",
+			            (netData.countServerTLSHandshakeThrottled -
+			             statState->networkState.countServerTLSHandshakeThrottled) /
+			                currentStats.elapsed)
+			    .detail("ClientTLSHandshakeThrottled",
+			            (netData.countClientTLSHandshakeThrottled -
+			             statState->networkState.countClientTLSHandshakeThrottled) /
+			                currentStats.elapsed)
+			    .detail("OutgoingConnHandshakeComplete",
+			            (netData.countOutgoingConnHandshakeComplete -
+			             statState->networkState.countOutgoingConnHandshakeComplete) /
+			                currentStats.elapsed)
+			    .detail("OutgoingConnHandshakeRequested",
+			            (netData.countOutgoingConnHandshakeRequested -
+			             statState->networkState.countOutgoingConnHandshakeRequested) /
+			                currentStats.elapsed)
+			    .detail("IncomingConnectionTimedout",
+			            (netData.countIncomingConnectionTimedout -
+			             statState->networkState.countIncomingConnectionTimedout) /
+			                currentStats.elapsed)
+			    .detail(
+			        "ServerTLSHandshakeLocked",
+			        (netData.countServerTLSHandshakeLocked - statState->networkState.countServerTLSHandshakeLocked) /
+			            currentStats.elapsed)
+			    .detail(
+			        "ClientTLSHandshakeLocked",
+			        (netData.countClientTLSHandshakeLocked - statState->networkState.countClientTLSHandshakeLocked) /
+			            currentStats.elapsed)
+			    .detail("IncomingConnConnected",
+			            (netData.countIncomingConnConnected - statState->networkState.countIncomingConnConnected) /
+			                currentStats.elapsed)
 
 			    .trackLatest(eventName);
 
