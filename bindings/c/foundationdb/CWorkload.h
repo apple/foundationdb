@@ -25,7 +25,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+typedef struct FDB_future FDBFuture;
 typedef struct FDB_database FDBDatabase;
+
 typedef struct Opaque_promise OpaquePromise;
 typedef struct Opaque_workload OpaqueWorkload;
 typedef struct Opaque_workloadContext OpaqueWorkloadContext;
@@ -98,6 +100,7 @@ typedef struct FDBWorkloadContext {
 	int (*clientId)(OpaqueWorkloadContext* inner);
 	int (*clientCount)(OpaqueWorkloadContext* inner);
 	int64_t (*sharedRandomNumber)(OpaqueWorkloadContext* inner);
+	FDBFuture* (*delay)(double seconds);
 } FDBWorkloadContext;
 
 // Interface for a workload implementation in C.
