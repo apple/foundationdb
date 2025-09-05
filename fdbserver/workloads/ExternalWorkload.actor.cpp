@@ -253,10 +253,15 @@ capi::FDBWorkloadContext wrap(FDBWorkloadContext* context) {
 class Workload : public FDBWorkload {
 private:
 	capi::FDBWorkload workload;
+	Wrapper<capi::FDBWorkloadContext>* context;
 
 public:
-	Workload(capi::FDBWorkload c_workload) : workload(c_workload) {}
-	~Workload() { this->workload.free(this->workload.inner); }
+	Workload(capi::FDBWorkload c_workload, Wrapper<capi::FDBWorkloadContext>* c_context)
+	  : workload(c_workload), context(c_context) {}
+	~Workload() {
+		this->workload.free(this->workload.inner);
+		delete this->context;
+	}
 
 	virtual bool init(FDBWorkloadContext* context) override { return true; }
 	virtual void setup(FDBDatabase* db, GenericPromise<bool> done) override {
@@ -320,7 +325,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		}
 
 		if (useCAPI) {
-			capi::FDBWorkload (*workloadCFactory)(const char*, capi::FDBWorkloadContext);
+			capi::FDBWorkload (*workloadCFactory)(const char*, capi::FDBWorkloadContext*);
 			workloadCFactory = reinterpret_cast<decltype(workloadCFactory)>(loadFunction(library, "workloadCFactory"));
 			if (workloadCFactory == nullptr) {
 				TraceEvent(SevError, "ExternalCFactoryNotFound").log();
@@ -328,8 +333,9 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 				return;
 			}
 			auto name = wName.toString();
-			capi::FDBWorkload c_workload = (*workloadCFactory)(name.c_str(), translator::context::wrap(this));
-			workloadImpl = std::make_shared<translator::Workload>(c_workload);
+			auto c_context = new translator::Wrapper<capi::FDBWorkloadContext>{ translator::context::wrap(this) };
+			capi::FDBWorkload c_workload = (*workloadCFactory)(name.c_str(), (capi::FDBWorkloadContext*)c_context);
+			workloadImpl = std::make_shared<translator::Workload>(c_workload, c_context);
 		} else {
 			FDBWorkloadFactory* (*workloadFactory)(FDBLogger*);
 			workloadFactory = reinterpret_cast<decltype(workloadFactory)>(loadFunction(library, "workloadFactory"));
