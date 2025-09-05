@@ -1787,19 +1787,32 @@ std::string TraceEventFields::toString() const {
 	return str;
 }
 
-// FIXME: give the rationale for the naming scheme that this is enforcing
-bool validateField(const char* key, bool allowUnderscores) {
-	if ((key[0] < 'A' || key[0] > 'Z') && key[0] != '_') {
+// ChatGPT generated code to return true iff `name` is a valid Prometheus
+// metric name. Below we call this on trace event fields for the reason
+// that we are contemplating converting fields in trace events to metrics
+// in downstream Prometheus-compatible metrics systems.
+bool isValidPrometheusMetricName(std::string_view name) {
+	if (name.empty()) {
 		return false;
 	}
 
-	const char* underscore = strchr(key, '_');
-	while (underscore) {
-		if (!allowUnderscores || ((underscore[1] < 'A' || underscore[1] > 'Z') && key[0] != '_' && key[0] != '\0')) {
+	// First character: [a-zA-Z_:]
+	char first = name.front();
+	if (!(std::isalpha(static_cast<unsigned char>(first)) || first == '_' || first == ':')) {
+		return false;
+	}
+
+	// Rest: [a-zA-Z0-9_:]*
+	for (size_t i = 1; i < name.size(); ++i) {
+		char c = name[i];
+		if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == ':')) {
 			return false;
 		}
+	}
 
-		underscore = strchr(&underscore[1], '_');
+	// Reserved prefix check: names starting with "__" are reserved
+	if (name.size() >= 2 && name[0] == '_' && name[1] == '_') {
+		return false;
 	}
 
 	return true;
@@ -1809,14 +1822,11 @@ void TraceEventFields::validateFormat() const {
 	// FIXME: this condition should be expanded to include any unit test mode.
 	if (g_network && g_network->isSimulated()) {
 		for (Field field : fields) {
-			if (!validateField(field.first.c_str(), false)) {
+			if (!isValidPrometheusMetricName(field.first.c_str())) {
 				fprintf(stderr,
 				        "Trace event detail name `%s' is invalid in:\n\t%s\n",
 				        field.first.c_str(),
 				        toString().c_str());
-			}
-			if (field.first == "Type" && !validateField(field.second.c_str(), true)) {
-				fprintf(stderr, "Trace event detail Type `%s' is invalid\n", field.second.c_str());
 			}
 		}
 	}

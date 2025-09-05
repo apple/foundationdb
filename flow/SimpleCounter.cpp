@@ -23,30 +23,16 @@
 #include "flow/SimpleCounter.h"
 #include "flow/UnitTest.h"
 
-// Trace.cpp::validateField insists on applying some rules to trace
-// field names.  Instead of fighting this, for now just make our
-// hierarchical names comply by converting / to 'U'.  Yes, 'U'.
-//
-// If this annoys you, there are several options:
-// 1) Don't use hierarchical metric names.
-// 2) Go figure out why Trace.cpp has this restriction (it itself offers
-// no explanation whatsoever), and consider relaxing it. HOWEVER: consider that
-// Prometheus imposes very strict rules on metric names.  The most useful thing one
-// can do with Prometheus-compatible metric names and still retain some manner
-// of hierarchical naming is to use underscore as the component separator.
-// Longer term, if we are emitting Prometheus-compatible metrics, then replacing
-// '/' with '_' could be a strategy.  However, we would want to ensure that we don't end
-// up with random naming collisions from people who might use '_' for its normal purpose of
-// separating any old words anywhere, including within the same path component.
-// More background: https://chatgpt.com/share/68ad3e33-00b0-800b-9fa9-644ef201feb9
-//
-// So basically, Trace.cpp rules suck, and Prometheus rules suck, but we should be
-// aware of them and play ball.
-static std::string mungeName(const std::string input) {
+// Convert hierarchical metric names into Prometheus-compatible metric
+// names.  Do this by a) removing initial '/' chars, and b) converting
+// remaining '/' chars to '_' chars.
+static std::string hierarchicalToPrometheus(const std::string input) {
 	std::string output;
 	for (char ch : input) {
-		if (ch == '/' || ch == ':') {
-			output += "U";
+		if (ch == '/') {
+			if (output.size() > 0) {
+				output += '_';
+			}
 		} else {
 			output += ch;
 		}
@@ -71,8 +57,8 @@ void simpleCounterReport(Severity severity) {
 		do {
 			SimpleCounter<int64_t>* ic = intCounters[i];
 			std::string n = ic->name();
-			n = mungeName(n);
-			ASSERT(validateField(n.c_str(), /* allowUnderscores= */ true));
+			n = hierarchicalToPrometheus(n);
+			ASSERT(isValidPrometheusMetricName(n));
 			traceEvent.detail(std::move(n), ic->get());
 			i++;
 			c++;
@@ -85,8 +71,8 @@ void simpleCounterReport(Severity severity) {
 		do {
 			SimpleCounter<double>* dc = doubleCounters[i];
 			std::string n = dc->name();
-			n = mungeName(n);
-			ASSERT(validateField(n.c_str(), /* allowUnderscores= */ true));
+			n = hierarchicalToPrometheus(n);
+			ASSERT(isValidPrometheusMetricName(n));
 			traceEvent.detail(std::move(n), dc->get());
 			i++;
 			c++;
