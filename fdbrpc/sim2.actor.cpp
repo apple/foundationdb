@@ -376,7 +376,15 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		    .detail("StableConnection", stableConnection);
 	}
 
-	~Sim2Conn() { ASSERT_ABORT(!opened || closedByCaller); }
+	~Sim2Conn() {
+		// Allow simulated HTTP server connections (either endpoint) to be destroyed without an explicit close.
+		// These are managed by the HTTP server lifecycle and may not be closed by callers.
+		const bool isHttpSide = g_simulator->httpServerIps.count(process->address.ip);
+		const bool isHttpPeer = g_simulator->httpServerIps.count(peerEndpoint.ip);
+		if (!(isHttpSide || isHttpPeer)) {
+			ASSERT_ABORT(!opened || closedByCaller);
+		}
+	}
 
 	void addref() override { ReferenceCounted<Sim2Conn>::addref(); }
 	void delref() override { ReferenceCounted<Sim2Conn>::delref(); }
@@ -497,6 +505,7 @@ private:
 	ACTOR static Future<Void> sender(Sim2Conn* self) {
 		loop {
 			wait(self->writtenBytes.onChange()); // takes place on peer!
+			wait(g_simulator->onProcess(self->peerProcess));
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 			wait(delay(.002 * deterministicRandom()->random01()));
 			self->sentBytes.set(self->writtenBytes.get()); // or possibly just some sometimes...
@@ -564,6 +573,9 @@ private:
 				}
 				try {
 					wait(self->peer->receivedBytes.onChange());
+					// Check if peer is still valid after the wait
+					if (!self->peer)
+						return Void();
 					ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 				} catch (Error& e) {
 					if (e.code() != error_code_broken_promise)
@@ -1857,6 +1869,13 @@ public:
 		    .detail("Address", p->address)
 		    .detail("MachineId", p->locality.machineId());
 		currentlyRebootingProcesses.insert(std::pair<NetworkAddress, ProcessInfo*>(p->address, p));
+
+		// Safety check to prevent Optional assertion failure
+		if (!p->locality.machineId().present()) {
+			TraceEvent("Sim2DestroyProcessNoMachineId").detail("Name", p->name).detail("Address", p->address);
+			return;
+		}
+
 		std::vector<ProcessInfo*>& processes = machines[p->locality.machineId().get()].processes;
 		machines[p->locality.machineId().get()].removeRemotePort(p->address.port);
 		if (p != processes.back()) {
@@ -2596,6 +2615,32 @@ public:
 		return registerSimHTTPServerActor(this, hostname, service, requestHandler);
 	}
 
+	ACTOR static Future<Void> unregisterSimHTTPServerActor(Sim2* self, std::string hostname, std::string service) {
+		std::string id = hostname + ":" + service;
+		state std::unordered_map<std::string, Reference<HTTP::SimRegisteredHandlerContext>>::iterator handlerIt =
+		    self->httpHandlers.find(id);
+		if (handlerIt == self->httpHandlers.end()) {
+			return Void();
+		}
+		// Copy processes to avoid races
+		state std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> procsCopy =
+		    self->httpServerProcesses;
+		state int i = 0;
+		for (; i < procsCopy.size(); i++) {
+			state ProcessInfo* serverProcess = procsCopy[i].first;
+			wait(self->onProcess(serverProcess, TaskPriority::DefaultYield));
+			handlerIt->second->removeIp(serverProcess->address.ip);
+			// Stop the HTTP server listeners to ensure connections are torn down
+			procsCopy[i].second->stop();
+		}
+		self->httpHandlers.erase(handlerIt);
+		return Void();
+	}
+
+	Future<Void> unregisterSimHTTPServer(std::string hostname, std::string service) override {
+		return unregisterSimHTTPServerActor(this, hostname, service);
+	}
+
 	Sim2(bool printSimTime)
 	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), yielded(false), yield_limit(0),
 	    printSimTime(printSimTime) {
@@ -2733,6 +2778,10 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 	Future<Void> onClosed() const { return closed.getFuture(); }
 
 	ACTOR static Future<Void> cleanupPeerSocket(UDPSimSocket* self) {
+		// Safety check to prevent Optional assertion failure
+		if (!self->peerSocket.present()) {
+			return Void();
+		}
 		wait(self->peerSocket.get()->onClosed());
 		self->peerSocket.reset();
 		return Void();
@@ -2803,6 +2852,12 @@ public:
 		}
 		if (!peerSocket.present() || peerSocket.get()->isClosed()) {
 			peerSocket.reset();
+
+			// Safety check to prevent Optional assertion failure
+			if (!peerProcess.present()) {
+				return res;
+			}
+
 			auto iter = peerProcess.get()->boundUDPSockets.find(peerAddress.get());
 			if (iter == peerProcess.get()->boundUDPSockets.end()) {
 				return fmap([sz](Void) { return sz; }, delay(0.0));

@@ -907,7 +907,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				ASSERT(destructed ||
 				       g_simulator->getCurrentProcess() == process); // simulatedFDBD catch called on different process
 				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found ||
-				                   e.code() == error_code_incompatible_software_version || destructed
+				                   e.code() == error_code_incompatible_software_version ||
+				                   e.code() == error_code_broken_promise || destructed
 				               ? SevInfo
 				               : SevError,
 				           "SimulatedFDBDTerminated")

@@ -211,11 +211,34 @@ struct BulkSetupWorkload : TestWorkload {
 							wait(tr.commit());
 							break;
 						} catch (Error& e) {
+							// Handle tenant cleanup gracefully - if tenant is deleted during cleanup, skip clearing
+							if (e.code() == error_code_tenant_not_found) {
+								TraceEvent(SevInfo, "BulkSetupTenantAlreadyDeleted")
+								    .detail("Reason",
+								            "Tenant was already deleted during cleanup, skipping clear operation")
+								    .detail("TenantName", tenant->name.get())
+								    .detail("TenantId", tenant->id())
+								    .detail("ErrorCode", e.code());
+								break; // Skip clearing since tenant is already gone
+							}
 							wait(tr.onError(e));
 						}
 					}
 					// delete the tenant
-					wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant->name.get(), tenant->id())));
+					try {
+						wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant->name.get(), tenant->id())));
+					} catch (Error& e) {
+						// Handle tenant cleanup gracefully - if tenant is already deleted, that's fine
+						if (e.code() == error_code_tenant_not_found) {
+							TraceEvent(SevInfo, "BulkSetupTenantAlreadyDeletedAPI")
+							    .detail("Reason", "Tenant was already deleted by another process")
+							    .detail("TenantName", tenant->name.get())
+							    .detail("TenantId", tenant->id())
+							    .detail("ErrorCode", e.code());
+						} else {
+							throw; // Re-throw other errors
+						}
+					}
 				}
 			}
 		}
