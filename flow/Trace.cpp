@@ -266,7 +266,6 @@ public:
 		};
 		void action(WriteBuffer& a) {
 			for (const auto& event : a.events) {
-				event.validateFormat();
 				logWriter->write(formatter->formatEvent(event));
 			}
 
@@ -1785,51 +1784,6 @@ std::string TraceEventFields::toString() const {
 	}
 
 	return str;
-}
-
-// ChatGPT generated code to return true iff `name` is a valid Prometheus
-// metric name. Below we call this on trace event fields for the reason
-// that we are contemplating converting fields in trace events to metrics
-// in downstream Prometheus-compatible metrics systems.
-bool isValidPrometheusMetricName(std::string_view name) {
-	if (name.empty()) {
-		return false;
-	}
-
-	// First character: [a-zA-Z_:]
-	char first = name.front();
-	if (!(std::isalpha(static_cast<unsigned char>(first)) || first == '_' || first == ':')) {
-		return false;
-	}
-
-	// Rest: [a-zA-Z0-9_:]*
-	for (size_t i = 1; i < name.size(); ++i) {
-		char c = name[i];
-		if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == ':')) {
-			return false;
-		}
-	}
-
-	// Reserved prefix check: names starting with "__" are reserved
-	if (name.size() >= 2 && name[0] == '_' && name[1] == '_') {
-		return false;
-	}
-
-	return true;
-}
-
-void TraceEventFields::validateFormat() const {
-	// FIXME: this condition should be expanded to include any unit test mode.
-	if (g_network && g_network->isSimulated()) {
-		for (Field field : fields) {
-			if (!isValidPrometheusMetricName(field.first.c_str())) {
-				fprintf(stderr,
-				        "Trace event detail name `%s' is invalid in:\n\t%s\n",
-				        field.first.c_str(),
-				        toString().c_str());
-			}
-		}
-	}
 }
 
 std::string traceableStringToString(const char* value, size_t S) {

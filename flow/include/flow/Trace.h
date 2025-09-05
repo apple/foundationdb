@@ -586,8 +586,6 @@ void disposeTraceFileWriter();
 std::string getTraceFormatExtension();
 uint64_t getTraceThreadId();
 
-bool isValidPrometheusMetricName(std::string_view name);
-
 template <class T>
 class Future;
 class Void;
