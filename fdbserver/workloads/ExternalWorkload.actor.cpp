@@ -103,6 +103,15 @@ struct FDBLoggerImpl : FDBLogger {
 namespace capi {
 #include "foundationdb/CWorkload.h"
 }
+
+namespace common {
+capi::FDBFuture* delay(double seconds) {
+	ThreadFuture<Void> future =
+	    onMainThread([seconds]() -> Future<Void> { return g_network->delay(seconds, TaskPriority::DefaultDelay); });
+	return (capi::FDBFuture*)future.extractPtr();
+}
+} // namespace common
+
 namespace translator {
 template <typename T>
 struct Wrapper {
@@ -224,11 +233,6 @@ int64_t sharedRandomNumber(capi::OpaqueWorkloadContext* c_context) {
 	auto context = (FDBWorkloadContext*)c_context;
 	return context->sharedRandomNumber();
 }
-capi::FDBFuture* delay(double seconds) {
-	ThreadFuture<Void> future =
-	    onMainThread([seconds]() -> Future<Void> { return g_network->delay(seconds, TaskPriority::DefaultDelay); });
-	return (capi::FDBFuture*)future.extractPtr();
-}
 capi::FDBWorkloadContext wrap(FDBWorkloadContext* context) {
 	return capi::FDBWorkloadContext{
 		.inner = (capi::OpaqueWorkloadContext*)context,
@@ -241,7 +245,7 @@ capi::FDBWorkloadContext wrap(FDBWorkloadContext* context) {
 		.clientId = clientId,
 		.clientCount = clientCount,
 		.sharedRandomNumber = sharedRandomNumber,
-		.delay = delay,
+		.delay = common::delay,
 	};
 }
 } // namespace context
@@ -461,6 +465,8 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	int clientCount() const override { return WorkloadContext::clientCount; }
 
 	int64_t sharedRandomNumber() const override { return WorkloadContext::sharedRandomNumber; }
+
+	FDBFuture* delay(double seconds) const override { return common::delay(seconds); }
 };
 } // namespace
 
