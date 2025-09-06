@@ -92,15 +92,12 @@ bool PolicyOne::validate(std::vector<LocalityEntry> const& solutionSet,
 	return ((solutionSet.size() > 0) && (fromServers->size() > 0));
 }
 
-PolicyAcross::PolicyAcross(int count,
-                           std::string const& attribKey,
-                           Reference<IReplicationPolicy> const policy,
-                           bool cacheable)
-  : _count(count), _attribKey(attribKey), _policy(policy), _cacheable(cacheable) {
+PolicyAcross::PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy)
+  : _count(count), _attribKey(attribKey), _policy(policy) {
 	return;
 }
 
-PolicyAcross::PolicyAcross() : _policy(new PolicyOne()), _cacheable(false) {}
+PolicyAcross::PolicyAcross() : _policy(new PolicyOne()) {}
 
 PolicyAcross::~PolicyAcross() {}
 
@@ -189,13 +186,18 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 	AttribKey indexKey;
 	AttribKey groupIndexKey;
 
-	if (fromServers->_localitygroup->cachedKey.present()) {
-		indexKey = groupIndexKey = fromServers->_localitygroup->cachedKey.get();
+	if (fromServers->_localitygroup->_cachedAttribName.present() &&
+	    fromServers->_localitygroup->_cachedAttribName.get() == _attribKey &&
+	    fromServers->_localitygroup->_cachedKey.present()) {
+		indexKey = groupIndexKey = fromServers->_localitygroup->_cachedKey.get();
 	} else {
 		indexKey = fromServers->keyIndex(_attribKey);
 		groupIndexKey = fromServers->getGroupKeyIndex(indexKey);
-		if (_cacheable) {
-			fromServers->_localitygroup->cachedKey = groupIndexKey;
+		// Only cache known-safe pattern: PolicyAcross(PolicyOne) with maxdepth=2
+		if (isSingleAcrossOverPolicyOne()) {
+			ASSERT_WE_THINK(indexKey == groupIndexKey);
+			fromServers->_localitygroup->_cachedAttribName = _attribKey;
+			fromServers->_localitygroup->_cachedKey = groupIndexKey;
 		}
 	}
 	int resultsSize, resultsAdded;
