@@ -134,6 +134,7 @@ std::string BackupDescription::toString() const {
 	info.append(format("URL: %s\n", url.c_str()));
 	info.append(format("Restorable: %s\n", maxRestorableVersion.present() ? "true" : "false"));
 	info.append(format("Partitioned logs: %s\n", partitioned ? "true" : "false"));
+	info.append(format("File-level encryption: %s\n", fileLevelEncryption ? "true" : "false"));
 
 	auto formatVersion = [&](Version v) {
 		std::string s;
@@ -346,6 +347,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 		r->encryptionKeyFileName = encryptionKeyFileName;
 		r->URL = url;
+
 		return r;
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)

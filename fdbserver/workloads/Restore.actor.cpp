@@ -60,8 +60,10 @@ struct RestoreWorkload : TestWorkload {
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
 
 		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
-		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
-			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
+		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
+		// Only set encryptionKeyFileName if the encryption key file exists during backup.
+		if (fileExists(keyFileName)) {
+			encryptionKeyFileName = keyFileName;
 		}
 
 		randomID = nondeterministicRandom()->randomUniqueID();
