@@ -2504,6 +2504,7 @@ int main(int argc, char* argv[]) {
 			setupRunLoopProfiler();
 			auto m =
 			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
+			auto metricsReportActor = metricsReport();
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_UNIT_TESTS,
 			                       TEST_HERE,
