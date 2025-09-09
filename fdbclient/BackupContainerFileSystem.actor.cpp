@@ -1512,7 +1512,8 @@ Future<Void> BackupContainerFileSystem::expireData(Version expireEndVersion,
 }
 
 Future<Void> BackupContainerFileSystem::writeEncryptionMetadata() {
-	return BackupContainerFileSystemImpl::writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem>::addRef(this));
+	return BackupContainerFileSystemImpl::writeEncryptionMetadataIfNotExists(
+	    Reference<BackupContainerFileSystem>::addRef(this));
 }
 
 ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,

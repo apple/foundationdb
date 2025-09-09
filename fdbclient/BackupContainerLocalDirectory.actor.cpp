@@ -234,7 +234,7 @@ Future<bool> BackupContainerLocalDirectory::exists() {
 Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std::string& path) {
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
 	// Skip encryption for properties/ folder
-	if (usesEncryption()  && !StringRef(path).startsWith("properties/"_sr)) {
+	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
 		flags |= IAsyncFile::OPEN_ENCRYPTED;
 	}
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::readFile");
