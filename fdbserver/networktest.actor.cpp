@@ -356,8 +356,10 @@ struct P2PNetworkTest {
 	RandomIntRange waitReadMilliseconds;
 	// Random delay before socket writes
 	RandomIntRange waitWriteMilliseconds;
-
+	// Test duration seconds
+	double duration;
 	double startTime;
+	double globalStartTime;
 	int64_t bytesSent;
 	int64_t bytesReceived;
 	int sessionsIn;
@@ -376,11 +378,13 @@ struct P2PNetworkTest {
 		    bytesSent / elapsed / 1e6,
 		    sessionsIn / elapsed,
 		    sessionsOut / elapsed);
-		s += format("Total Errors %d  connect=%d  accept=%d  session=%d",
+		s += format("Total Errors %d  connect=%d  accept=%d  session=%d  ",
 		            connectErrors + acceptErrors + sessionErrors,
 		            connectErrors,
 		            acceptErrors,
 		            sessionErrors);
+		s += format("Remaining time %.0f seconds",
+		            duration > 0 ? std::max(0.0, duration - (now() - globalStartTime)) : 0.0);
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -399,10 +403,11 @@ struct P2PNetworkTest {
 	               RandomIntRange requests,
 	               RandomIntRange idleMilliseconds,
 	               RandomIntRange waitReadMilliseconds,
-	               RandomIntRange waitWriteMilliseconds)
+	               RandomIntRange waitWriteMilliseconds,
+	               double duration)
 	  : connectionsOut(connectionsOut), requestBytes(sendMsgBytes), replyBytes(recvMsgBytes), requests(requests),
 	    idleMilliseconds(idleMilliseconds), waitReadMilliseconds(waitReadMilliseconds),
-	    waitWriteMilliseconds(waitWriteMilliseconds) {
+	    waitWriteMilliseconds(waitWriteMilliseconds), duration(duration) {
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -586,6 +591,7 @@ struct P2PNetworkTest {
 		state ActorCollection actors(false);
 
 		self->startTime = now();
+		self->globalStartTime = self->startTime;
 
 		fmt::print("{0} listeners, {1} remotes, {2} outgoing connections\n",
 		           self->listeners.size(),
@@ -623,7 +629,12 @@ struct P2PNetworkTest {
 		loop {
 			wait(delay(1.0, TaskPriority::Max));
 			printf("%s\n", self->statsString().c_str());
+			if (self->duration > 0 && now() - self->globalStartTime > self->duration) {
+				break;
+			}
 		}
+
+		return Void();
 	}
 
 	Future<Void> run() { return run_impl(this); }
@@ -652,7 +663,8 @@ TEST_CASE(":/network/p2ptest") {
 	                         params.get("requests").orDefault("10:10000"),
 	                         params.get("idleMilliseconds").orDefault("0"),
 	                         params.get("waitReadMilliseconds").orDefault("0"),
-	                         params.get("waitWriteMilliseconds").orDefault("0"));
+	                         params.get("waitWriteMilliseconds").orDefault("0"),
+	                         params.getDouble("duration").orDefault(0.0));
 
 	wait(p2p.run());
 	return Void();
