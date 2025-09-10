@@ -356,8 +356,7 @@ struct P2PNetworkTest {
 	RandomIntRange waitReadMilliseconds;
 	// Random delay before socket writes
 	RandomIntRange waitWriteMilliseconds;
-	// Test duration seconds
-	double duration;
+	double targetDuration;
 	double startTime;
 	double globalStartTime;
 	int64_t bytesSent;
@@ -378,13 +377,13 @@ struct P2PNetworkTest {
 		    bytesSent / elapsed / 1e6,
 		    sessionsIn / elapsed,
 		    sessionsOut / elapsed);
-		s += format("Total Errors %d  connect=%d  accept=%d  session=%d  ",
+		s += format("Total Errors %d  connect error=%d  accept error=%d  session error=%d  ",
 		            connectErrors + acceptErrors + sessionErrors,
 		            connectErrors,
 		            acceptErrors,
 		            sessionErrors);
 		s += format("Remaining time %.0f seconds",
-		            duration > 0 ? std::max(0.0, duration - (now() - globalStartTime)) : 0.0);
+		            targetDuration > 0 ? std::max(0.0, targetDuration - (now() - globalStartTime)) : 0.0);
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -404,10 +403,10 @@ struct P2PNetworkTest {
 	               RandomIntRange idleMilliseconds,
 	               RandomIntRange waitReadMilliseconds,
 	               RandomIntRange waitWriteMilliseconds,
-	               double duration)
+	               double targetDuration)
 	  : connectionsOut(connectionsOut), requestBytes(sendMsgBytes), replyBytes(recvMsgBytes), requests(requests),
 	    idleMilliseconds(idleMilliseconds), waitReadMilliseconds(waitReadMilliseconds),
-	    waitWriteMilliseconds(waitWriteMilliseconds), duration(duration) {
+	    waitWriteMilliseconds(waitWriteMilliseconds), targetDuration(targetDuration) {
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -629,7 +628,7 @@ struct P2PNetworkTest {
 		loop {
 			wait(delay(1.0, TaskPriority::Max));
 			printf("%s\n", self->statsString().c_str());
-			if (self->duration > 0 && now() - self->globalStartTime > self->duration) {
+			if (self->targetDuration > 0 && now() - self->globalStartTime > self->targetDuration) {
 				break;
 			}
 		}
@@ -663,7 +662,7 @@ TEST_CASE(":/network/p2ptest") {
 	                         params.get("idleMilliseconds").orDefault("0"),
 	                         params.get("waitReadMilliseconds").orDefault("0"),
 	                         params.get("waitWriteMilliseconds").orDefault("0"),
-	                         params.getDouble("duration").orDefault(0.0));
+	                         params.getDouble("targetDuration").orDefault(0.0));
 
 	wait(p2p.run());
 	return Void();
