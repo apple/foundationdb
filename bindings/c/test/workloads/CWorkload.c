@@ -33,7 +33,7 @@ fdb_error_t fdb_future_set_callback(FDBFuture* f, FDBCallback callback, void* ca
 typedef struct CWorkload {
 	char* name;
 	int client_id;
-	FDBWorkloadContext* context;
+	FDBWorkloadContext context;
 } CWorkload;
 
 typedef struct DelayParameter {
@@ -44,8 +44,7 @@ typedef struct DelayParameter {
 } DelayParameter;
 
 #define BIND(W) CWorkload* this = (CWorkload*)W
-#define WITH(C, M, ...) (C).M((C).inner, ##__VA_ARGS__)
-#define WITHP(C, M, ...) (C)->M((C)->inner, ##__VA_ARGS__)
+#define WITH(C, M, ...) (C).vt->M((C).inner, ##__VA_ARGS__)
 #define EXPORT extern __attribute__((visibility("default")))
 
 static void delay_callback(void* f, DelayParameter* param) {
@@ -54,7 +53,7 @@ static void delay_callback(void* f, DelayParameter* param) {
 	       this->name,
 	       this->client_id,
 	       param->expected,
-	       WITHP(this->context, now) - param->start);
+	       WITH(this->context, now) - param->start);
 	WITH(param->done, send, true);
 	WITH(param->done, free);
 	free(param);
@@ -67,7 +66,7 @@ static void workload_setup(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPro
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "setup" },
 	};
-	WITHP(this->context, trace, FDBSeverity_Debug, "Test", details, 2);
+	WITH(this->context, trace, FDBSeverity_Debug, "Test", details, 2);
 	WITH(done, send, true);
 	WITH(done, free);
 }
@@ -78,15 +77,15 @@ static void workload_start(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPro
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "start" },
 	};
-	WITHP(this->context, trace, FDBSeverity_Debug, "Test", details, 2);
+	WITH(this->context, trace, FDBSeverity_Debug, "Test", details, 2);
 
 	double amount = 100 + this->client_id * 10;
 	DelayParameter* param = malloc(sizeof(DelayParameter));
 	param->workload = this;
 	param->expected = amount;
-	param->start = WITHP(this->context, now);
+	param->start = WITH(this->context, now);
 	param->done = done;
-	FDBFuture* f = this->context->delay(amount);
+	FDBFuture* f = WITH(this->context, delay, amount);
 	fdb_future_set_callback(f, (FDBCallback)delay_callback, param);
 }
 static void workload_check(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
@@ -96,7 +95,7 @@ static void workload_check(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPro
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "check" },
 	};
-	WITHP(this->context, trace, FDBSeverity_Debug, "Test", details, 2);
+	WITH(this->context, trace, FDBSeverity_Debug, "Test", details, 2);
 	WITH(done, send, true);
 	WITH(done, free);
 }
@@ -118,22 +117,36 @@ static void workload_free(OpaqueWorkload* raw_workload) {
 	free(this);
 }
 
-EXPORT FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext* context) {
+static struct FDBWorkload_VT CWorkload_vt = {
+	.free = workload_free,
+	.setup = workload_setup,
+	.start = workload_start,
+	.check = workload_check,
+	.getMetrics = workload_getMetrics,
+	.getCheckTimeout = workload_getCheckTimeout,
+};
+
+EXPORT FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext context) {
 	int len = strlen(borrow_name) + 1;
 	char* name = (char*)malloc(len);
 	memcpy(name, borrow_name, len);
 
-	int client_id = WITHP(context, clientId);
-	int client_count = WITHP(context, clientCount);
+	int client_id = WITH(context, clientId);
+	int client_count = WITH(context, clientCount);
 	printf("workloadCFactory(%s)[%d/%d]\n", name, client_id, client_count);
 
 	FDBString my_c_option;
-	my_c_option = WITHP(context, getOption, "my_c_option", "null");
+	my_c_option = WITH(context, getOption, "my_c_option", "null");
 	printf("my_c_option: \"%s\"\n", my_c_option.inner);
 	WITH(my_c_option, free);
-	my_c_option = WITHP(context, getOption, "my_c_option", "null");
+	my_c_option = WITH(context, getOption, "my_c_option", "null");
 	printf("my_c_option: \"%s\"\n", my_c_option.inner);
 	WITH(my_c_option, free);
+
+	printf("c_init(%s_%d) rnd: %u\n", name, client_id, WITH(context, rnd));
+	printf("c_init(%s_%d) rnd: %u\n", name, client_id, WITH(context, rnd));
+	printf("c_init(%s_%d) shared_rnd: %lu\n", name, client_id, WITH(context, sharedRandomNumber));
+	printf("c_init(%s_%d) shared_rnd: %lu\n", name, client_id, WITH(context, sharedRandomNumber));
 
 	CWorkload* workload = (CWorkload*)malloc(sizeof(CWorkload));
 	workload->name = name;
@@ -142,11 +155,6 @@ EXPORT FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext*
 
 	return (FDBWorkload){
 		.inner = (OpaqueWorkload*)workload,
-		.setup = workload_setup,
-		.start = workload_start,
-		.check = workload_check,
-		.getMetrics = workload_getMetrics,
-		.getCheckTimeout = workload_getCheckTimeout,
-		.free = workload_free,
+		.vt = &CWorkload_vt,
 	};
 }

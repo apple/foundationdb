@@ -103,15 +103,6 @@ struct FDBLoggerImpl : FDBLogger {
 namespace capi {
 #include "foundationdb/CWorkload.h"
 }
-
-namespace common {
-capi::FDBFuture* delay(double seconds) {
-	ThreadFuture<Void> future =
-	    onMainThread([seconds]() -> Future<Void> { return g_network->delay(seconds, TaskPriority::DefaultDelay); });
-	return (capi::FDBFuture*)future.extractPtr();
-}
-} // namespace common
-
 namespace translator {
 template <typename T>
 struct Wrapper {
@@ -135,10 +126,13 @@ void push(capi::OpaqueMetrics* c_metrics, capi::FDBMetric c_metric) {
 	metrics->emplace_back(metric);
 }
 capi::FDBMetrics wrap(std::vector<FDBPerfMetric>* metrics) {
-	return capi::FDBMetrics{
-		.inner = (capi::OpaqueMetrics*)metrics,
+	static capi::FDBMetrics::FDBMetrics_VT vt = {
 		.reserve = reserve,
 		.push = push,
+	};
+	return capi::FDBMetrics{
+		.inner = (capi::OpaqueMetrics*)metrics,
+		.vt = &vt,
 	};
 }
 } // namespace metrics
@@ -153,11 +147,14 @@ void free(capi::OpaquePromise* c_promise) {
 	delete promise;
 }
 capi::FDBPromise wrap(GenericPromise<bool> promise) {
+	static capi::FDBPromise::FDBPromise_VT vt{
+		.free = free,
+		.send = send,
+	};
 	auto wrapped = new Wrapper<GenericPromise<bool>>{ promise };
 	return capi::FDBPromise{
 		.inner = (capi::OpaquePromise*)wrapped,
-		.send = send,
-		.free = free,
+		.vt = &vt,
 	};
 }
 } // namespace promise
@@ -211,6 +208,9 @@ uint32_t rnd(capi::OpaqueWorkloadContext* c_context) {
 	return context->rnd();
 }
 capi::FDBString getOption(capi::OpaqueWorkloadContext* c_context, const char* name, const char* defaultValue) {
+	static capi::FDBString::FDBString_VT vt{
+		.free = (void (*)(const char*))free,
+	};
 	auto context = (FDBWorkloadContext*)c_context;
 	std::string value = context->getOption(name, std::string(defaultValue));
 	size_t len = value.length() + 1;
@@ -218,7 +218,7 @@ capi::FDBString getOption(capi::OpaqueWorkloadContext* c_context, const char* na
 	memcpy(c_value, value.c_str(), len);
 	return capi::FDBString{
 		.inner = c_value,
-		.free = (void (*)(const char*))free,
+		.vt = &vt,
 	};
 }
 int clientId(capi::OpaqueWorkloadContext* c_context) {
@@ -233,9 +233,12 @@ int64_t sharedRandomNumber(capi::OpaqueWorkloadContext* c_context) {
 	auto context = (FDBWorkloadContext*)c_context;
 	return context->sharedRandomNumber();
 }
+FDBFuture* delay(capi::OpaqueWorkloadContext* c_context, double seconds) {
+	auto context = (FDBWorkloadContext*)c_context;
+	return context->delay(seconds);
+}
 capi::FDBWorkloadContext wrap(FDBWorkloadContext* context) {
-	return capi::FDBWorkloadContext{
-		.inner = (capi::OpaqueWorkloadContext*)context,
+	static capi::FDBWorkloadContext::FDBWorkloadContext_VT vt{
 		.trace = trace,
 		.getProcessID = getProcessID,
 		.setProcessID = setProcessID,
@@ -245,38 +248,38 @@ capi::FDBWorkloadContext wrap(FDBWorkloadContext* context) {
 		.clientId = clientId,
 		.clientCount = clientCount,
 		.sharedRandomNumber = sharedRandomNumber,
-		.delay = common::delay,
+		.delay = delay,
+	};
+	return capi::FDBWorkloadContext{
+		.inner = (capi::OpaqueWorkloadContext*)context,
+		.vt = &vt,
 	};
 }
 } // namespace context
 
 class Workload : public FDBWorkload {
 private:
-	capi::FDBWorkload workload;
-	Wrapper<capi::FDBWorkloadContext>* context;
+	capi::OpaqueWorkload* inner;
+	capi::FDBWorkload::FDBWorkload_VT* vt;
 
 public:
-	Workload(capi::FDBWorkload c_workload, Wrapper<capi::FDBWorkloadContext>* c_context)
-	  : workload(c_workload), context(c_context) {}
-	~Workload() {
-		this->workload.free(this->workload.inner);
-		delete this->context;
-	}
+	Workload(capi::FDBWorkload c_workload) : inner(c_workload.inner), vt(c_workload.vt) {}
+	~Workload() { this->vt->free(this->inner); }
 
 	virtual bool init(FDBWorkloadContext* context) override { return true; }
 	virtual void setup(FDBDatabase* db, GenericPromise<bool> done) override {
-		return this->workload.setup(this->workload.inner, (capi::FDBDatabase*)db, promise::wrap(done));
+		return this->vt->setup(this->inner, (capi::FDBDatabase*)db, promise::wrap(done));
 	}
 	virtual void start(FDBDatabase* db, GenericPromise<bool> done) override {
-		return this->workload.start(this->workload.inner, (capi::FDBDatabase*)db, promise::wrap(done));
+		return this->vt->start(this->inner, (capi::FDBDatabase*)db, promise::wrap(done));
 	}
 	virtual void check(FDBDatabase* db, GenericPromise<bool> done) override {
-		return this->workload.check(this->workload.inner, (capi::FDBDatabase*)db, promise::wrap(done));
+		return this->vt->check(this->inner, (capi::FDBDatabase*)db, promise::wrap(done));
 	}
 	virtual void getMetrics(std::vector<FDBPerfMetric>& out) const override {
-		this->workload.getMetrics(this->workload.inner, metrics::wrap(&out));
+		this->vt->getMetrics(this->inner, metrics::wrap(&out));
 	}
-	virtual double getCheckTimeout() override { return this->workload.getCheckTimeout(this->workload.inner); }
+	virtual double getCheckTimeout() override { return this->vt->getCheckTimeout(this->inner); }
 };
 } // namespace translator
 
@@ -325,7 +328,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		}
 
 		if (useCAPI) {
-			capi::FDBWorkload (*workloadCFactory)(const char*, capi::FDBWorkloadContext*);
+			capi::FDBWorkload (*workloadCFactory)(const char*, capi::FDBWorkloadContext);
 			workloadCFactory = reinterpret_cast<decltype(workloadCFactory)>(loadFunction(library, "workloadCFactory"));
 			if (workloadCFactory == nullptr) {
 				TraceEvent(SevError, "ExternalCFactoryNotFound").log();
@@ -333,9 +336,8 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 				return;
 			}
 			auto name = wName.toString();
-			auto c_context = new translator::Wrapper<capi::FDBWorkloadContext>{ translator::context::wrap(this) };
-			capi::FDBWorkload c_workload = (*workloadCFactory)(name.c_str(), (capi::FDBWorkloadContext*)c_context);
-			workloadImpl = std::make_shared<translator::Workload>(c_workload, c_context);
+			capi::FDBWorkload c_workload = (*workloadCFactory)(name.c_str(), translator::context::wrap(this));
+			workloadImpl = std::make_shared<translator::Workload>(c_workload);
 		} else {
 			FDBWorkloadFactory* (*workloadFactory)(FDBLogger*);
 			workloadFactory = reinterpret_cast<decltype(workloadFactory)>(loadFunction(library, "workloadFactory"));
@@ -472,7 +474,11 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 
 	int64_t sharedRandomNumber() const override { return WorkloadContext::sharedRandomNumber; }
 
-	FDBFuture* delay(double seconds) const override { return common::delay(seconds); }
+	FDBFuture* delay(double seconds) const override {
+		ThreadFuture<Void> future =
+		    onMainThread([seconds]() -> Future<Void> { return g_network->delay(seconds, TaskPriority::DefaultDelay); });
+		return (capi::FDBFuture*)future.extractPtr();
+	}
 };
 } // namespace
 
