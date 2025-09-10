@@ -10,7 +10,7 @@ struct MockWorkload {
 }
 
 impl RustWorkload for MockWorkload {
-    fn setup(&'static mut self, _db: MockDatabase, done: Promise) {
+    fn setup(&mut self, _db: MockDatabase, done: Promise) {
         println!("rust_setup({}_{})", self.name, self.client_id);
         self.context.trace(
             Severity::Debug,
@@ -19,7 +19,7 @@ impl RustWorkload for MockWorkload {
         );
         done.send(true);
     }
-    fn start(&'static mut self, _db: MockDatabase, done: Promise) {
+    fn start(&mut self, _db: MockDatabase, done: Promise) {
         println!("rust_start({}_{})", self.name, self.client_id);
         self.context.trace(
             Severity::Debug,
@@ -28,7 +28,7 @@ impl RustWorkload for MockWorkload {
         );
         done.send(true);
     }
-    fn check(&'static mut self, _db: MockDatabase, done: Promise) {
+    fn check(&mut self, _db: MockDatabase, done: Promise) {
         println!("rust_check({}_{})", self.name, self.client_id);
         self.context.trace(
             Severity::Debug,
@@ -77,7 +77,7 @@ impl RustWorkloadFactory for MockFactory {
             context.get_option::<String>("my_rust_option")
         );
         match name.as_str() {
-            "MockWorkload" => WrappedWorkload::new(MockWorkload::new(name, client_id, context)),
+            "MockWorkload" => MockWorkload::new(name, client_id, context).wrap(),
             _ => panic!("Unknown workload name: {name}"),
         }
     }
