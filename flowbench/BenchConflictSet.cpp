@@ -20,10 +20,11 @@
 
 #include "benchmark/benchmark.h"
 #include "flow/IRandom.h"
+#include "flow/Error.h"
 #include <vector>
 #include <algorithm>
 #include <cstdint>
-#include <unordered_map>
+#include <limits>
 
 // ============================================================================
 // Current MiniConflictSet implementation (from SkipList.cpp)
@@ -47,41 +48,44 @@ public:
 };
 
 // ============================================================================
-// CacheOptimizedConflictSet implementation
+// WordBitsetConflictSet implementation
 // ============================================================================
-class CacheOptimizedConflictSet {
+class WordBitsetConflictSet {
 	std::vector<uint64_t> words;
-	size_t size_;
 
 public:
-	explicit CacheOptimizedConflictSet(size_t size) : size_(size) { words.resize((size + 63) / 64, 0); }
+	explicit WordBitsetConflictSet(size_t size) {
+		ASSERT(size <= std::numeric_limits<size_t>::max() - 63); // Prevent overflow in (size + 63)
+		words.resize((size + 63) / 64, 0);
+	}
 
 	void set(int begin, int end) {
 		if (end <= begin)
 			return;
 
-		const int wordBegin = begin / 64;
-		const int wordEnd = (end - 1) / 64;
+		const size_t wordBegin = static_cast<size_t>(begin) / 64;
+		const size_t wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
 
 		if (wordBegin == wordEnd) {
 			// Single word case
-			const int bitStart = begin % 64;
-			const int numBits = end - begin;
+			const size_t bitStart = static_cast<size_t>(begin) % 64;
+			const size_t numBits = static_cast<size_t>(end - begin);
 
+			ASSERT(numBits <= 64); // Single word should never span > 64 bits
 			uint64_t mask;
-			if (numBits >= 64) {
+			if (numBits == 64) {
 				mask = ~0ULL;
 			} else {
 				mask = ((1ULL << numBits) - 1) << bitStart;
 			}
 			words[wordBegin] |= mask;
 		} else {
-			// Multi-word case
-			words[wordBegin] |= ~0ULL << (begin % 64);
-			for (int w = wordBegin + 1; w < wordEnd; w++) {
+			// Multi-word case: wordBegin (partial) + middle words (full) + wordEnd (partial)
+			words[wordBegin] |= ~0ULL << (static_cast<size_t>(begin) % 64);
+			for (size_t w = wordBegin + 1; w < wordEnd; w++) { // Fill middle words completely
 				words[w] = ~0ULL;
 			}
-			words[wordEnd] |= ~0ULL >> (63 - ((end - 1) % 64));
+			words[wordEnd] |= ~0ULL >> (63 - (static_cast<size_t>(end - 1) % 64));
 		}
 	}
 
@@ -89,16 +93,16 @@ public:
 		if (end <= begin)
 			return false;
 
-		const int wordBegin = begin / 64;
-		const int wordEnd = (end - 1) / 64;
+		const size_t wordBegin = static_cast<size_t>(begin) / 64;
+		const size_t wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
 
-		for (int w = wordBegin; w <= wordEnd; w++) {
+		for (size_t w = wordBegin; w <= wordEnd; w++) { // Check all words including wordEnd
 			uint64_t mask = ~0ULL;
 			if (w == wordBegin) {
-				mask &= (~0ULL << (begin % 64));
+				mask &= (~0ULL << (static_cast<size_t>(begin) % 64));
 			}
 			if (w == wordEnd) {
-				mask &= (~0ULL >> (63 - ((end - 1) % 64)));
+				mask &= (~0ULL >> (63 - (static_cast<size_t>(end - 1) % 64)));
 			}
 
 			if (words[w] & mask)
@@ -167,7 +171,7 @@ bool verifyCorrectness() {
 	const int keySpace = 1000;
 
 	MiniConflictSet mini(keySpace);
-	CacheOptimizedConflictSet cache(keySpace);
+	WordBitsetConflictSet cache(keySpace);
 
 	// Set the same ranges in both implementations
 	for (const auto& range : ranges) {
@@ -231,14 +235,14 @@ static void bench_MiniConflictSet_query(benchmark::State& state) {
 }
 
 // ============================================================================
-// Benchmarks - CacheOptimizedConflictSet implementation
+// Benchmarks - WordBitsetConflictSet implementation
 // ============================================================================
 template <int KeySpace, int NumRanges, int SparsityPercent>
-static void bench_CacheOptimizedConflictSet_set(benchmark::State& state) {
+static void bench_WordBitsetConflictSet_set(benchmark::State& state) {
 	const auto& ranges = getSharedWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
 
 	for (auto _ : state) {
-		CacheOptimizedConflictSet mcs(KeySpace);
+		WordBitsetConflictSet mcs(KeySpace);
 		for (const auto& range : ranges) {
 			mcs.set(range.begin, range.end);
 		}
@@ -250,11 +254,11 @@ static void bench_CacheOptimizedConflictSet_set(benchmark::State& state) {
 }
 
 template <int KeySpace, int NumRanges, int SparsityPercent>
-static void bench_CacheOptimizedConflictSet_query(benchmark::State& state) {
+static void bench_WordBitsetConflictSet_query(benchmark::State& state) {
 	const auto& writeRanges = getSharedWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
 	const auto& readRanges = getSharedQueryWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
 
-	CacheOptimizedConflictSet mcs(KeySpace);
+	WordBitsetConflictSet mcs(KeySpace);
 	for (const auto& range : writeRanges) {
 		mcs.set(range.begin, range.end);
 	}
@@ -314,8 +318,8 @@ static void bench_ConflictDetection_Realistic(benchmark::State& state) {
 			}
 			benchmark::DoNotOptimize(conflicts);
 		} else if constexpr (Implementation == 1) {
-			// CacheOptimizedConflictSet
-			CacheOptimizedConflictSet mcs(keySpace);
+			// WordBitsetConflictSet
+			WordBitsetConflictSet mcs(keySpace);
 
 			for (const auto& range : writeRanges) {
 				mcs.set(range.begin, range.end);
@@ -343,39 +347,32 @@ BENCHMARK(bench_CorrectnessTest)->Name("CorrectnessTest/VerifyAllImplementations
 
 // Small workloads (typical transaction batch)
 BENCHMARK_TEMPLATE(bench_MiniConflictSet_set, 1000, 50, 5)->Name("MiniConflictSet/set/small_sparse");
-BENCHMARK_TEMPLATE(bench_CacheOptimizedConflictSet_set, 1000, 50, 5)
-    ->Name("CacheOptimizedConflictSet/set/small_sparse");
+BENCHMARK_TEMPLATE(bench_WordBitsetConflictSet_set, 1000, 50, 5)->Name("WordBitsetConflictSet/set/small_sparse");
 
 BENCHMARK_TEMPLATE(bench_MiniConflictSet_query, 1000, 50, 5)->Name("MiniConflictSet/query/small_sparse");
-BENCHMARK_TEMPLATE(bench_CacheOptimizedConflictSet_query, 1000, 50, 5)
-    ->Name("CacheOptimizedConflictSet/query/small_sparse");
+BENCHMARK_TEMPLATE(bench_WordBitsetConflictSet_query, 1000, 50, 5)->Name("WordBitsetConflictSet/query/small_sparse");
 
 // Medium workloads (busy transaction batch)
 BENCHMARK_TEMPLATE(bench_MiniConflictSet_set, 5000, 200, 10)->Name("MiniConflictSet/set/medium_sparse");
-BENCHMARK_TEMPLATE(bench_CacheOptimizedConflictSet_set, 5000, 200, 10)
-    ->Name("CacheOptimizedConflictSet/set/medium_sparse");
+BENCHMARK_TEMPLATE(bench_WordBitsetConflictSet_set, 5000, 200, 10)->Name("WordBitsetConflictSet/set/medium_sparse");
 
 BENCHMARK_TEMPLATE(bench_MiniConflictSet_query, 5000, 200, 10)->Name("MiniConflictSet/query/medium_sparse");
-BENCHMARK_TEMPLATE(bench_CacheOptimizedConflictSet_query, 5000, 200, 10)
-    ->Name("CacheOptimizedConflictSet/query/medium_sparse");
+BENCHMARK_TEMPLATE(bench_WordBitsetConflictSet_query, 5000, 200, 10)->Name("WordBitsetConflictSet/query/medium_sparse");
 
 // Large workloads (high throughput scenario) - where optimization shines
 BENCHMARK_TEMPLATE(bench_MiniConflictSet_set, 20000, 500, 5)->Name("MiniConflictSet/set/large_sparse");
-BENCHMARK_TEMPLATE(bench_CacheOptimizedConflictSet_set, 20000, 500, 5)
-    ->Name("CacheOptimizedConflictSet/set/large_sparse");
+BENCHMARK_TEMPLATE(bench_WordBitsetConflictSet_set, 20000, 500, 5)->Name("WordBitsetConflictSet/set/large_sparse");
 
 BENCHMARK_TEMPLATE(bench_MiniConflictSet_query, 20000, 500, 5)->Name("MiniConflictSet/query/large_sparse");
-BENCHMARK_TEMPLATE(bench_CacheOptimizedConflictSet_query, 20000, 500, 5)
-    ->Name("CacheOptimizedConflictSet/query/large_sparse");
+BENCHMARK_TEMPLATE(bench_WordBitsetConflictSet_query, 20000, 500, 5)->Name("WordBitsetConflictSet/query/large_sparse");
 
 // Dense workloads (challenging for optimizations)
 BENCHMARK_TEMPLATE(bench_MiniConflictSet_set, 10000, 100, 50)->Name("MiniConflictSet/set/dense");
-BENCHMARK_TEMPLATE(bench_CacheOptimizedConflictSet_set, 10000, 100, 50)->Name("CacheOptimizedConflictSet/set/dense");
+BENCHMARK_TEMPLATE(bench_WordBitsetConflictSet_set, 10000, 100, 50)->Name("WordBitsetConflictSet/set/dense");
 
 BENCHMARK_TEMPLATE(bench_MiniConflictSet_query, 10000, 100, 50)->Name("MiniConflictSet/query/dense");
-BENCHMARK_TEMPLATE(bench_CacheOptimizedConflictSet_query, 10000, 100, 50)
-    ->Name("CacheOptimizedConflictSet/query/dense");
+BENCHMARK_TEMPLATE(bench_WordBitsetConflictSet_query, 10000, 100, 50)->Name("WordBitsetConflictSet/query/dense");
 
 // Realistic FoundationDB workload comparison
 BENCHMARK_TEMPLATE(bench_ConflictDetection_Realistic, 0)->Name("ConflictDetection/MiniConflictSet/realistic");
-BENCHMARK_TEMPLATE(bench_ConflictDetection_Realistic, 1)->Name("ConflictDetection/CacheOptimized/realistic");
+BENCHMARK_TEMPLATE(bench_ConflictDetection_Realistic, 1)->Name("ConflictDetection/WordBitsetConflictSet/realistic");
