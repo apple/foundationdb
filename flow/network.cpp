@@ -370,6 +370,10 @@ Future<Reference<IConnection>> INetworkConnections::connect(const std::string& h
 	// Wait for the endpoint to return, then wait for connect(endpoint) and return it.
 	// Template types are being provided explicitly because they can't be automatically deduced for some reason.
 	return mapAsync(pickEndpoint, [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> {
+		// Pass the original hostname for SNI if this is a TLS connection from hostname
+		if (addr.isTLS() && addr.fromHostname) {
+			return connectExternalWithHostname(addr, host);
+		}
 		return connectExternal(addr);
 	});
 }
