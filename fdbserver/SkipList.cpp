@@ -878,22 +878,68 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOl
 	transactionInfo.push_back(arena, info);
 }
 
-// SOMEDAY: This should probably be replaced with a roaring bitmap.
 class MiniConflictSet : NonCopyable {
-	std::vector<bool> values;
+	std::vector<uint64_t> words;
 
 public:
-	explicit MiniConflictSet(int size) { values.assign(size, false); }
-	void set(int begin, int end) {
-		for (int i = begin; i < end; i++)
-			values[i] = true;
+	explicit MiniConflictSet(size_t size) {
+		ASSERT(size <= std::numeric_limits<size_t>::max() - 63); // Prevent overflow in (size + 63)
+		words.resize((size + 63) / 64, 0);
 	}
-	bool any(int begin, int end) {
-		for (int i = begin; i < end; i++)
-			if (values[i])
+
+	void set(int begin, int end) {
+		if (end <= begin)
+			return;
+
+		const size_t wordBegin = static_cast<size_t>(begin) / 64;
+		const size_t wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
+
+		if (wordBegin == wordEnd) {
+			// Single word case
+			const size_t bitStart = static_cast<size_t>(begin) % 64;
+			const size_t numBits = static_cast<size_t>(end - begin);
+
+			ASSERT(numBits <= 64); // Single word should never span > 64 bits
+			uint64_t mask;
+			if (numBits == 64) {
+				mask = ~0ULL;
+			} else {
+				mask = ((1ULL << numBits) - 1) << bitStart;
+			}
+			words[wordBegin] |= mask;
+		} else {
+			// Multi-word case: wordBegin (partial) + middle words (full) + wordEnd (partial)
+			words[wordBegin] |= ~0ULL << (static_cast<size_t>(begin) % 64);
+			for (size_t w = wordBegin + 1; w < wordEnd; w++) { // Fill middle words completely
+				words[w] = ~0ULL;
+			}
+			words[wordEnd] |= ~0ULL >> (63 - (static_cast<size_t>(end - 1) % 64));
+		}
+	}
+
+	bool any(int begin, int end) const {
+		if (end <= begin)
+			return false;
+
+		const size_t wordBegin = static_cast<size_t>(begin) / 64;
+		const size_t wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
+
+		for (size_t w = wordBegin; w <= wordEnd; w++) { // Check all words including wordEnd
+			uint64_t mask = ~0ULL;
+			if (w == wordBegin) {
+				mask &= (~0ULL << (static_cast<size_t>(begin) % 64));
+			}
+			if (w == wordEnd) {
+				mask &= (~0ULL >> (63 - (static_cast<size_t>(end - 1) % 64)));
+			}
+
+			if (words[w] & mask)
 				return true;
+		}
 		return false;
 	}
+
+	void clear() { std::fill(words.begin(), words.end(), 0); }
 };
 
 void ConflictBatch::checkIntraBatchConflicts() {
