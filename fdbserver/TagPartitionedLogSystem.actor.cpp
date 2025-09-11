@@ -2359,14 +2359,17 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
  *     - "key" is present in "mapB"
  *     - each element in (the vector in) "mapA[key]" is present in (the vector in) "mapB[key]"
  * Assumes that the elements in the vectors in "mapA" and "mapB" are in sorted order.
+ * @note This function extends the functionality of "std::includes()" to containers of
+ * type "std::map<uint8_t, std::vector<uint16_t>>".
  */
 static bool isSubset(const std::map<uint8_t, std::vector<uint16_t>>& mapA,
                      const std::map<uint8_t, std::vector<uint16_t>>& mapB) {
 	for (const auto& [keyA, valueA] : mapA) {
-		if (mapB.find(keyA) == mapB.end()) {
+		auto it = mapB.find(keyA);
+		if (it == mapB.end()) {
 			return false;
 		}
-		const auto& valueB = mapB.at(keyA);
+		const auto& valueB = it->second;
 		if (!std::includes(valueB.begin(), valueB.end(), valueA.begin(), valueA.end())) {
 			return false;
 		}
@@ -2670,6 +2673,12 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			// Are the locked servers that were available in the previous iteration still available? If not,
 			// restart recovery (as there is a chance that the recovery of the previous iteration would stall).
 			knownLockedTLogIdsChanged = !isSubset(lastKnownLockedTLogIds, currentKnownLockedTLogIds);
+			if (knownLockedTLogIdsChanged) {
+				// @todo dump the contents of "lastKnownLockedTLogIds" and "currentKnownLockedTLogIds" here
+				TraceEvent("KnownLockedTLogIdsChanged")
+				    .detail("LastKnownLockedTLogIdCount", lastKnownLockedTLogIds.size())
+				    .detail("CurrentKnownLockedTLogIdCount", currentKnownLockedTLogIds.size());
+			}
 		}
 		if (maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get() || knownLockedTLogIdsChanged)) {
 			CODE_PROBE(lastEnd.present(), "Restarting recovery at an earlier point");
@@ -2688,6 +2697,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->lockResults = lockResults;
 			logSystem->knownLockedTLogIds = currentKnownLockedTLogIds;
 			lastKnownLockedTLogIds = std::move(currentKnownLockedTLogIds);
+			currentKnownLockedTLogIds.clear(); // ensures safety if accessed later
 			if (knownCommittedVersion > minEnd) {
 				knownCommittedVersion = minEnd;
 			}
