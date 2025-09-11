@@ -18,6 +18,8 @@ use raw_bindings::{
     FDBStringPair,
 };
 
+pub const FDB_WORKLOAD_API_VERSION: i32 = raw_bindings::FDB_WORKLOAD_API_VERSION as i32;
+
 // -----------------------------------------------------------------------------
 // String conversions
 
@@ -84,6 +86,10 @@ macro_rules! with {
 impl WorkloadContext {
     pub fn new(raw: FDBWorkloadContext) -> Self {
         Self(raw)
+    }
+    /// Get the server FDB_WORKLOAD_API_VERSION
+    pub fn get_workload_api_version(&self) -> i32 {
+        self.0.api_version
     }
     /// Add a log entry in the FoundationDB logs
     pub fn trace<S>(&self, severity: Severity, name: S, details: &[(&str, &str)])

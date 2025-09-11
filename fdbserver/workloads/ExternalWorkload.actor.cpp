@@ -251,6 +251,7 @@ capi::FDBWorkloadContext wrap(FDBWorkloadContext* context) {
 		.delay = delay,
 	};
 	return capi::FDBWorkloadContext{
+		.api_version = FDB_WORKLOAD_API_VERSION,
 		.inner = (capi::OpaqueWorkloadContext*)context,
 		.vt = &vt,
 	};
@@ -315,7 +316,6 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		libraryPath = ::getOption(options, "libraryPath"_sr, Value(getDefaultLibraryPath())).toString();
 		auto wName = ::getOption(options, "workloadName"_sr, ""_sr);
 		auto fullPath = joinPath(libraryPath, toLibName(libraryName));
-		std::cout << "ExternalWorkload::useCAPI: " << useCAPI << "\n";
 		TraceEvent("ExternalWorkloadLoad")
 		    .detail("LibraryName", libraryName)
 		    .detail("LibraryPath", fullPath)

@@ -6,6 +6,7 @@ mod mock;
 use bindings::{
     str_from_c, FDBDatabase, FDBMetrics, FDBPromise, FDBWorkload, FDBWorkloadContext,
     FDBWorkload_VT, Metric, Metrics, OpaqueWorkload, Promise, Severity, WorkloadContext,
+    FDB_WORKLOAD_API_VERSION,
 };
 
 /// Should be replaced by a Rust wrapper over the `FDBDatabase` bindings, like the one provided by foundationdb-rs
@@ -28,6 +29,7 @@ pub trait RustWorkload: Sized {
     fn wrap(self) -> WrappedWorkload {
         let inner = Box::into_raw(Box::new(self));
         WrappedWorkload {
+            api_version: FDB_WORKLOAD_API_VERSION,
             inner: inner as *mut _,
             vt: &Self::VT as *const _ as *mut _,
         }

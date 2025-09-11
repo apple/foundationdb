@@ -133,7 +133,12 @@ EXPORT FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext 
 
 	int client_id = WITH(context, clientId);
 	int client_count = WITH(context, clientCount);
-	printf("workloadCFactory(%s)[%d/%d]\n", name, client_id, client_count);
+	printf("workloadCFactory(%s)[%d/%d]: client_version: %d, server_version: %d\n",
+	       name,
+	       client_id,
+	       client_count,
+	       FDB_WORKLOAD_API_VERSION,
+	       context.api_version);
 
 	FDBString my_c_option;
 	my_c_option = WITH(context, getOption, "my_c_option", "null");
@@ -143,17 +148,13 @@ EXPORT FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext 
 	printf("my_c_option: \"%s\"\n", my_c_option.inner);
 	WITH(my_c_option, free);
 
-	printf("c_init(%s_%d) rnd: %u\n", name, client_id, WITH(context, rnd));
-	printf("c_init(%s_%d) rnd: %u\n", name, client_id, WITH(context, rnd));
-	printf("c_init(%s_%d) shared_rnd: %lu\n", name, client_id, WITH(context, sharedRandomNumber));
-	printf("c_init(%s_%d) shared_rnd: %lu\n", name, client_id, WITH(context, sharedRandomNumber));
-
 	CWorkload* workload = (CWorkload*)malloc(sizeof(CWorkload));
 	workload->name = name;
 	workload->client_id = client_id;
 	workload->context = context;
 
 	return (FDBWorkload){
+		.api_version = FDB_WORKLOAD_API_VERSION,
 		.inner = (OpaqueWorkload*)workload,
 		.vt = &CWorkload_vt,
 	};

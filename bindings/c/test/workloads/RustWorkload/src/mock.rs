@@ -1,6 +1,6 @@
 use crate::{
     register_factory, Metric, Metrics, MockDatabase, Promise, RustWorkload, RustWorkloadFactory,
-    Severity, WorkloadContext, WrappedWorkload,
+    Severity, WorkloadContext, WrappedWorkload, FDB_WORKLOAD_API_VERSION,
 };
 
 struct MockWorkload {
@@ -67,7 +67,7 @@ impl RustWorkloadFactory for MockFactory {
     fn create(name: String, context: WorkloadContext) -> WrappedWorkload {
         let client_id = context.client_id();
         let client_count = context.client_count();
-        println!("RustWorkloadFactory::create({name})[{client_id}/{client_count}]");
+        println!("RustWorkloadFactory::create({name})[{client_id}/{client_count}]: client_version: {FDB_WORKLOAD_API_VERSION}, server_version: {}", context.get_workload_api_version());
         println!(
             "my_c_option: {:?}",
             context.get_option::<String>("my_rust_option")

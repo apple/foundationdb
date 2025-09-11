@@ -25,6 +25,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define FDB_WORKLOAD_API_VERSION 1
+
 typedef struct FDB_future FDBFuture;
 typedef struct FDB_database FDBDatabase;
 
@@ -97,6 +99,7 @@ typedef struct FDBPromise {
 // Wrapper around a borrowed `ExternalWorkload`'s context.
 // All pointer-based arguments are borrowed and managed by the workload.
 typedef struct FDBWorkloadContext {
+	int api_version;
 	OpaqueWorkloadContext* inner;
 	struct FDBWorkloadContext_VT {
 		// Log a message with severity and optional details.
@@ -133,6 +136,7 @@ typedef struct FDBWorkloadContext {
 // Workload functions should not block. If an operation must wait for database interaction,
 // it should initiate the action, register a callback, and return.
 typedef struct FDBWorkload {
+	int api_version;
 	OpaqueWorkload* inner;
 	struct FDBWorkload_VT {
 		void (*free)(OpaqueWorkload* inner);
