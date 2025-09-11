@@ -1393,7 +1393,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
 			Optional<std::vector<uint16_t>> bestKnownStoppedTLogIds;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 				resetBestServerIfNotLocked(bestSetIdx, bestServer, end, knownStoppedTLogIds);
-				ASSERT_WE_THINK(knownStoppedTLogIds.get().contains(bestSetIdx));
+				ASSERT_WE_THINK(knownStoppedTLogIds.present() || knownStoppedTLogIds.get().contains(bestSetIdx));
 				bestKnownStoppedTLogIds = knownStoppedTLogIds.get().at(bestSetIdx);
 			}
 

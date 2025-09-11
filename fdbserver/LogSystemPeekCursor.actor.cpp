@@ -589,16 +589,16 @@ static bool canReturnEmptyVersionRange(
     int bestServer,
     int currentServer,
     Version end,
-    Optional<std::vector<uint16_t>> knownLockedTLogIds = Optional<std::vector<uint16_t>>(),
+    Optional<std::vector<uint16_t>> knownLockedTLogIndices = Optional<std::vector<uint16_t>>(),
     Optional<int> bestSet = Optional<int>(),
     Optional<int> currentSet = Optional<int>()) {
 	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && end != std::numeric_limits<Version>::max());
 	bool returnEmptyIfLocked = false;
 	if ((!bestSet.present() || bestSet.get() >= 0)) {
-		if (knownLockedTLogIds.present()) {
+		if (knownLockedTLogIndices.present()) {
 			bool foundServer =
-			    std::find(knownLockedTLogIds.get().begin(), knownLockedTLogIds.get().end(), currentServer) !=
-			    knownLockedTLogIds.get().end();
+			    std::find(knownLockedTLogIndices.get().begin(), knownLockedTLogIndices.get().end(), currentServer) !=
+			    knownLockedTLogIndices.get().end();
 			if (bestServer >= 0) {
 				ASSERT_WE_THINK(!bestSet.present() || currentSet.present());
 				if ((!bestSet.present() || bestSet.get() == currentSet.get()) && currentServer == bestServer) {
