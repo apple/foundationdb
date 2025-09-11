@@ -592,15 +592,16 @@ static bool canReturnEmptyVersionRange(
     Optional<std::vector<uint16_t>> knownLockedTLogIds = Optional<std::vector<uint16_t>>(),
     Optional<int> bestSet = Optional<int>(),
     Optional<int> currentSet = Optional<int>()) {
-	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST);
+	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && end != std::numeric_limits<Version>::max());
 	bool returnEmptyIfLocked = false;
-	if ((!bestSet.present() || bestSet.get() >= 0) && end != std::numeric_limits<Version>::max()) {
+	if ((!bestSet.present() || bestSet.get() >= 0)) {
 		if (knownLockedTLogIds.present()) {
 			bool foundServer =
 			    std::find(knownLockedTLogIds.get().begin(), knownLockedTLogIds.get().end(), currentServer) !=
 			    knownLockedTLogIds.get().end();
 			if (bestServer >= 0) {
-				if ((!bestSet.present() || bestSet.get() == currentSet) && currentServer == bestServer) {
+				ASSERT_WE_THINK(!bestSet.present() || currentSet.present());
+				if ((!bestSet.present() || bestSet.get() == currentSet.get()) && currentServer == bestServer) {
 					ASSERT(foundServer);
 					// The best server (that is available and known to have been locked) can return
 					// an empty version range.
@@ -931,8 +932,7 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
 	for (int i = 0; i < logSets.size(); i++) {
 		for (int j = 0; j < logSets[i]->logServers.size(); j++) {
 			bool returnEmptyIfStopped =
-			    ((SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && bestSet >= 0 &&
-			      end != std::numeric_limits<Version>::max())
+			    ((SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && end != std::numeric_limits<Version>::max())
 			         ? canReturnEmptyVersionRange(
 			               bestServer, j /*currentServer*/, end, knownLockedTLogIds, bestSet, i /* currentSet */)
 			         : false);
