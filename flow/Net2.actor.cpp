@@ -1022,6 +1022,9 @@ public:
 		try {
 			choose {
 				when(wait(connected.getFuture())) {
+					static SimpleCounter<int64_t>* countServerTLSHandshakesSucceed =
+					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesSucceed");
+					countServerTLSHandshakesSucceed->increment(1);
 					return Void();
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
@@ -1111,6 +1114,9 @@ public:
 		try {
 			choose {
 				when(wait(connected.getFuture())) {
+					static SimpleCounter<int64_t>* countClientTLSHandshakesSucceed =
+					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesSucceed");
+					countClientTLSHandshakesSucceed->increment(1);
 					return Void();
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
