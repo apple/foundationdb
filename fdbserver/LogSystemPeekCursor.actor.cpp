@@ -589,37 +589,34 @@ static bool canReturnEmptyVersionRange(
     int bestServer,
     int currentServer,
     Version end,
-    const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>(),
+    Optional<std::vector<uint16_t>> knownLockedTLogIds = Optional<std::vector<uint16_t>>(),
     Optional<int> bestSet = Optional<int>(),
     Optional<int> currentSet = Optional<int>()) {
 	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST);
-	bool returnEmptyIfStopped = false;
+	bool returnEmptyIfLocked = false;
 	if ((!bestSet.present() || bestSet.get() >= 0) && end != std::numeric_limits<Version>::max()) {
-		if (bestServer >= 0) {
-			if ((!bestSet.present() || bestSet.get() == currentSet) && currentServer == bestServer) {
-				if (knownLockedTLogIds.present()) {
-					ASSERT(std::find(knownLockedTLogIds.get().begin(), knownLockedTLogIds.get().end(), currentServer) !=
-					       knownLockedTLogIds.get().end());
+		if (knownLockedTLogIds.present()) {
+			bool foundServer =
+			    std::find(knownLockedTLogIds.get().begin(), knownLockedTLogIds.get().end(), currentServer) !=
+			    knownLockedTLogIds.get().end();
+			if (bestServer >= 0) {
+				if ((!bestSet.present() || bestSet.get() == currentSet) && currentServer == bestServer) {
+					ASSERT(foundServer);
+					// The best server (that is available and known to have been locked) can return
+					// an empty version range.
+					returnEmptyIfLocked = true;
 				}
-				// The best server (that is available and is known to have been locked) can return
+			} else if (foundServer) {
+				// A non-buddy server (that is available and known to have been locked) can return
 				// an empty version range.
-				returnEmptyIfStopped = true;
+				returnEmptyIfLocked = true;
 			}
 		} else {
-			if (knownLockedTLogIds.present()) {
-				if (std::find(knownLockedTLogIds.get().begin(), knownLockedTLogIds.get().end(), currentServer) !=
-				    knownLockedTLogIds.get().end()) {
-					// A non-buddy server (that is available and is known to have been locked) can
-					// return an empty version range.
-					returnEmptyIfStopped = true;
-				}
-			} else {
-				// The current server belongs to an old epoch, hence can return an empty version range.
-				returnEmptyIfStopped = true;
-			}
+			// The current server belongs to an old epoch, hence can return an empty version range.
+			returnEmptyIfLocked = true;
 		}
 	}
-	return returnEmptyIfStopped;
+	return returnEmptyIfLocked;
 }
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
