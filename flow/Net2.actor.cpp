@@ -141,6 +141,7 @@ public:
 	// INetworkConnections interface
 	Future<Reference<IConnection>> connect(NetworkAddress toAddr, tcp::socket* existingSocket = nullptr) override;
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override;
+	Future<Reference<IConnection>> connectExternalWithHostname(NetworkAddress toAddr, const std::string& hostname) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
 	// The mock DNS methods should only be used in simulation.
@@ -913,6 +914,52 @@ public:
 		}
 	}
 
+	// Connect with hostname for SNI (Server Name Indication) support
+	ACTOR static Future<Reference<IConnection>> connectWithHostname(
+	    boost::asio::io_service* ios,
+	    Reference<ReferencedObject<boost::asio::ssl::context>> context,
+	    NetworkAddress addr,
+	    std::string hostname) {
+		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
+		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+			if (now() < iter->second.second) {
+				if (iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
+					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", addr);
+					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+					throw connection_failed();
+				}
+			} else {
+				g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
+			}
+		}
+
+		state Reference<SSLConnection> self(new SSLConnection(*ios, context));
+		self->peer_address = addr;
+		self->sni_hostname = hostname; // Store hostname for SNI during handshake
+		
+		// Store hostname for SNI use during handshake  
+		TraceEvent("SSLConnectionWithHostname").detail("Hostname", hostname).detail("Addr", addr);
+		
+		try {
+			auto to = tcpEndpoint(self->peer_address);
+			BindPromise p("N2_ConnectError", self->id);
+			Future<Void> onConnected = p.getFuture();
+			self->socket.async_connect(to, std::move(p));
+
+			wait(onConnected);
+			
+			// SNI will be set later in doConnectHandshake before SSL handshake
+			
+			self->init();
+			return self;
+		} catch (Error&) {
+			// Either the connection failed, or was cancelled by the caller
+			self->closeSocket();
+			throw;
+		}
+	}
+
 	// This is not part of the IConnection interface, because it is wrapped by IListener::accept()
 	void accept(NetworkAddress peerAddr) {
 		this->peer_address = peerAddr;
@@ -1010,6 +1057,15 @@ public:
 			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
 				conn->has_trusted_peer = verifyOk;
 			});
+
+			// Set SNI hostname if we have one (for connections made with hostname)
+			if (!self->sni_hostname.empty()) {
+				TraceEvent("SSLSetSNI").detail("Hostname", self->sni_hostname).detail("Addr", self->peer_address);
+				int result = SSL_set_tlsext_host_name(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
+				TraceEvent("SSLSetSNIResult").detail("Hostname", self->sni_hostname).detail("Result", result).detail("Addr", self->peer_address);
+			} else {
+				TraceEvent("SSLNoSNIHostname").detail("Addr", self->peer_address);
+			}
 
 			// If the background handshakers are not all busy, use one
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
@@ -1164,6 +1220,7 @@ private:
 	NetworkAddress peer_address;
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
 	bool has_trusted_peer;
+	std::string sni_hostname; // For Server Name Indication
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -1822,6 +1879,14 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket*
 }
 
 Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
+	return connect(toAddr);
+}
+
+Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr, const std::string& hostname) {
+	if (toAddr.isTLS()) {
+		initTLS(ETLSInitState::CONNECT);
+		return SSLConnection::connectWithHostname(&this->reactor.ios, this->sslContextVar.get(), toAddr, hostname);
+	}
 	return connect(toAddr);
 }
 
