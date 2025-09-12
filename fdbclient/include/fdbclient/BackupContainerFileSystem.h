@@ -163,6 +163,8 @@ public:
 	                                                  Version beginVersion) final;
 	static Future<Void> createTestEncryptionKeyFile(std::string const& filename);
 
+	Future<Void> writeEncryptionMetadata() override;
+
 protected:
 	bool usesEncryption() const;
 	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
@@ -196,6 +198,7 @@ private:
 	VersionProperty expiredEndVersion();
 	VersionProperty unreliableEndVersion();
 	VersionProperty logType();
+	VersionProperty fileLevelEncryption();
 
 	// List range files, unsorted, which contain data at or between beginVersion and endVersion
 	// NOTE: This reads the range file folder schema from FDB 6.0.15 and earlier and is provided for backward

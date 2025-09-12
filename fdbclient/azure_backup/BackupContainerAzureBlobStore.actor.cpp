@@ -228,7 +228,8 @@ public:
 		}
 		Reference<IAsyncFile> f =
 		    makeReference<ReadFile>(self->asyncTaskThread, self->containerName, fileName, self->client);
-		if (self->usesEncryption()) {
+		// Skip encryption for properties/ folder
+		if (self->usesEncryption() && !StringRef(fileName).startsWith("properties/"_sr)) {
 			f = encryptFile(f, AsyncFileEncrypted::Mode::READ_ONLY);
 		}
 		return f;
@@ -245,7 +246,8 @@ public:
 		    }));
 		Reference<IAsyncFile> f =
 		    makeReference<WriteFile>(self->asyncTaskThread, self->containerName, fileName, self->client);
-		if (self->usesEncryption()) {
+		// Skip encryption for properties/ folder
+		if (self->usesEncryption() && !StringRef(fileName).startsWith("properties/"_sr)) {
 			f = encryptFile(f, AsyncFileEncrypted::Mode::APPEND_ONLY);
 		}
 		return makeReference<BackupFile>(fileName, f);
