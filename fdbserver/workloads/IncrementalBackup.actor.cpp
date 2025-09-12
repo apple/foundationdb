@@ -64,7 +64,13 @@ struct IncrementalBackupWorkload : TestWorkload {
 		clearBackupAgentKeys = getOption(options, "clearBackupAgentKeys"_sr, false);
 		blobManifestUrl = getOption(options, "blobManifestUrl"_sr, ""_sr);
 
-		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
+		if (restoreOnly) {
+			// During restore, the encryption key file depends on whether the backup was encrypted or not.
+			std::string temp_encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
+			if (fileExists(temp_encryptionKeyFileName)) {
+				encryptionKeyFileName = temp_encryptionKeyFileName;
+			}
+		} else if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
 			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
 		}
 	}
