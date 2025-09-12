@@ -48,16 +48,15 @@ PerfDoubleCounter g_buildTest("Build", skc), g_add("Add", skc), g_detectConflict
     g_merge("D.MergeWrite", skc), g_removeBefore("D.RemoveBefore", skc);
 
 static force_inline int compare(const StringRef& a, const StringRef& b) {
-	int c = memcmp(a.begin(), b.begin(), std::min(a.size(), b.size()));
-	if (c < 0)
-		return -1;
-	if (c > 0)
-		return +1;
-	if (a.size() < b.size())
-		return -1;
-	if (a.size() == b.size())
-		return 0;
-	return +1;
+	const size_t aSize = a.size();
+	const size_t bSize = b.size();
+	const size_t minSize = std::min(aSize, bSize);
+
+	int c = memcmp(a.begin(), b.begin(), minSize);
+
+	// Branchless size comparison using arithmetic
+	// This avoids multiple conditional branches in the hot path
+	return c ? c : ((aSize > bSize) - (aSize < bSize));
 }
 
 struct ReadConflictRange {
@@ -168,9 +167,15 @@ struct SortTask {
 };
 
 void sortPoints(std::vector<KeyInfo>& points) {
-	std::vector<SortTask> tasks;
-	std::vector<KeyInfo> newPoints;
-	std::vector<int> counts;
+	// Static locals are safer than thread_local in Flow's cooperative execution model
+	static std::vector<SortTask> tasks;
+	static std::vector<KeyInfo> newPoints;
+	static std::vector<int> counts;
+
+	// Reuse pre-allocated buffers to avoid malloc overhead
+	tasks.clear();
+	newPoints.clear();
+	counts.clear();
 
 	tasks.emplace_back(0, points.size(), 0);
 
@@ -999,8 +1004,9 @@ void ConflictBatch::addConflictRanges(Version now,
 	const int stringCount = count * 2;
 
 	const int stripeSize = 16;
-	SkipList::Finger fingers[stripeSize];
-	int temp[stripeSize];
+	// Use static buffers to avoid repeated stack allocations
+	static SkipList::Finger fingers[stripeSize];
+	static int temp[stripeSize];
 	int stripes = (stringCount + stripeSize - 1) / stripeSize;
 
 	int ss = stringCount - (stripes - 1) * stripeSize;
