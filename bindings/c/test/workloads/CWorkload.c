@@ -18,24 +18,50 @@
  * limitations under the License.
  */
 
+// gcc -shared CWorkload.c -Ibindings/c/ -lfdb_c -o libc_workload.so
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include "foundationdb/CWorkload.h"
 
+// #include "foundationdb/fdb_c.h"
+typedef int fdb_error_t;
+typedef void (*FDBCallback)(FDBFuture* f, void* callback_parameter);
+fdb_error_t fdb_future_set_callback(FDBFuture* f, FDBCallback callback, void* callback_parameter);
+
 typedef struct CWorkload {
 	char* name;
-	int cliend_id;
+	int client_id;
 	FDBWorkloadContext context;
 } CWorkload;
 
+typedef struct DelayParameter {
+	CWorkload* workload;
+	double expected;
+	double start;
+	FDBPromise done;
+} DelayParameter;
+
 #define BIND(W) CWorkload* this = (CWorkload*)W
-#define WITH(C, M, ...) (C).M((C).inner, ##__VA_ARGS__)
+#define WITH(C, M, ...) (C).vt->M((C).inner, ##__VA_ARGS__)
 #define EXPORT extern __attribute__((visibility("default")))
+
+static void delay_callback(void* f, DelayParameter* param) {
+	BIND(param->workload);
+	printf("c_delayed(%s_%d): expected: %.3f, elapsed: %.3f\n",
+	       this->name,
+	       this->client_id,
+	       param->expected,
+	       WITH(this->context, now) - param->start);
+	WITH(param->done, send, true);
+	WITH(param->done, free);
+	free(param);
+}
 
 static void workload_setup(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
 	BIND(raw_workload);
-	printf("c_setup(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_setup(%s_%d)\n", this->name, this->client_id);
 	FDBStringPair details[2] = {
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "setup" },
@@ -46,18 +72,25 @@ static void workload_setup(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPro
 }
 static void workload_start(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
 	BIND(raw_workload);
-	printf("c_start(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_start(%s_%d)\n", this->name, this->client_id);
 	FDBStringPair details[2] = {
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "start" },
 	};
 	WITH(this->context, trace, FDBSeverity_Debug, "Test", details, 2);
-	WITH(done, send, true);
-	WITH(done, free);
+
+	double amount = 100 + this->client_id * 10;
+	DelayParameter* param = malloc(sizeof(DelayParameter));
+	param->workload = this;
+	param->expected = amount;
+	param->start = WITH(this->context, now);
+	param->done = done;
+	FDBFuture* f = WITH(this->context, delay, amount);
+	fdb_future_set_callback(f, (FDBCallback)delay_callback, param);
 }
 static void workload_check(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPromise done) {
 	BIND(raw_workload);
-	printf("c_check(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_check(%s_%d)\n", this->name, this->client_id);
 	FDBStringPair details[2] = {
 		{ .key = "Layer", .val = "C" },
 		{ .key = "Stage", .val = "check" },
@@ -68,21 +101,30 @@ static void workload_check(OpaqueWorkload* raw_workload, FDBDatabase* db, FDBPro
 }
 static void workload_getMetrics(OpaqueWorkload* raw_workload, FDBMetrics out) {
 	BIND(raw_workload);
-	printf("c_getMetrics(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_getMetrics(%s_%d)\n", this->name, this->client_id);
 	WITH(out, reserve, 8);
 	WITH(out, push, (FDBMetric){ .key = "test", .val = 42., .avg = false });
 }
 static double workload_getCheckTimeout(OpaqueWorkload* raw_workload) {
 	BIND(raw_workload);
-	printf("c_getCheckTimeout(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_getCheckTimeout(%s_%d)\n", this->name, this->client_id);
 	return 3000.;
 };
 static void workload_free(OpaqueWorkload* raw_workload) {
 	BIND(raw_workload);
-	printf("c_free(%s_%d)\n", this->name, this->cliend_id);
+	printf("c_free(%s_%d)\n", this->name, this->client_id);
 	free(this->name);
 	free(this);
 }
+
+static struct FDBWorkload_VT CWorkload_vt = {
+	.free = workload_free,
+	.setup = workload_setup,
+	.start = workload_start,
+	.check = workload_check,
+	.getMetrics = workload_getMetrics,
+	.getCheckTimeout = workload_getCheckTimeout,
+};
 
 EXPORT FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext context) {
 	int len = strlen(borrow_name) + 1;
@@ -91,7 +133,12 @@ EXPORT FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext 
 
 	int client_id = WITH(context, clientId);
 	int client_count = WITH(context, clientCount);
-	printf("workloadCFactory(%s)[%d/%d]\n", name, client_id, client_count);
+	printf("workloadCFactory(%s)[%d/%d]: client_version: %d, server_version: %d\n",
+	       name,
+	       client_id,
+	       client_count,
+	       FDB_WORKLOAD_API_VERSION,
+	       context.api_version);
 
 	FDBString my_c_option;
 	my_c_option = WITH(context, getOption, "my_c_option", "null");
@@ -103,16 +150,12 @@ EXPORT FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext 
 
 	CWorkload* workload = (CWorkload*)malloc(sizeof(CWorkload));
 	workload->name = name;
-	workload->cliend_id = client_id;
+	workload->client_id = client_id;
 	workload->context = context;
 
 	return (FDBWorkload){
+		.api_version = FDB_WORKLOAD_API_VERSION,
 		.inner = (OpaqueWorkload*)workload,
-		.setup = workload_setup,
-		.start = workload_start,
-		.check = workload_check,
-		.getMetrics = workload_getMetrics,
-		.getCheckTimeout = workload_getCheckTimeout,
-		.free = workload_free,
+		.vt = &CWorkload_vt,
 	};
 }

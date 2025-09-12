@@ -1,6 +1,6 @@
 use crate::{
     register_factory, Metric, Metrics, MockDatabase, Promise, RustWorkload, RustWorkloadFactory,
-    Severity, WorkloadContext, WrappedWorkload,
+    Severity, WorkloadContext, WrappedWorkload, FDB_WORKLOAD_API_VERSION,
 };
 
 struct MockWorkload {
@@ -10,7 +10,7 @@ struct MockWorkload {
 }
 
 impl RustWorkload for MockWorkload {
-    fn setup(&'static mut self, _db: MockDatabase, done: Promise) {
+    fn setup(&mut self, _db: MockDatabase, done: Promise) {
         println!("rust_setup({}_{})", self.name, self.client_id);
         self.context.trace(
             Severity::Debug,
@@ -19,7 +19,7 @@ impl RustWorkload for MockWorkload {
         );
         done.send(true);
     }
-    fn start(&'static mut self, _db: MockDatabase, done: Promise) {
+    fn start(&mut self, _db: MockDatabase, done: Promise) {
         println!("rust_start({}_{})", self.name, self.client_id);
         self.context.trace(
             Severity::Debug,
@@ -28,7 +28,7 @@ impl RustWorkload for MockWorkload {
         );
         done.send(true);
     }
-    fn check(&'static mut self, _db: MockDatabase, done: Promise) {
+    fn check(&mut self, _db: MockDatabase, done: Promise) {
         println!("rust_check({}_{})", self.name, self.client_id);
         self.context.trace(
             Severity::Debug,
@@ -67,7 +67,7 @@ impl RustWorkloadFactory for MockFactory {
     fn create(name: String, context: WorkloadContext) -> WrappedWorkload {
         let client_id = context.client_id();
         let client_count = context.client_count();
-        println!("RustWorkloadFactory::create({name})[{client_id}/{client_count}]");
+        println!("RustWorkloadFactory::create({name})[{client_id}/{client_count}]: client_version: {FDB_WORKLOAD_API_VERSION}, server_version: {}", context.get_workload_api_version());
         println!(
             "my_c_option: {:?}",
             context.get_option::<String>("my_rust_option")
@@ -77,7 +77,7 @@ impl RustWorkloadFactory for MockFactory {
             context.get_option::<String>("my_rust_option")
         );
         match name.as_str() {
-            "MockWorkload" => WrappedWorkload::new(MockWorkload::new(name, client_id, context)),
+            "MockWorkload" => MockWorkload::new(name, client_id, context).wrap(),
             _ => panic!("Unknown workload name: {name}"),
         }
     }
