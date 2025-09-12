@@ -48,8 +48,10 @@ struct RestoreBackupWorkload : TestWorkload {
 		delayFor = getOption(options, "delayFor"_sr, 10.0);
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, false));
 
-		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
-			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
+		std::string keyFileName = "simfdb/" + getTestEncryptionFileName();
+		// Only set encryptionKeyFileName if the encryption key file exists during backup.
+		if (fileExists(keyFileName)) {
+			encryptionKeyFileName = keyFileName;
 		}
 	}
 
@@ -121,11 +123,6 @@ struct RestoreBackupWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(RestoreBackupWorkload* self, Database cx) {
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-
-		if (self->encryptionKeyFileName.present()) {
-			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
-		}
-
 		wait(delay(self->delayFor));
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));

@@ -3548,6 +3548,9 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			}
 		}
 
+		Reference<IBackupContainer> bc = wait(config.backupContainer().getOrThrow(tr));
+		wait(bc->writeEncryptionMetadata());
+
 		config.stateEnum().set(tr, EBackupState::STATE_RUNNING);
 
 		state Reference<TaskFuture> backupFinished = futureBucket->future(tr);
@@ -6138,6 +6141,15 @@ public:
 		    IBackupContainer::openContainer(url.toString(), proxy, encryptionKeyFileName);
 
 		state BackupDescription desc = wait(bc->describeBackup(true));
+
+		if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
+			fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
+			throw restore_error();
+		} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
+			fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
+			throw restore_error();
+		}
+
 		if (cxOrig.present()) {
 			wait(desc.resolveVersionTimes(cxOrig.get()));
 		}
