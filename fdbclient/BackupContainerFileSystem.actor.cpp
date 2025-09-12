@@ -521,11 +521,13 @@ public:
 		state Optional<Version> metaExpiredEnd;
 		state Optional<Version> metaUnreliableEnd;
 		state Optional<Version> metaLogType;
+		state Optional<Version> fileLevelEncryption;
 
 		std::vector<Future<Void>> metaReads;
 		metaReads.push_back(store(metaExpiredEnd, bc->expiredEndVersion().get()));
 		metaReads.push_back(store(metaUnreliableEnd, bc->unreliableEndVersion().get()));
 		metaReads.push_back(store(metaLogType, bc->logType().get()));
+		metaReads.push_back(store(fileLevelEncryption, bc->fileLevelEncryption().get()));
 
 		// Only read log begin/end versions if not doing a deep scan, otherwise scan files and recalculate them.
 		if (!deepScan) {
@@ -621,6 +623,12 @@ public:
 		} else {
 			desc.partitioned =
 			    metaLogType.present() && metaLogType.get() == BackupContainerFileSystemImpl::PARTITIONED_MUTATION_LOG;
+		}
+
+		if (fileLevelEncryption.present() && fileLevelEncryption.get() != 0) {
+			desc.fileLevelEncryption = true;
+		} else {
+			desc.fileLevelEncryption = false;
 		}
 
 		// List logs in version order so log continuity can be analyzed
@@ -1310,6 +1318,15 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc) {
+		Optional<Version> existingEncryptionMetadata = wait(bc->fileLevelEncryption().get());
+
+		if (!existingEncryptionMetadata.present()) {
+			wait(bc->fileLevelEncryption().set(bc->encryptionKeyFileName.present() ? 1 : 0));
+		}
+		return Void();
+	}
+
 }; // class BackupContainerFileSystemImpl
 
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeLogFile(Version beginVersion,
@@ -1494,6 +1511,11 @@ Future<Void> BackupContainerFileSystem::expireData(Version expireEndVersion,
 	    Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, progress, restorableBeginVersion);
 }
 
+Future<Void> BackupContainerFileSystem::writeEncryptionMetadata() {
+	return BackupContainerFileSystemImpl::writeEncryptionMetadataIfNotExists(
+	    Reference<BackupContainerFileSystem>::addRef(this));
+}
+
 ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
                                                            RangeFile file,
                                                            Database cx) {
@@ -1620,6 +1642,10 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::unreliable
 BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() {
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
+BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::fileLevelEncryption() {
+	return { Reference<BackupContainerFileSystem>::addRef(this), "file_level_encryption" };
+}
+
 bool BackupContainerFileSystem::usesEncryption() const {
 	return encryptionSetupFuture.isValid();
 }

@@ -43,7 +43,6 @@ struct RestoreWorkload : TestWorkload {
 	bool allowPauses;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
-	Optional<std::string> encryptionKeyFileName;
 	UID randomID;
 
 	RestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -60,10 +59,6 @@ struct RestoreWorkload : TestWorkload {
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
 
 		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
-		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
-			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
-		}
-
 		randomID = nondeterministicRandom()->randomUniqueID();
 		TraceEvent("RW_ClientId").detail("Id", wcx.clientId);
 		TraceEvent("RW_PerformRestore", randomID).detail("Value", performRestore);
@@ -88,8 +83,7 @@ struct RestoreWorkload : TestWorkload {
 		    .detail("Locked", locked)
 		    .detail("PerformRestore", performRestore)
 		    .detail("BackupTag", printable(backupTag).c_str())
-		    .detail("AgentRequest", agentRequest)
-		    .detail("Encrypted", encryptionKeyFileName.present());
+		    .detail("AgentRequest", agentRequest);
 
 		return _start(cx, this);
 	}
@@ -149,10 +143,6 @@ struct RestoreWorkload : TestWorkload {
 		// Increment the backup agent requests
 		if (self->agentRequest) {
 			RestoreWorkload::backupAgentRequests++;
-		}
-
-		if (self->encryptionKeyFileName.present()) {
-			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
 		}
 
 		try {
@@ -243,7 +233,7 @@ struct RestoreWorkload : TestWorkload {
 				                              OnlyApplyMutationLogs::False,
 				                              InconsistentSnapshotOnly::False,
 				                              ::invalidVersion,
-				                              self->encryptionKeyFileName,
+				                              lastBackupContainer->getEncryptionKeyFileName(),
 				                              {});
 
 				wait(success(restore));
