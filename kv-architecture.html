@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>FoundationDB Architecture &#8212; FoundationDB 7.4.4 documentation</title>
+    <title>FoundationDB Architecture &#8212; FoundationDB 7.4.5 documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.4</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.5</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -75,6 +75,8 @@
 <li><a class="reference internal" href="#transaction-logs">Transaction Logs</a></li>
 <li><a class="reference internal" href="#resolvers">Resolvers</a></li>
 <li><a class="reference internal" href="#storage-servers">Storage Servers</a></li>
+<li><a class="reference internal" href="#data-distributor">Data Distributor</a></li>
+<li><a class="reference internal" href="#ratekeeper">RateKeeper</a></li>
 <li><a class="reference internal" href="#clients">Clients</a></li>
 </ul>
 </li>
@@ -127,6 +129,8 @@
 <li><a class="reference internal" href="#transaction-logs">Transaction Logs</a></li>
 <li><a class="reference internal" href="#resolvers">Resolvers</a></li>
 <li><a class="reference internal" href="#storage-servers">Storage Servers</a></li>
+<li><a class="reference internal" href="#data-distributor">Data Distributor</a></li>
+<li><a class="reference internal" href="#ratekeeper">RateKeeper</a></li>
 <li><a class="reference internal" href="#clients">Clients</a></li>
 </ul>
 </li>
@@ -144,11 +148,11 @@
 </section>
 <section id="cluster-controller">
 <h2>Cluster Controller</h2>
-<p>The cluster controller is a singleton elected by a majority of coordinators. It is the entry point for all processes in the cluster. It is responsible for determining when a process has failed, telling processes which roles they should become, and passing system information between all of the processes.</p>
+<p>The cluster controller is a singleton elected by a majority of coordinators. It is the entry point for all processes in the cluster. It is responsible for determining when a process has failed, telling processes which roles they should become, and passing system information between all of the processes. The cluster controller is responsible for coordinating the transition of the write sub-system from one generation to the next. The write sub-system includes the master, GRV (i.e., Get-Read-Version) proxies, commit proxies, resolvers, and transaction logs. These five roles are treated as a unit, and if any of them fail, we will recruit a replacement for all five roles.</p>
 </section>
 <section id="master">
 <h2>Master</h2>
-<p>The master is responsible for coordinating the transition of the write sub-system from one generation to the next. The write sub-system includes the master, GRV proxies, commit proxies, resolvers, and transaction logs. The three roles are treated as a unit, and if any of them fail, we will recruit a replacement for all three roles. The master keeps commit proxies’ committed version, provides read version for GRV proxies, provides the commit versions for batches of the mutations to the commit proxies, runs data distribution algorithm, and runs ratekeeper.</p>
+<p>The master is a singleton that keeps commit proxies’ committed version, provides read version for GRV proxies, and provides the commit versions for batches of the mutations to the commit proxies.</p>
 </section>
 <section id="grv-proxies-and-commit-proxies">
 <h2>GRV Proxies and Commit Proxies</h2>
@@ -171,7 +175,15 @@
 </section>
 <section id="storage-servers">
 <h2>Storage Servers</h2>
-<p>The vast majority of processes in a cluster are storage servers. Storage servers are assigned ranges of keys, and are responsible for storing all of the data for that range. They keep 5 seconds of mutations in memory, and an on disk copy of the data as of 5 second ago. Clients must read at a version within the last 5 seconds, or they will get a transaction_too_old error. The ssd storage engine stores the data in a b-tree. The memory storage engine stores the data in memory with an append only log that is only read from disk if the process is rebooted.</p>
+<p>The vast majority of processes in a cluster are storage servers. Storage servers are assigned ranges of keys, and are responsible for storing all of the data for that range. They keep 5 seconds of mutations in memory, and an on disk copy of the data as of 5 second ago. Clients must read at a version within the last 5 seconds, or they will get a <code class="docutils literal notranslate"><span class="pre">transaction_too_old</span></code> error. The ssd storage engine stores the data in a b-tree. The memory storage engine stores the data in memory with an append only log that is only read from disk if the process is rebooted.</p>
+</section>
+<section id="data-distributor">
+<h2>Data Distributor</h2>
+<p>Data Distributor is a singleton in the cluster that runs the data distribution algorithm. It is responsible for ensuring that all data is replicated to the desired replication factor, and that the data is balanced across all storage servers. It is also responsible for moving data off of failed storage servers, and moving data away from storage servers that are overloaded.</p>
+</section>
+<section id="ratekeeper">
+<h2>RateKeeper</h2>
+<p>The RateKeeper is a singleton in the cluster and is responsible for monitoring the performance of the system and making adjustments to ensure that the cluster operates within its performance targets. Specifically, the throttling of client requests is achieved by controlling the rate of accepted GRV requests from clients.</p>
 </section>
 <section id="clients">
 <h2>Clients</h2>
@@ -199,7 +211,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Aug 29, 2025.<br/>
+      Last updated on Sep 13, 2025.<br/>
     </p>
   </div>
 </footer>
