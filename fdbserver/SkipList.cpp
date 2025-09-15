@@ -51,12 +51,10 @@ static force_inline int compare(const StringRef& a, const StringRef& b) {
 	const size_t aSize = a.size();
 	const size_t bSize = b.size();
 	const size_t minSize = std::min(aSize, bSize);
-
 	int c = memcmp(a.begin(), b.begin(), minSize);
-
-	// Branchless size comparison using arithmetic
-	// This avoids multiple conditional branches in the hot path
-	return c ? c : ((aSize > bSize) - (aSize < bSize));
+	if (c)
+		return (c > 0) - (c < 0); // normalize to +1/-1
+	return (aSize > bSize) - (aSize < bSize);
 }
 
 struct ReadConflictRange {
@@ -167,15 +165,13 @@ struct SortTask {
 };
 
 void sortPoints(std::vector<KeyInfo>& points) {
-	// Static locals are safer than thread_local in Flow's cooperative execution model
-	static std::vector<SortTask> tasks;
-	static std::vector<KeyInfo> newPoints;
-	static std::vector<int> counts;
+	std::vector<SortTask> tasks;
+	std::vector<KeyInfo> newPoints;
+	std::vector<int> counts;
 
-	// Reuse pre-allocated buffers to avoid malloc overhead
-	tasks.clear();
-	newPoints.clear();
-	counts.clear();
+	tasks.reserve(points.size());
+	newPoints.reserve(points.size());
+	counts.resize(261); // 256+5 = character+sentinal
 
 	tasks.emplace_back(0, points.size(), 0);
 
@@ -190,7 +186,7 @@ void sortPoints(std::vector<KeyInfo>& points) {
 		}
 
 		newPoints.resize(st.size);
-		counts.assign(256 + 5, 0);
+		std::fill(counts.begin(), counts.end(), 0);
 
 		// get counts
 		int c;
@@ -1004,9 +1000,8 @@ void ConflictBatch::addConflictRanges(Version now,
 	const int stringCount = count * 2;
 
 	const int stripeSize = 16;
-	// Use static buffers to avoid repeated stack allocations
-	static SkipList::Finger fingers[stripeSize];
-	static int temp[stripeSize];
+	SkipList::Finger fingers[stripeSize];
+	int temp[stripeSize];
 	int stripes = (stringCount + stripeSize - 1) / stripeSize;
 
 	int ss = stringCount - (stripes - 1) * stripeSize;
