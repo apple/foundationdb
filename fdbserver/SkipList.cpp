@@ -33,6 +33,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ConflictSet.h"
+#include "flow/UnitTest.h"
 
 static std::vector<PerfDoubleCounter*> skc;
 
@@ -1245,4 +1246,180 @@ void skipListTest() {
 	}
 
 	printf("%d entries in version history\n", cs->versionHistory.count());
+}
+
+TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
+	// Reference implementation using std::vector<bool> for comparison
+	class ReferenceMiniConflictSet {
+		std::vector<bool> bits;
+
+	public:
+		explicit ReferenceMiniConflictSet(size_t size) : bits(size, false) {}
+
+		void set(int begin, int end) {
+			if (end <= begin)
+				return;
+			for (int i = begin; i < end; i++) {
+				bits[i] = true;
+			}
+		}
+
+		bool any(int begin, int end) const {
+			if (end <= begin)
+				return false;
+			for (int i = begin; i < end; i++) {
+				if (bits[i])
+					return true;
+			}
+			return false;
+		}
+
+		void clear() { std::fill(bits.begin(), bits.end(), false); }
+	};
+
+	auto testCase = [](size_t size,
+	                   const std::vector<std::pair<int, int>>& setOperations,
+	                   const std::vector<std::pair<int, int>>& anyQueries) {
+		MiniConflictSet mcs(size);
+		ReferenceMiniConflictSet ref(size);
+
+		// Apply set operations to both implementations
+		for (const auto& op : setOperations) {
+			mcs.set(op.first, op.second);
+			ref.set(op.first, op.second);
+		}
+
+		// Compare any() results
+		for (const auto& query : anyQueries) {
+			bool mcsResult = mcs.any(query.first, query.second);
+			bool refResult = ref.any(query.first, query.second);
+			ASSERT(mcsResult == refResult);
+		}
+	};
+
+	// Test 1: Edge cases
+	{
+		std::vector<std::pair<int, int>> setOps = { { 0, 0 }, { 5, 5 }, { 10, 10 } }; // Empty ranges
+		std::vector<std::pair<int, int>> queries = { { 0, 1 }, { 5, 6 }, { 9, 11 }, { 0, 64 } };
+		testCase(64, setOps, queries);
+	}
+
+	// Test 2: Single bit operations
+	{
+		std::vector<std::pair<int, int>> setOps = { { 0, 1 }, { 63, 64 }, { 32, 33 } };
+		std::vector<std::pair<int, int>> queries = { { 0, 1 }, { 63, 64 }, { 32, 33 }, { 0, 64 }, { 31, 34 } };
+		testCase(64, setOps, queries);
+	}
+
+	// Test 3: Full word operations (64 bits)
+	{
+		std::vector<std::pair<int, int>> setOps = { { 0, 64 } };
+		std::vector<std::pair<int, int>> queries = { { 0, 64 }, { 0, 32 }, { 32, 64 }, { 10, 50 } };
+		testCase(64, setOps, queries);
+	}
+
+	// Test 4: Multi-word operations
+	{
+		std::vector<std::pair<int, int>> setOps = { { 0, 128 }, { 64, 192 }, { 100, 300 } };
+		std::vector<std::pair<int, int>> queries = { { 0, 64 }, { 64, 128 }, { 128, 192 }, { 0, 320 }, { 50, 150 } };
+		testCase(320, setOps, queries);
+	}
+
+	// Test 5: Overlapping ranges
+	{
+		std::vector<std::pair<int, int>> setOps = { { 10, 50 }, { 30, 70 }, { 60, 100 } };
+		std::vector<std::pair<int, int>> queries = { { 0, 10 },  { 10, 30 },  { 30, 50 }, { 50, 60 },
+			                                         { 60, 70 }, { 70, 100 }, { 0, 128 } };
+		testCase(128, setOps, queries);
+	}
+
+	// Test 6: Word boundary edge cases
+	{
+		std::vector<std::pair<int, int>> setOps = { { 63, 65 }, { 127, 129 }, { 191, 193 } };
+		std::vector<std::pair<int, int>> queries = { { 62, 64 },   { 63, 64 },   { 64, 65 },
+			                                         { 126, 128 }, { 127, 128 }, { 128, 129 } };
+		testCase(256, setOps, queries);
+	}
+
+	// Test 7: Random stress test with small size
+	{
+		std::vector<std::pair<int, int>> setOps, queries;
+		for (int i = 0; i < 20; i++) {
+			int a = deterministicRandom()->randomInt(0, 128);
+			int b = deterministicRandom()->randomInt(a, 128);
+			setOps.push_back({ a, b });
+		}
+		for (int i = 0; i < 50; i++) {
+			int a = deterministicRandom()->randomInt(0, 128);
+			int b = deterministicRandom()->randomInt(a, 128);
+			queries.push_back({ a, b });
+		}
+		testCase(128, setOps, queries);
+	}
+
+	// Test 8: Random stress test with large size
+	{
+		std::vector<std::pair<int, int>> setOps, queries;
+		for (int i = 0; i < 50; i++) {
+			int a = deterministicRandom()->randomInt(0, 1000);
+			int b = deterministicRandom()->randomInt(a, 1000);
+			setOps.push_back({ a, b });
+		}
+		for (int i = 0; i < 100; i++) {
+			int a = deterministicRandom()->randomInt(0, 1000);
+			int b = deterministicRandom()->randomInt(a, 1000);
+			queries.push_back({ a, b });
+		}
+		testCase(1000, setOps, queries);
+	}
+
+	// Test 9: Large ranges spanning multiple words
+	{
+		std::vector<std::pair<int, int>> setOps = { { 50, 500 }, { 200, 800 }, { 700, 900 } };
+		std::vector<std::pair<int, int>> queries = { { 0, 50 },    { 50, 200 },  { 200, 500 }, { 500, 700 },
+			                                         { 700, 800 }, { 800, 900 }, { 900, 1000 } };
+		testCase(1000, setOps, queries);
+	}
+
+	// Test 10: Clear operation test
+	{
+		MiniConflictSet mcs(64);
+		ReferenceMiniConflictSet ref(64);
+
+		// Set some bits
+		mcs.set(10, 50);
+		ref.set(10, 50);
+
+		// Verify they're set
+		ASSERT(mcs.any(20, 30) == ref.any(20, 30));
+		ASSERT(mcs.any(20, 30) == true);
+
+		// Clear and verify
+		mcs.clear();
+		ref.clear();
+		ASSERT(mcs.any(20, 30) == ref.any(20, 30));
+		ASSERT(mcs.any(20, 30) == false);
+		ASSERT(mcs.any(0, 64) == ref.any(0, 64));
+		ASSERT(mcs.any(0, 64) == false);
+	}
+
+	// Test 11: Patterns that might expose bit manipulation bugs
+	{
+		// Alternating bits pattern
+		std::vector<std::pair<int, int>> setOps;
+		for (int i = 0; i < 128; i += 2) {
+			setOps.push_back({ i, i + 1 });
+		}
+		std::vector<std::pair<int, int>> queries = { { 0, 128 }, { 0, 64 }, { 64, 128 }, { 1, 127 } };
+		testCase(128, setOps, queries);
+	}
+
+	// Test 12: Verify specific bit positions in multi-word scenarios
+	{
+		std::vector<std::pair<int, int>> setOps = { { 0, 1 }, { 63, 64 }, { 64, 65 }, { 127, 128 } };
+		std::vector<std::pair<int, int>> queries = { { 0, 1 }, { 63, 64 }, { 64, 65 }, { 127, 128 }, { 0, 128 } };
+		testCase(128, setOps, queries);
+	}
+
+	return Void();
 }
