@@ -1060,7 +1060,6 @@ public:
 
 			// Set SNI hostname if we have one (for connections made with hostname)
 			if (!self->sni_hostname.empty()) {
-				TraceEvent("SSLSetSNI").detail("Hostname", self->sni_hostname).detail("Addr", self->peer_address);
 				int result = SSL_set_tlsext_host_name(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
 				TraceEvent("SSLSetSNIResult").detail("Hostname", self->sni_hostname).detail("Result", result).detail("Addr", self->peer_address);
 			} else {
