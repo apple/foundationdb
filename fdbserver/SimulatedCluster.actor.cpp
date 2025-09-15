@@ -137,7 +137,7 @@ bool destructed = false;
 // environment details
 class TestConfig : public BasicTestConfig {
 	class ConfigBuilder {
-		using value_type = toml::basic_value<toml::discard_comments>;
+		using value_type = toml::value;
 		using base_variant = std::variant<int,
 		                                  float,
 		                                  double,
