@@ -965,9 +965,8 @@ public:
 		state Reference<SSLConnection> self(new SSLConnection(*ios, context));
 		self->peer_address = addr;
 		self->sni_hostname = hostname; // Store hostname for SNI during handshake
-
-		// Store hostname for SNI use during handshake
-		TraceEvent("SSLConnectionWithHostname").detail("Hostname", hostname).detail("Addr", addr);
+		
+		// Store hostname for SNI use during handshake  
 
 		try {
 			auto to = tcpEndpoint(self->peer_address);
@@ -1112,14 +1111,8 @@ public:
 
 			// Set SNI hostname if we have one (for connections made with hostname)
 			if (!self->sni_hostname.empty()) {
-				TraceEvent("SSLSetSNI").detail("Hostname", self->sni_hostname).detail("Addr", self->peer_address);
 				int result = SSL_set_tlsext_host_name(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
-				TraceEvent("SSLSetSNIResult")
-				    .detail("Hostname", self->sni_hostname)
-				    .detail("Result", result)
-				    .detail("Addr", self->peer_address);
-			} else {
-				TraceEvent("SSLNoSNIHostname").detail("Addr", self->peer_address);
+				TraceEvent("SSLSetSNIResult").detail("Hostname", self->sni_hostname).detail("Result", result).detail("Addr", self->peer_address);
 			}
 
 			// If the background handshakers are not all busy, use one
