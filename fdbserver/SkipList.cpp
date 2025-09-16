@@ -1249,6 +1249,7 @@ void skipListTest() {
 }
 
 TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
+	// Unit test written by Claude AI assistant
 	// Reference implementation using std::vector<bool> for comparison
 	class ReferenceMiniConflictSet {
 		std::vector<bool> bits;
@@ -1297,14 +1298,18 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 		}
 	};
 
-	// Test 1: Edge cases
+	// Test 1: Edge cases - empty ranges and boundary conditions
+	// Rationale: Empty ranges (begin == end) should be no-ops but could cause issues
+	// if the implementation doesn't handle them properly. This catches off-by-one errors.
 	{
 		std::vector<std::pair<int, int>> setOps = { { 0, 0 }, { 5, 5 }, { 10, 10 } }; // Empty ranges
 		std::vector<std::pair<int, int>> queries = { { 0, 1 }, { 5, 6 }, { 9, 11 }, { 0, 64 } };
 		testCase(64, setOps, queries);
 	}
 
-	// Test 2: Single bit operations
+	// Test 2: Single bit operations at critical positions
+	// Rationale: Single bits test the minimal unit of operation and catch issues with
+	// bit indexing, especially at word boundaries (0, 63) and middle positions.
 	{
 		std::vector<std::pair<int, int>> setOps = { { 0, 1 }, { 63, 64 }, { 32, 33 } };
 		std::vector<std::pair<int, int>> queries = { { 0, 1 }, { 63, 64 }, { 32, 33 }, { 0, 64 }, { 31, 34 } };
@@ -1312,6 +1317,8 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	}
 
 	// Test 3: Full word operations (64 bits)
+	// Rationale: Setting/querying entire 64-bit words tests the numBits == 64 special case
+	// in set() method and ensures correct mask generation for full words.
 	{
 		std::vector<std::pair<int, int>> setOps = { { 0, 64 } };
 		std::vector<std::pair<int, int>> queries = { { 0, 64 }, { 0, 32 }, { 32, 64 }, { 10, 50 } };
@@ -1319,6 +1326,8 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	}
 
 	// Test 4: Multi-word operations
+	// Rationale: Operations spanning multiple 64-bit words exercise the multi-word logic
+	// in both set() and any(). This catches issues with word iteration and mask application.
 	{
 		std::vector<std::pair<int, int>> setOps = { { 0, 128 }, { 64, 192 }, { 100, 300 } };
 		std::vector<std::pair<int, int>> queries = { { 0, 64 }, { 64, 128 }, { 128, 192 }, { 0, 320 }, { 50, 150 } };
@@ -1326,6 +1335,8 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	}
 
 	// Test 5: Overlapping ranges
+	// Rationale: Overlapping set operations test that bits remain set correctly when
+	// multiple ranges affect the same positions. This ensures proper OR semantics.
 	{
 		std::vector<std::pair<int, int>> setOps = { { 10, 50 }, { 30, 70 }, { 60, 100 } };
 		std::vector<std::pair<int, int>> queries = { { 0, 10 },  { 10, 30 },  { 30, 50 }, { 50, 60 },
@@ -1334,6 +1345,8 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	}
 
 	// Test 6: Word boundary edge cases
+	// Rationale: Operations that cross 64-bit word boundaries are prone to off-by-one
+	// errors and incorrect mask calculations. This specifically targets boundary crossings.
 	{
 		std::vector<std::pair<int, int>> setOps = { { 63, 65 }, { 127, 129 }, { 191, 193 } };
 		std::vector<std::pair<int, int>> queries = { { 62, 64 },   { 63, 64 },   { 64, 65 },
@@ -1342,6 +1355,8 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	}
 
 	// Test 7: Random stress test with small size
+	// Rationale: Random testing catches edge cases that structured tests might miss.
+	// Small size ensures good coverage of single and double-word scenarios.
 	{
 		std::vector<std::pair<int, int>> setOps, queries;
 		for (int i = 0; i < 20; i++) {
@@ -1358,6 +1373,8 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	}
 
 	// Test 8: Random stress test with large size
+	// Rationale: Larger random testing stresses multi-word logic and can expose
+	// performance issues or correctness bugs that only appear with many words.
 	{
 		std::vector<std::pair<int, int>> setOps, queries;
 		for (int i = 0; i < 50; i++) {
@@ -1374,6 +1391,8 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	}
 
 	// Test 9: Large ranges spanning multiple words
+	// Rationale: Very large ranges test the efficiency and correctness of the multi-word
+	// implementation, ensuring it handles bulk operations without errors.
 	{
 		std::vector<std::pair<int, int>> setOps = { { 50, 500 }, { 200, 800 }, { 700, 900 } };
 		std::vector<std::pair<int, int>> queries = { { 0, 50 },    { 50, 200 },  { 200, 500 }, { 500, 700 },
@@ -1382,6 +1401,8 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	}
 
 	// Test 10: Clear operation test
+	// Rationale: The clear() operation must reset all bits to zero. This verifies
+	// that clear() works correctly and doesn't leave stray bits set.
 	{
 		MiniConflictSet mcs(64);
 		ReferenceMiniConflictSet ref(64);
@@ -1404,6 +1425,8 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	}
 
 	// Test 11: Patterns that might expose bit manipulation bugs
+	// Rationale: Alternating bit patterns create specific mask patterns that could
+	// expose bugs in bit manipulation logic, especially with carry/overflow issues.
 	{
 		// Alternating bits pattern
 		std::vector<std::pair<int, int>> setOps;
@@ -1415,10 +1438,109 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	}
 
 	// Test 12: Verify specific bit positions in multi-word scenarios
+	// Rationale: First and last bits of each word are most prone to indexing errors.
+	// This test specifically targets these critical positions across multiple words.
 	{
 		std::vector<std::pair<int, int>> setOps = { { 0, 1 }, { 63, 64 }, { 64, 65 }, { 127, 128 } };
 		std::vector<std::pair<int, int>> queries = { { 0, 1 }, { 63, 64 }, { 64, 65 }, { 127, 128 }, { 0, 128 } };
 		testCase(128, setOps, queries);
+	}
+
+	// Test 13: Comprehensive word boundary testing
+	// Rationale: Word boundaries (multiples of 64) are critical because bit manipulation
+	// logic often has special cases when ranges cross 64-bit word boundaries.
+	// This test ensures set() and any() work correctly when ranges start/end at or near
+	// word boundaries, catching off-by-one errors and incorrect mask calculations.
+	{
+		const int testSize = 320; // 5 words
+		std::vector<std::pair<int, int>> setOps, queries;
+
+		// Test every word boundary systematically
+		for (int wordBoundary : { 64, 128, 192, 256 }) {
+			for (int offset : { -1, 0, 1 }) {
+				int pos = wordBoundary + offset;
+				if (pos >= 0 && pos < testSize) {
+					// Single bit at boundary
+					setOps.push_back({ pos, pos + 1 });
+					queries.push_back({ pos, pos + 1 });
+
+					// Range crossing boundary
+					if (pos > 5 && pos < testSize - 5) {
+						setOps.push_back({ pos - 2, pos + 3 });
+						queries.push_back({ pos - 2, pos + 3 });
+						queries.push_back({ pos - 1, pos + 2 });
+					}
+				}
+			}
+		}
+
+		// Test ranges that span exactly 1, 2, 3+ words
+		setOps.push_back({ 0, 64 }); // Exactly 1 word
+		setOps.push_back({ 64, 192 }); // Exactly 2 words
+		setOps.push_back({ 128, 320 }); // Exactly 3 words
+
+		queries.push_back({ 0, 64 });
+		queries.push_back({ 64, 192 });
+		queries.push_back({ 128, 320 });
+		queries.push_back({ 0, 320 });
+
+		testCase(testSize, setOps, queries);
+	}
+
+	// Test 14: Mask generation edge cases
+	// Rationale: The set() method has special logic for numBits == 64 (lines 905-909)
+	// and different code paths for single vs multi-word operations. This test specifically
+	// targets those branches to ensure correct mask generation in all scenarios.
+	{
+		std::vector<std::pair<int, int>> setOps, queries;
+
+		// Test numBits == 64 case (single word, full mask)
+		setOps.push_back({ 0, 64 });
+		setOps.push_back({ 64, 128 });
+		queries.push_back({ 0, 64 });
+		queries.push_back({ 64, 128 });
+
+		// Test begin % 64 == 0 and end % 64 == 0 cases
+		setOps.push_back({ 128, 192 });
+		setOps.push_back({ 192, 256 });
+		queries.push_back({ 128, 192 });
+		queries.push_back({ 192, 256 });
+
+		// Test single-word ranges with different start positions
+		for (int start = 0; start < 64; start += 7) {
+			setOps.push_back({ start, start + 1 });
+			setOps.push_back({ start + 64, start + 65 });
+			queries.push_back({ start, start + 1 });
+			queries.push_back({ start + 64, start + 65 });
+		}
+
+		testCase(256, setOps, queries);
+	}
+
+	// Test 15: Extreme size testing
+	// Rationale: Large sizes (10,000+ bits) stress-test the multi-word logic and can expose
+	// issues that only appear when dealing with many 64-bit words. This catches performance
+	// issues and ensures correctness scales beyond typical use cases.
+	{
+		const int largeSize = 10000;
+		std::vector<std::pair<int, int>> setOps, queries;
+
+		// Large ranges across many words
+		setOps.push_back({ 100, 5000 });
+		setOps.push_back({ 3000, 8000 });
+		setOps.push_back({ 7000, 9500 });
+
+		// Query various sections
+		queries.push_back({ 0, 100 });
+		queries.push_back({ 100, 3000 });
+		queries.push_back({ 3000, 5000 });
+		queries.push_back({ 5000, 7000 });
+		queries.push_back({ 7000, 8000 });
+		queries.push_back({ 8000, 9500 });
+		queries.push_back({ 9500, largeSize });
+		queries.push_back({ 0, largeSize });
+
+		testCase(largeSize, setOps, queries);
 	}
 
 	return Void();
