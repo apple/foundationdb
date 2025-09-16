@@ -46,7 +46,7 @@ std::string awsV4URIEncode(const std::string& s, bool encodeSlash) {
 		else if (c == '/')
 			o.append(encodeSlash ? "%2F" : "/");
 		else {
-			sprintf(buf, "%%%.02X", c);
+			snprintf(buf, sizeof(buf), "%%%.02X", c);
 			o.append(buf);
 		}
 	}
