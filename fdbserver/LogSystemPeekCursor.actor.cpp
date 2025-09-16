@@ -585,6 +585,18 @@ static void resetBestServerIfNotAvailable(
 	}
 }
 
+/*
+* Version vector/unicast related: This function is used by both set and merge peek cursors in order
+* to decide when a tLog can return an empty version range. At a high level, the logic is as follows:
+* - the tLogs of old epochs can return an empty version range
+* - if "bestServer" is set then only the best server (of the "bestSet", if "bestSet" is initialized)
+    can return an empty version range
+* - if "bestServer" is not set then only the tLogs that are known to have been locked can return an
+*   empty version range
+* - if "bestSet" is set to a negative value then do not return an empty version range, irrespective
+*   of what other parameters are set to (we don't understand much about this scenario so trying to
+*   be safe in this case)
+*/
 static bool canReturnEmptyVersionRange(
     int bestServer,
     int currentServer,
@@ -596,9 +608,8 @@ static bool canReturnEmptyVersionRange(
 	bool returnEmptyIfLocked = false;
 	if ((!bestSet.present() || bestSet.get() >= 0)) {
 		if (knownLockedTLogIndices.present()) {
-			bool foundServer =
-			    std::find(knownLockedTLogIndices.get().begin(), knownLockedTLogIndices.get().end(), currentServer) !=
-			    knownLockedTLogIndices.get().end();
+			bool foundServer = std::binary_search(
+			    knownLockedTLogIndices.get().begin(), knownLockedTLogIndices.get().end(), currentServer);
 			if (bestServer >= 0) {
 				ASSERT_WE_THINK(!bestSet.present() || currentSet.present());
 				if ((!bestSet.present() || bestSet.get() == currentSet.get()) && currentServer == bestServer) {
