@@ -52,6 +52,11 @@ void forceLinkCommitProxyTests();
 void forceLinkWipedStringTests();
 void forceLinkRandomKeyValueUtilsTests();
 void forceLinkSimKmsVaultTests();
+void forceLinkRESTSimKmsVaultTest();
+void forceLinkActorFuzzUnitTests();
+void forceLinkGrpcTests();
+void forceLinkGrpcTests2();
+void forceLinkSimpleCounterTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -119,6 +124,17 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkWipedStringTests();
 		forceLinkRandomKeyValueUtilsTests();
 		forceLinkSimKmsVaultTests();
+<<<<<<< HEAD
+=======
+		forceLinkRESTSimKmsVaultTest();
+		forceLinkActorFuzzUnitTests();
+		forceLinkSimpleCounterTests();
+
+#ifdef FLOW_GRPC_ENABLED
+		forceLinkGrpcTests();
+		forceLinkGrpcTests2();
+#endif
+>>>>>>> ff1922078 (SimpleCounter implementation and application to Arena, FastAlloc, and Net2 cherrypick to 7.4 (#12372))
 	}
 
 	Future<Void> setup(Database const& cx) override {
