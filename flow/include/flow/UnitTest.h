@@ -25,8 +25,18 @@
 /*
  * Flow unit testing framework
  *
- * This is an *extremely* lightweight framework for writing optionally asynchronous,
+ * This is a simple framework for writing optionally asynchronous,
  * optionally randomized unit tests.
+ *
+ * This framework is not trivial to use correctly. For example, your
+ * unit tests will affect the global execution environment of a
+ * fdbserver process. If things done in your unit test are not in
+ * accordance with global expectations that are only enabled in
+ * simulation, then you may break simulation even though your unit
+ * test itself runs fine via fdbserver -r unittests.  As a result, to test
+ * that your unit tests themselves do not break simulation, you should
+ * also run a 100k simulation run.  If you think this sounds
+ * backwards, you may be right.
  *
  * Usage:
  *

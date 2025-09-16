@@ -19,9 +19,9 @@
  */
 
 #include "flow/Arena.h"
-
-#include "flow/UnitTest.h"
 #include "flow/ScopeExit.h"
+#include "flow/SimpleCounter.h"
+#include "flow/UnitTest.h"
 
 #include "flow/config.h"
 
@@ -110,9 +110,13 @@ void makeUndefined(void*, size_t) {}
 Arena::Arena() : impl(nullptr) {}
 Arena::Arena(size_t reservedSize) : impl(0) {
 	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
+	static SimpleCounter<int64_t>* created = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenasCreated");
+	created->increment(1);
 	if (reservedSize) {
 		allowAccess(impl.getPtr());
 		ArenaBlock::create((int)reservedSize, impl);
+		static SimpleCounter<int64_t>* bytes = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBytesReserved");
+		bytes->increment(reservedSize);
 		disallowAccess(impl.getPtr());
 	}
 }
@@ -138,6 +142,8 @@ void* Arena::allocate4kAlignedBuffer(uint32_t size) {
 
 size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	if (impl) {
+		static SimpleCounter<int64_t>* calls = SimpleCounter<int64_t>::makeCounter("/flow/arena/getSizeCalls");
+		calls->increment(1);
 		allowAccess(impl.getPtr());
 		size_t result;
 		if (fastInaccurateEstimate) {
@@ -219,6 +225,9 @@ size_t ArenaBlock::totalSize(std::unordered_set<ArenaBlock*>& visited) const {
 	totalSizeEstimate = size();
 	int o = nextBlockOffset;
 	while (o) {
+		static SimpleCounter<int64_t>* count =
+		    SimpleCounter<int64_t>::makeCounter("/flow/arena/totalSizeBlocksExamined");
+		count->increment(1);
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
 		if (r->aligned4kBufferSize != 0) {
@@ -247,6 +256,8 @@ void ArenaBlock::wipeUsed() {
 	int dataOffset = isTiny() ? TINY_HEADER : sizeof(ArenaBlock);
 	void* dataBegin = (char*)getData() + dataOffset;
 	int dataSize = used() - dataOffset;
+	static SimpleCounter<int64_t>* bytesWiped = SimpleCounter<int64_t>::makeCounter("/flow/arena/bytesWiped");
+	bytesWiped->increment(dataSize);
 	makeDefined(dataBegin, dataSize);
 	::memset(dataBegin, 0, dataSize);
 	makeNoAccess(dataBegin, dataSize);
@@ -332,6 +343,13 @@ void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t 
 }
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem isSecure) {
+	static SimpleCounter<int64_t>* arenaBlockAllocations =
+	    SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBlockAllocations");
+	static SimpleCounter<int64_t>* arenaBlockBytesAllocated =
+	    SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBlockBytesAllocated");
+	arenaBlockAllocations->increment(1);
+	arenaBlockBytesAllocated->increment(bytes);
+
 	ArenaBlock* b = self.getPtr();
 	allowAccess(b);
 	if (!self || self->unused() < bytes) {
@@ -351,6 +369,8 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem i
 // Return an appropriately-sized ArenaBlock to store the given data
 ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
+	static SimpleCounter<int64_t>* created = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBlocksCreated");
+	created->increment(1);
 	// all blocks are initialized with no-wipe by default. allocate() sets it, if needed.
 	if (dataSize <= SMALL - TINY_HEADER && !next) {
 		static_assert(sizeof(ArenaBlock) <= 32); // Need to allocate at least sizeof(ArenaBlock) for an ArenaBlock*. See
@@ -381,6 +401,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 		}
 
 		if (reqSize < LARGE) {
+			// NOTE: FastAlloc.* maintains metrics on its ::allocate calls.
 			if (reqSize <= 128) {
 				b = (ArenaBlock*)FastAllocator<128>::allocate();
 				b->bigSize = 128;
@@ -487,6 +508,9 @@ void ArenaBlock::destroy() {
 			}
 		}
 		b->destroyLeaf();
+		static SimpleCounter<int64_t>* destroyed =
+		    SimpleCounter<int64_t>::makeCounter("/flow/arena/arenaBlocksDestroyed");
+		destroyed->increment(1);
 	}
 }
 
@@ -503,6 +527,7 @@ void ArenaBlock::destroyLeaf() {
 			INSTRUMENT_RELEASE("Arena64");
 		}
 	} else {
+		// NOTE: FastAlloc.* maintains counters on ::release calls/bytes.
 		if (bigSize <= 128) {
 			FastAllocator<128>::release(this);
 			INSTRUMENT_RELEASE("Arena128");

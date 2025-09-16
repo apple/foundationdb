@@ -265,7 +265,6 @@ public:
 		};
 		void action(WriteBuffer& a) {
 			for (const auto& event : a.events) {
-				event.validateFormat();
 				logWriter->write(formatter->formatEvent(event));
 			}
 
@@ -1783,39 +1782,6 @@ std::string TraceEventFields::toString() const {
 	}
 
 	return str;
-}
-
-bool validateField(const char* key, bool allowUnderscores) {
-	if ((key[0] < 'A' || key[0] > 'Z') && key[0] != '_') {
-		return false;
-	}
-
-	const char* underscore = strchr(key, '_');
-	while (underscore) {
-		if (!allowUnderscores || ((underscore[1] < 'A' || underscore[1] > 'Z') && key[0] != '_' && key[0] != '\0')) {
-			return false;
-		}
-
-		underscore = strchr(&underscore[1], '_');
-	}
-
-	return true;
-}
-
-void TraceEventFields::validateFormat() const {
-	if (g_network && g_network->isSimulated()) {
-		for (Field field : fields) {
-			if (!validateField(field.first.c_str(), false)) {
-				fprintf(stderr,
-				        "Trace event detail name `%s' is invalid in:\n\t%s\n",
-				        field.first.c_str(),
-				        toString().c_str());
-			}
-			if (field.first == "Type" && !validateField(field.second.c_str(), true)) {
-				fprintf(stderr, "Trace event detail Type `%s' is invalid\n", field.second.c_str());
-			}
-		}
-	}
 }
 
 std::string traceableStringToString(const char* value, size_t S) {

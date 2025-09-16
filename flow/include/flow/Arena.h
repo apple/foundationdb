@@ -31,6 +31,7 @@
 #include "flow/FileIdentifier.h"
 #include "flow/swift_support.h"
 #include "flow/Optional.h"
+#include "flow/SimpleCounter.h"
 #include "flow/Traceable.h"
 #include <algorithm>
 #include <array>
@@ -290,8 +291,6 @@ struct union_like_traits<Optional<T>> : std::true_type {
 	}
 };
 
-// #define STANDALONE_ALWAYS_COPY
-
 template <class T>
 class Standalone : private Arena, public T {
 public:
@@ -316,30 +315,12 @@ public:
 		return *this;
 	}
 
-// Always-copy mode was meant to make alloc instrumentation more useful by making allocations occur at the final resting
-// place of objects leaked It doesn't actually work because some uses of Standalone things assume the object's memory
-// will not change on copy or assignment
-#ifdef STANDALONE_ALWAYS_COPY
-	// Treat Standalone<T>'s as T's in construction and assignment so the memory is copied
-	Standalone(const T& t, const Arena& arena) : Standalone(t) {}
-	Standalone(const Standalone<T>& t) : Standalone((T const&)t) {}
-	Standalone(const Standalone<T>&& t) : Standalone((T const&)t) {}
-	Standalone<T>& operator=(const Standalone<T>&& t) {
-		*this = (T const&)t;
-		return *this;
-	}
-	Standalone<T>& operator=(const Standalone<T>& t) {
-		*this = (T const&)t;
-		return *this;
-	}
-#else
 	Standalone(const T& t, const Arena& arena) : Arena(arena), T(t) {}
 	Standalone(const Standalone<T>&) = default;
 	Standalone<T>& operator=(const Standalone<T>&) = default;
 	Standalone(Standalone<T>&&) = default;
 	Standalone<T>& operator=(Standalone<T>&&) = default;
 	~Standalone() = default;
-#endif
 
 	template <class U>
 	Standalone<U> castTo() const {
@@ -355,11 +336,6 @@ public:
 		serializer(ar, (*(T*)this), arena());
 	}
 
-	/*static Standalone<T> fakeStandalone( const T& t ) {
-	    Standalone<T> x;
-	    *(T*)&x = t;
-	    return x;
-	}*/
 private:
 	template <class U>
 	Standalone(Standalone<U> const&); // unimplemented
@@ -371,22 +347,33 @@ extern std::string format(const char* form, ...);
 
 #pragma pack(push, 4)
 class StringRef {
+private:
+	static SimpleCounter<int64_t>* bytesCopied() {
+		static SimpleCounter<int64_t>* bytesCopied =
+		    SimpleCounter<int64_t>::makeCounter("/flow/arena/stringRefBytesCopied");
+		return bytesCopied;
+	}
+
 public:
 	constexpr static FileIdentifier file_identifier = 13300811;
 	StringRef() : data(0), length(0) {}
 	StringRef(Arena& p, const StringRef& toCopy) : data(new(p) uint8_t[toCopy.size()]), length(toCopy.size()) {
 		if (length > 0) {
+			bytesCopied()->increment(length);
 			memcpy((void*)data, toCopy.data, length);
 		}
 	}
 	StringRef(Arena& p, const std::string& toCopy) : length((int)toCopy.size()) {
 		UNSTOPPABLE_ASSERT(toCopy.size() <= std::numeric_limits<int>::max());
 		data = new (p) uint8_t[toCopy.size()];
-		if (length)
+		if (length) {
+			bytesCopied()->increment(length);
 			memcpy((void*)data, &toCopy[0], length);
+		}
 	}
 	StringRef(Arena& p, const uint8_t* toCopy, int length) : data(new(p) uint8_t[length]), length(length) {
 		if (length > 0) {
+			bytesCopied()->increment(length);
 			memcpy((void*)data, toCopy, length);
 		}
 	}
@@ -422,7 +409,10 @@ public:
 	}
 
 	StringRef withPrefix(const StringRef& prefix, Arena& arena) const {
-		uint8_t* s = new (arena) uint8_t[prefix.size() + size()];
+		size_t len = prefix.size() + size();
+		uint8_t* s = new (arena) uint8_t[len];
+		bytesCopied()->increment(len);
+
 		if (prefix.size() > 0) {
 			memcpy(s, prefix.begin(), prefix.size());
 		}
@@ -433,7 +423,9 @@ public:
 	}
 
 	StringRef withSuffix(const StringRef& suffix, Arena& arena) const {
-		uint8_t* s = new (arena) uint8_t[suffix.size() + size()];
+		size_t len = suffix.size() + size();
+		uint8_t* s = new (arena) uint8_t[len];
+		bytesCopied()->increment(len);
 		if (size() > 0) {
 			memcpy(s, begin(), size());
 		}
@@ -467,7 +459,10 @@ public:
 		return substr(0, size() - s.size());
 	}
 
-	std::string toString() const { return std::string(reinterpret_cast<const char*>(data), length); }
+	std::string toString() const {
+		bytesCopied()->increment(length);
+		return std::string(reinterpret_cast<const char*>(data), length);
+	}
 
 	std::string_view toStringView() const { return std::string_view(reinterpret_cast<const char*>(data), length); }
 
@@ -477,6 +472,7 @@ public:
 	std::string toHexString(int limit = -1) const {
 		if (limit < 0)
 			limit = length;
+		std::string rv;
 		if (length > limit) {
 			// If limit is high enough split it so that 2/3 of limit is used to show prefix bytes and the rest is used
 			// for suffix bytes
@@ -485,21 +481,21 @@ public:
 				return substr(0, limit - suffix).toHexString() + "..." + substr(length - suffix, suffix).toHexString() +
 				       format(" [%d bytes]", length);
 			}
-			return substr(0, limit).toHexString() + format("...[%d]", length);
+			rv = substr(0, limit).toHexString() + format("...[%d]", length);
+		} else {
+			rv.reserve(length * 7);
+			for (int i = 0; i < length; i++) {
+				uint8_t b = (*this)[i];
+				if (isalnum(b))
+					rv.append(format("%02x (%c) ", b, b));
+				else
+					rv.append(format("%02x ", b));
+			}
+			if (rv.size() > 0)
+				rv.resize(rv.size() - 1);
 		}
-
-		std::string s;
-		s.reserve(length * 7);
-		for (int i = 0; i < length; i++) {
-			uint8_t b = (*this)[i];
-			if (isalnum(b))
-				s.append(format("%02x (%c) ", b, b));
-			else
-				s.append(format("%02x ", b));
-		}
-		if (s.size() > 0)
-			s.resize(s.size() - 1);
-		return s;
+		bytesCopied()->increment(rv.length());
+		return rv;
 	}
 
 	// Get string with full content in hex format. Different digits are splitted by a space.
@@ -513,6 +509,7 @@ public:
 		}
 		if (s.size() > 0)
 			s.resize(s.size() - 1);
+		bytesCopied()->increment(s.length());
 		return s;
 	}
 
@@ -600,6 +597,7 @@ public:
 	// Copies string contents to dst and returns a pointer to the next byte after
 	uint8_t* copyTo(uint8_t* dst) const {
 		if (length > 0) {
+			bytesCopied()->increment(length);
 			memcpy(dst, data, length);
 		}
 		return dst + length;
@@ -953,6 +951,8 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 	void reset() { _cached_size = 0; }
 };
 
+// FIXME: consider whether methods in this class should be instrumented to
+// count calls, bytes processed, etc.
 template <class T, VecSerStrategy SerStrategy = VecSerStrategy::FlatBuffers>
 class VectorRef : public ComposedIdentifier<T, 3>, public VectorRefPreserializer<T, SerStrategy> {
 	using VPS = VectorRefPreserializer<T, SerStrategy>;
@@ -1219,6 +1219,8 @@ protected:
 // that all of them are always copied. This should be faster
 // when you expect the vector to be usually very small as it
 // won't need allocations in these cases.
+// FIXME: assess whether methods in this class should be instrumented
+// with metrics. Currently this appears to be thinly used.
 template <class T, int InlineMembers = 1>
 class SmallVectorRef {
 	static_assert(InlineMembers >= 0);
