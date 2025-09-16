@@ -828,9 +828,9 @@ public:
 	                                                         // remote log routers are experiencing degradation
 	                                                         // (latency) with their peers. Gray failure may trigger
 	                                                         // recovery based on this.
-	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether
-	                                             // remote log routers are disconnected from their peers. Gray failure
-	                                             // may trigger recovery based on this.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_DISCONNECT_MONITORING; // When enabled, gray failure tries to detect whether
+	                                                        // remote log routers are disconnected from their peers.
+	                                                        // Gray failure may trigger recovery based on this.
 	bool CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING; // When enabled, gray failure tries to detect whether remote
 	                                                   // tlogs are experiencing degradation (latency) with their peers.
 	                                                   // Gray failure may trigger recovery based on this.
