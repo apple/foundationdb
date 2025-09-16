@@ -2353,6 +2353,30 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 	return std::make_tuple(maxKCV, RV);
 }
 
+/**
+ * Returns true if:
+ *   for each <key, value> in "mapA":
+ *     - "key" is present in "mapB"
+ *     - each element in (the vector in) "mapA[key]" is present in (the vector in) "mapB[key]"
+ * Assumes that the elements in the vectors in "mapA" and "mapB" are in sorted order.
+ * @note This function extends the functionality of "std::includes()" to containers of
+ * type "std::map<uint8_t, std::vector<uint16_t>>".
+ */
+static bool isSubset(const std::map<uint8_t, std::vector<uint16_t>>& mapA,
+                     const std::map<uint8_t, std::vector<uint16_t>>& mapB) {
+	for (const auto& [keyA, valueA] : mapA) {
+		auto it = mapB.find(keyA);
+		if (it == mapB.end()) {
+			return false;
+		}
+		const auto& valueB = it->second;
+		if (!std::includes(valueB.begin(), valueB.end(), valueA.begin(), valueA.end())) {
+			return false;
+		}
+	}
+	return true;
+}
+
 ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem,
                                                      UID dbgid,
                                                      DBCoreState prevState,
@@ -2609,13 +2633,15 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 
 	state Optional<Version> lastEnd;
 	state Version knownCommittedVersion = 0;
+	state std::map<uint8_t, std::vector<uint16_t>> lastKnownLockedTLogIds;
+	state bool knownLockedTLogIdsChanged = false;
 	loop {
 		Version minEnd = std::numeric_limits<Version>::max();
 		Version minDV = std::numeric_limits<Version>::max();
 		Version maxEnd = 0;
 		state std::vector<Future<Void>> changes;
 		state std::vector<std::tuple<int, std::vector<TLogLockResult>, bool>> logGroupResults;
-		state std::map<uint8_t, std::vector<uint16_t>> knownLockedTLogIds;
+		state std::map<uint8_t, std::vector<uint16_t>> currentKnownLockedTLogIds;
 		for (int log = 0; log < logServers.size(); log++) {
 			if (!logServers[log]->isLocal) {
 				continue;
@@ -2626,7 +2652,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				logGroupResults.emplace_back(logServers[log]->tLogReplicationFactor,
 				                             durableVersionInfo.get().lockResults,
 				                             durableVersionInfo.get().policyResult);
-				knownLockedTLogIds[log] = durableVersionInfo.get().knownLockedTLogIds;
+				currentKnownLockedTLogIds[log] = std::move(durableVersionInfo.get().knownLockedTLogIds);
 				minDV = std::min(minDV, durableVersionInfo.get().minimumDurableVersion);
 				if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 					knownCommittedVersion =
@@ -2642,7 +2668,19 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			}
 			changes.push_back(TagPartitionedLogSystem::getDurableVersionChanged(lockResults[log], logFailed[log]));
 		}
-		if (maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get())) {
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && maxEnd > 0 && lastEnd.present() &&
+		    maxEnd >= lastEnd.get()) {
+			// Are the locked servers that were available in the previous iteration still available? If not,
+			// restart recovery (as there is a chance that the recovery of the previous iteration would stall).
+			knownLockedTLogIdsChanged = !isSubset(lastKnownLockedTLogIds, currentKnownLockedTLogIds);
+			if (knownLockedTLogIdsChanged) {
+				// @todo dump the contents of "lastKnownLockedTLogIds" and "currentKnownLockedTLogIds" here
+				TraceEvent("KnownLockedTLogIdsChanged")
+				    .detail("LastKnownLockedTLogIdCount", lastKnownLockedTLogIds.size())
+				    .detail("CurrentKnownLockedTLogIdCount", currentKnownLockedTLogIds.size());
+			}
+		}
+		if (maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get() || knownLockedTLogIdsChanged)) {
 			CODE_PROBE(lastEnd.present(), "Restarting recovery at an earlier point");
 
 			state Reference<TagPartitionedLogSystem> logSystem =
@@ -2657,7 +2695,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->logSystemType = prevState.logSystemType;
 			logSystem->rejoins = rejoins;
 			logSystem->lockResults = lockResults;
-			logSystem->knownLockedTLogIds = knownLockedTLogIds;
+			logSystem->knownLockedTLogIds = currentKnownLockedTLogIds;
+			lastKnownLockedTLogIds = std::move(currentKnownLockedTLogIds);
+			currentKnownLockedTLogIds.clear(); // ensures safety if accessed later
 			if (knownCommittedVersion > minEnd) {
 				knownCommittedVersion = minEnd;
 			}
