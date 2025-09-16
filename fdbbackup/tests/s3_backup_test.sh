@@ -24,19 +24,18 @@ trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
 function cleanup {
-  :
-#  if type shutdown_fdb_cluster &> /dev/null; then
-#    shutdown_fdb_cluster
-#  fi
-#  if type shutdown_weed &> /dev/null; then
-#    shutdown_weed "${TEST_SCRATCH_DIR}"
-#  fi
-#  if type shutdown_aws &> /dev/null; then
-#    shutdown_aws "${TEST_SCRATCH_DIR}"
-#  fi
-#  if [[ -n "${ENCRYPTION_KEY_FILE:-}" ]] && [[ -f "${ENCRYPTION_KEY_FILE}" ]]; then
-#    rm -f "${ENCRYPTION_KEY_FILE}"
-#  fi
+  if type shutdown_fdb_cluster &> /dev/null; then
+    shutdown_fdb_cluster
+  fi
+  if type shutdown_weed &> /dev/null; then
+    shutdown_weed "${TEST_SCRATCH_DIR}"
+  fi
+  if type shutdown_aws &> /dev/null; then
+    shutdown_aws "${TEST_SCRATCH_DIR}"
+  fi
+  if [[ -n "${ENCRYPTION_KEY_FILE:-}" ]] && [[ -f "${ENCRYPTION_KEY_FILE}" ]]; then
+    rm -f "${ENCRYPTION_KEY_FILE}"
+  fi
 }
 
 # Resolve passed in reference to an absolute path.
