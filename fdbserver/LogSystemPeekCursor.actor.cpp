@@ -605,30 +605,31 @@ static bool canReturnEmptyVersionRange(
     Optional<int> bestSet = Optional<int>(),
     Optional<int> currentSet = Optional<int>()) {
 	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && end != std::numeric_limits<Version>::max());
-	bool returnEmptyIfLocked = false;
-	if ((!bestSet.present() || bestSet.get() >= 0)) {
-		if (knownLockedTLogIndices.present()) {
-			bool foundServer = std::binary_search(
-			    knownLockedTLogIndices.get().begin(), knownLockedTLogIndices.get().end(), currentServer);
-			if (bestServer >= 0) {
-				ASSERT_WE_THINK(!bestSet.present() || currentSet.present());
-				if ((!bestSet.present() || bestSet.get() == currentSet.get()) && currentServer == bestServer) {
-					ASSERT(foundServer);
-					// The best server (that is available and known to have been locked) can return
-					// an empty version range.
-					returnEmptyIfLocked = true;
-				}
-			} else if (foundServer) {
-				// A non-buddy server (that is available and known to have been locked) can return
-				// an empty version range.
-				returnEmptyIfLocked = true;
-			}
-		} else {
-			// The current server belongs to an old epoch, hence can return an empty version range.
-			returnEmptyIfLocked = true;
-		}
+	if (bestSet.present() && bestSet.get() < 0) {
+		// "BestSet" is set to a negative value - we don't know how/when this can happen.
+		// Be safe and return false.
+		return false;
 	}
-	return returnEmptyIfLocked;
+	if (!knownLockedTLogIndices.present()) {
+		// Servers from old epochs can return an empty version range.
+		return true;
+	}
+	bool foundServer =
+	    std::binary_search(knownLockedTLogIndices.get().begin(), knownLockedTLogIndices.get().end(), currentServer);
+	if (bestServer >= 0) {
+		ASSERT_WE_THINK(!bestSet.present() || currentSet.present());
+		if ((!bestSet.present() || bestSet.get() == currentSet.get()) && currentServer == bestServer) {
+			ASSERT(foundServer);
+			// Best server is set - only the best server (that is known to have been locked) can return
+			// an empty version range.
+			return true;
+		}
+	} else if (foundServer) {
+		// Best server is not set - only servers that are known to have been locked can return
+		// an empty version range.
+		return true;
+	}
+	return false;
 }
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
