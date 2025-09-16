@@ -143,7 +143,8 @@ public:
 	// INetworkConnections interface
 	Future<Reference<IConnection>> connect(NetworkAddress toAddr, tcp::socket* existingSocket = nullptr) override;
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override;
-	Future<Reference<IConnection>> connectExternalWithHostname(NetworkAddress toAddr, const std::string& hostname) override;
+	Future<Reference<IConnection>> connectExternalWithHostname(NetworkAddress toAddr,
+	                                                           const std::string& hostname) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
 	// The mock DNS methods should only be used in simulation.
@@ -964,10 +965,10 @@ public:
 		state Reference<SSLConnection> self(new SSLConnection(*ios, context));
 		self->peer_address = addr;
 		self->sni_hostname = hostname; // Store hostname for SNI during handshake
-		
-		// Store hostname for SNI use during handshake  
+
+		// Store hostname for SNI use during handshake
 		TraceEvent("SSLConnectionWithHostname").detail("Hostname", hostname).detail("Addr", addr);
-		
+
 		try {
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id);
@@ -975,9 +976,9 @@ public:
 			self->socket.async_connect(to, std::move(p));
 
 			wait(onConnected);
-			
+
 			// SNI will be set later in doConnectHandshake before SSL handshake
-			
+
 			self->init();
 			return self;
 		} catch (Error&) {
@@ -1113,7 +1114,10 @@ public:
 			if (!self->sni_hostname.empty()) {
 				TraceEvent("SSLSetSNI").detail("Hostname", self->sni_hostname).detail("Addr", self->peer_address);
 				int result = SSL_set_tlsext_host_name(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
-				TraceEvent("SSLSetSNIResult").detail("Hostname", self->sni_hostname).detail("Result", result).detail("Addr", self->peer_address);
+				TraceEvent("SSLSetSNIResult")
+				    .detail("Hostname", self->sni_hostname)
+				    .detail("Result", result)
+				    .detail("Addr", self->peer_address);
 			} else {
 				TraceEvent("SSLNoSNIHostname").detail("Addr", self->peer_address);
 			}
