@@ -179,6 +179,10 @@ function test_s3_backup_and_restore {
     err "Failed clear data in fdb"
     return 1
   fi
+  # Test encryption mismatches (always run to test both encrypted and unencrypted scenarios)
+  log "Testing encryption mismatches"
+  test_encryption_mismatches "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}" "${local_encryption_key_file}"
+
   log "Restore from s3"
   if ! restore "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}" "${local_encryption_key_file}"; then
     err "Failed restore"
@@ -211,6 +215,126 @@ function test_s3_backup_and_restore {
     err "Found Severity=40 errors in logs"
     return 1
   fi
+}
+
+# Test all encryption mismatch scenarios - all should fail
+# $1 The build directory
+# $2 The scratch directory
+# $3 The S3 url
+# $4 credentials file
+# $5 encryption key file used for backup (empty if no encryption)
+function test_encryption_mismatches {
+  local local_build_dir="${1}"
+  local local_scratch_dir="${2}"
+  local local_url="${3}"
+  local local_credentials="${4}"
+  local backup_encryption_key_file="${5}"
+
+  # Create separate log directory for encryption mismatch tests
+  local mismatch_logdir="${local_scratch_dir}/encryption_mismatch_logs"
+  mkdir -p "${mismatch_logdir}"
+
+  if [[ -n "${backup_encryption_key_file}" ]]; then
+    # Backup was encrypted - test mismatches
+    log "Testing encryption mismatches for encrypted backup"
+
+    # Test 1: Encrypted backup → restore without encryption (should fail)
+    log "Test 1: Attempting restore without encryption on encrypted backup (should fail)"
+    local cmd_args1=(
+      "--dest-cluster-file" "${local_scratch_dir}/loopback_cluster/fdb.cluster"
+      "-t" "${TAG}" "-w"
+      "-r" "${local_url}"
+      "--log" "--logdir=${mismatch_logdir}"
+      "--blob-credentials" "${local_credentials}"
+    )
+    for knob in "${KNOBS[@]}"; do
+      cmd_args1+=("${knob}")
+    done
+
+    set +e
+    "${local_build_dir}"/bin/fdbrestore start "${cmd_args1[@]}"
+    local exit_code1=$?
+    set -e
+
+    if [[ ${exit_code1} -eq 0 ]]; then
+      err "ERROR: Restore without encryption on encrypted backup succeeded when it should have failed!"
+      rm -rf "${mismatch_logdir}"
+      return 1
+    fi
+    log "SUCCESS: Restore without encryption on encrypted backup failed as expected"
+
+    # Test 3: Encrypted backup → restore with wrong encryption key (should fail)
+    local wrong_key_file="${local_scratch_dir}/wrong_key"
+    create_encryption_key_file "${wrong_key_file}"
+
+    log "Test 3: Attempting restore with wrong encryption key (should fail)"
+    local cmd_args3=(
+      "--dest-cluster-file" "${local_scratch_dir}/loopback_cluster/fdb.cluster"
+      "-t" "${TAG}" "-w"
+      "-r" "${local_url}"
+      "--log" "--logdir=${mismatch_logdir}"
+      "--blob-credentials" "${local_credentials}"
+      "--encryption-key-file" "${wrong_key_file}"
+    )
+    for knob in "${KNOBS[@]}"; do
+      cmd_args3+=("${knob}")
+    done
+
+    set +e
+    "${local_build_dir}"/bin/fdbrestore start "${cmd_args3[@]}"
+    local exit_code3=$?
+    set -e
+
+    rm -f "${wrong_key_file}"
+
+    if [[ ${exit_code3} -eq 0 ]]; then
+      err "ERROR: Restore with wrong encryption key succeeded when it should have failed!"
+      rm -rf "${mismatch_logdir}"
+      return 1
+    fi
+    log "SUCCESS: Restore with wrong encryption key failed as expected"
+
+  else
+    # Backup was not encrypted - test mismatch
+    log "Testing encryption mismatch for unencrypted backup"
+
+    # Test 2: Unencrypted backup → restore with encryption (should fail)
+    local any_key_file="${local_scratch_dir}/any_key"
+    create_encryption_key_file "${any_key_file}"
+
+    log "Test 2: Attempting restore with encryption on unencrypted backup (should fail)"
+    local cmd_args2=(
+      "--dest-cluster-file" "${local_scratch_dir}/loopback_cluster/fdb.cluster"
+      "-t" "${TAG}" "-w"
+      "-r" "${local_url}"
+      "--log" "--logdir=${mismatch_logdir}"
+      "--blob-credentials" "${local_credentials}"
+      "--encryption-key-file" "${any_key_file}"
+    )
+    for knob in "${KNOBS[@]}"; do
+      cmd_args2+=("${knob}")
+    done
+
+    set +e
+    "${local_build_dir}"/bin/fdbrestore start "${cmd_args2[@]}"
+    local exit_code2=$?
+    set -e
+
+    rm -f "${any_key_file}"
+
+    if [[ ${exit_code2} -eq 0 ]]; then
+      err "ERROR: Restore with encryption on unencrypted backup succeeded when it should have failed!"
+      rm -rf "${mismatch_logdir}"
+      return 1
+    fi
+    log "SUCCESS: Restore with encryption on unencrypted backup failed as expected"
+  fi
+
+  # Clean up separate log directory
+  rm -rf "${mismatch_logdir}"
+
+  log "All encryption mismatch tests completed successfully"
+  return 0
 }
 
 # set -o xtrace   # a.k.a set -x  # Set this one when debugging (or 'bash -x THIS_SCRIPT').
