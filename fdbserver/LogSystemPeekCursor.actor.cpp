@@ -585,6 +585,53 @@ static void resetBestServerIfNotAvailable(
 	}
 }
 
+/*
+* Version vector/unicast related: This function is used by both set and merge peek cursors in order
+* to decide when a tLog can return an empty version range. At a high level, the logic is as follows:
+* - the tLogs of old epochs can return an empty version range
+* - if "bestServer" is set then only the best server (of the "bestSet", if "bestSet" is initialized)
+    can return an empty version range
+* - if "bestServer" is not set then only the tLogs that are known to have been locked can return an
+*   empty version range
+* - if "bestSet" is set to a negative value then do not return an empty version range, irrespective
+*   of what other parameters are set to (we don't understand much about this scenario so trying to
+*   be safe in this case)
+*/
+static bool canReturnEmptyVersionRange(
+    int bestServer,
+    int currentServer,
+    Version end,
+    Optional<std::vector<uint16_t>> knownLockedTLogIndices = Optional<std::vector<uint16_t>>(),
+    Optional<int> bestSet = Optional<int>(),
+    Optional<int> currentSet = Optional<int>()) {
+	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && end != std::numeric_limits<Version>::max());
+	if (bestSet.present() && bestSet.get() < 0) {
+		// "BestSet" is set to a negative value - we don't know how/when this can happen.
+		// Be safe and return false.
+		return false;
+	}
+	if (!knownLockedTLogIndices.present()) {
+		// Servers from old epochs can return an empty version range.
+		return true;
+	}
+	bool foundServer =
+	    std::binary_search(knownLockedTLogIndices.get().begin(), knownLockedTLogIndices.get().end(), currentServer);
+	if (bestServer >= 0) {
+		ASSERT_WE_THINK(!bestSet.present() || currentSet.present());
+		if ((!bestSet.present() || bestSet.get() == currentSet.get()) && currentServer == bestServer) {
+			ASSERT(foundServer);
+			// Best server is set - only the best server (that is known to have been locked) can return
+			// an empty version range.
+			return true;
+		}
+	} else if (foundServer) {
+		// Best server is not set - only servers that are known to have been locked can return
+		// an empty version range.
+		return true;
+	}
+	return false;
+}
+
 ILogSystem::MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
                                                Version begin)
   : serverCursors(serverCursors), tag(invalidTag), bestServer(-1), currentCursor(0), readQuorum(serverCursors.size()),
@@ -603,7 +650,8 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
     bool parallelGetMore,
     std::vector<LocalityData> const& tLogLocalities,
     Reference<IReplicationPolicy> const tLogPolicy,
-    int tLogReplicationFactor)
+    int tLogReplicationFactor,
+    const Optional<std::vector<uint16_t>>& knownLockedTLogIds)
   : tag(tag), bestServer(bestServerLogId), currentCursor(0), readQuorum(readQuorum), messageVersion(begin),
     hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
     tLogReplicationFactor(tLogReplicationFactor) {
@@ -622,7 +670,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
 	for (int i = 0; i < logServers.size(); i++) {
 		bool returnEmptyIfStopped =
 		    ((SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && end != std::numeric_limits<Version>::max())
-		         ? (bestServer < 0 || (i == bestServer))
+		         ? canReturnEmptyVersionRange(bestServer, i /*currentServer*/, end, knownLockedTLogIds)
 		         : false);
 		auto cursor = makeReference<ILogSystem::ServerPeekCursor>(
 		    logServers[i], tag, begin, end, bestServer >= 0, parallelGetMore, returnEmptyIfStopped);
@@ -883,7 +931,8 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
                                          Tag tag,
                                          Version begin,
                                          Version end,
-                                         bool parallelGetMore)
+                                         bool parallelGetMore,
+                                         const Optional<std::vector<uint16_t>>& knownLockedTLogIds)
   : logSets(logSets), tag(tag), bestSet(bestSet), bestServer(bestServerLogId), currentSet(bestSet), currentCursor(0),
     messageVersion(begin), hasNextMessage(false), useBestSet(true), randomID(deterministicRandom()->randomUniqueID()),
     end(end) {
@@ -896,7 +945,8 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
 		for (int j = 0; j < logSets[i]->logServers.size(); j++) {
 			bool returnEmptyIfStopped =
 			    ((SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && end != std::numeric_limits<Version>::max())
-			         ? (bestSet < 0 || bestServer < 0 || (i == bestSet && j == bestServer))
+			         ? canReturnEmptyVersionRange(
+			               bestServer, j /*currentServer*/, end, knownLockedTLogIds, bestSet, i /* currentSet */)
 			         : false);
 			auto cursor = makeReference<ILogSystem::ServerPeekCursor>(
 			    logSets[i]->logServers[j], tag, begin, end, true, parallelGetMore, returnEmptyIfStopped);
@@ -1051,7 +1101,7 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 				c->advanceTo(messageVersion);
 				if (start <= messageVersion && messageVersion < c->version()) {
 					advancedPast = true;
-					CODE_PROBE(true, "Merge peek cursor with logIdx advanced past desired sequence");
+					CODE_PROBE(true, "Set peek cursor with logIdx advanced past desired sequence");
 				}
 			}
 		}
