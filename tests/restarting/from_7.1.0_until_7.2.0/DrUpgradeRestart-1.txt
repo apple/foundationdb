@@ -1,6 +1,5 @@
 storageEngineExcludeTypes=3
-extraDatabaseMode=Local
-allowDefaultTenant = false
+extraDB=3
 
 testTitle=DrUpgrade
 clearAfterTest=false
