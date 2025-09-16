@@ -48,16 +48,13 @@ PerfDoubleCounter g_buildTest("Build", skc), g_add("Add", skc), g_detectConflict
     g_merge("D.MergeWrite", skc), g_removeBefore("D.RemoveBefore", skc);
 
 static force_inline int compare(const StringRef& a, const StringRef& b) {
-	int c = memcmp(a.begin(), b.begin(), std::min(a.size(), b.size()));
-	if (c < 0)
-		return -1;
-	if (c > 0)
-		return +1;
-	if (a.size() < b.size())
-		return -1;
-	if (a.size() == b.size())
-		return 0;
-	return +1;
+	const size_t aSize = a.size();
+	const size_t bSize = b.size();
+	const size_t minSize = std::min(aSize, bSize);
+	int c = memcmp(a.begin(), b.begin(), minSize);
+	if (c)
+		return (c > 0) - (c < 0); // normalize to +1/-1
+	return (aSize > bSize) - (aSize < bSize);
 }
 
 struct ReadConflictRange {
@@ -172,6 +169,10 @@ void sortPoints(std::vector<KeyInfo>& points) {
 	std::vector<KeyInfo> newPoints;
 	std::vector<int> counts;
 
+	tasks.reserve(points.size());
+	newPoints.reserve(points.size());
+	counts.resize(261); // 256+5 = character+sentinal
+
 	tasks.emplace_back(0, points.size(), 0);
 
 	while (tasks.size()) {
@@ -185,7 +186,7 @@ void sortPoints(std::vector<KeyInfo>& points) {
 		}
 
 		newPoints.resize(st.size);
-		counts.assign(256 + 5, 0);
+		std::fill(counts.begin(), counts.end(), 0);
 
 		// get counts
 		int c;
