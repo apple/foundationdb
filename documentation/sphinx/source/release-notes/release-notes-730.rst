@@ -2,6 +2,22 @@
 Release Notes
 #############
 
+7.3.71
+======
+* Same as 7.3.71 release with AVX enabled.
+
+7.3.70
+======
+* Improved TLS handshake mechanism. `(PR #12348) <https://github.com/apple/foundationdb/pull/12348>`_
+* Fixed restarting test failures. `(PR #12324) <https://github.com/apple/foundationdb/pull/12324>`_
+* Fixed go ctest failures. `(PR #12320) <https://github.com/apple/foundationdb/pull/12320>`_
+* Fixed version range for Snap Restart test. `(PR #12283) <https://github.com/apple/foundationdb/pull/12283>`_
+* Suppressed PingLatency events. `(PR #12316) <https://github.com/apple/foundationdb/pull/12316>`_
+* Fixed "Unknown error" when configuring regions. `(PR #12313) <https://github.com/apple/foundationdb/pull/12313>`_
+* Replaced '...' with actual random data in simulation workloads. `(PR #12273) <https://github.com/apple/foundationdb/pull/12273>`_
+* Added TLS related counters. `(PR #12278) <https://github.com/apple/foundationdb/pull/12278>`_ and `(PR #12296) <https://github.com/apple/foundationdb/pull/12296>`_
+* Fixed go compiling errors. `(PR #12240) <https://github.com/apple/foundationdb/pull/12240>`_
+
 7.3.69
 ======
 * Same as 7.3.68 release with AVX enabled.
