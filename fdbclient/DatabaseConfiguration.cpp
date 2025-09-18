@@ -212,8 +212,9 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 
 bool DatabaseConfiguration::isValid() const {
 	auto log_test = [](const char* text, bool val) {
-#only print if the value returned is false AI!
-		fprintf(stderr, "%s: %s\n", text, val ? "true" : "false");
+		if (!val) {
+			fprintf(stderr, "%s: false\n", text);
+		}
 		return val;
 	};
 #define LOG_TEST(expr) log_test(#expr, (expr))
