@@ -138,6 +138,13 @@ public:
 
 	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) = 0;
 
+	// Make an outgoing connection to the given address with hostname for SNI (TLS Server Name Indication)
+	virtual Future<Reference<IConnection>> connectExternalWithHostname(NetworkAddress toAddr,
+	                                                                   const std::string& hostname) {
+		// Default implementation ignores hostname - subclasses can override for SNI support
+		return connectExternal(toAddr);
+	}
+
 	// Make an outgoing udp connection and connect to the passed address.
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) = 0;
 	// Make an outgoing udp connection without establishing a connection
