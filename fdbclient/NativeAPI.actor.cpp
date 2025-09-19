@@ -84,6 +84,7 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
+#include "flow/GetSourceVersion.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/ProtocolVersion.h"
@@ -114,8 +115,6 @@
 
 template class RequestStream<OpenDatabaseRequest, false>;
 template struct NetNotifiedQueue<OpenDatabaseRequest, false>;
-
-extern const char* getSourceVersion();
 
 namespace {
 
@@ -170,21 +169,6 @@ NetworkOptions::NetworkOptions()
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
-
-void DatabaseContext::validateVersion(Version version) const {
-	// Version could be 0 if the INITIALIZE_NEW_DATABASE option is set. In that case, it is illegal to perform any
-	// reads. We throw client_invalid_operation because the caller didn't directly set the version, so the
-	// version_invalid error might be confusing.
-	if (version == 0) {
-		throw client_invalid_operation();
-	}
-	if (switchable && version < minAcceptableReadVersion) {
-		CODE_PROBE(true, "Attempted to read a version lower than any this client has seen from the current cluster");
-		throw transaction_too_old();
-	}
-
-	ASSERT(version > 0 || version == latestVersion);
-}
 
 void validateOptionValuePresent(Optional<StringRef> value) {
 	if (!value.present()) {

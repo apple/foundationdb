@@ -351,3 +351,17 @@ StorageServerInfo::~StorageServerInfo() {
 	}
 }
 
+void DatabaseContext::validateVersion(Version version) const {
+	// Version could be 0 if the INITIALIZE_NEW_DATABASE option is set. In that case, it is illegal to perform any
+	// reads. We throw client_invalid_operation because the caller didn't directly set the version, so the
+	// version_invalid error might be confusing.
+	if (version == 0) {
+		throw client_invalid_operation();
+	}
+	if (switchable && version < minAcceptableReadVersion) {
+		CODE_PROBE(true, "Attempted to read a version lower than any this client has seen from the current cluster");
+		throw transaction_too_old();
+	}
+
+	ASSERT(version > 0 || version == latestVersion);
+}
