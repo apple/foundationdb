@@ -1,5 +1,5 @@
 /*
- * version.cpp
+ * GetSourceVersion.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,11 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/GetSourceVersion.h"
+#ifndef FLOW_GETSOURCEVERSION_H
+#define FLOW_GETSOURCEVERSION_H
 
-// This is a generated file.
-#include "flow/SourceVersion.h"
+const char* getSourceVersion();
 
-const char* getSourceVersion() {
-	return sourceVersion;
-}
+#endif // FLOW_GETSOURCEVERSION_H
