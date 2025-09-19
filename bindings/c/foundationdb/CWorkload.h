@@ -122,7 +122,7 @@ typedef struct FDBWorkloadContext {
 		int (*clientCount)(OpaqueWorkloadContext* inner);
 		// Return a random seed (same each time and for all clients).
 		int64_t (*sharedRandomNumber)(OpaqueWorkloadContext* inner);
-		// Return a future that will be resolved after a given time.
+		// Return a future that will be ready after a given time. This internally uses TaskPriority::DefaultDelay.
 		FDBFuture* (*delay)(OpaqueWorkloadContext* inner, double seconds);
 	}* vt;
 } FDBWorkloadContext;
