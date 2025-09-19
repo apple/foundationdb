@@ -717,5 +717,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
                                                            Reverse isBackward,
                                                            Version version);
 
+ACTOR Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr);
+
 #include "flow/unactorcompiler.h"
 #endif
