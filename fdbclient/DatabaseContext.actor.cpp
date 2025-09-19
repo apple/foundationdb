@@ -365,3 +365,65 @@ void DatabaseContext::validateVersion(Version version) const {
 
 	ASSERT(version > 0 || version == latestVersion);
 }
+
+inline HealthMetrics populateHealthMetrics(const HealthMetrics& detailedMetrics, bool detailedOutput) {
+	if (detailedOutput) {
+		return detailedMetrics;
+	} else {
+		HealthMetrics result;
+		result.update(detailedMetrics, false, false);
+		return result;
+	}
+}
+
+ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed, bool sendDetailedRequest) {
+	loop {
+		choose {
+			when(wait(cx->onProxiesChanged())) {}
+			when(GetHealthMetricsReply rep = wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
+			                                                       &GrvProxyInterface::getHealthMetrics,
+			                                                       GetHealthMetricsRequest(sendDetailedRequest)))) {
+				cx->healthMetrics.update(rep.healthMetrics, sendDetailedRequest, true);
+				cx->healthMetricsLastUpdated = now();
+				if (sendDetailedRequest) {
+					cx->detailedHealthMetricsLastUpdated = now();
+				}
+				return populateHealthMetrics(cx->healthMetrics, detailed);
+			}
+		}
+	}
+}
+
+Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
+	if (now() - healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
+		return populateHealthMetrics(healthMetrics, detailed);
+	}
+	bool sendDetailedRequest =
+	    detailed && now() - detailedHealthMetricsLastUpdated > CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
+	return getHealthMetricsActor(this, detailed, sendDetailedRequest);
+}
+
+Future<Optional<HealthMetrics::StorageStats>> DatabaseContext::getStorageStats(const UID& id, double maxStaleness) {
+	if (now() - detailedHealthMetricsLastUpdated < maxStaleness) {
+		auto it = healthMetrics.storageStats.find(id);
+		return it == healthMetrics.storageStats.end() ? Optional<HealthMetrics::StorageStats>() : it->second;
+	}
+
+	return map(getHealthMetricsActor(this, true, true), [&id](auto metrics) -> Optional<HealthMetrics::StorageStats> {
+		auto it = metrics.storageStats.find(id);
+		return it == metrics.storageStats.end() ? Optional<HealthMetrics::StorageStats>() : it->second;
+	});
+}
+
+// register a special key(s) implementation under the specified module
+void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
+                                              SpecialKeySpace::IMPLTYPE type,
+                                              std::unique_ptr<SpecialKeyRangeReadImpl>&& impl,
+                                              int deprecatedVersion) {
+	// if deprecated, add the implementation when the api version is less than the deprecated version
+	if (deprecatedVersion == -1 || apiVersion.version() < deprecatedVersion) {
+		specialKeySpace->registerKeyRange(module, type, impl->getKeyRange(), impl.get());
+		specialKeySpaceModules.push_back(std::move(impl));
+	}
+}
+
