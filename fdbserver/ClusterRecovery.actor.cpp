@@ -270,6 +270,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
                                   RecruitFromConfigurationReply recr,
                                   Reference<ILogSystem> oldLogSystem,
                                   std::vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
+	TraceEvent("LogSystemInitializationStart", self->dbgid).detail("UsableRegions", self->configuration.usableRegions);
 	if (self->configuration.usableRegions > 1) {
 		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
 		if (!self->dcId_locality.contains(recr.dcId)) {
@@ -339,6 +340,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		                                                                 self->recruitmentStalled));
 		self->logSystem = newLogSystem;
 	}
+	TraceEvent("LogSystemInitializationComplete", self->dbgid);
 	return Void();
 }
 
