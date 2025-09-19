@@ -217,8 +217,8 @@ bool DatabaseConfiguration::isValid() const {
 		}
 		return val;
 	};
-//LOG_TEST(expr) takes an expression that returns a boolean.  If the boolean == false, the
-//expression and it's boolean return value will be printed.
+// LOG_TEST(expr) takes an expression that returns a boolean.  If the boolean == false, the
+// expression and it's boolean return value will be printed.
 #define LOG_TEST(expr) log_test(#expr, (expr))
 	if (!(LOG_TEST(initialized) && LOG_TEST(tLogWriteAntiQuorum >= 0) &&
 	      LOG_TEST(tLogWriteAntiQuorum <= tLogReplicationFactor / 2) && LOG_TEST(tLogReplicationFactor >= 1) &&
@@ -226,23 +226,23 @@ bool DatabaseConfiguration::isValid() const {
 	      LOG_TEST(getDesiredGrvProxies() >= 1) && LOG_TEST(getDesiredLogs() >= 1) &&
 	      LOG_TEST(getDesiredResolvers() >= 1) && LOG_TEST(tLogVersion != TLogVersion::UNSET) &&
 	      LOG_TEST(tLogVersion >= TLogVersion::MIN_RECRUITABLE) &&
-	      LOG_TEST(tLogVersion <= TLogVersion::MAX_SUPPORTED) && LOG_TEST(tLogDataStoreType != KeyValueStoreType::END) &&
-	      LOG_TEST(tLogSpillType != TLogSpillType::UNSET) &&
+	      LOG_TEST(tLogVersion <= TLogVersion::MAX_SUPPORTED) &&
+	      LOG_TEST(tLogDataStoreType != KeyValueStoreType::END) && LOG_TEST(tLogSpillType != TLogSpillType::UNSET) &&
 	      LOG_TEST(!(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3)) &&
 	      LOG_TEST(storageServerStoreType != KeyValueStoreType::END) && LOG_TEST(autoCommitProxyCount >= 1) &&
-	      LOG_TEST(autoGrvProxyCount >= 1) && LOG_TEST(autoResolverCount >= 1) &&
-	      LOG_TEST(autoDesiredTLogCount >= 1) && LOG_TEST(!!storagePolicy) && LOG_TEST(!!tLogPolicy) &&
-	      LOG_TEST(getDesiredRemoteLogs() >= 1) && LOG_TEST(remoteTLogReplicationFactor >= 0) &&
-	      LOG_TEST(repopulateRegionAntiQuorum >= 0) && LOG_TEST(repopulateRegionAntiQuorum <= 1) &&
-	      LOG_TEST(usableRegions >= 1) && LOG_TEST(usableRegions <= 2) && LOG_TEST(regions.size() <= 2) &&
-	      LOG_TEST((usableRegions == 1 || regions.size() == 2)) &&
+	      LOG_TEST(autoGrvProxyCount >= 1) && LOG_TEST(autoResolverCount >= 1) && LOG_TEST(autoDesiredTLogCount >= 1) &&
+	      LOG_TEST(!!storagePolicy) && LOG_TEST(!!tLogPolicy) && LOG_TEST(getDesiredRemoteLogs() >= 1) &&
+	      LOG_TEST(remoteTLogReplicationFactor >= 0) && LOG_TEST(repopulateRegionAntiQuorum >= 0) &&
+	      LOG_TEST(repopulateRegionAntiQuorum <= 1) && LOG_TEST(usableRegions >= 1) && LOG_TEST(usableRegions <= 2) &&
+	      LOG_TEST(regions.size() <= 2) && LOG_TEST((usableRegions == 1 || regions.size() == 2)) &&
 	      LOG_TEST((regions.size() == 0 || regions[0].priority >= 0)) &&
 	      LOG_TEST((regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1")) &&
 	      // We cannot specify regions with three_datacenter replication
 	      LOG_TEST((perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1)) &&
 	      LOG_TEST(isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality)) &&
-	      LOG_TEST(storageMigrationType != StorageMigrationType::UNSET) && LOG_TEST(tenantMode >= TenantMode::DISABLED) &&
-	      LOG_TEST(tenantMode < TenantMode::END) && LOG_TEST(encryptionAtRestMode >= EncryptionAtRestMode::DISABLED) &&
+	      LOG_TEST(storageMigrationType != StorageMigrationType::UNSET) &&
+	      LOG_TEST(tenantMode >= TenantMode::DISABLED) && LOG_TEST(tenantMode < TenantMode::END) &&
+	      LOG_TEST(encryptionAtRestMode >= EncryptionAtRestMode::DISABLED) &&
 	      LOG_TEST(encryptionAtRestMode < EncryptionAtRestMode::END))) {
 		return false;
 	}
