@@ -171,58 +171,6 @@ NetworkOptions::NetworkOptions()
 static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
 
-void updateCachedReadVersionShared(double t, Version v, DatabaseSharedState* p) {
-	MutexHolder mutex(p->mutexLock);
-	if (v >= p->grvCacheSpace.cachedReadVersion) {
-		//TraceEvent(SevDebug, "CacheReadVersionUpdate")
-		//    .detail("Version", v)
-		//    .detail("CurTime", t)
-		//    .detail("LastVersion", p->grvCacheSpace.cachedReadVersion)
-		//    .detail("LastTime", p->grvCacheSpace.lastGrvTime);
-		p->grvCacheSpace.cachedReadVersion = v;
-		if (t > p->grvCacheSpace.lastGrvTime) {
-			p->grvCacheSpace.lastGrvTime = t;
-		}
-	}
-}
-
-void DatabaseContext::updateCachedReadVersion(double t, Version v) {
-	if (sharedStatePtr) {
-		return updateCachedReadVersionShared(t, v, sharedStatePtr);
-	}
-	if (v >= cachedReadVersion) {
-		//TraceEvent(SevDebug, "CachedReadVersionUpdate")
-		//    .detail("Version", v)
-		//    .detail("GrvStartTime", t)
-		//    .detail("LastVersion", cachedReadVersion)
-		//    .detail("LastTime", lastGrvTime);
-		cachedReadVersion = v;
-		// Since the time is based on the start of the request, it's possible that we
-		// get a newer version with an older time.
-		// (Request started earlier, but was latest to reach the proxy)
-		// Only update time when strictly increasing (?)
-		if (t > lastGrvTime) {
-			lastGrvTime = t;
-		}
-	}
-}
-
-Version DatabaseContext::getCachedReadVersion() {
-	if (sharedStatePtr) {
-		MutexHolder mutex(sharedStatePtr->mutexLock);
-		return sharedStatePtr->grvCacheSpace.cachedReadVersion;
-	}
-	return cachedReadVersion;
-}
-
-double DatabaseContext::getLastGrvTime() {
-	if (sharedStatePtr) {
-		MutexHolder mutex(sharedStatePtr->mutexLock);
-		return sharedStatePtr->grvCacheSpace.lastGrvTime;
-	}
-	return lastGrvTime;
-}
-
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
                                                              StorageServerInterface const& ssi,
                                                              LocalityData const& locality) {
