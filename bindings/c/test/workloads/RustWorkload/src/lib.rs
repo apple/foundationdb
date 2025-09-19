@@ -4,8 +4,9 @@ mod bindings;
 mod mock;
 
 use bindings::{
-    str_from_c, FDBDatabase, FDBMetrics, FDBPromise, FDBWorkload, FDBWorkloadContext, Metric,
-    Metrics, OpaqueWorkload, Promise, Severity, WorkloadContext,
+    str_from_c, FDBDatabase, FDBMetrics, FDBPromise, FDBWorkload, FDBWorkloadContext,
+    FDBWorkload_VT, Metric, Metrics, OpaqueWorkload, Promise, Severity, WorkloadContext,
+    FDB_WORKLOAD_API_VERSION,
 };
 
 /// Should be replaced by a Rust wrapper over the `FDBDatabase` bindings, like the one provided by foundationdb-rs
@@ -14,7 +15,26 @@ pub type MockDatabase = NonNull<FDBDatabase>;
 pub type WrappedWorkload = FDBWorkload;
 
 /// Equivalent to the C++ abstract class `FDBWorkload`
-pub trait RustWorkload {
+pub trait RustWorkload: Sized {
+    const VT: FDBWorkload_VT = FDBWorkload_VT {
+        setup: Some(workload_setup::<Self>),
+        start: Some(workload_start::<Self>),
+        check: Some(workload_check::<Self>),
+        getMetrics: Some(workload_get_metrics::<Self>),
+        getCheckTimeout: Some(workload_get_check_timeout::<Self>),
+        free: Some(workload_drop::<Self>),
+    };
+
+    /// Wrap the underlying Rust type so it can be passed to the C API
+    fn wrap(self) -> WrappedWorkload {
+        let inner = Box::into_raw(Box::new(self));
+        WrappedWorkload {
+            api_version: FDB_WORKLOAD_API_VERSION,
+            inner: inner as *mut _,
+            vt: &Self::VT as *const _ as *mut _,
+        }
+    }
+
     /// This method is called by the tester during the setup phase.
     /// It should be used to populate the database.
     ///
@@ -22,7 +42,7 @@ pub trait RustWorkload {
     ///
     /// * `db` - The simulated database.
     /// * `done` - A promise that should be resolved to indicate completion
-    fn setup(&'static mut self, db: MockDatabase, done: Promise);
+    fn setup(&mut self, db: MockDatabase, done: Promise);
 
     /// This method should run the actual test.
     ///
@@ -30,7 +50,7 @@ pub trait RustWorkload {
     ///
     /// * `db` - The simulated database.
     /// * `done` - A promise that should be resolved to indicate completion
-    fn start(&'static mut self, db: MockDatabase, done: Promise);
+    fn start(&mut self, db: MockDatabase, done: Promise);
 
     /// This method is called when the tester completes.
     /// A workload should run any consistency/correctness tests during this phase.
@@ -39,7 +59,7 @@ pub trait RustWorkload {
     ///
     /// * `db` - The simulated database.
     /// * `done` - A promise that should be resolved to indicate completion
-    fn check(&'static mut self, db: MockDatabase, done: Promise);
+    fn check(&mut self, db: MockDatabase, done: Promise);
 
     /// If a workload collects metrics (like latencies or throughput numbers), these should be reported back here.
     /// The multitester (or test orchestrator) will collect all metrics from all test clients and it will aggregate them.
@@ -61,7 +81,7 @@ pub trait RustWorkloadFactory {
     fn create(name: String, context: WorkloadContext) -> WrappedWorkload;
 }
 
-unsafe extern "C" fn workload_setup<W: RustWorkload + 'static>(
+unsafe extern "C" fn workload_setup<W: RustWorkload>(
     raw_workload: *mut OpaqueWorkload,
     raw_database: *mut FDBDatabase,
     raw_promise: FDBPromise,
@@ -71,7 +91,7 @@ unsafe extern "C" fn workload_setup<W: RustWorkload + 'static>(
     let done = Promise::new(raw_promise);
     workload.setup(database, done)
 }
-unsafe extern "C" fn workload_start<W: RustWorkload + 'static>(
+unsafe extern "C" fn workload_start<W: RustWorkload>(
     raw_workload: *mut OpaqueWorkload,
     raw_database: *mut FDBDatabase,
     raw_promise: FDBPromise,
@@ -81,7 +101,7 @@ unsafe extern "C" fn workload_start<W: RustWorkload + 'static>(
     let done = Promise::new(raw_promise);
     workload.start(database, done)
 }
-unsafe extern "C" fn workload_check<W: RustWorkload + 'static>(
+unsafe extern "C" fn workload_check<W: RustWorkload>(
     raw_workload: *mut OpaqueWorkload,
     raw_database: *mut FDBDatabase,
     raw_promise: FDBPromise,
@@ -107,21 +127,6 @@ unsafe extern "C" fn workload_get_check_timeout<W: RustWorkload>(
 }
 unsafe extern "C" fn workload_drop<W: RustWorkload>(raw_workload: *mut OpaqueWorkload) {
     unsafe { drop(Box::from_raw(raw_workload as *mut W)) };
-}
-
-impl WrappedWorkload {
-    pub fn new<W: RustWorkload + 'static>(workload: W) -> Self {
-        let workload = Box::into_raw(Box::new(workload));
-        WrappedWorkload {
-            inner: workload as *mut _,
-            setup: Some(workload_setup::<W>),
-            start: Some(workload_start::<W>),
-            check: Some(workload_check::<W>),
-            getMetrics: Some(workload_get_metrics::<W>),
-            getCheckTimeout: Some(workload_get_check_timeout::<W>),
-            free: Some(workload_drop::<W>),
-        }
-    }
 }
 
 /// Register a `RustWorkloadFactory` in the FoundationDB simulation.
