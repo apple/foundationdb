@@ -604,8 +604,6 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
                                                                                   KeyRange keys,
                                                                                   int shardLimit);
 
-std::string unprintable(const std::string&);
-
 int64_t extractIntOption(Optional<StringRef> value,
                          int64_t minValue = std::numeric_limits<int64_t>::min(),
                          int64_t maxValue = std::numeric_limits<int64_t>::max());

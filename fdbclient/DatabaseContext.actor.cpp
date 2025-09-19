@@ -307,3 +307,47 @@ double DatabaseContext::getLastGrvTime() {
 	}
 	return lastGrvTime;
 }
+
+Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
+                                                             StorageServerInterface const& ssi,
+                                                             LocalityData const& locality) {
+	auto it = cx->server_interf.find(ssi.id());
+	if (it != cx->server_interf.end()) {
+		if (it->second->interf.getValue.getEndpoint().token != ssi.getValue.getEndpoint().token) {
+			if (it->second->interf.locality == ssi.locality) {
+				// FIXME: load balance holds pointers to individual members of the interface, and this assignment will
+				// swap out the object they are
+				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load
+				//       balance to take an AsyncVar<Reference<Interface>> so that it is notified when the interface
+				//       changes.
+
+				it->second->interf = ssi;
+			} else {
+				it->second->notifyContextDestroyed();
+				Reference<StorageServerInfo> loc(new StorageServerInfo(cx, ssi, locality));
+				cx->server_interf[ssi.id()] = loc.getPtr();
+				return loc;
+			}
+		}
+
+		return Reference<StorageServerInfo>::addRef(it->second);
+	}
+
+	Reference<StorageServerInfo> loc(new StorageServerInfo(cx, ssi, locality));
+	cx->server_interf[ssi.id()] = loc.getPtr();
+	return loc;
+}
+
+void StorageServerInfo::notifyContextDestroyed() {
+	cx = nullptr;
+}
+
+StorageServerInfo::~StorageServerInfo() {
+	if (cx) {
+		auto it = cx->server_interf.find(interf.id());
+		if (it != cx->server_interf.end())
+			cx->server_interf.erase(it);
+		cx = nullptr;
+	}
+}
+

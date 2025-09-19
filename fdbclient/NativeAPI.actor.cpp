@@ -65,8 +65,8 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
-#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ParallelStream.actor.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
@@ -171,117 +171,6 @@ NetworkOptions::NetworkOptions()
 static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
 
-Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
-                                                             StorageServerInterface const& ssi,
-                                                             LocalityData const& locality) {
-	auto it = cx->server_interf.find(ssi.id());
-	if (it != cx->server_interf.end()) {
-		if (it->second->interf.getValue.getEndpoint().token != ssi.getValue.getEndpoint().token) {
-			if (it->second->interf.locality == ssi.locality) {
-				// FIXME: load balance holds pointers to individual members of the interface, and this assignment will
-				// swap out the object they are
-				//       pointing to. This is technically correct, but is very unnatural. We may want to refactor load
-				//       balance to take an AsyncVar<Reference<Interface>> so that it is notified when the interface
-				//       changes.
-
-				it->second->interf = ssi;
-			} else {
-				it->second->notifyContextDestroyed();
-				Reference<StorageServerInfo> loc(new StorageServerInfo(cx, ssi, locality));
-				cx->server_interf[ssi.id()] = loc.getPtr();
-				return loc;
-			}
-		}
-
-		return Reference<StorageServerInfo>::addRef(it->second);
-	}
-
-	Reference<StorageServerInfo> loc(new StorageServerInfo(cx, ssi, locality));
-	cx->server_interf[ssi.id()] = loc.getPtr();
-	return loc;
-}
-
-void StorageServerInfo::notifyContextDestroyed() {
-	cx = nullptr;
-}
-
-StorageServerInfo::~StorageServerInfo() {
-	if (cx) {
-		auto it = cx->server_interf.find(interf.id());
-		if (it != cx->server_interf.end())
-			cx->server_interf.erase(it);
-		cx = nullptr;
-	}
-}
-
-std::string printable(const VectorRef<KeyValueRef>& val) {
-	std::string s;
-	for (int i = 0; i < val.size(); i++)
-		s = s + printable(val[i].key) + format(":%d ", val[i].value.size());
-	return s;
-}
-
-std::string printable(const KeyValueRef& val) {
-	return printable(val.key) + format(":%d ", val.value.size());
-}
-
-std::string printable(const VectorRef<StringRef>& val) {
-	std::string s;
-	for (int i = 0; i < val.size(); i++)
-		s = s + printable(val[i]) + " ";
-	return s;
-}
-
-std::string printable(const StringRef& val) {
-	return val.printable();
-}
-std::string printable(const std::string& str) {
-	return StringRef(str).printable();
-}
-
-std::string printable(const KeyRangeRef& range) {
-	return printable(range.begin) + " - " + printable(range.end);
-}
-
-std::string printable(const VectorRef<KeyRangeRef>& val) {
-	std::string s;
-	for (int i = 0; i < val.size(); i++)
-		s = s + printable(val[i]) + " ";
-	return s;
-}
-
-int unhex(char c) {
-	if (c >= '0' && c <= '9')
-		return c - '0';
-	if (c >= 'a' && c <= 'f')
-		return c - 'a' + 10;
-	if (c >= 'A' && c <= 'F')
-		return c - 'A' + 10;
-	UNREACHABLE();
-}
-
-std::string unprintable(std::string const& val) {
-	std::string s;
-	for (int i = 0; i < val.size(); i++) {
-		char c = val[i];
-		if (c == '\\') {
-			if (++i == val.size())
-				ASSERT(false);
-			if (val[i] == '\\') {
-				s += '\\';
-			} else if (val[i] == 'x') {
-				if (i + 2 >= val.size())
-					ASSERT(false);
-				s += char((unhex(val[i + 1]) << 4) + unhex(val[i + 2]));
-				i += 2;
-			} else
-				ASSERT(false);
-		} else
-			s += c;
-	}
-	return s;
-}
-
 void DatabaseContext::validateVersion(Version version) const {
 	// Version could be 0 if the INITIALIZE_NEW_DATABASE option is set. In that case, it is illegal to perform any
 	// reads. We throw client_invalid_operation because the caller didn't directly set the version, so the
@@ -306,28 +195,6 @@ void validateOptionValuePresent(Optional<StringRef> value) {
 void validateOptionValueNotPresent(Optional<StringRef> value) {
 	if (value.present() && value.get().size() > 0) {
 		throw invalid_option_value();
-	}
-}
-
-void dumpMutations(const MutationListRef& mutations) {
-	for (auto m = mutations.begin(); m; ++m) {
-		switch (m->type) {
-		case MutationRef::SetValue:
-			printf("  '%s' := '%s'\n", printable(m->param1).c_str(), printable(m->param2).c_str());
-			break;
-		case MutationRef::AddValue:
-			printf("  '%s' += '%s'", printable(m->param1).c_str(), printable(m->param2).c_str());
-			break;
-		case MutationRef::ClearRange:
-			printf("  Clear ['%s','%s')\n", printable(m->param1).c_str(), printable(m->param2).c_str());
-			break;
-		default:
-			printf("  Unknown mutation %d('%s','%s')\n",
-			       m->type,
-			       printable(m->param1).c_str(),
-			       printable(m->param2).c_str());
-			break;
-		}
 	}
 }
 

@@ -298,6 +298,7 @@ std::string printable(const VectorRef<KeyRangeRef>& val);
 std::string printable(const VectorRef<StringRef>& val);
 std::string printable(const VectorRef<KeyValueRef>& val);
 std::string printable(const KeyValueRef& val);
+std::string unprintable(std::string const& val);
 
 template <class T>
 std::string printable(const Optional<T>& val) {
