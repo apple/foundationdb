@@ -217,6 +217,8 @@ bool DatabaseConfiguration::isValid() const {
 		}
 		return val;
 	};
+//LOG_TEST(expr) takes an expression that returns a boolean.  If the boolean == false, the
+//expression and it's boolean return value will be printed.
 #define LOG_TEST(expr) log_test(#expr, (expr))
 	if (!(LOG_TEST(initialized) && LOG_TEST(tLogWriteAntiQuorum >= 0) &&
 	      LOG_TEST(tLogWriteAntiQuorum <= tLogReplicationFactor / 2) && LOG_TEST(tLogReplicationFactor >= 1) &&
