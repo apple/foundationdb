@@ -160,7 +160,6 @@ ACTOR Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr) {
 // FIXME: get a prototype in a header file, ugh.
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 
-
 Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const TenantInfo& tenant,
                                                                   const KeyRef& key,
                                                                   Reverse isBackward) {
@@ -5899,7 +5898,6 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 		throw;
 	}
 }
-
 
 Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	ASSERT(!readVersionFuture.isValid());

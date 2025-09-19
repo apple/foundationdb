@@ -23,4 +23,4 @@
 
 const char* getSourceVersion();
 
-#endif   // FLOW_GETSOURCEVERSION_H
+#endif // FLOW_GETSOURCEVERSION_H
