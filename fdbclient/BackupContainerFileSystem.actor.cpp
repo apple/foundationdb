@@ -58,9 +58,14 @@ public:
 		state Standalone<StringRef> buf = makeString(size);
 		wait(success(f->read(mutateString(buf), buf.size(), 0)));
 		json_spirit::mValue json;
-		json_spirit::read_string(buf.toString(), json);
-		JSONDoc doc(json);
+		if (!json_spirit::read_string(buf.toString(), json)) {
+			fprintf(stderr,
+			        "ERROR: Failed to read data. Verify that backup and restore encryption keys match (if provided) or "
+			        "the data is corrupted.\n");
+			throw restore_error();
+		}
 
+		JSONDoc doc(json);
 		Version v;
 		if (!doc.tryGet("beginVersion", v) || v != snapshot.beginVersion)
 			throw restore_corrupted_data();
