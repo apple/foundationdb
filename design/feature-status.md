@@ -27,3 +27,5 @@
 |Configuration Database|experimental|contributed from the community. Have data consistency issues, probably not finished.|None|Need a new owner or become deprecated.|
 |OpenTelemetry|experimental|contributed from the community. Probably not finished.|None|Need a new owner.|
 |Dynamic knobs|experimental|Allows changing fdbserver process knob values without requiring a process restart|None|Need a new owner or become deprecated.|
+|Dynamic knobs|experimental|Allows changing fdbserver process knob values without requiring a process restart|None|Need a new owner or become deprecated.|
+|Tag Throttling|experimental|limits the transaction rate for specific transaction tags|None|Need a new owner or become deprecated.|
