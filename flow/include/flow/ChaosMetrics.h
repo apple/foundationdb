@@ -23,6 +23,11 @@
 
 struct TraceEvent;
 
+// FIXME: define the exact nature and scope of what is meant by "ChaosMetrics"
+// and how ChaosMetrics relates to and/or differs from similar techniques, e.g. as described
+// here: https://apple.github.io/foundationdb/testing.html, since this doesn't seem
+// related to that stuff, but that stuff seems related to injecting chaos.
+
 // Chaos Metrics - We periodically log chaosMetrics to make sure that chaos events are happening
 // Only includes DiskDelays which encapsulates all type delays and BitFlips for now
 // Expand as per need
