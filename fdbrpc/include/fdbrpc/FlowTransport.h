@@ -37,6 +37,17 @@
 
 class IConnection;
 
+// FIXME: what does "WL" stand for?  Some ideas suggested by AI:
+//   Windows Live
+//   Whitelist
+//   Wallet Token
+//   Work List
+//
+// PRO TIP: Avoid annoying comments like this from future maintainers
+// by writing stuff down.
+//
+// Possible answer: an abbreviation for "well-known".
+//
 enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_UNAUTHORIZED_ENDPOINT, WLTOKEN_FIRST_AVAILABLE };
 
 #pragma pack(push, 4)
@@ -44,6 +55,8 @@ class Endpoint {
 public:
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
 	// An endpoint is either "local" (used for receiving data) or "remote" (used for sending data)
+	// FIXME: assuming TCP is used, how many Endpoints are associated with a given TCP connection?
+	// Is it 4?  One each for reading/writing at both of two sides?  Is it something else?
 	constexpr static FileIdentifier file_identifier = 10618805;
 	using Token = UID;
 	NetworkAddressList addresses;
@@ -192,6 +205,11 @@ struct Peer : public ReferenceCounted<Peer> {
 
 class IPAllowList;
 
+// FIXME: define what FlowTransport represents.  Some possibilities:
+//   -- A scope of data transport defined over some domain?
+//   -- All data transport local to a process?
+//   -- Something else?
+//
 class FlowTransport : NonCopyable {
 public:
 	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
@@ -220,16 +238,13 @@ public:
 	// to avoid unnecessary calls to toString() and fmt overhead.
 	Standalone<StringRef> getLocalAddressAsString() const;
 
-	// Returns first local NetworkAddress.
-	void setLocalAddress(NetworkAddress const&);
-
 	// Returns all local NetworkAddress.
 	NetworkAddressList getLocalAddresses() const;
 
 	// Returns all peers that the FlowTransport is monitoring.
 	const std::unordered_map<NetworkAddress, Reference<Peer>>& getAllPeers() const;
 
-	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
+	// Returns the set of all peers that have attempted to connect, but have incompatible protocol versions
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 
 	// Returns when getIncompatiblePeers has at least one peer which is incompatible.

@@ -1808,12 +1808,6 @@ Standalone<StringRef> FlowTransport::getLocalAddressAsString() const {
 	return self->localAddresses.getLocalAddressAsString();
 }
 
-void FlowTransport::setLocalAddress(NetworkAddress const& address) {
-	auto newAddress = self->localAddresses.getAddressList();
-	newAddress.address = address;
-	self->localAddresses.setAddressList(newAddress);
-}
-
 const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAllPeers() const {
 	return self->peers;
 }
