@@ -3472,7 +3472,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		}
 	}
 
-	wait(traceAfter(waitForAll(primaryTLogReplies), "InitializationRepliesReceived"_sr) ||
+	wait(traceAfter(waitForAll(primaryTLogReplies), "PrimaryTLogRepliesReceived"_sr) ||
 	     traceAfter(oldRouterRecruitment, "OldRouterRecruitmentFinished"_sr));
 	TraceEvent("PrimaryTLogInitializationComplete", logSystem->getDebugID()).log();
 
