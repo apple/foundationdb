@@ -62,6 +62,10 @@ endif()
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 
+option(USE_SCCACHE "Use sccache if found" ON)
+if(USE_SCCACHE)
+  find_package(sccache)
+endif()
 
 option(WITH_ACAC "Enale actor stack recording" OFF)
 if(WITH_ACAC)
