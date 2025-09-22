@@ -30,7 +30,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Apple Inc")]
 [assembly: AssemblyProduct("actorcompiler")]
-[assembly: AssemblyCopyright("Copyright (c) 2013-2017 Apple Inc.")]
+[assembly: AssemblyCopyright("Copyright (c) 2013-2025 Apple Inc.")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
