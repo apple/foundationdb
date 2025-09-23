@@ -1,11 +1,17 @@
-define_property(TARGET PROPERTY SOURCE_FILES
+define_property(
+  TARGET
+  PROPERTY SOURCE_FILES
   BRIEF_DOCS "Source files a flow target is built off"
-  FULL_DOCS "When compiling a flow target, this property contains a list of the non-generated source files. \
+  FULL_DOCS
+    "When compiling a flow target, this property contains a list of the non-generated source files. \
 This property is set by the add_flow_target function")
 
-define_property(TARGET PROPERTY COVERAGE_FILTERS
+define_property(
+  TARGET
+  PROPERTY COVERAGE_FILTERS
   BRIEF_DOCS "List of filters for the coverage tool"
-  FULL_DOCS "Holds a list of regular expressions. All filenames matching any regular \
+  FULL_DOCS
+    "Holds a list of regular expressions. All filenames matching any regular \
 expression in this list will be ignored when the coverage.target.xml file is \
 generated. This property is set through the add_flow_target function.")
 
@@ -15,8 +21,12 @@ else()
   set(compilation_unit_macro_default ON)
 endif()
 
-set(PASS_COMPILATION_UNIT "${compilation_unit_macro_default}" CACHE BOOL
-  "Pass path to compilation unit as macro to each compilation unit (useful for code probes)")
+set(PASS_COMPILATION_UNIT
+    "${compilation_unit_macro_default}"
+    CACHE
+      BOOL
+      "Pass path to compilation unit as macro to each compilation unit (useful for code probes)"
+)
 
 function(generate_coverage_xml)
   if(NOT (${ARGC} EQUAL "1"))
@@ -37,15 +47,16 @@ function(generate_coverage_xml)
     endif()
   endforeach()
   set(target_file ${CMAKE_CURRENT_SOURCE_DIR}/coverage_target_${target_name})
-  # we can't get the targets output dir through a generator expression as this would
-  # create a cyclic dependency.
-  # Instead we follow the following rules:
-  # - For executable we place the coverage file into the directory EXECUTABLE_OUTPUT_PATH
-  # - For static libraries we place it into the directory LIBRARY_OUTPUT_PATH
-  # - For dynamic libraries we place it into LIBRARY_OUTPUT_PATH on Linux and MACOS
-  #   and to EXECUTABLE_OUTPUT_PATH on Windows
+  # we can't get the targets output dir through a generator expression as this
+  # would create a cyclic dependency. Instead we follow the following rules: -
+  # For executable we place the coverage file into the directory
+  # EXECUTABLE_OUTPUT_PATH - For static libraries we place it into the directory
+  # LIBRARY_OUTPUT_PATH - For dynamic libraries we place it into
+  # LIBRARY_OUTPUT_PATH on Linux and MACOS and to EXECUTABLE_OUTPUT_PATH on
+  # Windows
   get_target_property(type ${target_name} TYPE)
-  # STATIC_LIBRARY, MODULE_LIBRARY, SHARED_LIBRARY, OBJECT_LIBRARY, INTERFACE_LIBRARY, EXECUTABLE
+  # STATIC_LIBRARY, MODULE_LIBRARY, SHARED_LIBRARY, OBJECT_LIBRARY,
+  # INTERFACE_LIBRARY, EXECUTABLE
   if(type STREQUAL "STATIC_LIBRARY")
     set(target_file ${LIBRARY_OUTPUT_PATH}/coverage.${target_name}.xml)
   elseif(type STREQUAL "SHARED_LIBRARY")
@@ -64,14 +75,21 @@ function(generate_coverage_xml)
       DEPENDS ${in_files}
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       COMMENT "Generate coverage xml")
-  else()
+  elseif(CSHARP_USE_MONO)
     add_custom_command(
       OUTPUT ${target_file}
       COMMAND ${MONO_EXECUTABLE} ${coveragetool_exe} ${target_file} ${in_files}
       DEPENDS ${in_files}
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       COMMENT "Generate coverage xml")
-  endif()
+  else()
+    add_custom_command(
+      OUTPUT ${target_file}
+      COMMAND ${coveragetool_exe} ${target_file} ${in_files}
+      DEPENDS ${in_files}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      COMMENT "Generate coverage xml")
+   endif()
   add_custom_target(coverage_${target_name} ALL DEPENDS ${target_file})
   add_dependencies(coverage_${target_name} coveragetool)
 endfunction()
@@ -108,16 +126,20 @@ function(strip_debug_symbols target)
   endif()
   set(out_file "${path}/${out_name}")
   list(APPEND strip_command -o "${out_file}")
-  add_custom_command(OUTPUT "${out_file}"
+  add_custom_command(
+    OUTPUT "${out_file}"
     COMMAND ${strip_command} $<TARGET_FILE:${target}>
     DEPENDS ${target}
     COMMENT "Stripping symbols from ${target}")
   add_custom_target(strip_only_${target} DEPENDS ${out_file})
   if(is_exec AND NOT APPLE)
-    add_custom_command(OUTPUT "${out_file}.debug"
+    add_custom_command(
+      OUTPUT "${out_file}.debug"
       DEPENDS strip_only_${target}
-      COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
-      COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}"
+      COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}>
+              "${out_file}.debug"
+      COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug"
+              "${out_file}"
       COMMENT "Copy debug symbols to ${out_name}.debug")
     add_custom_target(strip_${target} DEPENDS "${out_file}.debug")
   else()
@@ -127,16 +149,19 @@ function(strip_debug_symbols target)
   add_dependencies(strip_targets strip_${target})
 endfunction()
 
-# This will copy the header from a flow target into ${CMAKE_BINARY_DIR}/include/target-name
-# We're doing this to enforce proper dependencies. In the past we simply added the source
-# and binary dir to the include list, which means that for example a compilation unit in
-# flow could include a header file that lives in fdbserver. This is a somewhat hacky solution
-# but due to our directory structure it seems to be the least invasive one.
+# This will copy the header from a flow target into
+# ${CMAKE_BINARY_DIR}/include/target-name We're doing this to enforce proper
+# dependencies. In the past we simply added the source and binary dir to the
+# include list, which means that for example a compilation unit in flow could
+# include a header file that lives in fdbserver. This is a somewhat hacky
+# solution but due to our directory structure it seems to be the least invasive
+# one.
 function(copy_headers)
   set(options)
   set(oneValueArgs NAME OUT_DIR INC_DIR)
   set(multiValueArgs SRCS)
-  cmake_parse_arguments(CP "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
+  cmake_parse_arguments(CP "${options}" "${oneValueArgs}" "${multiValueArgs}"
+                        "${ARGN}")
   get_filename_component(dir_name ${CMAKE_CURRENT_SOURCE_DIR} NAME)
   set(include_dir "${CMAKE_CURRENT_BINARY_DIR}/include")
   set(incl_dir "${include_dir}/${dir_name}")
@@ -157,37 +182,40 @@ function(copy_headers)
       make_directory(${incl_dir}/${dname})
     endif()
     set(fpath "${incl_dir}/${dname}/${fname}")
-    add_custom_command(OUTPUT "${fpath}"
+    add_custom_command(
+      OUTPUT "${fpath}"
       DEPENDS "${f}"
       COMMAND "${CMAKE_COMMAND}" -E copy "${f}" "${fpath}"
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     list(APPEND out_files "${fpath}")
   endforeach()
   add_custom_target("${CP_NAME}_incl" DEPENDS ${out_files})
-  set("${CP_OUT_DIR}" "${incl_dir}" PARENT_SCOPE)
-  set("${CP_INC_DIR}" ${include_dir} PARENT_SCOPE)
+  set("${CP_OUT_DIR}"
+      "${incl_dir}"
+      PARENT_SCOPE)
+  set("${CP_INC_DIR}"
+      ${include_dir}
+      PARENT_SCOPE)
 endfunction()
 
 function(add_flow_target)
-  set(options EXECUTABLE STATIC_LIBRARY
-    DYNAMIC_LIBRARY LINK_TEST)
+  set(options EXECUTABLE STATIC_LIBRARY DYNAMIC_LIBRARY LINK_TEST)
   set(oneValueArgs NAME)
-  set(multiValueArgs SRCS COVERAGE_FILTER_OUT DISABLE_ACTOR_DIAGNOSTICS ADDL_SRCS)
-  cmake_parse_arguments(AFT "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
+  set(multiValueArgs SRCS COVERAGE_FILTER_OUT DISABLE_ACTOR_DIAGNOSTICS
+                     ADDL_SRCS)
+  cmake_parse_arguments(AFT "${options}" "${oneValueArgs}" "${multiValueArgs}"
+                        "${ARGN}")
   if(NOT AFT_NAME)
     message(FATAL_ERROR "add_flow_target requires option NAME")
   endif()
   if(NOT AFT_SRCS)
     message(FATAL_ERROR "No sources provided")
   endif()
-  #foreach(src IN LISTS AFT_SRCS)
-  #  is_header(h "${src}")
-  #  if(NOT h)
-  #    list(SRCS "${CMAKE_CURRENT_SOURCE_DIR}/${src}")
-  #  endif()
-  #endforeach()
+  # foreach(src IN LISTS AFT_SRCS) is_header(h "${src}") if(NOT h) list(SRCS
+  # "${CMAKE_CURRENT_SOURCE_DIR}/${src}") endif() endforeach()
   if(OPEN_FOR_IDE)
-    # Intentionally omit ${AFT_DISABLE_ACTOR_DIAGNOSTICS} since we don't want diagnostics
+    # Intentionally omit ${AFT_DISABLE_ACTOR_DIAGNOSTICS} since we don't want
+    # diagnostics
     set(sources ${AFT_SRCS} ${AFT_ADDL_SRCS})
     add_library(${AFT_NAME} OBJECT ${sources})
   else()
@@ -200,7 +228,8 @@ function(add_flow_target)
         if(${src} MATCHES ".*\\.h")
           string(REPLACE ".actor.h" ".actor.g.h" out_filename ${in_filename})
         else()
-          string(REPLACE ".actor.cpp" ".actor.g.cpp" out_filename ${in_filename})
+          string(REPLACE ".actor.cpp" ".actor.g.cpp" out_filename
+                         ${in_filename})
         endif()
       else()
         set(is_actor_file NO)
@@ -235,13 +264,24 @@ function(add_flow_target)
 
         list(APPEND generated_files ${out_file})
         if(WIN32)
-          add_custom_command(OUTPUT "${out_file}"
-            COMMAND $<TARGET_FILE:actorcompiler> "${in_file}" "${out_file}" ${actor_compiler_flags}
+          add_custom_command(
+            OUTPUT "${out_file}"
+            COMMAND $<TARGET_FILE:actorcompiler> "${in_file}" "${out_file}"
+                    ${actor_compiler_flags}
+            DEPENDS "${in_file}" actorcompiler
+            COMMENT "Compile actor: ${src}")
+        elseif(CSHARP_USE_MONO)
+          add_custom_command(
+            OUTPUT "${out_file}"
+            COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${in_file}" "${out_file}"
+                    ${actor_compiler_flags} > /dev/null
             DEPENDS "${in_file}" actorcompiler
             COMMENT "Compile actor: ${src}")
         else()
-          add_custom_command(OUTPUT "${out_file}"
-            COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${in_file}" "${out_file}" ${actor_compiler_flags} > /dev/null
+          add_custom_command(
+            OUTPUT "${out_file}"
+            COMMAND ${actor_exe} "${in_file}" "${out_file}"
+                    ${actor_compiler_flags} > /dev/null
             DEPENDS "${in_file}" actorcompiler
             COMMENT "Compile actor: ${src}")
         endif()
@@ -249,7 +289,8 @@ function(add_flow_target)
     endforeach()
     if(PASS_COMPILATION_UNIT)
       foreach(s IN LISTS sources)
-        set_source_files_properties("${s}" PROPERTIES COMPILE_DEFINITIONS "COMPILATION_UNIT=${s}")
+        set_source_files_properties("${s}" PROPERTIES COMPILE_DEFINITIONS
+                                                      "COMPILATION_UNIT=${s}")
       endforeach()
     endif()
     if(AFT_EXECUTABLE)
@@ -281,7 +322,8 @@ function(add_flow_target)
       get_filename_component(dname ${CMAKE_CURRENT_SOURCE_DIR} NAME)
       string(REGEX REPLACE "\\..*" "" fname ${src})
       string(REPLACE / _ fname ${fname})
-      #set_source_files_properties(${src} PROPERTIES COMPILE_DEFINITIONS FNAME=${dname}_${fname})
+      # set_source_files_properties(${src} PROPERTIES COMPILE_DEFINITIONS
+      # FNAME=${dname}_${fname})
     endforeach()
 
     set_property(TARGET ${AFT_NAME} PROPERTY SOURCE_FILES ${AFT_SRCS})
