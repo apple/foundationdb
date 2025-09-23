@@ -52,13 +52,14 @@
 
 ACTOR template <class T>
 Future<T> traceAfter(Future<T> what, Standalone<StringRef> type, bool traceErrors = true) {
+	state std::string typeStr = type.toString();
 	try {
 		T val = wait(what);
-		TraceEvent(type.toString().c_str());
+		TraceEvent(typeStr.c_str());
 		return val;
 	} catch (Error& e) {
 		if (traceErrors) {
-			TraceEvent(type.toString().c_str()).errorUnsuppressed(e);
+			TraceEvent(typeStr.c_str()).errorUnsuppressed(e);
 		}
 		throw;
 	}

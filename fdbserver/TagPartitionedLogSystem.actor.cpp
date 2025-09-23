@@ -3100,7 +3100,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 	    .detail("LocalStart", self->tLogs[0]->startVersion)
 	    .detail("LogRouterTags", self->logRouterTags);
 	wait(traceAfter(waitForAll(remoteTLogInitializationReplies), "RemoteTLogInitializationRepliesReceived"_sr) &&
-	     traceAfter(waitForAll(logRouterInitializationReplies), "logRouterInitializationRepliesReceived"_sr) &&
+	     traceAfter(waitForAll(logRouterInitializationReplies), "LogRouterInitializationRepliesReceived"_sr) &&
 	     traceAfter(oldRouterRecruitment, "OldRouterRecruitmentFinished"_sr));
 
 	for (int i = 0; i < logRouterInitializationReplies.size(); i++) {
