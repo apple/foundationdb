@@ -210,7 +210,6 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	}
 }
 
-#Make print_invalid an optional parameter AI!
 bool DatabaseConfiguration::isValid(bool print_invalid) const {
 	auto log_test = [print_invalid](const char* text, bool val) {
 		if (!val && print_invalid) {
