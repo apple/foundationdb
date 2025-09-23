@@ -687,6 +687,7 @@ struct HasVerify_t<T, decltype(void(std::declval<T>().verify()), 0)> : std::true
 template <class T>
 constexpr bool HasVerify = HasVerify_t<T>::value;
 
+// FIXME: explain what IsPublic means here
 template <class T, bool IsPublic>
 struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T, IsPublic>> {
 	using FastAllocated<NetNotifiedQueue<T, IsPublic>>::operator new;
@@ -947,6 +948,7 @@ private:
 	NetNotifiedQueue<T, IsPublic>* queue;
 };
 
+// FIXME: explain what Public and Private mean here
 template <class T>
 using PrivateRequestStream = RequestStream<T, false>;
 template <class T>
