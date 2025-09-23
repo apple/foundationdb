@@ -3099,9 +3099,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 	    .detail("StartVersion", logSet->startVersion)
 	    .detail("LocalStart", self->tLogs[0]->startVersion)
 	    .detail("LogRouterTags", self->logRouterTags);
-	wait(traceAfter(waitForAll(remoteTLogInitializationReplies), "RemoteTLogInitializationRepliesReceived"_sr) &&
-	     traceAfter(waitForAll(logRouterInitializationReplies), "LogRouterInitializationRepliesReceived"_sr) &&
-	     traceAfter(oldRouterRecruitment, "OldRouterRecruitmentFinished"_sr));
+	wait(traceAfter(waitForAll(remoteTLogInitializationReplies), "RemoteTLogInitializationRepliesReceived") &&
+	     traceAfter(waitForAll(logRouterInitializationReplies), "LogRouterInitializationRepliesReceived") &&
+	     traceAfter(oldRouterRecruitment, "OldRouterRecruitmentFinished"));
 
 	for (int i = 0; i < logRouterInitializationReplies.size(); i++) {
 		logSet->logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
@@ -3451,8 +3451,8 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			    cluster_recovery_failed()));
 		}
 
-		wait(traceAfter(waitForAll(satelliteInitializationReplies), "SatelliteInitializationRepliesReceived"_sr) ||
-		     traceAfter(oldRouterRecruitment, "OldRouterRecruitmentFinished"_sr));
+		wait(traceAfter(waitForAll(satelliteInitializationReplies), "SatelliteInitializationRepliesReceived") ||
+		     traceAfter(oldRouterRecruitment, "OldRouterRecruitmentFinished"));
 		TraceEvent("PrimarySatelliteTLogInitializationComplete", logSystem->getDebugID()).log();
 
 		for (int i = 0; i < satelliteInitializationReplies.size(); i++) {
@@ -3472,8 +3472,8 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		}
 	}
 
-	wait(traceAfter(waitForAll(primaryTLogReplies), "PrimaryTLogRepliesReceived"_sr) ||
-	     traceAfter(oldRouterRecruitment, "OldRouterRecruitmentFinished"_sr));
+	wait(traceAfter(waitForAll(primaryTLogReplies), "PrimaryTLogRepliesReceived") ||
+	     traceAfter(oldRouterRecruitment, "OldRouterRecruitmentFinished"));
 	TraceEvent("PrimaryTLogInitializationComplete", logSystem->getDebugID()).log();
 
 	for (int i = 0; i < primaryTLogReplies.size(); i++) {

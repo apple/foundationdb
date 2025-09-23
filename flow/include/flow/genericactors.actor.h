@@ -51,8 +51,8 @@
 #endif
 
 ACTOR template <class T>
-Future<T> traceAfter(Future<T> what, Standalone<StringRef> type, bool traceErrors = true) {
-	state std::string typeStr = type.toString();
+Future<T> traceAfter(Future<T> what, std::string type, bool traceErrors = true) {
+	state std::string typeStr = type;
 	try {
 		T val = wait(what);
 		TraceEvent(typeStr.c_str());
