@@ -674,6 +674,7 @@ struct InitializeLogRouterRequest {
 	// information from the logSystem).
 	Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds =
 	    Optional<std::map<uint8_t, std::vector<uint16_t>>>();
+	bool allowDropInSim; // TODO: sim only!
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -686,7 +687,8 @@ struct InitializeLogRouterRequest {
 		           locality,
 		           reply,
 		           recoverAt,
-		           knownLockedTLogIds);
+		           knownLockedTLogIds,
+		           allowDropInSim);
 	}
 };
 

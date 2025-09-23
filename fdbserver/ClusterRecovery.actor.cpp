@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cmath>
 #include <utility>
 
 #include "fdbclient/FDBTypes.h"
@@ -29,8 +30,10 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
+#include "flow/Error.h"
 #include "flow/ProtocolVersion.h"
 
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -963,6 +966,46 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 	}
 }
 
+ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
+	// Validate parameters to prevent overflow and ensure exponential backoff works correctly
+	// With growth factor <= 10 and unfinishedRecoveries <= 100, max scaling factor is 10^100
+	// Since we cap timeout early with min(), overflow is prevented even with large base timeouts
+	const bool validParameters = unfinishedRecoveries >= 1 &&
+	                            unfinishedRecoveries <= SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES &&
+	                            SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR > 1.0 &&
+	                            SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR <= 10.0 &&
+	                            SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT > 0 &&
+	                            SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT > 0;
+
+	ASSERT_WE_THINK(validParameters);
+	if (!validParameters) {
+		TraceEvent(SevWarnAlways, "InitializingTxnSystemTimeoutInvalid")
+		    .detail("UnfinishedRecoveries", unfinishedRecoveries)
+		    .detail("BaseTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT)
+		    .detail("GrowthFactor", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR)
+		    .detail("MaxTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT)
+		    .detail("MaxUnfinishedRecoveries", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES);
+		return Void();
+	}
+
+	// Calculate timeout with exponential backoff
+	const double scalingFactor = std::pow(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR, unfinishedRecoveries);
+	const double scaledTimeout = std::min(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT * scalingFactor,
+	                                      SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT);
+
+	TraceEvent("InitializingTxnSystemTimeout")
+	    .detail("UnfinishedRecoveries", unfinishedRecoveries)
+	    .detail("BaseTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT)
+	    .detail("GrowthFactor", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR)
+	    .detail("ScalingFactor", scalingFactor)
+	    .detail("ScaledTimeout", scaledTimeout)
+	    .detail("MaxTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT);
+
+	wait(delay(scaledTimeout));
+	TraceEvent("InitializingTxnSystemTimeoutTriggered");
+	throw cluster_recovery_failed();
+}
+
 ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
     Reference<ClusterRecoveryData> self,
     std::vector<StorageServerInterface>* seedServers,
@@ -1061,13 +1104,19 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    .detail("RemoteDcIds", remoteDcIds)
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
-	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
-	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
-	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
+	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a
+	// brand new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would
+	// split that up so that the recruitment part happens above (in parallel with recruiting the transaction
+	// servers?).
 	wait(newSeedServers(self, recruits, seedServers));
+
 	state std::vector<Standalone<CommitTransactionRef>> confChanges;
-	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
-	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
+	Future<Void> txnSystemInitialized =
+	    traceAfter(newCommitProxies(self, recruits), "CommitProxiesInitialized") &&
+	    traceAfter(newGrvProxies(self, recruits), "GRVProxiesInitialized") &&
+	    traceAfter(newResolvers(self, recruits), "ResolversInitialized") &&
+	    traceAfter(newTLogServers(self, recruits, oldLogSystem, &confChanges), "TLogServersInitialized");
+	wait(txnSystemInitialized || monitorInitializingTxnSystem(self->controllerData->db.unfinishedRecoveries));
 
 	// Update recovery related information to the newly elected sequencer (master) process.
 	wait(brokenPromiseToNever(

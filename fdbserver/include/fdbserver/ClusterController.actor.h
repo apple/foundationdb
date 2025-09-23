@@ -142,7 +142,7 @@ public:
 		DatabaseConfiguration config; // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
-		int unfinishedRecoveries;
+		int unfinishedRecoveries; // TODO: add comment
 		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 		Future<Void> clientCounter;

@@ -196,7 +196,8 @@ struct GcGenerationsWorkload : TestWorkload {
 		TraceEvent("GcGenerations").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 		// Sometimes Cycle Setup can take a long time, so we need to enable connection failures
 		// injection for clogRemoteDc() to work properly.
-		extendConnectionFailures("GcGenerations", FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS);
+		extendConnectionFailures(
+		    "GcGenerations", FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT);
 
 		wait(self->generateMultipleTxnGenerations(self, cx));
 		self->unclogAll();
