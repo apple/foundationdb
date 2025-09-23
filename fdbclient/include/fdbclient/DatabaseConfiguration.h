@@ -111,7 +111,7 @@ struct DatabaseConfiguration {
 	bool clear(KeyRangeRef keys);
 	Optional<ValueRef> get(KeyRef key) const;
 
-	bool isValid() const;
+	bool isValid(bool print_invalid = false) const;
 
 	bool initialized;
 

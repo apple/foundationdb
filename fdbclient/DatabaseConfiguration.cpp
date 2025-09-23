@@ -210,10 +210,9 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	}
 }
 
-#Add boolean parameter with a default value of false.  Only print within log_test if that parameter is set to true. AI!
-bool DatabaseConfiguration::isValid() const {
-	auto log_test = [](const char* text, bool val) {
-		if (!val) {
+bool DatabaseConfiguration::isValid(bool print_invalid) const {
+	auto log_test = [print_invalid](const char* text, bool val) {
+		if (!val && print_invalid) {
 			fprintf(stderr, "%s: false\n", text);
 		}
 		return val;
