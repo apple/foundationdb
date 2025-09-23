@@ -850,6 +850,7 @@ public:
 	bool CC_GRAY_FAILURE_STATUS_JSON; // When enabled, returns gray failure information in machine readable status json.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
+	double CC_RECOVERY_INIT_REQ_TIMEOUT;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
