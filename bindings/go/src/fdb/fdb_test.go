@@ -397,9 +397,9 @@ func TestGetClientStatus(t *testing.T) {
 	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
 
-	st, e := db.GetClientStatus()
-	if e != nil {
-		t.Fatalf("GetClientStatus failed %v", e)
+	st, err := db.GetClientStatus()
+	if err != nil {
+		t.Fatalf("GetClientStatus failed %v", err)
 	}
 	if len(st) == 0 {
 		t.Fatal("returned status is empty")
@@ -416,8 +416,8 @@ func ExampleDatabase_GetClientStatus() {
 
 	db := fdb.MustOpenDefault()
 
-	st, e := db.GetClientStatus()
-	if e != nil {
+	st, err := db.GetClientStatus()
+	if err != nil {
 		fmt.Errorf("Unable to get client status: %v\n", err)
 		return
 	}
