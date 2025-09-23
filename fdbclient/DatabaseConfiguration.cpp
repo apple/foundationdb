@@ -211,6 +211,7 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 }
 
 bool DatabaseConfiguration::isValid() const {
+#Only call fprint when this function is called via the fdbcli binary AI!
 	auto log_test = [](const char* text, bool val) {
 		if (!val) {
 			fprintf(stderr, "%s: false\n", text);
