@@ -225,7 +225,7 @@ WipedString ISimulator::makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow) 
 	return WipedString(authz::jwt::signToken(arena, tokenSpec, key));
 }
 
-int openCount = 0;
+int openFileCount = 0;
 
 struct SimClogging {
 	double getSendDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) const {
@@ -578,7 +578,6 @@ private:
 	}
 
 	void rollRandomClose() {
-		// make sure connections between parenta and their childs are not closed
 		if (!stableConnection &&
 		    now() - g_simulator->lastConnectionFailure > g_simulator->connectionFailuresDisableDuration &&
 		    deterministicRandom()->random01() < .00001) {
@@ -673,12 +672,12 @@ public:
 		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
-		if (++openCount >= 6000) {
+		if (++openFileCount >= 6000) {
 			TraceEvent(SevError, "TooManyFiles").log();
 			ASSERT(false);
 		}
 
-		if (openCount == 4000) {
+		if (openFileCount == 4000) {
 			disableConnectionFailures("TooManyFiles");
 		}
 
@@ -742,11 +741,11 @@ public:
 
 	~SimpleFile() override {
 		_close(h);
-		--openCount;
+		--openFileCount;
 	}
 
 private:
-	int h;
+	int h;  // normally this would be called `fd`
 
 	// Performance parameters of simulated disk
 	Reference<DiskParameters> diskParameters;
@@ -1050,9 +1049,6 @@ private:
 
 class Sim2 final : public ISimulator, public INetworkConnections {
 public:
-	// Implement INetwork interface
-	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating
-	// machines and time
 	double now() const override { return time; }
 
 	// timer() can be up to 0.1 seconds ahead of now()
@@ -1436,8 +1432,8 @@ public:
 		}
 	}
 
-	// Implement ISimulator interface
 	void run() override { runLoop(this); }
+
 	ProcessInfo* newProcess(const char* name,
 	                        IPAddress ip,
 	                        uint16_t port,
@@ -1485,6 +1481,7 @@ public:
 			addresses.secondaryAddress = NetworkAddress(ip, port + 1, true, false);
 		}
 
+		// FIXME: why would a ProcessInfo be called `m`?
 		ProcessInfo* m =
 		    new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
 		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
@@ -1508,6 +1505,8 @@ public:
 		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
 		m->setGlobal(INetwork::enMetrics, (flowGlobalType)&m->metrics);
 
+		// FIXME: we are not creating a new machine. We are creating a new process.  Why is
+		// the first argument to TraceEvent here talking about a new machine?
 		TraceEvent("NewMachine")
 		    .detail("Name", name)
 		    .detail("Address", m->address)
@@ -2495,6 +2494,7 @@ public:
 	}
 
 	// Assumes the simulator is already onProcess for proc
+	// FIXME: delete the above comment and add an ASSERT about this condition.
 	void startRequestHandlerOnProcess(ProcessInfo* process,
 	                                  Reference<HTTP::SimServerContext> serverContext,
 	                                  Reference<HTTP::SimRegisteredHandlerContext> handlerContext) {
@@ -2617,7 +2617,6 @@ public:
 		check_yield(TaskPriority::Zero);
 	}
 
-	// Implementation
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		ProcessInfo* machine;
@@ -2692,7 +2691,6 @@ public:
 
 	std::vector<std::function<void()>> stopCallbacks;
 
-	// Sim2Net network;
 	INetwork* net2;
 
 	// Map from machine IP -> machine disk space info
