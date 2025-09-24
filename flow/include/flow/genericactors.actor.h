@@ -50,32 +50,17 @@
 #pragma warning(disable : 4355) // 'this' : used in base member initializer list
 #endif
 
-ACTOR template <class T, class X>
-Future<T> traceAfter(Future<T> what, const char* type, const char* key, X value, bool traceErrors = false) {
+ACTOR template <class T>
+Future<T> traceAfter(Future<T> what, std::string type, bool traceErrors = true) {
+	state std::string typeStr = type;
 	try {
 		T val = wait(what);
-		TraceEvent(type).detail(key, value);
+		TraceEvent(typeStr.c_str());
 		return val;
 	} catch (Error& e) {
-		if (traceErrors)
-			TraceEvent(type).errorUnsuppressed(e).detail(key, value);
-		throw;
-	}
-}
-
-ACTOR template <class T, class X>
-Future<T> traceAfterCall(Future<T> what, const char* type, const char* key, X func, bool traceErrors = false) {
-	try {
-		state T val = wait(what);
-		try {
-			TraceEvent(type).detail(key, func(val));
-		} catch (Error& e) {
-			TraceEvent(SevError, "TraceAfterCallError").error(e);
+		if (traceErrors) {
+			TraceEvent(typeStr.c_str()).errorUnsuppressed(e);
 		}
-		return val;
-	} catch (Error& e) {
-		if (traceErrors)
-			TraceEvent(type).errorUnsuppressed(e);
 		throw;
 	}
 }
