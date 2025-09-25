@@ -196,6 +196,34 @@ void ShardsAffectedByTeamFailure::setCheckMode(CheckMode mode) {
 	checkMode = mode;
 }
 
+void ShardsAffectedByTeamFailure::traceTeamShardMapping() const {
+	Team prevTeam;
+	int count = 0;
+	int teamCount;
+	for (auto it = team_shards.begin(); it != team_shards.end(); ++it) {
+		if (it->first != prevTeam) {
+			if (count > 0) {
+				TraceEvent("DDTeamShardCount")
+				    .detail("IsPrimary", prevTeam.primary)
+				    .detail("Team", prevTeam.toString())
+				    .detail("Shards", count);
+			}
+			count = 1;
+			prevTeam = it->first;
+			++teamCount;
+		} else {
+			++count;
+		}
+	}
+	if (count > 0) {
+		TraceEvent("DDTeamShardCount")
+		    .detail("IsPrimary", prevTeam.primary)
+		    .detail("Team", prevTeam.toString())
+		    .detail("Shards", count);
+	}
+	TraceEvent("DDTeamShardStats").detail("TotalShards", team_shards.size()).detail("TotalTeams", teamCount);
+}
+
 void ShardsAffectedByTeamFailure::check() const {
 	if (checkMode == CheckMode::ForceNoCheck)
 		return;
