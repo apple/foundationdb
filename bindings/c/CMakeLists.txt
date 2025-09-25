@@ -423,6 +423,7 @@ set_target_properties(c_workloads PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
 target_link_libraries(cpp_workloads PUBLIC fdb_c)
 target_include_directories(c_workloads PUBLIC ${CMAKE_SOURCE_DIR}/bindings/c)
+target_link_libraries(c_workloads PUBLIC fdb_c)
 
 if(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
   # Add the -Wl,--undefined-version flag to the linker command to allow
