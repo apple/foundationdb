@@ -370,4 +370,3 @@ TEST_CASE("/fdbclient/knobs/initialize") {
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions * 2);
 	return Void();
 }
-
