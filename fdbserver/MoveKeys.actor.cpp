@@ -3404,6 +3404,11 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), shardId, UID());
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 
+		// Set DataMoveMetaData for seed data move. Team id will be read by seed servers. 
+		// TODO: clean up data move metadata for initial moves.
+		DataMoveMetaData metadata(shardId, allKeys);
+		tr.set(dataMoveKeyFor(shardId), dataMoveValue(metadata));
+
 		for (auto& s : servers) {
 			krmSetPreviouslyEmptyRange(
 			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysValue(shardId), serverKeysFalse);
