@@ -295,6 +295,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	//fdbcli
 	init( CLI_CONNECT_PARALLELISM,                  400 );
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
+	init( CLI_PRINT_INVALID_CONFIGURATION,		  false );
 
 	// trace
 	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );
@@ -369,3 +370,4 @@ TEST_CASE("/fdbclient/knobs/initialize") {
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions * 2);
 	return Void();
 }
+

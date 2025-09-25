@@ -111,7 +111,7 @@ struct DatabaseConfiguration {
 	bool clear(KeyRangeRef keys);
 	Optional<ValueRef> get(KeyRef key) const;
 
-	bool isValid(bool print_invalid = false) const;
+	bool isValid() const;
 
 	bool initialized;
 
@@ -262,7 +262,6 @@ struct DatabaseConfiguration {
 	TenantMode tenantMode;
 
 	EncryptionAtRestMode encryptionAtRestMode;
-
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList, const LocalityData& locality) const;
 	bool isExcludedLocality(const LocalityData& locality) const;

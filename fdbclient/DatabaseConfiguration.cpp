@@ -210,9 +210,10 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	}
 }
 
-bool DatabaseConfiguration::isValid(bool print_invalid) const {
-	auto log_test = [print_invalid](const char* text, bool val) {
-		if (!val && print_invalid) {
+bool DatabaseConfiguration::isValid() const {
+//enable this via `fdbcli --knob_cli_print_invalid_configuration=1` command line parameter
+	auto log_test = [](const char* text, bool val) {
+		if (!val && CLIENT_KNOBS->CLI_PRINT_INVALID_CONFIGURATION) {
 			fprintf(stderr, "%s: false\n", text);
 		}
 		return val;
