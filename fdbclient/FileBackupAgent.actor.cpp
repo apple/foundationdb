@@ -1216,9 +1216,18 @@ Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringR
 		}
 
 		// Read a value, which must exist or the block is invalid
+		uint32_t kLen1 = reader.consumeNetworkUInt32();
+		const uint8_t* k1 = reader.consume(kLen1);
+
+		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
+		if (reader.eof() || *reader.rptr == 0xFF) {
+			results.push_back(results.arena(), KeyValueRef(KeyRef(k1, kLen1), ValueRef()));
+			break;
+		}
+
 		uint32_t vLen = reader.consumeNetworkUInt32();
 		const uint8_t* v = reader.consume(vLen);
-		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+		results.push_back(results.arena(), KeyValueRef(KeyRef(k1, kLen1), ValueRef(v, vLen)));
 	}
 
 	// Make sure any remaining bytes in the block are 0xFF
