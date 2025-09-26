@@ -72,7 +72,7 @@ public:
 	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 	enum class ExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
 
-	static ExtraDatabaseMode stringToExtraDatabaseMode(std::string databaseMode) {
+	static ExtraDatabaseMode stringToExtraDatabaseMode(const std::string& databaseMode) {
 		if (databaseMode == "Disabled") {
 			return ExtraDatabaseMode::Disabled;
 		} else if (databaseMode == "LocalOrSingle") {
@@ -130,7 +130,6 @@ public:
 	                          bool forceKill = false,
 	                          KillType* ktFinal = nullptr) = 0;
 	virtual bool killAll(KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
-	// virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual void processInjectBlobFault(ProcessInfo* machine, double failureRate) = 0;
 	virtual void processStopInjectBlobFault(ProcessInfo* machine) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
@@ -408,7 +407,7 @@ public:
 
 	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
 
-	// Valdiate at-rest encryption guarantees. If enabled, tests should inject a known 'marker' in Key and/or Values
+	// Validate at-rest encryption guarantees. If enabled, tests should inject a known 'marker' in Key and/or Values
 	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
 	// 'plaintext marker' is present.
 	Optional<std::string> dataAtRestPlaintextMarker;
@@ -429,6 +428,8 @@ public:
 	// generate authz token for use in simulation environment
 	WipedString makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
 
+	// FIXME: simulation is generally discussed as being deterministic and single-threaded. So
+	// explain why we need thread_local variables here and a mutex just below.
 	static thread_local ProcessInfo* currentProcess;
 	static thread_local bool isMainThread;
 

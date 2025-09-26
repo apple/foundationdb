@@ -244,7 +244,6 @@ void DatabaseContext::addSSIdTagMapping(const UID& uid, const Tag& tag) {
 }
 
 void DatabaseContext::getLatestCommitVersionForSSID(const UID& ssid, Tag& tag, Version& commitVersion) {
-	// initialization
 	tag = invalidTag;
 	commitVersion = invalidVersion;
 
@@ -611,8 +610,8 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 	loop {
 		wait(delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
 
-		bool logTraces = !g_network->isSimulated() || BUGGIFY_WITH_PROB(0.01);
-		if (logTraces) {
+		bool logMetrics = !g_network->isSimulated() || BUGGIFY_WITH_PROB(0.01);
+		if (logMetrics) {
 			TraceEvent ev("TransactionMetrics", cx->dbId);
 
 			ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
@@ -648,7 +647,7 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			    .detail("NumLocalityCacheEntries", cx->locationCache.size());
 		}
 
-		if (cx->usedAnyChangeFeeds && logTraces) {
+		if (cx->usedAnyChangeFeeds && logMetrics) {
 			TraceEvent feedEv("ChangeFeedClientMetrics", cx->dbId);
 
 			feedEv.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
@@ -661,7 +660,7 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			cx->ccFeed.logToTraceEvent(feedEv);
 		}
 
-		if (cx->anyBGReads && logTraces) {
+		if (cx->anyBGReads && logMetrics) {
 			TraceEvent bgReadEv("BlobGranuleReadMetrics", cx->dbId);
 
 			bgReadEv.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
@@ -788,6 +787,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 	}
 }
 
+// FIXME: explain what "client status" is
 // The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
 // counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
 // cyclic reference and hence this actor and Database object will not be destroyed at all.
@@ -1030,6 +1030,7 @@ Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
 	return makeReference<LocationInfo>(interfaces, true);
 }
 
+// FIXME: describe what this is supposed to be doing.
 ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, StorageServerInterface>* cacheServers) {
 	state Transaction tr;
 	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
@@ -1107,6 +1108,7 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 	}
 }
 
+// FIXME: describe what this is supposed to be doing
 // The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
 // counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
 // cyclic reference and hence this actor and Database object will not be destroyed at all.

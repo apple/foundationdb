@@ -83,23 +83,25 @@ typedef double TimeEstimate;
 
 class QueueModel {
 public:
-	// Finishes the request sent to storage server with `id`.
-	//   - latency: the measured client-side latency of the request.
-	//   - penalty: the server side penalty sent along with the response from
-	//              the storage server. Requires >= 1.
-	//   - delta: Update server `id`'s queue model by subtracting this amount.
-	//            This value should be the value returned by `addRequest` below.
-	//   - clean: indicates whether the there was an error or not.
-	// 	 - futureVersion: indicates whether there was "future version" error or
-	//					  not.
-	void endRequest(uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion);
-	QueueData const& getMeasurement(uint64_t id);
-
 	// Starts a new request to storage server with `id`. If the storage
 	// server contains a penalty, add it to the queue size, and return the
 	// penalty. The returned penalty should be passed as `delta` to `endRequest`
 	// to make `smoothOutstanding` to reflect the real storage queue size.
 	double addRequest(uint64_t id);
+
+	// Finishes the request sent to storage server with `id`.
+	//   - latency: the measured client-side latency of the request.
+	//   - penalty: the server side penalty sent along with the response from
+	//              the storage server. Requires >= 1.
+	//   - delta: Update server `id`'s queue model by subtracting this amount.
+	//            This value should be the value returned by `addRequest`.
+	//   - clean: indicates whether the there was an error or not.
+	// 	 - futureVersion: indicates whether there was "future version" error or
+	//					  not.
+	void endRequest(uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion);
+
+	QueueData const& getMeasurement(uint64_t id);
+
 	double secondMultiplier;
 	double secondBudget;
 	PromiseStream<Future<Void>> addActor;
@@ -131,25 +133,5 @@ public:
 private:
 	std::unordered_map<uint64_t, QueueData> data;
 };
-
-/* old queue model
-class QueueModel {
-public:
-    QueueModel() : new_index(0) {
-        total_time[0] = 0;
-        total_time[1] = 0;
-    }
-    void addMeasurement( uint64_t id, QueueDetails qd );
-    TimeEstimate getTimeEstimate( uint64_t id );
-    TimeEstimate getAverageTimeEstimate();
-    QueueDetails getMeasurement( uint64_t id );
-    void expire();
-
-private:
-    std::map<uint64_t, QueueDetails> data[2];
-    double total_time[2];
-    int new_index; // data[new_index] is the new data
-};
-*/
 
 #endif
