@@ -295,6 +295,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	//fdbcli
 	init( CLI_CONNECT_PARALLELISM,                  400 );
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
+	init( CLI_PRINT_INVALID_CONFIGURATION,		  false );
 
 	// trace
 	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );

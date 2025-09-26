@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cstdio>
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
@@ -210,27 +211,43 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 }
 
 bool DatabaseConfiguration::isValid() const {
-	if (!(initialized && tLogWriteAntiQuorum >= 0 && tLogWriteAntiQuorum <= tLogReplicationFactor / 2 &&
-	      tLogReplicationFactor >= 1 && storageTeamSize >= 1 && getDesiredCommitProxies() >= 1 &&
-	      getDesiredGrvProxies() >= 1 && getDesiredLogs() >= 1 && getDesiredResolvers() >= 1 &&
-	      tLogVersion != TLogVersion::UNSET && tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
-	      tLogVersion <= TLogVersion::MAX_SUPPORTED && tLogDataStoreType != KeyValueStoreType::END &&
-	      tLogSpillType != TLogSpillType::UNSET &&
-	      !(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
-	      storageServerStoreType != KeyValueStoreType::END && autoCommitProxyCount >= 1 && autoGrvProxyCount >= 1 &&
-	      autoResolverCount >= 1 && autoDesiredTLogCount >= 1 && storagePolicy && tLogPolicy &&
-	      getDesiredRemoteLogs() >= 1 && remoteTLogReplicationFactor >= 0 && repopulateRegionAntiQuorum >= 0 &&
-	      repopulateRegionAntiQuorum <= 1 && usableRegions >= 1 && usableRegions <= 2 && regions.size() <= 2 &&
-	      (usableRegions == 1 || regions.size() == 2) && (regions.size() == 0 || regions[0].priority >= 0) &&
-	      (regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") &&
+	// enable this via `fdbcli --knob_cli_print_invalid_configuration=1` command line parameter
+	auto log_test = [](const char* text, bool val) {
+		if (!val && CLIENT_KNOBS->CLI_PRINT_INVALID_CONFIGURATION) {
+			fprintf(stderr, "%s: false\n", text);
+		}
+		return val;
+	};
+// LOG_TEST(expr) takes an expression that returns a boolean.  If the boolean == false, the
+// expression and it's boolean return value will be printed.
+#define LOG_TEST(expr) log_test(#expr, (expr))
+	if (!(LOG_TEST(initialized) && LOG_TEST(tLogWriteAntiQuorum >= 0) &&
+	      LOG_TEST(tLogWriteAntiQuorum <= tLogReplicationFactor / 2) && LOG_TEST(tLogReplicationFactor >= 1) &&
+	      LOG_TEST(storageTeamSize >= 1) && LOG_TEST(getDesiredCommitProxies() >= 1) &&
+	      LOG_TEST(getDesiredGrvProxies() >= 1) && LOG_TEST(getDesiredLogs() >= 1) &&
+	      LOG_TEST(getDesiredResolvers() >= 1) && LOG_TEST(tLogVersion != TLogVersion::UNSET) &&
+	      LOG_TEST(tLogVersion >= TLogVersion::MIN_RECRUITABLE) &&
+	      LOG_TEST(tLogVersion <= TLogVersion::MAX_SUPPORTED) &&
+	      LOG_TEST(tLogDataStoreType != KeyValueStoreType::END) && LOG_TEST(tLogSpillType != TLogSpillType::UNSET) &&
+	      LOG_TEST(!(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3)) &&
+	      LOG_TEST(storageServerStoreType != KeyValueStoreType::END) && LOG_TEST(autoCommitProxyCount >= 1) &&
+	      LOG_TEST(autoGrvProxyCount >= 1) && LOG_TEST(autoResolverCount >= 1) && LOG_TEST(autoDesiredTLogCount >= 1) &&
+	      LOG_TEST(!!storagePolicy) && LOG_TEST(!!tLogPolicy) && LOG_TEST(getDesiredRemoteLogs() >= 1) &&
+	      LOG_TEST(remoteTLogReplicationFactor >= 0) && LOG_TEST(repopulateRegionAntiQuorum >= 0) &&
+	      LOG_TEST(repopulateRegionAntiQuorum <= 1) && LOG_TEST(usableRegions >= 1) && LOG_TEST(usableRegions <= 2) &&
+	      LOG_TEST(regions.size() <= 2) && LOG_TEST((usableRegions == 1 || regions.size() == 2)) &&
+	      LOG_TEST((regions.size() == 0 || regions[0].priority >= 0)) &&
+	      LOG_TEST((regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1")) &&
 	      // We cannot specify regions with three_datacenter replication
-	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
-	      isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality) &&
-	      storageMigrationType != StorageMigrationType::UNSET && tenantMode >= TenantMode::DISABLED &&
-	      tenantMode < TenantMode::END && encryptionAtRestMode >= EncryptionAtRestMode::DISABLED &&
-	      encryptionAtRestMode < EncryptionAtRestMode::END)) {
+	      LOG_TEST((perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1)) &&
+	      LOG_TEST(isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality)) &&
+	      LOG_TEST(storageMigrationType != StorageMigrationType::UNSET) &&
+	      LOG_TEST(tenantMode >= TenantMode::DISABLED) && LOG_TEST(tenantMode < TenantMode::END) &&
+	      LOG_TEST(encryptionAtRestMode >= EncryptionAtRestMode::DISABLED) &&
+	      LOG_TEST(encryptionAtRestMode < EncryptionAtRestMode::END))) {
 		return false;
 	}
+#undef LOG_TEST
 	std::set<Key> dcIds;
 	dcIds.insert(Key());
 	for (auto& r : regions) {
