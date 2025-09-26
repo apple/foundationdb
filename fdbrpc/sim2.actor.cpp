@@ -745,7 +745,7 @@ public:
 	}
 
 private:
-	int h;  // normally this would be called `fd`
+	int h; // normally this would be called `fd`
 
 	// Performance parameters of simulated disk
 	Reference<DiskParameters> diskParameters;
