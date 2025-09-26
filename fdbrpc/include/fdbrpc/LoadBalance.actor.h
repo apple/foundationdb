@@ -83,6 +83,7 @@ struct LoadBalancedReply {
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply);
 Optional<LoadBalancedReply> getLoadBalancedReply(const void*);
 
+// FIXME: use a less obscure name than `P` here
 ACTOR template <class Req, class Resp, class Interface, class Multi, bool P>
 Future<Void> tssComparison(Req req,
                            Future<ErrorOr<Resp>> fSource,
@@ -687,6 +688,8 @@ struct RequestData : NonCopyable {
 // interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
 // If compareReplicas is set, does a consistency check by fetching and comparing results from storage
 // replicas (as many as specified by "requiredReplicas") and throws an exception if an inconsistency is found.
+// FIXME: reformat this minus the long inline comment about one parameter, so that the indentation of
+// the parameters is more to the right and not confusingly lined up with the code of this function.
 ACTOR template <class Interface, class Request, class Multi, bool P>
 Future<REPLY_TYPE(Request)> loadBalance(
     Reference<MultiInterface<Multi>> alternatives,

@@ -19,6 +19,9 @@
  */
 
 // TODO this should really be renamed "TSSComparison.cpp"
+// FIXME: actually it should be renamed "ReplyComparison" because TSS vs SS
+// is just one use case.  This code is agnostic to the specific use cases.
+// Fundamentally it is just about comparing replies. Where they came from is incidental.
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "crc32/crc32c.h" // for crc32c_append, to checksum values in tss trace events
