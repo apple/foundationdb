@@ -37,17 +37,7 @@
 
 class IConnection;
 
-// FIXME: what does "WL" stand for?  Some ideas suggested by AI:
-//   Windows Live
-//   Whitelist
-//   Wallet Token
-//   Work List
-//
-// PRO TIP: Avoid annoying comments like this from future maintainers
-// by writing stuff down.
-//
-// Possible answer: an abbreviation for "well-known".
-//
+// FIXME: explain what the "WL" prefix means
 enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_UNAUTHORIZED_ENDPOINT, WLTOKEN_FIRST_AVAILABLE };
 
 #pragma pack(push, 4)
@@ -205,11 +195,8 @@ struct Peer : public ReferenceCounted<Peer> {
 
 class IPAllowList;
 
-// FIXME: define what FlowTransport represents.  Some possibilities:
-//   -- A scope of data transport defined over some domain?
-//   -- All data transport local to a process?
-//   -- Something else?
-//
+// FIXME: describe what FlowTransport represents.  Is it everything
+// for a given process?  Is it some subset of what a process uses?
 class FlowTransport : NonCopyable {
 public:
 	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
