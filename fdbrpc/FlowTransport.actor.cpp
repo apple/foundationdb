@@ -653,7 +653,6 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 			// the version reported in ConnectPacket.
 			//
 			// TLDR; We can probably close the connection now as we don't have any older clusters running either.
-			/
 			state double lastRefreshed = now();
 			state int64_t lastBytesReceived = peer->bytesReceived;
 			loop {
