@@ -1826,11 +1826,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	//   - If a valid 'end' version was provided in the request (the Recovery Version), return with that version.
 	//   - Otherwise, wait for new data as long as the tLog isn't locked.
 	state Optional<Version> replyWithRecoveryVersion = Optional<Version>();
-	ASSERT(!SERVER_KNOBS->ENABLE_VERSION_VECTOR_REPLY_RECOVERY || SERVER_KNOBS->ENABLE_VERSION_VECTOR);
 	if (logData->version.get() < reqBegin) {
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_REPLY_RECOVERY && SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-		    logData->stopped() && reqEnd.present() && reqEnd.get() != std::numeric_limits<Version>::max() &&
-		    reqReturnEmptyIfStopped.present() && reqReturnEmptyIfStopped.get()) {
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && logData->stopped() && reqEnd.present() &&
+		    reqEnd.get() != std::numeric_limits<Version>::max() && reqReturnEmptyIfStopped.present() &&
+		    reqReturnEmptyIfStopped.get()) {
 			ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST);
 			replyWithRecoveryVersion = reqEnd;
 		} else if (reqReturnIfBlocked) {
