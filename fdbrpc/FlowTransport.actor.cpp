@@ -636,7 +636,24 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 			// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
 			// We ignore this block for incompatible clients because pings from server would trigger the
 			// peer->resetPing and prevent 'connection_failed' due to ping timeout.
-			// FIXME: why don't we just close the connection if the peer is incompatible?
+			// FIXME: why don't we just close the connection if the peer is incompatible?  This isn't
+			// directly related to the code here but here is info from @vishesh suggesting it might be
+			// possible:
+			// This existed for two reasons (both in context of MultiVersionClient)
+			//  (1) While the peer is incompatible, don't try reconnecting to it.
+			//  (2) We can just mark it incompatible and never
+			//  reconnect however, this will create an issue during
+			//  upgrades when clients will not reconnect unless
+			//  restarted.
+			//
+			// However, since 7.1 or 7.2 I think, we only keep one
+			// version in MultiVersionClient active and dynamically
+			// switch to the compatible one, and if it becomes
+			// incompatible it can swtich over to correct one using
+			// the version reported in ConnectPacket.
+			//
+			// TLDR; We can probably close the connection now as we don't have any older clusters running either.
+			/
 			state double lastRefreshed = now();
 			state int64_t lastBytesReceived = peer->bytesReceived;
 			loop {

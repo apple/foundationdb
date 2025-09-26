@@ -37,7 +37,7 @@
 
 class IConnection;
 
-// FIXME: explain what the "WL" prefix means
+// WL: Well-known
 enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_UNAUTHORIZED_ENDPOINT, WLTOKEN_FIRST_AVAILABLE };
 
 #pragma pack(push, 4)
@@ -45,8 +45,9 @@ class Endpoint {
 public:
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
 	// An endpoint is either "local" (used for receiving data) or "remote" (used for sending data)
-	// FIXME: assuming TCP is used, how many Endpoints are associated with a given TCP connection?
-	// Is it 4?  One each for reading/writing at both of two sides?  Is it something else?
+	// FIXME: confirm if there is one endpoint per client and one per server.  Also,
+	// what if it's the same process talking to itself, does that change anything?
+	// Consider linking to a diagram on a web site.
 	constexpr static FileIdentifier file_identifier = 10618805;
 	using Token = UID;
 	NetworkAddressList addresses;
