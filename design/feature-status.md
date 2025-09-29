@@ -19,12 +19,12 @@
 |[Bulk Loading & Dumping](https://apple.github.io/foundationdb/bulkdump.html)|experimental|Since 7.4. Dumping an idle cluster to S3 and loading data from S3 into an empty cluster.|Apple FDB Team|Will evolve into any keyrange dumping and loading with support to work with live clusters.|
 |Version Vector|experimental|An attempt to scale the transaction system so that proxy commits data no longer broadcasts to all tlogs.|Apple FDB Team|TBD|
 |gRPC|under development|Adding gRPC endpoints for certain client/server communications, e.g., some fdbcli usage, file transfer to and from fdbserver processes.|Apple FDB Team|Supported|
-|Multitenancy|experimental|Multi-tenant support, contributed from the community.|None|Need a new owner or become deprecated.|
-|Metacluster|experimental|contributed from the community.|None|Need a new owner or become deprecated.|
-|Storage Cache|experimental|contributed from the community. Serve as memory cache for storage servers. This is probably never finished and another solution to read hot shard is using large storage teams.|None|Need a new owner or become deprecated.|
-|Blob granule|experimental|contributed from the community. Related to backup.|None|Need a new owner or become deprecated.|
-|ChangeFeed|experimental|contributed from the community.|None|Need a new owner or become depredated.|
-|Configuration Database|experimental|contributed from the community. Have data consistency issues, probably not finished.|None|Need a new owner or become deprecated.|
+|Multitenancy|experimental|Multi-tenant support, contributed from the community.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
+|Metacluster|experimental|contributed from the community.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
+|Storage Cache|experimental|contributed from the community. Serve as memory cache for storage servers. This is probably never finished and another solution to read hot shard is using large storage teams.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
+|Blob granule|experimental|contributed from the community. Related to backup.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
+|ChangeFeed|experimental|contributed from the community.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
+|Configuration Database|experimental|contributed from the community. Have data consistency issues, probably not finished.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
 |OpenTelemetry|experimental|contributed from the community. Probably not finished.|None|Need a new owner.|
 |Dynamic knobs|experimental|Allows changing fdbserver process knob values without requiring a process restart|None|Need a new owner or become deprecated.|
 |Tag Throttling|experimental|limits the transaction rate for specific transaction tags|None|Need a new owner or become deprecated.|
