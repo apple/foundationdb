@@ -53,7 +53,6 @@ enum TesterOptionId {
 	OPT_OUTPUT_PIPE,
 	OPT_FDB_API_VERSION,
 	OPT_TRANSACTION_RETRY_LIMIT,
-	OPT_BLOB_GRANULE_LOCAL_FILE_PATH,
 	OPT_STATS_INTERVAL,
 	OPT_TLS_CERT_FILE,
 	OPT_TLS_KEY_FILE,
@@ -81,7 +80,6 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_OUTPUT_PIPE, "--output-pipe", SO_REQ_SEP },
 	  { OPT_FDB_API_VERSION, "--api-version", SO_REQ_SEP },
 	  { OPT_TRANSACTION_RETRY_LIMIT, "--transaction-retry-limit", SO_REQ_SEP },
-	  { OPT_BLOB_GRANULE_LOCAL_FILE_PATH, "--blob-granule-local-file-path", SO_REQ_SEP },
 	  { OPT_STATS_INTERVAL, "--stats-interval", SO_REQ_SEP },
 	  { OPT_TLS_CERT_FILE, "--tls-cert-file", SO_REQ_SEP },
 	  { OPT_TLS_KEY_FILE, "--tls-key-file", SO_REQ_SEP },
@@ -124,8 +122,6 @@ void printProgramUsage(const char* execName) {
 	       "                 Required FDB API version (default %d).\n"
 	       "  --transaction-retry-limit NUMBER\n"
 	       "				 Maximum number of retries per transaction (default: 0 - unlimited)\n"
-	       "  --blob-granule-local-file-path PATH\n"
-	       "				 Path to blob granule files on local filesystem\n"
 	       "  -f, --test-file FILE\n"
 	       "                 Test file to run.\n"
 	       "  --stats-interval MILLISECONDS\n"
@@ -212,9 +208,6 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		break;
 	case OPT_TRANSACTION_RETRY_LIMIT:
 		processIntOption(args.OptionText(), args.OptionArg(), 0, 1000, options.transactionRetryLimit);
-		break;
-	case OPT_BLOB_GRANULE_LOCAL_FILE_PATH:
-		options.bgBasePath = args.OptionArg();
 		break;
 	case OPT_STATS_INTERVAL:
 		processIntOption(args.OptionText(), args.OptionArg(), 0, 60000, options.statsIntervalMs);

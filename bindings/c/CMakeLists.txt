@@ -106,8 +106,6 @@ if(NOT WIN32)
     test/mako/admin_server.cpp
     test/mako/async.hpp
     test/mako/async.cpp
-    test/mako/blob_granules.hpp
-    test/mako/blob_granules.cpp
     test/mako/future.hpp
     test/mako/limit.hpp
     test/mako/logger.hpp
@@ -149,10 +147,6 @@ if(NOT WIN32)
     test/apitester/TesterApiWorkload.h
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
-    test/apitester/TesterBlobGranuleCorrectnessWorkload.cpp
-    test/apitester/TesterBlobGranuleErrorsWorkload.cpp
-    test/apitester/TesterBlobGranuleUtil.cpp
-    test/apitester/TesterBlobGranuleUtil.h
     test/apitester/TesterCancelTransactionWorkload.cpp
     test/apitester/TesterCorrectnessWorkload.cpp
     test/apitester/TesterExampleWorkload.cpp
@@ -298,7 +292,6 @@ if(NOT WIN32)
     set(PATTERNS_TO_SKIP "XXXX")
     if (USE_ASAN)
       set(PATTERNS_TO_SKIP
-        ".*BlobGranule.*"  # skip BlobGranule tests because we don't use
         ".*Tenant.*"       # skip Tenant tests because we don't use
       )
     endif()
@@ -334,15 +327,6 @@ if(NOT WIN32)
       --build-dir ${CMAKE_BINARY_DIR}
       --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
       --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
-      --process-number 3
-      )
-
-    add_python_venv_test(NAME fdb_c_upgrade_to_future_version_blob_granules
-      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/ApiBlobGranulesCorrectness.toml
-      --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
-      --blob-granules-enabled
       --process-number 3
       )
 

@@ -99,43 +99,6 @@ KeyRangeArray copyKeyRangeArray(fdb::future_var::KeyRangeRefArray::Type array) {
 	return out;
 };
 
-GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefArray::Type array) {
-	auto& [in_summaries, in_count] = array;
-
-	GranuleSummaryArray out;
-
-	for (int i = 0; i < in_count; ++i) {
-		fdb::native::FDBGranuleSummary nativeSummary = *in_summaries++;
-		fdb::GranuleSummary summary(nativeSummary);
-		out.push_back(summary);
-	}
-	return out;
-};
-
-GranuleDescriptionArray copyGranuleDescriptionArray(fdb::future_var::GranuleDescriptionRefArray::Type array) {
-	auto& [in_desc, in_count] = array;
-
-	GranuleDescriptionArray out;
-
-	for (int i = 0; i < in_count; ++i) {
-		fdb::native::FDBBGFileDescription nativeDesc = *in_desc++;
-		out.emplace_back(nativeDesc);
-	}
-	return out;
-};
-
-GranuleMutationArray copyGranuleMutationArray(fdb::future_var::GranuleMutationRefArray::Type array) {
-	auto& [in_mutations, in_count] = array;
-
-	GranuleMutationArray out;
-
-	for (int i = 0; i < in_count; ++i) {
-		fdb::native::FDBBGMutation nativeMutation = *in_mutations++;
-		out.emplace_back(nativeMutation);
-	}
-	return out;
-};
-
 TmpFile::~TmpFile() {
 	if (!filename.empty()) {
 		remove();

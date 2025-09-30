@@ -385,10 +385,6 @@ protected:
 	// used only in ON_ERROR and DONE states (no need for mutex)
 	std::vector<fdb::Error> retriedErrors;
 
-	// blob granule base path
-	// Set in constructor, stays immutable
-	const std::string bgBasePath;
-
 	// Indicates if the database error was injected
 	// Accessed on initialization and in ON_ERROR state only (no need for mutex)
 	bool databaseCreateErrorInjected;

@@ -48,8 +48,6 @@
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
-#include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/BlobGranuleRequest.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -658,28 +656,6 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			    .detail("Internal", cx->internal);
 
 			cx->ccFeed.logToTraceEvent(feedEv);
-		}
-
-		if (cx->anyBGReads && logMetrics) {
-			TraceEvent bgReadEv("BlobGranuleReadMetrics", cx->dbId);
-
-			bgReadEv.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
-			    .detail("Cluster",
-			            cx->getConnectionRecord()
-			                ? cx->getConnectionRecord()->getConnectionString().clusterKeyName().toString()
-			                : "")
-			    .detail("Internal", cx->internal);
-
-			// add counters
-			cx->ccBG.logToTraceEvent(bgReadEv);
-
-			// add latencies
-			bgReadEv.detail("MeanBGLatency", cx->bgLatencies.mean())
-			    .detail("MedianBGLatency", cx->bgLatencies.median())
-			    .detail("MaxBGLatency", cx->bgLatencies.max())
-			    .detail("MeanBGGranulesPerRequest", cx->bgGranulesPerRequest.mean())
-			    .detail("MedianBGGranulesPerRequest", cx->bgGranulesPerRequest.median())
-			    .detail("MaxBGGranulesPerRequest", cx->bgGranulesPerRequest.max());
 		}
 
 		cx->latencies.clear();

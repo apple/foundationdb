@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "blob_granules.hpp"
 #include "operations.hpp"
 #include "mako.hpp"
 #include "logger.hpp"
@@ -228,46 +227,6 @@ const std::array<Operation, MAX_OP> opTable{
 	    true },
 	  { "COMMIT", { { StepKind::NONE, nullptr } }, 0, false },
 	  { "TRANSACTION", { { StepKind::NONE, nullptr } }, 0, false },
-	  { "READBLOBGRANULE",
-	    { { StepKind::ON_ERROR,
-	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	            auto err = Error{};
-
-	            err = tx.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, BytesRef());
-	            if (err) {
-		            // Issuing read/writes before disabling RYW results in error.
-		            // Possible malformed workload?
-		            // As workloads execute in sequence, retrying would likely repeat this error.
-		            fmt::print(stderr, "ERROR: TR_OPTION_READ_YOUR_WRITES_DISABLE: {}", err.what());
-		            return Future();
-	            }
-
-	            // Allocate a separate context per call to avoid multiple threads accessing
-	            auto user_context = blob_granules::local_file::UserContext(args.bg_file_path);
-
-	            auto api_context = blob_granules::local_file::createApiContext(user_context, args.bg_materialize_files);
-
-	            auto r = tx.readBlobGranules(begin,
-	                                         end,
-	                                         0 /* beginVersion*/,
-	                                         -2, /* endVersion. -2 (latestVersion) is use txn read version */
-	                                         api_context);
-
-	            user_context.clear();
-
-	            auto out = Result::KeyValueRefArray{};
-	            err = r.getKeyValueArrayNothrow(out);
-	            if (!err || err.is(2037 /*blob_granule_not_materialized*/))
-		            return Future();
-	            const auto level = (err.is(1020 /*not_committed*/) || err.is(1021 /*commit_unknown_result*/) ||
-	                                err.is(1213 /*tag_throttled*/))
-	                                   ? VERBOSE_WARN
-	                                   : VERBOSE_NONE;
-	            logr.printWithLogLevel(level, "ERROR", "get_keyvalue_array() after readBlobGranules(): {}", err.what());
-	            return tx.onError(err).eraseType();
-	        } } },
-	    1,
-	    false } }
 };
 
 } // namespace mako

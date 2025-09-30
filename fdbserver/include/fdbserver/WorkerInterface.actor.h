@@ -47,6 +47,8 @@
 #include "fdbserver/ConfigBroadcastInterface.h"
 #include "flow/actorcompiler.h"
 
+// gglass todo: check if WorkerInterface is persisted
+//   (similar to how StorageServerInterface is persisted)
 struct WorkerInterface {
 	constexpr static FileIdentifier file_identifier = 14712718;
 	ClientWorkerInterface clientInterface;

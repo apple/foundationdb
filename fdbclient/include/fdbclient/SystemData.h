@@ -27,7 +27,6 @@
 #include "fdbclient/AccumulativeChecksum.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/BulkDumping.h"
-#include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this dependency
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -758,6 +757,7 @@ extern const KeyRange globalConfigKnobKeys;
 extern const KeyRangeRef configKnobKeys;
 extern const KeyRangeRef configClassKeys;
 
+#if 0
 // blob range special keys
 extern const KeyRef blobRangeChangeKey;
 extern const KeyRangeRef blobRangeKeys;
@@ -878,6 +878,8 @@ const Key blobWorkerAffinityKeyFor(UID workerID);
 UID decodeBlobWorkerAffinityKey(KeyRef const& key);
 const Value blobWorkerAffinityValue(UID const& id);
 UID decodeBlobWorkerAffinityValue(ValueRef const& value);
+
+#endif
 
 extern const Key blobManifestVersionKey;
 

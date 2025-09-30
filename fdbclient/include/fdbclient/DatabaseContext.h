@@ -445,28 +445,6 @@ public:
 	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
-	// BlobGranule API.
-	Future<Key> purgeBlobGranules(KeyRange keyRange,
-	                              Version purgeVersion,
-	                              Optional<Reference<Tenant>> tenant,
-	                              bool force = false);
-	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
-
-	Future<bool> blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
-	Future<bool> blobbifyRangeBlocking(KeyRange range, Optional<Reference<Tenant>> tenant = {});
-	Future<bool> unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
-	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
-	                                                                int rangeLimit,
-	                                                                Optional<Reference<Tenant>> tenant = {});
-	Future<Version> verifyBlobRange(const KeyRange& range,
-	                                Optional<Version> version,
-	                                Optional<Reference<Tenant>> tenant = {});
-	Future<bool> flushBlobRange(const KeyRange& range,
-	                            bool compact,
-	                            Optional<Version> version,
-	                            Optional<Reference<Tenant>> tenant = {});
-	Future<bool> blobRestore(const KeyRange range, Optional<Version> version);
-
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
@@ -546,7 +524,6 @@ public:
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
 
 	std::map<UID, StorageServerInfo*> server_interf;
-	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
 
 	// map from ssid -> tss interface
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
@@ -616,8 +593,6 @@ public:
 	Counter transactionsCommitCompleted;
 	Counter transactionKeyServerLocationRequests;
 	Counter transactionKeyServerLocationRequestsCompleted;
-	Counter transactionBlobGranuleLocationRequests;
-	Counter transactionBlobGranuleLocationRequestsCompleted;
 	Counter transactionStatusRequests;
 	Counter transactionTenantLookupRequests;
 	Counter transactionTenantLookupRequestsCompleted;
@@ -633,17 +608,6 @@ public:
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
 	Counter transactionCommitVersionNotFoundForSS;
-
-	// Blob Granule Read metrics. Omit from logging if not used.
-	bool anyBGReads;
-	CounterCollection ccBG;
-	Counter bgReadInputBytes;
-	Counter bgReadOutputBytes;
-	Counter bgReadSnapshotRows;
-	Counter bgReadRowsCleared;
-	Counter bgReadRowsInserted;
-	Counter bgReadRowsUpdated;
-	DDSketch<double> bgLatencies, bgGranulesPerRequest;
 
 	// Change Feed metrics. Omit change feed metrics from logging if not used
 	bool usedAnyChangeFeeds;
@@ -683,7 +647,6 @@ public:
 
 	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
-	bool blobGranuleNoMaterialize = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;

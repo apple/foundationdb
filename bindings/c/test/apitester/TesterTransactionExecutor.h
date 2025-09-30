@@ -68,9 +68,6 @@ public:
 	// Must be called for all write transactions that may need to be restarted on timeouts
 	virtual void makeSelfConflicting() = 0;
 
-	// Plumbing for blob granule base path
-	virtual std::string getBGBasePath() = 0;
-
 	// A continuation to be executed when all of the given futures get ready
 	virtual void continueAfterAll(std::vector<fdb::Future> futures, TTaskFct cont);
 };

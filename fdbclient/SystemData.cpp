@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/SystemData.h"
-#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
@@ -1677,6 +1676,7 @@ const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
 const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
 const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
 
+#if 0
 // key to watch for changes in active blob ranges + KeyRangeMap of active blob ranges
 // Blob Manager + Worker stuff is all \xff\x02 to avoid Transaction State Store
 const KeyRef blobRangeChangeKey = "\xff\x02/blobRangeChange"_sr;
@@ -2081,6 +2081,8 @@ UID decodeBlobWorkerAffinityValue(ValueRef const& value) {
 	reader.deserialize(id);
 	return id;
 }
+
+#endif
 
 const Key blobManifestVersionKey = "\xff\x02/blobManifestVersion"_sr;
 

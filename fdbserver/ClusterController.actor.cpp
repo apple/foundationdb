@@ -26,8 +26,6 @@
 #include <tuple>
 #include <vector>
 
-#include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
@@ -35,7 +33,6 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbrpc/Locality.h"
-#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -666,15 +663,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
 	WorkerDetails newCSWorker = findNewProcessForSingleton(self, ProcessClass::ConsistencyScan, id_used);
 
-	WorkerDetails newBMWorker;
-	WorkerDetails newMGWorker;
-	if (self->db.blobGranulesEnabled.get()) {
-		newBMWorker = findNewProcessForSingleton(self, ProcessClass::BlobManager, id_used);
-		if (self->db.blobRestoreEnabled.get()) {
-			newMGWorker = findNewProcessForSingleton(self, ProcessClass::BlobMigrator, id_used);
-		}
-	}
-
 	WorkerDetails newEKPWorker;
 	EncryptionAtRestMode encryptMode = self->db.config.encryptionAtRestMode;
 	const bool enableKmsCommunication =
@@ -687,15 +675,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
 	auto bestFitnessForCS = findBestFitnessForSingleton(self, newCSWorker, ProcessClass::ConsistencyScan);
-
-	ProcessClass::Fitness bestFitnessForBM;
-	ProcessClass::Fitness bestFitnessForMG;
-	if (self->db.blobGranulesEnabled.get()) {
-		bestFitnessForBM = findBestFitnessForSingleton(self, newBMWorker, ProcessClass::BlobManager);
-		if (self->db.blobRestoreEnabled.get()) {
-			bestFitnessForMG = findBestFitnessForSingleton(self, newMGWorker, ProcessClass::BlobManager);
-		}
-	}
 
 	ProcessClass::Fitness bestFitnessForEKP;
 	if (enableKmsCommunication) {
@@ -721,17 +700,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	bool csHealthy = isHealthySingleton<ConsistencyScanSingleton>(
 	    self, newCSWorker, csSingleton, bestFitnessForCS, self->recruitingConsistencyScanID);
 
-	bool bmHealthy = true;
-	bool mgHealthy = true;
-	if (self->db.blobGranulesEnabled.get()) {
-		bmHealthy = isHealthySingleton<BlobManagerSingleton>(
-		    self, newBMWorker, bmSingleton, bestFitnessForBM, self->recruitingBlobManagerID);
-		if (self->db.blobRestoreEnabled.get()) {
-			mgHealthy = isHealthySingleton<BlobMigratorSingleton>(
-			    self, newMGWorker, mgSingleton, bestFitnessForMG, self->recruitingBlobMigratorID);
-		}
-	}
-
 	bool ekpHealthy = true;
 	if (enableKmsCommunication) {
 		ekpHealthy = isHealthySingleton<EncryptKeyProxySingleton>(
@@ -752,17 +720,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newCSProcessId = newCSWorker.interf.locality.processId();
 
-	Optional<Standalone<StringRef>> currBMProcessId, newBMProcessId;
-	Optional<Standalone<StringRef>> currMGProcessId, newMGProcessId;
-	if (self->db.blobGranulesEnabled.get()) {
-		currBMProcessId = bmSingleton.getInterface().locality.processId();
-		newBMProcessId = newBMWorker.interf.locality.processId();
-		if (self->db.blobRestoreEnabled.get()) {
-			currMGProcessId = mgSingleton.getInterface().locality.processId();
-			newMGProcessId = newMGWorker.interf.locality.processId();
-		}
-	}
-
 	Optional<Standalone<StringRef>> currEKPProcessId, newEKPProcessId;
 	if (enableKmsCommunication) {
 		currEKPProcessId = ekpSingleton.getInterface().locality.processId();
@@ -771,15 +728,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	std::vector<Optional<Standalone<StringRef>>> currPids = { currRKProcessId, currDDProcessId, currCSProcessId };
 	std::vector<Optional<Standalone<StringRef>>> newPids = { newRKProcessId, newDDProcessId, newCSProcessId };
-	if (self->db.blobGranulesEnabled.get()) {
-		currPids.emplace_back(currBMProcessId);
-		newPids.emplace_back(newBMProcessId);
-		if (self->db.blobRestoreEnabled.get()) {
-			currPids.emplace_back(currMGProcessId);
-			newPids.emplace_back(newMGProcessId);
-		}
-	}
-
 	if (enableKmsCommunication) {
 		currPids.emplace_back(currEKPProcessId);
 		newPids.emplace_back(newEKPProcessId);

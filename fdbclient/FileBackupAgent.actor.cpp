@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/TenantEntryCache.actor.h"
