@@ -1705,15 +1705,12 @@ void peekMessagesFromMemory(Reference<LogData> self,
 		++self->emptyPeeks;
 	} else {
 		++self->nonEmptyPeeks;
-
-		// TODO (version vector) check if this should be included in "status details" json
-		if (self->peekVersionCounts.find(tag) == self->peekVersionCounts.end()) {
-			UID ssID = deterministicRandom()->randomUniqueID();
-			std::string s = "PeekVersionCounts " + tag.toString();
-			self->peekVersionCounts.try_emplace(
-			    tag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
-		}
-		LatencySample& sample = self->peekVersionCounts.at(tag);
+		auto [it, _] = self->peekVersionCounts.try_emplace(tag,
+		                                                   "PeekVersionCounts " + tag.toString(),
+		                                                   deterministicRandom()->randomUniqueID(),
+		                                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		LatencySample& sample = it->second;
 		sample.addMeasurement(versionCount);
 	}
 }
@@ -1906,20 +1903,15 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
 		    !reqReturnIfBlocked && tagRecovered) {
 			state double startTime = now();
-			// TODO (version vector) check if this should be included in "status details" json
-			// TODO (version vector) all tags may be too many, instead,  standard deviation?
 			wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
 			double latency = now() - startTime;
-			if (logData->blockingPeekLatencies.find(reqTag) == logData->blockingPeekLatencies.end()) {
-				UID ssID = nondeterministicRandom()->randomUniqueID();
-				std::string s = "BlockingPeekLatencies-" + reqTag.toString();
-				logData->blockingPeekLatencies.try_emplace(reqTag,
-				                                           s,
-				                                           ssID,
-				                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-				                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
-			}
-			LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
+			auto [it, inserted] =
+			    logData->blockingPeekLatencies.try_emplace(reqTag,
+			                                               "BlockingPeekLatencies-" + reqTag.toString(),
+			                                               nondeterministicRandom()->randomUniqueID(),
+			                                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+			                                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+			LatencySample& sample = it->second;
 			sample.addMeasurement(latency);
 			poppedVer = poppedVersion(logData, reqTag);
 		}
