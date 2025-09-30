@@ -28,3 +28,4 @@
 |OpenTelemetry|experimental|contributed from the community. Probably not finished.|None|Need a new owner.|
 |Dynamic knobs|experimental|Allows changing fdbserver process knob values without requiring a process restart|None|Need a new owner or become deprecated.|
 |Tag Throttling|experimental|limits the transaction rate for specific transaction tags|None|Need a new owner or become deprecated.|
+|Windows Binary|experimental|FoundationDB on Windows Platform|Community (To be filled out by the the exact company/person)|Unclear if needed.|
