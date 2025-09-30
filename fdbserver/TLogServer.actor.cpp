@@ -1705,11 +1705,11 @@ void peekMessagesFromMemory(Reference<LogData> self,
 		++self->emptyPeeks;
 	} else {
 		++self->nonEmptyPeeks;
-		auto [it, inserted] = self->peekVersionCounts.try_emplace(tag,
-		                                                          "PeekVersionCounts " + tag.toString(),
-		                                                          deterministicRandom()->randomUniqueID(),
-		                                                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		auto [it, _] = self->peekVersionCounts.try_emplace(tag,
+		                                                   "PeekVersionCounts " + tag.toString(),
+		                                                   deterministicRandom()->randomUniqueID(),
+		                                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
 		LatencySample& sample = it->second;
 		sample.addMeasurement(versionCount);
 	}
@@ -1903,8 +1903,6 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
 		    !reqReturnIfBlocked && tagRecovered) {
 			state double startTime = now();
-			// TODO (version vector) check if this should be included in "status details" json
-			// TODO (version vector) all tags may be too many, instead,  standard deviation?
 			wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
 			double latency = now() - startTime;
 			auto [it, inserted] =
