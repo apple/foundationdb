@@ -189,7 +189,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			// Step 1: Get source server id of the shard
 			state std::vector<UID> sourceStorageServers;
 			state std::vector<UID> destStorageServers;
-			state std::map<UID, Tag> storageServerToTagMap;
+			state std::map<UID, Tag> storageServerToTagMap; // populated only when version vector is enabled
 			retryCount = 0;
 			loop {
 				try {
@@ -283,7 +283,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 						storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
 					}
 					if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-						for (j = 0; j < storageServers.size(); j++) {
+						for (int j = 0; j < storageServers.size(); j++) {
 							auto iter = storageServerToTagMap.find(storageServers[j]);
 							ASSERT(iter != storageServerToTagMap.end());
 							// Note: This workload doesn't use the NativeAPI getRange() API for reading
