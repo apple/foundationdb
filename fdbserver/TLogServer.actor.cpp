@@ -1766,14 +1766,19 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		try {
 			peekId = reqSequence.get().first;
 			sequence = reqSequence.get().second;
-			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
-			    logData->peekTracker.find(peekId) == logData->peekTracker.end()) {
+			auto [trackerIt, trackerInserted] = logData->peekTracker.try_emplace(peekId);
+			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && trackerInserted) {
+				// New tracker but high sequence number means operation is obsolete
+				logData->peekTracker.erase(trackerIt);
 				throw operation_obsolete();
 			}
-			auto& trackerData = logData->peekTracker[peekId];
-			if (sequence == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
-				trackerData.tag = reqTag;
-				trackerData.sequence_version[0].send(std::make_pair(reqBegin, reqOnlySpilled));
+			auto& trackerData = trackerIt->second;
+			if (sequence == 0) {
+				auto [seqIt, seqInserted] = trackerData.sequence_version.try_emplace(0);
+				if (seqInserted) {
+					trackerData.tag = reqTag;
+					seqIt->second.send(std::make_pair(reqBegin, reqOnlySpilled));
+				}
 			}
 			auto seqBegin = trackerData.sequence_version.begin();
 			// The peek cursor and this comparison need to agree about the maximum number of in-flight requests.
@@ -1938,8 +1943,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			rep.onlySpilled = false;
 
 			if (reqSequence.present()) {
-				auto& trackerData = logData->peekTracker[peekId];
-				auto& sequenceData = trackerData.sequence_version[sequence + 1];
+				auto [trackerIt, _] = logData->peekTracker.try_emplace(peekId);
+				auto& trackerData = trackerIt->second;
+				auto [seqIt, seqInserted] = trackerData.sequence_version.try_emplace(sequence + 1);
+				auto& sequenceData = seqIt->second;
 				trackerData.lastUpdate = now();
 				if (trackerData.sequence_version.size() && sequence + 1 < trackerData.sequence_version.begin()->first) {
 					replyPromise.sendError(operation_obsolete());
