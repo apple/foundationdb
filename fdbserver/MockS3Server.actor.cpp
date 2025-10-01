@@ -34,14 +34,12 @@
 #include <iomanip>
 #include <regex>
 #include <utility>
-#include <mutex>
 #include <iostream>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// Mock S3 Server Implementation for deterministic testing
-class MockS3ServerImpl {
-public:
+// Global storage for MockS3 (shared across all simulated processes)
+struct MockS3GlobalStorage {
 	struct ObjectData {
 		std::string content;
 		HTTP::Headers headers;
@@ -71,9 +69,34 @@ public:
 		}
 	};
 
-	// Storage
 	std::map<std::string, std::map<std::string, ObjectData>> buckets;
 	std::map<std::string, MultipartUpload> multipartUploads;
+
+	// Note: In FDB simulation, function-local statics are SHARED across all simulated processes
+	// because they all run on the same OS thread. This is exactly what we want for MockS3 storage.
+	MockS3GlobalStorage() { TraceEvent("MockS3GlobalStorageCreated").detail("Address", format("%p", this)); }
+
+	// Clear all stored data - called at the start of each simulation test to prevent
+	// data accumulation across multiple tests
+	void clearStorage() {
+		buckets.clear();
+		multipartUploads.clear();
+		TraceEvent("MockS3GlobalStorageCleared").detail("Address", format("%p", this));
+	}
+};
+
+// Accessor function - uses function-local static for lazy initialization
+// In simulation, this static is shared across all simulated processes (same OS thread)
+static MockS3GlobalStorage& getGlobalStorage() {
+	static MockS3GlobalStorage storage;
+	return storage;
+}
+
+// Mock S3 Server Implementation for deterministic testing
+class MockS3ServerImpl {
+public:
+	using ObjectData = MockS3GlobalStorage::ObjectData;
+	using MultipartUpload = MockS3GlobalStorage::MultipartUpload;
 
 	MockS3ServerImpl() { TraceEvent("MockS3ServerImpl_Constructor").detail("Address", format("%p", this)); }
 
@@ -180,7 +203,7 @@ public:
 		std::string path = (queryPos != std::string::npos) ? resource.substr(0, queryPos) : resource;
 		std::string query = (queryPos != std::string::npos) ? resource.substr(queryPos + 1) : "";
 
-		// Parse path: /bucket/object
+		// Parse path: /bucket/object (like real S3)
 		if (path.size() > 1) {
 			path = path.substr(1); // Remove leading /
 			size_t slashPos = path.find('/');
@@ -203,8 +226,16 @@ public:
 				std::string key = iter->str(1);
 				std::string value = iter->str(2);
 				// URL decode the parameter value
-				queryParams[key] = urlDecode(value);
+				queryParams[key] = HTTP::urlDecode(value);
 			}
+		}
+
+		// MockS3Server handles S3 HTTP requests where bucket is always the first path component
+		// For bucket operations: HEAD /bucket_name
+		// For object operations: HEAD /bucket_name/object_path
+		if (bucket.empty()) {
+			TraceEvent(SevError, "MockS3MissingBucketInPath").detail("Resource", resource).detail("QueryString", query);
+			throw backup_invalid_url();
 		}
 
 		TraceEvent("MockS3ParsedPath")
@@ -212,6 +243,40 @@ public:
 		    .detail("Bucket", bucket)
 		    .detail("Object", object)
 		    .detail("QueryString", query);
+	}
+
+	// Parse HTTP Range header: "bytes=start-end"
+	// Returns true if parsing succeeded, false otherwise
+	// Sets rangeStart and rangeEnd to the parsed values
+	static bool parseRangeHeader(const std::string& rangeHeader, int64_t& rangeStart, int64_t& rangeEnd) {
+		if (rangeHeader.empty()) {
+			return false;
+		}
+
+		// Check for "bytes=" prefix
+		if (rangeHeader.substr(0, 6) != "bytes=") {
+			return false;
+		}
+
+		std::string range = rangeHeader.substr(6);
+		size_t dashPos = range.find('-');
+		if (dashPos == std::string::npos) {
+			return false;
+		}
+
+		try {
+			rangeStart = std::stoll(range.substr(0, dashPos));
+			std::string endStr = range.substr(dashPos + 1);
+			if (endStr.empty()) {
+				// Open-ended range (e.g., "bytes=100-")
+				rangeEnd = -1; // Indicates open-ended
+			} else {
+				rangeEnd = std::stoll(endStr);
+			}
+			return true;
+		} catch (...) {
+			return false;
+		}
 	}
 
 	// Multipart Upload Operations
@@ -226,7 +291,7 @@ public:
 		// Create multipart upload
 		MultipartUpload upload(bucket, object);
 		std::string uploadId = upload.uploadId;
-		self->multipartUploads[uploadId] = std::move(upload);
+		getGlobalStorage().multipartUploads[uploadId] = std::move(upload);
 
 		// Generate XML response
 		std::string xml = format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -266,8 +331,8 @@ public:
 		                ? req->data.content.substr(0, std::min((size_t)20, req->data.content.size()))
 		                : "EMPTY");
 
-		auto uploadIter = self->multipartUploads.find(uploadId);
-		if (uploadIter == self->multipartUploads.end()) {
+		auto uploadIter = getGlobalStorage().multipartUploads.find(uploadId);
+		if (uploadIter == getGlobalStorage().multipartUploads.end()) {
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchUpload", "Upload not found");
 			return Void();
 		}
@@ -301,8 +366,8 @@ public:
 
 		TraceEvent("MockS3MultipartComplete").detail("UploadId", uploadId);
 
-		auto uploadIter = self->multipartUploads.find(uploadId);
-		if (uploadIter == self->multipartUploads.end()) {
+		auto uploadIter = getGlobalStorage().multipartUploads.find(uploadId);
+		if (uploadIter == getGlobalStorage().multipartUploads.end()) {
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchUpload", "Upload not found");
 			return Void();
 		}
@@ -323,19 +388,19 @@ public:
 
 		// Create final object
 		ObjectData obj(combinedContent);
-		self->buckets[bucket][object] = std::move(obj);
+		getGlobalStorage().buckets[bucket][object] = std::move(obj);
 
 		TraceEvent("MockS3MultipartFinalObject")
 		    .detail("UploadId", uploadId)
-		    .detail("StoredSize", self->buckets[bucket][object].content.size())
+		    .detail("StoredSize", getGlobalStorage().buckets[bucket][object].content.size())
 		    .detail("StoredPreview",
-		            self->buckets[bucket][object].content.size() > 0
-		                ? self->buckets[bucket][object].content.substr(
-		                      0, std::min((size_t)20, self->buckets[bucket][object].content.size()))
+		            getGlobalStorage().buckets[bucket][object].content.size() > 0
+		                ? getGlobalStorage().buckets[bucket][object].content.substr(
+		                      0, std::min((size_t)20, getGlobalStorage().buckets[bucket][object].content.size()))
 		                : "EMPTY");
 
 		// Clean up multipart upload
-		self->multipartUploads.erase(uploadId);
+		getGlobalStorage().multipartUploads.erase(uploadId);
 
 		// Generate completion XML response
 		std::string xml = format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -346,7 +411,7 @@ public:
 		                         "</CompleteMultipartUploadResult>",
 		                         bucket.c_str(),
 		                         object.c_str(),
-		                         self->buckets[bucket][object].etag.c_str());
+		                         getGlobalStorage().buckets[bucket][object].etag.c_str());
 
 		self->sendXMLResponse(response, 200, xml);
 
@@ -366,14 +431,14 @@ public:
 
 		TraceEvent("MockS3MultipartAbort").detail("UploadId", uploadId);
 
-		auto uploadIter = self->multipartUploads.find(uploadId);
-		if (uploadIter == self->multipartUploads.end()) {
+		auto uploadIter = getGlobalStorage().multipartUploads.find(uploadId);
+		if (uploadIter == getGlobalStorage().multipartUploads.end()) {
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchUpload", "Upload not found");
 			return Void();
 		}
 
 		// Remove multipart upload
-		self->multipartUploads.erase(uploadId);
+		getGlobalStorage().multipartUploads.erase(uploadId);
 
 		response->code = 204; // No Content
 		response->data.contentLen = 0;
@@ -396,8 +461,8 @@ public:
 		    .detail("Object", object)
 		    .detail("TagsXML", req->data.content);
 
-		auto bucketIter = self->buckets.find(bucket);
-		if (bucketIter == self->buckets.end()) {
+		auto bucketIter = getGlobalStorage().buckets.find(bucket);
+		if (bucketIter == getGlobalStorage().buckets.end()) {
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
 			return Void();
 		}
@@ -432,8 +497,8 @@ public:
 
 		TraceEvent("MockS3GetObjectTags").detail("Bucket", bucket).detail("Object", object);
 
-		auto bucketIter = self->buckets.find(bucket);
-		if (bucketIter == self->buckets.end()) {
+		auto bucketIter = getGlobalStorage().buckets.find(bucket);
+		if (bucketIter == getGlobalStorage().buckets.end()) {
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
 			return Void();
 		}
@@ -463,24 +528,14 @@ public:
 	                                    std::string bucket,
 	                                    std::string object) {
 
-		TraceEvent("MockS3PutObject")
-		    .detail("Bucket", bucket)
-		    .detail("Object", object)
-		    .detail("ContentLength", req->data.contentLen);
-
-		// Create object
 		ObjectData obj(req->data.content);
-		self->buckets[bucket][object] = std::move(obj);
+		std::string etag = obj.etag;
+		getGlobalStorage().buckets[bucket][object] = std::move(obj);
 
 		response->code = 200;
-		response->data.headers["ETag"] = self->buckets[bucket][object].etag;
+		response->data.headers["ETag"] = etag;
 		response->data.contentLen = 0;
 		response->data.content = new UnsentPacketQueue(); // Required for HTTP header transmission
-
-		TraceEvent("MockS3ObjectStored")
-		    .detail("Bucket", bucket)
-		    .detail("Object", object)
-		    .detail("ETag", self->buckets[bucket][object].etag);
 
 		return Void();
 	}
@@ -491,10 +546,8 @@ public:
 	                                    std::string bucket,
 	                                    std::string object) {
 
-		TraceEvent("MockS3GetObject").detail("Bucket", bucket).detail("Object", object);
-
-		auto bucketIter = self->buckets.find(bucket);
-		if (bucketIter == self->buckets.end()) {
+		auto bucketIter = getGlobalStorage().buckets.find(bucket);
+		if (bucketIter == getGlobalStorage().buckets.end()) {
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
 			return Void();
 		}
@@ -505,41 +558,81 @@ public:
 			return Void();
 		}
 
-		response->code = 200;
-		response->data.headers["ETag"] = objectIter->second.etag;
-		response->data.headers["Content-Type"] = "binary/octet-stream";
-		response->data.headers["Content-MD5"] = HTTP::computeMD5Sum(objectIter->second.content);
+		std::string content = objectIter->second.content;
+		std::string etag = objectIter->second.etag;
+		std::string contentMD5 = HTTP::computeMD5Sum(content);
 
-		// Write content to response - CRITICAL FIX: Avoid PacketWriter to prevent malloc corruption
-		TraceEvent("MockS3GetObjectWriting")
-		    .detail("Bucket", bucket)
-		    .detail("Object", object)
-		    .detail("ContentSize", objectIter->second.content.size());
+		// Handle HTTP Range header for partial content requests
+		// This is essential for AsyncFileEncrypted to read encrypted blocks correctly
+		int64_t rangeStart = 0;
+		int64_t rangeEnd = static_cast<int64_t>(content.size() - 1);
+		bool isRangeRequest = false;
 
-		if (objectIter->second.content.empty()) {
-			response->data.contentLen = 0;
-		} else {
-			// CORRUPTION FIX: Use PacketWriter with generous buffer allocation
-			size_t contentSize = objectIter->second.content.size();
-			size_t bufferSize = contentSize + 1024; // Generous padding to prevent overflow
-
-			response->data.content = new UnsentPacketQueue();
-			PacketBuffer* buffer = response->data.content->getWriteBuffer(bufferSize);
-			PacketWriter pw(buffer, nullptr, Unversioned());
-
-			TraceEvent("MockS3GetObject_SafePacketWriter")
-			    .detail("ContentSize", contentSize)
-			    .detail("BufferSize", bufferSize)
-			    .detail("BufferPtr", format("%p", buffer))
-			    .detail("ResponseCode", response->code);
-
-			pw.serializeBytes(objectIter->second.content);
-			pw.finish(); // CRITICAL: Finalize PacketWriter to make content available
-			response->data.contentLen = contentSize;
-			response->data.headers["Content-Length"] = std::to_string(contentSize);
+		auto rangeHeader = req->data.headers.find("Range");
+		if (rangeHeader != req->data.headers.end()) {
+			int64_t parsedStart, parsedEnd;
+			if (parseRangeHeader(rangeHeader->second, parsedStart, parsedEnd)) {
+				rangeStart = parsedStart;
+				if (parsedEnd == -1) {
+					// Open-ended range (e.g., "bytes=100-")
+					rangeEnd = static_cast<int64_t>(content.size() - 1);
+				} else {
+					rangeEnd = parsedEnd;
+				}
+				// Clamp range to actual content size
+				int64_t contentSize = static_cast<int64_t>(content.size() - 1);
+				rangeEnd = std::min(rangeEnd, contentSize);
+				rangeStart = std::min(rangeStart, contentSize);
+				if (rangeStart <= rangeEnd) {
+					isRangeRequest = true;
+				}
+			}
 		}
 
-		TraceEvent("MockS3ObjectRetrieved").detail("Bucket", bucket).detail("Object", object);
+		// Extract the requested range
+		std::string responseContent;
+		if (isRangeRequest && rangeStart <= rangeEnd) {
+			responseContent =
+			    content.substr(static_cast<size_t>(rangeStart), static_cast<size_t>(rangeEnd - rangeStart + 1));
+			response->code = 206; // Partial Content
+			response->data.headers["Content-Range"] =
+			    format("bytes %lld-%lld/%zu", rangeStart, rangeEnd, content.size());
+			// For range requests, calculate MD5 of the partial content, not full content
+			contentMD5 = HTTP::computeMD5Sum(responseContent);
+		} else {
+			responseContent = content;
+			response->code = 200;
+		}
+
+		response->data.headers["ETag"] = etag;
+		response->data.headers["Content-Type"] = "binary/octet-stream";
+		response->data.headers["Content-MD5"] = contentMD5;
+
+		// Write content to response
+		response->data.contentLen = responseContent.size();
+		response->data.headers["Content-Length"] = std::to_string(responseContent.size());
+		response->data.content = new UnsentPacketQueue();
+
+		if (!responseContent.empty()) {
+			// Allocate extra byte for safety and ensure proper termination
+			size_t bufferSize = responseContent.size() + 1; // Extra byte for safety
+			PacketBuffer* buffer = PacketBuffer::create(bufferSize);
+
+			// Copy content with explicit size check
+			ASSERT(responseContent.size() <= buffer->size());
+			memcpy(buffer->data(), responseContent.data(), responseContent.size());
+
+			// Explicitly set the written bytes to exact content size (no extra byte)
+			buffer->bytes_written = responseContent.size();
+
+			// Zero out any remaining buffer space for safety
+			if (buffer->size() > responseContent.size()) {
+				memset(buffer->data() + responseContent.size(), 0, buffer->size() - responseContent.size());
+			}
+
+			// Add the buffer to the queue
+			response->data.content->prependWriteBuffer(buffer, buffer);
+		}
 
 		return Void();
 	}
@@ -552,8 +645,8 @@ public:
 
 		TraceEvent("MockS3DeleteObject").detail("Bucket", bucket).detail("Object", object);
 
-		auto bucketIter = self->buckets.find(bucket);
-		if (bucketIter != self->buckets.end()) {
+		auto bucketIter = getGlobalStorage().buckets.find(bucket);
+		if (bucketIter != getGlobalStorage().buckets.end()) {
 			bucketIter->second.erase(object);
 		}
 
@@ -572,14 +665,12 @@ public:
 	                                     std::string bucket,
 	                                     std::string object) {
 
-		TraceEvent("MockS3HeadObject").detail("Bucket", bucket).detail("Object", object);
-
-		auto bucketIter = self->buckets.find(bucket);
-		if (bucketIter == self->buckets.end()) {
+		auto bucketIter = getGlobalStorage().buckets.find(bucket);
+		if (bucketIter == getGlobalStorage().buckets.end()) {
 			TraceEvent("MockS3HeadObjectNoBucket")
 			    .detail("Bucket", bucket)
 			    .detail("Object", object)
-			    .detail("AvailableBuckets", self->buckets.size());
+			    .detail("AvailableBuckets", getGlobalStorage().buckets.size());
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
 			return Void();
 		}
@@ -595,25 +686,22 @@ public:
 		}
 
 		const ObjectData& obj = objectIter->second;
+		std::string etag = obj.etag;
+		size_t contentSize = obj.content.size();
+		std::string preview = contentSize > 0 ? obj.content.substr(0, std::min((size_t)20, contentSize)) : "EMPTY";
 
 		TraceEvent("MockS3HeadObjectFound")
 		    .detail("Bucket", bucket)
 		    .detail("Object", object)
-		    .detail("Size", obj.content.size())
-		    .detail("Preview",
-		            obj.content.size() > 0 ? obj.content.substr(0, std::min((size_t)20, obj.content.size())) : "EMPTY");
+		    .detail("Size", contentSize)
+		    .detail("Preview", preview);
 
 		response->code = 200;
-		response->data.headers["ETag"] = obj.etag;
-		response->data.headers["Content-Length"] = std::to_string(obj.content.size());
+		response->data.headers["ETag"] = etag;
+		response->data.headers["Content-Length"] = std::to_string(contentSize);
 		response->data.headers["Content-Type"] = "binary/octet-stream";
-		// CRITICAL FIX: HEAD requests need contentLen set to actual size for headers
-		response->data.contentLen = obj.content.size(); // This controls ResponseContentSize in HTTP logs
-
-		TraceEvent("MockS3ObjectHead")
-		    .detail("Bucket", bucket)
-		    .detail("Object", object)
-		    .detail("Size", obj.content.size());
+		// HEAD requests need contentLen set to actual size for headers
+		response->data.contentLen = contentSize; // This controls ResponseContentSize in HTTP logs
 
 		return Void();
 	}
@@ -639,8 +727,8 @@ public:
 		    .detail("MaxKeys", maxKeys);
 
 		// Find bucket
-		auto bucketIter = self->buckets.find(bucket);
-		if (bucketIter == self->buckets.end()) {
+		auto bucketIter = getGlobalStorage().buckets.find(bucket);
+		if (bucketIter == getGlobalStorage().buckets.end()) {
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchBucket", "Bucket not found");
 			return Void();
 		}
@@ -699,8 +787,8 @@ public:
 		TraceEvent("MockS3HeadBucket").detail("Bucket", bucket);
 
 		// Ensure bucket exists in our storage (implicit creation like real S3)
-		if (self->buckets.find(bucket) == self->buckets.end()) {
-			self->buckets[bucket] = std::map<std::string, ObjectData>();
+		if (getGlobalStorage().buckets.find(bucket) == getGlobalStorage().buckets.end()) {
+			getGlobalStorage().buckets[bucket] = std::map<std::string, ObjectData>();
 		}
 
 		response->code = 200;
@@ -721,8 +809,8 @@ public:
 		TraceEvent("MockS3PutBucket").detail("Bucket", bucket);
 
 		// Ensure bucket exists in our storage (implicit creation)
-		if (self->buckets.find(bucket) == self->buckets.end()) {
-			self->buckets[bucket] = std::map<std::string, ObjectData>();
+		if (getGlobalStorage().buckets.find(bucket) == getGlobalStorage().buckets.end()) {
+			getGlobalStorage().buckets[bucket] = std::map<std::string, ObjectData>();
 		}
 
 		response->code = 200;
@@ -736,26 +824,6 @@ public:
 	}
 
 	// Utility Methods
-	static std::string urlDecode(const std::string& encoded) {
-		std::string decoded;
-		for (size_t i = 0; i < encoded.length(); ++i) {
-			if (encoded[i] == '%' && i + 2 < encoded.length()) {
-				int value;
-				std::istringstream is(encoded.substr(i + 1, 2));
-				if (is >> std::hex >> value) {
-					decoded += static_cast<char>(value);
-					i += 2;
-				} else {
-					decoded += encoded[i];
-				}
-			} else if (encoded[i] == '+') {
-				decoded += ' ';
-			} else {
-				decoded += encoded[i];
-			}
-		}
-		return decoded;
-	}
 
 	void sendError(Reference<HTTP::OutgoingResponse> response,
 	               int code,
@@ -786,29 +854,22 @@ public:
 		response->data.headers["Content-Length"] = std::to_string(xml.size());
 		response->data.headers["Content-MD5"] = HTTP::computeMD5Sum(xml);
 
-		// CORRUPTION FIX: Use PacketWriter with generous buffer allocation
+		// Actually put the XML content into the response
 		if (xml.empty()) {
 			response->data.contentLen = 0;
 			TraceEvent("MockS3SendXMLResponse_Empty").detail("ResponseCode", response->code);
 		} else {
-			// Use PacketWriter with generous buffer to prevent heap corruption
+			// Use PacketWriter to properly populate the content
+			// The previous approach created an empty UnsentPacketQueue, causing memory corruption
 			size_t contentSize = xml.size();
-			size_t bufferSize = contentSize + 1024; // Generous padding to prevent overflow
 
 			response->data.content = new UnsentPacketQueue();
-			PacketBuffer* buffer = response->data.content->getWriteBuffer(bufferSize);
+			response->data.contentLen = contentSize;
+
+			PacketBuffer* buffer = response->data.content->getWriteBuffer(contentSize);
 			PacketWriter pw(buffer, nullptr, Unversioned());
-
-			TraceEvent("MockS3SendXMLResponse_SafePacketWriter")
-			    .detail("ContentSize", contentSize)
-			    .detail("BufferSize", bufferSize)
-			    .detail("BufferPtr", format("%p", buffer))
-			    .detail("ResponseCode", response->code)
-			    .detail("XMLPreview", xml.substr(0, std::min((size_t)50, xml.size())));
-
 			pw.serializeBytes(xml);
-			pw.finish(); // CRITICAL: Finalize PacketWriter to make content available
-			response->data.contentLen = contentSize; // Set to actual content size
+			pw.finish();
 		}
 
 		TraceEvent("MockS3SendXMLResponse_Complete")
@@ -851,40 +912,28 @@ public:
 // Global registry to track registered servers and avoid conflicts
 static std::map<std::string, bool> registeredServers;
 
-// Thread-safe singleton storage that avoids destruction order issues
-// Use a static local variable to ensure it's never destroyed
-static MockS3ServerImpl& getSingletonInstance() {
-	static MockS3ServerImpl instance;
-	return instance;
-}
-
-// Clear singleton state for clean test runs
+// Clear global storage state for clean test runs
 static void clearSingletonState() {
-	MockS3ServerImpl& instance = getSingletonInstance();
-	instance.buckets.clear();
-	instance.multipartUploads.clear();
+	getGlobalStorage().buckets.clear();
+	getGlobalStorage().multipartUploads.clear();
 	TraceEvent("MockS3ServerImpl_StateCleared");
 }
 
-// Request Handler Implementation - Uses singleton to preserve state
+// Request Handler Implementation - Each handler instance works with global storage
 Future<Void> MockS3RequestHandler::handleRequest(Reference<HTTP::IncomingRequest> req,
                                                  Reference<HTTP::OutgoingResponse> response) {
-	TraceEvent("MockS3RequestHandler_GetInstance").detail("Method", req->verb).detail("Resource", req->resource);
-
-	// Use singleton instance to maintain state across requests while avoiding reference counting
-	MockS3ServerImpl& serverInstance = getSingletonInstance();
-
-	TraceEvent("MockS3RequestHandler_UsingInstance")
-	    .detail("InstancePtr", format("%p", &serverInstance))
-	    .detail("Method", req->verb)
-	    .detail("Resource", req->resource);
-
-	TraceEvent("MockS3RequestHandler").detail("Method", req->verb).detail("Resource", req->resource);
-
+	// Create a temporary instance just to use its static handleRequest method
+	// All actual storage is in g_mockS3Storage which is truly global
+	static MockS3ServerImpl serverInstance;
 	return MockS3ServerImpl::handleRequest(&serverInstance, req, response);
 }
 
 Reference<HTTP::IRequestHandler> MockS3RequestHandler::clone() {
+	// Prevent cloning during destruction to avoid "Pure virtual function called!" errors
+	if (destructing) {
+		TraceEvent(SevWarn, "MockS3RequestHandlerCloneDuringDestruction");
+		return Reference<HTTP::IRequestHandler>();
+	}
 	return makeReference<MockS3RequestHandler>();
 }
 
@@ -953,6 +1002,285 @@ ACTOR Future<Void> startMockS3Server(NetworkAddress listenAddress) {
 		TraceEvent(SevError, "MockS3ServerStartError").error(e).detail("ListenAddress", listenAddress.toString());
 		throw;
 	}
+
+	return Void();
+}
+
+// Clear all MockS3 global storage - called at the start of each simulation test
+void clearMockS3Storage() {
+	getGlobalStorage().clearStorage();
+}
+
+// Unit Tests for MockS3Server
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ValidBucketParameter") {
+
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket?region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket");
+	ASSERT(object == "");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/MissingBucketParameter") {
+
+	MockS3ServerImpl server;
+	std::string resource = "/?region=us-east-1"; // Empty path - no bucket
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	try {
+		server.parseS3Request(resource, bucket, object, queryParams);
+		ASSERT(false); // Should not reach here
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_backup_invalid_url);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/EmptyQueryString") {
+
+	MockS3ServerImpl server;
+	std::string resource = "/"; // Empty path - no bucket
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	try {
+		server.parseS3Request(resource, bucket, object, queryParams);
+		ASSERT(false); // Should not reach here
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_backup_invalid_url);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/BucketParameterOverride") {
+
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket/testobject?region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket"); // Should use path (like real S3)
+	ASSERT(object == "testobject");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ComplexPath") {
+
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket/folder/subfolder/file.txt?region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket"); // Should use path (like real S3)
+	ASSERT(object == "folder/subfolder/file.txt");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/URLEncodedParameters") {
+
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket?region=us-east-1&param=value%3Dtest";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket"); // Path components are not URL decoded (as per S3 spec)
+	ASSERT(queryParams["region"] == "us-east-1");
+	ASSERT(queryParams["param"] == "value=test"); // Query parameters ARE URL decoded
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/EmptyPath") {
+
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket?region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket");
+	ASSERT(object == "");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/OnlyBucketInPath") {
+
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket?region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket"); // Should use path (like real S3)
+	ASSERT(object == "");
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/MultipleParameters") {
+
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket?region=us-east-1&version=1&encoding=utf8";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket");
+	ASSERT(queryParams["region"] == "us-east-1");
+	ASSERT(queryParams["version"] == "1");
+	ASSERT(queryParams["encoding"] == "utf8");
+	ASSERT(queryParams.size() == 3);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ParametersWithoutValues") {
+
+	MockS3ServerImpl server;
+	std::string resource = "/testbucket?flag&region=us-east-1";
+	std::string bucket, object;
+	std::map<std::string, std::string> queryParams;
+
+	server.parseS3Request(resource, bucket, object, queryParams);
+
+	ASSERT(bucket == "testbucket");
+	ASSERT(queryParams["flag"] == ""); // Parameter without value should be empty string
+	ASSERT(queryParams["region"] == "us-east-1");
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/RangeHeader/SimpleByteRange") {
+	std::string rangeHeader = "bytes=0-99";
+	int64_t rangeStart, rangeEnd;
+
+	bool result = MockS3ServerImpl::parseRangeHeader(rangeHeader, rangeStart, rangeEnd);
+
+	ASSERT(result == true);
+	ASSERT(rangeStart == 0);
+	ASSERT(rangeEnd == 99);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/RangeHeader/MiddleRange") {
+	std::string rangeHeader = "bytes=100-199";
+	int64_t rangeStart, rangeEnd;
+
+	bool result = MockS3ServerImpl::parseRangeHeader(rangeHeader, rangeStart, rangeEnd);
+
+	ASSERT(result == true);
+	ASSERT(rangeStart == 100);
+	ASSERT(rangeEnd == 199);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/RangeHeader/LargeOffsets") {
+	std::string rangeHeader = "bytes=1000000-1999999";
+	int64_t rangeStart, rangeEnd;
+
+	bool result = MockS3ServerImpl::parseRangeHeader(rangeHeader, rangeStart, rangeEnd);
+
+	ASSERT(result == true);
+	ASSERT(rangeStart == 1000000);
+	ASSERT(rangeEnd == 1999999);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/RangeHeader/InvalidFormat") {
+	std::string rangeHeader = "invalid-range";
+	int64_t rangeStart, rangeEnd;
+
+	bool result = MockS3ServerImpl::parseRangeHeader(rangeHeader, rangeStart, rangeEnd);
+
+	ASSERT(result == false);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/RangeHeader/MissingBytesPrefix") {
+	std::string rangeHeader = "0-99";
+	int64_t rangeStart, rangeEnd;
+
+	bool result = MockS3ServerImpl::parseRangeHeader(rangeHeader, rangeStart, rangeEnd);
+
+	ASSERT(result == false);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/RangeHeader/MissingDash") {
+	std::string rangeHeader = "bytes=0";
+	int64_t rangeStart, rangeEnd;
+
+	bool result = MockS3ServerImpl::parseRangeHeader(rangeHeader, rangeStart, rangeEnd);
+
+	ASSERT(result == false);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/RangeHeader/EmptyString") {
+	std::string rangeHeader = "";
+	int64_t rangeStart, rangeEnd;
+
+	bool result = MockS3ServerImpl::parseRangeHeader(rangeHeader, rangeStart, rangeEnd);
+
+	ASSERT(result == false);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/RangeHeader/NegativeStart") {
+	std::string rangeHeader = "bytes=-100-200";
+	int64_t rangeStart, rangeEnd;
+
+	bool result = MockS3ServerImpl::parseRangeHeader(rangeHeader, rangeStart, rangeEnd);
+
+	// Suffix-byte-range-spec (last N bytes) is not currently supported
+	ASSERT(result == false);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MockS3Server/RangeHeader/StartGreaterThanEnd") {
+	std::string rangeHeader = "bytes=200-100";
+	int64_t rangeStart, rangeEnd;
+
+	bool result = MockS3ServerImpl::parseRangeHeader(rangeHeader, rangeStart, rangeEnd);
+
+	// Parser accepts this, but semantic validation happens in handleGetObject
+	ASSERT(result == true);
+	ASSERT(rangeStart == 200);
+	ASSERT(rangeEnd == 100);
 
 	return Void();
 }
