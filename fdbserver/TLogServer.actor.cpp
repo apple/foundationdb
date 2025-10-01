@@ -510,15 +510,16 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	// If persistentDataVersion != persistentDurableDataVersion,
 	// then spilling is happening from persistentDurableDataVersion to persistentDataVersion.
 	// Data less than persistentDataDurableVersion is spilled on disk (or fully popped from the TLog);
-	VersionMetricHandle persistentDataVersion,
-	    persistentDataDurableVersion; // The last version number in the portion of the log (written|durable) to
-	                                  // persistentData
+	VersionMetricHandle persistentDataVersion;
+	VersionMetricHandle persistentDataDurableVersion; // The last version number in the portion of the log
+	                                                  // (written|durable) to persistentData
 	NotifiedVersion version;
 	NotifiedVersion queueCommittedVersion; // The disk queue has committed up until the queueCommittedVersion version.
 	Version queueCommittingVersion;
 	Version knownCommittedVersion; // The maximum version that a proxy has told us that is committed (all TLogs have
 	                               // ack'd a commit for this version).
-	Version durableKnownCommittedVersion, minKnownCommittedVersion;
+	Version durableKnownCommittedVersion;
+	Version minKnownCommittedVersion;
 	Version queuePoppedVersion; // The disk queue has been popped up until the location which represents this version.
 	Version minPoppedTagVersion;
 	Tag minPoppedTag; // The tag that makes tLog hold its data and cause tLog's disk queue increasing.
@@ -580,8 +581,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Future<Void> removed;
 	PromiseStream<Future<Void>> addActor;
 	TLogData* tLogData;
-	Promise<Void> recoveryComplete, committingQueue;
-	Version unrecoveredBefore, recoveredAt;
+	Promise<Void> recoveryComplete;
+	Promise<Void> committingQueue;
+	Version unrecoveredBefore;
+	Version recoveredAt;
 	Version recoveryTxnVersion;
 
 	struct PeekTrackerData {
@@ -631,7 +634,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Tag remoteTag;
 	bool isPrimary;
 	int logRouterTags;
-	Version logRouterPoppedVersion, logRouterPopToVersion;
+	Version logRouterPoppedVersion;
+	Version logRouterPopToVersion;
 	int8_t locality;
 	UID recruitmentID;
 	TLogSpillType logSpillType;
@@ -799,8 +803,9 @@ void TLogQueue::forgetBefore(Version upToVersion, Reference<LogData> logData) {
 	// Keep only the given and all subsequent version numbers
 	// Find the first version >= upTo
 	auto v = logData->versionLocation.lower_bound(upToVersion);
-	if (v == logData->versionLocation.begin())
+	if (v == logData->versionLocation.begin()) {
 		return;
+	}
 
 	if (v == logData->versionLocation.end()) {
 		v = logData->versionLocation.lastItem();
