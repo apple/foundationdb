@@ -156,8 +156,9 @@ ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<
 	// though
 	decodeKeyServersValue(UIDtoTagMap, shardBoundaries[0].value, sourceStorageServers, destStorageServers, true);
 
-	state std::map<UID, Tag> storageServerToTagMap;
+	state std::unordered_map<UID, Tag> storageServerToTagMap;
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		storageServerToTagMap.reserve(UIDtoTagMap.size());
 		for (auto& it : UIDtoTagMap) {
 			storageServerToTagMap[decodeServerTagKey(it.key)] = decodeServerTagValue(it.value);
 		}
@@ -184,7 +185,7 @@ ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 		for (int j = 0; j < storageServers.size(); j++) {
 			auto iter = storageServerToTagMap.find(storageServers[j]);
-			ASSERT(iter != storageServerToTagMap.end());
+			ASSERT_WE_THINK(iter != storageServerToTagMap.end());
 			// Note: This workload doesn't use the NativeAPI getRange() API for reading
 			// data, so we will need to explicitly populate the (ssid, tag) mapping in
 			// "db" - this is so version vector APIs can correctly fetch the latest commit
