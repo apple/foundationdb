@@ -1768,7 +1768,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			sequence = reqSequence.get().second;
 			auto [trackerIt, trackerInserted] = logData->peekTracker.try_emplace(peekId);
 			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && trackerInserted) {
-				// New tracker but high sequence number means operation is obsolete
+				// New tracker but high sequence number means operation is obsolete.
+				// This happens when a client has stalled and is now far behind the current sequence.
+				// We must erase the newly inserted tracker to avoid leaking memory, since try_emplace
+				// has already created an empty entry in the map that will never be used.
 				logData->peekTracker.erase(trackerIt);
 				throw operation_obsolete();
 			}
