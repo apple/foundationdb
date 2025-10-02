@@ -236,6 +236,20 @@ void addBlobMetadaToResDoc(rapidjson::Document& doc, rapidjson::Value& blobDetai
 	key.SetString(BLOB_METADATA_LOCATIONS_TAG, doc.GetAllocator());
 	blobDetail.AddMember(key, locations, doc.GetAllocator());
 
+	// Add 'refreshAt'
+	rapidjson::Value refreshKey(REFRESH_AFTER_SEC, doc.GetAllocator());
+	const int64_t refreshAt = getRefreshInterval(now(), FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL);
+	rapidjson::Value refreshInterval;
+	refreshInterval.SetInt64(refreshAt);
+	blobDetail.AddMember(refreshKey, refreshInterval, doc.GetAllocator());
+
+	// Add 'expireAt'
+	rapidjson::Value expireKey(EXPIRE_AFTER_SEC, doc.GetAllocator());
+	const int64_t expireAt = getExpireInterval(refreshAt, FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL);
+	rapidjson::Value expireInterval;
+	expireInterval.SetInt64(expireAt);
+	blobDetail.AddMember(expireKey, expireInterval, doc.GetAllocator());
+
 	blobDetails.PushBack(blobDetail, doc.GetAllocator());
 }
 
@@ -277,6 +291,10 @@ VaultResponse handleFetchKeysByDomainIds(const std::string& content) {
 	// Append 'cipher_key_details' as json array
 	rapidjson::Value cipherDetails(rapidjson::kArrayType);
 	for (const auto& cipherDetail : doc[CIPHER_KEY_DETAILS_TAG].GetArray()) {
+		// Check if ENCRYPT_DOMAIN_ID_TAG exists before accessing it
+		if (!cipherDetail.HasMember(ENCRYPT_DOMAIN_ID_TAG) || !cipherDetail[ENCRYPT_DOMAIN_ID_TAG].IsInt64()) {
+			continue; // Skip invalid entries
+		}
 		EncryptCipherDomainId domainId = cipherDetail[ENCRYPT_DOMAIN_ID_TAG].GetInt64();
 		Reference<SimKmsVaultKeyCtx> keyCtx = SimKmsVault::getByDomainId(domainId);
 		ASSERT(keyCtx.isValid());
@@ -389,6 +407,10 @@ VaultResponse handleFetchBlobMetada(const std::string& content) {
 	// Append 'blob_metadata_details' as json array
 	rapidjson::Value blobDetails(rapidjson::kArrayType);
 	for (const auto& blobDetail : doc[BLOB_METADATA_DETAILS_TAG].GetArray()) {
+		// Check if BLOB_METADATA_DOMAIN_ID_TAG exists before accessing it
+		if (!blobDetail.HasMember(BLOB_METADATA_DOMAIN_ID_TAG) || !blobDetail[BLOB_METADATA_DOMAIN_ID_TAG].IsInt64()) {
+			continue; // Skip invalid entries
+		}
 		EncryptCipherDomainId domainId = blobDetail[BLOB_METADATA_DOMAIN_ID_TAG].GetInt64();
 		addBlobMetadaToResDoc(doc, blobDetails, domainId);
 	}
@@ -525,8 +547,9 @@ std::string getFakeBaseCipherIdsRequestContent(EncryptCipherDomainIdVec& domIds,
 	if (fault != FaultType::MISSING_VERSION) {
 		if (fault == FaultType::INVALID_VERSION) {
 			addVersionToDoc(doc, SERVER_KNOBS->REST_KMS_MAX_CIPHER_REQUEST_VERSION + 1);
+		} else {
+			addVersionToDoc(doc, SERVER_KNOBS->REST_KMS_MAX_CIPHER_REQUEST_VERSION);
 		}
-		addVersionToDoc(doc, SERVER_KNOBS->REST_KMS_MAX_CIPHER_REQUEST_VERSION);
 	}
 
 	if (fault != FaultType::MISSING_VALIDATION_TOKEN) {
