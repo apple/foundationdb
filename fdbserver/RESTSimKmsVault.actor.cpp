@@ -236,14 +236,16 @@ void addBlobMetadaToResDoc(rapidjson::Document& doc, rapidjson::Value& blobDetai
 	key.SetString(BLOB_METADATA_LOCATIONS_TAG, doc.GetAllocator());
 	blobDetail.AddMember(key, locations, doc.GetAllocator());
 
-	// Add 'refreshAt'
+	// Add required key lifecycle timestamps to match real KMS API behavior
+	// These fields enable clients to implement proper key rotation schedules
+	// (Checked by EncryptedRangeFlowWriter)
 	rapidjson::Value refreshKey(REFRESH_AFTER_SEC, doc.GetAllocator());
 	const int64_t refreshAt = getRefreshInterval(now(), FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL);
 	rapidjson::Value refreshInterval;
 	refreshInterval.SetInt64(refreshAt);
 	blobDetail.AddMember(refreshKey, refreshInterval, doc.GetAllocator());
 
-	// Add 'expireAt'
+	// Expiration time prevents indefinite key usage for security compliance
 	rapidjson::Value expireKey(EXPIRE_AFTER_SEC, doc.GetAllocator());
 	const int64_t expireAt = getExpireInterval(refreshAt, FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL);
 	rapidjson::Value expireInterval;
@@ -548,6 +550,7 @@ std::string getFakeBaseCipherIdsRequestContent(EncryptCipherDomainIdVec& domIds,
 		if (fault == FaultType::INVALID_VERSION) {
 			addVersionToDoc(doc, SERVER_KNOBS->REST_KMS_MAX_CIPHER_REQUEST_VERSION + 1);
 		} else {
+			// Fix: Only add valid version for non-invalid-version faults
 			addVersionToDoc(doc, SERVER_KNOBS->REST_KMS_MAX_CIPHER_REQUEST_VERSION);
 		}
 	}

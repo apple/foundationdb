@@ -1012,7 +1012,7 @@ void clearMockS3Storage() {
 }
 
 // Unit Tests for MockS3Server
-TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ValidBucketParameter") {
+TEST_CASE("/MockS3Server/parseS3Request/ValidBucketParameter") {
 
 	MockS3ServerImpl server;
 	std::string resource = "/testbucket?region=us-east-1";
@@ -1028,7 +1028,7 @@ TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ValidBucketParameter") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/parseS3Request/MissingBucketParameter") {
+TEST_CASE("/MockS3Server/parseS3Request/MissingBucketParameter") {
 
 	MockS3ServerImpl server;
 	std::string resource = "/?region=us-east-1"; // Empty path - no bucket
@@ -1045,7 +1045,7 @@ TEST_CASE("/fdbserver/MockS3Server/parseS3Request/MissingBucketParameter") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/parseS3Request/EmptyQueryString") {
+TEST_CASE("/MockS3Server/parseS3Request/EmptyQueryString") {
 
 	MockS3ServerImpl server;
 	std::string resource = "/"; // Empty path - no bucket
@@ -1062,7 +1062,7 @@ TEST_CASE("/fdbserver/MockS3Server/parseS3Request/EmptyQueryString") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/parseS3Request/BucketParameterOverride") {
+TEST_CASE("/MockS3Server/parseS3Request/BucketParameterOverride") {
 
 	MockS3ServerImpl server;
 	std::string resource = "/testbucket/testobject?region=us-east-1";
@@ -1078,7 +1078,7 @@ TEST_CASE("/fdbserver/MockS3Server/parseS3Request/BucketParameterOverride") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ComplexPath") {
+TEST_CASE("/MockS3Server/parseS3Request/ComplexPath") {
 
 	MockS3ServerImpl server;
 	std::string resource = "/testbucket/folder/subfolder/file.txt?region=us-east-1";
@@ -1094,7 +1094,7 @@ TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ComplexPath") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/parseS3Request/URLEncodedParameters") {
+TEST_CASE("/MockS3Server/parseS3Request/URLEncodedParameters") {
 
 	MockS3ServerImpl server;
 	std::string resource = "/testbucket?region=us-east-1&param=value%3Dtest";
@@ -1110,7 +1110,7 @@ TEST_CASE("/fdbserver/MockS3Server/parseS3Request/URLEncodedParameters") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/parseS3Request/EmptyPath") {
+TEST_CASE("/MockS3Server/parseS3Request/EmptyPath") {
 
 	MockS3ServerImpl server;
 	std::string resource = "/testbucket?region=us-east-1";
@@ -1126,7 +1126,7 @@ TEST_CASE("/fdbserver/MockS3Server/parseS3Request/EmptyPath") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/parseS3Request/OnlyBucketInPath") {
+TEST_CASE("/MockS3Server/parseS3Request/OnlyBucketInPath") {
 
 	MockS3ServerImpl server;
 	std::string resource = "/testbucket?region=us-east-1";
@@ -1142,7 +1142,7 @@ TEST_CASE("/fdbserver/MockS3Server/parseS3Request/OnlyBucketInPath") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/parseS3Request/MultipleParameters") {
+TEST_CASE("/MockS3Server/parseS3Request/MultipleParameters") {
 
 	MockS3ServerImpl server;
 	std::string resource = "/testbucket?region=us-east-1&version=1&encoding=utf8";
@@ -1160,7 +1160,7 @@ TEST_CASE("/fdbserver/MockS3Server/parseS3Request/MultipleParameters") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ParametersWithoutValues") {
+TEST_CASE("/MockS3Server/parseS3Request/ParametersWithoutValues") {
 
 	MockS3ServerImpl server;
 	std::string resource = "/testbucket?flag&region=us-east-1";
@@ -1176,7 +1176,7 @@ TEST_CASE("/fdbserver/MockS3Server/parseS3Request/ParametersWithoutValues") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/RangeHeader/SimpleByteRange") {
+TEST_CASE("/MockS3Server/RangeHeader/SimpleByteRange") {
 	std::string rangeHeader = "bytes=0-99";
 	int64_t rangeStart, rangeEnd;
 
@@ -1189,7 +1189,7 @@ TEST_CASE("/fdbserver/MockS3Server/RangeHeader/SimpleByteRange") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/RangeHeader/MiddleRange") {
+TEST_CASE("/MockS3Server/RangeHeader/MiddleRange") {
 	std::string rangeHeader = "bytes=100-199";
 	int64_t rangeStart, rangeEnd;
 
@@ -1202,7 +1202,7 @@ TEST_CASE("/fdbserver/MockS3Server/RangeHeader/MiddleRange") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/RangeHeader/LargeOffsets") {
+TEST_CASE("/MockS3Server/RangeHeader/LargeOffsets") {
 	std::string rangeHeader = "bytes=1000000-1999999";
 	int64_t rangeStart, rangeEnd;
 
@@ -1215,7 +1215,7 @@ TEST_CASE("/fdbserver/MockS3Server/RangeHeader/LargeOffsets") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/RangeHeader/InvalidFormat") {
+TEST_CASE("/MockS3Server/RangeHeader/InvalidFormat") {
 	std::string rangeHeader = "invalid-range";
 	int64_t rangeStart, rangeEnd;
 
@@ -1226,7 +1226,7 @@ TEST_CASE("/fdbserver/MockS3Server/RangeHeader/InvalidFormat") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/RangeHeader/MissingBytesPrefix") {
+TEST_CASE("/MockS3Server/RangeHeader/MissingBytesPrefix") {
 	std::string rangeHeader = "0-99";
 	int64_t rangeStart, rangeEnd;
 
@@ -1237,7 +1237,7 @@ TEST_CASE("/fdbserver/MockS3Server/RangeHeader/MissingBytesPrefix") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/RangeHeader/MissingDash") {
+TEST_CASE("/MockS3Server/RangeHeader/MissingDash") {
 	std::string rangeHeader = "bytes=0";
 	int64_t rangeStart, rangeEnd;
 
@@ -1248,7 +1248,7 @@ TEST_CASE("/fdbserver/MockS3Server/RangeHeader/MissingDash") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/RangeHeader/EmptyString") {
+TEST_CASE("/MockS3Server/RangeHeader/EmptyString") {
 	std::string rangeHeader = "";
 	int64_t rangeStart, rangeEnd;
 
@@ -1259,7 +1259,7 @@ TEST_CASE("/fdbserver/MockS3Server/RangeHeader/EmptyString") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/RangeHeader/NegativeStart") {
+TEST_CASE("/MockS3Server/RangeHeader/NegativeStart") {
 	std::string rangeHeader = "bytes=-100-200";
 	int64_t rangeStart, rangeEnd;
 
@@ -1271,7 +1271,7 @@ TEST_CASE("/fdbserver/MockS3Server/RangeHeader/NegativeStart") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/MockS3Server/RangeHeader/StartGreaterThanEnd") {
+TEST_CASE("/MockS3Server/RangeHeader/StartGreaterThanEnd") {
 	std::string rangeHeader = "bytes=200-100";
 	int64_t rangeStart, rangeEnd;
 

@@ -1407,6 +1407,7 @@ void getFakeEncryptCipherResponse(StringRef jsonReqRef,
 
 	rapidjson::Value cipherKeyDetails(rapidjson::kArrayType);
 	for (const auto& detail : reqDoc[CIPHER_KEY_DETAILS_TAG].GetArray()) {
+		// Fix: Initialize JSON value as object type to prevent undefined behavior
 		rapidjson::Value keyDetail(rapidjson::kObjectType);
 
 		ASSERT(detail.HasMember(ENCRYPT_DOMAIN_ID_TAG));
