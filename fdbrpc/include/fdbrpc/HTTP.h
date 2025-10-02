@@ -39,6 +39,7 @@ constexpr int HTTP_STATUS_CODE_OK = 200;
 constexpr int HTTP_STATUS_CODE_CREATED = 201;
 constexpr int HTTP_STATUS_CODE_ACCEPTED = 202;
 constexpr int HTTP_STATUS_CODE_NO_CONTENT = 204;
+constexpr int HTTP_STATUS_CODE_PARTIAL_CONTENT = 206;
 constexpr int HTTP_STATUS_CODE_BAD_REQUEST = 400;
 constexpr int HTTP_STATUS_CODE_UNAUTHORIZED = 401;
 constexpr int HTTP_STATUS_CODE_NOT_FOUND = 404;
@@ -63,6 +64,9 @@ const std::string HTTP_VERB_CONNECT = "CONNECT";
 typedef std::map<std::string, std::string, is_iless> Headers;
 
 std::string urlEncode(const std::string& s);
+// URL decode a percent-encoded string, converting %XX hex sequences to characters
+// and + characters to spaces. Used for parsing query parameters and form data.
+std::string urlDecode(const std::string& s);
 std::string awsV4URIEncode(const std::string& s, bool encodeSlash);
 
 template <class T>
