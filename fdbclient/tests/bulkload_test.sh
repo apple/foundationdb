@@ -1,10 +1,9 @@
 #!/bin/bash
 #
-# Test bulkload. Uses S3 or seaweedfs if not available:
-# (https://github.com/seaweedfs/seaweedfs) as substitute.
+# Test bulkload. Uses S3 or MockS3Server if not available.
 #
 # In the below we start a small FDB cluster, populate it with
-# some data and then start up a seaweedfs instance. We
+# some data and then start up MockS3Server. We
 # then run a bulkdump to 'S3' and then a restore. We verify
 # the restore is the same as the original.
 #
@@ -13,7 +12,8 @@
 # so you can manually rerun commands or peruse logs and data
 # under SCRATCH_DIR.
 
-# Make sure cleanup on script exit.
+# Install signal traps. Depends on globals being set.
+# Calls the cleanup function.
 trap "exit 1" HUP INT PIPE QUIT TERM
 trap cleanup  EXIT
 
@@ -22,8 +22,8 @@ function cleanup {
   if type shutdown_fdb_cluster &> /dev/null; then
     shutdown_fdb_cluster
   fi
-  if type shutdown_weed &> /dev/null; then
-    shutdown_weed "${TEST_SCRATCH_DIR}"
+  if type shutdown_mocks3 &> /dev/null; then
+    shutdown_mocks3
   fi
   if type shutdown_aws &> /dev/null; then
     shutdown_aws "${TEST_SCRATCH_DIR}"
@@ -252,17 +252,17 @@ readonly HTTP_VERBOSE_LEVEL=2
 # internal apple dev environments where S3 is available).
 readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
 
-# Set KNOBS based on whether we're using real S3 or SeaweedFS
+# Set KNOBS based on whether we're using real S3 or MockS3Server
 if [[ "${USE_S3}" == "true" ]]; then
   # Use AWS KMS encryption for real S3
   KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
 else
-  # No encryption for SeaweedFS
+  # No encryption for MockS3Server
   KNOBS=("--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
 fi
 readonly KNOBS
 
-# Set TLS_CA_FILE only when using real S3, not for SeaweedFS
+# Set TLS_CA_FILE only when using real S3, not for SeaweedFS or MockS3Server
 if [[ "${USE_S3}" == "true" ]]; then
   # Try to find a valid TLS CA file if not explicitly set
   if [[ -z "${TLS_CA_FILE:-}" ]]; then
@@ -276,7 +276,7 @@ if [[ "${USE_S3}" == "true" ]]; then
   fi
   TLS_CA_FILE="${TLS_CA_FILE:-}"
 else
-  # For SeaweedFS, don't use TLS
+  # For SeaweedFS and MockS3Server, don't use TLS
   TLS_CA_FILE=""
 fi
 readonly TLS_CA_FILE
@@ -362,28 +362,29 @@ if [[ "${USE_S3}" == "true" ]]; then
     export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
   fi
 else
-  log "Testing against seaweedfs"
-  # Now source in the seaweedfs fixture so we can use its methods in the below.
+  log "Testing against MockS3Server"
+  # Now source in the mocks3 fixture so we can use its methods in the below.
   # shellcheck source=/dev/null
-  if ! source "${cwd}/../../fdbclient/tests/seaweedfs_fixture.sh"; then
-    err "Failed to source seaweedfs_fixture.sh"
+  if ! source "${cwd}/../../fdbclient/tests/mocks3_fixture.sh"; then
+    err "Failed to source mocks3_fixture.sh"
     exit 1
   fi
-  if ! TEST_SCRATCH_DIR=$(create_weed_dir "${scratch_dir}"); then
-    err "Failed create of the weed dir." >&2
+  if ! TEST_SCRATCH_DIR=$(mktemp -d "${scratch_dir}/mocks3_bulkload_test.XXXXXX"); then
+    err "Failed create of the mocks3 test dir." >&2
     exit 1
   fi
   readonly TEST_SCRATCH_DIR
-  if ! host=$( run_weed "${scratch_dir}" "${TEST_SCRATCH_DIR}"); then
-    err "Failed to run seaweed"
+  if ! start_mocks3 "${build_dir}"; then
+    err "Failed to start MockS3Server"
     exit 1
   fi
-  readonly host
-  readonly bucket="${SEAWEED_BUCKET}"
-  readonly region="all_regions"
-  # Reference a non-existent blob file (its ignored by seaweed)
+  readonly host="${MOCKS3_HOST}:${MOCKS3_PORT}"
+  readonly bucket="test-bucket"
+  readonly region="us-east-1"
+  # Create an empty blob credentials file (MockS3Server uses simple auth)
   readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
-  # Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
+  echo '{}' > "${blob_credentials_file}"
+  # Let the connection to MockS3Server be insecure -- not-TLS
   query_str="bucket=${bucket}&region=${region}&secure_connection=0"
 fi
 

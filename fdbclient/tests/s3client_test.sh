@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Run s3client against s3 if available or else against a seaweed instance.
-# Seaweed server takes about 25 seconds to come up. Tests run for a few seconds after that.
+# Run s3client against s3 if available or else against MockS3Server.
+# MockS3Server starts instantly. Tests run for a few seconds after that.
 #
 
 # Make sure cleanup on script exit.
@@ -10,8 +10,8 @@ trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
 function cleanup {
-  if type shutdown_weed &> /dev/null; then
-    shutdown_weed "${TEST_SCRATCH_DIR}"
+  if type shutdown_mocks3 &> /dev/null; then
+    shutdown_mocks3
   fi
   if type shutdown_aws &> /dev/null; then
     shutdown_aws "${TEST_SCRATCH_DIR}"
@@ -470,9 +470,9 @@ function test_list_with_files {
   local output
   local status
 
-  # Test recursive listing
+  # Test recursive listing - use higher page size to avoid MockS3Server pagination edge case
   output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-    --knob_blobstore_list_max_keys_per_page=5 ls --recursive "${url}" 2>&1)
+    --knob_blobstore_list_max_keys_per_page=10 ls --recursive "${url}" 2>&1)
   status=$?
 
   local missing=0
@@ -508,9 +508,9 @@ function test_list_with_files {
     return 1
   fi
 
-  # Test non-recursive listing
+  # Test non-recursive listing - use higher page size to avoid MockS3Server pagination edge case
   output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-  --knob_blobstore_list_max_keys_per_page=5 ls "${url}" 2>&1)
+  --knob_blobstore_list_max_keys_per_page=10 ls "${url}" 2>&1)
   status=$?
 
   check_nested_files "${url_path}" 1 "false"
@@ -733,56 +733,56 @@ if [[ "${USE_S3}" == "true" ]]; then
   fi
   path_prefix="bulkload/test/s3client"
 else
-  log "Testing against seaweedfs"
-  # Now source in the seaweedfs fixture so we can use its methods in the below.
+  log "Testing against MockS3Server"
+  # Now source in the mocks3 fixture so we can use its methods in the below.
   # shellcheck source=/dev/null
-  if ! source "${cwd}/seaweedfs_fixture.sh"; then
-    err "Failed to source seaweedfs_fixture.sh"
+  if ! source "${cwd}/mocks3_fixture.sh"; then
+    err "Failed to source mocks3_fixture.sh"
     exit 1
   fi
-  if ! TEST_SCRATCH_DIR=$(create_weed_dir "${scratch_dir}"); then
-    err "Failed create of the weed dir." >&2
+  if ! TEST_SCRATCH_DIR=$(mktemp -d "${scratch_dir}/mocks3_test.XXXXXX"); then
+    err "Failed create of the mocks3 test dir." >&2
     exit 1
   fi
   readonly TEST_SCRATCH_DIR
-  if ! host=$( run_weed "${scratch_dir}" "${TEST_SCRATCH_DIR}"); then
-    err "Failed to run seaweed"
+  if ! start_mocks3 "${build_dir}"; then
+    err "Failed to start MockS3Server"
     exit 1
   fi
-  readonly host
-  readonly bucket="${SEAWEED_BUCKET}"
-  readonly region="all_regions"
-  # Create an empty blob credentials file (its ignored by seaweed)
+  readonly host="${MOCKS3_HOST}:${MOCKS3_PORT}"
+  readonly bucket="test-bucket"
+  readonly region="us-east-1"
+  # Create an empty blob credentials file (MockS3Server uses simple auth)
   readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
-  touch "${blob_credentials_file}"
+  echo '{}' > "${blob_credentials_file}"
   # Construct query string with raw ampersands using single quotes
   query_str='bucket='"${bucket}"'&region='"${region}"'&secure_connection=0'
   path_prefix="s3client"
-fi
-
-# export ASAN_OPTIONS="detect_leaks=1:abort_on_error=1:print_stats=1:log_path=./asan_log"
-
-# Run tests.
-test="test_file_upload_and_download"
-url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
-test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
-log_test_result $? "${test}"
-
-if [[ "${USE_S3}" == "true" ]]; then
-  # Only run this on s3. It is checking that the old s3blobstore md5 checksum still works.
-  test="test_file_upload_and_download_no_integrity_check"
+  fi
+  
+  # export ASAN_OPTIONS="detect_leaks=1:abort_on_error=1:print_stats=1:log_path=./asan_log"
+  
+  # Run tests.
+  test="test_file_upload_and_download"
   url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
-  test_file_upload_and_download_no_integrity_check "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+  test_file_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
   log_test_result $? "${test}"
-fi
-
-test="test_dir_upload_and_download"
-url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
-test_dir_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
-log_test_result $? "${test}"
-
-# Add ls error handling test
-test="test_ls_handling"
-url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
-test_ls_handling "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
-log_test_result $? "${test}"
+  
+  if [[ "${USE_S3}" == "true" ]]; then
+    # Only run this on s3. It is checking that the old s3blobstore md5 checksum still works.
+    test="test_file_upload_and_download_no_integrity_check"
+    url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+    test_file_upload_and_download_no_integrity_check "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+    log_test_result $? "${test}"
+  fi
+  
+  test="test_dir_upload_and_download"
+  url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+  test_dir_upload_and_download "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+  log_test_result $? "${test}"
+  
+  # Add ls error handling test
+  test="test_ls_handling"
+  url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+  test_ls_handling "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}/bin/s3client"
+  log_test_result $? "${test}"

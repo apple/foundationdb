@@ -73,6 +73,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
 #include "fdbserver/OnDemandStore.h"
+#include "fdbserver/MockS3Server.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
@@ -722,7 +723,7 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " Server role (valid options are fdbd, test, multitest,"
 		                 " simulation, networktestclient, networktestserver, restore"
 		                 " consistencycheck, consistencycheckurgent, kvfileintegritycheck, kvfilegeneratesums, "
-		                 "kvfiledump, unittests)."
+		                 "kvfiledump, mocks3server, unittests)."
 		                 " The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
@@ -1057,6 +1058,7 @@ enum class ServerRole {
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
 	KVFileDump,
+	MockS3Server,
 	MultiTester,
 	NetworkTestClient,
 	NetworkTestServer,
@@ -1349,6 +1351,8 @@ private:
 					role = ServerRole::FlowProcess;
 				else if (!strcmp(sRole, "changeclusterkey"))
 					role = ServerRole::ChangeClusterKey;
+				else if (!strcmp(sRole, "mocks3server"))
+					role = ServerRole::MockS3Server;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -2566,6 +2570,10 @@ int main(int argc, char* argv[]) {
 			Key newClusterKey(opts.newClusterKey);
 			Key oldClusterKey = opts.connectionFile->getConnectionString().clusterKey();
 			f = stopAfter(coordChangeClusterKey(opts.dataFolder, newClusterKey, oldClusterKey));
+			g_network->run();
+		} else if (role == ServerRole::MockS3Server) {
+			printf("Starting MockS3Server on %s\n", opts.publicAddresses.address.toString().c_str());
+			f = stopAfter(startMockS3ServerReal(opts.publicAddresses.address));
 			g_network->run();
 		}
 

@@ -11,9 +11,9 @@ FDB_PIDS=()
 
 # Shutdown all processes.
 function shutdown_fdb_cluster {
-  # Kill all running fdb processes.
+  # Kill all running fdb processes from tracked PIDs
   for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
-    kill -9 "${FDB_PIDS[i]}" || true
+    kill -9 "${FDB_PIDS[i]}" 2>/dev/null || true
   done
 }
 
@@ -66,11 +66,25 @@ function start_fdb_cluster {
     # Restore exit on error.
     set -o errexit  # a.k.a. set -e
     set -o noclobber
-    # Set the global FDB_PIDS
-    FDB_PIDS=($(grep -e "PIDS=" "${output}" | sed -e 's/PIDS=//' | xargs)) || true
+    # Set the global FDB_PIDS with retry logic for robustness
+    FDB_PIDS=()
+    local retries=5
+    for ((i=0; i<retries; i++)); do
+      if [[ -f "${output}" ]]; then
+        FDB_PIDS=($(grep -e "PIDS=" "${output}" | sed -e 's/PIDS=//' | xargs)) || true
+        if [[ ${#FDB_PIDS[@]} -gt 0 ]]; then
+          break
+        fi
+      fi
+      echo "Retrying PID extraction (attempt $((i+1))/${retries})..."
+      sleep 0.5
+    done
+    
     # For debugging... on exit, it can complain: 'line 16: kill: Binary: arguments must be process or job IDs'
     if [[ -n "${FDB_PIDS[*]:-}" ]]; then
-      echo "${FDB_PIDS[*]}"
+      echo "Tracked FDB PIDs: ${FDB_PIDS[*]}"
+    else
+      echo "WARNING: No FDB PIDs found for tracking"
     fi
     if (( status == 0 )); then
       # Give the db a second to come healthy.
