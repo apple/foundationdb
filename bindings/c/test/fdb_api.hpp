@@ -467,6 +467,8 @@ template <typename VarTraits>
 class TypedFuture : public Future {
 	friend class Future;
 	friend class Transaction;
+	friend class Tenant;
+
 	using SelfType = TypedFuture<VarTraits>;
 	using Future::Future;
 	// hide type-unsafe inherited functions
@@ -519,6 +521,7 @@ inline KeySelector lastLessOrEqual(KeyRef key, int offset = 0) {
 
 class Transaction {
 	friend class Database;
+	friend class Tenant;
 	std::shared_ptr<native::FDBTransaction> tr;
 
 	explicit Transaction(native::FDBTransaction* tr_raw) {
