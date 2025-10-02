@@ -234,7 +234,7 @@ public:
 		// For bucket operations: HEAD /bucket_name
 		// For object operations: HEAD /bucket_name/object_path
 		if (bucket.empty()) {
-			TraceEvent(SevError, "MockS3MissingBucketInPath").detail("Resource", resource).detail("QueryString", query);
+			TraceEvent(SevWarn, "MockS3MissingBucketInPath").detail("Resource", resource).detail("QueryString", query);
 			throw backup_invalid_url();
 		}
 
