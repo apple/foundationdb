@@ -246,7 +246,7 @@ ACTOR Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Ve
 
 // Check if the given set of tags contain any tags other than the log router tags.
 // Used to check if a given "ResolveTransactionBatchRequest" corresponds to an
-// empty message or not.
+// empty commit message or not.
 static bool hasNonLogRouterTags(std::set<Tag>& allTags) {
 	for (auto& versionTag : allTags) {
 		if (versionTag.locality != tagLocalityLogRouter) {
@@ -499,7 +499,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				std::set<uint16_t> writtenTLogs;
 				// Does the given request correspond to an empty commit message? If so, broadcast it to all tLogs.
 				// NOTE: Ignore log router tags (in "req.writtenTags") while doing this check, because log router
-				// tags get added to all messages in HA mode.
+				// tags get added to all commit messages in HA mode.
 				bool isEmpty = !hasNonLogRouterTags(req.writtenTags);
 				if (req.lastShardMove < self->lastShardMove || shardChanged || req.txnStateTransactions.size() ||
 				    isEmpty) {
