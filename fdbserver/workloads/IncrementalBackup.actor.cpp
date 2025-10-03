@@ -199,8 +199,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True,
-				                                    self->encryptionKeyFileName,
-				                                    blobManifestUrl));
+				                                    self->encryptionKeyFileName));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {

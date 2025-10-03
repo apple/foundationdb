@@ -1677,6 +1677,8 @@ const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
 const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
 
 #if 0
+// gglass: delete the below
+
 // key to watch for changes in active blob ranges + KeyRangeMap of active blob ranges
 // Blob Manager + Worker stuff is all \xff\x02 to avoid Transaction State Store
 const KeyRef blobRangeChangeKey = "\xff\x02/blobRangeChange"_sr;
@@ -2082,9 +2084,8 @@ UID decodeBlobWorkerAffinityValue(ValueRef const& value) {
 	return id;
 }
 
-#endif
-
 const Key blobManifestVersionKey = "\xff\x02/blobManifestVersion"_sr;
+#endif
 
 const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
 const KeyRef idempotencyIdsExpiredVersion("\xff\x02/idmpExpiredVersion"_sr);

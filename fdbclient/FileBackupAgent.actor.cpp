@@ -22,7 +22,6 @@
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
-#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/simulator.h"
 #include "flow/EncryptUtils.h"
@@ -228,9 +227,6 @@ public:
 	KeyBackedBinaryValue<int64_t> fileCount() { return configSpace.pack(__FUNCTION__sr); }
 	// Total number of file blocks in the fileMap
 	KeyBackedBinaryValue<int64_t> fileBlockCount() { return configSpace.pack(__FUNCTION__sr); }
-
-	// True for blob granule restore
-	KeyBackedBinaryValue<bool> isBlobGranuleRestore() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
 		return getRestoreRangesOrDefault_impl(this, tr);
@@ -4274,19 +4270,6 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 			wait(unlockDatabase(tr, restore.getUid()));
 		}
 
-		bool bgRestoreEnabled = wait(restore.isBlobGranuleRestore().getD(tr));
-		if (bgRestoreEnabled) {
-			// No support to access historical data after blob granules restore. so cleanup the following keys
-			TraceEvent("BlobGranuleRestoreCleanup").log();
-			CODE_PROBE(true, "Cleanup blob granules keys after restore");
-			tr->clear(blobGranuleHistoryKeys);
-			tr->clear(blobGranuleFileKeys);
-			tr->clear(blobGranuleMappingKeys);
-			tr->clear(blobGranuleLockKeys);
-			BlobGranuleRestoreConfig().phase().set(tr, BlobRestorePhase::DONE);
-			BlobGranuleRestoreConfig().phaseStartTs().set(tr, BlobRestorePhase::DONE, now());
-		}
-
 		return Void();
 	}
 
@@ -6149,14 +6132,6 @@ ACTOR Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr
 	// Cancel the backup tasks on this tag
 	wait(tag.cancel(tr));
 
-	bool bgRestoreEnabled = wait(restore.isBlobGranuleRestore().getD(tr));
-	if (bgRestoreEnabled) {
-		BlobGranuleRestoreConfig bgRestoreConfig;
-		bgRestoreConfig.phase().set(tr, BlobRestorePhase::ERROR);
-		bgRestoreConfig.phaseStartTs().set(tr, BlobRestorePhase::ERROR, now());
-		bgRestoreConfig.error().set(tr, "Aborted");
-	}
-
 	wait(unlockDatabase(tr, current.get().first));
 	return ERestoreState::ABORTED;
 }
@@ -6219,7 +6194,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state std::vector<KeyRange> ranges;
 		state bool logsOnly;
 		state bool inconsistentSnapshotOnly;
-		state bool isBlobGranuleRestore;
 
 		loop {
 			try {
@@ -6234,7 +6208,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				wait(store(logsOnly, restore.onlyApplyMutationLogs().getD(tr, Snapshot::False, false)));
 				wait(store(inconsistentSnapshotOnly,
 				           restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false)));
-				wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
 				wait(taskBucket->keepRunning(tr, task));
 
 				ERestoreState oldState = wait(restore.stateEnum().getD(tr));
@@ -6254,45 +6227,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				wait(tr->commit());
 				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-
-		loop {
-			if (!isBlobGranuleRestore) {
-				break; // Skip this loop if it's not blob granule restore
-			}
-			CODE_PROBE(true, "Blob granule restore - wait data copy for completion");
-			try {
-				tr->reset();
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				state BlobRestorePhase phase = wait(BlobGranuleRestoreConfig().phase().getD(tr));
-				TraceEvent("BlobGranuleRestoreWaitPhase").detail("BlobRestorePhase", phase);
-				if (phase == BlobRestorePhase::ERROR) {
-					TraceEvent("BlobGranuleRestoreError").log();
-					restore.stateEnum().set(tr, ERestoreState::ABORTED);
-					wait(tr->commit());
-					return Void();
-				}
-				if (phase != BlobRestorePhase::APPLYING_MLOGS) {
-					wait(delay(CLIENT_KNOBS->BLOB_GRANULE_RESTORE_CHECK_INTERVAL));
-				} else {
-					Version version = wait(BlobGranuleRestoreConfig().beginVersion().getOrThrow(tr));
-					beginVersion = version;
-					restore.beginVersion().set(tr, beginVersion);
-					TraceEvent("BlobGranuleRestoreResume").detail("BeginVersion", beginVersion);
-					wait(tr->commit());
-					if (restoreVersion <= beginVersion) {
-						TraceEvent("BlobGranuleRestoreDone")
-						    .detail("BeginVersion", beginVersion)
-						    .detail("Target", restoreVersion);
-						return Void();
-					}
-					break;
-				}
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -6523,24 +6457,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state bool transformPartitionedLog;
 		state Version restoreVersion;
 		state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
-		state bool isBlobGranuleRestore;
-		wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
 
 		if (firstVersion == invalidVersion) {
-			if (isBlobGranuleRestore) {
-				// For blob granule restore, we can complete the restore job if no mutation log is needed
-				state Version beginVersion;
-				wait(store(beginVersion, restore.beginVersion().getD(tr, Snapshot::False, ::invalidVersion)));
-				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
-				// no need to apply mutations if target version is less than begin version
-				if (restoreVersion <= beginVersion) {
-					wait(
-					    success(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
-					wait(taskBucket->finish(tr, task));
-					return Void();
-				}
-			}
-
 			wait(restore.logError(
 			    tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", THIS));
 			std::string tag = wait(restore.tag().getD(tr));
@@ -6571,17 +6489,14 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 		wait(taskBucket->finish(tr, task));
 
-		// Initialize apply mutations map for non-blob-restore case. For blob restore, it's initialized
-		// in blob migrator
-		if (!isBlobGranuleRestore) {
-			state Future<Optional<bool>> logsOnly = restore.onlyApplyMutationLogs().get(tr);
-			wait(success(logsOnly));
-			if (logsOnly.get().present() && logsOnly.get().get()) {
-				//  If this is an incremental restore, we need to set the applyMutationsMapPrefix
-				//  to the earliest log version so no mutations are missed
-				Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
-				wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded));
-			}
+		// Initialize apply mutations map.
+		state Future<Optional<bool>> logsOnly = restore.onlyApplyMutationLogs().get(tr);
+		wait(success(logsOnly));
+		if (logsOnly.get().present() && logsOnly.get().get()) {
+			//  If this is an incremental restore, we need to set the applyMutationsMapPrefix
+			//  to the earliest log version so no mutations are missed
+			Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
+			wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded));
 		}
 		return Void();
 	}
@@ -6852,8 +6767,7 @@ public:
 	                                       StopWhenDone stopWhenDone,
 	                                       UsePartitionedLog partitionedLog,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
-	                                       Optional<std::string> encryptionKeyFileName,
-	                                       Optional<std::string> blobManifestUrl) {
+	                                       Optional<std::string> encryptionKeyFileName) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -6909,23 +6823,6 @@ public:
 			        "ERROR: The last backup `%s' happened in the future.\n",
 			        printable(lastBackupTimestamp.get()).c_str());
 			throw backup_error();
-		}
-
-		if (blobManifestUrl.present()) {
-			state BlobGranuleBackupConfig bgBackupConfig;
-			bool enabled = wait(bgBackupConfig.enabled().getD(tr));
-			if (enabled) {
-				fprintf(stderr, "ERROR: Abort existing blob manifest backup first before creating new one.\n");
-				throw backup_error();
-			} else {
-				bgBackupConfig.manifestUrl().set(tr, blobManifestUrl.get());
-				bgBackupConfig.mutationLogsUrl().set(tr, bc->getURL());
-				bgBackupConfig.enabled().set(tr, true);
-				bgBackupConfig.lastFlushTs().set(tr, 0);
-			}
-			// Allow only incremental backup
-			incrementalBackupOnly = IncrementalBackupOnly::True;
-			stopWhenDone = StopWhenDone::False;
 		}
 
 		KeyRangeMap<int> backupRangeSet;
@@ -6990,7 +6887,6 @@ public:
 		config.partitionedLogEnabled().set(tr, partitionedLog);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 		config.enableSnapshotBackupEncryption().set(tr, encryptionEnabled);
-		config.blobBackupEnabled().set(tr, blobManifestUrl.present());
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
@@ -7013,7 +6909,6 @@ public:
 	                                        InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                        Version beginVersion,
 	                                        UID uid,
-	                                        Optional<std::string> blobManifestUrl,
 	                                        TransformPartitionedLog transformPartitionedLog) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
@@ -7058,7 +6953,7 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		if (!onlyApplyMutationLogs || blobManifestUrl.present()) {
+		if (!onlyApplyMutationLogs) {
 			state int index;
 			for (index = 0; index < restoreRanges.size(); index++) {
 				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
@@ -7093,22 +6988,6 @@ public:
 		} else {
 			for (auto& range : restoreRanges) {
 				restore.restoreRangeSet().insert(tr, range);
-			}
-		}
-		if (blobManifestUrl.present()) {
-			state BlobGranuleRestoreConfig bgRestoreConfig;
-			BlobRestorePhase phase = wait(bgRestoreConfig.phase().getD(tr, Snapshot::True, BlobRestorePhase::MAX));
-			if (phase < BlobRestorePhase::DONE) {
-				fprintf(stderr, "ERROR: Abort existing blob granules restore first before creating new one.\n");
-				throw restore_error();
-			} else {
-				bgRestoreConfig.manifestUrl().set(tr, blobManifestUrl.get());
-				bgRestoreConfig.mutationLogsUrl().set(tr, backupURL.toString());
-				bgRestoreConfig.phase().set(tr, BlobRestorePhase::INIT);
-				bgRestoreConfig.uid().set(tr, uid);
-				bgRestoreConfig.targetVersion().set(tr, restoreVersion);
-				bgRestoreConfig.phaseStartTs().set(tr, BlobRestorePhase::INIT, now());
-				restore.isBlobGranuleRestore().set(tr, true);
 			}
 		}
 		// this also sets restore.add/removePrefix.
@@ -7247,14 +7126,6 @@ public:
 		    .detail("TagName", tagName.c_str())
 		    .detail("Status", BackupAgentBase::getStateText(status));
 
-		bool bgBackupEnabled = wait(config.blobBackupEnabled().getD(tr));
-		if (bgBackupEnabled) {
-			BlobGranuleBackupConfig bgbackupConfig;
-			bgbackupConfig.enabled().set(tr, false);
-			bgbackupConfig.lastFlushTs().set(tr, 0);
-		}
-
-		// Cancel backup task through tag
 		wait(tag.cancel(tr));
 
 		wait(eraseLogData(tr, config.getUidAsKey(), destUidValue) &&
@@ -7721,8 +7592,7 @@ public:
 	                                     OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                     InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                     Optional<std::string> encryptionKeyFileName,
-	                                     UID randomUid,
-	                                     Optional<std::string> blobManifestUrl) {
+	                                     UID randomUid) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
 		if (ranges.empty()) {
 			throw restore_error();
@@ -7752,9 +7622,6 @@ public:
 		if (targetVersion == invalidVersion && onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 			targetVersion = desc.contiguousLogEnd.get() - 1;
 		}
-		if (blobManifestUrl.present()) {
-			onlyApplyMutationLogs = OnlyApplyMutationLogs::True;
-		}
 
 		state Version beginVersion = invalidVersion; // min begin version for all ranges
 		if (!beginVersions.empty()) {
@@ -7763,8 +7630,7 @@ public:
 		Optional<RestorableFileSet> restoreSet =
 		    wait(bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion));
 
-		// for blob granule restore, we don't have the begin version yet, so no need to check restore data set
-		if (!restoreSet.present() && !blobManifestUrl.present()) {
+		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 			    .detail("BackupContainer", bc->getURL())
 			    .detail("BeginVersion", beginVersion)
@@ -7796,7 +7662,6 @@ public:
 				                   inconsistentSnapshotOnly,
 				                   beginVersion,
 				                   randomUid,
-				                   blobManifestUrl,
 				                   TransformPartitionedLog(desc.partitioned)));
 				wait(tr->commit());
 				break;
@@ -7984,8 +7849,7 @@ public:
 				                     OnlyApplyMutationLogs::False,
 				                     InconsistentSnapshotOnly::False,
 				                     {},
-				                     randomUid,
-				                     {})));
+				                     randomUid)));
 				state Reference<ReadYourWritesTransaction> rywTransaction =
 				    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 				// clear old restore config associated with system keys
@@ -8021,8 +7885,7 @@ public:
 			                                 OnlyApplyMutationLogs::False,
 			                                 InconsistentSnapshotOnly::False,
 			                                 {},
-			                                 randomUid,
-			                                 {}));
+			                                 randomUid));
 			return ver;
 		}
 	}
@@ -8086,8 +7949,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          UnlockDB unlockDB,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                                         Optional<std::string> const& encryptionKeyFileName,
-                                         Optional<std::string> blobManifestUrl) {
+                                         Optional<std::string> const& encryptionKeyFileName) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -8106,8 +7968,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    onlyApplyMutationLogs,
 	                                    inconsistentSnapshotOnly,
 	                                    encryptionKeyFileName,
-	                                    deterministicRandom()->randomUniqueID(),
-	                                    blobManifestUrl);
+	                                    deterministicRandom()->randomUniqueID());
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
@@ -8126,8 +7987,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName,
-                                         Optional<std::string> blobManifestUrl) {
+                                         Optional<std::string> const& encryptionKeyFileName) {
 	Standalone<VectorRef<Version>> beginVersions;
 	for (auto i = 0; i < ranges.size(); ++i) {
 		beginVersions.push_back(beginVersions.arena(), beginVersion);
@@ -8148,8 +8008,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               unlockDB,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
-	               encryptionKeyFileName,
-	               blobManifestUrl);
+	               encryptionKeyFileName);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
@@ -8167,8 +8026,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName,
-                                         Optional<std::string> blobManifestUrl) {
+                                         Optional<std::string> const& encryptionKeyFileName) {
 	Standalone<VectorRef<KeyRangeRef>> rangeRef;
 	if (range.begin.empty() && range.end.empty()) {
 		addDefaultBackupRanges(rangeRef);
@@ -8194,8 +8052,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               UnlockDB::True,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
-	               encryptionKeyFileName,
-	               blobManifestUrl);
+	               encryptionKeyFileName);
 }
 
 Future<Version> FileBackupAgent::atomicRestore(Database cx,
@@ -8248,8 +8105,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            StopWhenDone stopWhenDone,
                                            UsePartitionedLog partitionedLog,
                                            IncrementalBackupOnly incrementalBackupOnly,
-                                           Optional<std::string> const& encryptionKeyFileName,
-                                           Optional<std::string> const& blobManifestUrl) {
+                                           Optional<std::string> const& encryptionKeyFileName) {
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
 	                                         outContainer,
@@ -8262,8 +8118,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         stopWhenDone,
 	                                         partitionedLog,
 	                                         incrementalBackupOnly,
-	                                         encryptionKeyFileName,
-	                                         blobManifestUrl);
+	                                         encryptionKeyFileName);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {

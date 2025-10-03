@@ -1994,8 +1994,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 StopWhenDone stopWhenDone,
                                 UsePartitionedLog usePartitionedLog,
                                 IncrementalBackupOnly incrementalBackupOnly,
-                                Optional<std::string> encryptionKeyFile,
-                                Optional<std::string> blobManifestUrl) {
+                                Optional<std::string> encryptionKeyFile) {
 	try {
 		state FileBackupAgent backupAgent;
 		ASSERT(!backupRanges.empty());
@@ -2049,8 +2048,7 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              stopWhenDone,
 			                              usePartitionedLog,
 			                              incrementalBackupOnly,
-			                              encryptionKeyFile,
-			                              blobManifestUrl));
+			                              encryptionKeyFile));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -2374,8 +2372,7 @@ ACTOR Future<Void> runRestore(Database db,
                               std::string removePrefix,
                               OnlyApplyMutationLogs onlyApplyMutationLogs,
                               InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                              Optional<std::string> encryptionKeyFile,
-                              Optional<std::string> blobManifestUrl) {
+                              Optional<std::string> encryptionKeyFile) {
 	ASSERT(!ranges.empty());
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
@@ -2419,9 +2416,6 @@ ACTOR Future<Void> runRestore(Database db,
 				    "No restore target version given, will use maximum restorable version from backup description.\n");
 
 			BackupDescription desc = wait(bc->describeBackup());
-			if (blobManifestUrl.present()) {
-				onlyApplyMutationLogs = OnlyApplyMutationLogs::True;
-			}
 
 			if (onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 				targetVersion = desc.contiguousLogEnd.get() - 1;
@@ -2454,8 +2448,7 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   onlyApplyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion,
-			                                                   encryptionKeyFile,
-			                                                   blobManifestUrl));
+			                                                   encryptionKeyFile));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -4256,8 +4249,7 @@ int main(int argc, char* argv[]) {
 				                           stopWhenDone,
 				                           usePartitionedLog,
 				                           incrementalBackupOnly,
-				                           encryptionKeyFile,
-				                           blobManifestUrl));
+				                           encryptionKeyFile));
 				break;
 			}
 

@@ -9823,7 +9823,6 @@ ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db,
 Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
 }
-#endif
 
 ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
                                      KeyRange range,
@@ -9892,7 +9891,6 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 	}
 }
 
-#if 0
 ACTOR Future<bool> blobbifyRangeActor(Reference<DatabaseContext> cx,
                                       KeyRange range,
                                       bool doWait,
