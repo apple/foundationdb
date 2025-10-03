@@ -632,22 +632,6 @@ public:
 		                                         snapshot,
 		                                         reverse);
 	}
-
-#if 0
-	Result parseSnapshotFile(BytesRef fileData,
-	                         native::FDBBGTenantPrefix const* tenantPrefix,
-	                         native::FDBBGEncryptionCtx const* encryptionCtx) {
-		return Result(
-		    native::fdb_readbg_parse_snapshot_file(fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
-	}
-
-	Result parseDeltaFile(BytesRef fileData,
-	                      native::FDBBGTenantPrefix const* tenantPrefix,
-	                      native::FDBBGEncryptionCtx const* encryptionCtx) {
-		return Result(
-		    native::fdb_readbg_parse_delta_file(fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
-	}
-#endif
 	
 	TypedFuture<future_var::None> watch(KeyRef key) {
 		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key));
