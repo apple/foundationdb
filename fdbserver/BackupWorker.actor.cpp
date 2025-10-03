@@ -846,13 +846,14 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 		    .detail("File", logFiles[i]->getFileName());
 	}
 
-	// Fetch cipher keys if any of the messages are encrypted.
-	if (!cipherDetails.empty()) {
-		std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
-		        self->db, cipherDetails, BlobCipherMetrics::BLOB_GRANULE));
-		cipherKeys = getCipherKeysResult;
-	}
+	// TODO(gglass): remove this for real
+	//// Fetch cipher keys if any of the messages are encrypted.
+	// 	if (!cipherDetails.empty()) {
+	// 		std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
+	// 		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+	//	        self->db, cipherDetails, BlobCipherMetrics::BLOB_GRANULE));
+	// 	cipherKeys = getCipherKeysResult;
+	//	}
 
 	blockEnds = std::vector<int64_t>(logFiles.size(), 0);
 	for (idx = 0; idx < numMsg; idx++) {

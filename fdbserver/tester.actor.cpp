@@ -2625,10 +2625,6 @@ void encryptionAtRestPlaintextMarkerCheck() {
 					CODE_PROBE(true,
 					           "EncryptionAtRestPlaintextMarkerCheckScanned storage file scanned",
 					           probe::decoration::rare);
-				} else if (itr->path().string().find("fdbblob") != std::string::npos) {
-					CODE_PROBE(true,
-					           "EncryptionAtRestPlaintextMarkerCheckScanned BlobGranule file scanned",
-					           probe::decoration::rare);
 				} else if (itr->path().string().find("logqueue") != std::string::npos) {
 					CODE_PROBE(
 					    true, "EncryptionAtRestPlaintextMarkerCheckScanned TLog file scanned", probe::decoration::rare);

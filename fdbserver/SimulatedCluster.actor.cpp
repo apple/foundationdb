@@ -127,10 +127,6 @@ bool isValidSimulationStorageEngineValue(const std::underlying_type_t<Simulation
 
 constexpr int MACHINE_REBOOT_TIME = 10;
 
-// The max number of extra blob worker machines we might (i.e. randomly) add to the simulated cluster.
-// Note that this is in addition to the two we always have.
-constexpr int NUM_EXTRA_BW_MACHINES = 5;
-
 bool destructed = false;
 
 // Configuration details specified in workload test files that change the simulation
@@ -408,9 +404,6 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "randomlyRenameZoneId") {
 				randomlyRenameZoneId = strcmp(value.c_str(), "true") == 0;
 			}
-			if (attrib == "blobGranulesEnabled") {
-				blobGranulesEnabled = strcmp(value.c_str(), "true") == 0;
-			}
 			if (attrib == "simHTTPServerEnabled") {
 				simHTTPServerEnabled = strcmp(value.c_str(), "true") == 0;
 			}
@@ -489,7 +482,6 @@ public:
 	Optional<bool> generateFearless, buggify;
 	Optional<std::string> config;
 	Optional<std::string> remoteConfig;
-	bool blobGranulesEnabled = false;
 	bool randomlyRenameZoneId = false;
 	bool simHTTPServerEnabled = true;
 
@@ -576,7 +568,6 @@ public:
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
 		    .add("extraStorageMachineCountPerDC", &extraStorageMachineCountPerDC)
-		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
@@ -1669,7 +1660,6 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 	if (testConfig.resolverCount.present()) {
 		db.resolverCount = testConfig.resolverCount.get();
 	}
-	db.blobGranulesEnabled = testConfig.blobGranulesEnabled;
 }
 
 // Sets generateFearless and number of dataCenters based on testConfig details
@@ -2397,8 +2387,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
 	}
 
-	g_simulator->blobGranulesEnabled = simconfig.db.blobGranulesEnabled;
-
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
 	std::string startingConfigString = "new";
 	if (testConfig.configureLocked) {
@@ -2661,10 +2649,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		int storageCacheMachines = dc == 0 ? 1 : 0;
 		int blobWorkerMachines = 0;
 		int simHTTPMachines = 0;
-		if (testConfig.blobGranulesEnabled) {
-			int blobWorkerProcesses = 1 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
-			blobWorkerMachines = std::max(1, blobWorkerProcesses / processesPerMachine);
-		}
 		if (testConfig.simHTTPServerEnabled) {
 			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
 			fmt::print("sim http machines = {0}\n", simHTTPMachines);
@@ -2948,10 +2932,6 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	     std::string_view(testFile).find("BulkLoading") == std::string_view::npos &&
 	     std::string_view(testFile).find("BulkDumping") == std::string_view::npos &&
 	     std::string_view(testFile).find("ShardedRocksNondeterministicTest") == std::string_view::npos)) {
-		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
-	}
-
-	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 

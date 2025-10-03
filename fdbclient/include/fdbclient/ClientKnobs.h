@@ -197,7 +197,7 @@ public:
 	double MIN_CLEANUP_SECONDS;
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
 	int RESTORE_RANGES_READ_BATCH;
-	int BLOB_GRANULE_RESTORE_CHECK_INTERVAL;
+
 	bool BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH;
 	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS;
 	int BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
@@ -320,13 +320,6 @@ public:
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
-
-	// Blob Granules
-	int BG_MAX_GRANULE_PARALLELISM;
-	int BG_TOO_MANY_GRANULES;
-	int64_t BLOB_METADATA_REFRESH_INTERVAL;
-	bool DETERMINISTIC_BLOB_METADATA;
-	bool ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.

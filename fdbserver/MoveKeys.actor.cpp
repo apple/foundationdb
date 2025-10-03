@@ -21,7 +21,6 @@
 #include <vector>
 #include <limits.h>
 
-#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
