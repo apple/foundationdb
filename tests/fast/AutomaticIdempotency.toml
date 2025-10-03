@@ -1,3 +1,7 @@
+[[knobs]]
+# versions_per_second = 1M, max_write_transaction_life_versions = 5 * 1M = 5M
+max_write_transaction_life_versions = 5000000
+
 [[test]]
 testTitle = 'AutomaticIdempotency'
 
