@@ -2194,9 +2194,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo
 	// Wait for anything relevant to change
 	std::vector<Future<Void>> changes;
 	for (int j = 0; j < lockInfo.logSet->logServers.size(); j++) {
-		if (!lockInfo.replies[j].isReady())
+		if (!lockInfo.replies[j].isReady()) {
 			changes.push_back(ready(lockInfo.replies[j]));
-		else {
+		} else {
 			changes.push_back(lockInfo.logSet->logServers[j]->onChange());
 			if (failed.size()) {
 				changes.push_back(failed[j]->onChange());
@@ -2362,9 +2362,9 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 		// Update RV.
 		RV = version;
 		/*
-		// @note We currently don't use "RVs", but we may use this information later (maybe for doing
-		// error checking). Commenting out this code for now.
-		// Update recovery version vector.
+		@note We currently don't use "RVs", but we may use this information later (maybe for doing
+		error checking). Commenting out this code for now.
+		Update recovery version vector.
 		for (boost::dynamic_bitset<>::size_type id = 0; id < versionAvailableTLogs[version].size(); id++) {
 		    if (versionAvailableTLogs[version][id]) {
 		        RVs[id] = version;
@@ -3039,8 +3039,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		for (Tag tag : localTags) {
 			locations.clear();
 			logSet->getPushLocations(VectorRef<Tag>(&tag, 1), locations, 0);
-			for (int loc : locations)
+			for (int loc : locations) {
 				remoteTLogReqs[loc].recoverTags.push_back(tag);
+			}
 		}
 
 		if (oldLogSystem->tLogs.size()) {
@@ -3053,8 +3054,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 				Tag pushTag = Tag(tagLocalityTxs, i % self->txsTags);
 				locations.clear();
 				logSet->getPushLocations(VectorRef<Tag>(&pushTag, 1), locations, 0);
-				for (int loc : locations)
+				for (int loc : locations) {
 					remoteTLogReqs[loc].recoverTags.push_back(tag);
+				}
 			}
 		}
 	}
@@ -3318,8 +3320,9 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	for (Tag tag : localTags) {
 		locations.clear();
 		logSystem->tLogs[0]->getPushLocations(VectorRef<Tag>(&tag, 1), locations, 0);
-		for (int loc : locations)
+		for (int loc : locations) {
 			reqs[loc].recoverTags.push_back(tag);
+		}
 	}
 	for (int i = 0; i < oldLogSystem->logRouterTags; i++) {
 		Tag tag = Tag(tagLocalityLogRouter, i);
@@ -3332,8 +3335,9 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			Tag pushTag = Tag(tagLocalityTxs, i % logSystem->txsTags);
 			locations.clear();
 			logSystem->tLogs[0]->getPushLocations(VectorRef<Tag>(&pushTag, 1), locations, 0);
-			for (int loc : locations)
+			for (int loc : locations) {
 				reqs[loc].recoverTags.push_back(tag);
+			}
 		}
 		for (int i = 0; i < logSystem->txsTags; i++) {
 			localTags.push_back(Tag(tagLocalityTxs, i));
@@ -3402,8 +3406,9 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 				Tag pushLocation = Tag(tagLocalityLogRouter, i % logSystem->logRouterTags);
 				locations.clear();
 				logSystem->tLogs[1]->getPushLocations(VectorRef<Tag>(&pushLocation, 1), locations, 0);
-				for (int loc : locations)
+				for (int loc : locations) {
 					sreqs[loc].recoverTags.push_back(tag);
+				}
 			}
 		}
 		if (oldLogSystem->tLogs.size()) {
@@ -3412,8 +3417,9 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 				Tag pushTag = Tag(tagLocalityTxs, i % logSystem->txsTags);
 				locations.clear();
 				logSystem->tLogs[1]->getPushLocations(VectorRef<Tag>(&pushTag, 1), locations, 0);
-				for (int loc : locations)
+				for (int loc : locations) {
 					sreqs[loc].recoverTags.push_back(tag);
+				}
 			}
 			for (int i = 0; i < logSystem->txsTags; i++) {
 				satelliteTags.push_back(Tag(tagLocalityTxs, i));
@@ -3485,8 +3491,9 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 
 	// Don't force failure of recovery if it took us a long time to recover. This avoids multiple long running
 	// recoveries causing tests to timeout
-	if (BUGGIFY && now() - startTime < 300 && g_network->isSimulated() && g_simulator->speedUpSimulation)
+	if (BUGGIFY && now() - startTime < 300 && g_network->isSimulated() && g_simulator->speedUpSimulation) {
 		throw cluster_recovery_failed();
+	}
 
 	for (int i = 0; i < logSystem->tLogs[0]->logServers.size(); i++) {
 		recoveryComplete.push_back(transformErrors(
