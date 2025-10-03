@@ -27,7 +27,6 @@
 #include <unordered_map>
 
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/Knobs.h"
 #include "fdbrpc/TenantInfo.h"
@@ -56,8 +55,6 @@
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/AuditUtils.actor.h"
-#include "fdbclient/BlobConnectionProvider.h"
-#include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
@@ -100,7 +97,6 @@
 #include "fdbserver/TransactionTagCounter.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/StorageCorruptionBug.h"
 #include "fdbserver/StorageServerUtils.h"
 #include "flow/ActorCollection.h"
@@ -7792,6 +7788,8 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 	}
 }
 
+#if 0
+
 // Read blob granules metadata. It keeps retrying until reaching maxRetryCount.
 // The key range should not cross tenant boundary.
 ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranuleChunks(Transaction* tr,
@@ -7924,6 +7922,7 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 	}
 	return Void();
 }
+#endif
 
 // We have to store the version the change feed was stopped at in the SS instead of just the stopped status
 // In addition to simplifying stopping logic, it enables communicating stopped status when fetching change feeds

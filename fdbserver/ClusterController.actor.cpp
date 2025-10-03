@@ -33,7 +33,6 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbrpc/Locality.h"
-#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -57,7 +56,6 @@
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/RatekeeperInterface.h"
-#include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SingletonRoles.h"
 #include "fdbserver/Status.actor.h"
@@ -259,8 +257,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
 			dbInfo.distributor = db->serverInfo->get().distributor;
 			dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
-			dbInfo.blobManager = db->serverInfo->get().blobManager;
-			dbInfo.blobMigrator = db->serverInfo->get().blobMigrator;
 			dbInfo.consistencyScan = db->serverInfo->get().consistencyScan;
 			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
@@ -497,42 +493,6 @@ void checkOutstandingStorageRequests(ClusterControllerData* self) {
 	}
 }
 
-// When workers aren't available at the time of request, the request
-// gets added to a list of outstanding reqs. Here, we try to resolve these
-// outstanding requests.
-void checkOutstandingBlobWorkerRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingBlobWorkerRequests.size(); i++) {
-		auto& req = self->outstandingBlobWorkerRequests[i];
-		try {
-			if (req.second < now()) {
-				req.first.reply.sendError(timed_out());
-				swapAndPop(&self->outstandingBlobWorkerRequests, i--);
-			} else {
-				if (!self->gotProcessClasses)
-					throw no_more_servers();
-
-				auto worker = self->getBlobWorker(req.first);
-				RecruitBlobWorkerReply rep;
-				rep.worker = worker.interf;
-				rep.processClass = worker.processClass;
-				req.first.reply.send(rep);
-				// can remove it once we know the worker was found
-				swapAndPop(&self->outstandingBlobWorkerRequests, i--);
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id)
-				    .errorUnsuppressed(e)
-				    .suppressFor(1.0)
-				    .detail("OutstandingReq", i);
-			} else {
-				TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
-				throw;
-			}
-		}
-	}
-}
-
 // Finds and returns a new process for role
 WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
                                          const ProcessClass::ClusterRole role,
@@ -685,8 +645,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
 	auto ddSingleton = DataDistributorSingleton(db.distributor);
 	ConsistencyScanSingleton csSingleton(db.consistencyScan);
-	BlobManagerSingleton bmSingleton(db.blobManager);
-	BlobMigratorSingleton mgSingleton(db.blobMigrator);
 	EncryptKeyProxySingleton ekpSingleton(db.client.encryptKeyProxy);
 
 	// Check if the singletons are healthy.
@@ -707,7 +665,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
 	// consider any further re-recruitments
-	if (!(rkHealthy && ddHealthy && bmHealthy && ekpHealthy && csHealthy && mgHealthy)) {
+	if (!(rkHealthy && ddHealthy && ekpHealthy && csHealthy)) {
 		return;
 	}
 
@@ -735,16 +693,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	auto currColocMap = getColocCounts(currPids);
 	auto newColocMap = getColocCounts(newPids);
-
-	// if the knob is disabled, the BM coloc counts should have no affect on the coloc counts check below
-	if (!self->db.blobGranulesEnabled.get()) {
-		ASSERT(currColocMap[currBMProcessId] == 0);
-		ASSERT(newColocMap[newBMProcessId] == 0);
-		if (self->db.blobRestoreEnabled.get()) {
-			ASSERT(currColocMap[currMGProcessId] == 0);
-			ASSERT(newColocMap[newMGProcessId] == 0);
-		}
-	}
 
 	// if the knob is disabled, the EKP coloc counts should have no affect on the coloc counts check below
 	if (!enableKmsCommunication) {

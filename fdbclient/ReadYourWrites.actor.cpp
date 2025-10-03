@@ -1879,69 +1879,6 @@ Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPo
 	return waitOrError(tr.getRangeSplitPoints(range, chunkSize), resetPromise.getFuture());
 }
 
-Future<Standalone<VectorRef<KeyRangeRef>>> ReadYourWritesTransaction::getBlobGranuleRanges(const KeyRange& range,
-                                                                                           int rangeLimit) {
-	if (checkUsedDuringCommit()) {
-		return used_during_commit();
-	}
-	if (resetPromise.isSet())
-		return resetPromise.getFuture().getError();
-
-	KeyRef maxKey = getMaxReadKey();
-	if (range.begin > maxKey || range.end > maxKey)
-		return key_outside_legal_range();
-
-	return waitOrError(tr.getBlobGranuleRanges(range, rangeLimit), resetPromise.getFuture());
-}
-
-Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::readBlobGranules(
-    const KeyRange& range,
-    Version begin,
-    Optional<Version> readVersion,
-    Version* readVersionOut) {
-	if (!options.readYourWritesDisabled) {
-		return blob_granule_no_ryw();
-	}
-
-	if (checkUsedDuringCommit()) {
-		return used_during_commit();
-	}
-
-	if (resetPromise.isSet())
-		return resetPromise.getFuture().getError();
-
-	KeyRef maxKey = getMaxReadKey();
-	if (range.begin > maxKey || range.end > maxKey)
-		return key_outside_legal_range();
-
-	return waitOrError(tr.readBlobGranules(range, begin, readVersion, readVersionOut), resetPromise.getFuture());
-}
-
-Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> ReadYourWritesTransaction::summarizeBlobGranules(
-    const KeyRange& range,
-    Optional<Version> summaryVersion,
-    int rangeLimit) {
-	if (checkUsedDuringCommit()) {
-		return used_during_commit();
-	}
-
-	if (resetPromise.isSet())
-		return resetPromise.getFuture().getError();
-
-	KeyRef maxKey = getMaxReadKey();
-	if (range.begin > maxKey || range.end > maxKey)
-		return key_outside_legal_range();
-
-	return waitOrError(tr.summarizeBlobGranules(range, summaryVersion, rangeLimit), resetPromise.getFuture());
-}
-
-void ReadYourWritesTransaction::addGranuleMaterializeStats(const GranuleMaterializeStats& stats) {
-	if (checkUsedDuringCommit()) {
-		throw used_during_commit();
-	}
-	tr.addGranuleMaterializeStats(stats);
-}
-
 void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 	if (checkUsedDuringCommit()) {
 		throw used_during_commit();

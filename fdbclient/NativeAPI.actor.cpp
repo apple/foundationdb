@@ -127,7 +127,8 @@ FDB_BOOLEAN_PARAM(TransactionRecordLogInfo);
 FDB_BOOLEAN_PARAM(UseTenant);
 
 // Whether a blob granule request is a request for the mapping to read, or a request to get granule boundaries
-FDB_BOOLEAN_PARAM(JustGranules);
+// gglass:
+// FDB_BOOLEAN_PARAM(JustGranules);
 
 NetworkOptions networkOptions;
 TLSConfig tlsConfig(TLSEndpointType::CLIENT);
@@ -1543,6 +1544,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                                : latestVersion);
 }
 
+#if 0
 ACTOR Future<std::vector<std::pair<KeyRange, UID>>> getBlobGranuleLocations_internal(
     Database cx,
     TenantInfo tenant,
@@ -1650,6 +1652,7 @@ Future<std::vector<std::pair<KeyRange, UID>>> getBlobGranuleLocations(Reference<
 	                                                                                 : latestVersion,
 	    more);
 }
+#endif
 
 ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) {
 	state int totalRanges = 0;
@@ -6623,6 +6626,8 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 	return ::getRangeSplitPoints(trState, keys, chunkSize);
 }
 
+#if 0
+
 #define BG_REQUEST_DEBUG false
 
 ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Transaction* self,
@@ -6967,6 +6972,8 @@ void Transaction::addGranuleMaterializeStats(const GranuleMaterializeStats& stat
 	trState->cx->bgReadRowsInserted += stats.rowsInserted;
 	trState->cx->bgReadRowsUpdated += stats.rowsUpdated;
 }
+#endif
+
 
 ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
 	state ReadYourWritesTransaction tr(cx);
@@ -6989,6 +6996,7 @@ ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAw
 	return version;
 }
 
+#if 0
 ACTOR Future<Version> checkBlobSubrange(Database db,
                                         Optional<Reference<Tenant>> tenant,
                                         KeyRange keyRange,
@@ -7146,6 +7154,7 @@ Future<bool> DatabaseContext::flushBlobRange(const KeyRange& range,
                                              Optional<Reference<Tenant>> tenant) {
 	return flushBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, compact, version, tenant);
 }
+#endif
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,
@@ -9659,6 +9668,8 @@ Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 	return makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(this)));
 }
 
+#if 0
+
 // BlobGranule API.
 ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Transaction* tr, KeyRange range, int batchLimit) {
 	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
@@ -9812,6 +9823,7 @@ ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db,
 Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
 }
+#endif
 
 ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
                                      KeyRange range,
@@ -9880,6 +9892,7 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 	}
 }
 
+#if 0
 ACTOR Future<bool> blobbifyRangeActor(Reference<DatabaseContext> cx,
                                       KeyRange range,
                                       bool doWait,
@@ -9973,6 +9986,8 @@ Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges
                                                                                  Optional<Reference<Tenant>> tenant) {
 	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rangeLimit, tenant);
 }
+#endif
+
 
 ACTOR static Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>>
 getHotRangeMetricsActor(Reference<DatabaseContext> db, StorageServerInterface ssi, ReadHotSubRangeRequest req) {

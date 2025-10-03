@@ -22,7 +22,6 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
@@ -1375,7 +1374,7 @@ public:
 		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server);
 		try {
 			loop {
-				state bool isBm = BlobMigratorInterface::isBlobMigrator(server->getLastKnownInterface().id());
+				state bool isBm = false; // BlobMigratorInterface::isBlobMigrator(server->getLastKnownInterface().id());
 				status.isUndesired =
 				    (!self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get()) || isBm;
 

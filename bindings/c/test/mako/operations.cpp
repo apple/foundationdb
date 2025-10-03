@@ -227,6 +227,7 @@ const std::array<Operation, MAX_OP> opTable{
 	    true },
 	  { "COMMIT", { { StepKind::NONE, nullptr } }, 0, false },
 	  { "TRANSACTION", { { StepKind::NONE, nullptr } }, 0, false },
-};
+	} };
+
 
 } // namespace mako

@@ -34,7 +34,6 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/Locality.h"
@@ -55,8 +54,9 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
-	Future<Void> haltBlobManager;
-	Future<Void> haltBlobMigrator;
+	// gglass:
+	// Future<Void> haltBlobManager;
+	// Future<Void> haltBlobMigrator;
 	Future<Void> haltEncryptKeyProxy;
 	Future<Void> haltConsistencyScan;
 	Standalone<VectorRef<StringRef>> issues;
@@ -80,7 +80,9 @@ struct WorkerInfo : NonCopyable {
 	WorkerInfo(WorkerInfo&& r) noexcept
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
-	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), haltBlobManager(r.haltBlobManager),
+	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor),
+		// gglass; observe there is no copyfrom r.haltBlobMigrator.  This looks like a bug in the original.
+		// haltBlobManager(r.haltBlobManager),
 	    haltEncryptKeyProxy(r.haltEncryptKeyProxy), haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
@@ -92,7 +94,7 @@ struct WorkerInfo : NonCopyable {
 		details = std::move(r.details);
 		haltRatekeeper = r.haltRatekeeper;
 		haltDistributor = r.haltDistributor;
-		haltBlobManager = r.haltBlobManager;
+		// haltBlobManager = r.haltBlobManager;
 		haltEncryptKeyProxy = r.haltEncryptKeyProxy;
 		issues = r.issues;
 	}
@@ -147,8 +149,6 @@ public:
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 		Future<Void> clientCounter;
 		int clientCount;
-		AsyncVar<bool> blobGranulesEnabled;
-		AsyncVar<bool> blobRestoreEnabled;
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
 		Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration;
@@ -164,8 +164,7 @@ public:
 		                               EnableLocalityLoadBalance::True,
 		                               TaskPriority::DefaultEndpoint,
 		                               LockAware::True)), // SOMEDAY: Locality!
-		    unfinishedRecoveries(0), cachePopulated(false), clientCount(0),
-		    blobGranulesEnabled(config.blobGranulesEnabled), blobRestoreEnabled(false) {
+		    unfinishedRecoveries(0), cachePopulated(false), clientCount(0) {
 			clientCounter = countClients(this);
 		}
 
@@ -184,7 +183,7 @@ public:
 			newInfo.ratekeeper = interf;
 			serverInfo->set(newInfo);
 		}
-
+#if 0
 		void setBlobManager(const BlobManagerInterface& interf) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
@@ -200,6 +199,7 @@ public:
 			newInfo.blobMigrator = interf;
 			serverInfo->set(newInfo);
 		}
+#endif
 
 		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -231,10 +231,6 @@ public:
 				newInfo.distributor = Optional<DataDistributorInterface>();
 			} else if (t == ProcessClass::RatekeeperClass) {
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
-			} else if (t == ProcessClass::BlobManagerClass) {
-				newInfo.blobManager = Optional<BlobManagerInterface>();
-			} else if (t == ProcessClass::BlobMigratorClass) {
-				newInfo.blobMigrator = Optional<BlobMigratorInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
 				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
@@ -332,10 +328,6 @@ public:
 		        db.serverInfo->get().distributor.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().ratekeeper.present() &&
 		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().blobManager.present() &&
-		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().blobMigrator.present() &&
-		        db.serverInfo->get().blobMigrator.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().client.encryptKeyProxy.present() &&
 		        db.serverInfo->get().client.encryptKeyProxy.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().consistencyScan.present() &&
@@ -397,6 +389,7 @@ public:
 		throw no_more_servers();
 	}
 
+#if 0
 	// Returns a worker that can be used by a blob worker
 	// Note: we restrict the set of possible workers to those in the same DC as the BM/CC
 	WorkerDetails getBlobWorker(RecruitBlobWorkerRequest const& req) {
@@ -416,6 +409,7 @@ public:
 
 		throw no_more_servers();
 	}
+#endif	
 
 	std::vector<WorkerDetails> getWorkersForSeedServers(
 	    DatabaseConfiguration const& conf,
@@ -3355,7 +3349,6 @@ public:
 	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
 	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
-	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
 	ActorCollection ac;
 	UpdateWorkerList updateWorkerList;
 	Future<Void> outstandingRequestChecker;

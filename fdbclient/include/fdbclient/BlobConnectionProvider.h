@@ -21,6 +21,9 @@
 #ifndef BLOB_CONNECTION_PROVIDER_H
 #define BLOB_CONNECTION_PROVIDER_H
 
+// gglass
+#if 0
+
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobMetadataUtils.h"
 
@@ -44,5 +47,7 @@ struct BlobConnectionProvider : NonCopyable, ReferenceCounted<BlobConnectionProv
 	// FIXME: make this function dedupe location connections/providers across location ids
 	static Reference<BlobConnectionProvider> newBlobConnectionProvider(Standalone<BlobMetadataDetailsRef> blobMetadata);
 };
+
+#endif
 
 #endif

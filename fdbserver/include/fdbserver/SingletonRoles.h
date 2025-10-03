@@ -118,64 +118,6 @@ struct ConsistencyScanSingleton : Singleton<ConsistencyScanInterface> {
 	}
 };
 
-struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
-
-	BlobManagerSingleton(const Optional<BlobManagerInterface>& interface) : Singleton(interface) {}
-
-	Role getRole() const { return Role::BLOB_MANAGER; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::BlobManager; }
-
-	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
-		if (interface.present()) {
-			TraceEvent("CCBM_SetInf", cc.id).detail("Id", interface.get().id());
-			cc.db.setBlobManager(interface.get());
-		}
-	}
-	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present() && cc.id_worker.contains(pid)) {
-			cc.id_worker[pid].haltBlobManager =
-			    brokenPromiseToNever(interface.get().haltBlobManager.getReply(HaltBlobManagerRequest(cc.id)));
-		}
-	}
-	void recruit(ClusterControllerData& cc) const {
-		cc.lastRecruitTime = now();
-		cc.recruitBlobManager.set(true);
-	}
-
-	void haltBlobGranules(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
-			cc.id_worker[pid].haltBlobManager =
-			    brokenPromiseToNever(interface.get().haltBlobGranules.getReply(HaltBlobGranulesRequest(cc.id)));
-		}
-	}
-};
-
-struct BlobMigratorSingleton : Singleton<BlobMigratorInterface> {
-
-	BlobMigratorSingleton(const Optional<BlobMigratorInterface>& interface) : Singleton(interface) {}
-
-	Role getRole() const { return Role::BLOB_MIGRATOR; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::BlobMigrator; }
-
-	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
-		if (interface.present()) {
-			TraceEvent("CCMG_SetInf", cc.id).detail("Id", interface.get().id());
-			cc.db.setBlobMigrator(interface.get());
-		}
-	}
-	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
-			TraceEvent("CCMG_Halt", cc.id).detail("Id", interface.get().id());
-			cc.id_worker[pid].haltBlobMigrator =
-			    brokenPromiseToNever(interface.get().haltBlobMigrator.getReply(HaltBlobMigratorRequest(cc.id)));
-		}
-	}
-	void recruit(ClusterControllerData& cc) const {
-		cc.lastRecruitTime = now();
-		cc.recruitBlobMigrator.set(true);
-	}
-};
-
 struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 
 	EncryptKeyProxySingleton(const Optional<EncryptKeyProxyInterface>& interface) : Singleton(interface) {}
