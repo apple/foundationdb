@@ -853,7 +853,8 @@ public:
 	double CC_RECOVERY_INIT_REQ_TIMEOUT; // Base timeout for transaction system initialization during recovery (seconds)
 	double CC_RECOVERY_INIT_REQ_GROWTH_FACTOR; // Exponential backoff growth factor for recovery timeout (must be > 1)
 	double CC_RECOVERY_INIT_REQ_MAX_TIMEOUT; // Maximum timeout for transaction system initialization (seconds)
-	int CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES; // Maximum unfinished recoveries before parameter validation fails
+	int CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES; // Maximum unfinished recoveries before parameter validation
+	                                                    // fails
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -1212,6 +1213,7 @@ public:
 	int STORAGE_DISK_CLEANUP_MAX_RETRIES; // Max retries to cleanup left-over disk files from last storage server
 	int STORAGE_DISK_CLEANUP_RETRY_INTERVAL; // Sleep interval between cleanup retries
 	double WORKER_START_STORAGE_DELAY;
+	bool SIM_WORKER_INIT_RSP_DROP; // TODO (claude)
 
 	// Test harness
 	double WORKER_POLL_DELAY;
