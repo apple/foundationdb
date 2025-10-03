@@ -868,6 +868,8 @@ Future<Void> updateHealthStatus(Reference<EncryptKeyProxyData> ekpProxyData, Kms
 	return updateHealthStatusImpl(ekpProxyData, kmsConnectorInf);
 }
 
+// TODO(gglass): Remove the following, or remove this whole file.
+#if 0
 ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData,
                                          KmsConnectorInterface kmsConnectorInf,
                                          EKPGetLatestBlobMetadataRequest req) {
@@ -1022,6 +1024,7 @@ ACTOR Future<Void> refreshBlobMetadataCore(Reference<EncryptKeyProxyData> ekpPro
 void refreshBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
 	Future<Void> ignored = refreshBlobMetadataCore(ekpProxyData, kmsConnectorInf);
 }
+#endif
 
 void activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
 	if (g_network->isSimulated()) {
@@ -1067,10 +1070,10 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 	                                              true, /* absoluteIntervalDelay */
 	                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* initialDelay */
 	                                              TaskPriority::Worker);
-
-	self->blobMetadataRefresher = recurring([&]() { refreshBlobMetadata(self, kmsConnectorInf); },
-	                                        CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,
-	                                        TaskPriority::Worker);
+	// TODO(gglass): remove this outright 
+	//self->blobMetadataRefresher = recurring([&]() { refreshBlobMetadata(self, kmsConnectorInf); },
+	//	                                        CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,
+	//	                                        TaskPriority::Worker);
 
 	self->healthChecker = recurringAsync([&]() { return updateHealthStatus(self, kmsConnectorInf); },
 	                                     FLOW_KNOBS->ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,
@@ -1091,10 +1094,11 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 				ASSERT(encryptMode.isEncryptionEnabled());
 				self->addActor.send(getLatestCipherKeys(self, kmsConnectorInf, req));
 			}
-			when(EKPGetLatestBlobMetadataRequest req = waitNext(ekpInterface.getLatestBlobMetadata.getFuture())) {
-				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION);
-				self->addActor.send(getLatestBlobMetadata(self, kmsConnectorInf, req));
-			}
+			// TODO(gglass): remove this outright
+			// when(EKPGetLatestBlobMetadataRequest req = waitNext(ekpInterface.getLatestBlobMetadata.getFuture())) {
+			// 				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION);
+			//self->addActor.send(getLatestBlobMetadata(self, kmsConnectorInf, req));
+			//}
 			when(HaltEncryptKeyProxyRequest req = waitNext(ekpInterface.haltEncryptKeyProxy.getFuture())) {
 				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION);
 				TraceEvent("EKPHalted", self->myId).detail("ReqID", req.requesterID);
