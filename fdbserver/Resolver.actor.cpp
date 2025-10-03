@@ -247,7 +247,7 @@ ACTOR Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Ve
 // Check if the given set of tags contain any tags other than the log router tags.
 // Used to check if a given "ResolveTransactionBatchRequest" corresponds to an
 // empty commit message or not.
-static bool hasNonLogRouterTags(std::set<Tag>& allTags) {
+static bool hasNonLogRouterTags(const std::set<Tag>& allTags) {
 	for (auto& versionTag : allTags) {
 		if (versionTag.locality != tagLocalityLogRouter) {
 			return true;
