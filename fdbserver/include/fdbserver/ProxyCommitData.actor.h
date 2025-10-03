@@ -68,8 +68,6 @@ struct ProxyStats {
 	Counter tenantIdRequestIn;
 	Counter tenantIdRequestOut;
 	Counter tenantIdRequestErrors;
-	// gglass:
-	// Counter blobGranuleLocationIn, blobGranuleLocationOut, blobGranuleLocationErrors;
 	Counter txnExpensiveClearCostEstCount;
 	Version lastCommitVersionAssigned;
 
@@ -137,9 +135,6 @@ struct ProxyStats {
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
 	    keyServerLocationErrors("KeyServerLocationErrors", cc), tenantIdRequestIn("TenantIdRequestIn", cc),
 	    tenantIdRequestOut("TenantIdRequestOut", cc), tenantIdRequestErrors("TenantIdRequestErrors", cc),
-		// gglass:
-	    // blobGranuleLocationIn("BlobGranuleLocationIn", cc), blobGranuleLocationOut("BlobGranuleLocationOut", cc),
-	    // blobGranuleLocationErrors("BlobGranuleLocationErrors", cc),
 	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), lastCommitVersionAssigned(0),
 	    commitLatencySample("CommitLatencyMetrics",
 	                        id,

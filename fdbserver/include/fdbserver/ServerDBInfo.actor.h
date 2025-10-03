@@ -48,9 +48,6 @@ struct ServerDBInfo {
 	Optional<DataDistributorInterface> distributor; // The best guess of current data distributor.
 	MasterInterface master; // The best guess as to the most recent master, which might still be recovering
 	Optional<RatekeeperInterface> ratekeeper;
-	// gglass:
-	// Optional<BlobManagerInterface> blobManager;
-	// Optional<BlobMigratorInterface> blobMigrator;
 	Optional<ConsistencyScanInterface> consistencyScan;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount
@@ -83,9 +80,6 @@ struct ServerDBInfo {
 		           distributor,
 		           master,
 		           ratekeeper,
-				   // gglass:
-		           // blobManager,
-		           // blobMigrator,
 		           consistencyScan,
 		           resolvers,
 		           recoveryCount,

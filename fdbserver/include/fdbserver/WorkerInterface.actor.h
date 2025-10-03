@@ -32,10 +32,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
-// #include "fdbserver/BlobManagerInterface.h"
-// #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/ResolverInterface.h"
-// #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -47,8 +44,6 @@
 #include "fdbserver/ConfigBroadcastInterface.h"
 #include "flow/actorcompiler.h"
 
-// gglass todo: check if WorkerInterface is persisted
-//   (similar to how StorageServerInterface is persisted)
 struct WorkerInterface {
 	constexpr static FileIdentifier file_identifier = 14712718;
 	ClientWorkerInterface clientInterface;
@@ -59,12 +54,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeGrvProxyRequest> grvProxy;
 	RequestStream<struct InitializeDataDistributorRequest> dataDistributor;
 	RequestStream<struct InitializeRatekeeperRequest> ratekeeper;
-	// gglass:
-	// RequestStream<struct InitializeBlobManagerRequest> blobManager;
-	// RequestStream<struct InitializeBlobWorkerRequest> blobWorker;
 	RequestStream<struct InitializeConsistencyScanRequest> consistencyScan;
-	// gglass:
-	// RequestStream<struct InitializeBlobMigratorRequest> blobMigrator;
 	RequestStream<struct InitializeResolverRequest> resolver;
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
@@ -168,8 +158,6 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 	RequestStream<struct RecruitFromConfigurationRequest> recruitFromConfiguration;
 	RequestStream<struct RecruitRemoteFromConfigurationRequest> recruitRemoteFromConfiguration;
 	RequestStream<struct RecruitStorageRequest> recruitStorage;
-	// gglass:
-	// RequestStream<struct RecruitBlobWorkerRequest> recruitBlobWorker;
 	RequestStream<struct RegisterWorkerRequest> registerWorker;
 	RequestStream<struct GetWorkersRequest> getWorkers;
 	RequestStream<struct RegisterMasterRequest> registerMaster;
@@ -413,30 +401,6 @@ struct RecruitStorageRequest {
 	}
 };
 
-#if 0
-struct RecruitBlobWorkerReply {
-	constexpr static FileIdentifier file_identifier = 9908409;
-	WorkerInterface worker;
-	ProcessClass processClass;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, worker, processClass);
-	}
-};
-
-struct RecruitBlobWorkerRequest {
-	constexpr static FileIdentifier file_identifier = 72435;
-	std::vector<AddressExclusion> excludeAddresses;
-	ReplyPromise<RecruitBlobWorkerReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, excludeAddresses, reply);
-	}
-};
-#endif
-
 struct RegisterWorkerRequest {
 	constexpr static FileIdentifier file_identifier = 14332605;
 	WorkerInterface wi;
@@ -446,9 +410,6 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
-	// gglass:
-	// Optional<BlobManagerInterface> blobManagerInterf;
-	// Optional<BlobMigratorInterface> blobMigratorInterf;
 	Optional<EncryptKeyProxyInterface> encryptKeyProxyInterf;
 	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Standalone<VectorRef<StringRef>> issues;
@@ -471,9 +432,6 @@ struct RegisterWorkerRequest {
 	                      Generation generation,
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
-						  // gglass:
-	                      // Optional<BlobManagerInterface> bmInterf,
-	                      // Optional<BlobMigratorInterface> mgInterf,
 	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      Optional<ConsistencyScanInterface> csInterf,
 	                      bool degraded,
@@ -501,9 +459,6 @@ struct RegisterWorkerRequest {
 		           generation,
 		           distributorInterf,
 		           ratekeeperInterf,
-				   // gglass
-		           // blobManagerInterf,
-		           // blobMigratorInterf,
 		           encryptKeyProxyInterf,
 		           consistencyScanInterf,
 		           issues,
@@ -842,35 +797,6 @@ struct InitializeConsistencyScanRequest {
 	}
 };
 
-#if 0
-struct InitializeBlobManagerRequest {
-	constexpr static FileIdentifier file_identifier = 2567474;
-	UID reqId;
-	int64_t epoch;
-	ReplyPromise<BlobManagerInterface> reply;
-
-	InitializeBlobManagerRequest() {}
-	explicit InitializeBlobManagerRequest(UID uid, int64_t epoch) : reqId(uid), epoch(epoch) {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reqId, epoch, reply);
-	}
-};
-
-struct InitializeBlobMigratorRequest {
-	constexpr static FileIdentifier file_identifier = 7932681;
-	UID reqId;
-	ReplyPromise<BlobMigratorInterface> reply;
-
-	InitializeBlobMigratorRequest() {}
-	explicit InitializeBlobMigratorRequest(UID uid) : reqId(uid) {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reqId, reply);
-	}
-};
-#endif
-
 struct InitializeResolverRequest {
 	constexpr static FileIdentifier file_identifier = 7413317;
 	LifetimeToken masterLifetime;
@@ -916,46 +842,6 @@ struct InitializeStorageRequest {
 		    ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion, encryptMode);
 	}
 };
-
-#if 0
-struct InitializeBlobWorkerReply {
-	constexpr static FileIdentifier file_identifier = 6095215;
-	BlobWorkerInterface interf;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, interf);
-	}
-};
-
-struct InitializeBlobWorkerRequest {
-	constexpr static FileIdentifier file_identifier = 5838547;
-	UID reqId;
-	UID interfaceId;
-	KeyValueStoreType storeType;
-	ReplyPromise<InitializeBlobWorkerReply> reply;
-	EncryptionAtRestMode encryptMode;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reqId, interfaceId, storeType, reply, encryptMode);
-	}
-};
-
-struct InitializeBlobWorkerRequestOld {
-	constexpr static FileIdentifier file_identifier = 5838547;
-	UID reqId;
-	UID interfaceId;
-	KeyValueStoreType storeType;
-	ReplyPromise<InitializeBlobWorkerReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reqId, interfaceId, storeType, reply);
-	}
-};
-#endif
-
 
 struct InitializeEncryptKeyProxyRequest {
 	constexpr static FileIdentifier file_identifier = 4180191;
@@ -1134,10 +1020,6 @@ struct Role {
 	static const Role LOG_ROUTER;
 	static const Role DATA_DISTRIBUTOR;
 	static const Role RATEKEEPER;
-	// gglass: TBD about this stuff.
-	// static const Role BLOB_MANAGER;
-	// static const Role BLOB_WORKER;
-	// static const Role BLOB_MIGRATOR;
 	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
@@ -1170,14 +1052,6 @@ struct Role {
 			return DATA_DISTRIBUTOR;
 		case ProcessClass::Ratekeeper:
 			return RATEKEEPER;
-#if 0			
-		case ProcessClass::BlobManager:
-			return BLOB_MANAGER;
-		case ProcessClass::BlobWorker:
-			return BLOB_WORKER;
-		case ProcessClass::BlobMigrator:
-			return BLOB_MIGRATOR;
-#endif			
 		case ProcessClass::StorageCache:
 			return STORAGE_CACHE;
 		case ProcessClass::Backup:
@@ -1251,17 +1125,6 @@ class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
 
-#if 0
-ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
-                              ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady,
-                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                              IKeyValueStore* persistentData);
-ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
-                              Promise<Void> recovered,
-                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                              IKeyValueStore* persistentData);
-#endif
-
 ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei,
                                          Reference<AsyncVar<ServerDBInfo>> db,
                                          EncryptionAtRestMode encryptMode);
@@ -1321,11 +1184,6 @@ Future<Void> dataDistributor(DataDistributorInterface ddi,
                              std::string folder);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
-
-#if 0
-ACTOR Future<Void> blobManager(BlobManagerInterface bmi, Reference<AsyncVar<ServerDBInfo> const> db, int64_t epoch);
-ACTOR Future<Void> blobMigrator(BlobMigratorInterface mgi, Reference<AsyncVar<ServerDBInfo> const> db);
-#endif
 
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
                                       uint16_t id,

@@ -198,16 +198,6 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 // Directly removes serverID from serverKeys and keyServers system keyspace.
 // Performed when a storage server is marked as permanently failed.
 
-// Prepare for data migration for given key range. Reassign key ranges to the storage server interface hold by blob
-// migrator
-ACTOR Future<Void> prepareBlobRestore(Database occ,
-                                      MoveKeysLock lock,
-                                      const DDEnabledState* ddEnabledState,
-                                      UID traceId,
-                                      KeyRangeRef keys,
-                                      UID bmId,
-                                      UID reqId = UID());
-
 Future<Void> checkMoveKeysLock(Transaction* tr,
                                MoveKeysLock const& lock,
                                const DDEnabledState* ddEnabledState,

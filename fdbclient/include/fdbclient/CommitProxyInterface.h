@@ -93,9 +93,6 @@ struct CommitProxyInterface {
 			expireIdempotencyId =
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
-			// gglass pending deletion:
-			// getBlobGranuleLocations = PublicRequestStream<struct GetBlobGranuleLocationsRequest>(
-			// commit.getEndpoint().getAdjustedEndpoint(12));
 			setThrottledShard =
 			    RequestStream<struct SetThrottledShardRequest>(commit.getEndpoint().getAdjustedEndpoint(13));
 		}
@@ -116,8 +113,6 @@ struct CommitProxyInterface {
 		streams.push_back(getDDMetrics.getReceiver());
 		streams.push_back(expireIdempotencyId.getReceiver());
 		streams.push_back(getTenantId.getReceiver());
-		// gglass pending deletion:
-		// streams.push_back(getBlobGranuleLocations.getReceiver());
 		streams.push_back(setThrottledShard.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}

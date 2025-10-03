@@ -54,9 +54,6 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
-	// gglass:
-	// Future<Void> haltBlobManager;
-	// Future<Void> haltBlobMigrator;
 	Future<Void> haltEncryptKeyProxy;
 	Future<Void> haltConsistencyScan;
 	Standalone<VectorRef<StringRef>> issues;
@@ -81,8 +78,6 @@ struct WorkerInfo : NonCopyable {
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
 	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor),
-		// gglass; observe there is no copyfrom r.haltBlobMigrator.  This looks like a bug in the original.
-		// haltBlobManager(r.haltBlobManager),
 	    haltEncryptKeyProxy(r.haltEncryptKeyProxy), haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
@@ -183,23 +178,6 @@ public:
 			newInfo.ratekeeper = interf;
 			serverInfo->set(newInfo);
 		}
-#if 0
-		void setBlobManager(const BlobManagerInterface& interf) {
-			auto newInfo = serverInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.blobManager = interf;
-			serverInfo->set(newInfo);
-		}
-
-		void setBlobMigrator(const BlobMigratorInterface& interf) {
-			auto newInfo = serverInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.blobMigrator = interf;
-			serverInfo->set(newInfo);
-		}
-#endif
 
 		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -388,28 +366,6 @@ public:
 
 		throw no_more_servers();
 	}
-
-#if 0
-	// Returns a worker that can be used by a blob worker
-	// Note: we restrict the set of possible workers to those in the same DC as the BM/CC
-	WorkerDetails getBlobWorker(RecruitBlobWorkerRequest const& req) {
-		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
-		for (auto& it : id_worker) {
-			// the worker must be available, have the same dcID as CC,
-			// not be one of the excluded addrs from req and have the appropiate fitness
-			if (workerAvailable(it.second, false) &&
-			    clusterControllerDcId == it.second.details.interf.locality.dcId() &&
-			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
-			    (!it.second.details.interf.secondaryAddress().present() ||
-			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
-			    it.second.details.processClass.machineClassFitness(ProcessClass::BlobWorker) == ProcessClass::BestFit) {
-				return it.second.details;
-			}
-		}
-
-		throw no_more_servers();
-	}
-#endif	
 
 	std::vector<WorkerDetails> getWorkersForSeedServers(
 	    DatabaseConfiguration const& conf,

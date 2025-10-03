@@ -2370,8 +2370,6 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
-				g_knobs.setKnob("enable_blob_granule_compression",
-				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 				g_knobs.setKnob("encrypt_header_auth_token_enabled",
 				                KnobValue::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
 				g_knobs.setKnob("encrypt_header_auth_token_algo",

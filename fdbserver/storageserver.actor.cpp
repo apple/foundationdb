@@ -8861,14 +8861,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// We must also ensure we have fetched all change feed metadata BEFORE changing the phase to fetching to
 		// ensure change feed mutations get applied correctly
 		state std::vector<Key> changeFeedsToFetch;
-		// gglass
-		// state Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(data->cx, keys);
-		// state bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
-		state bool isFullRestore = false;
-		if (!isFullRestore) {
-			std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
-			changeFeedsToFetch = _cfToFetch;
-		}
+		std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
+		changeFeedsToFetch = _cfToFetch;
 		wait(data->durableVersionLock.take());
 
 		shard->phase = AddingShard::Fetching;
@@ -8890,7 +8884,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state Transaction tr(data->cx);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			if (!isFullRestore && SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
+			if (SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
 				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
 				int64_t requiredReplicas = SERVER_KNOBS->DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
 				tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
@@ -8951,24 +8945,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			state KeyRef rangeEnd;
-			// gglass: bulk commented out below.
-			// 			if (isFullRestore) {
-				// 				state BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(restoreController));
-				// 				// Read from blob only when it's copying data for full restore. Otherwise it may cause data
-				// 				// corruptions e.g we don't want to copy from blob any more when it's applying mutation
-				// 				// logs(APPLYING_MLOGS)
-				// 				if (phase == BlobRestorePhase::COPYING_DATA || phase == BlobRestorePhase::ERROR) {
-					// 					wait(loadBGTenantMap(&data->tenantData, &tr));
-					// 					// only copy the range that intersects with full restore range
-					// 					state KeyRangeRef range(std::max(keys.begin, normalKeys.begin), std::min(keys.end, normalKeys.end));
-					//					Version version = wait(BlobRestoreController::getTargetVersion(restoreController, fetchVersion));
-					//					hold = tryGetRangeFromBlob(results, &tr, data->cx, range, version, &data->tenantData);
-					// 					rangeEnd = range.end;
-					// 				} else {
-					//					hold = tryGetRange(results, &tr, keys);
-					// 					rangeEnd = keys.end;
-					// 				}
-				//}
 			if (conductBulkLoad) {
 				ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId)); // TODO(BulkLoad): remove dangerous assert
 				// Get the bulkload task metadata from the data move metadata. Note that a SS can receive a data move

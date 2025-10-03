@@ -1065,32 +1065,6 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection>
 	}
 }
 
-// This actor must be a singleton
-ACTOR Future<Void> prepareDataMigration(PrepareBlobRestoreRequest req,
-                                        Reference<DDSharedContext> context,
-                                        Database cx) {
-	try {
-		// Register as a storage server, so that DataDistributor could start data movement after
-		std::pair<Version, Tag> verAndTag = wait(addStorageServer(cx, req.ssi));
-		TraceEvent(SevDebug, "BlobRestorePrepare", context->id())
-		    .detail("State", "BMAdded")
-		    .detail("ReqId", req.requesterID)
-		    .detail("Version", verAndTag.first)
-		    .detail("Tag", verAndTag.second);
-
-		wait(prepareBlobRestore(
-		    cx, context->lock, context->ddEnabledState.get(), context->id(), req.keys, req.ssi.id(), req.requesterID));
-		req.reply.send(PrepareBlobRestoreReply(PrepareBlobRestoreReply::SUCCESS));
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw e;
-		req.reply.sendError(e);
-	}
-
-	ASSERT(context->ddEnabledState->trySetEnabled(req.requesterID));
-	return Void();
-}
-
 // Trigger a task on range based on the current bulk load task metadata
 ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<DataDistributor> self,
                                                                         KeyRange taskRange,

@@ -194,9 +194,6 @@ enum {
 	OPT_DSTONLY,
 
 	OPT_TRACE_FORMAT,
-
-	// blob granules backup/restore
-	OPT_BLOB_MANIFEST_URL,
 };
 
 // Top level binary commands.
@@ -285,7 +282,6 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 	{ OPT_ENCRYPT_FILES, "--encrypt-files", SO_REQ_SEP },
-	{ OPT_BLOB_MANIFEST_URL, "--blob-manifest-url", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -742,7 +738,6 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin-version", SO_REQ_SEP },
 	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent-snapshot-only", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
-	{ OPT_BLOB_MANIFEST_URL, "--blob-manifest-url", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1139,9 +1134,6 @@ static void printBackupUsage(bool devhelp) {
 	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
 	       "level encryption of snapshot backups while --encryption-key-file (above) refers to file level encryption. "
 	       "Generally, these two options should not be used together.\n");
-	printf("  --blob-manifest-url URL\n"
-	       "                 Perform blob manifest backup. Manifest files are stored to the destination URL.\n"
-	       "                 Blob granules should be enabled first for manifest backup.\n");
 
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
@@ -1218,8 +1210,6 @@ static void printRestoreUsage(bool devhelp) {
 	       "instead of the entire set.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-256-GCM key in the provided file is used for decrypting backup files.\n");
-	printf("  --blob-manifest-url URL\n"
-	       "                 Restore from blob granules. Manifest files are stored to the destination URL.\n");
 	printf(TLS_HELP);
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
 	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in %s\n",
@@ -3990,10 +3980,6 @@ int main(int argc, char* argv[]) {
 			case OPT_JSON:
 				jsonOutput = true;
 				break;
-			case OPT_BLOB_MANIFEST_URL: {
-				blobManifestUrl = args->OptionArg();
-				break;
-			}
 			}
 		}
 

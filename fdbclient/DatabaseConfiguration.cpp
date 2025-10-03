@@ -54,7 +54,6 @@ void DatabaseConfiguration::resetInternal() {
 	perpetualStorageWiggleSpeed = 0;
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
-	blobGranulesEnabled = false;
 	tenantMode = TenantMode::DISABLED;
 	encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
 }
@@ -389,7 +388,6 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["perpetual_storage_wiggle_engine"] = perpetualStoreType.toString();
 	}
 	result["storage_migration_type"] = storageMigrationType.toString();
-	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
 	result["tenant_mode"] = tenantMode.toString();
 	result["encryption_at_rest_mode"] = encryptionAtRestMode.toString();
 	return result;
@@ -680,9 +678,6 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		tenantMode = TenantMode::fromValue(value);
 	} else if (ck == "proxies"_sr) {
 		overwriteProxiesCount();
-	} else if (ck == "blob_granules_enabled"_sr) {
-		parse((&type), value);
-		blobGranulesEnabled = (type != 0);
 	} else if (ck == "encryption_at_rest_mode"_sr) {
 		encryptionAtRestMode = EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(value));
 	} else if (ck.startsWith("excluded/"_sr)) {
