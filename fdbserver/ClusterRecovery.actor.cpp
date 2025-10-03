@@ -988,7 +988,7 @@ ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 	}
 
 	const bool tooManyUnfinishedRecoveries =
-	    unfinishedRecoveries <= SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES;
+	    unfinishedRecoveries > SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES;
 	if (tooManyUnfinishedRecoveries) {
 		TraceEvent(SevWarnAlways, "InitializingTxnSystemTimeoutTooMany")
 		    .detail("UnfinishedRecoveries", unfinishedRecoveries)
