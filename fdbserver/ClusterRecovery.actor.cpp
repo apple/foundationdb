@@ -35,6 +35,7 @@
 
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/flow.h"
 
 namespace {
 EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config) {
@@ -983,7 +984,7 @@ ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 		    .detail("MaxTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT)
 		    .detail("MaxUnfinishedRecoveries", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES);
 		ASSERT_WE_THINK(false);
-		return Void();
+		return Never();
 	}
 
 	const bool tooManyUnfinishedRecoveries =
@@ -995,7 +996,7 @@ ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 		    .detail("GrowthFactor", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR)
 		    .detail("MaxTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT)
 		    .detail("MaxUnfinishedRecoveries", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES);
-		return Void();
+		return Never();
 	}
 
 	// Calculate timeout with exponential backoff
