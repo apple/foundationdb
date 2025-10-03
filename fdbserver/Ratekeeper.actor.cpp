@@ -800,8 +800,9 @@ void Ratekeeper::updateCommitCostEstimation(
     UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation) {
 	for (auto it = storageQueueInfo.begin(); it != storageQueueInfo.end(); ++it) {
 		auto tagCostIt = costEstimation.find(it->key);
-		if (tagCostIt == costEstimation.end())
+		if (tagCostIt == costEstimation.end()) {
 			continue;
+		}
 		for (const auto& [tagName, cost] : tagCostIt->second) {
 			it->value.addCommitCost(tagName, cost);
 		}
@@ -823,8 +824,6 @@ static std::string getIgnoredZonesReasons(
 }
 
 void Ratekeeper::updateRate(RatekeeperLimits* limits) {
-	// double controlFactor = ;  // dt / eFoldingTime
-
 	double actualTps = smoothReleasedTransactions.smoothRate();
 	actualTpsMetric = (int64_t)actualTps;
 	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back
@@ -857,8 +856,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	// ratio
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC))
+		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC)) {
 			continue;
+		}
 		++sscount;
 
 		limitReason_t ssLimitReason = limitReason_t::unlimited;
@@ -906,7 +906,6 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		}
 
 		double inputRate = ss.getSmoothInputBytesRate();
-		// inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
 
 		/*if( deterministicRandom()->random01() < 0.1 ) {
 		  std::string name = "RatekeeperUpdateRate" + limits.context;
@@ -932,8 +931,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		    ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0);
 		double limitTps = std::min(actualTps * maxBytesPerSecond / std::max(1.0e-8, inputRate),
 		                           maxBytesPerSecond * SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
-		if (ssLimitReason == limitReason_t::unlimited)
+		if (ssLimitReason == limitReason_t::unlimited) {
 			ssLimitReason = limitReason_t::storage_server_write_bandwidth_mvcc;
+		}
 
 		if (targetRateRatio > 0 && inputRate > 0) {
 			ASSERT(inputRate != 0);
@@ -1209,8 +1209,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		Version minLimitingSSVer = std::numeric_limits<Version>::max();
 		for (const auto& it : storageQueueInfo) {
 			auto& ss = it.value;
-			if (!ss.valid || (remoteDC.present() && ss.locality.dcId() == remoteDC))
+			if (!ss.valid || (remoteDC.present() && ss.locality.dcId() == remoteDC)) {
 				continue;
+			}
 
 			minSSVer = std::min(minSSVer, ss.lastReply.version);
 
@@ -1223,8 +1224,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		Version maxTLVer = std::numeric_limits<Version>::min();
 		for (const auto& it : tlogQueueInfo) {
 			auto& tl = it.value;
-			if (!tl.valid)
+			if (!tl.valid) {
 				continue;
+			}
 			maxTLVer = std::max(maxTLVer, tl.getLastCommittedVersion());
 		}
 
@@ -1243,8 +1245,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	int tlcount = 0;
 	for (auto& it : tlogQueueInfo) {
 		auto const& tl = it.value;
-		if (!tl.valid)
+		if (!tl.valid) {
 			continue;
+		}
 		++tlcount;
 
 		limitReason_t tlogLimitReason = limitReason_t::log_server_write_queue;
@@ -1324,8 +1327,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 			double smoothedRate =
 			    std::max(tl.getVerySmoothDurableBytesRate(), actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
 			double x = smoothedRate / (inputRate * targetRateRatio);
-			if (targetRateRatio < .75) //< FIXME: KNOB for 2.0
+			if (targetRateRatio < .75) { //< FIXME: KNOB for 2.0
 				x = std::max(x, 0.95);
+			}
 			double lim = actualTps * x;
 			if (lim < limits->tpsLimit) {
 				limits->tpsLimit = lim;
@@ -1450,8 +1454,9 @@ void Ratekeeper::getSSVersionLag(Version& maxSSPrimaryVersion, Version& maxSSRem
 	maxSSPrimaryVersion = maxSSRemoteVersion = invalidVersion;
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		if (!ss.valid || !ss.acceptingRequests)
+		if (!ss.valid || !ss.acceptingRequests) {
 			continue;
+		}
 
 		if (remoteDC.present() && ss.locality.dcId() == remoteDC) {
 			maxSSRemoteVersion = std::max(ss.getLatestVersion(), maxSSRemoteVersion);

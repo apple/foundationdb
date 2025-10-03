@@ -105,8 +105,9 @@ public:
 
 	// Records non-zero stateBytes for a version.
 	void addVersionBytes(Version commitVersion, int64_t stateBytes) {
-		if (stateBytes > 0)
+		if (stateBytes > 0) {
 			recentStateTransactionSizes.emplace_back(commitVersion, stateBytes);
+		}
 	}
 
 	// Returns the reference to the pair of (shardChanged, stateMutations) for the given version
@@ -124,7 +125,8 @@ private:
 
 struct Resolver : ReferenceCounted<Resolver> {
 	const UID dbgid;
-	const int commitProxyCount, resolverCount;
+	const int commitProxyCount;
+	const int resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
 
@@ -802,8 +804,10 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 ResolverInterface myInterface) {
 	loop {
 		if (db->get().recoveryCount >= recoveryCount &&
-		    std::find(db->get().resolvers.begin(), db->get().resolvers.end(), myInterface) == db->get().resolvers.end())
+		    std::find(db->get().resolvers.begin(), db->get().resolvers.end(), myInterface) ==
+		        db->get().resolvers.end()) {
 			throw worker_removed();
+		}
 		wait(db->onChange());
 	}
 }
