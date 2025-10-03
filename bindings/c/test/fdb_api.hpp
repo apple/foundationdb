@@ -606,10 +606,6 @@ public:
 		return native::fdb_transaction_get(tr.get(), key.data(), intSize(key), snapshot);
 	}
 
-	TypedFuture<future_var::None> watch(KeyRef key) {
-		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key));
-	}
-
 	// Usage: tx.getRange(key_select::firstGreaterOrEqual(firstKey), key_select::lastLessThan(lastKey), ...)
 	// gets key-value pairs in key range [begin, end)
 	TypedFuture<future_var::KeyValueRefArray> getRange(KeySelector first,
@@ -653,6 +649,10 @@ public:
 	}
 #endif
 	
+	TypedFuture<future_var::None> watch(KeyRef key) {
+		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key));
+	}
+
 	TypedFuture<future_var::None> commit() { return native::fdb_transaction_commit(tr.get()); }
 
 	TypedFuture<future_var::None> onError(Error err) { return native::fdb_transaction_on_error(tr.get(), err.code()); }
