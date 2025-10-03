@@ -4434,8 +4434,7 @@ int main(int argc, char* argv[]) {
 				                         removePrefix,
 				                         onlyApplyMutationLogs,
 				                         inconsistentSnapshotOnly,
-				                         encryptionKeyFile,
-				                         blobManifestUrl));
+				                         encryptionKeyFile));
 
 				break;
 			case RestoreType::WAIT:

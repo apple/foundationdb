@@ -46,8 +46,6 @@ enum limitReason_t {
 	log_server_min_free_space_ratio,
 	storage_server_durability_lag, // 10
 	storage_server_list_fetch_failed,
-	blob_worker_lag,
-	blob_worker_missing,
 	limitReason_t_end
 };
 

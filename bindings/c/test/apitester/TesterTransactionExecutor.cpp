@@ -81,7 +81,7 @@ public:
 	                       bool transactional,
 	                       bool restartOnTimeout)
 	  : executor(executor), startFct(startFct), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
-	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath), tenantName(tenantName),
+	    txState(TxState::IN_PROGRESS), commitCalled(false), tenantName(tenantName),
 	    transactional(transactional), restartOnTimeout(restartOnTimeout),
 	    selfConflictingKey(Random::get().randomByteStringLowerCase(8, 8)) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
@@ -173,8 +173,6 @@ public:
 			transaction.addWriteConflictRange(selfConflictingKey, selfConflictingKey + fdb::Key(1, '\x00'));
 		}
 	}
-
-	std::string getBGBasePath() override { return bgBasePath; }
 
 	virtual void onError(fdb::Error err) override {
 		std::unique_lock<std::mutex> lock(mutex);

@@ -233,8 +233,7 @@ struct RestoreWorkload : TestWorkload {
 				                              OnlyApplyMutationLogs::False,
 				                              InconsistentSnapshotOnly::False,
 				                              ::invalidVersion,
-				                              lastBackupContainer->getEncryptionKeyFileName(),
-				                              {});
+				                              lastBackupContainer->getEncryptionKeyFileName());
 
 				wait(success(restore));
 				ASSERT(!restore.isError());
