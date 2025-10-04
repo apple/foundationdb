@@ -844,7 +844,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_GRAY_FAILURE_STATUS_JSON,                          false); if (isSimulated) CC_GRAY_FAILURE_STATUS_JSON = true;
 	init( CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL,              0.5 );
 	init( CC_RECOVERY_INIT_REQ_TIMEOUT,                         30.0 );
-	init( CC_RECOVERY_INIT_REQ_GROWTH_FACTOR,                   1.5 );
+	init( CC_RECOVERY_INIT_REQ_GROWTH_FACTOR,                   2.0 );
 	init( CC_RECOVERY_INIT_REQ_MAX_TIMEOUT,                   300.0 );
 	init( CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES,       100 );
 
@@ -1157,8 +1157,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
 	init( STORAGE_DISK_CLEANUP_MAX_RETRIES,                       10 );
 	init( STORAGE_DISK_CLEANUP_RETRY_INTERVAL,  isSimulated ? 2 : 30 );
-	init( WORKER_START_STORAGE_DELAY,                            0.0 ); if ( randomize && BUGGIFY ) WORKER_START_STORAGE_DELAY = 1.0;
-	init( SIM_WORKER_INIT_RSP_DROP,                               false ); if (isSimulated) SIM_WORKER_INIT_RSP_DROP = BUGGIFY_WITH_PROB(0.01 /* 1% */);
+	init( WORKER_START_STORAGE_DELAY,                            0.0 ); if ( randomize && BUGGIFY ) WORKER_START_STORAGE_DELAY = 1.0;	
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );

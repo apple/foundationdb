@@ -1213,7 +1213,6 @@ public:
 	int STORAGE_DISK_CLEANUP_MAX_RETRIES; // Max retries to cleanup left-over disk files from last storage server
 	int STORAGE_DISK_CLEANUP_RETRY_INTERVAL; // Sleep interval between cleanup retries
 	double WORKER_START_STORAGE_DELAY;
-	bool SIM_WORKER_INIT_RSP_DROP; // TODO (claude)
 
 	// Test harness
 	double WORKER_POLL_DELAY;
