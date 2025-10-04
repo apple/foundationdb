@@ -1705,15 +1705,16 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 	// Enable encryption siginificantly reduces chance that a storage engine other than redwood got selected
 	// We want storage servers are selected by simulation tests with roughly equal chance
 	// If encryptMode is not specified explicitly, with high probability, we disable encryption
-	if (testConfig.encryptModes.empty() &&
-	    deterministicRandom()->random01() < SERVER_KNOBS->DISABLED_ENCRYPTION_PROBABILITY_SIM) {
-		EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
-		TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
-		CODE_PROBE(true, "Enforce to disable encryption in simulation", probe::decoration::rare);
-		set_config("encryption_at_rest_mode=" + encryptionMode.toString());
-		return;
-	}
+	// TODO(gglass): why don't we just always disable encryption at rest mode?
+	//if (testConfig.encryptModes.empty() &&
+	// 	    deterministicRandom()->random01() < SERVER_KNOBS->DISABLED_ENCRYPTION_PROBABILITY_SIM) {
+	EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
+	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
+	CODE_PROBE(true, "Enforce to disable encryption in simulation", probe::decoration::rare);
+	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
+	return;
 
+#if 0
 	std::vector<bool> available;
 	std::vector<double> probability;
 	if (!testConfig.encryptModes.empty()) {
@@ -1772,6 +1773,7 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 	           "Enabled domain-aware encryption in simulation",
 	           probe::decoration::rare);
 	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
+#endif	
 }
 
 namespace {
