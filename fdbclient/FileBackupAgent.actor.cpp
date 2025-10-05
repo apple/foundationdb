@@ -1843,14 +1843,25 @@ Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringR
 		throw restore_unsupported_file_version();
 
 	// Read begin key, if this fails then block was invalid.
-	uint32_t kLen = reader.consumeNetworkUInt32();
-	const uint8_t* k = reader.consume(kLen);
-	results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+	uint32_t beginKeyLen = reader.consumeNetworkUInt32();
+	const uint8_t* beginKey = reader.consume(beginKeyLen);
+	results.push_back(results.arena(), KeyValueRef(KeyRef(beginKey, beginKeyLen), ValueRef()));
 
 	// Read kv pairs and end key
 	while (1) {
 		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
 		if (reader.eof() || *reader.rptr == 0xFF) {
+			break;
+		}
+
+		// Read a key, which must exist or the block is invalid
+		uint32_t kLen = reader.consumeNetworkUInt32();
+		const uint8_t* k = reader.consume(kLen);
+
+		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
+		if (reader.eof() || *reader.rptr == 0xFF) {
+			// The last block in the file, will have Read End key.
+			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
 			break;
 		}
 
