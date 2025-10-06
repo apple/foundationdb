@@ -853,9 +853,9 @@ public:
 	double CC_RECOVERY_INIT_REQ_TIMEOUT; // Base timeout (seconds) for transaction system initialization during
 	                                     // recovery. Only applies to initializing_transaction_servers phase.
 	double
-	    CC_RECOVERY_INIT_REQ_GROWTH_FACTOR; // Exponential backoff growth factor for recovery timeout (must be > 1
-	                                        // and <= 10). TODO (claude): maybe I should be clear that this is the base
-	                                        // of the exponent in exponential backoff? Pls review this comment and fix.
+	    CC_RECOVERY_INIT_REQ_GROWTH_FACTOR; // Base of the exponential backoff calculation. The timeout is calculated as:
+	                                        // base_timeout * (growth_factor ^ unfinished_recoveries). Must be > 1 and
+	                                        // <= 10 to prevent overflow.
 	double CC_RECOVERY_INIT_REQ_MAX_TIMEOUT; // Maximum timeout (seconds) for transaction system initialization. Only
 	                                         // applies to initializing_transaction_servers phase.
 	int CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES; // Maximum unfinished recoveries after which transaction system

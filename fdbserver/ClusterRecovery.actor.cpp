@@ -966,9 +966,13 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 	}
 }
 
-// TODO (claude): add a nice comment describing the "why" behind this actor. Mention the rationale behind Never() return
-// i.e. the actor does nothing in certain cases. We can't return Void() in those cases since that'll cause the callsite
-// to proceed which we do not want.
+// Monitors the initialization of transaction system roles (commit proxies, GRV proxies, resolvers, TLogs, LogRouters)
+// during cluster recovery and enforces a timeout if they take too long to initialize.
+//
+// The timeout uses exponential backoff based on the number of previous failed recovery attempts:
+// - By default: base timeout (30s) doubles with each unfinished recovery: 30s, 60s, 120s, 240s, up to max (300s)
+// - This prevents rapid recovery retry loops while allowing quick initial attempts
+// - All timeout values are configurable via SERVER_KNOBS
 ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 	// Validate parameters to prevent overflow and ensure exponential backoff works correctly
 	// With growth factor <= 10 and unfinishedRecoveries <= 100, max scaling factor is 10^100
