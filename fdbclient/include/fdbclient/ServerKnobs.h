@@ -37,9 +37,9 @@ public:
 	// Versions -- knobs that control 5s timeout
 	int64_t VERSIONS_PER_SECOND; // Mainly used to represent the rate at which the sequencer can increase the versions
 	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS; // Used in various roles (Blob*, DD, LR, RK, SC) but most importantly
-	                                            // used in CP and SS. Reason for usage is different based on the roles.
+	                                            // used in CP and SS. Reason for usage is different based on the role.
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS; // Used in Resolver and CP. Reason for usage is different based on the
-	                                             // roles.
+	                                             // role.
 
 	// Versions -- other
 	int64_t MAX_VERSIONS_IN_FLIGHT;
