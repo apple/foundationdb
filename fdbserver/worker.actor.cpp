@@ -2196,7 +2196,7 @@ void cleanupStorageDisks(Reference<AsyncVar<ServerDBInfo>> dbInfo,
 }
 
 bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
-	const bool skip = allowDropInSim && g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01 /* 1% */);
+	const bool skip = allowDropInSim && g_network->isSimulated() && BUGGIFY_WITH_PROB(/* 1% */ 0.01);
 	if (skip) {
 		TraceEvent("SkipInitRspInSimTrue").detail("WorkerInterfID", workerInterfID);
 	}

@@ -976,7 +976,6 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 	// Validate parameters to prevent overflow and ensure exponential backoff works correctly
 	// With growth factor <= 10 and unfinishedRecoveries <= 100, max scaling factor is 10^100
-	// Since we cap timeout early with min(), overflow is prevented even with large base timeouts
 	const bool validParameters = unfinishedRecoveries >= 1 && SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT > 0 &&
 	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT > 0 &&
 	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR > 1.0 &&
@@ -989,8 +988,8 @@ ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 		    .detail("MaxTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT)
 		    .detail("UnfinishedRecoveries", unfinishedRecoveries)
 		    .detail("MaxUnfinishedRecoveries", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES);
-		ASSERT_WE_THINK(false); // it is expected these parameters to always be valid so we assert/crash in simulation
-		                        // if that's not the case
+		ASSERT_WE_THINK(false); // it is expected for these parameters to always be valid so we assert/crash in
+		                        // simulation if that's not the case
 		return Never();
 	}
 
