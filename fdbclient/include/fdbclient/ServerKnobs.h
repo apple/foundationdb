@@ -33,12 +33,17 @@ static constexpr int _PAGE_SIZE = 4096;
 class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
 	bool ALLOW_DANGEROUS_KNOBS;
-	// Versions
-	int64_t VERSIONS_PER_SECOND;
+
+	// Versions -- knobs that control 5s timeout
+	int64_t VERSIONS_PER_SECOND; // Mainly used to represent the rate at which the sequencer can increase the versions
+	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS; // Used in various roles (Blob*, DD, LR, RK, SC) but most importantly
+	                                            // used in CP and SS. Reason for usage is different based on the roles.
+	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS; // Used in Resolver and CP. Reason for usage is different based on the
+	                                             // roles.
+
+	// Versions -- other
 	int64_t MAX_VERSIONS_IN_FLIGHT;
 	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
-	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
-	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 	bool ENABLE_VERSION_VECTOR;
 	bool ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	bool ENABLE_VERSION_VECTOR_REPLY_RECOVERY;
