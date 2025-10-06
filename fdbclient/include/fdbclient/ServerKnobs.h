@@ -850,11 +850,16 @@ public:
 	bool CC_GRAY_FAILURE_STATUS_JSON; // When enabled, returns gray failure information in machine readable status json.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
-	double CC_RECOVERY_INIT_REQ_TIMEOUT; // Base timeout for transaction system initialization during recovery (seconds)
-	double CC_RECOVERY_INIT_REQ_GROWTH_FACTOR; // Exponential backoff growth factor for recovery timeout (must be > 1)
-	double CC_RECOVERY_INIT_REQ_MAX_TIMEOUT; // Maximum timeout for transaction system initialization (seconds)
-	int CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES; // Maximum unfinished recoveries before parameter validation
-	                                                    // fails
+	double CC_RECOVERY_INIT_REQ_TIMEOUT; // Base timeout (seconds) for transaction system initialization during
+	                                     // recovery. Only applies to initializing_transaction_servers phase.
+	double
+	    CC_RECOVERY_INIT_REQ_GROWTH_FACTOR; // Exponential backoff growth factor for recovery timeout (must be > 1
+	                                        // and <= 10). TODO (claude): maybe I should be clear that this is the base
+	                                        // of the exponent in exponential backoff? Pls review this comment and fix.
+	double CC_RECOVERY_INIT_REQ_MAX_TIMEOUT; // Maximum timeout (seconds) for transaction system initialization. Only
+	                                         // applies to initializing_transaction_servers phase.
+	int CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES; // Maximum unfinished recoveries after which transaction system
+	                                                    // intilization timeouts above do not apply.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)

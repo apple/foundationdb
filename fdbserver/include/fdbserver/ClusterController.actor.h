@@ -142,7 +142,10 @@ public:
 		DatabaseConfiguration config; // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
-		int unfinishedRecoveries; // TODO: add comment
+		int unfinishedRecoveries; // This counter is incremented every time a new sequencer/master is recruited. It goes
+		                          // back to 0 when recovery reaches fully_recovered phase. So a high counter value
+		                          // represents restarted recoveries that did not finish all the way to fully_recovered.
+		                          // TODO (claude): look for clarity/grammar issues above.
 		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 		Future<Void> clientCounter;

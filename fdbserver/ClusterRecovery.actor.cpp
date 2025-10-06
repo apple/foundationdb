@@ -32,10 +32,9 @@
 #include "fdbserver/WaitFailure.h"
 #include "flow/Error.h"
 #include "flow/ProtocolVersion.h"
-
 #include "flow/Trace.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include "flow/flow.h"
 
 namespace {
 EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config) {
@@ -967,23 +966,27 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 	}
 }
 
+// TODO (claude): add a nice comment describing the "why" behind this actor. Mention the rationale behind Never() return
+// i.e. the actor does nothing in certain cases. We can't return Void() in those cases since that'll cause the callsite
+// to proceed which we do not want.
 ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 	// Validate parameters to prevent overflow and ensure exponential backoff works correctly
 	// With growth factor <= 10 and unfinishedRecoveries <= 100, max scaling factor is 10^100
 	// Since we cap timeout early with min(), overflow is prevented even with large base timeouts
-	const bool validParameters = unfinishedRecoveries >= 1 && SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR > 1.0 &&
-	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR <= 10.0 &&
-	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT > 0 &&
-	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT > 0;
+	const bool validParameters = unfinishedRecoveries >= 1 && SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT > 0 &&
+	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT > 0 &&
+	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR > 1.0 &&
+	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR <= 10.0;
 
 	if (!validParameters) {
 		TraceEvent(SevWarnAlways, "InitializingTxnSystemTimeoutInvalid")
-		    .detail("UnfinishedRecoveries", unfinishedRecoveries)
 		    .detail("BaseTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT)
 		    .detail("GrowthFactor", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR)
 		    .detail("MaxTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT)
+		    .detail("UnfinishedRecoveries", unfinishedRecoveries)
 		    .detail("MaxUnfinishedRecoveries", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES);
-		ASSERT_WE_THINK(false);
+		ASSERT_WE_THINK(false); // it is expected these parameters to always be valid so we assert/crash in simulation
+		                        // if that's not the case
 		return Never();
 	}
 
@@ -991,12 +994,14 @@ ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 	    unfinishedRecoveries > SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES;
 	if (tooManyUnfinishedRecoveries) {
 		TraceEvent(SevWarnAlways, "InitializingTxnSystemTimeoutTooMany")
-		    .detail("UnfinishedRecoveries", unfinishedRecoveries)
 		    .detail("BaseTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT)
 		    .detail("GrowthFactor", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR)
 		    .detail("MaxTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT)
+		    .detail("UnfinishedRecoveries", unfinishedRecoveries)
 		    .detail("MaxUnfinishedRecoveries", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES);
-		return Never();
+		return Never(); // if there have been too many recoveries, clearly something is wrong. At this point, an
+		                // operator needs to look into the issue rather than us relying on this timeout monitor.
+		                // Triggering more timeouts can make the situation worse.
 	}
 
 	// Calculate timeout with exponential backoff
@@ -1005,14 +1010,15 @@ ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 	                                      SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT);
 
 	TraceEvent("InitializingTxnSystemTimeout")
-	    .detail("UnfinishedRecoveries", unfinishedRecoveries)
 	    .detail("BaseTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT)
 	    .detail("GrowthFactor", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR)
+	    .detail("MaxTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT)
+	    .detail("UnfinishedRecoveries", unfinishedRecoveries)
 	    .detail("ScalingFactor", scalingFactor)
-	    .detail("ScaledTimeout", scaledTimeout)
-	    .detail("MaxTimeout", SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT);
+	    .detail("ScaledTimeout", scaledTimeout);
 
 	wait(delay(scaledTimeout));
+
 	TraceEvent("InitializingTxnSystemTimeoutTriggered");
 	throw cluster_recovery_failed();
 }
