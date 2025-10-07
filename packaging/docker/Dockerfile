@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM docker.io/rockylinux/rockylinux:9.4-minimal AS base
+FROM docker.io/rockylinux/rockylinux:9.5-minimal AS base
 
 RUN microdnf install -y \
     bind-utils \
@@ -46,36 +46,22 @@ RUN microdnf install -y \
 
 WORKDIR /tmp
 
-RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64 -o tini  && \
-    echo "93dcc18adc78c65a028a84799ecf8ad40c936fdfc5f2a57b1acda5a8117fa82c  tini" > tini-sha.txt && \
-    sha256sum --quiet -c tini-sha.txt && \
-    chmod +x tini && \
-    mv tini /usr/bin/ && \
+ARG TARGETARCH
+RUN curl -Ls "https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH" -o "tini-$TARGETARCH"  && \
+    echo "93dcc18adc78c65a028a84799ecf8ad40c936fdfc5f2a57b1acda5a8117fa82c  tini-amd64" > "tini-amd64-sha.txt" && \
+    echo "07952557df20bfd2a95f9bef198b445e006171969499a1d361bd9e6f8e5e0e81  tini-arm64" > "tini-arm64-sha.txt" && \
+    sha256sum --quiet -c "tini-${TARGETARCH}-sha.txt" && \
+    chmod +x "tini-$TARGETARCH" && \
+    mv "tini-$TARGETARCH" /usr/bin/tini && \
     rm -rf /tmp/*
 
 WORKDIR /
 
-FROM docker.io/library/golang:1.22.5-bullseye AS go-build
+FROM docker.io/library/golang:1.24.7-bookworm AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
-COPY fdb-aws-s3-credentials-fetcher/ /fdb-aws-s3-credentials-fetcher
-WORKDIR /fdb-aws-s3-credentials-fetcher
-RUN go build -o /fdb-aws-s3-credentials-fetcher *.go
-
-# For now use 'base'. Later, could use a more stripped down image
-# since this script needs little.
-FROM base AS fdb-aws-s3-credentials-fetcher-sidecar
-RUN groupadd --gid 4059 fdb && \
-    useradd --gid 4059 \
-            --uid 4059 \
-            --no-create-home \
-            --shell /bin/bash fdb
-USER fdb
-COPY --from=go-build /fdb-aws-s3-credentials-fetcher /usr/bin/
-ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
-
 
 FROM base AS foundationdb-base
 
@@ -100,30 +86,39 @@ RUN groupadd --gid 4059 \
 
 COPY website /tmp/website/
 
-# Install FoundationDB Binaries
-RUN for file in fdbserver fdbbackup fdbcli fdbmonitor; do \
-        curl --fail -Ls ${FDB_WEBSITE}/${FDB_VERSION}/$file.x86_64 -o $file; \
-        chmod +x $file; \
-        mv $file /usr/bin; \
-    done
+# Install FoundationDB Binaries and additional FoundationDB Client Libraries
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        FDB_ARCH=x86_64; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        FDB_ARCH=aarch64; \
+    else \
+        echo "ERROR: unsupported architecture $TARGETARCH" 1>&2; \
+        exit 1; \
+    fi; \
+    CURL="curl --fail -Ls"; \
+    for file in fdbserver fdbbackup fdbcli fdbmonitor; do \
+        URL="${FDB_WEBSITE}/${FDB_VERSION}/$file.$FDB_ARCH"; \
+        echo "Downloading $URL"; \
+        $CURL "$URL" -o "$file" && \
+        chmod +x "$file" && \
+        mv "$file" /usr/bin/ || exit $?; \
+    done && \
+    mkdir -p /var/fdb/lib && \
+    for version in $FDB_LIBRARY_VERSIONS; do \
+        URL="${FDB_WEBSITE}/${version}/libfdb_c.${FDB_ARCH}.so"; \
+        echo "Downloading $URL"; \
+        TARGET="/usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so"; \
+        $CURL "$URL" -o "$TARGET" && \
+        cp "$TARGET" /var/fdb/lib/ || exit $?; \
+    done && \
+    $CURL $FDB_WEBSITE/$FDB_VERSION/libfdb_c.${FDB_ARCH}.so -o /usr/lib/libfdb_c.so
 
 # Setup all symlinks for the other binaries that are a copy of fdbbackup
 RUN for file in fdbdr fdbrestore backup_agent dr_agent fastrestore_tool; do \
-        ln -s /usr/bin/fdbbackup /usr/bin/$file; \
-    done
-
-# Install additional FoundationDB Client Libraries
-RUN for version in $FDB_LIBRARY_VERSIONS; do \
-    curl --fail -Ls ${FDB_WEBSITE}/${version}/libfdb_c.x86_64.so -o /usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so; \
-    done
-
-# Install additional FoundationDB Client Libraries (for sidecar)
-RUN mkdir -p /var/fdb/lib && \
-    for version in $FDB_LIBRARY_VERSIONS; do \
-    curl --fail -Ls ${FDB_WEBSITE}/${version}/libfdb_c.x86_64.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; \
-    done
-
-RUN curl -Ls $FDB_WEBSITE/$FDB_VERSION/libfdb_c.x86_64.so -o /usr/lib/libfdb_c.so
+        ln -s /usr/bin/fdbbackup "/usr/bin/$file"; \
+    done && \
+    cd / && \
+    rm -rf /tmp/*
 
 RUN rm -rf /tmp/*
 WORKDIR /
@@ -196,15 +191,24 @@ RUN microdnf -y install \
     rm -rf /var/cache/yum
 
 WORKDIR /tmp
-RUN NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-eks/1.22.6/2022-03-09/bin/linux/amd64/kubectl -o kubectl && \
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        AWS_ARCH=x86_64; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        AWS_ARCH=aarch64; \
+    else \
+        echo "ERROR: unsupported architecture $TARGETARCH" 1>&2; \
+        exit 1; \
+    fi; \
+    NO_PROXY="" no_proxy="" curl -Ls https://s3.us-west-2.amazonaws.com/amazon-eks/1.22.6/2022-03-09/bin/linux/$TARGETARCH/kubectl -o kubectl && \
     echo "860c3d37a5979491895767e7332404d28dc0d7797c7673c33df30ca80e215a07  kubectl" > kubectl.txt && \
     sha256sum --quiet -c kubectl.txt && \
     mv kubectl /usr/local/bin/kubectl && \
     chmod 755 /usr/local/bin/kubectl && \
-    curl -Ls https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.7.34.zip -o "awscliv2.zip" && \
-    echo "daf9253f0071b5cfee9532bc5220bedd7a5d29d4e0f92b42b9e3e4c496341e88  awscliv2.zip" > awscliv2.txt && \
-    sha256sum --quiet -c awscliv2.txt && \
-    unzip -qq awscliv2.zip && \
+    curl -Ls https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}-2.7.34.zip -o "awscliv2-${AWS_ARCH}.zip" && \
+    echo "daf9253f0071b5cfee9532bc5220bedd7a5d29d4e0f92b42b9e3e4c496341e88  awscliv2-x86_64.zip" > awscliv2-x86_64.txt && \
+    echo "bcb195622f0956c8569736b95bff9cff7f5684e400e694a33661f2d498fbc799  awscliv2-aarch64.zip" > awscliv2-aarch64.txt && \
+    sha256sum --quiet -c awscliv2-${AWS_ARCH}.txt && \
+    unzip -qq awscliv2-${AWS_ARCH}.zip && \
     ./aws/install && \
     rm -rf /tmp/*
 
