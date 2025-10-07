@@ -432,17 +432,18 @@ class TestRunner(object):
         util.get_logger().info("\nInserting test into database...")
         del self.db[:]
 
-        while True:
-            tr = self.db.create_transaction()
-            try:
-                tr.options.set_special_key_space_enable_writes()
-                del tr[
-                    b"\xff\xff/management/tenant/map/":b"\xff\xff/management/tenant/map0"
-                ]
-                tr.commit().wait()
-                break
-            except fdb.FDBError as e:
-                tr.on_error(e).wait()
+        if not self.args.no_tenants:
+            while True:
+                tr = self.db.create_transaction()
+                try:
+                    tr.options.set_special_key_space_enable_writes()
+                    del tr[
+                        b"\xff\xff/management/tenant/map/":b"\xff\xff/management/tenant/map0"
+                    ]
+                    tr.commit().wait()
+                    break
+                except fdb.FDBError as e:
+                    tr.on_error(e).wait()
 
         for subspace, thread in test_instructions.items():
             thread.insert_operations(self.db, subspace)
