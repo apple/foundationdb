@@ -31,7 +31,7 @@
 
 FoundationDB partitions the keyspace into shards (contiguous key ranges) and assigns each shard to a storage-team replica set.
 
-Shards are just key ranges; their size adapts continuously as Data Distribution monitors load and splits or merges ranges to stay within configured bounds [1][2]. Splits are triggered when metrics like bytes, read/write bandwidth, or hot-shard detection exceed thresholds (splitMetrics.bytes = shardBounds.max.bytes / 2, splitMetrics.bytesWrittenPerKSecond etc.). In other words, shard size is workload driven rather than fixed [1][3]. Storage servers and commit proxies provide ongoing measurements so DD can resize ranges dynamically to relieve load hotspots and maintain balance [4][5].
+Shards are just key ranges. Their size adapts continuously as Data Distribution monitors load and splits or merges ranges to stay within configured bounds [1][2]. Splits are triggered when metrics like bytes, read/write bandwidth, or hot-shard detection exceed thresholds (splitMetrics.bytes = shardBounds.max.bytes / 2, splitMetrics.bytesWrittenPerKSecond etc.). In other words, shard size is workload driven rather than fixed [1][3]. Storage servers and commit proxies provide ongoing measurements so DD can resize ranges dynamically to relieve load hotspots and maintain balance [4][5].
 
 The maximum shard size is:
 ```
@@ -41,27 +41,38 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
       SERVER_KNOBS->SHARD_BYTES_RATIO,
         (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
 ```
+  | dbSizeEstimate | Calculation                                | Result (approx.) |
+  |----------------|--------------------------------------------|------------------|
+  | 0              | (10 MB + 0) × 4                            | 40 MB            |
+  | 1 GB           | (10 MB + √1 GB × 45) × 4                   | 45.7 MB          |
+  | 100 GB         | (10 MB + √100 GB × 45) × 4                 | 96.9 MB          |
+  | 1 TB           | (10 MB + √1 TB × 45) × 4                   | 220 MB           |
+  | ≈6.5 TB        | (10 MB + √6.5 TB × 45) × 4 → hits cap      | 500 MB           |
+  | ≥10 TB         | Any larger value → capped by MAX_SHARD_BYTES | 500 MB         |
+
 ## What is a Hot Shard?
 
 A shard is "hot" when it absorbs a disproportionate share of the cluster's write workload (not reads!), driving CPU or bandwidth saturation on its replica servers [6].
 
-Storage servers continually sample bytes-read, ops-read, and shard sizes; a shard whose read bandwidth density exceeds configured thresholds is tagged as read-hot so the distributor can identify the offending range [4].
+StorageServerMetrics::splitMetrics only emits a split point when it can carve the shard into two chunks that both respect the size/traffic limits. The loop stops attempting further splits when the remaining range would be smaller than 2 × MIN_SHARD_BYTES and write-based splitting is either disabled or below SHARD_SPLIT_BYTES_PER_KSEC. Separately, getSplitKey() returns the shard end (so no split is emitted) if the byte/IO samples can’t find a valid interior key. [8][9]”
+
+Storage servers continually sample bytes-read, ops-read, and shard sizes. A shard whose read bandwidth density exceeds configured thresholds is tagged as read-hot so the data distributor process can identify the offending range [4]. This internal state isn’t directly visible to users, though "ReadHotRangeLog" trace events in the server logs can help surface diagnostic information about detected hot ranges.
 
 ## Normal Internal Shard Splitting Process
 
-- The data distributor decides a shard should shrink and calls splitStorageMetrics, which in turn asks each storage server in the shard for split points via SplitMetricsRequest; the tracker sets targets like "half of the max shard size" and minimum bytes/throughput [1].
+- The data distributor decides a shard should shrink and calls splitStorageMetrics, which in turn asks each storage server in the shard for split points via SplitMetricsRequest. The tracker sets targets like "half of the max shard size" and minimum bytes/throughput [1].
 
 - The storage server handles that request in StorageServerMetrics::splitMetrics, pulling the live samples it already maintains for bytes, write bandwidth, and IOs (byteSample, bytesWriteSample, iopsSample) to compute balanced cut points [7][8].
 
 - Inside splitMetrics, the helper getSplitKey converts the desired metric offset into an actual key using the sampled histogram, adds jitter so repeated splits don't choose exactly the same boundary, and enforces MIN_SHARD_BYTES plus optional write-traffic thresholds before accepting the split [8][9].
 
-- It loops until the remaining range falls under all limits, emitting each chosen key into the reply; the tracker then uses those keys to call executeShardSplit, which updates the shard map and kicks off the relocation [10][11].
+- It loops until the remaining range falls under all limits, emitting each chosen key into the reply. The tracker then uses those keys to call executeShardSplit, which updates the shard map and kicks off the relocation [10][11].
 
 ## Hot Shard Special Case
 
 StorageServerMetrics::splitMetrics only emits a split point when it can carve the shard into two chunks that both satisfy the size/traffic limits—specifically the loop exits if remaining.bytes < 2 * MIN_SHARD_BYTES or the write bandwidth is below SHARD_SPLIT_BYTES_PER_KSEC, and getSplitKey() will return the shard end if the byte/IO samples can't find an interior key that meets the target [8][9].
 
-Hot shards are often tiny (say, a single hot key), so they're already near the minimum size or lack sample resolution; splitting them would just violate those constraints and leave the hot key on the same team anyway.
+Hot shards typically cannot be split because they're already very small—often just a single hot key or small range. Such tiny shards hit two barriers: (1) they violate minimum size constraints (MIN_SHARD_BYTES), or (2) they don't contain enough keys for the storage server's sampling mechanism to identify a split point. Worse, even if a split were possible, the hot key would remain assigned to the same storage team, providing no relief from saturation.
 
 ## When a Hot Shard Occurs That Cannot Be Split
 
@@ -89,8 +100,8 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
 
 ### Avoiding Hot Shards
 
-- Randomize key prefixes so consecutive writes land on different shard ranges; for example, hash user IDs or add a short random salt before the natural key. This way inserts will scatter instead of piling onto one shard.
-- If you need to store a counter, consider sharding them across N disjoint keys (e.g., counter/<bucket>/…) and aggregate in clients or background jobs; this keeps the per-key mutation rate below the commit proxy’s hot-shard throttle.
+- Randomize key prefixes so consecutive writes land on different shard ranges. For example, hash user IDs or add a short random salt before the natural key. This way inserts will scatter instead of piling onto one shard.
+- If you need to store a counter, consider sharding them across N disjoint keys (e.g., counter/<bucket>/…) and aggregate in clients or background jobs. This keeps the per-key mutation rate below the commit proxy’s hot-shard throttle.
 - If you are storing append-only logs,  split them into multiple partitions (such as log/<partition>/<ts>), rotating partitions over time rather than funneling through a single key path.
 - Avoid “read-modify-write” cycles. Use FDB's atomic operations (like ATOMIC_ADD) when possible, and throttle/queue work in clients so they don’t stampede on that hot key.
 - For multi-tenant schemas, assign each tenant a disjoint key subspace.
@@ -102,7 +113,7 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
   - For range scans, fetch only the window you truly need—store derived indexes or “chunked” materializations so transactions avoid reading a large
   contiguous range every time.
   - If one small document is hammered by many readers, replicate it into multiple keys (e.g., per region or per hash bucket) and route readers to
-  different replicas based on a deterministic hash; background jobs can keep replicas in sync.
+  different replicas based on a deterministic hash. Background jobs can keep replicas in sync.
   - Stagger periodic polling across clients—add random jitter so metrics or heartbeat jobs don’t all read the same shard simultaneously.
   - Watch readBandwidth metrics and proactively split large ranges (via splitStorageMetrics) if access skew is predictable (e.g., time-series keys); pre-
   splitting keeps each shard small enough that DD can relocate it quickly.
@@ -115,7 +126,7 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
   - Reserve dedicated key ranges for “global” data that’s touched by admins or background coordinators; keep those ranges tiny and infrequently written so
   they never become hot.
   - For time-ordered data, interleave a bucket prefix (hour, minute) or a modulo partition to avoid writing the latest timestamp into a single ever-
-  growing shard; readers can consult a manifest that lists active buckets.
+  growing shard. Readers can consult a manifest that lists active buckets.
   - If you must maintain a monotonic index (e.g., queue), combine it with a random shard ID so each enqueue writes to queue/<shard>/<increasing counter>;
   consumers merge shards client-side.
 
