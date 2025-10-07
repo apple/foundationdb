@@ -426,6 +426,16 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
       COMMENT "Copy generated.go for bindingtester")
   endif()
 
+  if(WITH_SWIFT_BINDING)
+    add_dependencies(${target_name} stacktester_swift)
+    add_custom_command(
+      TARGET ${target_name}
+      POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/bindings/swift/bin/stacktester_swift"
+                                       "${build_directory}/tests/swift/bin/stacktester_swift"
+      COMMENT "Copy stacktester_swift for bindingtester")
+  endif()
+
   foreach(generated IN LISTS generated_binding_files)
     add_custom_command(
       TARGET ${target_name}

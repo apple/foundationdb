@@ -19,7 +19,6 @@
 # limitations under the License.
 #
 
-
 import sys
 import subprocess
 import random
@@ -29,12 +28,11 @@ import copy
 import traceback
 from threading import Timer, Event
 
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..")]
 import logging.config
 
 from collections import OrderedDict
 from functools import reduce
-
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..")]
 
 from bindingtester import FDB_API_VERSION
 from bindingtester import Result

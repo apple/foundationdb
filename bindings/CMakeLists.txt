@@ -15,6 +15,11 @@ endif()
 if(WITH_RUBY_BINDING)
   add_subdirectory(ruby)
 endif()
+
+if(WITH_SWIFT_BINDING)
+  add_subdirectory(swift)
+endif()
+
 if(NOT WIN32 AND NOT OPEN_FOR_IDE)
   package_bindingtester()
   package_bindingtester2()

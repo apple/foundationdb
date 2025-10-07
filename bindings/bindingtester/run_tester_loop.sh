@@ -25,6 +25,7 @@ function run_scripted() {
 	scripted java_async
 	scripted go
 	scripted flow
+    scripted swift
 }
 
 run_scripted
@@ -39,4 +40,5 @@ while `true`; do
 	run java_async
 	run go
 	run flow
+    run swift
 done
