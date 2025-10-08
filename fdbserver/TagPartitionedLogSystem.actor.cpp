@@ -2415,6 +2415,10 @@ std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
 } // namespace
 
 TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/Simple") {
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		return Void();
+	}
+
 	// Construct two local tLogs backed by a single LogSet.
 	// Both tLogs have known committed version 100 and report a higher durable
 	// version 110 that was sent to both log servers.
@@ -2424,8 +2428,7 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/Simple") {
 	std::vector<Reference<LogSet>> logServers{ makeSingleLogSet({ tlogA, tlogB }) };
 
 	UnknownCommittedVersions ucv(110, 100, std::vector<uint16_t>{ 0, 1 });
-	auto logGroupResults =
-	    makeLogGroupResults(2, { { ucv }, { ucv } }, { tlogA, tlogB }, true, { 100, 100 });
+	auto logGroupResults = makeLogGroupResults(2, { { ucv }, { ucv } }, { tlogA, tlogB }, true, { 100, 100 });
 
 	Version minDV = 90;
 	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
@@ -2446,6 +2449,10 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/Simple") {
 }
 
 TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/FallbackToMaxKCV") {
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		return Void();
+	}
+
 	// When no unknown committed versions are reported, should fall back to maxKCV
 	LocalityData locality;
 	TLogInterface tlogA(locality);
@@ -2473,6 +2480,10 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/FallbackToMaxKCV") 
 }
 
 TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/HaltOnMissingDelivery") {
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		return Void();
+	}
+
 	// When an available tLog didn't receive a version, recovery should halt at the previous version
 	LocalityData locality;
 	TLogInterface tlogA(locality);
@@ -2507,6 +2518,10 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/HaltOnMissingDelive
 }
 
 TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/PolicyNotSatisfied") {
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		return Void();
+	}
+
 	// When a version was sent to both tLogs but only received by one (insufficient for RF=2)
 	LocalityData locality;
 	TLogInterface tlogA(locality);
@@ -2541,6 +2556,10 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/PolicyNotSatisfied"
 }
 
 TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/MinDVRespected") {
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		return Void();
+	}
+
 	// Tests that recovery version respects maxKCV when minDV < maxKCV
 	LocalityData locality;
 	TLogInterface tlogA(locality);
@@ -2573,6 +2592,10 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/MinDVRespected") {
 }
 
 TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/BrokenChain") {
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		return Void();
+	}
+
 	// Tests that recovery halts when prevVersion chain is broken
 	LocalityData locality;
 	TLogInterface tlogA(locality);
@@ -2608,21 +2631,22 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/BrokenChain") {
 }
 
 TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/MultipleLogSets") {
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		return Void();
+	}
+
 	// Tests recovery with multiple LogSets (primary + satellite)
 	LocalityData locality;
 	TLogInterface primary1(locality), primary2(locality);
 	TLogInterface satellite1(locality), satellite2(locality);
 
 	// Two LogSets: primary (local) + satellite (non-local)
-	std::vector<Reference<LogSet>> logServers{
-		makeSingleLogSet({ primary1, primary2 }, true),
-		makeSingleLogSet({ satellite1, satellite2 }, false)
-	};
+	std::vector<Reference<LogSet>> logServers{ makeSingleLogSet({ primary1, primary2 }, true),
+		                                       makeSingleLogSet({ satellite1, satellite2 }, false) };
 
 	// Only the 2 primary tLogs report version 110 (satellite LogSet is non-local and not in logGroupResults)
 	UnknownCommittedVersions ucv(110, 100, std::vector<uint16_t>{ 0, 1 });
-	auto logGroupResults =
-	    makeLogGroupResults(2, { { ucv }, { ucv } }, { primary1, primary2 }, true, { 100, 100 });
+	auto logGroupResults = makeLogGroupResults(2, { { ucv }, { ucv } }, { primary1, primary2 }, true, { 100, 100 });
 
 	Version minDV = 90;
 	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
@@ -2646,6 +2670,10 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/MultipleLogSets") {
 }
 
 TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/PartialAvailabilityPolicyFail") {
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		return Void();
+	}
+
 	// Tests that available tLogs must satisfy replication policy
 	LocalityData locality;
 	TLogInterface tlogA(locality), tlogB(locality), tlogC(locality);
@@ -2681,6 +2709,10 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/PartialAvailability
 }
 
 TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/VersionsBelowMaxKCV") {
+	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		return Void();
+	}
+
 	// Tests that versions <= maxKCV are filtered out
 	LocalityData locality;
 	TLogInterface tlogA(locality);
