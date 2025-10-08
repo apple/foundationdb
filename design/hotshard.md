@@ -25,13 +25,12 @@
   - [Shard Split/Merge Priority Knobs](#shard-splitmerge-priority-knobs)
   - [Other Hot Shard Related Knobs](#other-hot-shard-related-knobs)
   - [Key Relationships](#key-relationships)
-- [References](#references)
 
 ## Overview
 
 FoundationDB partitions the keyspace into shards (contiguous key ranges) and assigns each shard to a storage-team replica set.
 
-Shards are just key ranges. Their size adapts continuously as Data Distribution monitors load and splits or merges ranges to stay within configured bounds [1][2]. Splits are triggered when metrics like bytes, read/write bandwidth, or hot-shard detection exceed thresholds (splitMetrics.bytes = shardBounds.max.bytes / 2, splitMetrics.bytesWrittenPerKSecond etc.). In other words, shard size is workload driven rather than fixed [1][3]. Storage servers and commit proxies provide ongoing measurements so DD can resize ranges dynamically to relieve load hotspots and maintain balance [4][5].
+Shards are just key ranges. Their size adapts continuously as Data Distributor (DD) monitors load and splits or merges ranges to stay within configured bounds ([DDShardTracker:875](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L875), [DDShardTracker:884](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L884)). Splits are triggered when shard size (bytes) or write bandwidth exceeds thresholds (splitMetrics.bytes = shardBounds.max.bytes / 2, splitMetrics.bytesWrittenPerKSecond etc.). In other words, shard size is workload driven rather than fixed ([DDShardTracker:875](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L875), [DDShardTracker:879](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L879)). Storage servers and commit proxies provide ongoing measurements so DD can resize ranges dynamically to relieve load hotspots and maintain balance ([StorageMetrics:472](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L472), [CommitProxyServer:742](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/CommitProxyServer.actor.cpp#L742)). 
 
 The maximum shard size is:
 ```
@@ -52,25 +51,25 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
 
 ## What is a Hot Shard?
 
-A shard is "hot" when it absorbs a disproportionate share of the cluster's write workload (not reads!), driving CPU or bandwidth saturation on its replica servers [6].
+A shard is "write-hot" when it absorbs a disproportionate share of write traffic, triggering shard splitting. Read-hot shards also exist and trigger rebalancing (moving shards between teams), but they do not trigger splits ([dd-internals:L129](https://github.com/apple/foundationdb/blob/7.3.0/design/data-distributor-internals.md#L129)).
 
-StorageServerMetrics::splitMetrics only emits a split point when it can carve the shard into two chunks that both respect the size/traffic limits. The loop stops attempting further splits when the remaining range would be smaller than 2 × MIN_SHARD_BYTES and write-based splitting is either disabled or below SHARD_SPLIT_BYTES_PER_KSEC. Separately, getSplitKey() returns the shard end (so no split is emitted) if the byte/IO samples can’t find a valid interior key. [8][9]”
+StorageServerMetrics::splitMetrics only emits a split point when it can carve the shard into two chunks that both respect the size/traffic limits. The loop stops attempting further splits when the remaining range would be smaller than 2 × MIN_SHARD_BYTES and write-based splitting is either disabled or below SHARD_SPLIT_BYTES_PER_KSEC. Separately, getSplitKey() returns the shard end (so no split is emitted) if the byte/IO samples can't find a valid interior key ([StorageMetrics:286](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L286), [StorageMetrics:302](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L302)).
 
-Storage servers continually sample bytes-read, ops-read, and shard sizes. A shard whose read bandwidth density exceeds configured thresholds is tagged as read-hot so the data distributor process can identify the offending range [4]. This internal state isn’t directly visible to users, though "ReadHotRangeLog" trace events in the server logs can help surface diagnostic information about detected hot ranges.
+Storage servers continually sample bytes-read, ops-read, and shard sizes. A shard whose read bandwidth density exceeds configured thresholds is tagged as read-hot so the data distributor process can identify the offending range ([StorageMetrics:472](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L472)). This internal state isn't directly visible to users, though "ReadHotRangeLog" trace events in the server logs can help surface diagnostic information about detected hot ranges.
 
 ## Normal Internal Shard Splitting Process
 
-- The data distributor decides a shard should shrink and calls splitStorageMetrics, which in turn asks each storage server in the shard for split points via SplitMetricsRequest. The tracker sets targets like "half of the max shard size" and minimum bytes/throughput [1].
+- The data distributor decides a shard should shrink and calls splitStorageMetrics, which in turn asks each storage server in the shard for split points via SplitMetricsRequest. The tracker sets targets like "half of the max shard size" and minimum bytes/throughput ([DDShardTracker:875](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L875)).
 
-- The storage server handles that request in StorageServerMetrics::splitMetrics, pulling the live samples it already maintains for bytes, write bandwidth, and IOs (byteSample, bytesWriteSample, iopsSample) to compute balanced cut points [7][8].
+- The storage server handles that request in StorageServerMetrics::splitMetrics, pulling the live samples it already maintains for bytes, write bandwidth, and IOs (byteSample, bytesWriteSample, iopsSample) to compute balanced cut points ([storageserver:1973](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/storageserver.actor.cpp#L1973), [StorageMetrics:286](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L286)).
 
-- Inside splitMetrics, the helper getSplitKey converts the desired metric offset into an actual key using the sampled histogram, adds jitter so repeated splits don't choose exactly the same boundary, and enforces MIN_SHARD_BYTES plus optional write-traffic thresholds before accepting the split [8][9].
+- Inside splitMetrics, the helper getSplitKey converts the desired metric offset into an actual key using the sampled histogram, adds jitter so repeated splits don't choose exactly the same boundary, and enforces MIN_SHARD_BYTES plus optional write-traffic thresholds before accepting the split ([StorageMetrics:286](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L286), [StorageMetrics:302](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L302)).
 
-- It loops until the remaining range falls under all limits, emitting each chosen key into the reply. The tracker then uses those keys to call executeShardSplit, which updates the shard map and kicks off the relocation [10][11].
+- It loops until the remaining range falls under all limits, emitting each chosen key into the reply. The tracker then uses those keys to call executeShardSplit, which updates the shard map and kicks off the relocation ([StorageMetrics:332](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L332), [DDShardTracker:890](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L890)).
 
 ## Hot Shard Special Case
 
-StorageServerMetrics::splitMetrics only emits a split point when it can carve the shard into two chunks that both satisfy the size/traffic limits—specifically the loop exits if remaining.bytes < 2 * MIN_SHARD_BYTES or the write bandwidth is below SHARD_SPLIT_BYTES_PER_KSEC, and getSplitKey() will return the shard end if the byte/IO samples can't find an interior key that meets the target [8][9].
+StorageServerMetrics::splitMetrics only emits a split point when it can carve the shard into two chunks that both satisfy the size/traffic limits—specifically the loop exits if remaining.bytes < 2 * MIN_SHARD_BYTES or the write bandwidth is below SHARD_SPLIT_BYTES_PER_KSEC, and getSplitKey() will return the shard end if the byte/IO samples can't find an interior key that meets the target ([StorageMetrics:286](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L286), [StorageMetrics:302](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L302)).
 
 Hot shards typically cannot be split because they're already very small—often just a single hot key or small range. Such tiny shards hit two barriers: (1) they violate minimum size constraints (MIN_SHARD_BYTES), or (2) they don't contain enough keys for the storage server's sampling mechanism to identify a split point. Worse, even if a split were possible, the hot key would remain assigned to the same storage team, providing no relief from saturation.
 
@@ -80,27 +79,29 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
 
 ### Storage Server Impact
 
-- The storage servers hosting the hot shard become saturated with write traffic, causing their write queues to grow [13][14].
+- The storage servers hosting the hot shard become saturated with write traffic, causing their write queues to grow ([Ratekeeper:933](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L933), [Ratekeeper:973](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L973)).
 
-- Storage server metrics report high `bytesInput` and increasing queue depths, which are monitored by Ratekeeper [13].
+- Storage server metrics report high `bytesInput` and increasing queue depths, which are monitored by Ratekeeper ([Ratekeeper:933](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L933)).
 
-- If the storage server's write queue size exceeds thresholds relative to available space and target ratios, it becomes the bottleneck for the entire cluster [14].
+- If the storage server's write queue size exceeds thresholds relative to available space and target ratios, it becomes the bottleneck for the entire cluster ([Ratekeeper:973](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L973)).
 
 ### Cluster-Wide Rate Limiting
 
-- Ratekeeper continuously monitors storage server queues and bandwidth metrics to determine cluster-wide transaction rate limits [13][14].
+- Ratekeeper continuously monitors storage server queues and bandwidth metrics to determine cluster-wide transaction rate limits ([Ratekeeper:933](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L933), [Ratekeeper:973](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L973)).
 
-- When a storage server's write queue becomes excessive, Ratekeeper sets the limit reason to `storage_server_write_queue_size` and reduces the cluster-wide transaction rate proportionally [14][15].
+- When a storage server's write queue becomes excessive, Ratekeeper sets the limit reason to `storage_server_write_queue_size` and reduces the cluster-wide transaction rate proportionally ([Ratekeeper:973](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L973), [Ratekeeper:1440](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L1440)).
 
 - This causes **all transactions across the cluster** to be throttled, even those not touching the hot shard, because the cluster cannot commit faster than its slowest storage server can durably persist data.
 
-- The rate limit is calculated as: `limitTps = min(actualTps * maxBytesPerSecond / inputRate, maxBytesPerSecond * MAX_TRANSACTIONS_PER_BYTE)`, ensuring the cluster doesn't overwhelm the saturated storage server [13].
+- The rate limit is calculated as: `limitTps = min(actualTps * maxBytesPerSecond / inputRate, maxBytesPerSecond * MAX_TRANSACTIONS_PER_BYTE)`, ensuring the cluster doesn't overwhelm the saturated storage server ([Ratekeeper:933](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L933)).
 
 ## Mitigation
 
 ### Avoiding Hot Shards
 
-- Randomize key prefixes so consecutive writes land on different shard ranges. For example, hash user IDs or add a short random salt before the natural key. This way inserts will scatter instead of piling onto one shard.
+- Randomize key prefixes when range queries are not needed, so consecutive writes land on different shard ranges. For example, hash user IDs or add a short
+   random salt before the natural key. This way inserts will scatter instead of piling onto one shard. (Note this prevents efficient range scans over the 
+  randomized portion of the key.)
 - If you need to store a counter, consider sharding them across N disjoint keys (e.g., counter/<bucket>/…) and aggregate in clients or background jobs. This keeps the per-key mutation rate below the commit proxy’s hot-shard throttle.
 - If you are storing append-only logs,  split them into multiple partitions (such as log/<partition>/<ts>), rotating partitions over time rather than funneling through a single key path.
 - Avoid “read-modify-write” cycles. Use FDB's atomic operations (like ATOMIC_ADD) when possible, and throttle/queue work in clients so they don’t stampede on that hot key.
@@ -108,15 +109,13 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
 
 ### Avoiding Read Hotspots
 
-  - Cache hot objects (in the application or via a memory service) instead of repeatedly issuing get for the same key every transaction; read-hot shards
-  often stem from the same value being fetched continuously.
+  - Cache hot objects (in the application or via a memory service) instead of repeatedly issuing get for the same key every transaction; read-hot shards often stem from the same value being fetched continuously.
   - For range scans, fetch only the window you truly need—store derived indexes or “chunked” materializations so transactions avoid reading a large
   contiguous range every time.
-  - If one small document is hammered by many readers, replicate it into multiple keys (e.g., per region or per hash bucket) and route readers to
-  different replicas based on a deterministic hash. Background jobs can keep replicas in sync.
+  - If one small value is hammered by many readers, replicate it into multiple keys (e.g., per region or per hash bucket) and route readers to different replicas based on a deterministic hash.
   - Stagger periodic polling across clients—add random jitter so metrics or heartbeat jobs don’t all read the same shard simultaneously.
-  - Watch readBandwidth metrics and proactively split large ranges (via splitStorageMetrics) if access skew is predictable (e.g., time-series keys); pre-
-  splitting keeps each shard small enough that DD can relocate it quickly.
+  - Watch readBandwidth metrics and proactively split large ranges (via splitStorageMetrics) if access skew is predictable (e.g., time-series keys). Pre-splitting keeps each shard small enough that DD can relocate it quickly.
+  - Rather than polling, you can attach an FDB watch so the client wakes up when the value changes.
 
 ### Schema & Keyspace Design Patterns
 
@@ -133,14 +132,17 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
 ### What to do when encountered in production
 
 **Detection Signs:**
-- One storage team receives significantly more reads than others (visible in Hubble "Storage Server Read Operations" graph)
+- One storage team receives significantly more reads than others (check storage server read operation metrics in your monitoring dashboard)
 - Large spike in "Batch GRV ms" latency
 - Single team (3 storage servers) with very large storage queues
 - Relatively unchanged transaction/operation counts overall
 
 **Verification Process:**
 
-1. Get the cluster connection string from the cluster dashboard in the WF UI
+1. Locate your cluster file:
+  - Check your monitoring dashboard (if available) for the connection string
+  - Or use the default location: `/etc/foundationdb/fdb.cluster`
+  - Or run `fdbcli` (without arguments) and note the cluster file path shown
 
 2. SSH to one of the clients
 
@@ -148,7 +150,7 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
 
 4. Run the transaction profiling analyzer:
    ```bash
-   sudo sh run.sh -s "2023-09-14 16:40 UTC" -e "2023-09-14 16:50 UTC" -C connections.txt
+   contrib/transaction_profiling_analyzer/transaction_profiling_analyzer.py -s "2023-09-14 16:40 UTC" -e "2023-09-14 16:50 UTC" -C connections.txt
    ```
    Note: Use UTC format recommended above. The script uses [dateparser](https://pypi.org/project/dateparser/) library for time parsing.
 
@@ -169,17 +171,13 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
 
 ### Optional Hot Shard Throttling (Targeted Mitigation)
 
-**Note**: This feature is **experimental** and disabled by default, guarded by the `HOT_SHARD_THROTTLING_ENABLED` server knob [16].
+**Note**: This feature is **experimental** and disabled by default, guarded by the `HOT_SHARD_THROTTLING_ENABLED` server knob ([ServerKnobs:872](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L872)).
 
-- When enabled, write-hot shards are tracked by the commit proxies, which maintain a hot-shard table and reject incoming mutations against those ranges with the `transaction_throttled_hot_shard` error to keep them from overwhelming a single team [5].
+- When enabled, write-hot shards are tracked by the commit proxies, which maintain a hot-shard table and reject incoming mutations against those ranges with the `transaction_throttled_hot_shard` error to keep them from overwhelming a single team ([CommitProxyServer:742](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/CommitProxyServer.actor.cpp#L742)).
 
-- This targeted throttling attempts to throttle only transactions writing to the hot shard, rather than penalizing the entire cluster with global rate limits [5].
+- This targeted throttling attempts to throttle only transactions writing to the hot shard, rather than penalizing the entire cluster with global rate limits ([CommitProxyServer:742](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/CommitProxyServer.actor.cpp#L742)).
 
-- Once the data distributor flags a hot shard, it can split the range into smaller pieces and/or relocate portions to other teams to spread the traffic while respecting health constraints and load targets [12].
-
-### Key Insight
-
-The fundamental problem with unsplittable hot shards is that they create a **single point of contention** that forces cluster-wide rate limiting. Even with targeted hot shard throttling enabled, the storage server write queues will still grow if the hot key receives sustained traffic, eventually triggering global rate limits that affect all clients.
+- Once the data distributor flags a hot shard, it can split the range into smaller pieces and/or relocate portions to other teams to spread the traffic while respecting health constraints and load targets ([dd-internals:146](https://github.com/apple/foundationdb/blob/7.3.0/design/data-distributor-internals.md#L146)).
 
 ---
 
@@ -195,22 +193,22 @@ These knobs control the experimental hot shard throttling feature (PR #10970):
 - Master switch to enable/disable hot shard throttling at commit proxies
 - When enabled, commit proxies track hot shards and reject transactions writing to them
 - Disabled by default as the feature is experimental
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L999
+- Location: [ServerKnobs:999](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L999)
 
 **`HOT_SHARD_THROTTLING_EXPIRE_AFTER`** (double, default: `3.0` seconds)
 - Duration after which a throttled hot shard expires and is removed from the throttle list
 - Prevents indefinite throttling if load decreases
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L1000
+- Location: [ServerKnobs:1000](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L1000)
 
 **`HOT_SHARD_THROTTLING_TRACKED`** (int64_t, default: `1`)
 - Maximum number of hot shards to track and throttle per storage server
 - Limits the size of the hot shard list to prevent excessive memory usage
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L1001
+- Location: [ServerKnobs:1001](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L1001)
 
 **`HOT_SHARD_MONITOR_FREQUENCY`** (double, default: `5.0` seconds)
 - How often Ratekeeper queries storage servers for hot shard information
 - Lower values provide faster hot shard detection but increase RPC overhead
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L1002
+- Location: [ServerKnobs:1002](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L1002)
 
 ### Shard Bandwidth Splitting Knobs
 
@@ -221,20 +219,20 @@ These knobs control when Data Distribution splits shards based on write bandwidt
 - For a large shard (e.g., 100MB), it will be split into multiple pieces
 - If set too low, causes excessive data movement for small bandwidth spikes
 - If set too high, workload can remain concentrated on a single team indefinitely
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L244
+- Location: [ServerKnobs:244](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L244)
 
 **`SHARD_MIN_BYTES_PER_KSEC`** (int64_t, default: `100,000,000` bytes/ksec = 100 MB/sec)
 - Shards with write bandwidth above this threshold will not be merged
 - Must be significantly less than `SHARD_MAX_BYTES_PER_KSEC` to avoid merge/split cycles
 - Controls the number of extra shards: max extra shards ≈ (total cluster bandwidth) / `SHARD_MIN_BYTES_PER_KSEC`
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L255
+- Location: [ServerKnobs:255](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L255)
 
 **`SHARD_SPLIT_BYTES_PER_KSEC`** (int64_t, default: `250,000,000` bytes/ksec = 250 MB/sec)
 - When splitting a hot shard, each resulting piece will have less than this bandwidth
 - Must be less than half of `SHARD_MAX_BYTES_PER_KSEC`
 - Smaller values split hot shards into more pieces, distributing load faster across more servers
 - If too small relative to `SHARD_MIN_BYTES_PER_KSEC`, generates immediate re-merging work
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L269
+- Location: [ServerKnobs:269](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L269)
 
 ### Read Hot Shard Detection Knobs
 
@@ -243,37 +241,37 @@ These knobs control read-hot shard detection (primarily for read load balancing)
 **`SHARD_MAX_READ_OPS_PER_KSEC`** (int64_t, default: `45,000,000` ops/ksec = 45k ops/sec)
 - Read operation rate above which a shard is considered read-hot
 - Assumption: at 45k reads/sec, a storage server becomes CPU-saturated
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L224
+- Location: [ServerKnobs:224](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L224)
 
 **`SHARD_READ_OPS_CHANGE_THRESHOLD`** (int64_t, default: `SHARD_MAX_READ_OPS_PER_KSEC / 4`)
 - When sampled read ops change by more than this amount, shard metrics update immediately
 - Enables faster response to sudden changes in read workload
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L225
+- Location: [ServerKnobs:225](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L225)
 
 **`READ_SAMPLING_ENABLED`** (bool, default: `false`)
 - Master switch to enable/disable read sampling on storage servers
 - When enabled, storage servers sample read operations to detect hot ranges
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L1018
+- Location: [ServerKnobs:1018](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L1018)
 
 **`ENABLE_WRITE_BASED_SHARD_SPLIT`** (bool)
 - Controls whether write traffic (in addition to read traffic) can trigger shard splits
 - When enabled, high write bandwidth marks shards as hot for splitting
-- Location: fdbclient/include/fdbclient/ServerKnobs.h:260
+- Location: [ServerKnobs.h:260](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/include/fdbclient/ServerKnobs.h#L260)
 
 **`SHARD_MAX_READ_DENSITY_RATIO`** (double)
 - Maximum read density ratio before a shard is considered hot
 - Used to detect hotspots based on read concentration rather than absolute rate
-- Location: fdbclient/include/fdbclient/ServerKnobs.h:263
+- Location: [ServerKnobs.h:263](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/include/fdbclient/ServerKnobs.h#L263)
 
 **`SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS`** (int64_t)
 - Minimum read bandwidth threshold (in bytes/ksec) for a shard to be marked read-hot
 - Prevents low-traffic shards from being flagged as hot due to ratio calculations
-- Location: fdbclient/include/fdbclient/ServerKnobs.h:264
+- Location: [ServerKnobs.h:264](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/include/fdbclient/ServerKnobs.h#L264)
 
 **`SHARD_MAX_BYTES_READ_PER_KSEC_JITTER`** (int64_t)
 - Jitter applied to read hot shard detection to avoid synchronization
 - Adds randomness to prevent all shards from being evaluated simultaneously
-- Location: fdbclient/include/fdbclient/ServerKnobs.h:265
+- Location: [ServerKnobs.h:265](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/include/fdbclient/ServerKnobs.h#L265)
 
 ### Storage Queue Rebalancing Knobs
 
@@ -282,12 +280,12 @@ These knobs control automatic shard movement when storage queues become unbalanc
 **`REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN`** (int64_t, default: `SHARD_MIN_BYTES_PER_KSEC`)
 - Minimum write bandwidth for a shard to be considered for storage queue rebalancing
 - Prevents moving tiny/idle shards during rebalancing
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L368
+- Location: [ServerKnobs:368](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L368)
 
 **`DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD`** (bool, default: `true`)
 - Allows moving light-traffic shards out of overloaded storage servers
 - Helps reduce queue buildup by redistributing low-write shards
-- Location: https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L369
+- Location: [ServerKnobs:369](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L369)
 
 ### Read Rebalancing Knobs
 
@@ -296,12 +294,12 @@ These knobs control Data Distribution's ability to move shards based on read hot
 **`READ_REBALANCE_SHARD_TOPK`** (int)
 - Number of top read-hot shards to consider for rebalancing moves
 - Limits how many hot shards DD tracks simultaneously for read-aware relocations
-- Location: fdbclient/include/fdbclient/ServerKnobs.h:242
+- Location: [ServerKnobs.h:242](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/include/fdbclient/ServerKnobs.h#L242)
 
 **`READ_REBALANCE_MAX_SHARD_FRAC`** (double)
 - Maximum fraction of the read imbalance gap that a moved shard can represent
 - Prevents moving excessively large shards during read rebalancing
-- Location: fdbclient/include/fdbclient/ServerKnobs.h:245
+- Location: [ServerKnobs.h:245](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/include/fdbclient/ServerKnobs.h#L245)
 
 ### Shard Split/Merge Priority Knobs
 
@@ -310,24 +308,24 @@ These knobs control the priority of different Data Distribution operations:
 **`PRIORITY_SPLIT_SHARD`** (int)
 - Priority level for shard split operations in DD's work queue
 - Higher priority means splits happen before lower-priority operations
-- Location: fdbclient/include/fdbclient/ServerKnobs.h:193
+- Location: [ServerKnobs.h:193](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/include/fdbclient/ServerKnobs.h#L193)
 
 **`PRIORITY_MERGE_SHARD`** (int)
 - Priority level for shard merge operations in DD's work queue
 - Typically lower than split priority since merges are less urgent
-- Location: fdbclient/include/fdbclient/ServerKnobs.h:177
+- Location: [ServerKnobs.h:177](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/include/fdbclient/ServerKnobs.h#L177)
 
 ### Other Hot Shard Related Knobs
 
 **`WAIT_METRICS_WRONG_SHARD_CHANCE`** (double)
 - Probability of injecting a delay when a storage server reports wrong_shard error
 - Prevents rapid retry loops when shard location information is stale
-- Location: fdbclient/include/fdbclient/ServerKnobs.h:1124
+- Location: [ServerKnobs.h:1124](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/include/fdbclient/ServerKnobs.h#L1124)
 
 **`WRONG_SHARD_SERVER_DELAY`** (double, client-side)
 - Backoff delay on client when receiving a wrong_shard_server error
 - Prevents tight retry loops when client's location cache is stale
-- Location: fdbclient/include/fdbclient/ClientKnobs.h:57
+- Location: [ClientKnobs.h:57](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/include/fdbclient/ClientKnobs.h#L57)
 
 ### Key Relationships
 
@@ -349,37 +347,3 @@ When a shard's write bandwidth exceeds `SHARD_MAX_BYTES_PER_KSEC`, it is split i
 5. DD considers top-K hot shards (`READ_REBALANCE_SHARD_TOPK`) for rebalancing
 
 ---
-
-## References
-
-[1] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L875
-
-[2] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L884
-
-[3] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L879
-
-[4] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L472
-
-[5] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/CommitProxyServer.actor.cpp#L742
-
-[6] https://github.com/apple/foundationdb/blob/7.3.0/design/data-distributor-internals.md#L129
-
-[7] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/storageserver.actor.cpp#L1973
-
-[8] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L286
-
-[9] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L302
-
-[10] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L332
-
-[11] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L890
-
-[12] https://github.com/apple/foundationdb/blob/7.3.0/design/data-distributor-internals.md#L146
-
-[13] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L933
-
-[14] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L973
-
-[15] https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L1440
-
-[16] https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L872
