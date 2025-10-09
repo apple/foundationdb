@@ -5146,36 +5146,41 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	                                      Version end) {
 		// mergeSort all iterator until all are exhausted
 		// it stores all mutations for the next min version, in new format
-		state bool atLeastOneIteratorHasNext = true;
-		state Version minVersion, lastMinVersion = invalidVersion;
-		while (atLeastOneIteratorHasNext) {
-			std::pair<Version, bool> minVersionAndHasNext = wait(findNextVersion(iterators));
-			minVersion = minVersionAndHasNext.first;
-			atLeastOneIteratorHasNext = minVersionAndHasNext.second;
-			ASSERT_LT(lastMinVersion, minVersion);
-			lastMinVersion = minVersion;
+		try {
+			state bool atLeastOneIteratorHasNext = true;
+			state Version minVersion, lastMinVersion = invalidVersion;
+			while (atLeastOneIteratorHasNext) {
+				std::pair<Version, bool> minVersionAndHasNext = wait(findNextVersion(iterators));
+				minVersion = minVersionAndHasNext.first;
+				atLeastOneIteratorHasNext = minVersionAndHasNext.second;
+				ASSERT_LT(lastMinVersion, minVersion);
+				lastMinVersion = minVersion;
 
-			if (atLeastOneIteratorHasNext) {
-				std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion =
-				    wait(getMutationsForVersion(iterators, minVersion));
+				if (atLeastOneIteratorHasNext) {
+					std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion =
+					    wait(getMutationsForVersion(iterators, minVersion));
 
-				if (minVersion < begin) {
-					// skip generating mutations, because this is not within desired range
-					// this is already handled by the previous taskfunc
-					continue;
-				} else if (minVersion >= end) {
-					// all valid data has been consumed
-					break;
+					if (minVersion < begin) {
+						// skip generating mutations, because this is not within desired range
+						// this is already handled by the previous taskfunc
+						continue;
+					} else if (minVersion >= end) {
+						// all valid data has been consumed
+						break;
+					}
+
+					// transform from new format to old format(param1, param2) for this version.
+					// This transformation has to be done version by version.
+					Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
+					    generateOldFormatMutations(minVersion, mutationsSingleVersion);
+					mutationStream.send(oldFormatMutations);
 				}
-
-				// transform from new format to old format(param1, param2) for this version.
-				// This transformation has to be done version by version.
-				Standalone<VectorRef<KeyValueRef>> oldFormatMutations =
-				    generateOldFormatMutations(minVersion, mutationsSingleVersion);
-				mutationStream.send(oldFormatMutations);
 			}
+			mutationStream.sendError(end_of_stream());
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "FileRestoreLogReadError").error(e);
+			mutationStream.sendError(e);
 		}
-		mutationStream.sendError(end_of_stream());
 		return Void();
 	}
 
@@ -5203,7 +5208,8 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	ACTOR static Future<Void> writeMutations(Database cx,
 	                                         std::vector<Standalone<VectorRef<KeyValueRef>>> mutations,
 	                                         Key mutationLogPrefix,
-	                                         Reference<Task> task) {
+	                                         Reference<Task> task,
+	                                         Reference<TaskBucket> taskBucket) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Standalone<VectorRef<KeyValueRef>> oldFormatMutations;
 		state int mutationIndex = 0;
@@ -5239,7 +5245,9 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 					txBytes += v.expectedSize();
 					++mutationCount;
 				}
+				wait(taskBucket->keepRunning(tr, task));
 				wait(tr->commit());
+
 				int64_t oldBytes = Params.bytesWritten().get(task);
 				Params.bytesWritten().set(task, oldBytes + txBytes);
 				DisabledTraceEvent("FileRestorePartitionedLogCommittData")
@@ -5350,7 +5358,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				// batching mutations from multiple versions together before writing to the database
 				state int64_t bytes = oneVersionData.expectedSize();
 				if (totalBytes + bytes > CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE) {
-					wait(writeMutations(cx, mutations, restore.mutationLogPrefix(), task));
+					wait(writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket));
 					mutations.clear();
 					totalBytes = 0;
 				}
@@ -5359,7 +5367,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 			} catch (Error& e) {
 				if (e.code() == error_code_end_of_stream) {
 					if (mutations.size() > 0) {
-						wait(writeMutations(cx, mutations, restore.mutationLogPrefix(), task));
+						wait(writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket));
 					}
 					break;
 				} else {
