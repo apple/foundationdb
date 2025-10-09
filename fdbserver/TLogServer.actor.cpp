@@ -1027,8 +1027,12 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 
 	state bool anyData = false;
 
+	// Track total batch runs (including empty batches with no work)
 	logData->dirtyTagBatches += 1;
+
+	// Track successfully processed tags (incremented at end after all work completes)
 	state int64_t tagsProcessedThisBatch = 0;
+
 	// For all existing tags
 	state int tagLocality = 0;
 	state int tagId = 0;
@@ -1116,6 +1120,8 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 			}
 		}
 	}
+
+	// Only update counter after all tags successfully processed
 	logData->dirtyTagsProcessed += tagsProcessedThisBatch;
 
 	auto locationIter = logData->versionLocation.lower_bound(newPersistentDataVersion);
