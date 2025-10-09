@@ -915,8 +915,9 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 	state Future<Void> failed = (worker.address() == g_network->getLocalAddress())
 	                                ? Never()
 	                                : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
-	cluster->updateWorkerList.set(worker.locality.processId(),
-	                              ProcessData(worker.locality, startingClass, worker.stableAddress()));
+	cluster->updateWorkerList.set(
+	    worker.locality.processId(),
+	    ProcessData(worker.locality, startingClass, worker.stableAddress(), worker.grpcAddress()));
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch
 	// fails for the worker.
 	wait(delay(0));
