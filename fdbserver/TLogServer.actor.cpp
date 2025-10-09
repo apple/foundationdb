@@ -510,15 +510,16 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	// If persistentDataVersion != persistentDurableDataVersion,
 	// then spilling is happening from persistentDurableDataVersion to persistentDataVersion.
 	// Data less than persistentDataDurableVersion is spilled on disk (or fully popped from the TLog);
-	VersionMetricHandle persistentDataVersion,
-	    persistentDataDurableVersion; // The last version number in the portion of the log (written|durable) to
-	                                  // persistentData
+	VersionMetricHandle persistentDataVersion;
+	VersionMetricHandle persistentDataDurableVersion; // The last version number in the portion of the log
+	                                                  // (written|durable) to persistentData
 	NotifiedVersion version;
 	NotifiedVersion queueCommittedVersion; // The disk queue has committed up until the queueCommittedVersion version.
 	Version queueCommittingVersion;
 	Version knownCommittedVersion; // The maximum version that a proxy has told us that is committed (all TLogs have
 	                               // ack'd a commit for this version).
-	Version durableKnownCommittedVersion, minKnownCommittedVersion;
+	Version durableKnownCommittedVersion;
+	Version minKnownCommittedVersion;
 	Version queuePoppedVersion; // The disk queue has been popped up until the location which represents this version.
 	Version minPoppedTagVersion;
 	Tag minPoppedTag; // The tag that makes tLog hold its data and cause tLog's disk queue increasing.
@@ -580,8 +581,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Future<Void> removed;
 	PromiseStream<Future<Void>> addActor;
 	TLogData* tLogData;
-	Promise<Void> recoveryComplete, committingQueue;
-	Version unrecoveredBefore, recoveredAt;
+	Promise<Void> recoveryComplete;
+	Promise<Void> committingQueue;
+	Version unrecoveredBefore;
+	Version recoveredAt;
 	Version recoveryTxnVersion;
 
 	struct PeekTrackerData {
@@ -631,7 +634,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Tag remoteTag;
 	bool isPrimary;
 	int logRouterTags;
-	Version logRouterPoppedVersion, logRouterPopToVersion;
+	Version logRouterPoppedVersion;
+	Version logRouterPopToVersion;
 	int8_t locality;
 	UID recruitmentID;
 	TLogSpillType logSpillType;
@@ -799,8 +803,9 @@ void TLogQueue::forgetBefore(Version upToVersion, Reference<LogData> logData) {
 	// Keep only the given and all subsequent version numbers
 	// Find the first version >= upTo
 	auto v = logData->versionLocation.lower_bound(upToVersion);
-	if (v == logData->versionLocation.begin())
+	if (v == logData->versionLocation.begin()) {
 		return;
+	}
 
 	if (v == logData->versionLocation.end()) {
 		v = logData->versionLocation.lastItem();
@@ -1705,15 +1710,12 @@ void peekMessagesFromMemory(Reference<LogData> self,
 		++self->emptyPeeks;
 	} else {
 		++self->nonEmptyPeeks;
-
-		// TODO (version vector) check if this should be included in "status details" json
-		if (self->peekVersionCounts.find(tag) == self->peekVersionCounts.end()) {
-			UID ssID = deterministicRandom()->randomUniqueID();
-			std::string s = "PeekVersionCounts " + tag.toString();
-			self->peekVersionCounts.try_emplace(
-			    tag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
-		}
-		LatencySample& sample = self->peekVersionCounts.at(tag);
+		auto [it, _] = self->peekVersionCounts.try_emplace(tag,
+		                                                   "PeekVersionCounts " + tag.toString(),
+		                                                   deterministicRandom()->randomUniqueID(),
+		                                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+		LatencySample& sample = it->second;
 		sample.addMeasurement(versionCount);
 	}
 }
@@ -1766,14 +1768,22 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		try {
 			peekId = reqSequence.get().first;
 			sequence = reqSequence.get().second;
-			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
-			    logData->peekTracker.find(peekId) == logData->peekTracker.end()) {
+			auto [trackerIt, trackerInserted] = logData->peekTracker.try_emplace(peekId);
+			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && trackerInserted) {
+				// New tracker but high sequence number means operation is obsolete.
+				// This happens when a client has stalled and is now far behind the current sequence.
+				// We must erase the newly inserted tracker to avoid leaking memory, since try_emplace
+				// has already created an empty entry in the map that will never be used.
+				logData->peekTracker.erase(trackerIt);
 				throw operation_obsolete();
 			}
-			auto& trackerData = logData->peekTracker[peekId];
-			if (sequence == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
-				trackerData.tag = reqTag;
-				trackerData.sequence_version[0].send(std::make_pair(reqBegin, reqOnlySpilled));
+			auto& trackerData = trackerIt->second;
+			if (sequence == 0) {
+				auto [seqIt, seqInserted] = trackerData.sequence_version.try_emplace(0);
+				if (seqInserted) {
+					trackerData.tag = reqTag;
+					seqIt->second.send(std::make_pair(reqBegin, reqOnlySpilled));
+				}
 			}
 			auto seqBegin = trackerData.sequence_version.begin();
 			// The peek cursor and this comparison need to agree about the maximum number of in-flight requests.
@@ -1906,20 +1916,15 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
 		    !reqReturnIfBlocked && tagRecovered) {
 			state double startTime = now();
-			// TODO (version vector) check if this should be included in "status details" json
-			// TODO (version vector) all tags may be too many, instead,  standard deviation?
 			wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
 			double latency = now() - startTime;
-			if (logData->blockingPeekLatencies.find(reqTag) == logData->blockingPeekLatencies.end()) {
-				UID ssID = nondeterministicRandom()->randomUniqueID();
-				std::string s = "BlockingPeekLatencies-" + reqTag.toString();
-				logData->blockingPeekLatencies.try_emplace(reqTag,
-				                                           s,
-				                                           ssID,
-				                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-				                                           SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
-			}
-			LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
+			auto [it, inserted] =
+			    logData->blockingPeekLatencies.try_emplace(reqTag,
+			                                               "BlockingPeekLatencies-" + reqTag.toString(),
+			                                               nondeterministicRandom()->randomUniqueID(),
+			                                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+			                                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
+			LatencySample& sample = it->second;
 			sample.addMeasurement(latency);
 			poppedVer = poppedVersion(logData, reqTag);
 		}
@@ -1938,8 +1943,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			rep.onlySpilled = false;
 
 			if (reqSequence.present()) {
-				auto& trackerData = logData->peekTracker[peekId];
-				auto& sequenceData = trackerData.sequence_version[sequence + 1];
+				auto [trackerIt, _] = logData->peekTracker.try_emplace(peekId);
+				auto& trackerData = trackerIt->second;
+				auto [seqIt, seqInserted] = trackerData.sequence_version.try_emplace(sequence + 1);
+				auto& sequenceData = seqIt->second;
 				trackerData.lastUpdate = now();
 				if (trackerData.sequence_version.size() && sequence + 1 < trackerData.sequence_version.begin()->first) {
 					replyPromise.sendError(operation_obsolete());

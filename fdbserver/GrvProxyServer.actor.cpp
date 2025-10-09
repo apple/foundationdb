@@ -42,18 +42,31 @@
 
 struct GrvProxyStats {
 	CounterCollection cc;
-	Counter txnRequestIn, txnRequestOut, txnRequestErrors;
-	Counter txnStartIn, txnStartOut, txnStartBatch;
-	Counter txnSystemPriorityStartIn, txnSystemPriorityStartOut;
-	Counter txnBatchPriorityStartIn, txnBatchPriorityStartOut;
-	Counter txnDefaultPriorityStartIn, txnDefaultPriorityStartOut;
-	Counter txnTagThrottlerIn, txnTagThrottlerOut;
+	Counter txnRequestIn;
+	Counter txnRequestOut;
+	Counter txnRequestErrors;
+	Counter txnStartIn;
+	Counter txnStartOut;
+	Counter txnStartBatch;
+	Counter txnSystemPriorityStartIn;
+	Counter txnSystemPriorityStartOut;
+	Counter txnBatchPriorityStartIn;
+	Counter txnBatchPriorityStartOut;
+	Counter txnDefaultPriorityStartIn;
+	Counter txnDefaultPriorityStartOut;
+	Counter txnTagThrottlerIn;
+	Counter txnTagThrottlerOut;
 	Counter txnThrottled;
-	Counter updatesFromRatekeeper, leaseTimeouts;
-	int systemGRVQueueSize, defaultGRVQueueSize, batchGRVQueueSize;
+	Counter updatesFromRatekeeper;
+	Counter leaseTimeouts;
+	int systemGRVQueueSize;
+	int defaultGRVQueueSize;
+	int batchGRVQueueSize;
 	int tagThrottlerGRVQueueSize;
-	double transactionRateAllowed, batchTransactionRateAllowed;
-	double transactionLimit, batchTransactionLimit;
+	double transactionRateAllowed;
+	double batchTransactionRateAllowed;
+	double transactionLimit;
+	double batchTransactionLimit;
 	// how much of the GRV requests queue was processed in one attempt to hand out read version.
 	double percentageOfDefaultGRVQueueProcessed;
 	double percentageOfBatchGRVQueueProcessed;
@@ -405,8 +418,9 @@ ACTOR Future<Void> getRate(UID myID,
 	state bool expectingDetailedReply = false;
 	// state int64_t lastTC = 0;
 
-	if (db->get().ratekeeper.present())
+	if (db->get().ratekeeper.present()) {
 		nextRequestTimer = Void();
+	}
 	loop choose {
 		when(wait(db->onChange())) {
 			if (db->get().ratekeeper.present()) {
@@ -440,7 +454,7 @@ ACTOR Future<Void> getRate(UID myID,
 			stats->transactionRateAllowed = rep.transactionRate;
 			stats->batchTransactionRateAllowed = rep.batchTransactionRate;
 			++stats->updatesFromRatekeeper;
-			//TraceEvent("GrvProxyRate", myID).detail("Rate", rep.transactionRate).detail("BatchRate", rep.batchTransactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
+			// TraceEvent("GrvProxyRate", myID).detail("Rate", rep.transactionRate).detail("BatchRate", rep.batchTransactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
 			// lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
@@ -805,8 +819,9 @@ ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<Asyn
 	state Future<Void> nextRequestTimer = Never();
 	state Future<GetDataDistributorMetricsReply> nextReply = Never();
 
-	if (db->get().distributor.present())
+	if (db->get().distributor.present()) {
 		nextRequestTimer = Void();
+	}
 	loop {
 		try {
 			choose {
@@ -838,8 +853,9 @@ ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<Asyn
 			}
 		} catch (Error& e) {
 			TraceEvent("DDMidShardSizeUpdateFail").error(e);
-			if (e.code() != error_code_timed_out && e.code() != error_code_dd_not_found)
+			if (e.code() != error_code_timed_out && e.code() != error_code_dd_not_found) {
 				throw;
+			}
 			nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
 			nextReply = Never();
 		}
@@ -971,8 +987,9 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			}
 
 			if (req.debugID.present()) {
-				if (!debugID.present())
+				if (!debugID.present()) {
 					debugID = nondeterministicRandom()->randomUniqueID();
+				}
 				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
 			}
 
@@ -1022,16 +1039,16 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		}
 
 		/*TraceEvent("GRVBatch", proxy.id())
-		.detail("Elapsed", elapsed)
-		.detail("NTransactionToStart", nTransactionsToStart)
-		.detail("TransactionRate", transactionRate)
-		.detail("TransactionQueueSize", transactionQueue.size())
-		.detail("NumTransactionsStarted", transactionsStarted[0] + transactionsStarted[1])
-		.detail("NumSystemTransactionsStarted", systemTransactionsStarted[0] + systemTransactionsStarted[1])
-		.detail("NumNonSystemTransactionsStarted", transactionsStarted[0] + transactionsStarted[1] -
-		systemTransactionsStarted[0] - systemTransactionsStarted[1])
-		.detail("TransactionBudget", transactionBudget)
-		.detail("BatchTransactionBudget", batchTransactionBudget);*/
+		    .detail("Elapsed", elapsed)
+		    .detail("NTransactionToStart", nTransactionsToStart)
+		    .detail("TransactionRate", transactionRate)
+		    .detail("TransactionQueueSize", transactionQueue.size())
+		    .detail("NumTransactionsStarted", transactionsStarted[0] + transactionsStarted[1])
+		    .detail("NumSystemTransactionsStarted", systemTransactionsStarted[0] + systemTransactionsStarted[1])
+		    .detail("NumNonSystemTransactionsStarted", transactionsStarted[0] + transactionsStarted[1] -
+		                                                systemTransactionsStarted[0] - systemTransactionsStarted[1])
+		    .detail("TransactionBudget", transactionBudget)
+		    .detail("BatchTransactionBudget", batchTransactionBudget);*/
 
 		int systemTotalStarted = systemTransactionsStarted[0] + systemTransactionsStarted[1];
 		int normalTotalStarted = defaultPriTransactionsStarted[0] + defaultPriTransactionsStarted[1];

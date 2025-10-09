@@ -154,18 +154,27 @@ struct ResolutionRequestBuilder {
 		for (int idx = 0; idx < trIn.read_conflict_ranges.size(); ++idx) {
 			const auto& r = trIn.read_conflict_ranges[idx];
 			auto ranges = self->keyResolvers.intersectingRanges(r);
-			std::set<int> resolvers;
+			std::vector<int> resolvers;
+			resolvers.reserve(self->resolvers.size());
+			// O(1) de-dup keyed by resolver id (deterministic)
+			std::vector<unsigned char> seen(self->resolvers.size(), 0);
 			for (auto& ir : ranges) {
 				auto& version_resolver = ir.value();
 				for (int i = version_resolver.size() - 1; i >= 0; i--) {
-					resolvers.insert(version_resolver[i].second);
+					const int resolver_id = version_resolver[i].second;
+					if (!seen[resolver_id]) {
+						seen[resolver_id] = 1;
+						resolvers.push_back(resolver_id);
+					}
 					if (version_resolver[i].first < trIn.read_snapshot)
 						break;
 				}
 			}
 			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && systemKeys.intersects(r)) {
-				for (int k = 0; k < self->resolvers.size(); k++) {
-					resolvers.insert(k);
+				// All resolvers are eligible; skip per-id de-dup and just fill 0..N-1.
+				resolvers.clear();
+				for (int k = 0; k < self->resolvers.size(); ++k) {
+					resolvers.push_back(k);
 				}
 			}
 			ASSERT(resolvers.size());
@@ -181,16 +190,24 @@ struct ResolutionRequestBuilder {
 	void addWriteConflictRanges(CommitTransactionRef& trIn) {
 		for (auto& r : trIn.write_conflict_ranges) {
 			auto ranges = self->keyResolvers.intersectingRanges(r);
-			std::set<int> resolvers;
+			std::vector<int> resolvers;
+			resolvers.reserve(self->resolvers.size());
+			std::vector<unsigned char> seen(self->resolvers.size(), 0);
 			for (auto& ir : ranges) {
 				auto& version_resolver = ir.value();
 				if (!version_resolver.empty()) {
-					resolvers.insert(version_resolver.back().second);
+					const int resolver_id = version_resolver.back().second;
+					if (!seen[resolver_id]) {
+						seen[resolver_id] = 1;
+						resolvers.push_back(resolver_id);
+					}
 				}
 			}
 			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && systemKeys.intersects(r)) {
-				for (int k = 0; k < self->resolvers.size(); k++) {
-					resolvers.insert(k);
+				// All resolvers are eligible.
+				resolvers.clear();
+				for (int k = 0; k < self->resolvers.size(); ++k) {
+					resolvers.push_back(k);
 				}
 			}
 			ASSERT(resolvers.size());

@@ -130,4 +130,12 @@ testers = {
         MAX_API_VERSION,
         directory_snapshot_ops_enabled=False,
     ),
+    "swift": Tester(
+        "swift",
+        _absolute_path("swift/bin/stacktester_swift"),
+        63,
+        730,
+        MAX_API_VERSION,
+        directory_snapshot_ops_enabled=False,
+    ),
 }

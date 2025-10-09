@@ -142,7 +142,8 @@ ACTOR Future<Void> pollDatabaseSize(Reference<ConsistencyScanMemoryState> memSta
 
 ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<ConsistencyScanMemoryState> memState,
                                                                       Reference<ReadYourWritesTransaction> tr,
-                                                                      Future<RangeResult> readShardBoundaries) {
+                                                                      Future<RangeResult> readShardBoundaries,
+                                                                      Database db) {
 	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 	state RangeResult shardBoundaries = wait(readShardBoundaries);
@@ -155,8 +156,16 @@ ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<
 	// though
 	decodeKeyServersValue(UIDtoTagMap, shardBoundaries[0].value, sourceStorageServers, destStorageServers, true);
 
+	state std::unordered_map<UID, Tag> storageServerToTagMap;
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		storageServerToTagMap.reserve(UIDtoTagMap.size());
+		for (auto& it : UIDtoTagMap) {
+			storageServerToTagMap[decodeServerTagKey(it.key)] = decodeServerTagValue(it.value);
+		}
+	}
+
 	// if shard move in progress, use destination
-	std::vector<UID> storageServers = (!destStorageServers.empty()) ? destStorageServers : sourceStorageServers;
+	state std::vector<UID> storageServers = (!destStorageServers.empty()) ? destStorageServers : sourceStorageServers;
 
 	state std::vector<Future<Optional<Value>>> serverListEntries;
 	serverListEntries.reserve(storageServers.size());
@@ -171,6 +180,18 @@ ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<
 	for (auto& it : serverListValues) {
 		ASSERT(it.present());
 		storageServerInterfaces.push_back(decodeServerListValue(it.get()));
+	}
+
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		for (int j = 0; j < storageServers.size(); j++) {
+			auto iter = storageServerToTagMap.find(storageServers[j]);
+			ASSERT_WE_THINK(iter != storageServerToTagMap.end());
+			// Note: This workload doesn't use the NativeAPI getRange() API for reading
+			// data, so we will need to explicitly populate the (ssid, tag) mapping in
+			// "db" - this is so version vector APIs can correctly fetch the latest commit
+			// versions of storage servers.
+			db->addSSIdTagMapping(storageServerInterfaces[j].id(), iter->second);
+		}
 	}
 
 	return storageServerInterfaces;
@@ -712,7 +733,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 					                 limits,
 					                 Snapshot::True);
 					wait(store(shardBoundaries, readShardBoundaries) &&
-					     store(storageServerInterfaces, loadShardInterfaces(memState, tr, readShardBoundaries)) &&
+					     store(storageServerInterfaces, loadShardInterfaces(memState, tr, readShardBoundaries, db)) &&
 					     store(csVersion, cs.trigger.get(tr)) &&
 					     store(configRange, cs.rangeConfig().getRangeForKey(tr, statsCurrentRound.lastEndKey)));
 

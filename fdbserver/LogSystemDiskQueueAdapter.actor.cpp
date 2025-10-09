@@ -180,8 +180,9 @@ public:
 };
 
 Future<Standalone<StringRef>> LogSystemDiskQueueAdapter::readNext(int bytes) {
-	if (!enableRecovery)
+	if (!enableRecovery) {
 		return Standalone<StringRef>();
+	}
 	return LogSystemDiskQueueAdapterImpl::readNext(this, bytes);
 }
 

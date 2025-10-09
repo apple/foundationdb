@@ -372,10 +372,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			if (isNormalClusterRecoveryError(err)) {
 				TraceEvent(SevWarn, "ClusterRecoveryRetrying", cluster->id).error(err);
 			} else {
-				bool ok = err.code() == error_code_no_more_servers;
-				TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(err);
-				if (!ok)
-					throw err;
+				TraceEvent(SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(err);
+				throw err;
 			}
 			wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
 		}

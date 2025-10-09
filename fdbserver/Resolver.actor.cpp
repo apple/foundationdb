@@ -105,8 +105,9 @@ public:
 
 	// Records non-zero stateBytes for a version.
 	void addVersionBytes(Version commitVersion, int64_t stateBytes) {
-		if (stateBytes > 0)
+		if (stateBytes > 0) {
 			recentStateTransactionSizes.emplace_back(commitVersion, stateBytes);
+		}
 	}
 
 	// Returns the reference to the pair of (shardChanged, stateMutations) for the given version
@@ -124,7 +125,8 @@ private:
 
 struct Resolver : ReferenceCounted<Resolver> {
 	const UID dbgid;
-	const int commitProxyCount, resolverCount;
+	const int commitProxyCount;
+	const int resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
 
@@ -242,6 +244,18 @@ ACTOR Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Ve
 			when(wait(self->checkNeededVersion.onTrigger())) {}
 		}
 	}
+}
+
+// Check if the given set of tags contain any tags other than the log router tags.
+// Used to check if a given "ResolveTransactionBatchRequest" corresponds to an
+// empty commit message or not.
+static bool hasNonLogRouterTags(const std::set<Tag>& allTags) {
+	for (auto& versionTag : allTags) {
+		if (versionTag.locality != tagLocalityLogRouter) {
+			return true;
+		}
+	}
+	return false;
 }
 
 ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
@@ -485,8 +499,12 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
+				// Does the given request correspond to an empty commit message? If so, broadcast it to all tLogs.
+				// NOTE: Ignore log router tags (in "req.writtenTags") while doing this check, because log router
+				// tags get added to all commit messages in HA mode.
+				bool isEmpty = !hasNonLogRouterTags(req.writtenTags);
 				if (req.lastShardMove < self->lastShardMove || shardChanged || req.txnStateTransactions.size() ||
-				    !req.writtenTags.size()) {
+				    isEmpty) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
 					}
@@ -802,8 +820,10 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 ResolverInterface myInterface) {
 	loop {
 		if (db->get().recoveryCount >= recoveryCount &&
-		    std::find(db->get().resolvers.begin(), db->get().resolvers.end(), myInterface) == db->get().resolvers.end())
+		    std::find(db->get().resolvers.begin(), db->get().resolvers.end(), myInterface) ==
+		        db->get().resolvers.end()) {
 			throw worker_removed();
+		}
 		wait(db->onChange());
 	}
 }
