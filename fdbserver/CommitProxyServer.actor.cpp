@@ -1604,6 +1604,17 @@ Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
 	                                      "validateAndProcessTenantAccess");
 }
 
+// Acknowledge transaction state store commits.
+// Note: This acknowledgement will cause the transaction state store's popped version ("poppedUpTo", that's
+// maintained in LogSystemDiskQueueAdapter) to get updated.
+void acknowledgeTransactionStateStoreCommits(CommitBatchContext* self) {
+	for (auto& p : self->storeCommits) {
+		ASSERT(!p.second.isReady());
+		p.first.get().acknowledge.send(Void());
+		ASSERT(p.second.isReady());
+	}
+}
+
 // Compute and apply "metadata" effects of each other proxy's most recent batch
 void applyMetadataEffect(CommitBatchContext* self) {
 	bool initialState = self->isMyFirstBatch;
@@ -1680,11 +1691,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 			self->forceRecovery = false;
 			self->pProxyCommitData->txnStateStore->resyncLog();
 
-			for (auto& p : self->storeCommits) {
-				ASSERT(!p.second.isReady());
-				p.first.get().acknowledge.send(Void());
-				ASSERT(p.second.isReady());
-			}
+			acknowledgeTransactionStateStoreCommits(self);
 			self->storeCommits.clear();
 		}
 	}
@@ -2651,11 +2658,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		}
 
 		// Acknowledge transaction state store commits.
-		for (auto& p : self->storeCommits) {
-			ASSERT(!p.second.isReady());
-			p.first.get().acknowledge.send(Void());
-			ASSERT(p.second.isReady());
-		}
+		acknowledgeTransactionStateStoreCommits(self);
 	}
 
 	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
@@ -2704,11 +2707,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		}
 
 		// Acknowledge transaction state store commits.
-		for (auto& p : self->storeCommits) {
-			ASSERT(!p.second.isReady());
-			p.first.get().acknowledge.send(Void());
-			ASSERT(p.second.isReady());
-		}
+		acknowledgeTransactionStateStoreCommits(self);
 	}
 
 	if (self->commitVersion > pProxyCommitData->committedVersion.get()) {
