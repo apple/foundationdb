@@ -26,6 +26,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/BlobMigratorInterface.h"
 #include "flow/ApiVersion.h"
+#include "flow/Buggify.h"
 #include "flow/CodeProbe.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
@@ -2194,6 +2195,14 @@ void cleanupStorageDisks(Reference<AsyncVar<ServerDBInfo>> dbInfo,
 	}
 }
 
+bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
+	const bool skip = allowDropInSim && g_network->isSimulated() && BUGGIFY_WITH_PROB(/* 1% */ 0.01);
+	if (skip) {
+		TraceEvent("SkipInitRspInSimTrue").detail("WorkerInterfID", workerInterfID);
+	}
+	return skip;
+}
+
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
@@ -3367,7 +3376,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				errorForwarders.add(
 				    zombie(recruited,
 				           forwardError(errors, Role::LOG_ROUTER, recruited.id(), logRouter(recruited, req, dbInfo))));
-				req.reply.send(recruited);
+
+				if (!skipInitRspInSim(interf.id(), req.allowDropInSim)) {
+					req.reply.send(recruited);
+				}
 			}
 			when(CoordinationPingMessage m = waitNext(interf.coordinationPing.getFuture())) {
 				TraceEvent("CoordinationPing", interf.id())

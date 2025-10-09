@@ -674,6 +674,9 @@ struct InitializeLogRouterRequest {
 	// information from the logSystem).
 	Optional<std::map<uint8_t, std::vector<uint16_t>>> knownLockedTLogIds =
 	    Optional<std::map<uint8_t, std::vector<uint16_t>>>();
+	bool allowDropInSim; // Simulation-only field for fault injection testing. When true, allows the worker to
+	                     // selectively drop responses to initialization messages to test recovery behavior under
+	                     // partial failures. Must only be true in simulation.
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -686,7 +689,8 @@ struct InitializeLogRouterRequest {
 		           locality,
 		           reply,
 		           recoverAt,
-		           knownLockedTLogIds);
+		           knownLockedTLogIds,
+		           allowDropInSim);
 	}
 };
 

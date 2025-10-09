@@ -142,7 +142,9 @@ public:
 		DatabaseConfiguration config; // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
-		int unfinishedRecoveries;
+		int unfinishedRecoveries; // Counter tracking incomplete recovery attempts. Incremented when a new
+		                          // sequencer/master is recruited, reset to 0 when recovery reaches fully_recovered.
+		                          // A high value indicates multiple recovery attempts that failed to complete.
 		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 		Future<Void> clientCounter;

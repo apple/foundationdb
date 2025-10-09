@@ -863,6 +863,15 @@ public:
 	bool CC_GRAY_FAILURE_STATUS_JSON; // When enabled, returns gray failure information in machine readable status json.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
+	double CC_RECOVERY_INIT_REQ_TIMEOUT; // Base timeout (seconds) for transaction system initialization during
+	                                     // recovery. Only applies to initializing_transaction_servers phase.
+	double CC_RECOVERY_INIT_REQ_GROWTH_FACTOR; // Base of the exponential backoff calculation. The timeout is calculated
+	                                           // as: base_timeout * (growth_factor ^ unfinished_recoveries). Must be >
+	                                           // 1 and <= 10 to prevent overflow.
+	double CC_RECOVERY_INIT_REQ_MAX_TIMEOUT; // Maximum timeout (seconds) for transaction system initialization. Only
+	                                         // applies to initializing_transaction_servers phase.
+	int CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES; // Maximum unfinished recoveries after which transaction system
+	                                                    // intilization timeouts above do not apply.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)

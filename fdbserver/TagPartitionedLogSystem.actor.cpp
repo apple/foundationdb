@@ -2788,6 +2788,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 			// Recruit log routers for old generations of the primary locality
 			if (tLogs->locality == locality) {
 				logRouterInitializationReplies.emplace_back();
+				TraceEvent("LogRouterInitReqSent1")
+				    .detail("Locality", locality)
+				    .detail("LogRouterTags", self->logRouterTags);
 				for (int i = 0; i < self->logRouterTags; i++) {
 					InitializeLogRouterRequest req;
 					req.recoveryCount = recoveryCount;
@@ -2798,6 +2801,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					req.locality = locality;
 					req.recoverAt = self->recoverAt.get();
 					req.knownLockedTLogIds = self->knownLockedTLogIds;
+					req.allowDropInSim = !forRemote;
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -2839,6 +2843,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 			// Recruit log routers for old generations of the primary locality
 			if (tLogs->locality == locality) {
 				logRouterInitializationReplies.emplace_back();
+				TraceEvent("LogRouterInitReqSent2")
+				    .detail("Locality", locality)
+				    .detail("LogRouterTags", old.logRouterTags);
 				for (int i = 0; i < old.logRouterTags; i++) {
 					InitializeLogRouterRequest req;
 					req.recoveryCount = recoveryCount;
@@ -2848,6 +2855,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					req.tLogPolicy = tLogPolicy;
 					req.locality = locality;
 					req.recoverAt = old.recoverAt;
+					req.allowDropInSim = !forRemote;
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -2860,7 +2868,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 		}
 	}
 
-	wait(waitForAll(allReplies));
+	wait(traceAfter(waitForAll(allReplies), "AllLogRouterRepliesReceived"));
 
 	int nextReplies = 0;
 	lastStart = std::numeric_limits<Version>::max();
@@ -2997,13 +3005,14 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		                                                                     logSet->startVersion,
 		                                                                     localities,
 		                                                                     logSet->tLogPolicy,
-		                                                                     true);
+		                                                                     /* forRemote */ true);
 	}
 
 	state std::vector<Future<TLogInterface>> logRouterInitializationReplies;
 	const Version startVersion = oldLogSystem->logRouterTags == 0
 	                                 ? oldLogSystem->recoverAt.get() + 1
 	                                 : std::max(self->tLogs[0]->startVersion, logSet->startVersion);
+	TraceEvent("LogRouterInitReqSent3").detail("Locality", remoteLocality).detail("LogRouterTags", self->logRouterTags);
 	for (int i = 0; i < self->logRouterTags; i++) {
 		InitializeLogRouterRequest req;
 		req.recoveryCount = recoveryCount;
@@ -3012,6 +3021,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		req.tLogLocalities = localities;
 		req.tLogPolicy = logSet->tLogPolicy;
 		req.locality = remoteLocality;
+		req.allowDropInSim = false;
 		TraceEvent("RemoteTLogRouterReplies", self->dbgid)
 		    .detail("WorkerID", remoteWorkers.logRouters[i % remoteWorkers.logRouters.size()].id());
 		logRouterInitializationReplies.push_back(transformErrors(
@@ -3090,7 +3100,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 
 	remoteTLogInitializationReplies.reserve(remoteWorkers.remoteTLogs.size());
 	for (int i = 0; i < remoteWorkers.remoteTLogs.size(); i++) {
-		TraceEvent("RemoteTLogReplies", self->dbgid).detail("WorkerID", remoteWorkers.remoteTLogs[i].id());
+		TraceEvent("RemoteTLogInitReqSent", self->dbgid).detail("WorkerID", remoteWorkers.remoteTLogs[i].id());
 		remoteTLogInitializationReplies.push_back(transformErrors(
 		    throwErrorOr(remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor(
 		        remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -3289,7 +3299,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		                                                                     logSystem->tLogs[0]->startVersion,
 		                                                                     localities,
 		                                                                     logSystem->tLogs[0]->tLogPolicy,
-		                                                                     false);
+		                                                                     /* forRemote */ false);
 		if (oldLogSystem->knownCommittedVersion - logSystem->tLogs[0]->startVersion >
 		    SERVER_KNOBS->MAX_RECOVERY_VERSIONS) {
 			// make sure we can recover in the other DC.
@@ -3380,7 +3390,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 
 	primaryTLogReplies.reserve(recr.tLogs.size());
 	for (int i = 0; i < recr.tLogs.size(); i++) {
-		TraceEvent("PrimaryTLogReqSent", logSystem->getDebugID()).detail("WorkerID", recr.tLogs[i].id());
+		TraceEvent("PrimaryTLogInitReqSent", logSystem->getDebugID()).detail("WorkerID", recr.tLogs[i].id());
 		primaryTLogReplies.push_back(transformErrors(
 		    throwErrorOr(recr.tLogs[i].tLog.getReplyUnlessFailedFor(
 		        reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -3449,7 +3459,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 
 		satelliteInitializationReplies.reserve(recr.satelliteTLogs.size());
 		for (int i = 0; i < recr.satelliteTLogs.size(); i++) {
-			TraceEvent("PrimarySatelliteTLogReplies", logSystem->getDebugID())
+			TraceEvent("PrimarySatelliteTLogInitReqSent", logSystem->getDebugID())
 			    .detail("WorkerID", recr.satelliteTLogs[i].id());
 			satelliteInitializationReplies.push_back(transformErrors(
 			    throwErrorOr(recr.satelliteTLogs[i].tLog.getReplyUnlessFailedFor(
