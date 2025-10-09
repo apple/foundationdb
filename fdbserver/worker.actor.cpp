@@ -583,24 +583,23 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 
 // Register the worker interf to cluster controller (cc) and
 // re-register the worker when key roles interface, e.g., cc, dd, ratekeeper, change.
-ACTOR Future<Void> registrationClient(
-    Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-    WorkerInterface interf,
-    Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-    ProcessClass initialClass,
-    Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
-    Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
-    Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
-    Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
-    Reference<AsyncVar<bool> const> degraded,
-    Reference<IClusterConnectionRecord> connRecord,
-    Reference<AsyncVar<std::set<std::string>> const> issues,
-    Reference<ConfigNode> configNode,
-    Reference<LocalConfiguration> localConfig,
-    ConfigBroadcastInterface configBroadcastInterface,
-    Reference<AsyncVar<ServerDBInfo>> dbInfo,
-    Promise<Void> recoveredDiskFiles,
-    Reference<AsyncVar<Optional<UID>>> clusterId) {
+ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                                      WorkerInterface interf,
+                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                                      ProcessClass initialClass,
+                                      Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
+                                      Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+                                      Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
+                                      Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
+                                      Reference<AsyncVar<bool> const> degraded,
+                                      Reference<IClusterConnectionRecord> connRecord,
+                                      Reference<AsyncVar<std::set<std::string>> const> issues,
+                                      Reference<ConfigNode> configNode,
+                                      Reference<LocalConfiguration> localConfig,
+                                      ConfigBroadcastInterface configBroadcastInterface,
+                                      Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                      Promise<Void> recoveredDiskFiles,
+                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -623,22 +622,22 @@ ACTOR Future<Void> registrationClient(
 			incorrectTime = Optional<double>();
 		}
 
-		RegisterWorkerRequest request(
-		    interf,
-		    initialClass,
-		    processClass,
-		    asyncPriorityInfo->get(),
-		    requestGeneration++,
-		    ddInterf->get(),
-		    rkInterf->get(),
-		    ekpInterf->get(),
-		    csInterf->get(),
-		    degraded->get(),
-		    localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
-		    localConfig.isValid() ? localConfig->configClassSet() : Optional<ConfigClassSet>(),
-		    recoveredDiskFiles.isSet(),
-		    configBroadcastInterface,
-		    clusterId->get());
+		RegisterWorkerRequest request(interf,
+		                              initialClass,
+		                              processClass,
+		                              asyncPriorityInfo->get(),
+		                              requestGeneration++,
+		                              ddInterf->get(),
+		                              rkInterf->get(),
+		                              ekpInterf->get(),
+		                              csInterf->get(),
+		                              degraded->get(),
+		                              localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
+		                              localConfig.isValid() ? localConfig->configClassSet()
+		                                                    : Optional<ConfigClassSet>(),
+		                              recoveredDiskFiles.isSet(),
+		                              configBroadcastInterface,
+		                              clusterId->get());
 
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);

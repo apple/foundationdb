@@ -81,9 +81,8 @@ public:
 	                       bool transactional,
 	                       bool restartOnTimeout)
 	  : executor(executor), startFct(startFct), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
-	    txState(TxState::IN_PROGRESS), commitCalled(false), tenantName(tenantName),
-	    transactional(transactional), restartOnTimeout(restartOnTimeout),
-	    selfConflictingKey(Random::get().randomByteStringLowerCase(8, 8)) {
+	    txState(TxState::IN_PROGRESS), commitCalled(false), tenantName(tenantName), transactional(transactional),
+	    restartOnTimeout(restartOnTimeout), selfConflictingKey(Random::get().randomByteStringLowerCase(8, 8)) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
 		if (databaseCreateErrorInjected) {

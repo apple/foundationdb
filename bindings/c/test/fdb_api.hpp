@@ -368,7 +368,6 @@ public:
 			throwError("ERROR: result_get_keyvalue_array(): ", err);
 		return ret;
 	}
-
 };
 
 class Future {
@@ -632,7 +631,7 @@ public:
 		                                         snapshot,
 		                                         reverse);
 	}
-	
+
 	TypedFuture<future_var::None> watch(KeyRef key) {
 		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key));
 	}
@@ -681,7 +680,6 @@ public:
 	virtual ~IDatabaseOps() = default;
 
 	virtual Transaction createTransaction() = 0;
-
 };
 
 class Tenant final : public IDatabaseOps {
@@ -780,14 +778,13 @@ public:
 		return native::fdb_tenant_flush_blob_range(
 		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), compact, version);
 	}
-#endif	
+#endif
 
 	TypedFuture<future_var::Int64> getId() {
 		if (!tenant)
 			throw std::runtime_error("getId() from null tenant");
 		return native::fdb_tenant_get_id(tenant.get());
 	}
-
 };
 
 class Database : public IDatabaseOps {
@@ -914,7 +911,7 @@ public:
 		return native::fdb_database_wait_purge_granules_complete(db.get(), purgeKey.data(), intSize(purgeKey));
 	}
 #endif
-	
+
 	TypedFuture<future_var::KeyRef> getClientStatus() { return native::fdb_database_get_client_status(db.get()); }
 };
 

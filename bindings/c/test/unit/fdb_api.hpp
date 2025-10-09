@@ -216,7 +216,6 @@ public:
 	                                   int uid_length,
 	                                   const uint8_t* snap_command,
 	                                   int snap_command_length);
-
 };
 
 class Tenant final {
@@ -349,7 +348,6 @@ public:
 
 	// Wrapper around fdb_transaction_add_conflict_range.
 	fdb_error_t add_conflict_range(std::string_view begin_key, std::string_view end_key, FDBConflictRangeType type);
-
 
 private:
 	FDBTransaction* tr_;

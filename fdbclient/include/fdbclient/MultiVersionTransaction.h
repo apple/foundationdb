@@ -141,7 +141,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
 
-
 	FDBFuture* (*tenantGetId)(FDBTenant* tenant);
 	void (*tenantDestroy)(FDBTenant* tenant);
 

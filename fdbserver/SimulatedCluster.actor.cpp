@@ -1706,7 +1706,7 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 	// We want storage servers are selected by simulation tests with roughly equal chance
 	// If encryptMode is not specified explicitly, with high probability, we disable encryption
 	// TODO(gglass): why don't we just always disable encryption at rest mode?
-	//if (testConfig.encryptModes.empty() &&
+	// if (testConfig.encryptModes.empty() &&
 	// 	    deterministicRandom()->random01() < SERVER_KNOBS->DISABLED_ENCRYPTION_PROBABILITY_SIM) {
 	EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
 	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
@@ -1773,7 +1773,7 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 	           "Enabled domain-aware encryption in simulation",
 	           probe::decoration::rare);
 	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
-#endif	
+#endif
 }
 
 namespace {

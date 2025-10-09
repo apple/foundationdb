@@ -208,7 +208,7 @@ boost::optional<std::string> AdminServer::createTenant(fdb::Database db, int id_
 			}
 		}
 		logr.info("blobbify_tenants [{}-{}) OK ({:.3f}s)", id_begin, id_end, toDoubleSeconds(stopwatch.stop().diff()));
-#endif		
+#endif
 		return {};
 	} catch (const std::exception& e) {
 		return std::string(e.what());

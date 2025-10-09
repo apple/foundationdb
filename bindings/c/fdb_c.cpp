@@ -496,7 +496,6 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db
 	                    .extractPtr());
 }
 
-
 extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_client_status(FDBDatabase* db) {
 	return (FDBFuture*)(DB(db)->getClientStatus().extractPtr());
 }
@@ -504,7 +503,6 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_client_statu
 extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {
 	CATCH_AND_RETURN(*out_transaction = (FDBTransaction*)TENANT(tenant)->createTransaction().extractPtr(););
 }
-
 
 extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_get_id(FDBTenant* tenant) {
 	return (FDBFuture*)(TENANT(tenant)->getId().extractPtr());

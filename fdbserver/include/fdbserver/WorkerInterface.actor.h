@@ -179,7 +179,7 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 	bool hasMessage() const {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
-			/* recruitBlobWorker.getFuture().isReady() || */ registerWorker.getFuture().isReady() ||
+		       /* recruitBlobWorker.getFuture().isReady() || */ registerWorker.getFuture().isReady() ||
 		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
 		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
 		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
@@ -442,12 +442,12 @@ struct RegisterWorkerRequest {
 	                      Optional<UID> clusterId)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf),
-		// blobManagerInterf(bmInterf),
+	    // blobManagerInterf(bmInterf),
 	    // blobMigratorInterf(mgInterf),
-		encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf),
-	    degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet),
-	    requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles),
-	    configBroadcastInterface(configBroadcastInterface), clusterId(clusterId) {}
+	    encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf), degraded(degraded),
+	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet), requestDbInfo(false),
+	    recoveredDiskFiles(recoveredDiskFiles), configBroadcastInterface(configBroadcastInterface),
+	    clusterId(clusterId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

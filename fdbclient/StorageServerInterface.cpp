@@ -423,7 +423,6 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
-
 // only record metrics for data reads
 
 template <>

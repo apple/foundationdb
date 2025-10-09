@@ -114,9 +114,10 @@ Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::strin
 	}
 
 	// set random refresh + expire time
-	bool doExpire = (true /* CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA */) ? domainId % 2 : deterministicRandom()->coinflip();
+	bool doExpire =
+	    (true /* CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA */) ? domainId % 2 : deterministicRandom()->coinflip();
 	if (doExpire) {
-		if (true /* CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA */ ) {
+		if (true /* CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA */) {
 			metadata.refreshAt = now() + 10 /* CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL */;
 			metadata.expireAt = metadata.refreshAt + 0.2 * 10 /* CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL */;
 		}
