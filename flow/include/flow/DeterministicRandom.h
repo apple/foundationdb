@@ -66,6 +66,7 @@ public:
 	char randomAlphaNumeric() override;
 	std::string randomAlphaNumeric(int length) override;
 	void randomBytes(uint8_t* buf, int length) override;
+	bool truePercent(const int percent) override;
 	uint64_t peek() const override;
 	void addref() override;
 	void delref() override;
