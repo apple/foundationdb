@@ -2330,7 +2330,7 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
 	bool nonAvailableTLogsCompletePolicy = std::get<2>(logGroupResults);
 	Version prevVersion = maxKCV;
 	for (auto const& [version, tLogs] : versionAllTLogs) {
-		if (!(prevVersion == maxKCV || prevVersion == prevVersionMap[version])) {
+		if (prevVersion != prevVersionMap[version]) {
 			break;
 		}
 		// This version is not recoverable if there is a log server (LS) such that:
