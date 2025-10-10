@@ -1843,14 +1843,25 @@ Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringR
 		throw restore_unsupported_file_version();
 
 	// Read begin key, if this fails then block was invalid.
-	uint32_t kLen = reader.consumeNetworkUInt32();
-	const uint8_t* k = reader.consume(kLen);
-	results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+	uint32_t beginKeyLen = reader.consumeNetworkUInt32();
+	const uint8_t* beginKey = reader.consume(beginKeyLen);
+	results.push_back(results.arena(), KeyValueRef(KeyRef(beginKey, beginKeyLen), ValueRef()));
 
 	// Read kv pairs and end key
 	while (1) {
 		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
 		if (reader.eof() || *reader.rptr == 0xFF) {
+			break;
+		}
+
+		// Read a key, which must exist or the block is invalid
+		uint32_t kLen = reader.consumeNetworkUInt32();
+		const uint8_t* k = reader.consume(kLen);
+
+		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
+		if (reader.eof() || *reader.rptr == 0xFF) {
+			// The last block in the file, will have Read End key.
+			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
 			break;
 		}
 
@@ -4179,6 +4190,9 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				config.startMutationLogs(tr, backupRange, destUidValue);
 			}
 		}
+
+		Reference<IBackupContainer> bc = wait(config.backupContainer().getOrThrow(tr));
+		wait(bc->writeEncryptionMetadata());
 
 		config.stateEnum().set(tr, EBackupState::STATE_RUNNING);
 
@@ -7734,9 +7748,19 @@ public:
 			throw restore_error();
 		}
 
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString(), proxy, {});
+		state Reference<IBackupContainer> bc =
+		    IBackupContainer::openContainer(url.toString(), proxy, encryptionKeyFileName);
 
 		state BackupDescription desc = wait(bc->describeBackup(true));
+
+		if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
+			fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
+			throw restore_error();
+		} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
+			fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
+			throw restore_error();
+		}
+
 		if (cxOrig.present()) {
 			wait(desc.resolveVersionTimes(cxOrig.get()));
 		}
@@ -7917,6 +7941,7 @@ public:
 		}
 
 		state Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
+
 		bc = fileBackup::getBackupContainerWithProxy(bc);
 
 		if (fastRestore) {

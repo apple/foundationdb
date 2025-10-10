@@ -58,9 +58,14 @@ public:
 		state Standalone<StringRef> buf = makeString(size);
 		wait(success(f->read(mutateString(buf), buf.size(), 0)));
 		json_spirit::mValue json;
-		json_spirit::read_string(buf.toString(), json);
-		JSONDoc doc(json);
+		if (!json_spirit::read_string(buf.toString(), json)) {
+			fprintf(stderr,
+			        "ERROR: Failed to read data. Verify that backup and restore encryption keys match (if provided) or "
+			        "the data is corrupted.\n");
+			throw restore_error();
+		}
 
+		JSONDoc doc(json);
 		Version v;
 		if (!doc.tryGet("beginVersion", v) || v != snapshot.beginVersion)
 			throw restore_corrupted_data();
@@ -521,11 +526,13 @@ public:
 		state Optional<Version> metaExpiredEnd;
 		state Optional<Version> metaUnreliableEnd;
 		state Optional<Version> metaLogType;
+		state Optional<Version> fileLevelEncryption;
 
 		std::vector<Future<Void>> metaReads;
 		metaReads.push_back(store(metaExpiredEnd, bc->expiredEndVersion().get()));
 		metaReads.push_back(store(metaUnreliableEnd, bc->unreliableEndVersion().get()));
 		metaReads.push_back(store(metaLogType, bc->logType().get()));
+		metaReads.push_back(store(fileLevelEncryption, bc->fileLevelEncryption().get()));
 
 		// Only read log begin/end versions if not doing a deep scan, otherwise scan files and recalculate them.
 		if (!deepScan) {
@@ -621,6 +628,12 @@ public:
 		} else {
 			desc.partitioned =
 			    metaLogType.present() && metaLogType.get() == BackupContainerFileSystemImpl::PARTITIONED_MUTATION_LOG;
+		}
+
+		if (fileLevelEncryption.present() && fileLevelEncryption.get() != 0) {
+			desc.fileLevelEncryption = true;
+		} else {
+			desc.fileLevelEncryption = false;
 		}
 
 		// List logs in version order so log continuity can be analyzed
@@ -1267,6 +1280,12 @@ public:
 	}
 
 	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
+		if (fileExists(filename)) {
+			// Key file already exists, don't overwrite it -> only for testing between backup and restore workloads to
+			// share the key.
+			TraceEvent("EncryptionKeyFileExists").detail("FileName", filename);
+			return Void();
+		}
 		state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
 		    filename,
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
@@ -1282,8 +1301,10 @@ public:
 		state Reference<IAsyncFile> keyFile;
 		state StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		try {
-			Reference<IAsyncFile> _keyFile =
-			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
+			Reference<IAsyncFile> _keyFile = wait(IAsyncFileSystem::filesystem()->open(
+			    encryptionKeyFileName,
+			    IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED,
+			    0400));
 			keyFile = _keyFile;
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
@@ -1299,6 +1320,15 @@ public:
 			throw invalid_encryption_key_file();
 		}
 		ASSERT_EQ(bytesRead, cipherKey->size());
+		return Void();
+	}
+
+	ACTOR static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc) {
+		Optional<Version> existingEncryptionMetadata = wait(bc->fileLevelEncryption().get());
+
+		if (!existingEncryptionMetadata.present()) {
+			wait(bc->fileLevelEncryption().set(bc->encryptionKeyFileName.present() ? 1 : 0));
+		}
 		return Void();
 	}
 
@@ -1486,6 +1516,11 @@ Future<Void> BackupContainerFileSystem::expireData(Version expireEndVersion,
 	    Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, progress, restorableBeginVersion);
 }
 
+Future<Void> BackupContainerFileSystem::writeEncryptionMetadata() {
+	return BackupContainerFileSystemImpl::writeEncryptionMetadataIfNotExists(
+	    Reference<BackupContainerFileSystem>::addRef(this));
+}
+
 ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
                                                            RangeFile file,
                                                            Database cx) {
@@ -1612,6 +1647,10 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::unreliable
 BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() {
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
+BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::fileLevelEncryption() {
+	return { Reference<BackupContainerFileSystem>::addRef(this), "file_level_encryption" };
+}
+
 bool BackupContainerFileSystem::usesEncryption() const {
 	return encryptionSetupFuture.isValid();
 }

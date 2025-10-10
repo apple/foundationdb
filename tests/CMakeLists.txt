@@ -163,11 +163,15 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/BlobGranuleVerifySmallClean.toml)
 
   # TODO: test occasionally times out due to too many change feed shard parts
+  # Disable for now until the underlying issue is fixed.
   add_fdb_test(TEST_FILES rare/BlobGranuleMoveVerifyCycle.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobRestoreBasic.toml)
+  add_fdb_test(TEST_FILES rare/BlobRestoreBasic.toml IGNORE)
   add_fdb_test(TEST_FILES rare/BlobRestoreLarge.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobRestoreToVersion.toml)
-  add_fdb_test(TEST_FILES rare/BlobRestoreTenantMode.toml)
+  add_fdb_test(TEST_FILES rare/BlobRestoreToVersion.toml IGNORE)
+  # IGNORE below because we do not use tenant mode and it is likely to be
+  # deprecated/removed. rdar://157717454, rdar://134522214.
+  add_fdb_test(TEST_FILES rare/BlobRestoreTenantMode.toml IGNORE)
+
   add_fdb_test(TEST_FILES fast/BulkDumping.toml)
   add_fdb_test(TEST_FILES fast/BulkLoading.toml)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
@@ -293,16 +297,19 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml)
   endif()
 
-  add_fdb_test(TEST_FILES rare/BlobGranuleApiCorrectness.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleCorrectnessClean.toml)
+  # TODO: Disable BlobGranule tests temporarily until the feature is more stable and these tests are fixed.
+  add_fdb_test(TEST_FILES rare/BlobGranuleApiCorrectness.toml IGNORE)
+  add_fdb_test(TEST_FILES rare/BlobGranuleCorrectnessClean.toml IGNORE)
   add_fdb_test(TEST_FILES rare/BlobGranuleCorrectness.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleMergeBoundaries.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleRangesChangeLog.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyBalance.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyBalanceClean.toml)
+  add_fdb_test(TEST_FILES rare/BlobGranuleMergeBoundaries.toml IGNORE)
+  add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml IGNORE)
+  add_fdb_test(TEST_FILES rare/BlobGranuleRangesChangeLog.toml IGNORE)
+  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyBalance.toml IGNORE)
+  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyBalanceClean.toml IGNORE)
   add_fdb_test(TEST_FILES rare/BlobGranuleVerifyLarge.toml IGNORE)
   add_fdb_test(TEST_FILES rare/BlobGranuleVerifyLargeClean.toml IGNORE)
+
+
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogTlog.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)

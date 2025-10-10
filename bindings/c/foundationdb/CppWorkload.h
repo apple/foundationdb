@@ -64,6 +64,7 @@ public:
 	virtual int clientId() const = 0;
 	virtual int clientCount() const = 0;
 	virtual int64_t sharedRandomNumber() const = 0;
+	virtual FDBFuture* delay(double seconds) const = 0;
 };
 
 struct FDBPromise {

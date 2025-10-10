@@ -33,6 +33,7 @@ waitForQuiescence = false
     blobManifestUrl = 'file://simfdb/fdbblob/manifest'
     submitOnly = true
     waitForBackup = true
+    encrypted = false
         
 [[test]]
 testTitle = 'WriteTest'
@@ -68,6 +69,7 @@ waitForQuiescence = false
     tag = 'default'
     stopBackup = true
     waitForBackup = true
+    encrypted = false
 
 [[test]]
 testTitle = 'BlobRestore'
