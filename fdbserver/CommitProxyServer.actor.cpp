@@ -1621,6 +1621,17 @@ Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
 	                                      "validateAndProcessTenantAccess");
 }
 
+// Acknowledge transaction state store commits.
+// Note: This acknowledgement will cause the transaction state store's popped version ("poppedUpTo", that's
+// maintained in LogSystemDiskQueueAdapter) to get updated.
+void acknowledgeTransactionStateStoreCommits(CommitBatchContext* self) {
+	for (auto& p : self->storeCommits) {
+		ASSERT(!p.second.isReady());
+		p.first.get().acknowledge.send(Void());
+		ASSERT(p.second.isReady());
+	}
+}
+
 // Compute and apply "metadata" effects of each other proxy's most recent batch
 void applyMetadataEffect(CommitBatchContext* self) {
 	bool initialState = self->isMyFirstBatch;
@@ -1688,7 +1699,6 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				self->forceRecovery = false;
 			}
 		}
-
 		// These changes to txnStateStore will be committed by the other proxy, so we simply discard the commit message
 		auto fcm = self->pProxyCommitData->logAdapter->getCommitMessage();
 		self->storeCommits.emplace_back(fcm, self->pProxyCommitData->txnStateStore->commit());
@@ -1698,11 +1708,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 			self->forceRecovery = false;
 			self->pProxyCommitData->txnStateStore->resyncLog();
 
-			for (auto& p : self->storeCommits) {
-				ASSERT(!p.second.isReady());
-				p.first.get().acknowledge.send(Void());
-				ASSERT(p.second.isReady());
-			}
+			acknowledgeTransactionStateStoreCommits(self);
 			self->storeCommits.clear();
 		}
 	}
@@ -2659,13 +2665,17 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	state const Optional<UID>& debugID = self->debugID;
 
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-		// Do not advance min committed version at this point when version vector is enabled, as we can treat the
-		// current transaction as committed only after receiving a reply from the sequencer (at which point we can
-		// guarantee that all the versions prior to the current version have also been made durable).
+		// Version vector/unicast is disabled: Logging completed, so the current version (and all versions prior to
+		// the current versions) can be treated as commited.
+
+		// Advance min committed version.
 		if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
 			//TraceEvent("CPAdvanceMinVersion", self->pProxyCommitData->dbgid).detail("PrvVersion", self->prevVersion).detail("CommitVersion", self->commitVersion).detail("Master", self->pProxyCommitData->master.id().toString()).detail("TxSize", self->trs.size());
 			debug_advanceMinCommittedVersion(UID(), self->commitVersion);
 		}
+
+		// Acknowledge transaction state store commits.
+		acknowledgeTransactionStateStoreCommits(self);
 	}
 
 	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
@@ -2673,12 +2683,6 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	//     .detail("Version", self->commitVersion);
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AfterLogPush");
-
-	for (auto& p : self->storeCommits) {
-		ASSERT(!p.second.isReady());
-		p.first.get().acknowledge.send(Void());
-		ASSERT(p.second.isReady());
-	}
 
 	// After logging finishes, we report the commit version to master so that every other proxy can get the most
 	// up-to-date live committed version. We also maintain the invariant that master's committed version >=
@@ -2710,12 +2714,17 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	}
 
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-		// We have received a reply from the sequencer, so all versions prior to the current version have been
-		// made durable and we can consider the current transaction to be committed - advance min commit version now.
+		// Version vector/unicast is enabled: Received a reply from the sequencer, so we can treat the
+		// current version (and all versions prior to the current version) as committed.
+
+		// Advance min committed version now.
 		if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
 			//TraceEvent("CPAdvanceMinVersion", self->pProxyCommitData->dbgid).detail("PrvVersion", self->prevVersion).detail("CommitVersion", self->commitVersion).detail("Master", self->pProxyCommitData->master.id().toString()).detail("TxSize", self->trs.size());
 			debug_advanceMinCommittedVersion(UID(), self->commitVersion);
 		}
+
+		// Acknowledge transaction state store commits.
+		acknowledgeTransactionStateStoreCommits(self);
 	}
 
 	if (self->commitVersion > pProxyCommitData->committedVersion.get()) {
