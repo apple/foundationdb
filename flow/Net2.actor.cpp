@@ -22,12 +22,14 @@
 #include "boost/asio/ip/address.hpp"
 #include "boost/system/system_error.hpp"
 #include "flow/Arena.h"
+#include "flow/Buggify.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
 #include <algorithm>
+#include <cstdio>
 #include <memory>
 #include <string_view>
 #ifndef BOOST_SYSTEM_NO_LIB
@@ -846,8 +848,40 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 	void action(Handshake& h) {
 		try {
 			h.socket.next_layer().non_blocking(false, h.err);
+
+			timeval timeout;
+			timeout.tv_sec = 2;
+			timeout.tv_usec = 0;
+			int nativeSock = h.socket.next_layer().native_handle();
+			setsockopt(nativeSock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+			setsockopt(nativeSock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+
 			if (!h.err.failed()) {
+				if (h.type == ssl_socket::handshake_type::client) {
+					printf("client handshake start\n");
+				} else {
+					printf("server handshake start\n");
+				}
 				h.socket.handshake(h.type, h.err);
+				if (h.type == ssl_socket::handshake_type::client) {
+					printf("client handshake end\n");
+				} else {
+					printf("server handshake end\n");
+				}
+				timeval timeoutZero;
+				timeoutZero.tv_sec = 0;
+				timeoutZero.tv_usec = 0;
+				int nativeSock = h.socket.next_layer().native_handle();
+				setsockopt(nativeSock,
+				           SOL_SOCKET,
+				           SO_RCVTIMEO,
+				           reinterpret_cast<const char*>(&timeoutZero),
+				           sizeof(timeoutZero));
+				setsockopt(nativeSock,
+				           SOL_SOCKET,
+				           SO_SNDTIMEO,
+				           reinterpret_cast<const char*>(&timeoutZero),
+				           sizeof(timeoutZero));
 			}
 			if (!h.err.failed()) {
 				h.socket.next_layer().non_blocking(true, h.err);
@@ -1028,9 +1062,11 @@ public:
 			}
 			wait(onHandshook);
 			wait(delay(0, TaskPriority::Handshake));
+			printf("server handshake success internal\n");
 			connected.send(Void());
 		} catch (...) {
 			self->closeSocket();
+			printf("server handshake error internal\n");
 			connected.sendError(connection_failed());
 		}
 	}
@@ -1063,7 +1099,6 @@ public:
 		static SimpleCounter<int64_t>* countServerTLSHandshakeLocked =
 		    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakeLocked");
 		countServerTLSHandshakeLocked->increment(1);
-
 		Promise<Void> connected;
 		doAcceptHandshake(self, connected);
 		try {
@@ -1072,12 +1107,17 @@ public:
 					static SimpleCounter<int64_t>* countServerTLSHandshakesSucceed =
 					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesSucceed");
 					countServerTLSHandshakesSucceed->increment(1);
+					printf("server handshake done\n");
 					return Void();
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
-					static SimpleCounter<int64_t>* countServerTLSHandshakesTimedout =
-					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesTimedout");
-					countServerTLSHandshakesTimedout->increment(1);
+					static SimpleCounter<int64_t>* countServerTLSHandshakesSucceed =
+					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ServerTLSHandshakesSucceed");
+					countServerTLSHandshakesSucceed->increment(1);
+					TraceEvent("N2_AcceptHandshakeTimeout", self->id)
+					    .suppressFor(1.0)
+					    .detail("PeerAddress", self->getPeerAddress());
+					printf("server handshake timeout\n");
 					throw connection_failed();
 				}
 			}
@@ -1138,6 +1178,10 @@ public:
 				handshake->setPeerAddr(self->getPeerAddress());
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
+				printf("main thread sleep\n");
+				g_network->stop();
+				threadSleep(10.0);
+				printf("main thread awake\n");
 			} else {
 				// Otherwise use flow network thread
 				static SimpleCounter<int64_t>* countClientTLSHandshakesOnMainThread =
@@ -1147,6 +1191,10 @@ public:
 				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
+				printf("main thread sleep\n");
+				g_network->stop();
+				threadSleep(10.0);
+				printf("main thread awake\n");
 			}
 			wait(onHandshook);
 			wait(delay(0, TaskPriority::Handshake));
@@ -1164,7 +1212,7 @@ public:
 		static SimpleCounter<int64_t>* countClientTLSHandshakeLocked =
 		    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakeLocked");
 		countClientTLSHandshakeLocked->increment(1);
-
+		printf("client handshake locked\n");
 		Promise<Void> connected;
 		doConnectHandshake(self, connected);
 		try {
@@ -1173,12 +1221,17 @@ public:
 					static SimpleCounter<int64_t>* countClientTLSHandshakesSucceed =
 					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesSucceed");
 					countClientTLSHandshakesSucceed->increment(1);
+					printf("client handshake done\n");
 					return Void();
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
 					static SimpleCounter<int64_t>* countClientTLSHandshakesTimedout =
 					    SimpleCounter<int64_t>::makeCounter("/Net2/TLS/ClientTLSHandshakesTimedout");
 					countClientTLSHandshakesTimedout->increment(1);
+					TraceEvent("N2_ConnectHandshakeTimeout", self->id)
+					    .suppressFor(1.0)
+					    .detail("PeerAddress", self->getPeerAddress());
+					printf("client handshake timeout\n");
 					throw connection_failed();
 				}
 			}
@@ -1309,10 +1362,13 @@ private:
 	void closeSocket() {
 		boost::system::error_code cancelError;
 		socket.cancel(cancelError);
+		printf("Socket cancelled\n");
 		boost::system::error_code closeError;
 		socket.close(closeError);
+		printf("Socket closed\n");
 		boost::system::error_code shutdownError;
 		ssl_sock.shutdown(shutdownError);
+		printf("SSL shutdown\n");
 	}
 
 	void onReadError(const boost::system::error_code& error) {

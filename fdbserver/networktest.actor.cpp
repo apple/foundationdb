@@ -586,6 +586,53 @@ struct P2PNetworkTest {
 		}
 	}
 
+	/*ACTOR static Future<Void> run_impl(P2PNetworkTest* self) {
+	    state ActorCollection actors(false);
+
+	    self->startTime = now();
+
+	    fmt::print("{0} listeners, {1} remotes, {2} outgoing connections\n",
+	               self->listeners.size(),
+	               self->remotes.size(),
+	               self->connectionsOut);
+
+	    for (auto n : self->remotes) {
+	        printf("Remote: %s\n", n.toString().c_str());
+	    }
+
+	    for (auto el : self->listeners) {
+	        printf("Listener: %s\n", el->getListenAddress().toString().c_str());
+	        actors.add(incoming(self, el));
+	    }
+
+	    printf("Request size: %s\n", self->requestBytes.toString().c_str());
+	    printf("Response size: %s\n", self->replyBytes.toString().c_str());
+	    printf("Requests per outgoing session: %s\n", self->requests.toString().c_str());
+	    printf("Delay before socket read: %s\n", self->waitReadMilliseconds.toString().c_str());
+	    printf("Delay before socket write: %s\n", self->waitWriteMilliseconds.toString().c_str());
+	    printf("Delay before session close: %s\n", self->idleMilliseconds.toString().c_str());
+	    printf("Send/Recv size %d bytes\n", FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+
+	    if ((self->remotes.empty() || self->connectionsOut == 0) && self->listeners.empty()) {
+	        printf("No listeners and no remotes or connectionsOut, so there is nothing to do!\n");
+	        ASSERT((!self->remotes.empty() && (self->connectionsOut > 0)) || !self->listeners.empty());
+	    }
+
+	    if (!self->remotes.empty()) {
+	        for (int i = 0; i < self->connectionsOut; ++i) {
+	            actors.add(outgoing(self));
+	        }
+	    }
+
+	    loop {
+	        wait(delay(1.0, TaskPriority::Max));
+	        printf("%s\n", self->statsString().c_str());
+	        if (self->targetDuration > 0 && now() - self->globalStartTime > self->targetDuration) {
+	            break;
+	        }
+	    }
+	}*/
+
 	ACTOR static Future<Void> run_impl(P2PNetworkTest* self) {
 		state ActorCollection actors(false);
 
@@ -603,35 +650,28 @@ struct P2PNetworkTest {
 
 		for (auto el : self->listeners) {
 			printf("Listener: %s\n", el->getListenAddress().toString().c_str());
-			actors.add(incoming(self, el));
 		}
 
-		printf("Request size: %s\n", self->requestBytes.toString().c_str());
-		printf("Response size: %s\n", self->replyBytes.toString().c_str());
-		printf("Requests per outgoing session: %s\n", self->requests.toString().c_str());
-		printf("Delay before socket read: %s\n", self->waitReadMilliseconds.toString().c_str());
-		printf("Delay before socket write: %s\n", self->waitWriteMilliseconds.toString().c_str());
-		printf("Delay before session close: %s\n", self->idleMilliseconds.toString().c_str());
-		printf("Send/Recv size %d bytes\n", FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
-
-		if ((self->remotes.empty() || self->connectionsOut == 0) && self->listeners.empty()) {
-			printf("No listeners and no remotes or connectionsOut, so there is nothing to do!\n");
-			ASSERT((!self->remotes.empty() && (self->connectionsOut > 0)) || !self->listeners.empty());
+		if (!self->listeners.empty()) {
+			state Reference<IConnection> conn1 = wait(self->listeners[0]->accept());
+			printf("Server: connected from %s\n", conn1->getPeerAddress().toString().c_str());
+			try {
+				wait(conn1->acceptHandshake());
+				printf("Server: connected from %s, handshake done\n", conn1->getPeerAddress().toString().c_str());
+			} catch (Error& e) {
+				printf("Server: handshake error %s\n", e.what());
+			}
+			threadSleep(11.0);
+			return Void();
 		}
 
 		if (!self->remotes.empty()) {
-			for (int i = 0; i < self->connectionsOut; ++i) {
-				actors.add(outgoing(self));
-			}
+			state Reference<IConnection> conn2 = wait(INetworkConnections::net()->connect(self->remotes[0]));
+			printf("Client: connected to %s\n", self->remotes[0].toString().c_str());
+			wait(conn2->connectHandshake());
+			printf("Client: connected to %s, handshake done\n", self->remotes[0].toString().c_str());
 		}
 
-		loop {
-			wait(delay(1.0, TaskPriority::Max));
-			printf("%s\n", self->statsString().c_str());
-			if (self->targetDuration > 0 && now() - self->globalStartTime > self->targetDuration) {
-				break;
-			}
-		}
 		return Void();
 	}
 
