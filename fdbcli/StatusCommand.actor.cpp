@@ -204,13 +204,14 @@ std::string logBackupDR(const char* context, std::map<std::string, std::string> 
 namespace fdb_cli {
 
 std::string toBytesString(double bytes) {
-	const char* sizes[] = { "B", "KB", "MB", "GB", "TB" };
-	int order = 0;
-	while (bytes >= 1024.0 && order < 4) {
-		order++;
-		bytes = bytes / 1024.0;
+	if (bytes >= 1e12) {
+		return format("%.3f TB", (bytes / 1e12));
+	} else if (bytes >= 1e9) {
+		return format("%.3f GB", (bytes / 1e9));
+	} else {
+		// no decimal points for MB
+		return format("%d MB", (int)round(bytes / 1e6));
 	}
-	return format("%.3f %s", bytes, sizes[order]);
 }
 
 void printStatus(StatusObjectReader statusObj,
