@@ -32,7 +32,8 @@ FoundationDB partitions the keyspace into shards (contiguous key ranges) and ass
 
 Shards are just key ranges. Their size adapts continuously as Data Distributor (DD) monitors load and splits or merges ranges to stay within configured bounds ([DDShardTracker:875](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L875), [DDShardTracker:884](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L884)). Splits are triggered when shard size (bytes) or write bandwidth exceeds thresholds (splitMetrics.bytes = shardBounds.max.bytes / 2, splitMetrics.bytesWrittenPerKSecond etc.). In other words, shard size is workload driven rather than fixed ([DDShardTracker:875](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L875), [DDShardTracker:879](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L879)). Storage servers and commit proxies provide ongoing measurements so DD can resize ranges dynamically to relieve load hotspots and maintain balance ([StorageMetrics:472](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L472), [CommitProxyServer:742](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/CommitProxyServer.actor.cpp#L742)). 
 
-The maximum shard size is:
+The maximum shard size can be no larger than 500MB (MAX_SHARD_BYTES). It is calculated this way:
+
 ```
 int64_t getMaxShardSize(double dbSizeEstimate) {
     int64_t size = std::min((SERVER_KNOBS->MIN_SHARD_BYTES + (int64_t)std::sqrt(std::max<double>(dbSizeEstimate, 0)) *
@@ -63,7 +64,7 @@ Storage servers continually sample bytes-read, ops-read, and shard sizes. A shar
 
 - The storage server handles that request in StorageServerMetrics::splitMetrics, pulling the live samples it already maintains for bytes, write bandwidth, and IOs (byteSample, bytesWriteSample, iopsSample) to compute balanced cut points ([storageserver:1973](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/storageserver.actor.cpp#L1973), [StorageMetrics:286](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L286)).
 
-- Inside splitMetrics, the helper getSplitKey converts the desired metric offset into an actual key using the sampled histogram, adds jitter so repeated splits don't choose exactly the same boundary, and enforces MIN_SHARD_BYTES plus optional write-traffic thresholds before accepting the split ([StorageMetrics:286](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L286), [StorageMetrics:302](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L302)).
+- Inside splitMetrics, the helper getSplitKey converts the desired metric offset into an actual key, i.e. the new key that defines the key that will become the new shard boundary. This is done using the sampled histogram. Jitter is added so repeated splits don't choose exactly the same boundary, and MIN_SHARD_BYTES plus optional write-traffic thresholds are enforced before accepting the split ([StorageMetrics:286](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L286), [StorageMetrics:302](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L302)).
 
 - It loops until the remaining range falls under all limits, emitting each chosen key into the reply. The tracker then uses those keys to call executeShardSplit, which updates the shard map and kicks off the relocation ([StorageMetrics:332](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/StorageMetrics.actor.cpp#L332), [DDShardTracker:890](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/DDShardTracker.actor.cpp#L890)).
 
@@ -105,7 +106,7 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
 - If you need to store a counter, consider sharding them across N disjoint keys (e.g., counter/<bucket>/…) and aggregate in clients or background jobs. This keeps the per-key mutation rate below the commit proxy’s hot-shard throttle.
 - If you are storing append-only logs,  split them into multiple partitions (such as log/<partition>/<ts>), rotating partitions over time rather than funneling through a single key path.
 - Avoid “read-modify-write” cycles. Use FDB's atomic operations (like ATOMIC_ADD) when possible, and throttle/queue work in clients so they don’t stampede on that hot key.
-- For multi-tenant schemas, assign each tenant a disjoint key subspace.
+- For multi-tenant schemas, assign each tenant a disjoint key subspace so a busy tenant won’t penalize others. (‘Tenant’ here just means a logical customer/namespace using separate key prefixes.)
 
 ### Avoiding Read Hotspots
 
@@ -114,15 +115,15 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
   contiguous range every time.
   - If one small value is hammered by many readers, replicate it into multiple keys (e.g., per region or per hash bucket) and route readers to different replicas based on a deterministic hash.
   - Stagger periodic polling across clients—add random jitter so metrics or heartbeat jobs don’t all read the same shard simultaneously.
+  - Or, rather than polling, you can attach an FDB watch so the client wakes up when the value changes.
   - Watch readBandwidth metrics and proactively split large ranges (via splitStorageMetrics) if access skew is predictable (e.g., time-series keys). Pre-splitting keeps each shard small enough that DD can relocate it quickly.
-  - Rather than polling, you can attach an FDB watch so the client wakes up when the value changes.
 
 ### Schema & Keyspace Design Patterns
 
   - Choose the subspace layout so high-cardinality data (per user, per session, per order) groups together while low-cardinality shared data fans out. A
   common pattern is subspace.pack([prefix, hash(id), id, ...]), where the hash spreads load and the trailing id preserves locality for range scans within
-  a user.
-  - Reserve dedicated key ranges for “global” data that’s touched by admins or background coordinators; keep those ranges tiny and infrequently written so
+  a user. Ultimately the relevant dimensions are frequency and working-set size. High-cardinality data typically fans out into many keys so each key sees low QPS (good to keep together), whereas low-cardinality data is shared (often larger/higher QPS) so you should spread it out across subspaces or buckets.
+  - Reserve an explicit subspace for “global” data that’s touched by admins or background coordinators; keep those ranges tiny and infrequently written so
   they never become hot.
   - For time-ordered data, interleave a bucket prefix (hour, minute) or a modulo partition to avoid writing the latest timestamp into a single ever-
   growing shard. Readers can consult a manifest that lists active buckets.
@@ -148,7 +149,7 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
 
 3. Copy the connection string into a file (e.g., `connections.txt`)
 
-4. Run the transaction profiling analyzer:
+4. Run the [transaction profiling analyzer](https://github.com/apple/foundationdb/blob/7.3.0/contrib/transaction_profiling_analyzer/transaction_profiling_analyzer.py) analyzer:
    ```bash
    contrib/transaction_profiling_analyzer/transaction_profiling_analyzer.py -s "2023-09-14 16:40 UTC" -e "2023-09-14 16:50 UTC" -C connections.txt
    ```
@@ -234,7 +235,7 @@ These knobs control when Data Distribution splits shards based on write bandwidt
 - If too small relative to `SHARD_MIN_BYTES_PER_KSEC`, generates immediate re-merging work
 - Location: [ServerKnobs:269](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L269)
 
-### Read Hot Shard Detection Knobs
+### Hot Shard Detection Knobs
 
 These knobs control read-hot shard detection (primarily for read load balancing):
 
