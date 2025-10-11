@@ -40,7 +40,7 @@ struct RoleLineage : LineageProperties<RoleLineage> {
 	static std::string_view name;
 	ProcessClass::ClusterRole role = ProcessClass::NoRole;
 
-	bool isSet(ProcessClass::ClusterRole RoleLineage::*member) const { return this->*member != ProcessClass::NoRole; }
+	bool isSet(ProcessClass::ClusterRole RoleLineage::* member) const { return this->*member != ProcessClass::NoRole; }
 };
 
 struct RoleLineageCollector : IALPCollector<RoleLineage> {

@@ -85,7 +85,7 @@ Future<Void> tssComparison(Req req,
                            TSSEndpointData tssData,
                            uint64_t srcEndpointId,
                            Reference<MultiInterface<Multi>> ssTeam,
-                           RequestStream<Req, P> Interface::*channel) {
+                           RequestStream<Req, P> Interface::* channel) {
 	state double startTime = now();
 	state Future<Optional<ErrorOr<Resp>>> fTssWithTimeout = timeout(fTss, FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT);
 	state int finished = 0;
@@ -264,7 +264,7 @@ struct RequestData : NonCopyable {
 	                                     QueueModel* model,
 	                                     Future<Reply> ssResponse,
 	                                     Reference<MultiInterface<Multi>> alternatives,
-	                                     RequestStream<Request, P> Interface::*channel) {
+	                                     RequestStream<Request, P> Interface::* channel) {
 		if (model) {
 			// Send parallel request to TSS pair, if it exists
 			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
@@ -294,7 +294,7 @@ struct RequestData : NonCopyable {
 	    Request& request,
 	    QueueModel* model,
 	    Reference<MultiInterface<Multi>> alternatives, // alternatives and channel passed through for TSS check
-	    RequestStream<Request, P> Interface::*channel) {
+	    RequestStream<Request, P> Interface::* channel) {
 		modelHolder = Reference<ModelHolder>();
 		requestStarted = false;
 
@@ -442,7 +442,7 @@ struct RequestData : NonCopyable {
 ACTOR template <class Interface, class Request, class Multi, bool P>
 Future<REPLY_TYPE(Request)> loadBalance(
     Reference<MultiInterface<Multi>> alternatives,
-    RequestStream<Request, P> Interface::*channel,
+    RequestStream<Request, P> Interface::* channel,
     Request request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
@@ -750,7 +750,7 @@ Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const void*);
 // returned future.
 ACTOR template <class Interface, class Request, class Multi, bool P>
 Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> alternatives,
-                                             RequestStream<Request, P> Interface::*channel,
+                                             RequestStream<Request, P> Interface::* channel,
                                              Request request = Request(),
                                              TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
                                              AtMostOnce atMostOnce = AtMostOnce::False,

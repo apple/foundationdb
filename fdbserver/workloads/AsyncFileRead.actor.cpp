@@ -38,7 +38,7 @@ struct IOLog {
 
 		bool logLatency; // when false, log times and compute elapsed, else, interpret the log'd time as a latency
 
-		ProcessLog() : logLatency(false){};
+		ProcessLog() : logLatency(false) {};
 
 		virtual void reset() {
 			startTime = now();

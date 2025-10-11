@@ -384,10 +384,10 @@ struct BlobRestoreState {
 	VectorRef<int64_t> phaseStartTs;
 	Optional<StringRef> error;
 
-	BlobRestoreState() : phase(BlobRestorePhase::INIT), progress(0){};
-	BlobRestoreState(BlobRestorePhase phase) : phase(phase), progress(0){};
-	BlobRestoreState(BlobRestorePhase phase, int progress) : phase(phase), progress(progress){};
-	BlobRestoreState(StringRef errorMessage) : phase(BlobRestorePhase::ERROR), progress(0), error(errorMessage){};
+	BlobRestoreState() : phase(BlobRestorePhase::INIT), progress(0) {};
+	BlobRestoreState(BlobRestorePhase phase) : phase(phase), progress(0) {};
+	BlobRestoreState(BlobRestorePhase phase, int progress) : phase(phase), progress(progress) {};
+	BlobRestoreState(StringRef errorMessage) : phase(BlobRestorePhase::ERROR), progress(0), error(errorMessage) {};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -400,7 +400,7 @@ struct BlobRestoreArg {
 	Optional<Version> version;
 
 	BlobRestoreArg() {}
-	BlobRestoreArg(Optional<Version> v) : version(v){};
+	BlobRestoreArg(Optional<Version> v) : version(v) {};
 
 	template <class Ar>
 	void serialize(Ar& ar) {

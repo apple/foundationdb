@@ -135,7 +135,7 @@ struct OpenKVStoreRequest {
 	bool checkIntegrity;
 	ReplyPromise<struct IKVSInterface> reply;
 
-	OpenKVStoreRequest(){};
+	OpenKVStoreRequest() {};
 
 	OpenKVStoreRequest(KeyValueStoreType storeType,
 	                   std::string filename,

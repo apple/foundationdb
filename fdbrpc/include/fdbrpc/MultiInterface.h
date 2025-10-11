@@ -165,7 +165,7 @@ public:
 	}
 
 	template <class F>
-	F const& get(int index, F T::*member) const {
+	F const& get(int index, F T::* member) const {
 		return alternatives[index].interf.*member;
 	}
 
@@ -221,7 +221,7 @@ public:
 	bool alwaysFresh() const { return LBLocalityData<T>::alwaysFresh(); }
 
 	template <class F>
-	F const& get(int index, F T::*member) const {
+	F const& get(int index, F T::* member) const {
 		return alternatives[index]->interf.*member;
 	}
 

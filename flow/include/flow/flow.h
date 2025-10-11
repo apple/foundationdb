@@ -185,12 +185,12 @@ public:
 	// v.map(&T::member) is equivalent to v.map<R>([](T t) { return t.member; })
 	template <class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
-	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::* member) const& {
 		return present() ? ErrorOr<Rp>(get().*member) : ErrorOr<Rp>(getError());
 	}
 	template <class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, ErrorOr<Rp>> map(
-	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::* member) && {
 		return present() ? ErrorOr<Rp>(std::move(*this).get().*member) : ErrorOr<Rp>(getError());
 	}
 
@@ -218,7 +218,7 @@ public:
 	//
 	// v.mapRef(&P::member) is equivalent to ErrorOr<R>(v.get()->member) if v is present and non-null
 	template <class P, class R, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, ErrorOr<Rp>> mapRef(R P::*member) const& {
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, ErrorOr<Rp>> mapRef(R P::* member) const& {
 
 		if (!present()) {
 			return ErrorOr<Rp>(getError());
@@ -567,7 +567,7 @@ struct LineageProperties : LineagePropertiesBase {
 	// A user should implement this for any type
 	// within the properies class.
 	template <class Value>
-	bool isSet(Value Derived::*member) const {
+	bool isSet(Value Derived::* member) const {
 		return true;
 	}
 };
@@ -618,7 +618,7 @@ public:
 		parent.clear();
 	}
 	template <class T, class V>
-	V& modify(V T::*member) {
+	V& modify(V T::* member) {
 		Lock _{ mutex };
 		auto& res = findOrInsert(T::name).properties;
 		if (!res) {
@@ -628,7 +628,7 @@ public:
 		return map->*member;
 	}
 	template <class T, class V>
-	std::optional<V> get(V T::*member) const {
+	std::optional<V> get(V T::* member) const {
 		Lock _{ mutex };
 		auto current = this;
 		while (current != nullptr) {
@@ -644,7 +644,7 @@ public:
 		return std::optional<V>{};
 	}
 	template <class T, class V>
-	std::vector<V> stack(V T::*member) const {
+	std::vector<V> stack(V T::* member) const {
 		Lock _{ mutex };
 		auto current = this;
 		std::vector<V> res;
@@ -1402,8 +1402,7 @@ struct Actor : SAV<ReturnValue> {
 	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
 	                         // group #
 
-	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/
-	}
+	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/ }
 	// ~Actor() { --actorCount; }
 
 #ifdef ENABLE_SAMPLING
@@ -1420,8 +1419,7 @@ struct Actor<void> {
 #endif
 	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
-	Actor() : actor_wait_state(0) { /*++actorCount;*/
-	}
+	Actor() : actor_wait_state(0) { /*++actorCount;*/ }
 	// ~Actor() { --actorCount; }
 
 #ifdef ENABLE_SAMPLING

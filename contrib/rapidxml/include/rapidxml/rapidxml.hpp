@@ -2252,7 +2252,7 @@ private:
 				} else {
 					// Child node
 					++text; // Skip '<'
-					if (xml_node<Ch>* child = parse_node<Flags & ~parse_open_only>(text))
+					if (xml_node<Ch>* child = parse_node < Flags & ~parse_open_only > (text))
 						node->append_node(child);
 				}
 				break;

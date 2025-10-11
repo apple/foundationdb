@@ -48,7 +48,7 @@ void doOnMainThreadVoid(Future<Void> signal, F f) {
 }
 
 ACTOR template <class F, class T>
-void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::*member) {
+void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::* member) {
 	wait(signal);
 	if (t && (t->*member).code() != invalid_error_code)
 		return;
@@ -77,7 +77,7 @@ void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::*member) {
 //
 // `onMainThreadVoid` is defined here because of the dependency in `ThreadSingleAssignmentVarBase`.
 template <class F, class T>
-void onMainThreadVoid(F f, T* t, Error T::*member, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
+void onMainThreadVoid(F f, T* t, Error T::* member, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
 	Promise<Void> signal;
 	internal_thread_helper::doOnMainThreadVoid(signal.getFuture(), f, t, member);
 	g_network->onMainThread(std::move(signal), taskID);

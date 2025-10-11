@@ -407,7 +407,7 @@ ecb_function_ ecb_bool ecb_little_endian(void) {
 #if ECB_GCC_VERSION(3, 0) || ECB_C99
 #define ecb_mod(m, n) ((m) % (n) + ((m) % (n) < 0 ? (n) : 0))
 #else
-#define ecb_mod(m, n) ((m) < 0 ? ((n)-1 - ((-1 - (m)) % (n))) : ((m) % (n)))
+#define ecb_mod(m, n) ((m) < 0 ? ((n) - 1 - ((-1 - (m)) % (n))) : ((m) % (n)))
 #endif
 
 #if __cplusplus
@@ -420,8 +420,8 @@ static inline T ecb_div_ru(T val, T div) {
 	return val < 0 ? -((-val) / div) : (val + div - 1) / div;
 }
 #else
-#define ecb_div_rd(val, div) ((val) < 0 ? -((-(val) + (div)-1) / (div)) : ((val)) / (div))
-#define ecb_div_ru(val, div) ((val) < 0 ? -((-(val)) / (div)) : ((val) + (div)-1) / (div))
+#define ecb_div_rd(val, div) ((val) < 0 ? -((-(val) + (div) - 1) / (div)) : ((val)) / (div))
+#define ecb_div_ru(val, div) ((val) < 0 ? -((-(val)) / (div)) : ((val) + (div) - 1) / (div))
 #endif
 
 #if ecb_cplusplus_does_not_suck

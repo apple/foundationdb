@@ -77,7 +77,7 @@ struct PrivateEndpoints : TestWorkload {
 	}
 
 	template <class I, class RT>
-	void addTestFor(RequestStream<RT, false> I::*channel) {
+	void addTestFor(RequestStream<RT, false> I::* channel) {
 		testFunctions.push_back([channel](Reference<AsyncVar<ClientDBInfo>> const& clientDBInfo) {
 			auto optintf = getInterface<I>(clientDBInfo);
 			if (!optintf.present()) {

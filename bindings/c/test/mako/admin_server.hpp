@@ -49,7 +49,7 @@ struct DefaultResponse {
 
 	template <class Ar>
 	void serialize(Ar& ar, unsigned int) {
-		ar& error_message;
+		ar & error_message;
 	}
 };
 
@@ -61,8 +61,8 @@ struct TenantIdsResponse {
 
 	template <class Ar>
 	void serialize(Ar& ar, unsigned int) {
-		ar& error_message;
-		ar& ids;
+		ar & error_message;
+		ar & ids;
 	}
 };
 
@@ -74,9 +74,9 @@ struct BatchCreateTenantRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar, unsigned int) {
-		ar& cluster_file;
-		ar& id_begin;
-		ar& id_end;
+		ar & cluster_file;
+		ar & id_begin;
+		ar & id_end;
 	}
 };
 
@@ -88,9 +88,9 @@ struct BatchDeleteTenantRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar, unsigned int) {
-		ar& cluster_file;
-		ar& id_begin;
-		ar& id_end;
+		ar & cluster_file;
+		ar & id_begin;
+		ar & id_end;
 	}
 };
 
@@ -102,9 +102,9 @@ struct FetchTenantIdsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar, unsigned int) {
-		ar& cluster_file;
-		ar& id_begin;
-		ar& id_end;
+		ar & cluster_file;
+		ar & id_begin;
+		ar & id_end;
 	}
 };
 

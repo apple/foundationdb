@@ -80,7 +80,7 @@ public:
 	}
 
 private:
-	ManagementAPIError(){};
+	ManagementAPIError() {};
 };
 
 class SpecialKeyRangeRWImpl : public SpecialKeyRangeReadImpl {

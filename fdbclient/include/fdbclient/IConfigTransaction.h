@@ -81,7 +81,7 @@ public:
 	Future<Standalone<StringRef>> getVersionstamp() override { throw client_invalid_operation(); }
 
 	// Implemented:
-	void getWriteConflicts(KeyRangeMap<bool>* result) override{};
+	void getWriteConflicts(KeyRangeMap<bool>* result) override {};
 
 	void debugTrace(BaseTraceEvent&& event) override {
 		event.detail("CommitResult", "Deferred logging unsupported").log();

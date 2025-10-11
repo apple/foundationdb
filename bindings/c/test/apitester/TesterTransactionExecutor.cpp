@@ -133,8 +133,7 @@ public:
 		lock.unlock();
 		fdb::Future f = fdbTx.commit();
 		auto thisRef = shared_from_this();
-		doContinueAfter(
-		    f, [thisRef]() { thisRef->done(); }, true);
+		doContinueAfter(f, [thisRef]() { thisRef->done(); }, true);
 	}
 
 	// Complete the transaction without a commit (for read transactions)

@@ -275,7 +275,7 @@ typedef RandomStringSetGenerator<RandomStringGenerator> RandomKeySetGenerator;
 // Generate random keys which are composed of tuple segments from a list of RandomKeySets
 // String Definition Format: RandomKeySet[,RandomKeySet]...
 struct RandomKeyTupleGenerator {
-	RandomKeyTupleGenerator(){};
+	RandomKeyTupleGenerator() {};
 	RandomKeyTupleGenerator(std::vector<RandomKeySetGenerator> tupleParts) : tuples(tupleParts) {}
 	RandomKeyTupleGenerator(std::string s) : RandomKeyTupleGenerator(StringRef(s)) {}
 	RandomKeyTupleGenerator(StringRef s) {
