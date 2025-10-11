@@ -516,19 +516,6 @@ public interface ReadTransaction extends ReadTransactionContext {
 	CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize);
 
 	/**
-	 * Gets the blob granule ranges for a given region.
-	 * Returned in batches, requires calling again moving the begin key up.
-	 *
-	 * @param begin beginning of the range (inclusive)
-	 * @param end end of the range (exclusive)
-	 * @param rowLimit the limit on the number of returned rows
-
-	 * @return list of blob granules in the given range. May not be all.
-	 */
-	 CompletableFuture<KeyRangeArrayResult> getBlobGranuleRanges(byte[] begin, byte[] end, int rowLimit);
-
-	
-	/**
 	 * Returns a set of options that can be set on a {@code Transaction}
 	 *
 	 * @return a set of transaction-specific options affecting this {@code Transaction}

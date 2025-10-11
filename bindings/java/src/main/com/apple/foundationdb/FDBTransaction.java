@@ -93,11 +93,6 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 
 		@Override
-		public CompletableFuture<KeyRangeArrayResult> getBlobGranuleRanges(byte[] begin, byte[] end, int rowLimit) {
-			return FDBTransaction.this.getBlobGranuleRanges(begin, end, rowLimit);
-		}
-
-		@Override
 		public AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper,
 		                                                    int limit, boolean reverse, StreamingMode mode) {
 
@@ -349,16 +344,6 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	@Override
 	public CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize) {
 		return this.getRangeSplitPoints(range.begin, range.end, chunkSize);
-	}
-
-	@Override
-	public CompletableFuture<KeyRangeArrayResult> getBlobGranuleRanges(byte[] begin, byte[] end, int rowLimit) {
-		pointerReadLock.lock();
-		try {
-			return new FutureKeyRangeArray(Transaction_getBlobGranuleRanges(getPtr(), begin, end, rowLimit), executor);
-		} finally {
-			pointerReadLock.unlock();
-		}
 	}
 
 	@Override
@@ -852,5 +837,4 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private native long Transaction_getKeyLocations(long cPtr, byte[] key);
 	private native long Transaction_getEstimatedRangeSizeBytes(long cPtr, byte[] keyBegin, byte[] keyEnd);
 	private native long Transaction_getRangeSplitPoints(long cPtr, byte[] keyBegin, byte[] keyEnd, long chunkSize);
-	private native long Transaction_getBlobGranuleRanges(long cPtr, byte[] keyBegin, byte[] keyEnd, int rowLimit);
 }
