@@ -372,6 +372,9 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_open_tenant(FDBDatabase* d
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
                                                                          FDBTransaction** out_transaction);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
+                                                                       FDBTransaction** out_transaction);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_reboot_worker(FDBDatabase* db,
                                                                    uint8_t const* address,
                                                                    int address_length,
@@ -550,32 +553,31 @@ DLLEXPORT const char* fdb_get_client_version(void);
 
 /* LEGACY API VERSIONS */
 
+// FIXME: document why this bending over backwards to provide super explanatory
+// error messages is needed.  Why would somebody compile FDB version N
+// of this file with FDB_API_VERSION set to a value lower than N?
+// What's the point of supporting this?  If a user wants to compile version
+// N-k of the API, they can get version N-k of this file from the repo and
+// it will have the prototypes for that API version.  What am I missing?
+
 #if FDB_API_VERSION < 740
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture* f,
                                                                               FDBGranuleSummary const** out_summaries,
                                                                               int* out_count);
-#else
-#define fdb_future_get_granule_summary_array(f, o1, o2) FDB_REMOVED_FUNCTION
-#endif
-
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f,
                                                                             FDBBGFileDescription** out,
                                                                             int* desc_count);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_snapshot_file(const uint8_t* file_data,
                                                                        int file_len,
                                                                        FDBBGTenantPrefix const* tenant_prefix,
                                                                        FDBBGEncryptionCtx const* encryption_ctx);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_delta_file(const uint8_t* file_data,
                                                                     int file_len,
                                                                     FDBBGTenantPrefix const* tenant_prefix,
                                                                     FDBBGEncryptionCtx const* encryption_ctx);
-
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_result_get_bg_mutations_array(FDBResult* r,
                                                                            FDBBGMutation const** out_mutations,
                                                                            int* out_count);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_purge_blob_granules(FDBDatabase* db,
                                                                          uint8_t const* begin_key_name,
                                                                          int begin_key_name_length,
@@ -583,7 +585,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_purge_blob_granules(FDBData
                                                                          int end_key_name_length,
                                                                          int64_t purge_version,
                                                                          fdb_bool_t force);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_wait_purge_granules_complete(FDBDatabase* db,
                                                                                   uint8_t const* purge_key_name,
                                                                                   int purge_key_name_length);
@@ -593,7 +594,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_blobbify_range(FDBDatabase*
                                                                     int begin_key_name_length,
                                                                     uint8_t const* end_key_name,
                                                                     int end_key_name_length);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_blobbify_range_blocking(FDBDatabase* db,
                                                                              uint8_t const* begin_key_name,
                                                                              int begin_key_name_length,
@@ -612,7 +612,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_list_blobbified_ranges(FDBD
                                                                             uint8_t const* end_key_name,
                                                                             int end_key_name_length,
                                                                             int rangeLimit);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_range(FDBDatabase* db,
                                                                        uint8_t const* begin_key_name,
                                                                        int begin_key_name_length,
@@ -627,10 +626,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_flush_blob_range(FDBDatabas
                                                                       int end_key_name_length,
                                                                       fdb_bool_t compact,
                                                                       int64_t version);
-
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
-                                                                       FDBTransaction** out_transaction);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_purge_blob_granules(FDBTenant* db,
                                                                        uint8_t const* begin_key_name,
                                                                        int begin_key_name_length,
@@ -638,7 +633,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_purge_blob_granules(FDBTenant
                                                                        int end_key_name_length,
                                                                        int64_t purge_version,
                                                                        fdb_bool_t force);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_wait_purge_granules_complete(FDBTenant* db,
                                                                                 uint8_t const* purge_key_name,
                                                                                 int purge_key_name_length);
@@ -648,13 +642,11 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_blobbify_range(FDBTenant* ten
                                                                   int begin_key_name_length,
                                                                   uint8_t const* end_key_name,
                                                                   int end_key_name_length);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_blobbify_range_blocking(FDBTenant* tenant,
                                                                            uint8_t const* begin_key_name,
                                                                            int begin_key_name_length,
                                                                            uint8_t const* end_key_name,
                                                                            int end_key_name_length);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_unblobbify_range(FDBTenant* tenant,
                                                                     uint8_t const* begin_key_name,
                                                                     int begin_key_name_length,
@@ -667,14 +659,12 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_list_blobbified_ranges(FDBTen
                                                                           uint8_t const* end_key_name,
                                                                           int end_key_name_length,
                                                                           int rangeLimit);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(FDBTenant* tenant,
                                                                      uint8_t const* begin_key_name,
                                                                      int begin_key_name_length,
                                                                      uint8_t const* end_key_name,
                                                                      int end_key_name_length,
                                                                      int64_t version);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_flush_blob_range(FDBTenant* tenant,
                                                                     uint8_t const* begin_key_name,
                                                                     int begin_key_name_length,
@@ -682,14 +672,12 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_flush_blob_range(FDBTenant* t
                                                                     int end_key_name_length,
                                                                     fdb_bool_t compact,
                                                                     int64_t version);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTransaction* tr,
                                                                                 uint8_t const* begin_key_name,
                                                                                 int begin_key_name_length,
                                                                                 uint8_t const* end_key_name,
                                                                                 int end_key_name_length,
                                                                                 int rangeLimit);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* tr,
                                                                            uint8_t const* begin_key_name,
                                                                            int begin_key_name_length,
@@ -698,7 +686,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(FDBTr
                                                                            int64_t beginVersion,
                                                                            int64_t readVersion,
                                                                            FDBReadBlobGranuleContext granuleContext);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_summarize_blob_granules(FDBTransaction* tr,
                                                                                 uint8_t const* begin_key_name,
                                                                                 int begin_key_name_length,
@@ -706,7 +693,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_summarize_blob_granules(
                                                                                 int end_key_name_length,
                                                                                 int64_t summaryVersion,
                                                                                 int rangeLimit);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granules_description(FDBTransaction* tr,
                                                                                        uint8_t const* begin_key_name,
                                                                                        int begin_key_name_length,
@@ -715,6 +701,35 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granules_descr
                                                                                        int64_t begin_version,
                                                                                        int64_t read_version,
                                                                                        int64_t* read_version_out);
+#else
+
+#define fdb_future_get_granule_summary_array(f, o1, o2) FDB_REMOVED_FUNCTION
+#define fdb_future_readbg_get_descriptions(f, o, d) FDB_REMOVED_FUNCTION
+#define fdb_readbg_parse_snapshot_file(f, ff, t, e) FDB_REMOVED_FUNCTION
+#define fdb_readbg_parse_delta_file(f, f2, t, e) FDB_REMOVED_FUNCTION
+#define fdb_result_get_bg_mutations_array(r, o, o2) FDB_REMOVED_FUNCTION
+#define fdb_database_purge_blob_granules(d, b, b2, e, e2, p, f) FDB_REMOVED_FUNCTION
+#define fdb_database_wait_purge_granules_complete(d, p, p2) FDB_REMOVED_FUNCTION
+#define fdb_database_blobbify_range(d, b, b2, e, e2) FDB_REMOVED_FUNCTION
+#define fdb_database_blobbify_range_blocking(d, b, b2, e, e2) FDB_REMOVED_FUNCTION
+#define fdb_database_unblobbify_range(d, b, b2, e, e2) FDB_REMOVED_FUNCTION
+#define fdb_database_list_blobbified_ranges(d, b, b2, e, e2, r) FDB_REMOVED_FUNCTION
+#define fdb_database_verify_blob_range(d, b, b2, e, e2, v) FDB_REMOVED_FUNCTION
+#define fdb_database_flush_blob_range(d, b, b2, e, e2, c, v) FDB_REMOVED_FUNCTION
+#define fdb_tenant_blurb_blob_granules(d, b, b2, e, e2, p, f) FDB_REMOVED_FUNCTION
+#define fdb_tenant_wait_purge_granules_complete(d, p, p2) FDB_REMOVED_FUNCTION
+#define fdb_tenant_blobbify_range(t, b, b2, e, e2) FDB_REMOVED_FUNCTION
+#define fdb_tenant_blobbify_range_blocking(t, b, b2, e, e2) FDB_REMOVED_FUNCTION
+#define fdb_tenant_unblobbify_range(t, b, b2, e, e2) FDB_REMOVED_FUNCTION
+#define fdb_tenant_list_blobbified_ranges(t, b, b2, e, e2, r) FDB_REMOVED_FUNCTION
+#define fdb_tenant_verify_blob_range(t, b, b2, e, e2, v) FDB_REMOVED_FUNCTION
+#define fdb_tenant_flush_blob_range(t, b, b2, e, e2, c, v) FDB_REMOVED_FUNCTION
+#define fdb_transaction_get_blob_granule_ranges(t, b, b2, e, e2, r) FDB_REMOVED_FUNCTION
+#define fdb_transaction_read_blob_granules(t, b, b2, e, e2, b3, r, g) FDB_REMOVED_FUNCTION
+#define fdb_transaction_summarize_blob_granules(t, b, b23, e, e2, s, r) FDB_REMOVED_FUNCTION
+#define fdb_transaction_read_blob_granules_description(t, b, b2, e, e2, b3, r, r2) FDB_REMOVED_FUNCTION
+
+#endif // 740
 
 #if FDB_API_VERSION < 620
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_version(FDBFuture* f, int64_t* out_version);
