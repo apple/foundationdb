@@ -1,5 +1,5 @@
 attrs==22.1.0
-Authlib==1.6.4
+Authlib==1.6.5
 cffi==1.15.1
 cryptography==44.0.1
 iniconfig==1.1.1
