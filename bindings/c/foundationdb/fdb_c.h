@@ -185,9 +185,11 @@ typedef struct keyrange {
 	int end_key_length;
 } FDBKeyRange;
 
-// TODO: delete this at some point.
-// FIXME: define the procedure for deleting stuff.  What are the timing considerations,
-// like how many releases or whatever does this stuff need to sit in the code base for?
+/*
+ * TODO: delete this at some point.
+ * FIXME: define the procedure for deleting stuff.  What are the timing considerations,
+ * like how many releases or whatever does this stuff need to sit in the code base for?
+ */
 typedef struct granulesummary {
 	FDBKeyRange key_range;
 	int64_t snapshot_version;
@@ -553,12 +555,14 @@ DLLEXPORT const char* fdb_get_client_version(void);
 
 /* LEGACY API VERSIONS */
 
-// FIXME: document why this bending over backwards to provide super explanatory
-// error messages is needed.  Why would somebody compile FDB version N
-// of this file with FDB_API_VERSION set to a value lower than N?
-// What's the point of supporting this?  If a user wants to compile version
-// N-k of the API, they can get version N-k of this file from the repo and
-// it will have the prototypes for that API version.  What am I missing?
+/*
+ * FIXME: document why this bending over backwards to provide super explanatory
+ * error messages is needed.  Why would somebody compile FDB version N
+ * of this file with FDB_API_VERSION set to a value lower than N?
+ * What's the point of supporting this?  If a user wants to compile version
+ * N-k of the API, they can get version N-k of this file from the repo and
+ * it will have the prototypes for that API version.  What am I missing?
+ */
 
 #if FDB_API_VERSION < 740
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture* f,
