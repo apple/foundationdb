@@ -138,6 +138,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 		state bool connectionEstablished = false;
 
 		state Reference<HTTP::IncomingResponse> r;
+		state RESTConnectionPool::ReusableConnection rconn;
 
 		try {
 			// Start connecting
@@ -145,8 +146,9 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			    client->conectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
 
 			// Finish connecting, do request
-			state RESTConnectionPool::ReusableConnection rconn =
+			RESTConnectionPool::ReusableConnection _rconn =
 			    wait(timeoutError(frconn, client->knobs.connect_timeout));
+			rconn = _rconn;
 			connectionEstablished = true;
 
 			remoteAddress = rconn.conn->getPeerAddress();
