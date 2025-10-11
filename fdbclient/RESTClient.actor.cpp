@@ -161,6 +161,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			}
 			rconn.conn.clear();
 		} catch (Error& e) {
+			// Close the connection on error to satisfy Sim2Conn's assertion in simulation.
+			// If rconn holds a connection that hasn't been returned to the pool,
+			// we must close it before it's destroyed (when rconn goes out of scope).
+			// This sets closedByCaller = true in Sim2Conn, preventing assertion failures.
+			if (connectionEstablished && rconn.conn.isValid()) {
+				rconn.conn->close();
+				rconn.conn.clear();
+			}
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
