@@ -753,7 +753,7 @@ DEE_ELL_ELL_EXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granu
 #define fdb_transaction_summarize_blob_granules(t, b, b23, e, e2, s, r) FDB_REMOVED_FUNCTION
 #define fdb_transaction_read_blob_granules_description(t, b, b2, e, e2, b3, r, r2) FDB_REMOVED_FUNCTION
 
-#endif // 740
+#endif
 
 #if FDB_API_VERSION < 620
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_version(FDBFuture* f, int64_t* out_version);
