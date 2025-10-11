@@ -572,6 +572,13 @@ DLLEXPORT const char* fdb_get_client_version(void);
  * people compiling old client code against this version of fdb_c.h
  * and to not break the Mac build, we introduce the hack below to break
  * the grep in symbolify.py.  It's hacks all the way down.
+ *
+ * What we almost certainly should do is just delete the removed
+ * functionality from the code base.  This includes all of the stuff
+ * below.  Anyone who encounters side effects of this, e.g. compile
+ * errors attempting to compile old apps that used the experimental
+ * features, will not have any difficulty understanding the reason for
+ * whatever error they are seeing.
  */
 
 #define DEE_ELL_ELL_EXPORT DLLEXPORT
