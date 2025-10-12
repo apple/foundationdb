@@ -497,7 +497,12 @@ function test_list_with_files {
     fi
   }
 
-  check_nested_files "ls_test" 1 "true"
+  # Extract the path prefix from the URL (everything between host and ?)
+  # URL format: blobstore://host/path/prefix?query
+  local url_path
+  url_path=$(echo "${url}" | sed -E 's|blobstore://[^/]+/([^?]+).*|\1|')
+  
+  check_nested_files "${url_path}" 1 "true"
 
   if [[ "${missing}" -ne 0 ]]; then
     return 1
@@ -508,7 +513,7 @@ function test_list_with_files {
   --knob_blobstore_list_max_keys_per_page=5 ls "${url}" 2>&1)
   status=$?
 
-  check_nested_files "ls_test" 1 "false"
+  check_nested_files "${url_path}" 1 "false"
   if [[ "${missing}" -ne 0 ]]; then
     return 1
   fi
