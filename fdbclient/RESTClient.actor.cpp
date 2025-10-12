@@ -146,8 +146,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			    client->conectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
 
 			// Finish connecting, do request
-			RESTConnectionPool::ReusableConnection _rconn =
-			    wait(timeoutError(frconn, client->knobs.connect_timeout));
+			RESTConnectionPool::ReusableConnection _rconn = wait(timeoutError(frconn, client->knobs.connect_timeout));
 			rconn = _rconn;
 			connectionEstablished = true;
 
