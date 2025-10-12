@@ -1103,6 +1103,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		state bool reusingConn = false;
 		state bool fastRetry = false;
 		state bool simulateS3TokenError = false;
+		state S3BlobStoreEndpoint::ReusableConnection rconn; // Moved outside try block for error handler access
 
 		try {
 			// Start connecting
@@ -1124,8 +1125,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			// Finish connecting, do request
-			state S3BlobStoreEndpoint::ReusableConnection rconn =
-			    wait(timeoutError(frconn, bstore->knobs.connect_timeout));
+			S3BlobStoreEndpoint::ReusableConnection _rconn = wait(timeoutError(frconn, bstore->knobs.connect_timeout));
+			rconn = _rconn; // Assign to state variable
 			connectionEstablished = true;
 			connID = rconn.conn->getDebugID();
 			reqStartTimer = g_network->timer();
