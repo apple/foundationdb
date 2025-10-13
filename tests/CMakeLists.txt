@@ -70,7 +70,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES s3VersionHeaders.txt IGNORE)
   add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
   add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
-  add_fdb_test(TEST_FILES BlobManagerUnit.toml)
   add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
   add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
   add_fdb_test(TEST_FILES DDSketch.txt IGNORE)
@@ -154,11 +153,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
 
-  # TODO: test occasionally times out due to too many change feed shard parts
-  # Disable for now until the underlying issue is fixed.
-  add_fdb_test(TEST_FILES rare/BlobRestoreBasic.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobRestoreLarge.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobRestoreToVersion.toml IGNORE)
   # IGNORE below because we do not use tenant mode and it is likely to be
   # deprecated/removed. rdar://157717454, rdar://134522214.
   add_fdb_test(TEST_FILES rare/BlobRestoreTenantMode.toml IGNORE)
@@ -185,8 +179,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
   # EncryptionUnitTests is only a convenience file to run the different types of encryption tests at once. Do not enable in general ensembles
   add_fdb_test(TEST_FILES fast/EncryptionUnitTests.toml IGNORE)
-  # TODO(gglass): get rid of EncryptKeyProxyTest because we only support unencrypted.
-  add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml IGNORE)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/HTTPKeyValueStore.toml)
