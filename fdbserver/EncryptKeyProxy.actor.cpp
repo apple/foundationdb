@@ -904,10 +904,6 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 	                                              true, /* absoluteIntervalDelay */
 	                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* initialDelay */
 	                                              TaskPriority::Worker);
-	// TODO(gglass): remove this outright
-	// self->blobMetadataRefresher = recurring([&]() { refreshBlobMetadata(self, kmsConnectorInf); },
-	//	                                        CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,
-	//	                                        TaskPriority::Worker);
 
 	self->healthChecker = recurringAsync([&]() { return updateHealthStatus(self, kmsConnectorInf); },
 	                                     FLOW_KNOBS->ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,
@@ -928,11 +924,6 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 				ASSERT(encryptMode.isEncryptionEnabled());
 				self->addActor.send(getLatestCipherKeys(self, kmsConnectorInf, req));
 			}
-			// TODO(gglass): remove this outright
-			// when(EKPGetLatestBlobMetadataRequest req = waitNext(ekpInterface.getLatestBlobMetadata.getFuture())) {
-			// 				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION);
-			// self->addActor.send(getLatestBlobMetadata(self, kmsConnectorInf, req));
-			//}
 			when(HaltEncryptKeyProxyRequest req = waitNext(ekpInterface.haltEncryptKeyProxy.getFuture())) {
 				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION);
 				TraceEvent("EKPHalted", self->myId).detail("ReqID", req.requesterID);

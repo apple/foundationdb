@@ -1702,78 +1702,11 @@ void SimulationConfig::setTenantMode(const TestConfig& testConfig) {
 }
 
 void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
-	// Enable encryption siginificantly reduces chance that a storage engine other than redwood got selected
-	// We want storage servers are selected by simulation tests with roughly equal chance
-	// If encryptMode is not specified explicitly, with high probability, we disable encryption
-	// TODO(gglass): why don't we just always disable encryption at rest mode?
-	// if (testConfig.encryptModes.empty() &&
-	// 	    deterministicRandom()->random01() < SERVER_KNOBS->DISABLED_ENCRYPTION_PROBABILITY_SIM) {
+	// Non-DISABLED encryption at rest values are experimental and are being removed.
 	EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
 	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
 	CODE_PROBE(true, "Enforce to disable encryption in simulation", probe::decoration::rare);
 	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
-	return;
-
-#if 0
-	std::vector<bool> available;
-	std::vector<double> probability;
-	if (!testConfig.encryptModes.empty()) {
-		// If encryptModes are specified explicitly, give them equal probability to be chosen.
-		available = std::vector<bool>(EncryptionAtRestMode::END, false);
-		probability = std::vector<double>(EncryptionAtRestMode::END, 0);
-		for (auto& mode : testConfig.encryptModes) {
-			available[EncryptionAtRestMode::fromString(mode).mode] = true;
-			probability[EncryptionAtRestMode::fromString(mode).mode] = 1.0 / testConfig.encryptModes.size();
-		}
-	} else {
-		// If encryptModes are not specified, give encryption higher chance to be enabled.
-		// The good thing is testing with encryption on doesn't loss test coverage for most of the other features.
-		available = std::vector<bool>(EncryptionAtRestMode::END, true);
-		// Enabling encryption require the use of Redwood storage engine, but we don't want to test with Redwood with
-		// high probability in simulation. Setting total probability of encryption being enabled to be close to 1/6,
-		// since we have 6 storage engine type currently.
-		probability = { 0.85, 0.1, 0.05 };
-		// Only Redwood support encryption. Disable encryption if Redwood is not available.
-		if ((testConfig.storageEngineType.present() &&
-		     testConfig.storageEngineType != SimulationStorageEngine::REDWOOD) ||
-		    testConfig.excludedStorageEngineType(SimulationStorageEngine::REDWOOD)) {
-			available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
-			available[(int)EncryptionAtRestMode::CLUSTER_AWARE] = false;
-		}
-	}
-	// domain_aware mode is supported only with required tenant mode.
-	if (db.tenantMode != TenantMode::REQUIRED) {
-		available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
-	}
-	int lastAvailableMode = EncryptionAtRestMode::END;
-	double totalProbability = 0;
-	for (int mode = 0; mode < (int)EncryptionAtRestMode::END; mode++) {
-		if (available[mode]) {
-			lastAvailableMode = mode;
-			totalProbability += probability[mode];
-		}
-	}
-	ASSERT(lastAvailableMode != EncryptionAtRestMode::END); // At least one mode available
-	double r = deterministicRandom()->random01() * totalProbability;
-	EncryptionAtRestMode encryptionMode;
-	for (int mode = 0;; mode++) {
-		if (available[mode] && (r < probability[mode] || mode == lastAvailableMode)) {
-			encryptionMode = (EncryptionAtRestMode::Mode)mode;
-			break;
-		}
-		r -= probability[mode];
-	}
-	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
-	CODE_PROBE(
-	    encryptionMode == EncryptionAtRestMode::DISABLED, "Disabled encryption in simulation", probe::decoration::rare);
-	CODE_PROBE(encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE,
-	           "Enabled cluster-aware encryption in simulation",
-	           probe::decoration::rare);
-	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE,
-	           "Enabled domain-aware encryption in simulation",
-	           probe::decoration::rare);
-	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
-#endif
 }
 
 namespace {
@@ -2934,10 +2867,6 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	     std::string_view(testFile).find("BulkLoading") == std::string_view::npos &&
 	     std::string_view(testFile).find("BulkDumping") == std::string_view::npos &&
 	     std::string_view(testFile).find("ShardedRocksNondeterministicTest") == std::string_view::npos)) {
-		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
-	}
-
-	if (std::string_view(testFile).find("BlobRestore") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 

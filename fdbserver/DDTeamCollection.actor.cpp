@@ -1374,11 +1374,8 @@ public:
 		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server);
 		try {
 			loop {
-				state bool isBm = false; // BlobMigratorInterface::isBlobMigrator(server->getLastKnownInterface().id());
-				status.isUndesired =
-				    (!self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get()) || isBm;
-
-				status.isWrongConfiguration = isBm;
+				status.isUndesired = (!self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get());
+				status.isWrongConfiguration = false;
 				status.isWiggling = false;
 				hasWrongDC = !self->isCorrectDC(*server);
 				hasInvalidLocality =

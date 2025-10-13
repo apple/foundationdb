@@ -770,7 +770,6 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     std::vector<std::pair<TLogInterface, EventMap>> tLogs,
     std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
     std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
-    // std::vector<BlobWorkerInterface> blobWorkers,
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> coordinatorAddresses,
     Database cx,
@@ -3114,7 +3113,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::vector<std::pair<TLogInterface, EventMap>> tLogs;
 		state std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
 		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
-		// state std::vector<BlobWorkerInterface> blobWorkers;
 
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
@@ -3198,7 +3196,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    errorOr(getCommitProxiesAndMetrics(db, address_workers));
 			state Future<ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture =
 			    errorOr(getGrvProxiesAndMetrics(db, address_workers));
-			// state Future<ErrorOr<std::vector<BlobWorkerInterface>>> blobWorkersFuture;
 
 			state int minStorageReplicasRemaining = -1;
 			state int fullyReplicatedRegions = -1;
@@ -3414,7 +3411,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              tLogs,
 		                              commitProxies,
 		                              grvProxies,
-		                              // blobWorkers,
 		                              coordinators,
 		                              coordinatorAddresses,
 		                              cx,

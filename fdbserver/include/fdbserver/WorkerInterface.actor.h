@@ -108,10 +108,7 @@ struct WorkerInterface {
 		           grvProxy,
 		           dataDistributor,
 		           ratekeeper,
-		           // blobManager,
-		           // blobWorker,
 		           consistencyScan,
-		           // blobMigrator,
 		           resolver,
 		           storage,
 		           logRouter,
@@ -191,7 +188,6 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 		recruitFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
 		recruitRemoteFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
 		recruitStorage.getEndpoint(TaskPriority::ClusterController);
-		// recruitBlobWorker.getEndpoint(TaskPriority::ClusterController);
 		registerWorker.getEndpoint(TaskPriority::ClusterControllerWorker);
 		getWorkers.getEndpoint(TaskPriority::ClusterController);
 		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
@@ -213,7 +209,6 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 		           recruitFromConfiguration,
 		           recruitRemoteFromConfiguration,
 		           recruitStorage,
-		           // recruitBlobWorker,
 		           registerWorker,
 		           getWorkers,
 		           registerMaster,
@@ -442,8 +437,6 @@ struct RegisterWorkerRequest {
 	                      Optional<UID> clusterId)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf),
-	    // blobManagerInterf(bmInterf),
-	    // blobMigratorInterf(mgInterf),
 	    encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf), degraded(degraded),
 	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet), requestDbInfo(false),
 	    recoveredDiskFiles(recoveredDiskFiles), configBroadcastInterface(configBroadcastInterface),
