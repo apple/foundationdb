@@ -176,11 +176,11 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 	bool hasMessage() const {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
-		       /* recruitBlobWorker.getFuture().isReady() || */ registerWorker.getFuture().isReady() ||
-		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
-		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
-		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
-		       changeCoordinators.getFuture().isReady() || getEncryptionAtRestMode.getFuture().isReady();
+		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
+		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
+		       updateWorkerHealth.getFuture().isReady() || tlogRejoin.getFuture().isReady() ||
+		       notifyBackupWorkerDone.getFuture().isReady() || changeCoordinators.getFuture().isReady() ||
+		       getEncryptionAtRestMode.getFuture().isReady();
 	}
 
 	void initEndpoints() {
