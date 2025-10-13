@@ -21,6 +21,7 @@
 #include "fmt/format.h"
 #include "flow/Arena.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/UnitTest.h"
 
 #include <cstring>
 
@@ -153,6 +154,12 @@ void DeterministicRandom::randomBytes(uint8_t* buf, int length) {
 	}
 }
 
+bool DeterministicRandom::truePercent(const int percent) {
+	ASSERT_GT(percent, 0);
+	ASSERT_LT(percent, 100);
+	return this->randomInt(1, 101) <= percent;
+}
+
 uint64_t DeterministicRandom::peek() const {
 	return next;
 }
@@ -162,4 +169,117 @@ void DeterministicRandom::addref() {
 }
 void DeterministicRandom::delref() {
 	ReferenceCounted<DeterministicRandom>::delref();
+}
+
+TEST_CASE("/flow/DeterministicRandom/truePercent") {
+	constexpr int trials = 10000;
+
+	{
+		// Test with a fixed seed for reproducibility
+		DeterministicRandom rng(12345);
+
+		// Test 1% probability - should be rare
+		int trueCount1 = 0;
+		for (int i = 0; i < trials; i++) {
+			if (rng.truePercent(1)) {
+				trueCount1++;
+			}
+		}
+
+		// With 1% probability, expect around 100 true out of 10000
+		// Allow for some variance (between 70-130 for 99% confidence)
+		ASSERT(trueCount1 >= 70 && trueCount1 <= 130);
+	}
+
+	{
+		// Test with a fixed seed for reproducibility
+		DeterministicRandom rng(54321);
+
+		// Test 50% probability - should be roughly half
+		int trueCount50 = 0;
+		for (int i = 0; i < trials; i++) {
+			if (rng.truePercent(50)) {
+				trueCount50++;
+			}
+		}
+
+		// With 50% probability, expect around 5000 true out of 10000
+		// Allow for variance (between 4800-5200 for 99% confidence)
+		ASSERT(trueCount50 >= 4800 && trueCount50 <= 5200);
+	}
+
+	{
+		// Test with a fixed seed for reproducibility
+		DeterministicRandom rng(99999);
+
+		// Test 99% probability - should be almost always true
+		int trueCount99 = 0;
+		for (int i = 0; i < trials; i++) {
+			if (rng.truePercent(99)) {
+				trueCount99++;
+			}
+		}
+
+		// With 99% probability, expect around 9900 true out of 10000
+		// Allow for variance (between 9870-9930 for 99% confidence)
+		ASSERT(trueCount99 >= 9870 && trueCount99 <= 9930);
+	}
+
+	{
+		// Test determinism - same seed should produce same results
+		DeterministicRandom rng1(7777);
+		DeterministicRandom rng2(7777);
+		for (int i = 0; i < 100; i++) {
+			ASSERT(rng1.truePercent(75) == rng2.truePercent(75));
+		}
+	}
+
+	{
+		// Test with a fixed seed for reproducibility
+		DeterministicRandom rng(8888);
+
+		// Test different percentages produce expected ordering
+		int count10 = 0, count30 = 0, count70 = 0, count90 = 0;
+		for (int i = 0; i < trials; i++) {
+			DeterministicRandom rngTemp(8888 + i); // Different seed for each trial
+			if (rngTemp.truePercent(10))
+				count10++;
+			if (rngTemp.truePercent(30))
+				count30++;
+			if (rngTemp.truePercent(70))
+				count70++;
+			if (rngTemp.truePercent(90))
+				count90++;
+		}
+
+		// Verify ordering: count10 < count30 < count70 < count90
+		ASSERT(count10 < count30);
+		ASSERT(count30 < count70);
+		ASSERT(count70 < count90);
+	}
+
+	// Test invalid values - these should trigger assertions
+	{
+		DeterministicRandom rng(12345);
+
+		// Lambda to test invalid percentage values
+		auto testInvalidPercent = [&rng](int invalidPercent) {
+			try {
+				[[maybe_unused]] bool result = rng.truePercent(invalidPercent);
+				ASSERT(false); // should not reach here
+			} catch (...) {
+			}
+		};
+
+		// Test various invalid values
+		testInvalidPercent(0); // Should trigger ASSERT_GT(percent, 0)
+		testInvalidPercent(100); // Should trigger ASSERT_LT(percent, 100)
+		testInvalidPercent(-5); // Should trigger ASSERT_GT(percent, 0)
+		testInvalidPercent(150); // Should trigger ASSERT_LT(percent, 100)
+		testInvalidPercent(-100); // Another negative value test
+		testInvalidPercent(101); // Just over 100
+		testInvalidPercent(999); // Much larger than 100
+	}
+
+	return Void();
 }
