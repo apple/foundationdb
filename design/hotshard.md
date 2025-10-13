@@ -80,21 +80,21 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
 
 ### Storage Server Impact
 
-- The storage servers hosting the hot shard become saturated with write traffic, causing their write queues to grow ([Ratekeeper:933](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L933), [Ratekeeper:973](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L973)).
+- Ratekeeper tracks each storage server's write queue and durability lag; a hot shard drives both metrics up for the servers hosting it ([Ratekeeper:894](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L894), [Ratekeeper:910](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L910)).
 
-- Storage server metrics report high `bytesInput` and increasing queue depths, which are monitored by Ratekeeper ([Ratekeeper:933](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L933)).
+- When the write queue grows faster than the configured target, Ratekeeper sets the limit reason to `storage_server_write_queue_size` and lowers the global transaction rate accordingly ([Ratekeeper:835](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L835)).
 
-- If the storage server's write queue size exceeds thresholds relative to available space and target ratios, it becomes the bottleneck for the entire cluster ([Ratekeeper:973](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L973)).
+- If durability lag remains high even after queue-based throttling, Ratekeeper applies the durability lag limiter to avoid violating MVCC guarantees ([Ratekeeper:845](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L845)).
 
 ### Cluster-Wide Rate Limiting
 
-- Ratekeeper continuously monitors storage server queues and bandwidth metrics to determine cluster-wide transaction rate limits ([Ratekeeper:933](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L933), [Ratekeeper:973](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L973)).
+- Ratekeeper continuously monitors these queue and durability metrics to determine cluster-wide transaction rate limits.
 
-- When a storage server's write queue becomes excessive, Ratekeeper sets the limit reason to `storage_server_write_queue_size` and reduces the cluster-wide transaction rate proportionally ([Ratekeeper:973](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L973), [Ratekeeper:1440](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L1440)).
+- When a storage server's write queue becomes excessive, Ratekeeper sets the limit reason to `storage_server_write_queue_size` and reduces the cluster-wide transaction rate proportionally.
 
 - This causes **all transactions across the cluster** to be throttled, even those not touching the hot shard, because the cluster cannot commit faster than its slowest storage server can durably persist data.
 
-- The rate limit is calculated as: `limitTps = min(actualTps * maxBytesPerSecond / inputRate, maxBytesPerSecond * MAX_TRANSACTIONS_PER_BYTE)`, ensuring the cluster doesn't overwhelm the saturated storage server ([Ratekeeper:933](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L933)).
+- The rate limit is calculated as `limitTps = min(actualTps * maxBytesPerSecond / max(1e-8, inputRate), maxBytesPerSecond * MAX_TRANSACTIONS_PER_BYTE)`, ensuring the cluster doesn't overwhelm the saturated storage server even when the measured input rate is near zero ([Ratekeeper:795](https://github.com/apple/foundationdb/blob/7.3.0/fdbserver/Ratekeeper.actor.cpp#L795)).
 
 ## Mitigation
 
