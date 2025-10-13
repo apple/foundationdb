@@ -205,8 +205,7 @@ public:
 	                        UnlockDB = UnlockDB::True,
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
-	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        Optional<std::string> blobManifestUrl = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 
 	// this method will construct range and version vectors and then call restore()
 	Future<Version> restore(Database cx,
@@ -224,8 +223,7 @@ public:
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        Optional<std::string> blobManifestUrl = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 
 	// create a version vector of size ranges.size(), all elements are the same, i.e. beginVersion
 	Future<Version> restore(Database cx,
@@ -244,8 +242,7 @@ public:
 	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        Optional<std::string> blobManifestUrl = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
@@ -285,8 +282,7 @@ public:
 	                          StopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {},
-	                          Optional<std::string> const& blobManifestUrl = {});
+	                          Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          Optional<std::string> proxy,
@@ -298,8 +294,7 @@ public:
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {},
-	                          Optional<std::string> const& blobManifestUrl = {}) {
+	                          Optional<std::string> const& encryptionKeyFileName = {}) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -312,8 +307,7 @@ public:
 			                    stopWhenDone,
 			                    partitionedLog,
 			                    incrementalBackupOnly,
-			                    encryptionKeyFileName,
-			                    blobManifestUrl) +
+			                    encryptionKeyFileName) +
 			       checkAndDisableBackupWorkers(cx);
 		});
 	}

@@ -173,18 +173,6 @@ private:
 	KeyRangeArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
-class GranuleSummaryArrayFuture : public Future {
-public:
-	// Call this function instead of fdb_future_get_granule_summary_array when using
-	// the GranuleSummaryArrayFuture type. Its behavior is identical to
-	// fdb_future_get_granule_summary_array.
-	fdb_error_t get(const FDBGranuleSummary** out_summaries, int* out_count);
-
-private:
-	friend class Transaction;
-	GranuleSummaryArrayFuture(FDBFuture* f) : Future(f) {}
-};
-
 class EmptyFuture : public Future {
 private:
 	friend class Transaction;
@@ -228,14 +216,6 @@ public:
 	                                   int uid_length,
 	                                   const uint8_t* snap_command,
 	                                   int snap_command_length);
-
-	static KeyFuture purge_blob_granules(FDBDatabase* db,
-	                                     std::string_view begin_key,
-	                                     std::string_view end_key,
-	                                     int64_t purge_version,
-	                                     fdb_bool_t force);
-
-	static EmptyFuture wait_purge_granules_complete(FDBDatabase* db, std::string_view purge_key);
 };
 
 class Tenant final {
@@ -246,14 +226,6 @@ public:
 	Tenant& operator=(const Tenant&) = delete;
 	Tenant(Tenant&&) = delete;
 	Tenant& operator=(Tenant&&) = delete;
-
-	static KeyFuture purge_blob_granules(FDBTenant* tenant,
-	                                     std::string_view begin_key,
-	                                     std::string_view end_key,
-	                                     int64_t purge_version,
-	                                     fdb_bool_t force);
-
-	static EmptyFuture wait_purge_granules_complete(FDBTenant* tenant, std::string_view purge_key);
 
 private:
 	friend class Transaction;
@@ -376,17 +348,6 @@ public:
 
 	// Wrapper around fdb_transaction_add_conflict_range.
 	fdb_error_t add_conflict_range(std::string_view begin_key, std::string_view end_key, FDBConflictRangeType type);
-
-	KeyRangeArrayFuture get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key, int rangeLimit);
-	KeyValueArrayResult read_blob_granules(std::string_view begin_key,
-	                                       std::string_view end_key,
-	                                       int64_t beginVersion,
-	                                       int64_t endVersion,
-	                                       FDBReadBlobGranuleContext granule_context);
-	GranuleSummaryArrayFuture summarize_blob_granules(std::string_view begin_key,
-	                                                  std::string_view end_key,
-	                                                  int64_t summaryVersion,
-	                                                  int rangeLimit);
 
 private:
 	FDBTransaction* tr_;

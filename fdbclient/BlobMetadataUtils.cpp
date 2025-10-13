@@ -27,6 +27,8 @@
 #include "flow/IConnection.h"
 #include "fdbclient/S3BlobStore.h"
 
+// TODO(gglass): delete this file.
+
 std::string buildPartitionPath(const std::string& url, const std::string& partition) {
 	ASSERT(!partition.empty());
 	ASSERT(partition.front() != '/');
@@ -63,7 +65,7 @@ Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::strin
 	metadata.domainId = domainId;
 	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
 	int type;
-	if (CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA) {
+	if (/* CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA */ true) {
 		type = domainId % 3;
 	} else {
 		type = deterministicRandom()->randomInt(0, 3);
@@ -71,7 +73,7 @@ Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::strin
 	int partitionCount;
 	if (type == 0) {
 		partitionCount = 0;
-	} else if (CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA) {
+	} else if (/* CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA */ true) {
 		partitionCount = 2 + domainId % 5;
 	} else {
 		partitionCount = deterministicRandom()->randomInt(2, 12);
@@ -90,7 +92,7 @@ Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::strin
 		// simulate hash prefixing in s3
 		for (int i = 0; i < partitionCount; i++) {
 			std::string partitionName;
-			if (CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA) {
+			if (true /* CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA */) {
 				partitionName = std::to_string(i);
 			} else {
 				partitionName = deterministicRandom()->randomUniqueID().shortString();
@@ -112,16 +114,12 @@ Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::strin
 	}
 
 	// set random refresh + expire time
-	bool doExpire = CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA ? domainId % 2 : deterministicRandom()->coinflip();
+	bool doExpire =
+	    (true /* CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA */) ? domainId % 2 : deterministicRandom()->coinflip();
 	if (doExpire) {
-		if (CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA) {
-			metadata.refreshAt = now() + CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
-			metadata.expireAt = metadata.refreshAt + 0.2 * CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
-		} else {
-			metadata.refreshAt =
-			    now() + deterministicRandom()->random01() * CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
-			metadata.expireAt =
-			    metadata.refreshAt + deterministicRandom()->random01() * CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+		if (true /* CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA */) {
+			metadata.refreshAt = now() + 10 /* CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL */;
+			metadata.expireAt = metadata.refreshAt + 0.2 * 10 /* CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL */;
 		}
 	} else {
 		metadata.refreshAt = std::numeric_limits<double>::max();

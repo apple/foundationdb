@@ -307,7 +307,6 @@ void configureGenerator(const char* text,
 		                   "perpetual_storage_wiggle_engine=",
 		                   "storage_migration_type=",
 		                   "tenant_mode=",
-		                   "blob_granules_enabled=",
 		                   "encryption_at_rest_mode=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
@@ -321,7 +320,7 @@ CommandFactory configureFactory(
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
-        "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}"
+        "|tenant_mode={disabled|optional_experimental|required_experimental}"
         "|encryption_at_rest_mode={disabled|domain_aware|cluster_aware}"
         "|exclude=<ADDRESS...>",
         "change the database configuration",

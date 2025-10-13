@@ -498,10 +498,7 @@ bool canLaunchSrc(RelocateData& relocation,
 	ASSERT(relocation.src.size() != 0);
 	ASSERT(teamSize >= singleRegionTeamSize);
 
-	// Blob migrator is backed by s3 so it can allow unlimited data movements
-	if (relocation.src.size() == 1 && BlobMigratorInterface::isBlobMigrator(relocation.src.back())) {
-		return true;
-	} else if (relocation.bulkLoadTask.present()) {
+	if (relocation.bulkLoadTask.present()) {
 		// workFactor for bulk load task on source is always 0, therefore, we can safely launch
 		// the data move with a bulk load task
 		return true;

@@ -81,9 +81,8 @@ public:
 	                       bool transactional,
 	                       bool restartOnTimeout)
 	  : executor(executor), startFct(startFct), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
-	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath), tenantName(tenantName),
-	    transactional(transactional), restartOnTimeout(restartOnTimeout),
-	    selfConflictingKey(Random::get().randomByteStringLowerCase(8, 8)) {
+	    txState(TxState::IN_PROGRESS), commitCalled(false), tenantName(tenantName), transactional(transactional),
+	    restartOnTimeout(restartOnTimeout), selfConflictingKey(Random::get().randomByteStringLowerCase(8, 8)) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
 		if (databaseCreateErrorInjected) {
@@ -173,8 +172,6 @@ public:
 			transaction.addWriteConflictRange(selfConflictingKey, selfConflictingKey + fdb::Key(1, '\x00'));
 		}
 	}
-
-	std::string getBGBasePath() override { return bgBasePath; }
 
 	virtual void onError(fdb::Error err) override {
 		std::unique_lock<std::mutex> lock(mutex);
@@ -384,10 +381,6 @@ protected:
 	// A history of errors on which the transaction was retried
 	// used only in ON_ERROR and DONE states (no need for mutex)
 	std::vector<fdb::Error> retriedErrors;
-
-	// blob granule base path
-	// Set in constructor, stays immutable
-	const std::string bgBasePath;
 
 	// Indicates if the database error was injected
 	// Accessed on initialization and in ON_ERROR state only (no need for mutex)

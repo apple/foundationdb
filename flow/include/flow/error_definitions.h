@@ -82,11 +82,11 @@ ERROR( failed_to_reach_quorum, 1057, "Failed to reach quorum from configuration 
 ERROR( unsupported_format_version, 1058, "Format version not supported" )
 ERROR( unknown_change_feed, 1059, "Change feed not found" )
 ERROR( change_feed_not_registered, 1060, "Change feed not registered" )
-ERROR( granule_assignment_conflict, 1061, "Conflicting attempts to assign blob granules" )
+// 1061 removed
 ERROR( change_feed_cancelled, 1062, "Change feed was cancelled" )
-ERROR( blob_granule_file_load_error, 1063, "Error loading a blob file during granule materialization" )
-ERROR( blob_granule_transaction_too_old, 1064, "Read version is older than blob granule history supports" )
-ERROR( blob_manager_replaced, 1065, "This blob manager has been replaced." )
+// 1063 removed
+// 1064 removed
+// 1065 removed
 ERROR( change_feed_popped, 1066, "Tried to read a version older than what has been popped from the change feed" )
 ERROR( remote_kvs_cancelled, 1067, "The remote key-value store is cancelled" )
 ERROR( page_header_wrong_page_id, 1068, "Page header does not match location on disk" )
@@ -98,9 +98,9 @@ ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
 ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
 ERROR( data_move_cancelled, 1075, "Data move was cancelled" )
 ERROR( data_move_dest_team_not_found, 1076, "Dest team was not found for data move" )
-ERROR( blob_worker_full, 1077, "Blob worker cannot take on more granule assignments" )
+// 1077 removed
 ERROR( grv_proxy_memory_limit_exceeded, 1078, "GetReadVersion proxy memory limit exceeded" )
-ERROR( blob_granule_request_failed, 1079, "BlobGranule request failed" )
+// 1079 removed
 ERROR( storage_too_many_feed_streams, 1080, "Too many feed streams to a single storage server" )
 ERROR( storage_engine_not_initialized, 1081, "Storage engine was never successfully initialized." )
 ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
@@ -235,8 +235,8 @@ ERROR( mapper_bad_range_decriptor, 2032, "\"{...}\" must be the last element of 
 ERROR( quick_get_key_values_has_more, 2033, "One of the mapped range queries is too large" )
 ERROR( quick_get_value_miss, 2034, "Found a mapped key that is not served in the same SS" )
 ERROR( quick_get_key_values_miss, 2035, "Found a mapped range that is not served in the same SS" )
-ERROR( blob_granule_no_ryw, 2036, "Blob Granule Read Transactions must be specified as ryw-disabled" )
-ERROR( blob_granule_not_materialized, 2037, "Blob Granule Read was not materialized" )
+// 2036 removed
+// 2037 removed
 ERROR( get_mapped_key_values_has_more, 2038, "getMappedRange does not support continuation for now" )
 ERROR( get_mapped_range_reads_your_writes, 2039, "getMappedRange tries to read data that were previously written in the transaction" )
 ERROR( checkpoint_not_found, 2040, "Checkpoint not found" )

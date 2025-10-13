@@ -70,8 +70,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES s3VersionHeaders.txt IGNORE)
   add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
   add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
-  add_fdb_test(TEST_FILES BGServerCommonUnit.toml)
-  add_fdb_test(TEST_FILES BlobGranuleFileUnit.toml)
   add_fdb_test(TEST_FILES BlobManagerUnit.toml)
   add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
   add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
@@ -145,8 +143,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/AtomicBackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicOps.toml)
   add_fdb_test(TEST_FILES fast/AtomicOpsApiCorrectness.toml)
-  add_fdb_test(TEST_FILES fast/AuthzSecurity.toml)
-  add_fdb_test(TEST_FILES fast/AuthzSecurityWithBlobGranules.toml)
   add_fdb_test(TEST_FILES fast/AutomaticIdempotency.toml)
   add_fdb_test(TEST_FILES fast/BackupAzureBlobCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES fast/BackupS3BlobCorrectness.toml IGNORE)
@@ -157,14 +153,9 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyAtomicOps.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyCycle.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifySmall.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifySmallClean.toml)
 
   # TODO: test occasionally times out due to too many change feed shard parts
   # Disable for now until the underlying issue is fixed.
-  add_fdb_test(TEST_FILES rare/BlobGranuleMoveVerifyCycle.toml IGNORE)
   add_fdb_test(TEST_FILES rare/BlobRestoreBasic.toml IGNORE)
   add_fdb_test(TEST_FILES rare/BlobRestoreLarge.toml IGNORE)
   add_fdb_test(TEST_FILES rare/BlobRestoreToVersion.toml IGNORE)
@@ -194,7 +185,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
   # EncryptionUnitTests is only a convenience file to run the different types of encryption tests at once. Do not enable in general ensembles
   add_fdb_test(TEST_FILES fast/EncryptionUnitTests.toml IGNORE)
-  add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml)
+  # TODO(gglass): get rid of EncryptKeyProxyTest because we only support unencrypted.
+  add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml IGNORE)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/HTTPKeyValueStore.toml)
@@ -301,19 +293,6 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml)
   endif()
 
-  # TODO: Disable BlobGranule tests temporarily until the feature is more stable and these tests are fixed.
-  add_fdb_test(TEST_FILES rare/BlobGranuleApiCorrectness.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleCorrectnessClean.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleCorrectness.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleMergeBoundaries.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleRangesChangeLog.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyBalance.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyBalanceClean.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyLarge.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyLargeClean.toml IGNORE)
-
-
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogTlog.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
@@ -411,15 +390,6 @@ if(WITH_PYTHON)
       TEST_FILES restarting/from_7.3.0/VersionVectorEnableRestart-1.toml
       restarting/from_7.3.0/VersionVectorEnableRestart-2.toml IGNORE)
     add_fdb_test(
-      TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCycle-1.toml
-      restarting/from_7.3.0/BlobGranuleRestartCycle-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.3.0/BlobGranuleRestartLarge-1.toml
-      restarting/from_7.3.0/BlobGranuleRestartLarge-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCorrectness-1.toml
-      restarting/from_7.3.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
-    add_fdb_test(
       TEST_FILES restarting/from_7.3.0_until_7.4.0/SnapCycleRestart-1.toml
       restarting/from_7.3.0_until_7.4.0/SnapCycleRestart-2.toml)
     add_fdb_test(
@@ -474,26 +444,17 @@ if(WITH_PYTHON)
       TEST_FILES restarting/to_7.2.0_until_7.3.0/CycleTestRestart-1.toml
       restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml IGNORE)
     add_fdb_test(
-      TEST_FILES restarting/to_7.3.0_until_7.3.51/BlobGranuleRestartCorrectness-1.toml
-      restarting/to_7.3.0_until_7.3.51/BlobGranuleRestartCorrectness-2.toml IGNORE)
-    add_fdb_test(
       TEST_FILES restarting/to_7.3.0_until_7.3.51/ConfigureStorageMigrationTestRestart-1.toml
       restarting/to_7.3.0_until_7.3.51/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
       TEST_FILES restarting/to_7.3.0_until_7.3.51/CycleTestRestart-1.toml
       restarting/to_7.3.0_until_7.3.51/CycleTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_7.3.51_until_7.4.0/BlobGranuleRestartCorrectness-1.toml
-      restarting/to_7.3.51_until_7.4.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
-    add_fdb_test(
       TEST_FILES restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
       restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
       TEST_FILES restarting/to_7.3.51_until_7.4.0/CycleTestRestart-1.toml
       restarting/to_7.3.51_until_7.4.0/CycleTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/to_7.4.0/BlobGranuleRestartCorrectness-1.toml
-      restarting/to_7.4.0/BlobGranuleRestartCorrectness-2.toml)
     add_fdb_test(
       TEST_FILES restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
       restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
@@ -610,71 +571,6 @@ if(WITH_PYTHON)
     endif()
   endif()
 
-  if(NOT OPEN_FOR_IDE AND NOT WIN32 AND NOT USE_SANITIZER)
-    # setup venv for testing token-based authorization
-    if(APPLE)
-      set(ld_env_name "DYLD_LIBRARY_PATH")
-    else()
-      set(ld_env_name "LD_LIBRARY_PATH")
-    endif()
-
-    set(authz_venv_dir ${CMAKE_CURRENT_BINARY_DIR}/authorization_test_venv)
-    set(authz_venv_activate ". ${authz_venv_dir}/bin/activate")
-    set(authz_venv_stamp_file ${authz_venv_dir}/venv.ready)
-    set(authz_venv_cmd "")
-    string(APPEND authz_venv_cmd "[[ ! -f ${authz_venv_stamp_file} ]] && ")
-    string(APPEND authz_venv_cmd "${Python3_EXECUTABLE} -m venv ${authz_venv_dir} ")
-    string(APPEND authz_venv_cmd "&& ${authz_venv_activate} ")
-    string(APPEND authz_venv_cmd "&& pip install --upgrade pip ")
-    string(APPEND authz_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/authorization/requirements.txt ")
-	# NOTE: Here we are already in the venv so Python3_EXECUTABLE is not available anymore
-    string(APPEND authz_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 -m pip install .) ")
-    string(APPEND authz_venv_cmd "&& touch ${authz_venv_stamp_file} ")
-    string(APPEND authz_venv_cmd "|| echo 'venv already set up'")
-    add_test(
-      NAME authorization_venv_setup
-      COMMAND bash -c ${authz_venv_cmd}
-      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-    set_tests_properties(authorization_venv_setup PROPERTIES FIXTURES_SETUP authz_virtual_env TIMEOUT 60)
-
-    set(authz_script_dir ${CMAKE_SOURCE_DIR}/tests/authorization)
-    set(enable_grv_cache 0 1)
-    set(force_mvc 0 1)
-
-    foreach(is_grv_cache_enabled IN LISTS enable_grv_cache)
-      foreach(is_mvc_forced IN LISTS force_mvc)
-        if(NOT is_mvc_forced AND is_grv_cache_enabled)
-          continue() # grv cache requires setting up of shared database state which is only available in MVC mode
-        endif()
-
-        set(authz_test_name "authz")
-        set(test_opt "")
-
-        if(is_grv_cache_enabled)
-          string(APPEND test_opt " --use-grv-cache")
-          string(APPEND authz_test_name "_with_grv_cache")
-        else()
-          string(APPEND authz_test_name "_no_grv_cache")
-        endif()
-
-        if(is_mvc_forced)
-          string(APPEND test_opt " --force-multi-version-client")
-          string(APPEND authz_test_name "_with_forced_mvc")
-        else()
-          string(APPEND authz_test_name "_no_forced_mvc")
-        endif()
-
-        set(authz_test_cmd "${authz_venv_activate} && pytest ${authz_script_dir}/authz_test.py -rA --build-dir ${CMAKE_BINARY_DIR} -vvv${test_opt}")
-        add_test(
-          NAME ${authz_test_name}
-          WORKING_DIRECTORY ${authz_venv_dir}
-          COMMAND bash -c ${authz_test_cmd})
-        set_tests_properties(${authz_test_name} PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner;${ld_env_name}=${CMAKE_BINARY_DIR}/lib")
-        set_tests_properties(${authz_test_name} PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
-        set_tests_properties(${authz_test_name} PROPERTIES TIMEOUT 120)
-      endforeach()
-    endforeach()
-  endif()
 else()
   message(WARNING "Python not found, won't configure ctest")
 endif()

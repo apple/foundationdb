@@ -21,7 +21,6 @@
 #include <vector>
 #include <limits.h>
 
-#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
@@ -34,7 +33,6 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -3462,54 +3460,4 @@ Future<Void> assignKeysToServer(UID traceId, TrType tr, KeyRangeRef keys, UID se
 	dprint("Assign {} to server {}\n", normalKeys.toString(), serverUID.toString());
 	TraceEvent("AssignKeys", traceId).detail("Keys", keys).detail("SS", serverUID);
 	return Void();
-}
-
-ACTOR Future<Void> prepareBlobRestore(Database occ,
-                                      MoveKeysLock lock,
-                                      const DDEnabledState* ddEnabledState,
-                                      UID traceId,
-                                      KeyRangeRef keys,
-                                      UID bmId,
-                                      UID reqId) {
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		TraceEvent(SevError, "PrepareBlobRestoreError")
-		    .detail("Reason", "SHARD_ENCODE_LOCATION_METADATA is enabled")
-		    .detail("Keys", keys)
-		    .detail("BMID", bmId)
-		    .detail("ReqID", reqId);
-		ASSERT(false);
-	}
-	state int retries = 0;
-	state Transaction tr = Transaction(occ);
-	ASSERT(ddEnabledState->isBlobRestorePreparing());
-	loop {
-		tr.debugTransaction(reqId);
-		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		try {
-			wait(checkPersistentMoveKeysLock(&tr, lock));
-			UID currentOwnerId = wait(BlobGranuleRestoreConfig().lock().getD(&tr));
-			if (currentOwnerId != bmId) {
-				CODE_PROBE(true, "Blob migrator replaced in prepareBlobRestore");
-				dprint("Blob migrator {} is replaced by {}\n", bmId.toString(), currentOwnerId.toString());
-				TraceEvent("BlobMigratorReplaced", traceId).detail("Current", currentOwnerId).detail("BM", bmId);
-				throw blob_migrator_replaced();
-			}
-			wait(unassignServerKeys(traceId, &tr, keys, { bmId }));
-			wait(assignKeysToServer(traceId, &tr, keys, bmId));
-			wait(tr.commit());
-			TraceEvent("BlobRestorePrepare", traceId)
-			    .detail("State", "PrepareTxnCommitted")
-			    .detail("ReqId", reqId)
-			    .detail("BM", bmId);
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-
-			if (++retries > SERVER_KNOBS->BLOB_MIGRATOR_ERROR_RETRIES) {
-				throw restore_error();
-			}
-		}
-	}
 }

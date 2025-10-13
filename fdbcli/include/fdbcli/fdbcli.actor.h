@@ -233,15 +233,6 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb,
                                           Optional<TenantMapEntry> tenantEntry,
                                           std::vector<StringRef> tokens,
                                           Future<Void> warn);
-// blobrange command
-ACTOR Future<bool> blobRangeCommandActor(Database localDb,
-                                         Optional<TenantMapEntry> tenantEntry,
-                                         std::vector<StringRef> tokens);
-
-// blobkey command
-ACTOR Future<bool> blobKeyCommandActor(Database localDb,
-                                       Optional<TenantMapEntry> tenantEntry,
-                                       std::vector<StringRef> tokens);
 // blobrestore command
 ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
 // hotrange command

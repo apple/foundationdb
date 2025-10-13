@@ -1065,63 +1065,6 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection>
 	}
 }
 
-// This actor must be a singleton
-ACTOR Future<Void> prepareDataMigration(PrepareBlobRestoreRequest req,
-                                        Reference<DDSharedContext> context,
-                                        Database cx) {
-	try {
-		// Register as a storage server, so that DataDistributor could start data movement after
-		std::pair<Version, Tag> verAndTag = wait(addStorageServer(cx, req.ssi));
-		TraceEvent(SevDebug, "BlobRestorePrepare", context->id())
-		    .detail("State", "BMAdded")
-		    .detail("ReqId", req.requesterID)
-		    .detail("Version", verAndTag.first)
-		    .detail("Tag", verAndTag.second);
-
-		wait(prepareBlobRestore(
-		    cx, context->lock, context->ddEnabledState.get(), context->id(), req.keys, req.ssi.id(), req.requesterID));
-		req.reply.send(PrepareBlobRestoreReply(PrepareBlobRestoreReply::SUCCESS));
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw e;
-		req.reply.sendError(e);
-	}
-
-	ASSERT(context->ddEnabledState->trySetEnabled(req.requesterID));
-	return Void();
-}
-
-ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
-                                             Reference<DataDistributionTracker> tracker,
-                                             Reference<DDQueue> queue) {
-	wait(self->initialized.getFuture());
-	loop {
-		PrepareBlobRestoreRequest req = waitNext(self->context->interface.prepareBlobRestoreReq.getFuture());
-		if (BlobMigratorInterface::isBlobMigrator(req.ssi.id())) {
-			if (self->context->ddEnabledState->sameId(req.requesterID) &&
-			    self->context->ddEnabledState->isBlobRestorePreparing()) {
-				// the sender use at-least once model, so we need to guarantee the idempotence
-				CODE_PROBE(true, "Receive repeated PrepareBlobRestoreRequest");
-				continue;
-			}
-			if (self->context->ddEnabledState->trySetBlobRestorePreparing(req.requesterID)) {
-				// trySetBlobRestorePreparing won't destroy DataDistributor, but will destroy tracker and queue
-				self->addActor.send(prepareDataMigration(req, self->context, self->txnProcessor->context()));
-				// force reloading initData and restarting DD components
-				throw dd_config_changed();
-			} else {
-				auto reason = self->context->ddEnabledState->isBlobRestorePreparing()
-				                  ? PrepareBlobRestoreReply::CONFLICT_BLOB_RESTORE
-				                  : PrepareBlobRestoreReply::CONFLICT_SNAPSHOT;
-				req.reply.send(PrepareBlobRestoreReply(reason));
-				continue;
-			}
-		} else {
-			req.reply.sendError(operation_failed());
-		}
-	}
-}
-
 // Trigger a task on range based on the current bulk load task metadata
 ACTOR Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<DataDistributor> self,
                                                                         KeyRange taskRange,
@@ -2869,7 +2812,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
 			}
 
-			actors.push_back(serveBlobMigratorRequests(self, self->context->tracker, self->context->ddQueue));
 			if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
 				TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
 				    .detail("UsableRegions", self->configuration.usableRegions);

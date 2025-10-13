@@ -324,13 +324,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 					wait(::success(self->checkStorageMetadata(cx, self)));
 
-					// Check blob workers are operating as expected
-					if (configuration.blobGranulesEnabled) {
-						bool blobWorkersCorrect = wait(self->checkBlobWorkers(cx, configuration, self));
-						if (!blobWorkersCorrect)
-							self->testFailure("Blob workers incorrect");
-					}
-
 					// Check that each machine is operating as its desired class
 					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
 					if (!usingDesiredClasses)
@@ -1223,82 +1216,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return true;
 	}
 
-	// Checks if the blob workers are "correct".
-	// Returns false if ANY of the following
-	// - any blob worker is on a diff DC than the blob manager/CC, or
-	// - any worker that should have a blob worker does not have exactly one, or
-	// - any worker that should NOT have a blob worker does indeed have one
-	ACTOR Future<bool> checkBlobWorkers(Database cx,
-	                                    DatabaseConfiguration configuration,
-	                                    ConsistencyCheckWorkload* self) {
-		state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx, true));
-		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
-
-		// process addr -> num blob workers on that process
-		state std::unordered_map<NetworkAddress, int> blobWorkersByAddr;
-		Optional<Key> ccDcId;
-		NetworkAddress ccAddr = self->dbInfo->get().clusterInterface.clientInterface.address();
-
-		// get the CC's DCID
-		for (const auto& worker : workers) {
-			if (ccAddr == worker.interf.address()) {
-				ccDcId = worker.interf.locality.dcId();
-				break;
-			}
-		}
-
-		if (!ccDcId.present()) {
-			TraceEvent("ConsistencyCheck_DidNotFindCC");
-			return false;
-		}
-
-		for (const auto& bwi : blobWorkers) {
-			if (bwi.locality.dcId() != ccDcId) {
-				TraceEvent("ConsistencyCheck_BWOnDiffDcThanCC")
-				    .detail("BWID", bwi.id())
-				    .detail("BwDcId", bwi.locality.dcId())
-				    .detail("CcDcId", ccDcId);
-				return false;
-			}
-			blobWorkersByAddr[bwi.stableAddress()]++;
-		}
-
-		int numBlobWorkerProcesses = 0;
-		for (const auto& worker : workers) {
-			NetworkAddress addr = worker.interf.stableAddress();
-			bool inCCDc = worker.interf.locality.dcId() == ccDcId;
-			if (!configuration.isExcludedServer(worker.interf.addresses(), worker.interf.locality)) {
-				if (worker.processClass == ProcessClass::BlobWorkerClass) {
-					numBlobWorkerProcesses++;
-
-					// this is a worker with processClass == BWClass, so should have exactly one blob worker if it's in
-					// the same DC
-					int desiredBlobWorkersOnAddr = inCCDc ? 1 : 0;
-
-					if (blobWorkersByAddr[addr] != desiredBlobWorkersOnAddr) {
-						TraceEvent("ConsistencyCheck_WrongBWCountOnBWClass")
-						    .detail("Address", addr)
-						    .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr])
-						    .detail("DesiredBlobWorkersOnAddr", desiredBlobWorkersOnAddr)
-						    .detail("BwDcId", worker.interf.locality.dcId())
-						    .detail("CcDcId", ccDcId);
-						return false;
-					}
-				} else {
-					// this is a worker with processClass != BWClass, so there should be no BWs on it
-					if (blobWorkersByAddr[addr] > 0) {
-						TraceEvent("ConsistencyCheck_BWOnNonBWClass").detail("Address", addr);
-						return false;
-					}
-				}
-			} else if (blobWorkersByAddr[addr] > 0) {
-				TraceEvent("ConsistencyCheck_BWOnExcludedAddr").detail("Address", addr);
-				return false;
-			}
-		}
-		return numBlobWorkerProcesses > 0;
-	}
-
 	ACTOR Future<bool> checkWorkerList(Database cx, ConsistencyCheckWorkload* self) {
 		if (!g_simulator->extraDatabases.empty()) {
 			return true;
@@ -1626,38 +1543,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
-		// Check BlobManager
-		if (config.blobGranulesEnabled && db.blobManager.present() &&
-		    (!nonExcludedWorkerProcessMap.contains(db.blobManager.get().address()) ||
-		     nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
-		         ProcessClass::BlobManager) > fitnessLowerBound)) {
-			TraceEvent("ConsistencyCheck_BlobManagerNotBest")
-			    .detail("BestBlobManagerFitness", fitnessLowerBound)
-			    .detail(
-			        "ExistingBlobManagerFitness",
-			        nonExcludedWorkerProcessMap.contains(db.blobManager.get().address())
-			            ? nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
-			                  ProcessClass::BlobManager)
-			            : -1);
-			return false;
-		}
-
-		// Check BlobMigrator
-		if (config.blobGranulesEnabled && db.blobMigrator.present() &&
-		    (!nonExcludedWorkerProcessMap.contains(db.blobMigrator.get().address()) ||
-		     nonExcludedWorkerProcessMap[db.blobMigrator.get().address()].processClass.machineClassFitness(
-		         ProcessClass::BlobMigrator) > fitnessLowerBound)) {
-			TraceEvent("ConsistencyCheck_BlobMigratorNotBest")
-			    .detail("BestBlobMigratorFitness", fitnessLowerBound)
-			    .detail(
-			        "ExistingBlobMigratorFitness",
-			        nonExcludedWorkerProcessMap.contains(db.blobMigrator.get().address())
-			            ? nonExcludedWorkerProcessMap[db.blobMigrator.get().address()].processClass.machineClassFitness(
-			                  ProcessClass::BlobMigrator)
-			            : -1);
-			return false;
-		}
-
 		// Check EncryptKeyProxy
 		if (config.encryptionAtRestMode.isEncryptionEnabled() && db.client.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.contains(db.client.encryptKeyProxy.get().address()) ||
@@ -1750,10 +1635,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		success &= self->checkSingleSingleton(allProcesses, ev, "Ratekeeper", 1);
 		success &= self->checkSingleSingleton(allProcesses, ev, "DataDistributor", 1);
 		success &= self->checkSingleSingleton(allProcesses, ev, "ConsistencyScan", 1);
-		success &= self->checkSingleSingleton(allProcesses, ev, "BlobManager", config.blobGranulesEnabled ? 1 : 0);
-
-		// FIXME: add blob migrator once it's always on
-		// success &= self->checkSingleSingleton(allProcesses, ev, "BlobMigrator", TODO ? 1 : 0);
 
 		success &= self->checkSingleSingleton(
 		    allProcesses,

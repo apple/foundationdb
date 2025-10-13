@@ -27,7 +27,6 @@
 #include <unordered_map>
 
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/Knobs.h"
 #include "fdbrpc/TenantInfo.h"
@@ -56,8 +55,6 @@
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/AuditUtils.actor.h"
-#include "fdbclient/BlobConnectionProvider.h"
-#include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
@@ -100,7 +97,6 @@
 #include "fdbserver/TransactionTagCounter.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/StorageCorruptionBug.h"
 #include "fdbserver/StorageServerUtils.h"
 #include "flow/ActorCollection.h"
@@ -1638,9 +1634,6 @@ public:
 
 	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
 
-	// Tenant metadata to manage connection to blob store for fetchKeys()
-	BGTenantMap tenantData;
-
 	std::shared_ptr<AccumulativeChecksumValidator> acsValidator = nullptr;
 
 	std::shared_ptr<SSBulkLoadMetrics> bulkLoadMetrics = nullptr;
@@ -1709,7 +1702,6 @@ public:
 	    busiestWriteTagContext(ssi.id()), getEncryptCipherKeysMonitor(encryptionMonitor), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")),
-	    tenantData(db),
 	    acsValidator(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
 	                         !SERVER_KNOBS->ENABLE_VERSION_VECTOR && !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST
 	                     ? std::make_shared<AccumulativeChecksumValidator>()
@@ -7792,139 +7784,6 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 	}
 }
 
-// Read blob granules metadata. It keeps retrying until reaching maxRetryCount.
-// The key range should not cross tenant boundary.
-ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranuleChunks(Transaction* tr,
-                                                                                  KeyRange keys,
-                                                                                  Version fetchVersion) {
-	state Version readVersion = fetchVersion;
-	loop {
-		try {
-			Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tr->readBlobGranules(keys, 0, readVersion));
-			TraceEvent(SevDebug, "ReadBlobGranules")
-			    .detail("Keys", keys)
-			    .detail("Chunks", chunks.size())
-			    .detail("FetchVersion", fetchVersion);
-			return chunks;
-		} catch (Error& e) {
-			if (e.code() == error_code_blob_granule_transaction_too_old) {
-				if (SERVER_KNOBS->BLOB_RESTORE_SKIP_EMPTY_RANGES) {
-					CODE_PROBE(true, "Skip blob ranges for restore", probe::decoration::rare);
-					TraceEvent(SevWarn, "SkipBlobGranuleForRestore").error(e).detail("Keys", keys);
-					Standalone<VectorRef<BlobGranuleChunkRef>> empty;
-					return empty;
-				} else {
-					TraceEvent(SevWarn, "NotRestorableBlobGranule").error(e).detail("Keys", keys);
-				}
-			}
-			wait(tr->onError(e));
-		}
-	}
-}
-
-// Read blob granules metadata. The key range can cross tenant bundary.
-ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranuleChunks(Transaction* tr,
-                                                                               Database cx,
-                                                                               KeyRangeRef keys,
-                                                                               Version fetchVersion) {
-	state Standalone<VectorRef<BlobGranuleChunkRef>> results;
-	state Standalone<VectorRef<KeyRangeRef>> ranges = wait(cx->listBlobbifiedRanges(keys, CLIENT_KNOBS->TOO_MANY));
-	for (auto& range : ranges) {
-		KeyRangeRef intersectedRange(std::max(keys.begin, range.begin), std::min(keys.end, range.end));
-		Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
-		    wait(tryReadBlobGranuleChunks(tr, intersectedRange, fetchVersion));
-		results.append(results.arena(), chunks.begin(), chunks.size());
-		results.arena().dependsOn(chunks.arena());
-	}
-	return results;
-}
-
-// Read keys from blob storage
-ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
-                                       Transaction* tr,
-                                       Database cx,
-                                       KeyRange keys,
-                                       Version fetchVersion,
-                                       BGTenantMap* tenantData) {
-	try {
-		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
-		    wait(readBlobGranuleChunks(tr, cx, keys, fetchVersion));
-		TraceEvent(SevDebug, "ReadBlobGranuleChunks").detail("Keys", keys).detail("Chunks", chunks.size());
-
-		state int i;
-		for (i = 0; i < chunks.size(); ++i) {
-			state KeyRangeRef chunkRange = chunks[i].keyRange;
-			// Chunk is empty if no snapshot file. Skip it
-			if (!chunks[i].snapshotFile.present()) {
-				TraceEvent("SkipEmptyBlobChunkForRestore")
-				    .detail("Chunk", chunks[i].keyRange)
-				    .detail("Version", chunks[i].includedVersion);
-				RangeResult rows;
-				if (i == chunks.size() - 1) {
-					rows.more = false;
-				} else {
-					rows.more = true;
-					rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
-				}
-				results.send(rows);
-				continue;
-			}
-			try {
-				state Reference<BlobConnectionProvider> blobConn = wait(loadBStoreForTenant(tenantData, chunkRange));
-				state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
-
-				TraceEvent(SevDebug, "ReadBlobData")
-				    .detail("Rows", rows.size())
-				    .detail("ChunkRange", chunkRange)
-				    .detail("FetchVersion", fetchVersion);
-				// It should read all the data from that chunk
-				ASSERT(!rows.more);
-				if (i == chunks.size() - 1) {
-					// set more to false when it's the last chunk
-					rows.more = false;
-				} else {
-					rows.more = true;
-					rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
-				}
-				results.send(rows);
-			} catch (Error& err) {
-				if (err.code() == error_code_file_not_found ||
-				    err.code() == error_code_blob_granule_transaction_too_old) {
-					if (SERVER_KNOBS->BLOB_RESTORE_SKIP_EMPTY_RANGES) {
-						// skip no data ranges and restore as much data as we can
-						TraceEvent(SevWarn, "SkipBlobChunkForRestore").error(err).detail("ChunkRange", chunkRange);
-						RangeResult rows;
-						results.send(rows);
-						CODE_PROBE(true, "Skip blob chunks for restore", probe::decoration::rare);
-					} else {
-						TraceEvent(SevWarn, "NotRestorableBlobChunk").error(err).detail("ChunkRange", chunkRange);
-						throw;
-					}
-				} else {
-					throw;
-				}
-			}
-		}
-
-		if (chunks.size() == 0) {
-			RangeResult rows;
-			results.send(rows);
-		}
-
-		results.sendError(end_of_stream()); // end of range read
-	} catch (Error& e) {
-		TraceEvent(SevWarn, "ReadBlobDataFailure")
-		    .suppressFor(5.0)
-		    .detail("Keys", keys)
-		    .detail("FetchVersion", fetchVersion)
-		    .detail("Error", e.what());
-		tr->reset();
-		tr->setVersion(fetchVersion);
-		results.sendError(e);
-	}
-	return Void();
-}
-
 // We have to store the version the change feed was stopped at in the SS instead of just the stopped status
 // In addition to simplifying stopping logic, it enables communicating stopped status when fetching change feeds
 // from other SS correctly
@@ -8669,8 +8528,6 @@ bool fetchKeyCanRetry(const Error& e) {
 	case error_code_future_version:
 	case error_code_process_behind:
 	case error_code_server_overloaded:
-	case error_code_blob_granule_request_failed:
-	case error_code_blob_granule_transaction_too_old:
 	case error_code_grv_proxy_memory_limit_exceeded:
 	case error_code_commit_proxy_memory_limit_exceeded:
 	case error_code_storage_replica_comparison_error:
@@ -9004,12 +8861,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// We must also ensure we have fetched all change feed metadata BEFORE changing the phase to fetching to
 		// ensure change feed mutations get applied correctly
 		state std::vector<Key> changeFeedsToFetch;
-		state Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(data->cx, keys);
-		state bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
-		if (!isFullRestore) {
-			std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
-			changeFeedsToFetch = _cfToFetch;
-		}
+		std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
+		changeFeedsToFetch = _cfToFetch;
 		wait(data->durableVersionLock.take());
 
 		shard->phase = AddingShard::Fetching;
@@ -9031,7 +8884,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state Transaction tr(data->cx);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			if (!isFullRestore && SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
+			if (SERVER_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT) {
 				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
 				int64_t requiredReplicas = SERVER_KNOBS->DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
 				tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
@@ -9092,23 +8945,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			state KeyRef rangeEnd;
-			if (isFullRestore) {
-				state BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(restoreController));
-				// Read from blob only when it's copying data for full restore. Otherwise it may cause data
-				// corruptions e.g we don't want to copy from blob any more when it's applying mutation
-				// logs(APPLYING_MLOGS)
-				if (phase == BlobRestorePhase::COPYING_DATA || phase == BlobRestorePhase::ERROR) {
-					wait(loadBGTenantMap(&data->tenantData, &tr));
-					// only copy the range that intersects with full restore range
-					state KeyRangeRef range(std::max(keys.begin, normalKeys.begin), std::min(keys.end, normalKeys.end));
-					Version version = wait(BlobRestoreController::getTargetVersion(restoreController, fetchVersion));
-					hold = tryGetRangeFromBlob(results, &tr, data->cx, range, version, &data->tenantData);
-					rangeEnd = range.end;
-				} else {
-					hold = tryGetRange(results, &tr, keys);
-					rangeEnd = keys.end;
-				}
-			} else if (conductBulkLoad) {
+			if (conductBulkLoad) {
 				ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId)); // TODO(BulkLoad): remove dangerous assert
 				// Get the bulkload task metadata from the data move metadata. Note that a SS can receive a data move
 				// mutation before the bulkload task metadata is persisted. In this case, the SS will not be able to

@@ -24,7 +24,6 @@
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/BlobMigratorInterface.h"
 #include "flow/ApiVersion.h"
 #include "flow/Buggify.h"
 #include "flow/CodeProbe.h"
@@ -60,7 +59,6 @@
 #include "fdbserver/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/DataDistributorInterface.h"
-#include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -346,7 +344,6 @@ StringRef fileLogDataPrefix = "log-"_sr;
 StringRef fileVersionedLogDataPrefix = "log2-"_sr;
 StringRef fileLogQueuePrefix = "logqueue-"_sr;
 StringRef tlogQueueExtension = "fdq"_sr;
-StringRef fileBlobWorkerPrefix = "bw-"_sr;
 
 enum class FilesystemCheck {
 	FILES_ONLY,
@@ -556,9 +553,6 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 			store.tLogOptions.version = TLogVersion::V2;
 			store.tLogOptions.spillType = TLogSpillType::VALUE;
 			prefix = fileLogDataPrefix;
-		} else if (filename.startsWith(fileBlobWorkerPrefix)) {
-			store.storedComponent = DiskStore::BlobWorker;
-			prefix = fileBlobWorkerPrefix;
 		} else {
 			continue;
 		}
@@ -590,26 +584,23 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 
 // Register the worker interf to cluster controller (cc) and
 // re-register the worker when key roles interface, e.g., cc, dd, ratekeeper, change.
-ACTOR Future<Void> registrationClient(
-    Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-    WorkerInterface interf,
-    Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-    ProcessClass initialClass,
-    Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
-    Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
-    Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>> const> bmInterf,
-    Reference<AsyncVar<Optional<BlobMigratorInterface>> const> blobMigratorInterf,
-    Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
-    Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
-    Reference<AsyncVar<bool> const> degraded,
-    Reference<IClusterConnectionRecord> connRecord,
-    Reference<AsyncVar<std::set<std::string>> const> issues,
-    Reference<ConfigNode> configNode,
-    Reference<LocalConfiguration> localConfig,
-    ConfigBroadcastInterface configBroadcastInterface,
-    Reference<AsyncVar<ServerDBInfo>> dbInfo,
-    Promise<Void> recoveredDiskFiles,
-    Reference<AsyncVar<Optional<UID>>> clusterId) {
+ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                                      WorkerInterface interf,
+                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                                      ProcessClass initialClass,
+                                      Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
+                                      Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+                                      Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
+                                      Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
+                                      Reference<AsyncVar<bool> const> degraded,
+                                      Reference<IClusterConnectionRecord> connRecord,
+                                      Reference<AsyncVar<std::set<std::string>> const> issues,
+                                      Reference<ConfigNode> configNode,
+                                      Reference<LocalConfiguration> localConfig,
+                                      ConfigBroadcastInterface configBroadcastInterface,
+                                      Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                      Promise<Void> recoveredDiskFiles,
+                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -632,24 +623,22 @@ ACTOR Future<Void> registrationClient(
 			incorrectTime = Optional<double>();
 		}
 
-		RegisterWorkerRequest request(
-		    interf,
-		    initialClass,
-		    processClass,
-		    asyncPriorityInfo->get(),
-		    requestGeneration++,
-		    ddInterf->get(),
-		    rkInterf->get(),
-		    bmInterf->get().present() ? bmInterf->get().get().second : Optional<BlobManagerInterface>(),
-		    blobMigratorInterf->get(),
-		    ekpInterf->get(),
-		    csInterf->get(),
-		    degraded->get(),
-		    localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
-		    localConfig.isValid() ? localConfig->configClassSet() : Optional<ConfigClassSet>(),
-		    recoveredDiskFiles.isSet(),
-		    configBroadcastInterface,
-		    clusterId->get());
+		RegisterWorkerRequest request(interf,
+		                              initialClass,
+		                              processClass,
+		                              asyncPriorityInfo->get(),
+		                              requestGeneration++,
+		                              ddInterf->get(),
+		                              rkInterf->get(),
+		                              ekpInterf->get(),
+		                              csInterf->get(),
+		                              degraded->get(),
+		                              localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
+		                              localConfig.isValid() ? localConfig->configClassSet()
+		                                                    : Optional<ConfigClassSet>(),
+		                              recoveredDiskFiles.isSet(),
+		                              configBroadcastInterface,
+		                              clusterId->get());
 
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
@@ -723,12 +712,6 @@ ACTOR Future<Void> registrationClient(
 			when(wait(csInterf->onChange())) {
 				break;
 			}
-			when(wait(bmInterf->onChange())) {
-				break;
-			}
-			when(wait(blobMigratorInterf->onChange())) {
-				break;
-			}
 			when(wait(ekpInterf->onChange())) {
 				break;
 			}
@@ -771,14 +754,6 @@ bool addressInDbAndPrimaryDc(
 	}
 
 	if (dbi.consistencyScan.present() && dbi.consistencyScan.get().address() == address) {
-		return true;
-	}
-
-	if (dbi.blobManager.present() && dbi.blobManager.get().address() == address) {
-		return true;
-	}
-
-	if (dbi.blobMigrator.present() && dbi.blobMigrator.get().address() == address) {
 		return true;
 	}
 
@@ -2055,24 +2030,6 @@ ACTOR Future<Void> chaosMetricsLogger() {
 	}
 }
 
-// like genericactors setWhenDoneOrError, but we need to take into account the bm epoch. We don't want to reset it if
-// this manager was replaced by a later manager (with a higher epoch) on this worker
-ACTOR Future<Void> resetBlobManagerWhenDoneOrError(
-    Future<Void> blobManagerProcess,
-    Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>> var,
-    int64_t epoch) {
-	try {
-		wait(blobManagerProcess);
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-	}
-	if (var->get().present() && var->get().get().first == epoch) {
-		var->set(Optional<std::pair<int64_t, BlobManagerInterface>>());
-	}
-	return Void();
-}
-
 static const std::string clusterIdFilename = "clusterId";
 
 ACTOR Future<Void> createClusterIdFile(std::string folder, UID clusterId) {
@@ -2225,11 +2182,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
-	state Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>> bmEpochAndInterf(
-	    new AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>());
-	state Reference<AsyncVar<Optional<BlobMigratorInterface>>> blobMigratorInterf(
-	    new AsyncVar<Optional<BlobMigratorInterface>>());
-	state UID lastBMRecruitRequestId;
 	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
 	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
 	state Reference<AsyncVar<Optional<ConsistencyScanInterface>>> csInterf(
@@ -2529,49 +2481,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				logData.back().actor = oldLog.getFuture() || tl;
 				logData.back().uid = s.storeID;
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
-			} else if (s.storedComponent == DiskStore::BlobWorker) {
-				if (blobWorkerFuture.isReady() && SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED) {
-					LocalLineage _;
-					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
-
-					BlobWorkerInterface recruited(locality, deterministicRandom()->randomUniqueID());
-					recruited.initEndpoints();
-
-					std::map<std::string, std::string> details;
-					details["StorageEngine"] = s.storeType.toString();
-					startRole(Role::BLOB_WORKER, recruited.id(), interf.id(), details, "Restored");
-
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.blobGranuleFileRequest);
-					DUMPTOKEN(recruited.assignBlobRangeRequest);
-					DUMPTOKEN(recruited.revokeBlobRangeRequest);
-					DUMPTOKEN(recruited.granuleAssignmentsRequest);
-					DUMPTOKEN(recruited.granuleStatusStreamRequest);
-					DUMPTOKEN(recruited.haltBlobWorker);
-					DUMPTOKEN(recruited.minBlobVersionRequest);
-
-					IKeyValueStore* data = openKVStore(s.storeType,
-					                                   s.filename,
-					                                   recruited.id(),
-					                                   memoryLimit,
-					                                   false,
-					                                   false,
-					                                   false,
-					                                   dbInfo,
-					                                   Optional<EncryptionAtRestMode>(),
-					                                   FLOW_KNOBS->BLOB_WORKER_PAGE_CACHE);
-					filesClosed.add(data->onClosed());
-
-					Promise<Void> recovery;
-					Future<Void> bw = blobWorker(recruited, recovery, dbInfo, data);
-					recoveries.push_back(recovery.getFuture());
-					bw = handleIOErrors(bw, data, recruited.id());
-					blobWorkerFuture = bw;
-					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
-				} else {
-					CODE_PROBE(true, "Multiple blob workers after reboot", probe::decoration::rare);
-					recoveries.push_back(deleteStorageFile(s.storeType, s.filename, s.storeID, memoryLimit, dbInfo));
-				}
 			}
 		}
 
@@ -2639,8 +2548,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       initialClass,
 		                                       ddInterf,
 		                                       rkInterf,
-		                                       bmEpochAndInterf,
-		                                       blobMigratorInterf,
 		                                       ekpInterf,
 		                                       csInterf,
 		                                       degraded,
@@ -2687,10 +2594,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						            localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 						    .detail("DataDistributorID",
 						            localInfo.distributor.present() ? localInfo.distributor.get().id() : UID())
-						    .detail("BlobManagerID",
-						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID())
-						    .detail("BlobMigratorID",
-						            localInfo.blobMigrator.present() ? localInfo.blobMigrator.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
 						            localInfo.client.encryptKeyProxy.present()
 						                ? localInfo.client.encryptKeyProxy.get().id()
@@ -2872,92 +2775,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					csInterf->set(Optional<ConsistencyScanInterface>(recruited));
 				}
 				TraceEvent("ConsistencyScanReceived", req.reqId).detail("ConsistencyScanId", recruited.id());
-				req.reply.send(recruited);
-			}
-			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobManager;
-				BlobManagerInterface recruited(locality, req.reqId, req.epoch);
-				recruited.initEndpoints();
-
-				if (bmEpochAndInterf->get().present() && bmEpochAndInterf->get().get().first == req.epoch) {
-					ASSERT(req.reqId == lastBMRecruitRequestId);
-					recruited = bmEpochAndInterf->get().get().second;
-
-					CODE_PROBE(true, "Recruited while already a blob manager.");
-				} else if (lastBMRecruitRequestId == req.reqId && !bmEpochAndInterf->get().present()) {
-					// The previous blob manager WAS present, like the above case, but it died before the CC got the
-					// response to the recruitment request, so the CC retried to recruit the same blob manager
-					// id/epoch from the same reqId. To keep epoch safety between different managers, instead of
-					// restarting the same manager id at the same epoch, we should just tell it the original request
-					// succeeded, and let it realize this manager died via failure detection and start a new one.
-					CODE_PROBE(true, "Recruited while formerly the same blob manager.", probe::decoration::rare);
-				} else {
-					// TODO: it'd be more optimal to halt the last manager if present here, but it will figure it
-					// out via the epoch check Also, not halting lets us handle the case here where the last BM had
-					// a higher epoch and somehow the epochs got out of order by a delayed initialize request. The
-					// one we start here will just halt on the lock check.
-					startRole(Role::BLOB_MANAGER, recruited.id(), interf.id());
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.haltBlobManager);
-					DUMPTOKEN(recruited.haltBlobGranules);
-					DUMPTOKEN(recruited.blobManagerExclCheckReq);
-
-					lastBMRecruitRequestId = req.reqId;
-
-					Future<Void> blobManagerProcess = blobManager(recruited, dbInfo, req.epoch);
-					errorForwarders.add(
-					    forwardError(errors,
-					                 Role::BLOB_MANAGER,
-					                 recruited.id(),
-					                 resetBlobManagerWhenDoneOrError(blobManagerProcess, bmEpochAndInterf, req.epoch)));
-					bmEpochAndInterf->set(
-					    Optional<std::pair<int64_t, BlobManagerInterface>>(std::pair(req.epoch, recruited)));
-				}
-				TraceEvent("BlobManagerReceived", req.reqId).detail("BlobManagerId", recruited.id());
-				req.reply.send(recruited);
-			}
-			when(InitializeBlobMigratorRequest req = waitNext(interf.blobMigrator.getFuture())) {
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobMigrator;
-
-				BlobMigratorInterface recruited(locality, req.reqId);
-				recruited.initEndpoints();
-				if (blobMigratorInterf->get().present()) {
-					recruited = blobMigratorInterf->get().get();
-					CODE_PROBE(true, "Recruited while already a blob migrator.", probe::decoration::rare);
-				} else {
-					startRole(Role::BLOB_MIGRATOR, recruited.id(), interf.id());
-					DUMPTOKEN(recruited.haltBlobMigrator);
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.ssi.getValue);
-					DUMPTOKEN(recruited.ssi.getKey);
-					DUMPTOKEN(recruited.ssi.getKeyValues);
-					DUMPTOKEN(recruited.ssi.getMappedKeyValues);
-					DUMPTOKEN(recruited.ssi.getShardState);
-					DUMPTOKEN(recruited.ssi.waitMetrics);
-					DUMPTOKEN(recruited.ssi.splitMetrics);
-					DUMPTOKEN(recruited.ssi.getReadHotRanges);
-					DUMPTOKEN(recruited.ssi.getRangeSplitPoints);
-					DUMPTOKEN(recruited.ssi.getStorageMetrics);
-					DUMPTOKEN(recruited.ssi.getQueuingMetrics);
-					DUMPTOKEN(recruited.ssi.getKeyValueStoreType);
-					DUMPTOKEN(recruited.ssi.watchValue);
-					DUMPTOKEN(recruited.ssi.getKeyValuesStream);
-					DUMPTOKEN(recruited.ssi.changeFeedStream);
-					DUMPTOKEN(recruited.ssi.changeFeedPop);
-					DUMPTOKEN(recruited.ssi.changeFeedVersionUpdate);
-
-					Future<Void> blobMigratorProcess = blobMigrator(recruited, dbInfo);
-					errorForwarders.add(forwardError(errors,
-					                                 Role::BLOB_MIGRATOR,
-					                                 recruited.id(),
-					                                 setWhenDoneOrError(blobMigratorProcess,
-					                                                    blobMigratorInterf,
-					                                                    Optional<BlobMigratorInterface>())));
-					blobMigratorInterf->set(Optional<BlobMigratorInterface>(recruited));
-				}
-				TraceEvent("BlobMigrator_InitRequest", req.reqId).detail("BlobMigratorId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when(InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
@@ -3235,52 +3052,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						reply.sendError(recruitment_failed());
 						return Void();
 					}));
-				}
-			}
-			when(InitializeBlobWorkerRequest req = waitNext(interf.blobWorker.getFuture())) {
-				if (blobWorkerFuture.isReady()) {
-					LocalLineage _;
-					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
-
-					BlobWorkerInterface recruited(locality, req.interfaceId);
-					recruited.initEndpoints();
-					startRole(Role::BLOB_WORKER, recruited.id(), interf.id());
-
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.blobGranuleFileRequest);
-					DUMPTOKEN(recruited.assignBlobRangeRequest);
-					DUMPTOKEN(recruited.revokeBlobRangeRequest);
-					DUMPTOKEN(recruited.granuleAssignmentsRequest);
-					DUMPTOKEN(recruited.granuleStatusStreamRequest);
-					DUMPTOKEN(recruited.haltBlobWorker);
-					DUMPTOKEN(recruited.minBlobVersionRequest);
-
-					IKeyValueStore* data = nullptr;
-					if (SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED && req.storeType != KeyValueStoreType::END) {
-						std::string filename =
-						    filenameFromId(req.storeType, folder, fileBlobWorkerPrefix.toString(), recruited.id());
-						data = openKVStore(req.storeType,
-						                   filename,
-						                   recruited.id(),
-						                   memoryLimit,
-						                   false,
-						                   false,
-						                   false,
-						                   dbInfo,
-						                   req.encryptMode,
-						                   FLOW_KNOBS->BLOB_WORKER_PAGE_CACHE);
-						filesClosed.add(data->onClosed());
-					}
-
-					ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
-					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo, data);
-					if (SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED && req.storeType != KeyValueStoreType::END) {
-						bw = handleIOErrors(bw, data, recruited.id());
-					}
-					blobWorkerFuture = bw;
-					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
-				} else {
-					req.reply.sendError(recruitment_failed());
 				}
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
@@ -4410,9 +4181,6 @@ const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
-const Role Role::BLOB_MANAGER("BlobManager", "BM");
-const Role Role::BLOB_WORKER("BlobWorker", "BW");
-const Role Role::BLOB_MIGRATOR("BlobMigrator", "MG");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");

@@ -117,7 +117,6 @@ public-address = {ip_address}:$ID{optional_tls}
 listen-address = public
 datadir = {datadir}/$ID
 logdir = {logdir}
-{bg_config}
 {encrypt_config}
 {tls_config}
 {authz_public_key_config}
@@ -149,7 +148,6 @@ knob_min_trace_severity=5
         create_config=True,
         port=None,
         ip_address=None,
-        blob_granules_enabled: bool = False,
         enable_encryption_at_rest: bool = False,
         use_future_protocol_version: bool = False,
         redundancy: str = "single",
@@ -181,12 +179,8 @@ knob_min_trace_severity=5
         self.ip_address = "127.0.0.1" if ip_address is None else ip_address
         self.first_port = port
         self.custom_config = custom_config
-        self.blob_granules_enabled = blob_granules_enabled
         self.enable_encryption_at_rest = enable_encryption_at_rest
         self.trace_check_entries = []
-        if blob_granules_enabled:
-            # add extra process for blob_worker
-            self.process_number += 1
         self.use_future_protocol_version = use_future_protocol_version
 
         if self.first_port is not None:
@@ -262,19 +256,9 @@ knob_min_trace_severity=5
         new_conf_file = self.conf_file.parent / (self.conf_file.name + ".new")
         with open(new_conf_file, "x") as f:
             conf_template = LocalCluster.configuration_template
-            bg_config = ""
             encrypt_config = ""
             if self.use_legacy_conf_syntax:
                 conf_template = conf_template.replace("-", "_")
-            if self.blob_granules_enabled:
-                bg_config = "\n".join(
-                    [
-                        "knob_bg_url=file://" + str(self.data) + "/fdbblob/",
-                        "knob_bg_snapshot_file_target_bytes=200000",
-                        "knob_bg_delta_file_target_bytes=10000",
-                        "knob_bg_delta_bytes_before_compact=100000",
-                    ]
-                )
             if self.enable_encryption_at_rest:
                 encrypt_config = "\n".join(
                     [
@@ -288,7 +272,6 @@ knob_min_trace_severity=5
                     datadir=self.data,
                     logdir=self.log,
                     ip_address=self.ip_address,
-                    bg_config=bg_config,
                     encrypt_config=encrypt_config,
                     tls_config=self.tls_conf_string(),
                     authz_public_key_config=self.authz_public_key_conf_string(),
@@ -319,9 +302,6 @@ knob_min_trace_severity=5
                     f.write("machine_id = {}\n".format(server_id))
                 else:
                     f.write("machine-id = {}\n".format(server_id))
-            if self.blob_granules_enabled:
-                # make last process a blob_worker class
-                f.write("class = blob_worker\n")
             f.flush()
             os.fsync(f.fileno())
 
@@ -440,8 +420,6 @@ knob_min_trace_severity=5
         if self.enable_encryption_at_rest:
             # FIXME: could support domain_aware if tenants are required
             db_config += " encryption_at_rest_mode=cluster_aware"
-        if self.blob_granules_enabled:
-            db_config += " blob_granules_enabled:=1"
         self.fdbcli_exec(db_config)
 
     # Generate and install test certificate chains and keys

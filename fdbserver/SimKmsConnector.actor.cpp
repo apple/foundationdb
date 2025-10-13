@@ -180,57 +180,6 @@ ACTOR Future<Void> ekLookupByDomainIds(KmsConnectorInterface interf, KmsConnLook
 	return Void();
 }
 
-ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobMetadataReq req) {
-	state KmsConnBlobMetadataRep rep;
-	state Optional<TraceEvent> dbgDIdTrace =
-	    req.debugId.present() ? TraceEvent("SimKmsBlobMetadataLookup", interf.id()) : Optional<TraceEvent>();
-	if (dbgDIdTrace.present()) {
-		dbgDIdTrace.get().detail("DbgId", req.debugId.get());
-	}
-
-	for (auto const domainId : req.domainIds) {
-		Standalone<BlobMetadataDetailsRef> metadataRef = SimKmsVault::getBlobMetadata(domainId, SERVER_KNOBS->BG_URL);
-		rep.metadataDetails.arena().dependsOn(metadataRef.arena());
-		rep.metadataDetails.push_back(rep.metadataDetails.arena(), metadataRef);
-	}
-
-	wait(delay(deterministicRandom()->random01())); // simulate network delay
-
-	// buggify omitted tenants, errors, or unexpectedly ordered locations in response
-	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
-		int bug = deterministicRandom()->randomInt(0, 3);
-		if (bug == 0) {
-			// remove some number of tenants from the response
-			int targetSize = deterministicRandom()->randomInt(0, rep.metadataDetails.size());
-			while (rep.metadataDetails.size() > targetSize) {
-				swapAndPop(&rep.metadataDetails, deterministicRandom()->randomInt(0, rep.metadataDetails.size()));
-			}
-		} else if (bug == 1) {
-			// send error
-			req.reply.sendError(connection_failed());
-			return Void();
-		} else if (bug == 2) {
-			int targetDetail = deterministicRandom()->randomInt(0, rep.metadataDetails.size());
-			auto& locs = rep.metadataDetails[targetDetail].locations;
-			if (locs.size() > 1) {
-				int targetIdx1 = deterministicRandom()->randomInt(0, locs.size());
-				int targetIdx2 = targetIdx1;
-				while (targetIdx2 == targetIdx1) {
-					targetIdx2 = deterministicRandom()->randomInt(0, locs.size());
-				}
-				std::swap(locs[targetIdx1], locs[targetIdx2]);
-			}
-		} else {
-			// developer forgot to update cases
-			ASSERT(false);
-		}
-	}
-
-	req.reply.send(rep);
-
-	return Void();
-}
-
 ACTOR Future<Void> simconnectorCoreImpl(KmsConnectorInterface interf) {
 	TraceEvent("SimEncryptKmsProxyInit", interf.id()).detail("MaxEncryptKeys", SERVER_KNOBS->SIM_KMS_MAX_KEYS);
 
@@ -243,9 +192,6 @@ ACTOR Future<Void> simconnectorCoreImpl(KmsConnectorInterface interf) {
 			}
 			when(KmsConnLookupEKsByDomainIdsReq req = waitNext(interf.ekLookupByDomainIds.getFuture())) {
 				addActor.send(ekLookupByDomainIds(interf, req));
-			}
-			when(KmsConnBlobMetadataReq req = waitNext(interf.blobMetadataReq.getFuture())) {
-				addActor.send(blobMetadataLookup(interf, req));
 			}
 			when(KmsConnGetKMSStateReq req = waitNext(interf.getKMSStateReq.getFuture())) {
 				req.reply.send(KmsConnGetKMSStateRep());

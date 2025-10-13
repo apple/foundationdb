@@ -48,27 +48,6 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_shared_state(FDBFuture* 
 
 DLLEXPORT void fdb_use_future_protocol_version();
 
-// the logical read_blob_granules is broken out (at different points depending on the client type) into the asynchronous
-// start() that happens on the fdb network thread, and synchronous finish() that happens off it
-DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_start(FDBTransaction* tr,
-                                                              uint8_t const* begin_key_name,
-                                                              int begin_key_name_length,
-                                                              uint8_t const* end_key_name,
-                                                              int end_key_name_length,
-                                                              int64_t beginVersion,
-                                                              int64_t readVersion,
-                                                              int64_t* readVersionOut);
-
-DLLEXPORT FDBResult* fdb_transaction_read_blob_granules_finish(FDBTransaction* tr,
-                                                               FDBFuture* f,
-                                                               uint8_t const* begin_key_name,
-                                                               int begin_key_name_length,
-                                                               uint8_t const* end_key_name,
-                                                               int end_key_name_length,
-                                                               int64_t beginVersion,
-                                                               int64_t readVersion,
-                                                               FDBReadBlobGranuleContext* granuleContext);
-
 #ifdef __cplusplus
 }
 #endif

@@ -337,7 +337,6 @@ const std::unordered_map<int, std::string> BlobCipherMetrics::usageTypeNames = {
 	{ BlobCipherMetrics::UsageType::TLOG_POST_RESOLUTION, "TLogPostResolution" },
 	{ BlobCipherMetrics::UsageType::KV_MEMORY, "KVMemory" },
 	{ BlobCipherMetrics::UsageType::KV_REDWOOD, "KVRedwood" },
-	{ BlobCipherMetrics::UsageType::BLOB_GRANULE, "BlobGranule" },
 	{ BlobCipherMetrics::UsageType::BACKUP, "Backup" },
 	{ BlobCipherMetrics::UsageType::RESTORE, "Restore" },
 	{ BlobCipherMetrics::UsageType::TEST, "Test" },
@@ -376,8 +375,6 @@ std::string toString(BlobCipherMetrics::UsageType type) {
 		return "KVMemory";
 	case BlobCipherMetrics::UsageType::KV_REDWOOD:
 		return "KVRedwood";
-	case BlobCipherMetrics::UsageType::BLOB_GRANULE:
-		return "BlobGranule";
 	case BlobCipherMetrics::UsageType::BACKUP:
 		return "Backup";
 	case BlobCipherMetrics::UsageType::RESTORE:
