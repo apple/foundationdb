@@ -150,6 +150,16 @@ public:
 	virtual std::string randomAlphaNumeric(int length) = 0;
 	virtual void randomBytes(uint8_t* buf, int length) = 0;
 	virtual uint32_t randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) = 0;
+
+	// Given an input percentage, returns true with a probability of that percentage.
+	// Valid range: 1 <= percent <= 99
+	// 0 percent -> not allowed since it will always be false anyway
+	// 100 percent -> not allowed since it will always be true anyway
+	// 1 percent -> returns true with a probability of 1% (0.01)
+	// 50 percent -> returns true with a probability of 50% (0.5)
+	// 99 percent -> returns true with a probability of 99% (0.99)
+	virtual bool truePercent(const int percent) = 0;
+
 	virtual uint64_t peek() const = 0; // returns something that is probably different for different random states.
 	                                   // Deterministic (and idempotent) for a deterministic generator.
 
