@@ -1722,6 +1722,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
 	    .detail("PrimaryLocality", self->primaryLocality)
 	    .detail("DcId", self->masterInterface.locality.dcId())
+	    .detail("LastEpochEnd", self->lastEpochEnd)
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
 	// Recovery transaction
@@ -1820,8 +1821,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
 	                                                     // window of the resolver(s)
 
-	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME).c_str(), self->dbgid)
-	    .log();
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME).c_str(), self->dbgid);
+
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
 	self->addActor.send(waitResolverFailure(self->resolvers));
@@ -1830,13 +1831,17 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
 	self->registrationTrigger.trigger();
 
-	wait(discardCommit(self->txnStateStore, self->txnStateLogAdapter));
+	wait(traceAfter(discardCommit(self->txnStateStore, self->txnStateLogAdapter), "DiscardCommitFinished"));
 
 	// Wait for the recovery transaction to complete.
 	// SOMEDAY: For faster recovery, do this and setDBState asynchronously and don't wait for them
 	// unless we want to change TLogs
-	wait((success(recoveryCommit) && sendInitialCommitToResolvers(self)));
+	wait(traceAfter(success(recoveryCommit), "RecoveryCommitFinished") &&
+	     traceAfter(sendInitialCommitToResolvers(self), "InitialCommitToResolversFinished"));
 	if (recoveryCommit.isReady() && recoveryCommit.get().isError()) {
+		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME).c_str(),
+		           self->dbgid)
+		    .errorUnsuppressed(recoveryCommit.get().getError());
 		CODE_PROBE(true, "Cluster recovery failed because of the initial commit failed");
 		throw cluster_recovery_failed();
 	}
