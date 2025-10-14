@@ -1,5 +1,7 @@
 [configuration]
 extraMachineCountDC = 2
+extraStorageMachineCountPerDC = 2 # adding more SS to avoid remote DC perpetual wiggle stuck when converting storage engine
+
 maxTLogVersion=7
 disableHostname=true
 tenantModes = ['disabled']

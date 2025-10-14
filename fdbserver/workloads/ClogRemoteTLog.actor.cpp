@@ -337,8 +337,13 @@ struct ClogRemoteTLog : TestWorkload {
 			if (self->cloggedRemoteTLog.get().ip == ip) {
 				continue;
 			}
-			TraceEvent("ClogRemoteTLog").detail("SrcIP", self->cloggedRemoteTLog->ip).detail("DstIP", ip);
-			g_simulator->clogPair(ip, self->cloggedRemoteTLog.get().ip, self->testDuration);
+			double clogDuration = self->testDuration * (0.5 + 0.4 * deterministicRandom()->random01());
+			// clogDuration must be less than testDuration to ensure that the clogging ends before the test ends
+			g_simulator->clogPair(ip, self->cloggedRemoteTLog.get().ip, clogDuration);
+			TraceEvent("ClogRemoteTLog")
+			    .detail("SrcIP", self->cloggedRemoteTLog->ip)
+			    .detail("DstIP", ip)
+			    .detail("Duration", clogDuration);
 			numClogged++;
 		}
 
