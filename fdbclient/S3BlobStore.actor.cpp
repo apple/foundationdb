@@ -2467,7 +2467,7 @@ TEST_CASE("/backup/s3/virtual_hosting_list_resource_path") {
 	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
 
 	ASSERT(s3.isValid());
-	ASSERT(resource == "/bulkload/path"); // Path prefix extracted from URL
+	ASSERT(resource == "bulkload/path"); // Path prefix extracted from URL (without leading '/')
 
 	// In virtual hosting mode, constructResourcePath returns "" for empty object
 	std::string listResource = s3->constructResourcePath("test-bucket", "");
@@ -2483,7 +2483,7 @@ TEST_CASE("/backup/s3/virtual_hosting_list_resource_path") {
 	url = "blobstore://s3.us-west-2.amazonaws.com/resource_path?bucket=test-bucket";
 	s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
 	ASSERT(s3.isValid());
-	ASSERT(resource == "/resource_path"); // Path extracted from URL
+	ASSERT(resource == "resource_path"); // Path extracted from URL (without leading '/')
 
 	// In non-virtual hosting mode, constructResourcePath includes bucket
 	listResource = s3->constructResourcePath("test-bucket", "");
