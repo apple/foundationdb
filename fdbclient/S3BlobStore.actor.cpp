@@ -1385,6 +1385,12 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
                                           int maxDepth,
                                           std::function<bool(std::string const&)> recurseFilter) {
 	state std::string resource = bstore->constructResourcePath(bucket, "");
+	// In virtual hosting mode, constructResourcePath returns "" for empty object.
+	// We need to ensure the query string starts with "/" to form a valid HTTP request.
+	// Commit 15dd76a7f9 switched from ListObjectsV1 to V2 and accidentally removed the leading "/".
+	if (resource.empty()) {
+		resource = "/";
+	}
 	resource.append("?list-type=2&max-keys=").append(std::to_string(CLIENT_KNOBS->BLOBSTORE_LIST_MAX_KEYS_PER_PAGE));
 
 	if (prefix.present())
@@ -2440,5 +2446,48 @@ TEST_CASE("/backup/s3/guess_region") {
 		// conversion of 922337203685477580700 to long int will overflow
 		ASSERT_EQ(e.code(), error_code_backup_invalid_url);
 	}
+	return Void();
+}
+
+TEST_CASE("/backup/s3/virtual_hosting_list_resource_path") {
+	// Test that listObjectsStream_impl constructs valid HTTP resource paths
+	// for virtual hosting mode URLs with path prefixes.
+	//
+	// Regression test for commit 15dd76a7f9 which accidentally removed the leading "/"
+	// from the query string when switching from ListObjectsV1 to ListObjectsV2.
+	//
+	// For URL: blobstore://@bucket.s3.region.amazonaws.com/prefix/path?bucket=...
+	// constructResourcePath(bucket, "") returns "" in virtual hosting mode.
+	// We must ensure the final resource starts with "/" before the query string.
+
+	std::string url = "blobstore://@test-bucket.s3.us-west-2.amazonaws.com/bulkload/path?bucket=test-bucket";
+	std::string resource;
+	std::string error;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+
+	ASSERT(s3.isValid());
+	ASSERT(resource == "bulkload/path"); // Path prefix extracted from URL (without leading '/')
+
+	// In virtual hosting mode, constructResourcePath returns "" for empty object
+	std::string listResource = s3->constructResourcePath("test-bucket", "");
+	ASSERT(listResource == ""); // Virtual hosting mode doesn't include bucket in path
+
+	// listObjectsStream_impl should add "/" before query string to form valid HTTP request
+	// Expected: GET /bulkload/path?list-type=2&... (but we can't test the full actor here)
+	// We can only verify that constructResourcePath returns "" as expected.
+	// The fix in listObjectsStream_impl checks if resource.empty() and sets it to "/" before
+	// appending the query string, ensuring the final request is well-formed.
+
+	// Test non-virtual hosting mode for comparison
+	url = "blobstore://s3.us-west-2.amazonaws.com/resource_path?bucket=test-bucket";
+	s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+	ASSERT(s3.isValid());
+	ASSERT(resource == "resource_path"); // Path extracted from URL (without leading '/')
+
+	// In non-virtual hosting mode, constructResourcePath includes bucket
+	listResource = s3->constructResourcePath("test-bucket", "");
+	ASSERT(listResource == "/test-bucket"); // Bucket is part of path
+
 	return Void();
 }
