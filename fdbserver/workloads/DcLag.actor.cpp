@@ -158,7 +158,8 @@ struct DcLagWorkload : TestWorkload {
 		TraceEvent("DcLag").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
 		// Clog and wait for recovery to happen
-		if (!self->clogTlog(self->testDuration)) {
+		double clogDuration = self->testDuration * (0.5 + 0.4 * deterministicRandom()->random01());
+		if (!self->clogTlog(clogDuration)) {
 			return Void(); // skip the test if no satellite found
 		}
 

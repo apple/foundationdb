@@ -259,7 +259,8 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		}
 
 		// Clog connections between remote tlogs and storage servers.
-		if (!self->findAndClogRemoteStorages(self->testDuration)) {
+		double clogDuration = self->testDuration * (0.5 + 0.4 * deterministicRandom()->random01());
+		if (!self->findAndClogRemoteStorages(clogDuration)) {
 			// Couldn't find remote tlogs/storage servers. Probably configuration will
 			// need to be adjusted.
 			self->testSuccess = false;
