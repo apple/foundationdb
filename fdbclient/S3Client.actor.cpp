@@ -323,8 +323,8 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 			}
 
 			// Store part data for sequential XXH64 checksum calculation after concurrent uploads complete
-			// This avoids race condition where multiple concurrent uploadPart actors would all call
-			// XXH64_update(hashState, ...) on the same hash state simultaneously, corrupting it.
+			// to avoid race condition where multiple concurrent uploadPart actors all call
+      // XXH64_update(hashState, ...) on the same hash state simultaneously, corrupting it.
 			resultPart.partData = std::move(partData);
 
 			// Calculate hash for this part - use SHA256 if integrity check enabled, otherwise MD5
@@ -354,8 +354,13 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 			PacketWriter pw(packets.getWriteBuffer(resultPart.partData.size()), nullptr, Unversioned());
 			pw.serializeBytes(resultPart.partData);
 
-			std::string etag = wait(endpoint->uploadPart(
-			    bucket, objectName, uploadID, resultPart.partNumber, &packets, resultPart.partData.size(), resultPart.checksum));
+			std::string etag = wait(endpoint->uploadPart(bucket,
+			                                             objectName,
+			                                             uploadID,
+			                                             resultPart.partNumber,
+			                                             &packets,
+			                                             resultPart.partData.size(),
+			                                             resultPart.checksum));
 
 			resultPart.etag = etag;
 			resultPart.completed = true;
@@ -462,9 +467,8 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 					part.size = partSize;
 					parts.push_back(part);
 
-				activeFutures.push_back(
-				    uploadPart(endpoint, bucket, objectName, uploadID, file, part, config));
-				activePartIndices.push_back(partNumber - 1); // Store index into parts array
+					activeFutures.push_back(uploadPart(endpoint, bucket, objectName, uploadID, file, part, config));
+					activePartIndices.push_back(partNumber - 1); // Store index into parts array
 
 					offset += partSize;
 					partNumber++;
@@ -508,9 +512,8 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 				    .detail("S3ChecksumSHA256", s3Checksum.get());
 			}
 
-			// Calculate XXH64 checksum sequentially now that all parts have completed
-			// Parts are sorted by partNumber, ensuring checksum is calculated in correct order
-			// This avoids the race condition from concurrent XXH64_update calls
+			// Calculate XXH64 checksum sequentially after all parts have completed.
+			// Parts are sorted by partNumber, ensuring checksum is calculated in correct order.
 			TraceEvent(SevDebug, "S3ClientCalculatingFileChecksum")
 			    .detail("Bucket", bucket)
 			    .detail("Object", objectName)
