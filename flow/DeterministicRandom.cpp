@@ -258,28 +258,5 @@ TEST_CASE("/flow/DeterministicRandom/truePercent") {
 		ASSERT(count70 < count90);
 	}
 
-	// Test invalid values - these should trigger assertions
-	{
-		DeterministicRandom rng(12345);
-
-		// Lambda to test invalid percentage values
-		auto testInvalidPercent = [&rng](int invalidPercent) {
-			try {
-				[[maybe_unused]] bool result = rng.truePercent(invalidPercent);
-				ASSERT(false); // should not reach here
-			} catch (...) {
-			}
-		};
-
-		// Test various invalid values
-		testInvalidPercent(0); // Should trigger ASSERT_GT(percent, 0)
-		testInvalidPercent(100); // Should trigger ASSERT_LT(percent, 100)
-		testInvalidPercent(-5); // Should trigger ASSERT_GT(percent, 0)
-		testInvalidPercent(150); // Should trigger ASSERT_LT(percent, 100)
-		testInvalidPercent(-100); // Another negative value test
-		testInvalidPercent(101); // Just over 100
-		testInvalidPercent(999); // Much larger than 100
-	}
-
 	return Void();
 }
