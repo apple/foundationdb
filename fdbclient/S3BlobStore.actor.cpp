@@ -2536,7 +2536,6 @@ TEST_CASE("/backup/s3/virtual_hosting_list_resource_path") {
 	return Void();
 }
 
-
 TEST_CASE("/backup/s3/constructResourcePath") {
 	// Test that leading slashes in object keys are properly stripped
 	// S3 object keys should not start with '/', but if passed, we normalize them
