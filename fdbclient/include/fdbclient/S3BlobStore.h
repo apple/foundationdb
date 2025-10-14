@@ -110,8 +110,8 @@ public:
 		                   CLIENT_KNOBS->BLOBSTORE_LATENCY_LOGGING_ACCURACY) {}
 	};
 	// null when initialized, so no blob stats until a blob connection is used
-	static std::unique_ptr<BlobStats> blobStats;
-	static Future<Void> statsLogger;
+	std::unique_ptr<BlobStats> blobStats;
+	Future<Void> statsLogger;
 
 	void maybeStartStatsLogger() {
 		if (!blobStats && CLIENT_KNOBS->BLOBSTORE_ENABLE_LOGGING) {
