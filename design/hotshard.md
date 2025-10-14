@@ -278,15 +278,17 @@ These knobs control read-hot shard detection (primarily for read load balancing)
 
 These knobs control automatic shard movement when storage queues become unbalanced:
 
+**`ENABLE_REBALANCE_STORAGE_QUEUE`** (bool, default: `false`)
+- Feature knob to enable storage queue rebalancing
+- When enabled, triggers data moves to rebalance storage queues when a queue is significantly longer than others
+
 **`REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN`** (int64_t, default: `SHARD_MIN_BYTES_PER_KSEC`)
 - Minimum write bandwidth for a shard to be considered for storage queue rebalancing
 - Prevents moving tiny/idle shards during rebalancing
-- Location: [ServerKnobs:368](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L368)
 
 **`DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD`** (bool, default: `true`)
 - Allows moving light-traffic shards out of overloaded storage servers
 - Helps reduce queue buildup by redistributing low-write shards
-- Location: [ServerKnobs:369](https://github.com/apple/foundationdb/blob/7.3.0/fdbclient/ServerKnobs.cpp#L369)
 
 ### Read Rebalancing Knobs
 
