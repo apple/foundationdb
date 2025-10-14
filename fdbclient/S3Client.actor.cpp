@@ -324,7 +324,7 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 
 			// Store part data for sequential XXH64 checksum calculation after concurrent uploads complete
 			// to avoid race condition where multiple concurrent uploadPart actors all call
-      // XXH64_update(hashState, ...) on the same hash state simultaneously, corrupting it.
+			// XXH64_update(hashState, ...) on the same hash state simultaneously, corrupting it.
 			resultPart.partData = std::move(partData);
 
 			// Calculate hash for this part - use SHA256 if integrity check enabled, otherwise MD5
