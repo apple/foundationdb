@@ -134,7 +134,6 @@ struct ClientDBInfo {
 
 	TenantMode tenantMode;
 	ClusterType clusterType = ClusterType::STANDALONE;
-	Optional<ClusterName> metaclusterName;
 
 	ClientDBInfo() {}
 
@@ -155,8 +154,7 @@ struct ClientDBInfo {
 		           tenantMode,
 		           encryptKeyProxy,
 		           clusterId,
-		           clusterType,
-		           metaclusterName);
+		           clusterType);
 	}
 };
 

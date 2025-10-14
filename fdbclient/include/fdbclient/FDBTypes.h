@@ -1590,6 +1590,7 @@ struct Traceable<EncryptionAtRestMode> : std::true_type {
 typedef StringRef ClusterNameRef;
 typedef Standalone<ClusterNameRef> ClusterName;
 
+// TODO(gglass): delete metacluster code and tenant code and reassess the need for this enum
 enum class ClusterType { STANDALONE, METACLUSTER_MANAGEMENT, METACLUSTER_DATA };
 
 struct GRVCacheSpace {

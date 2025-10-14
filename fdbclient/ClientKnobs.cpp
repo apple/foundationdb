@@ -324,6 +324,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
 
 	// Tenants and Metacluster
+	// TODO(gglass): delete this stuff
 	init( MAX_TENANTS_PER_CLUSTER,                  1e6 );
 	init( TENANT_TOMBSTONE_CLEANUP_INTERVAL,         60 ); if ( randomize && BUGGIFY ) TENANT_TOMBSTONE_CLEANUP_INTERVAL = deterministicRandom()->random01() * 30;
 	init( MAX_DATA_CLUSTERS,                        1e5 );

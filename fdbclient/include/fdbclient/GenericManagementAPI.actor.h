@@ -39,7 +39,6 @@ the contents of the system key space.
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"
@@ -492,15 +491,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
 					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 						warnShardedRocksDBIsExperimental = true;
-					}
-
-					if (newConfig.tenantMode != oldConfig.tenantMode) {
-						Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-						    wait(metacluster::metadata::metaclusterRegistration().get(tr));
-						if (metaclusterRegistration.present()) {
-							CODE_PROBE(true, "Attempt to change tenant mode in a metacluster", probe::decoration::rare);
-							return ConfigurationResult::DATABASE_IS_REGISTERED;
-						}
 					}
 				}
 			}

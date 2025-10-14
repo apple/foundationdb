@@ -2248,13 +2248,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "metacluster")) {
-					bool _result = wait(makeInterruptable(metaclusterCommand(db, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
 				if (tokencmp(tokens[0], "idempotencyids")) {
 					bool _result = wait(makeInterruptable(idempotencyIdsCommandActor(localDb, tokens)));
 					if (!_result) {

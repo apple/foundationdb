@@ -30,7 +30,6 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "flow/BooleanParam.h"
@@ -43,7 +42,6 @@ public:
 	Reference<DB> db;
 	TenantMetadataSpecification<TenantTypes>* tenantMetadata;
 
-	Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
 	ClusterType clusterType;
 
 	std::map<int64_t, typename TenantTypes::TenantMapEntryT> tenantMap;

@@ -36,6 +36,9 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <string>
 
+// TODO(gglass): remove this code, eliminating external callers of this stuff is any exist.
+#if 0
+
 namespace fdb_cli {
 
 Optional<std::pair<Optional<ClusterConnectionString>, Optional<metacluster::DataClusterEntry>>>
@@ -722,3 +725,5 @@ CommandFactory metaclusterRegisterFactory(
     &metaclusterHintGenerator);
 
 } // namespace fdb_cli
+
+#endif

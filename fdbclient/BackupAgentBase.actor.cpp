@@ -29,7 +29,6 @@
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
@@ -1448,8 +1447,6 @@ VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 	static Standalone<VectorRef<KeyRangeRef>> systemBackupRanges;
 	if (systemBackupRanges.empty()) {
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), prefixRange(TenantMetadata::subspace()));
-		systemBackupRanges.push_back_deep(systemBackupRanges.arena(),
-		                                  singleKeyRange(metacluster::metadata::metaclusterRegistration().key));
 	}
 
 	return systemBackupRanges;

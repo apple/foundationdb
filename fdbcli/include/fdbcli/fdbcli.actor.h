@@ -43,8 +43,6 @@ namespace fdb_cli {
 constexpr char msgTypeKey[] = "type";
 constexpr char msgClusterKey[] = "cluster";
 constexpr char msgClusterTypeKey[] = "cluster_type";
-constexpr char msgMetaclusterName[] = "metacluster_name";
-constexpr char msgMetaclusterKey[] = "metacluster";
 constexpr char msgDataClustersKey[] = "data_clusters";
 constexpr char msgCapacityKey[] = "capacity";
 constexpr char msgAllocatedKey[] = "allocated";
@@ -224,9 +222,6 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 // lock/unlock command
 ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
-
-// metacluster command
-Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
 // changefeed command
 ACTOR Future<bool> changeFeedCommandActor(Database localDb,

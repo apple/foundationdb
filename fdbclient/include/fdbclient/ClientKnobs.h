@@ -332,6 +332,7 @@ public:
 	double CHANGE_QUORUM_BAD_STATE_RETRY_DELAY;
 
 	// Tenants and Metacluster
+	// TODO(gglass): delete this stuff
 	int MAX_TENANTS_PER_CLUSTER;
 	int TENANT_TOMBSTONE_CLEANUP_INTERVAL;
 	int MAX_DATA_CLUSTERS;

@@ -31,7 +31,6 @@
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "flow/IRandom.h"
