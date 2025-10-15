@@ -1125,8 +1125,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			// Finish connecting, do request
-			S3BlobStoreEndpoint::ReusableConnection _rconn = wait(timeoutError(frconn, bstore->knobs.connect_timeout));
-			rconn = _rconn; // Assign to state variable
+			wait(store(rconn, timeoutError(frconn, bstore->knobs.connect_timeout)));
 			connectionEstablished = true;
 			connID = rconn.conn->getDebugID();
 			reqStartTimer = g_network->timer();
