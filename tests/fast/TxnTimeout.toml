@@ -1,0 +1,22 @@
+[[knobs]]
+# 15s timeout with 1M versions/sec
+max_read_transaction_life_versions = 15000000
+max_write_transaction_life_versions = 15000000
+
+[[test]]
+testTitle = "TxnTimeout"
+
+    [[test.workload]]
+    testName = 'TxnTimeout'
+    testDuration = 360.0
+    actorsPerClient = 4
+    nodeCountPerClientPerActor = 100
+    txnMinSecDuration = 7
+
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30
+    transactionsPerSecond = 250.0
+    testDuration = 360.0
+    expectedRate = 0

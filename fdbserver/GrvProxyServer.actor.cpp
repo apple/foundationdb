@@ -34,6 +34,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
+#include "flow/Buggify.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
@@ -530,8 +531,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
 			bool canBeQueued = true;
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
 			        SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ||
-			    (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-			     deterministicRandom()->random01() < 0.01)) {
+			    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01))) {
 				// When the limit is hit, try to drop requests from the lower priority queues.
 				if (req.priority == TransactionPriority::BATCH) {
 					canBeQueued = false;

@@ -59,7 +59,7 @@ Future<T> traceAfter(Future<T> what, std::string type, bool traceErrors = true) 
 		TraceEvent(typeStr.c_str());
 		return val;
 	} catch (Error& e) {
-		if (traceErrors) {
+		if (traceErrors && e.code() != error_code_operation_cancelled) {
 			TraceEvent(typeStr.c_str()).errorUnsuppressed(e);
 		}
 		throw;
