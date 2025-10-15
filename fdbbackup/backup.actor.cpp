@@ -109,6 +109,13 @@ enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME }
 // New fast restore reuses the type from legacy slow restore
 enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
 
+// Helper function to check if a URL is a blobstore:// URL
+// For blobstore:// URLs, describeBackup needs to use invalidVersion to allow writing missing version properties
+// This is needed for S3 where metadata may not be immediately consistent
+static inline bool isBlobstoreUrl(const std::string& url) {
+	return url.find("blobstore://") == 0;
+}
+
 //
 enum {
 	// Backup constants
@@ -2405,7 +2412,8 @@ ACTOR Future<Void> runRestore(Database db,
 				printf(
 				    "No restore target version given, will use maximum restorable version from backup description.\n");
 
-			BackupDescription desc = wait(bc->describeBackup());
+			// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
+			BackupDescription desc = wait(bc->describeBackup(false, isBlobstoreUrl(container) ? invalidVersion : 0));
 
 			if (onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 				targetVersion = desc.contiguousLogEnd.get() - 1;
@@ -2501,7 +2509,10 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 		if (performRestore) {
 			if (dbVersion == invalidVersion) {
 				TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", "Largest restorable version");
-				BackupDescription desc = wait(IBackupContainer::openContainer(container, proxy, {})->describeBackup());
+				// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
+				BackupDescription desc =
+				    wait(IBackupContainer::openContainer(container, proxy, {})
+				             ->describeBackup(false, isBlobstoreUrl(container) ? invalidVersion : 0));
 				if (!desc.maxRestorableVersion.present()) {
 					fprintf(stderr, "The specified backup is not restorable to any version.\n");
 					throw restore_error();
@@ -2541,7 +2552,9 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 			restoreVersion = dbVersion;
 		} else {
 			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container, proxy, {});
-			state BackupDescription description = wait(bc->describeBackup());
+			// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
+			state BackupDescription description =
+			    wait(bc->describeBackup(false, isBlobstoreUrl(container) ? invalidVersion : 0));
 
 			if (dbVersion <= 0) {
 				wait(description.resolveVersionTimes(db));
