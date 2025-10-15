@@ -1,4 +1,5 @@
 [[knobs]]
+# FIXME: Investigate why random timeout values (e.g. 1s) do not work with this test
 # versions_per_second = 1M, max_write_transaction_life_versions = 5 * 1M = 5M
 max_write_transaction_life_versions = 5000000
 
