@@ -171,6 +171,17 @@ void DeterministicRandom::delref() {
 	ReferenceCounted<DeterministicRandom>::delref();
 }
 
+// The nature of IRandom::truePercent API is that the output is random (still deterministic).
+// Testing randomness is tricky because there's no fixed value one can assert on.
+// For example, if truePercent(1%) is called 10,000 times, it's not always true that exactly
+// 100 times the function will return true.
+// This test solves such problems in two ways:
+//       1. It models the output of truePercent as a binomial distribution, and asserts that output is within a range.
+//          The range is decided based on standard deviations, typically 3 standard deviations are used.
+//       2. For each part of the test, a fixed seed is picked. This means that if one run passes, other runs should pass
+//          as well. We still need #1 above because rng implementation or platforms can change over time.
+// A more detailed discussion and math of this can be found here:
+//     https://github.com/apple/foundationdb/pull/12440/files#r2430230239
 TEST_CASE("/flow/DeterministicRandom/truePercent") {
 	constexpr int trials = 10000;
 
