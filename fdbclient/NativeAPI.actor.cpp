@@ -7248,6 +7248,9 @@ void DatabaseContext::setSharedState(DatabaseSharedState* p) {
 	sharedStatePtr->refCount++;
 }
 
+// TODO(gglass): remove this
+
+#if 0
 // FIXME: this has undesired head-of-line-blocking behavior in the case of large version jumps.
 // For example, say that The current feed version is 100, and one waiter wants to wait for the feed version >= 1000.
 // This will send a request with minVersion=1000. Then say someone wants to wait for feed version >= 200. Because we've
@@ -7359,9 +7362,7 @@ ACTOR Future<Void> handleShutdown(DatabaseContext* db) {
 	} catch (Error& e) {
 		TraceEvent("ChangeFeedCacheDiskError").error(e);
 	}
-	db->initializeChangeFeedCache = Void();
 	db->storage = nullptr;
-	db->changeFeedStorageCommitter = Void();
 	return Void();
 }
 
@@ -7371,10 +7372,6 @@ void DatabaseContext::setStorage(IKeyValueStore* store) {
 		return;
 	}
 	storage = store;
-	commitChangeFeedStorage = makeReference<AsyncVar<bool>>(false);
-	initializeChangeFeedCache = initializeCFCache(this);
-	changeFeedStorageCommitter = changeFeedCommitter(storage, commitChangeFeedStorage, &uncommittedCFBytes) &&
-	                             cleanupChangeFeedCache(this) && handleShutdown(this);
 }
 
 Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerInterface interf) {
@@ -9039,6 +9036,7 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version version) {
 	return popChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
 }
+#endif  // gglass
 
 Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 	return makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(this)));

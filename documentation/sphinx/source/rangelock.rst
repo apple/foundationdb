@@ -136,8 +136,6 @@ Compatibility
 
 * Backup and restore: RangeLock can cause losing mutations when restoring. Restoring should automatically detect the failure due to rangeLock and self-retry from a clean state.
 
-* ChangeFeed: RangeLock can trigger assertion failure. The reason is unclear yet.
-
 * Version vector: Version vector has a different path of updating metadata at proxies than the default one. Therefore, rangeLock temporarily is not available when the version vector is on.
 
 * Encryption and tenant: Currently, RangeLock does not have a clear functionality in the context of encryption and tenant, so when the encryption and tenant are on, we disable rangeLock for the clarity.

@@ -154,6 +154,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
 
+  # TODO(gglass): assess the following TODO in light of changefeed removal
   # TODO: test occasionally times out due to too many change feed shard parts
   # Disable for now until the underlying issue is fixed.
   add_fdb_test(TEST_FILES rare/BlobRestoreBasic.toml IGNORE)
@@ -178,9 +179,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CycleAndLock.toml)
   add_fdb_test(TEST_FILES fast/CycleTest.toml)
   add_fdb_test(TEST_FILES fast/RocksdbNondeterministicTest.toml)
-  add_fdb_test(TEST_FILES rare/ChangeFeeds.toml)
-  add_fdb_test(TEST_FILES rare/ChangeFeedOperations.toml)
-  add_fdb_test(TEST_FILES rare/ChangeFeedOperationsMove.toml)
   add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
   # EncryptionUnitTests is only a convenience file to run the different types of encryption tests at once. Do not enable in general ensembles

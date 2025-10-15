@@ -43,6 +43,7 @@
 #include "fdbclient/VersionVector.h"
 
 // Dead code, removed in the next protocol version
+// FIXME: assess removal of unneeded protocol related types.
 struct VersionReply {
 	constexpr static FileIdentifier file_identifier = 3;
 
@@ -902,6 +903,8 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct ChangeFeedStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanContext spanContext;
@@ -937,6 +940,8 @@ struct ChangeFeedStreamRequest {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct ChangeFeedPopRequest {
 	constexpr static FileIdentifier file_identifier = 10726174;
 	Key rangeID;
@@ -1042,6 +1047,8 @@ struct FetchCheckpointKeyValuesRequest {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct OverlappingChangeFeedEntry {
 	KeyRef feedId;
 	KeyRangeRef range;
@@ -1073,6 +1080,9 @@ struct OverlappingChangeFeedEntry {
 	}
 };
 
+
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct OverlappingChangeFeedsReply {
 	constexpr static FileIdentifier file_identifier = 11815134;
 	VectorRef<OverlappingChangeFeedEntry> feeds;
@@ -1091,6 +1101,8 @@ struct OverlappingChangeFeedsReply {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct OverlappingChangeFeedsRequest {
 	constexpr static FileIdentifier file_identifier = 7228462;
 	KeyRange range;
@@ -1106,6 +1118,8 @@ struct OverlappingChangeFeedsRequest {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct ChangeFeedVersionUpdateReply {
 	constexpr static FileIdentifier file_identifier = 4246160;
 	Version version = 0;
@@ -1119,6 +1133,8 @@ struct ChangeFeedVersionUpdateReply {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct ChangeFeedVersionUpdateRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	Version minVersion;

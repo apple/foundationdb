@@ -1441,13 +1441,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "changefeed")) {
-					bool _result = wait(makeInterruptable(changeFeedCommandActor(localDb, tenantEntry, tokens, warn)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
 				if (tokencmp(tokens[0], "unlock")) {
 					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
 					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
