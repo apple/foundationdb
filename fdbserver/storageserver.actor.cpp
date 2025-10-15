@@ -147,9 +147,7 @@ bool canReplyWith(Error e) {
 	case error_code_wrong_shard_server:
 	case error_code_process_behind:
 	case error_code_watch_cancelled:
-	case error_code_unknown_change_feed:
 	case error_code_server_overloaded:
-	case error_code_change_feed_popped:
 	case error_code_tenant_name_required:
 	case error_code_tenant_removed:
 	case error_code_tenant_not_found:
@@ -201,7 +199,6 @@ static const KeyRangeRef persistByteSampleSampleKeys =
     KeyRangeRef(PERSIST_PREFIX "BS/"_sr PERSIST_PREFIX "BS/"_sr, PERSIST_PREFIX "BS/"_sr PERSIST_PREFIX "BS0"_sr);
 static const KeyRef persistLogProtocol = PERSIST_PREFIX "LogProtocol"_sr;
 static const KeyRef persistPrimaryLocality = PERSIST_PREFIX "PrimaryLocality"_sr;
-static const KeyRangeRef persistChangeFeedKeys = KeyRangeRef(PERSIST_PREFIX "CF/"_sr, PERSIST_PREFIX "CF0"_sr);
 static const KeyRangeRef persistTenantMapKeys = KeyRangeRef(PERSIST_PREFIX "TM/"_sr, PERSIST_PREFIX "TM0"_sr);
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
@@ -418,6 +415,8 @@ struct AddingShard : NonCopyable {
 		Fetching,
 		// During the FetchingCF phase, the shard data is transferred but the remaining change feed data is still being
 		// transferred. This is equivalent to the waiting phase for non-changefeed data.
+		// TODO(gglass): remove FetchingCF.  Probably requires some refactoring of permanent logic,
+		// not just flat out removal of CF-specific logic, so come back to this.
 		FetchingCF,
 		// During Waiting phase, it sends updater the deferred updates, and wait until they are durable.
 		Waiting
@@ -824,86 +823,6 @@ struct FetchInjectionInfo {
 	std::vector<VerUpdateRef> changes;
 };
 
-struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
-	std::deque<Standalone<EncryptedMutationsAndVersionRef>> mutations;
-	Version fetchVersion = invalidVersion; // The version that commits from a fetch have been written to storage, but
-	                                       // have not yet been committed as part of updateStorage.
-	Version storageVersion = invalidVersion; // The version between the storage version and the durable version are
-	                                         // being written to disk as part of the current commit in updateStorage.
-	Version durableVersion = invalidVersion; // All versions before the durable version are durable on disk
-	Version metadataVersion = invalidVersion; // Last update to the change feed metadata. Used for reasoning about
-	                                          // fetched metadata vs local metadata
-	Version emptyVersion = 0; // The change feed does not have any mutations before emptyVersion
-	KeyRange range;
-	Key id;
-	AsyncTrigger newMutations;
-	NotifiedVersion durableFetchVersion;
-	// A stopped change feed no longer adds new mutations, but is still queryable.
-	// stopVersion = MAX_VERSION means the feed has not been stopped
-	Version stopVersion = MAX_VERSION;
-
-	// We need to track the version the change feed metadata was created by private mutation, so that if it is rolled
-	// back, we can avoid notifying other SS of change feeds that don't durably exist
-	Version metadataCreateVersion = invalidVersion;
-
-	FlowLock fetchLock = FlowLock(1);
-
-	bool removing = false;
-	bool destroyed = false;
-
-	KeyRangeMap<std::unordered_map<UID, Promise<Void>>> moveTriggers;
-
-	void triggerOnMove(KeyRange range, UID streamUID, Promise<Void> p) {
-		auto toInsert = moveTriggers.modify(range);
-		for (auto triggerRange = toInsert.begin(); triggerRange != toInsert.end(); ++triggerRange) {
-			triggerRange->value().insert({ streamUID, p });
-		}
-	}
-
-	void moved(KeyRange range) {
-		auto toTrigger = moveTriggers.intersectingRanges(range);
-		for (auto& triggerRange : toTrigger) {
-			for (auto& triggerStream : triggerRange.cvalue()) {
-				if (triggerStream.second.canBeSet()) {
-					triggerStream.second.send(Void());
-				}
-			}
-		}
-		// coalesce doesn't work with promises
-		moveTriggers.insert(range, std::unordered_map<UID, Promise<Void>>());
-	}
-
-	void removeOnMoveTrigger(KeyRange range, UID streamUID) {
-		auto toRemove = moveTriggers.modify(range);
-		for (auto triggerRange = toRemove.begin(); triggerRange != toRemove.end(); ++triggerRange) {
-			auto streamToRemove = triggerRange->value().find(streamUID);
-			if (streamToRemove == triggerRange->cvalue().end()) {
-				ASSERT(destroyed);
-			} else {
-				triggerRange->value().erase(streamToRemove);
-			}
-		}
-		// TODO: may be more cleanup possible here
-	}
-
-	void destroy(Version destroyVersion) {
-		updateMetadataVersion(destroyVersion);
-		removing = true;
-		destroyed = true;
-		moved(range);
-		newMutations.trigger();
-	}
-
-	bool updateMetadataVersion(Version version) {
-		// don't update metadata version if removing, so that metadata version remains the moved away version
-		if (!removing && version > metadataVersion) {
-			metadataVersion = version;
-			return true;
-		}
-		return false;
-	}
-};
-
 class ServerWatchMetadata : public ReferenceCounted<ServerWatchMetadata> {
 public:
 	Key key;
@@ -1257,18 +1176,6 @@ public:
 
 	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
 
-	KeyRangeMap<std::vector<Reference<ChangeFeedInfo>>> keyChangeFeed;
-	std::unordered_map<Key, Reference<ChangeFeedInfo>> uidChangeFeed;
-	Deque<std::pair<std::vector<Key>, Version>> changeFeedVersions;
-	std::map<UID, PromiseStream<Key>> changeFeedDestroys;
-	std::set<Key> currentChangeFeeds;
-	std::set<Key> fetchingChangeFeeds;
-	std::unordered_map<NetworkAddress, std::unordered_map<UID, Version>> changeFeedClientVersions;
-	std::unordered_map<Key, Version> changeFeedCleanupDurable;
-	int64_t activeFeedQueries = 0;
-	int64_t changeFeedMemoryBytes = 0;
-	std::deque<std::pair<Version, int64_t>> feedMemoryBytesByVersion;
-
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
 	//   <= storageVersion -> k is unavailable at all versions (but might be read anyway from storage if we are in the
@@ -1346,9 +1253,6 @@ public:
 
 	FlowLock durableVersionLock;
 	FlowLock fetchKeysParallelismLock;
-	// Extra lock that prevents too much post-initial-fetch work from building up, such as mutation applying and change
-	// feed tail fetching
-	FlowLock fetchKeysParallelismChangeFeedLock;
 	int64_t fetchKeysBytesBudget;
 	AsyncVar<bool> fetchKeysBudgetUsed;
 	int64_t fetchKeysTotalCommitBytes;
@@ -1409,8 +1313,7 @@ public:
 	struct Counters : CommonStorageCounters {
 
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
-		    getRangeStreamQueries, lowPriorityQueries, rowsQueried, watchQueries, emptyQueries, feedRowsQueried,
-		    feedBytesQueried, feedStreamQueries, rejectedFeedStreamQueries, feedVersionQueries;
+		    getRangeStreamQueries, lowPriorityQueries, rowsQueried, watchQueries, emptyQueries;
 
 		// counters related to getMappedRange queries
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
@@ -1504,9 +1407,7 @@ public:
 		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
 		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
 		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
-		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
-		    feedBytesQueried("FeedBytesQueried", cc), feedStreamQueries("FeedStreamQueries", cc),
-		    rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
+		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
 		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
@@ -1595,12 +1496,6 @@ public:
 			specialCounter(
 			    cc, "FetchKeysFetchActive", [self]() { return self->fetchKeysParallelismLock.activePermits(); });
 			specialCounter(cc, "FetchKeysWaiting", [self]() { return self->fetchKeysParallelismLock.waiters(); });
-			specialCounter(cc, "FetchKeysChangeFeedFetchActive", [self]() {
-				return self->fetchKeysParallelismChangeFeedLock.activePermits();
-			});
-			specialCounter(cc, "FetchKeysFullFetchWaiting", [self]() {
-				return self->fetchKeysParallelismChangeFeedLock.waiters();
-			});
 			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
 				return self->serveFetchCheckpointParallelismLock.activePermits();
 			});
@@ -1623,9 +1518,6 @@ public:
 			specialCounter(cc, "KvstoreSizeTotal", [self]() { return std::get<0>(self->storage.getSize()); });
 			specialCounter(cc, "KvstoreNodeTotal", [self]() { return std::get<1>(self->storage.getSize()); });
 			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
-			specialCounter(cc, "ActiveChangeFeeds", [self]() { return self->uidChangeFeed.size(); });
-			specialCounter(cc, "ActiveChangeFeedQueries", [self]() { return self->activeFeedQueries; });
-			specialCounter(cc, "ChangeFeedMemoryBytes", [self]() { return self->changeFeedMemoryBytes; });
 		}
 	} counters;
 
@@ -1684,7 +1576,6 @@ public:
 	    trackShardAssignmentMinVersion(invalidVersion), byteSampleClears(false, "\xff\xff\xff"_sr),
 	    durableInProgress(Void()), watchBytes(0), numWatches(0), noRecentUpdates(false), lastUpdate(now()),
 	    updateEagerReads(nullptr), fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
-	    fetchKeysParallelismChangeFeedLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_CHANGE_FEED),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    fetchKeysTotalCommitBytes(0), fetchKeysLimiter(SERVER_KNOBS->STORAGE_FETCH_KEYS_RATE_LIMIT),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
@@ -1886,33 +1777,6 @@ public:
 			return Void();
 		}
 		return fun(this, request);
-	}
-
-	Version minFeedVersionForAddress(const NetworkAddress& addr) {
-		auto& clientVersions = changeFeedClientVersions[addr];
-		Version minVersion = version.get();
-		for (auto& it : clientVersions) {
-			/*fmt::print("SS {0} Blocked client {1} @ {2}\n",
-			        thisServerID.toString().substr(0, 4),
-			        it.first.toString().substr(0, 8),
-			        it.second);*/
-			minVersion = std::min(minVersion, it.second);
-		}
-		return minVersion;
-	}
-
-	// count in-memory change feed bytes towards storage queue size, for the purposes of memory management and
-	// throttling
-	void addFeedBytesAtVersion(int64_t bytes, Version version) {
-		if (feedMemoryBytesByVersion.empty() || version != feedMemoryBytesByVersion.back().first) {
-			ASSERT(feedMemoryBytesByVersion.empty() || version >= feedMemoryBytesByVersion.back().first);
-			feedMemoryBytesByVersion.push_back({ version, 0 });
-		}
-		feedMemoryBytesByVersion.back().second += bytes;
-		changeFeedMemoryBytes += bytes;
-		if (SERVER_KNOBS->STORAGE_INCLUDE_FEED_STORAGE_QUEUE) {
-			counters.bytesInput += bytes;
-		}
 	}
 
 	void getSplitPoints(SplitRangeRequest const& req) override {
@@ -2972,80 +2836,6 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	return Void();
 }
 
-ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChangeFeedsRequest req) {
-	wait(delay(0));
-	try {
-		wait(success(waitForVersionNoTooOld(data, req.minVersion)));
-	} catch (Error& e) {
-		if (!canReplyWith(e))
-			throw;
-		req.reply.sendError(e);
-		return Void();
-	}
-
-	if (!data->isReadable(req.range)) {
-		req.reply.sendError(wrong_shard_server());
-		return Void();
-	}
-
-	Version metadataWaitVersion = invalidVersion;
-
-	auto ranges = data->keyChangeFeed.intersectingRanges(req.range);
-	std::map<Key, std::tuple<KeyRange, Version, Version, Version>> rangeIds;
-	for (auto r : ranges) {
-		for (auto& it : r.value()) {
-			if (!it->removing) {
-				// Can't tell other SS about a change feed create or stopVersion that may get rolled back, and we only
-				// need to tell it about the metadata if req.minVersion > metadataVersion, since it will get the
-				// information from its own private mutations if it hasn't processed up that version yet
-				metadataWaitVersion = std::max(metadataWaitVersion, it->metadataCreateVersion);
-
-				// don't wait for all it->metadataVersion updates, if metadata was fetched from elsewhere it's already
-				// durable, and some updates are unnecessary to wait for
-				Version stopVersion;
-				if (it->stopVersion != MAX_VERSION && req.minVersion > it->stopVersion) {
-					stopVersion = it->stopVersion;
-					metadataWaitVersion = std::max(metadataWaitVersion, stopVersion);
-				} else {
-					stopVersion = MAX_VERSION;
-				}
-
-				rangeIds[it->id] = std::tuple(it->range, it->emptyVersion, stopVersion, it->metadataVersion);
-			} else if (it->destroyed && it->metadataVersion > metadataWaitVersion) {
-				// if we communicate the lack of a change feed because it's destroying, ensure the feed destroy isn't
-				// rolled back first
-				CODE_PROBE(true, "Overlapping Change Feeds ensuring destroy isn't rolled back");
-				metadataWaitVersion = it->metadataVersion;
-			}
-		}
-	}
-	state OverlappingChangeFeedsReply reply;
-	reply.feedMetadataVersion = data->version.get();
-	for (auto& it : rangeIds) {
-		reply.feeds.push_back_deep(reply.arena,
-		                           OverlappingChangeFeedEntry(it.first,
-		                                                      std::get<0>(it.second),
-		                                                      std::get<1>(it.second),
-		                                                      std::get<2>(it.second),
-		                                                      std::get<3>(it.second)));
-		TraceEvent(SevDebug, "OverlappingChangeFeedEntry", data->thisServerID)
-		    .detail("MinVersion", req.minVersion)
-		    .detail("FeedID", it.first)
-		    .detail("Range", std::get<0>(it.second))
-		    .detail("EmptyVersion", std::get<1>(it.second))
-		    .detail("StopVersion", std::get<2>(it.second))
-		    .detail("FeedMetadataVersion", std::get<3>(it.second));
-	}
-
-	// Make sure all of the metadata we are sending won't get rolled back
-	if (metadataWaitVersion != invalidVersion && metadataWaitVersion > data->desiredOldestVersion.get()) {
-		CODE_PROBE(true, "overlapping change feeds waiting for metadata version to be safe from rollback");
-		wait(data->desiredOldestVersion.whenAtLeast(metadataWaitVersion));
-	}
-	req.reply.send(reply);
-	return Void();
-}
-
 MutationsAndVersionRef filterMutations(Arena& arena,
                                        EncryptedMutationsAndVersionRef const& m,
                                        KeyRange const& range,
@@ -3121,852 +2911,6 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 		return MutationsAndVersionRef(m.mutations, m.version, m.knownCommittedVersion);
 	}
 	return MutationsAndVersionRef(m.encrypted.get(), m.version, m.knownCommittedVersion);
-}
-
-// set this for VERY verbose logs on change feed SS reads
-#define DEBUG_CF_TRACE false
-
-// To easily find if a change feed read missed data. Set the CF to the feedId, the key to the missing key, and the
-// version to the version the mutation is missing at.
-#define DO_DEBUG_CF_MISSING false
-#define DEBUG_CF_MISSING_CF ""_sr
-#define DEBUG_CF_MISSING_KEY ""_sr
-#define DEBUG_CF_MISSING_VERSION invalidVersion
-#define DEBUG_CF_MISSING(cfId, keyRange, beginVersion, lastVersion)                                                    \
-	DO_DEBUG_CF_MISSING&& cfId.printable().substr(0, 6) ==                                                             \
-	        DEBUG_CF_MISSING_CF&& keyRange.contains(DEBUG_CF_MISSING_KEY) &&                                           \
-	    beginVersion <= DEBUG_CF_MISSING_VERSION&& lastVersion >= DEBUG_CF_MISSING_VERSION
-
-// efficiently searches for the change feed mutation start point at begin version
-static std::deque<Standalone<EncryptedMutationsAndVersionRef>>::const_iterator searchChangeFeedStart(
-    std::deque<Standalone<EncryptedMutationsAndVersionRef>> const& mutations,
-    Version beginVersion,
-    bool atLatest) {
-
-	if (mutations.empty() || beginVersion > mutations.back().version) {
-		return mutations.end();
-	} else if (beginVersion <= mutations.front().version) {
-		return mutations.begin();
-	}
-
-	EncryptedMutationsAndVersionRef searchKey;
-	searchKey.version = beginVersion;
-	if (atLatest) {
-		int jump = 1;
-		// exponential search backwards, because atLatest means the new mutations are likely only at the very end
-		auto lastEnd = mutations.end();
-		auto currentEnd = mutations.end() - 1;
-		while (currentEnd > mutations.begin()) {
-			if (beginVersion >= currentEnd->version) {
-				break;
-			}
-			lastEnd = currentEnd + 1;
-			jump = std::min((int)(currentEnd - mutations.begin()), jump);
-			currentEnd -= jump;
-			jump <<= 1;
-		}
-		auto ret = std::lower_bound(currentEnd, lastEnd, searchKey, EncryptedMutationsAndVersionRef::OrderByVersion());
-		// TODO REMOVE: for validation
-		if (ret != mutations.end()) {
-			if (ret->version < beginVersion) {
-				fmt::print("ERROR: {0}) {1} < {2}\n", ret - mutations.begin(), ret->version, beginVersion);
-			}
-			ASSERT(ret->version >= beginVersion);
-		}
-		if (ret != mutations.begin()) {
-			if ((ret - 1)->version >= beginVersion) {
-				fmt::print("ERROR: {0}) {1} >= {2}\n", (ret - mutations.begin()) - 1, (ret - 1)->version, beginVersion);
-			}
-			ASSERT((ret - 1)->version < beginVersion);
-		}
-		return ret;
-	} else {
-		// binary search
-		return std::lower_bound(
-		    mutations.begin(), mutations.end(), searchKey, EncryptedMutationsAndVersionRef::OrderByVersion());
-	}
-}
-
-// The normal read case for a change feed stream query is that it will first read the disk portion, which is at a lower
-// version than the memory portion, and then will effectively switch to reading only the memory portion. The complexity
-// lies in the fact that the feed does not know the switchover point ahead of time before reading from disk, and the
-// switchover point is constantly changing as the SS persists the in-memory data to disk. As a result, the
-// implementation first reads from memory, then reads from disk if necessary, then merges the result and potentially
-// discards the in-memory read data if the disk data is large and behind the in-memory data. The goal of
-// FeedDiskReadState is that we want to skip doing the full memory read if we still have a lot of disk reads to catch up
-// on. In the DISK_CATCHUP phase, the feed query will read only the first row from memory, to
-// determine if it's hit the switchover point, instead of reading (potentially) both in the normal phase.  We also want
-// to default to the normal behavior at the start in case there is not a lot of disk data. This guarantees that if we
-// somehow incorrectly went into DISK_CATCHUP when there wasn't much more data on disk, we only have one cycle of
-// getChangeFeedMutations in the incorrect mode that returns a smaller result before switching to NORMAL mode.
-//
-// Put another way, the state transitions are:
-//
-// STARTING ->
-//   DISK_CATCHUP (if after the first read, there is more disk data to read before the first memory data)
-//   NORMAL (otherwise)
-// DISK_CATCHUP ->
-//   still DISK_CATCHUP (if there is still more disk data to read before the first memory data)
-//   NORMAL (otherwise)
-// NORMAL -> NORMAL (always)
-enum FeedDiskReadState { STARTING, NORMAL, DISK_CATCHUP };
-
-ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
-                                                                            Reference<ChangeFeedInfo> feedInfo,
-                                                                            ChangeFeedStreamRequest req,
-                                                                            bool atLatest,
-                                                                            bool doFilterMutations,
-                                                                            int commonFeedPrefixLength,
-                                                                            FeedDiskReadState* feedDiskReadState) {
-	state ChangeFeedStreamReply reply;
-	state ChangeFeedStreamReply memoryReply;
-	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-	state int remainingDurableBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-	state Version startVersion = data->version.get();
-
-	if (DEBUG_CF_TRACE) {
-		TraceEvent(SevDebug, "TraceChangeFeedMutationsBegin", data->thisServerID)
-		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", req.id)
-		    .detail("Range", req.range)
-		    .detail("Begin", req.begin)
-		    .detail("End", req.end)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
-	}
-
-	if (data->version.get() < req.begin) {
-		wait(data->version.whenAtLeast(req.begin));
-		// we must delay here to ensure that any up-to-date change feeds that are waiting on the
-		// mutation trigger run BEFORE any blocked change feeds run, in order to preserve the
-		// correct minStreamVersion ordering
-		wait(delay(0));
-	}
-
-	state uint64_t changeCounter = data->shardChangeCounter;
-	if (!data->isReadable(req.range)) {
-		throw wrong_shard_server();
-	}
-
-	if (feedInfo->removing) {
-		throw unknown_change_feed();
-	}
-
-	// We must copy the mutationDeque when fetching the durable bytes in case mutations are popped from memory while
-	// waiting for the results
-	state Version dequeVersion = data->version.get();
-	state Version dequeKnownCommit = data->knownCommittedVersion.get();
-	state Version emptyVersion = feedInfo->emptyVersion;
-	state Version durableValidationVersion = std::min(data->durableVersion.get(), feedInfo->durableFetchVersion.get());
-	state Version lastMemoryVersion = invalidVersion;
-	state Version lastMemoryKnownCommitted = invalidVersion;
-	Version fetchStorageVersion = std::max(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get());
-	state bool doValidation = EXPENSIVE_VALIDATION;
-
-	if (DEBUG_CF_TRACE) {
-		TraceEvent(SevDebug, "TraceChangeFeedMutationsDetails", data->thisServerID)
-		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", req.id)
-		    .detail("Range", req.range)
-		    .detail("Begin", req.begin)
-		    .detail("End", req.end)
-		    .detail("AtLatest", atLatest)
-		    .detail("DequeVersion", dequeVersion)
-		    .detail("EmptyVersion", feedInfo->emptyVersion)
-		    .detail("StorageVersion", feedInfo->storageVersion)
-		    .detail("DurableVersion", feedInfo->durableVersion)
-		    .detail("FetchStorageVersion", fetchStorageVersion)
-		    .detail("FetchVersion", feedInfo->fetchVersion)
-		    .detail("DurableFetchVersion", feedInfo->durableFetchVersion.get())
-		    .detail("DurableValidationVersion", durableValidationVersion)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
-	}
-
-	if (req.end > emptyVersion + 1) {
-		auto it = searchChangeFeedStart(feedInfo->mutations, req.begin, atLatest);
-		while (it != feedInfo->mutations.end()) {
-			// If DISK_CATCHUP, only read 1 mutation from the memory queue
-			if (it->version >= req.end || it->version > dequeVersion || remainingLimitBytes <= 0) {
-				break;
-			}
-			if ((*feedDiskReadState) == FeedDiskReadState::DISK_CATCHUP && !memoryReply.mutations.empty()) {
-				// so we don't add an empty mutation at the end
-				remainingLimitBytes = -1;
-				break;
-			}
-
-			// subtract size BEFORE filter, to avoid huge cpu loop and processing if very selective filter applied
-			remainingLimitBytes -= sizeof(MutationsAndVersionRef) + it->expectedSize();
-
-			MutationsAndVersionRef m;
-			if (doFilterMutations) {
-				m = filterMutations(memoryReply.arena, *it, req.range, req.encrypted, commonFeedPrefixLength);
-			} else {
-				m = MutationsAndVersionRef(req.encrypted && it->encrypted.present() ? it->encrypted.get()
-				                                                                    : it->mutations,
-				                           it->version,
-				                           it->knownCommittedVersion);
-			}
-			if (m.mutations.size()) {
-				memoryReply.arena.dependsOn(it->arena());
-				memoryReply.mutations.push_back(memoryReply.arena, m);
-			}
-
-			lastMemoryVersion = m.version;
-			lastMemoryKnownCommitted = m.knownCommittedVersion;
-			it++;
-		}
-	}
-
-	state bool readDurable = feedInfo->durableVersion != invalidVersion && req.begin <= feedInfo->durableVersion;
-	state bool readFetched = req.begin <= fetchStorageVersion && !atLatest;
-	state bool waitFetched = false;
-	if (req.end > emptyVersion + 1 && (readDurable || readFetched)) {
-		if (readFetched && req.begin <= feedInfo->fetchVersion) {
-			waitFetched = true;
-			// Request needs data that has been written to storage by a change feed fetch, but not committed yet
-			// To not block fetchKeys making normal SS data readable on making change feed data written to storage, we
-			// wait in here instead for all fetched data to become readable from the storage engine.
-			ASSERT(req.begin <= feedInfo->fetchVersion);
-			CODE_PROBE(true, "getChangeFeedMutations before fetched data durable");
-
-			// Wait for next commit to write pending feed data to storage
-			wait(feedInfo->durableFetchVersion.whenAtLeast(feedInfo->fetchVersion));
-			// To let update storage finish
-			wait(delay(0));
-		}
-
-		state PriorityMultiLock::Lock ssReadLock = wait(data->getReadLock(req.options));
-		// The assumption of feed ordering is that all atLatest feeds will get processed before the !atLatest ones.
-		// Without this delay(0), there is a case where that can happen:
-		//  - a read request (eg getValueQ) has the read lock and is waiting on ss->version.whenAtLeast(V)
-		//  - a getChangeFeedMutations is blocked on that read lock (which is necessarily not atLatest because it's
-		//  reading from disk)
-		//  - the ss calls version->set(V'), which triggers the read requests, which does not wait by reading only from
-		//  the p-tree, and releases this lock.
-		//  - the following storage read does not require waiting, and returns immediately to changeFeedStreamQ,
-		//  triggering its reply with an incorrectly large minStreamVersion
-		//  - the ss calls feed->triggerMutations(), triggering the atLatest feeds to reply with their minStreamVersion
-		//  at the correct version
-		// The delay(0) prevents this, blocking the rest of this execution until all feed triggers finish and the
-		// storage update loop actor completes, making the sequence of minStreamVersions returned to the client valid.
-		// The delay(0) is technically only necessary if we did not immediately acquire the lock, but isn't a big deal
-		// to do always
-		wait(delay(0));
-		state RangeResult res = wait(
-		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
-		                                        changeFeedDurableKey(req.rangeID, req.end)),
-		                            1 << 30,
-		                            remainingDurableBytes,
-		                            req.options));
-		ssReadLock.release();
-		data->counters.kvScanBytes += res.logicalSize();
-		++data->counters.changeFeedDiskReads;
-
-		if (!req.range.empty()) {
-			data->checkChangeCounter(changeCounter, req.range);
-		}
-
-		state std::vector<std::pair<Standalone<VectorRef<MutationRef>>, Version>> decodedMutations;
-		std::unordered_set<BlobCipherDetails> cipherDetails;
-		decodedMutations.reserve(res.size());
-		for (auto& kv : res) {
-			decodedMutations.push_back(decodeChangeFeedDurableValue(kv.value));
-			if (doFilterMutations || !req.encrypted) {
-				for (auto& m : decodedMutations.back().first) {
-					ASSERT(data->encryptionMode.present());
-					ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || m.isEncrypted() ||
-					       isBackupLogMutation(m) || mutationForKey(m, lastEpochEndPrivateKey));
-					if (m.isEncrypted()) {
-						m.updateEncryptCipherDetails(cipherDetails);
-					}
-				}
-			}
-		}
-
-		state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherMap;
-		if (cipherDetails.size()) {
-			std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-			    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
-			        data->db, cipherDetails, BlobCipherMetrics::TLOG));
-			cipherMap = getCipherKeysResult;
-		}
-
-		int memoryVerifyIdx = 0;
-
-		Version lastVersion = req.begin - 1;
-		Version lastKnownCommitted = invalidVersion;
-		for (int i = 0; i < res.size(); i++) {
-			Key id;
-			Version version, knownCommittedVersion;
-			Standalone<VectorRef<MutationRef>> mutations;
-			Standalone<VectorRef<MutationRef>> encryptedMutations;
-			std::vector<TextAndHeaderCipherKeys> cipherKeys;
-			std::tie(id, version) = decodeChangeFeedDurableKey(res[i].key);
-			std::tie(encryptedMutations, knownCommittedVersion) = decodedMutations[i];
-			cipherKeys.resize(encryptedMutations.size());
-
-			if (doFilterMutations || !req.encrypted) {
-				mutations.resize(mutations.arena(), encryptedMutations.size());
-				for (int j = 0; j < encryptedMutations.size(); j++) {
-					ASSERT(data->encryptionMode.present());
-					ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || encryptedMutations[j].isEncrypted() ||
-					       isBackupLogMutation(encryptedMutations[j]) ||
-					       mutationForKey(encryptedMutations[j], lastEpochEndPrivateKey));
-					if (encryptedMutations[j].isEncrypted()) {
-						cipherKeys[j] = encryptedMutations[j].getCipherKeys(cipherMap);
-						mutations[j] =
-						    encryptedMutations[j].decrypt(cipherKeys[j], mutations.arena(), BlobCipherMetrics::TLOG);
-					} else {
-						mutations[j] = encryptedMutations[j];
-					}
-				}
-			} else {
-				mutations = encryptedMutations;
-			}
-
-			// gap validation
-			while (doValidation && memoryVerifyIdx < memoryReply.mutations.size() &&
-			       version > memoryReply.mutations[memoryVerifyIdx].version) {
-				if (req.canReadPopped) {
-					// There are weird cases where SS fetching mixed with SS durability and popping can mean there are
-					// gaps before the popped version temporarily
-					memoryVerifyIdx++;
-					continue;
-				}
-
-				// There is a case where this can happen - if we wait on a fetching change feed, and the feed is
-				// popped while we wait, we could have copied the memory mutations into memoryReply before the
-				// pop, but they may or may not have been skipped writing to disk
-				if (waitFetched && feedInfo->emptyVersion > emptyVersion &&
-				    memoryReply.mutations[memoryVerifyIdx].version <= feedInfo->emptyVersion) {
-					memoryVerifyIdx++;
-					continue;
-				} else {
-					fmt::print("ERROR: SS {0} CF {1} SQ {2} has mutation at {3} in memory but not on disk (next disk "
-					           "is {4}) (emptyVersion={5}, emptyBefore={6})!\n",
-					           data->thisServerID.toString().substr(0, 4),
-					           req.rangeID.printable().substr(0, 6),
-					           req.id.toString().substr(0, 8),
-					           memoryReply.mutations[memoryVerifyIdx].version,
-					           version,
-					           feedInfo->emptyVersion,
-					           emptyVersion);
-
-					fmt::print("  Memory: ({})\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
-					for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
-						if (it.type == MutationRef::SetValue) {
-							fmt::print("    {}=\n", it.param1.printable());
-						} else {
-							fmt::print("    {} - {}\n", it.param1.printable(), it.param2.printable());
-						}
-					}
-					ASSERT(false);
-				}
-			}
-
-			MutationsAndVersionRef m;
-			if (doFilterMutations) {
-				m = filterMutations(reply.arena,
-				                    EncryptedMutationsAndVersionRef(
-				                        mutations, encryptedMutations, cipherKeys, version, knownCommittedVersion),
-				                    req.range,
-				                    req.encrypted,
-				                    commonFeedPrefixLength);
-			} else {
-				m = MutationsAndVersionRef(
-				    req.encrypted ? encryptedMutations : mutations, version, knownCommittedVersion);
-			}
-			if (m.mutations.size()) {
-				reply.arena.dependsOn(mutations.arena());
-				reply.arena.dependsOn(encryptedMutations.arena());
-				reply.mutations.push_back(reply.arena, m);
-
-				if (doValidation && memoryVerifyIdx < memoryReply.mutations.size() &&
-				    version == memoryReply.mutations[memoryVerifyIdx].version) {
-					// We could do validation of mutations here too, but it's complicated because clears can get split
-					// and stuff
-					memoryVerifyIdx++;
-				}
-			} else if (doValidation && memoryVerifyIdx < memoryReply.mutations.size() &&
-			           version == memoryReply.mutations[memoryVerifyIdx].version) {
-				if (version > durableValidationVersion) {
-					// Another validation case - feed was popped, data was fetched, fetched data was persisted but pop
-					// wasn't yet, then SS restarted. Now SS has the data without the popped version. This looks wrong
-					// here but is fine.
-					memoryVerifyIdx++;
-				} else {
-					fmt::print("ERROR: SS {0} CF {1} SQ {2} has mutation at {3} in memory but all filtered out on "
-					           "disk! (durable validation = {4})\n",
-					           data->thisServerID.toString().substr(0, 4),
-					           req.rangeID.printable().substr(0, 6),
-					           req.id.toString().substr(0, 8),
-					           version,
-					           durableValidationVersion);
-
-					fmt::print("  Memory: ({})\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
-					for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
-						if (it.type == MutationRef::SetValue) {
-							fmt::print("    {}=\n", it.param1.printable().c_str());
-						} else {
-							fmt::print("    {} - {}\n", it.param1.printable().c_str(), it.param2.printable().c_str());
-						}
-					}
-					fmt::print("  Disk(pre-filter): ({})\n", mutations.size());
-					for (auto& it : mutations) {
-						if (it.type == MutationRef::SetValue) {
-							fmt::print("    {}=\n", it.param1.printable().c_str());
-						} else {
-							fmt::print("    {} - {}\n", it.param1.printable().c_str(), it.param2.printable().c_str());
-						}
-					}
-					ASSERT_WE_THINK(false);
-				}
-			}
-			remainingDurableBytes -=
-			    sizeof(KeyValueRef) + res[i].expectedSize(); // This is tracking the size on disk rather than the reply
-			                                                 // size because we cannot add mutations from memory if
-			                                                 // there are potentially more on disk
-			lastVersion = version;
-			lastKnownCommitted = knownCommittedVersion;
-		}
-
-		if ((*feedDiskReadState) == FeedDiskReadState::STARTING ||
-		    (*feedDiskReadState) == FeedDiskReadState::DISK_CATCHUP) {
-			if (!memoryReply.mutations.empty() && !reply.mutations.empty() &&
-			    reply.mutations.back().version < memoryReply.mutations.front().version && remainingDurableBytes <= 0) {
-				// if we read a full batch from disk and the entire disk read was still less than the first memory
-				// mutation, switch to disk_catchup mode
-				*feedDiskReadState = FeedDiskReadState::DISK_CATCHUP;
-				CODE_PROBE(true, "Feed switching to disk_catchup mode");
-			} else {
-				// for testing
-				if ((*feedDiskReadState) == FeedDiskReadState::STARTING && BUGGIFY_WITH_PROB(0.001)) {
-					*feedDiskReadState = FeedDiskReadState::DISK_CATCHUP;
-					CODE_PROBE(true, "Feed forcing disk_catchup mode");
-				} else {
-					// else switch to normal mode
-					CODE_PROBE(true, "Feed switching to normal mode");
-					*feedDiskReadState = FeedDiskReadState::NORMAL;
-				}
-			}
-		}
-
-		if (remainingDurableBytes > 0) {
-			reply.arena.dependsOn(memoryReply.arena);
-			auto it = memoryReply.mutations.begin();
-			int totalCount = memoryReply.mutations.size();
-			while (it != memoryReply.mutations.end() && it->version <= lastVersion) {
-				++it;
-				--totalCount;
-			}
-			reply.mutations.append(reply.arena, it, totalCount);
-			// If still empty, that means disk results were filtered out, but skipped all memory results. Add an empty,
-			// either the last version from disk
-			if (reply.mutations.empty()) {
-				if (res.size() || (lastMemoryVersion != invalidVersion && remainingLimitBytes <= 0)) {
-					CODE_PROBE(true, "Change feed adding empty version after disk + memory filtered");
-					if (res.empty()) {
-						lastVersion = lastMemoryVersion;
-						lastKnownCommitted = lastMemoryKnownCommitted;
-					}
-					reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastVersion, lastKnownCommitted));
-				}
-			}
-		} else if (reply.mutations.empty() || reply.mutations.back().version < lastVersion) {
-			CODE_PROBE(true, "Change feed adding empty version after disk filtered");
-			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastVersion, lastKnownCommitted));
-		}
-	} else {
-		reply = memoryReply;
-		*feedDiskReadState = FeedDiskReadState::NORMAL;
-
-		// if we processed memory results that got entirely or mostly filtered, but we're not caught up, add an empty at
-		// the end
-		if ((reply.mutations.empty() || reply.mutations.back().version < lastMemoryVersion) &&
-		    remainingLimitBytes <= 0) {
-			CODE_PROBE(true, "Memory feed adding empty version after memory filtered", probe::decoration::rare);
-			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastMemoryVersion, lastMemoryKnownCommitted));
-		}
-	}
-
-	bool gotAll = remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion;
-	Version finalVersion = std::min(req.end - 1, dequeVersion);
-	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0 &&
-	    remainingDurableBytes > 0) {
-		CODE_PROBE(true, "Change feed adding empty version after empty results");
-		reply.mutations.push_back(
-		    reply.arena, MutationsAndVersionRef(finalVersion, finalVersion == dequeVersion ? dequeKnownCommit : 0));
-		// if we add empty mutation after the last thing in memory, and didn't read from disk, gotAll is true
-		if (data->version.get() == startVersion) {
-			gotAll = true;
-		}
-	}
-
-	// FIXME: clean all of this up, and just rely on client-side check
-	// This check is done just before returning, after all waits in this function
-	// Check if pop happened concurrently
-	if (!req.canReadPopped && req.begin <= feedInfo->emptyVersion) {
-		// This can happen under normal circumstances if this part of a change feed got no updates, but then the feed
-		// was popped. We can check by confirming that the client was sent empty versions as part of another feed's
-		// response's minStorageVersion, or a ChangeFeedUpdateRequest. If this was the case, we know no updates could
-		// have happened between req.begin and minVersion.
-		Version minVersion = data->minFeedVersionForAddress(req.reply.getEndpoint().getPrimaryAddress());
-		bool ok = atLatest && minVersion > feedInfo->emptyVersion;
-		CODE_PROBE(ok, "feed popped while valid read waiting");
-		CODE_PROBE(!ok, "feed popped while invalid read waiting");
-		if (!ok) {
-			TraceEvent("ChangeFeedMutationsPopped", data->thisServerID)
-			    .detail("FeedID", req.rangeID)
-			    .detail("StreamUID", req.id)
-			    .detail("Range", req.range)
-			    .detail("Begin", req.begin)
-			    .detail("End", req.end)
-			    .detail("EmptyVersion", feedInfo->emptyVersion)
-			    .detail("AtLatest", atLatest)
-			    .detail("MinVersionSent", minVersion);
-			// Disabling this check because it returns false positives when forcing a delta file flush at an empty
-			// version that was not a mutation version throw change_feed_popped();
-		}
-	}
-
-	if (MUTATION_TRACKING_ENABLED) {
-		for (auto& mutations : reply.mutations) {
-			for (auto& m : mutations.mutations) {
-				DEBUG_MUTATION("ChangeFeedSSRead", mutations.version, m, data->thisServerID)
-				    .detail("ChangeFeedID", req.rangeID)
-				    .detail("StreamUID", req.id)
-				    .detail("ReqBegin", req.begin)
-				    .detail("ReqEnd", req.end)
-				    .detail("ReqRange", req.range);
-			}
-		}
-	}
-
-	if (DEBUG_CF_MISSING(req.rangeID, req.range, req.begin, reply.mutations.back().version) && !req.canReadPopped) {
-		bool foundVersion = false;
-		bool foundKey = false;
-		for (auto& it : reply.mutations) {
-			if (it.version == DEBUG_CF_MISSING_VERSION) {
-				foundVersion = true;
-				for (auto& m : it.mutations) {
-					if (m.type == MutationRef::SetValue && m.param1 == DEBUG_CF_MISSING_KEY) {
-						foundKey = true;
-						break;
-					}
-				}
-				break;
-			}
-		}
-		if (!foundVersion || !foundKey) {
-			fmt::print("ERROR: SS {0} CF {1} SQ {2} missing {3} @ {4} from request for [{5} - {6}) {7} - {8}\n",
-			           data->thisServerID.toString().substr(0, 4),
-			           req.rangeID.printable().substr(0, 6),
-			           req.id.toString().substr(0, 8),
-			           foundVersion ? "key" : "version",
-			           static_cast<int64_t>(DEBUG_CF_MISSING_VERSION),
-			           req.range.begin.printable(),
-			           req.range.end.printable(),
-			           req.begin,
-			           req.end);
-			fmt::print("ERROR: {0} versions in response {1} - {2}:\n",
-			           reply.mutations.size(),
-			           reply.mutations.front().version,
-			           reply.mutations.back().version);
-			for (auto& it : reply.mutations) {
-				fmt::print("ERROR:    {0} ({1}){2}\n",
-				           it.version,
-				           it.mutations.size(),
-				           it.version == DEBUG_CF_MISSING_VERSION ? "<-------" : "");
-			}
-		} else {
-			fmt::print("DBG: SS {0} CF {1} SQ {2} correct @ {3} from request for [{4} - {5}) {6} - {7}\n",
-			           data->thisServerID.toString().substr(0, 4),
-			           req.rangeID.printable().substr(0, 6),
-			           req.id.toString().substr(0, 8),
-			           static_cast<int64_t>(DEBUG_CF_MISSING_VERSION),
-			           req.range.begin.printable(),
-			           req.range.end.printable(),
-			           req.begin,
-			           req.end);
-		}
-	}
-
-	reply.popVersion = feedInfo->emptyVersion + 1;
-
-	if (DEBUG_CF_TRACE) {
-		TraceEvent(SevDebug, "ChangeFeedMutationsDone", data->thisServerID)
-		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", req.id)
-		    .detail("Range", req.range)
-		    .detail("Begin", req.begin)
-		    .detail("End", req.end)
-		    .detail("FirstVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.front().version)
-		    .detail("LastVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.back().version)
-		    .detail("PopVersion", reply.popVersion)
-		    .detail("Count", reply.mutations.size())
-		    .detail("GotAll", gotAll)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-		    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
-	}
-
-	// If the SS's version advanced at all during any of the waits, the read from memory may have missed some
-	// mutations, so gotAll can only be true if data->version didn't change over the course of this actor
-	return std::make_pair(reply, gotAll);
-}
-
-// Change feed stream must be sent an error as soon as it is moved away, or change feed can get incorrect results
-ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamRequest req) {
-	auto feed = data->uidChangeFeed.find(req.rangeID);
-	if (feed == data->uidChangeFeed.end() || feed->second->removing) {
-		req.reply.sendError(unknown_change_feed());
-		return Void();
-	}
-	state Promise<Void> moved;
-	feed->second->triggerOnMove(req.range, req.id, moved);
-	try {
-		wait(moved.getFuture());
-	} catch (Error& e) {
-		ASSERT(e.code() == error_code_operation_cancelled);
-		// remove from tracking
-
-		auto feed = data->uidChangeFeed.find(req.rangeID);
-		if (feed != data->uidChangeFeed.end()) {
-			feed->second->removeOnMoveTrigger(req.range, req.id);
-		}
-		return Void();
-	}
-	CODE_PROBE(true, "Change feed moved away cancelling queries");
-	// DO NOT call req.reply.onReady before sending - we need to propagate this error through regardless of how far
-	// behind client is
-	req.reply.sendError(wrong_shard_server());
-	return Void();
-}
-
-ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req) {
-	state Span span("SS:getChangeFeedStream"_loc, req.spanContext);
-	state bool atLatest = false;
-	state bool removeUID = false;
-	state FeedDiskReadState feedDiskReadState = STARTING;
-	state Optional<Version> blockedVersion;
-	state Reference<ChangeFeedInfo> feedInfo;
-	state Future<Void> streamEndReached;
-	state bool doFilterMutations;
-	state int commonFeedPrefixLength;
-
-	try {
-		++data->counters.feedStreamQueries;
-
-		// FIXME: do something more sophisticated here besides hard limit
-		// Allow other storage servers fetching feeds to go above this limit. currently, req.canReadPopped == read is a
-		// fetch from another ss
-		if (!req.canReadPopped && (data->activeFeedQueries >= SERVER_KNOBS->STORAGE_FEED_QUERY_HARD_LIMIT ||
-		                           (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.005)))) {
-			req.reply.sendError(storage_too_many_feed_streams());
-			++data->counters.rejectedFeedStreamQueries;
-			return Void();
-		}
-
-		data->activeFeedQueries++;
-
-		if (req.replyBufferSize <= 0) {
-			req.reply.setByteLimit(SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES);
-		} else {
-			req.reply.setByteLimit(std::min((int64_t)req.replyBufferSize, SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES));
-		}
-
-		// Change feeds that are not atLatest must have a lower priority than UpdateStorage to not starve it out, and
-		// change feed disk reads generally only happen on blob worker recovery or data movement, so they should be
-		// lower priority. AtLatest change feeds are triggered directly from the SS update loop with no waits, so they
-		// will still be low latency
-		wait(delay(0, TaskPriority::SSSpilledChangeFeedReply));
-
-		if (DEBUG_CF_TRACE) {
-			TraceEvent(SevDebug, "TraceChangeFeedStreamStart", data->thisServerID)
-			    .detail("FeedID", req.rangeID)
-			    .detail("StreamUID", req.id)
-			    .detail("Range", req.range)
-			    .detail("Begin", req.begin)
-			    .detail("End", req.end)
-			    .detail("CanReadPopped", req.canReadPopped)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-			    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
-		}
-
-		Version checkTooOldVersion = (!req.canReadPopped || req.end == MAX_VERSION) ? req.begin : req.end;
-		wait(success(waitForVersionNoTooOld(data, checkTooOldVersion)));
-
-		// set persistent references to map data structures to not have to re-look them up every loop
-		auto feed = data->uidChangeFeed.find(req.rangeID);
-		if (feed == data->uidChangeFeed.end() || feed->second->removing) {
-			req.reply.sendError(unknown_change_feed());
-			// throw to delete from changeFeedClientVersions if present
-			throw unknown_change_feed();
-		}
-		feedInfo = feed->second;
-
-		streamEndReached =
-		    (req.end == std::numeric_limits<Version>::max()) ? Never() : data->version.whenAtLeast(req.end);
-
-		doFilterMutations = !req.range.contains(feedInfo->range);
-		commonFeedPrefixLength = 0;
-		if (doFilterMutations) {
-			commonFeedPrefixLength = commonPrefixLength(feedInfo->range.begin, feedInfo->range.end);
-		}
-
-		// send an empty version at begin - 1 to establish the stream quickly
-		ChangeFeedStreamReply emptyInitialReply;
-		MutationsAndVersionRef emptyInitialVersion;
-		emptyInitialVersion.version = req.begin - 1;
-		emptyInitialReply.mutations.push_back_deep(emptyInitialReply.arena, emptyInitialVersion);
-		ASSERT(emptyInitialReply.atLatestVersion == false);
-		ASSERT(emptyInitialReply.minStreamVersion == invalidVersion);
-		req.reply.send(emptyInitialReply);
-
-		if (DEBUG_CF_TRACE) {
-			TraceEvent(SevDebug, "TraceChangeFeedStreamSentInitialEmpty", data->thisServerID)
-			    .detail("FeedID", req.rangeID)
-			    .detail("StreamUID", req.id)
-			    .detail("Range", req.range)
-			    .detail("Begin", req.begin)
-			    .detail("End", req.end)
-			    .detail("CanReadPopped", req.canReadPopped)
-			    .detail("Version", req.begin - 1)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-			    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
-		}
-
-		loop {
-			Future<Void> onReady = req.reply.onReady();
-			if (atLatest && !onReady.isReady() && !removeUID) {
-				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
-				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
-				if (DEBUG_CF_TRACE) {
-					TraceEvent(SevDebug, "TraceChangeFeedStreamBlockedOnReady", data->thisServerID)
-					    .detail("FeedID", req.rangeID)
-					    .detail("StreamUID", req.id)
-					    .detail("Range", req.range)
-					    .detail("Begin", req.begin)
-					    .detail("End", req.end)
-					    .detail("CanReadPopped", req.canReadPopped)
-					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
-					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-					    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
-				}
-				removeUID = true;
-			}
-			wait(onReady);
-
-			// keep this as not state variable so it is freed after sending to reduce memory
-			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture = getChangeFeedMutations(
-			    data, feedInfo, req, atLatest, doFilterMutations, commonFeedPrefixLength, &feedDiskReadState);
-			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
-				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
-				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
-				removeUID = true;
-				if (DEBUG_CF_TRACE) {
-					TraceEvent(SevDebug, "TraceChangeFeedStreamBlockedMutations", data->thisServerID)
-					    .detail("FeedID", req.rangeID)
-					    .detail("StreamUID", req.id)
-					    .detail("Range", req.range)
-					    .detail("Begin", req.begin)
-					    .detail("End", req.end)
-					    .detail("CanReadPopped", req.canReadPopped)
-					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
-					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-					    .detail("PeerAddress", req.reply.getEndpoint().getPrimaryAddress());
-				}
-			}
-			std::pair<ChangeFeedStreamReply, bool> _feedReply = wait(feedReplyFuture);
-			ChangeFeedStreamReply feedReply = _feedReply.first;
-			bool gotAll = _feedReply.second;
-
-			ASSERT(feedReply.mutations.size() > 0);
-			req.begin = feedReply.mutations.back().version + 1;
-			if (!atLatest && gotAll) {
-				atLatest = true;
-			}
-
-			auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
-			// If removeUID is not set, that means that this loop was never blocked and executed synchronously as part
-			// of the new mutations trigger in the storage update loop. In that case, since there are potentially still
-			// other feeds triggering that this would race with, the largest version we can reply with is the storage's
-			// version just before the feed triggers. Otherwise, removeUID is set, and we were blocked at some point
-			// after the trigger. This means all feed triggers are done, and we can safely reply with the storage's
-			// version.
-			Version minVersion = removeUID ? data->version.get() : data->prevVersion;
-			if (removeUID) {
-				if (gotAll || req.begin == req.end) {
-					clientVersions.erase(req.id);
-					removeUID = false;
-				} else {
-					clientVersions[req.id] = feedReply.mutations.back().version;
-				}
-			}
-
-			for (auto& it : clientVersions) {
-				minVersion = std::min(minVersion, it.second);
-			}
-			feedReply.atLatestVersion = atLatest;
-			feedReply.minStreamVersion = minVersion;
-
-			data->counters.feedRowsQueried += feedReply.mutations.size();
-			data->counters.feedBytesQueried += feedReply.mutations.expectedSize();
-
-			req.reply.send(feedReply);
-			if (req.begin == req.end) {
-				data->activeFeedQueries--;
-				req.reply.sendError(end_of_stream());
-				return Void();
-			}
-			if (gotAll) {
-				blockedVersion = Optional<Version>();
-				if (feedInfo->removing) {
-					req.reply.sendError(unknown_change_feed());
-					// throw to delete from changeFeedClientVersions if present
-					throw unknown_change_feed();
-				}
-				choose {
-					when(wait(feedInfo->newMutations.onTrigger())) {}
-					when(wait(streamEndReached)) {}
-				}
-				if (feedInfo->removing) {
-					req.reply.sendError(unknown_change_feed());
-					// throw to delete from changeFeedClientVersions if present
-					throw unknown_change_feed();
-				}
-			} else {
-				blockedVersion = feedReply.mutations.back().version;
-			}
-		}
-	} catch (Error& e) {
-		data->activeFeedQueries--;
-		auto it = data->changeFeedClientVersions.find(req.reply.getEndpoint().getPrimaryAddress());
-		if (it != data->changeFeedClientVersions.end()) {
-			if (removeUID) {
-				it->second.erase(req.id);
-			}
-			if (it->second.empty()) {
-				data->changeFeedClientVersions.erase(it);
-			}
-		}
-		if (e.code() != error_code_operation_obsolete) {
-			if (!canReplyWith(e))
-				throw;
-			req.reply.sendError(e);
-		}
-	}
-	return Void();
-}
-
-ACTOR Future<Void> changeFeedVersionUpdateQ(StorageServer* data, ChangeFeedVersionUpdateRequest req) {
-	++data->counters.feedVersionQueries;
-	wait(data->version.whenAtLeast(req.minVersion));
-	wait(delay(0));
-	Version minVersion = data->minFeedVersionForAddress(req.reply.getEndpoint().getPrimaryAddress());
-	req.reply.send(ChangeFeedVersionUpdateReply(minVersion));
-	return Void();
 }
 
 #ifdef NO_INTELLISENSE
@@ -7231,17 +6175,6 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 		data->counters.bytesDurable += bytesDurable;
 	}
 
-	int64_t feedBytesDurable = 0;
-	while (!data->feedMemoryBytesByVersion.empty() &&
-	       data->feedMemoryBytesByVersion.front().first <= desiredDurableVersion) {
-		feedBytesDurable += data->feedMemoryBytesByVersion.front().second;
-		data->feedMemoryBytesByVersion.pop_front();
-	}
-	data->changeFeedMemoryBytes -= feedBytesDurable;
-	if (SERVER_KNOBS->STORAGE_INCLUDE_FEED_STORAGE_QUEUE) {
-		data->counters.bytesDurable += feedBytesDurable;
-	}
-
 	if (EXPENSIVE_VALIDATION) {
 		// Check that the above loop did its job
 		auto view = data->data().atLatest();
@@ -7437,125 +6370,6 @@ void applyMutation(StorageServer* self,
 		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
 		self->watches.triggerRange(m.param1, m.param2);
 		++self->counters.pTreeClears;
-	}
-}
-
-void applyChangeFeedMutation(StorageServer* self,
-                             MutationRef const& m,
-                             MutationRefAndCipherKeys const& encryptedMutation,
-                             Version version,
-                             KeyRangeRef const& shard) {
-	ASSERT(self->encryptionMode.present());
-	ASSERT(!self->encryptionMode.get().isEncryptionEnabled() || encryptedMutation.mutation.isEncrypted() ||
-	       isBackupLogMutation(m) || mutationForKey(m, lastEpochEndPrivateKey));
-	if (m.type == MutationRef::SetValue) {
-		for (auto& it : self->keyChangeFeed[m.param1]) {
-			if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
-				if (it->mutations.empty() || it->mutations.back().version != version) {
-					it->mutations.push_back(
-					    EncryptedMutationsAndVersionRef(version, self->knownCommittedVersion.get()));
-				}
-				if (encryptedMutation.mutation.isValid()) {
-					if (!it->mutations.back().encrypted.present()) {
-						it->mutations.back().encrypted = it->mutations.back().mutations;
-						it->mutations.back().cipherKeys.resize(it->mutations.back().mutations.size());
-					}
-					it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(),
-					                                                    encryptedMutation.mutation);
-					it->mutations.back().cipherKeys.push_back(encryptedMutation.cipherKeys);
-				} else if (it->mutations.back().encrypted.present()) {
-					it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(), m);
-					it->mutations.back().cipherKeys.push_back(TextAndHeaderCipherKeys());
-				}
-				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
-
-				self->currentChangeFeeds.insert(it->id);
-				self->addFeedBytesAtVersion(m.totalSize(), version);
-
-				DEBUG_MUTATION("ChangeFeedWriteSet", version, m, self->thisServerID)
-				    .detail("Range", it->range)
-				    .detail("ChangeFeedID", it->id);
-
-				++self->counters.changeFeedMutations;
-			} else {
-				CODE_PROBE(version <= it->emptyVersion, "Skip CF write because version <= emptyVersion");
-				CODE_PROBE(it->removing, "Skip CF write because removing");
-				CODE_PROBE(version >= it->stopVersion, "Skip CF write because stopped");
-				DEBUG_MUTATION("ChangeFeedWriteSetIgnore", version, m, self->thisServerID)
-				    .detail("Range", it->range)
-				    .detail("ChangeFeedID", it->id)
-				    .detail("StopVersion", it->stopVersion)
-				    .detail("EmptyVersion", it->emptyVersion)
-				    .detail("Removing", it->removing);
-			}
-		}
-	} else if (m.type == MutationRef::ClearRange) {
-		KeyRangeRef mutationClearRange(m.param1, m.param2);
-		// FIXME: this might double-insert clears if the same feed appears in multiple sub-ranges
-		auto ranges = self->keyChangeFeed.intersectingRanges(mutationClearRange);
-		for (auto& r : ranges) {
-			for (auto& it : r.value()) {
-				if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
-					// clamp feed mutation to change feed range
-					MutationRef clearMutation = m;
-					bool modified = false;
-					if (clearMutation.param1 < it->range.begin) {
-						clearMutation.param1 = it->range.begin;
-						modified = true;
-					}
-					if (clearMutation.param2 > it->range.end) {
-						clearMutation.param2 = it->range.end;
-						modified = true;
-					}
-					if (!modified && (clearMutation.param1 == shard.begin || clearMutation.param2 == shard.end)) {
-						modified = true;
-					}
-					if (it->mutations.empty() || it->mutations.back().version != version) {
-						it->mutations.push_back(
-						    EncryptedMutationsAndVersionRef(version, self->knownCommittedVersion.get()));
-					}
-					if (encryptedMutation.mutation.isEncrypted()) {
-						if (!it->mutations.back().encrypted.present()) {
-							it->mutations.back().encrypted = it->mutations.back().mutations;
-							it->mutations.back().cipherKeys.resize(it->mutations.back().mutations.size());
-						}
-						if (modified) {
-							it->mutations.back().encrypted.get().push_back_deep(
-							    it->mutations.back().arena(),
-							    clearMutation.encrypt(encryptedMutation.cipherKeys,
-							                          it->mutations.back().arena(),
-							                          BlobCipherMetrics::TLOG));
-						} else {
-							it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(),
-							                                                    encryptedMutation.mutation);
-						}
-						it->mutations.back().cipherKeys.push_back(encryptedMutation.cipherKeys);
-					} else if (it->mutations.back().encrypted.present()) {
-						it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(), m);
-						it->mutations.back().cipherKeys.push_back(TextAndHeaderCipherKeys());
-					}
-
-					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), clearMutation);
-					self->currentChangeFeeds.insert(it->id);
-					self->addFeedBytesAtVersion(m.totalSize(), version);
-
-					DEBUG_MUTATION("ChangeFeedWriteClear", version, m, self->thisServerID)
-					    .detail("Range", it->range)
-					    .detail("ChangeFeedID", it->id);
-					++self->counters.changeFeedMutations;
-				} else {
-					CODE_PROBE(version <= it->emptyVersion, "Skip CF clear because version <= emptyVersion");
-					CODE_PROBE(it->removing, "Skip CF clear because removing");
-					CODE_PROBE(version >= it->stopVersion, "Skip CF clear because stopped");
-					DEBUG_MUTATION("ChangeFeedWriteClearIgnore", version, m, self->thisServerID)
-					    .detail("Range", it->range)
-					    .detail("ChangeFeedID", it->id)
-					    .detail("StopVersion", it->stopVersion)
-					    .detail("EmptyVersion", it->emptyVersion)
-					    .detail("Removing", it->removing);
-				}
-			}
-		}
 	}
 }
 
@@ -7780,742 +6594,6 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 			throw;
 		}
 		results.sendError(e);
-		throw;
-	}
-}
-
-// We have to store the version the change feed was stopped at in the SS instead of just the stopped status
-// In addition to simplifying stopping logic, it enables communicating stopped status when fetching change feeds
-// from other SS correctly
-const Value changeFeedSSValue(KeyRangeRef const& range,
-                              Version popVersion,
-                              Version stopVersion,
-                              Version metadataVersion) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
-	wr << range;
-	wr << popVersion;
-	wr << stopVersion;
-	wr << metadataVersion;
-	return wr.toValue();
-}
-
-std::tuple<KeyRange, Version, Version, Version> decodeChangeFeedSSValue(ValueRef const& value) {
-	KeyRange range;
-	Version popVersion, stopVersion, metadataVersion;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> range;
-	reader >> popVersion;
-	reader >> stopVersion;
-	reader >> metadataVersion;
-	return std::make_tuple(range, popVersion, stopVersion, metadataVersion);
-}
-
-ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req) {
-	// if a SS restarted and is way behind, wait for it to at least have caught up through the pop version
-	wait(self->version.whenAtLeast(req.version));
-	wait(delay(0));
-
-	if (!self->isReadable(req.range)) {
-		req.reply.sendError(wrong_shard_server());
-		return Void();
-	}
-	auto feed = self->uidChangeFeed.find(req.rangeID);
-	if (feed == self->uidChangeFeed.end()) {
-		req.reply.sendError(unknown_change_feed());
-		return Void();
-	}
-
-	TraceEvent(SevDebug, "ChangeFeedPopQuery", self->thisServerID)
-	    .detail("FeedID", req.rangeID)
-	    .detail("Version", req.version)
-	    .detail("SSVersion", self->version.get())
-	    .detail("Range", req.range);
-
-	if (req.version - 1 > feed->second->emptyVersion) {
-		feed->second->emptyVersion = req.version - 1;
-		while (!feed->second->mutations.empty() && feed->second->mutations.front().version < req.version) {
-			feed->second->mutations.pop_front();
-		}
-		if (!feed->second->destroyed) {
-			Version durableVersion = self->data().getLatestVersion();
-			auto& mLV = self->addVersionToMutationLog(durableVersion);
-			self->addMutationToMutationLog(
-			    mLV,
-			    MutationRef(MutationRef::SetValue,
-			                persistChangeFeedKeys.begin.toString() + feed->second->id.toString(),
-			                changeFeedSSValue(feed->second->range,
-			                                  feed->second->emptyVersion + 1,
-			                                  feed->second->stopVersion,
-			                                  feed->second->metadataVersion)));
-			if (feed->second->storageVersion != invalidVersion) {
-				++self->counters.kvSystemClearRanges;
-				self->addMutationToMutationLog(mLV,
-				                               MutationRef(MutationRef::ClearRange,
-				                                           changeFeedDurableKey(feed->second->id, 0),
-				                                           changeFeedDurableKey(feed->second->id, req.version)));
-				if (req.version > feed->second->storageVersion) {
-					feed->second->storageVersion = invalidVersion;
-					feed->second->durableVersion = invalidVersion;
-				}
-			}
-			wait(self->durableVersion.whenAtLeast(durableVersion));
-		}
-	}
-	req.reply.send(Void());
-	return Void();
-}
-
-// FIXME: there's a decent amount of duplicated code around fetching and popping change feeds
-// Returns max version fetched
-ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
-                                             Reference<ChangeFeedInfo> changeFeedInfo,
-                                             Key rangeId,
-                                             KeyRange range,
-                                             Version emptyVersion,
-                                             Version beginVersion,
-                                             Version endVersion,
-                                             ReadOptions readOptions) {
-	state FlowLock::Releaser feedFetchReleaser;
-
-	// avoid fetching the same version range of the same change feed multiple times.
-	choose {
-		when(wait(changeFeedInfo->fetchLock.take())) {
-			feedFetchReleaser = FlowLock::Releaser(changeFeedInfo->fetchLock);
-		}
-		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) {
-			return invalidVersion;
-		}
-	}
-
-	state Version startVersion = beginVersion;
-	startVersion = std::max(startVersion, emptyVersion + 1);
-	startVersion = std::max(startVersion, changeFeedInfo->fetchVersion + 1);
-	startVersion = std::max(startVersion, changeFeedInfo->durableFetchVersion.get() + 1);
-
-	ASSERT(startVersion >= 0);
-
-	if (startVersion >= endVersion || (changeFeedInfo->removing)) {
-		CODE_PROBE(true, "Change Feed popped before fetch");
-		TraceEvent(SevDebug, "FetchChangeFeedNoOp", data->thisServerID)
-		    .detail("FeedID", rangeId)
-		    .detail("Range", range)
-		    .detail("StartVersion", startVersion)
-		    .detail("EndVersion", endVersion)
-		    .detail("Removing", changeFeedInfo->removing);
-		return invalidVersion;
-	}
-
-	// FIXME: if this feed range is not wholly contained within the shard, set cache to true on reading
-	state Reference<ChangeFeedData> feedResults = makeReference<ChangeFeedData>();
-	state Future<Void> feed = data->cx->getChangeFeedStream(feedResults,
-	                                                        rangeId,
-	                                                        startVersion,
-	                                                        endVersion,
-	                                                        range,
-	                                                        SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES,
-	                                                        true,
-	                                                        readOptions,
-	                                                        true);
-
-	state Version firstVersion = invalidVersion;
-	state Version lastVersion = invalidVersion;
-	state int64_t versionsFetched = 0;
-
-	// ensure SS is at least caught up to begin version, to maintain behavior with old fetch
-	wait(data->version.whenAtLeast(startVersion));
-
-	try {
-		loop {
-			while (data->fetchKeysBudgetUsed.get()) {
-				wait(data->fetchKeysBudgetUsed.onChange());
-			}
-
-			state Standalone<VectorRef<MutationsAndVersionRef>> remoteResult =
-			    waitNext(feedResults->mutations.getFuture());
-			state int remoteLoc = 0;
-			// ensure SS is at least caught up to begin version, to maintain behavior with old fetch
-			if (!remoteResult.empty()) {
-				wait(data->version.whenAtLeast(remoteResult.back().version));
-			}
-
-			while (remoteLoc < remoteResult.size()) {
-				if (feedResults->popVersion - 1 > changeFeedInfo->emptyVersion) {
-					CODE_PROBE(true, "CF fetched updated popped version from src SS");
-					changeFeedInfo->emptyVersion = feedResults->popVersion - 1;
-					// pop mutations
-					while (!changeFeedInfo->mutations.empty() &&
-					       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
-						changeFeedInfo->mutations.pop_front();
-					}
-					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-					data->addMutationToMutationLog(
-					    mLV,
-					    MutationRef(MutationRef::SetValue,
-					                persistChangeFeedKeys.begin.toString() + changeFeedInfo->id.toString(),
-					                changeFeedSSValue(changeFeedInfo->range,
-					                                  changeFeedInfo->emptyVersion + 1,
-					                                  changeFeedInfo->stopVersion,
-					                                  changeFeedInfo->metadataVersion)));
-					data->addMutationToMutationLog(
-					    mLV,
-					    MutationRef(MutationRef::ClearRange,
-					                changeFeedDurableKey(changeFeedInfo->id, 0),
-					                changeFeedDurableKey(changeFeedInfo->id, feedResults->popVersion)));
-					++data->counters.kvSystemClearRanges;
-				}
-
-				Version remoteVersion = remoteResult[remoteLoc].version;
-				// ensure SS is at least caught up to this version, to maintain behavior with old fetch
-				ASSERT(remoteVersion <= data->version.get());
-				if (remoteVersion > changeFeedInfo->emptyVersion) {
-					if (MUTATION_TRACKING_ENABLED) {
-						for (auto& m : remoteResult[remoteLoc].mutations) {
-							DEBUG_MUTATION("ChangeFeedWriteMove", remoteVersion, m, data->thisServerID)
-							    .detail("Range", range)
-							    .detail("ChangeFeedID", rangeId);
-						}
-					}
-					data->storage.writeKeyValue(
-					    KeyValueRef(changeFeedDurableKey(rangeId, remoteVersion),
-					                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
-					                                       remoteResult[remoteLoc].knownCommittedVersion)));
-					++data->counters.kvSystemClearRanges;
-					changeFeedInfo->fetchVersion = std::max(changeFeedInfo->fetchVersion, remoteVersion);
-
-					if (firstVersion == invalidVersion) {
-						firstVersion = remoteVersion;
-					}
-					lastVersion = remoteVersion;
-					versionsFetched++;
-				} else {
-					CODE_PROBE(true, "Change feed ignoring write on move because it was popped concurrently");
-					if (MUTATION_TRACKING_ENABLED) {
-						for (auto& m : remoteResult[remoteLoc].mutations) {
-							DEBUG_MUTATION("ChangeFeedWriteMoveIgnore", remoteVersion, m, data->thisServerID)
-							    .detail("Range", range)
-							    .detail("ChangeFeedID", rangeId)
-							    .detail("EmptyVersion", changeFeedInfo->emptyVersion);
-						}
-					}
-					if (versionsFetched > 0) {
-						ASSERT(firstVersion != invalidVersion);
-						ASSERT(lastVersion != invalidVersion);
-						data->storage.clearRange(
-						    KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
-						                changeFeedDurableKey(changeFeedInfo->id, lastVersion + 1)));
-						++data->counters.kvSystemClearRanges;
-						firstVersion = invalidVersion;
-						lastVersion = invalidVersion;
-						versionsFetched = 0;
-					}
-				}
-				remoteLoc++;
-			}
-			// Do this once per wait instead of once per version for efficiency
-			data->fetchingChangeFeeds.insert(changeFeedInfo->id);
-
-			data->counters.feedBytesFetched += remoteResult.expectedSize();
-			data->fetchKeysBytesBudget -= remoteResult.expectedSize();
-			data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
-			wait(yield());
-		}
-	} catch (Error& e) {
-		if (e.code() != error_code_end_of_stream) {
-			TraceEvent(SevDebug, "FetchChangeFeedError", data->thisServerID)
-			    .errorUnsuppressed(e)
-			    .detail("FeedID", rangeId)
-			    .detail("Range", range)
-			    .detail("EndVersion", endVersion)
-			    .detail("Removing", changeFeedInfo->removing)
-			    .detail("Destroyed", changeFeedInfo->destroyed);
-			throw;
-		}
-	}
-
-	if (feedResults->popVersion - 1 > changeFeedInfo->emptyVersion) {
-		CODE_PROBE(true, "CF fetched updated popped version from src SS at end");
-		changeFeedInfo->emptyVersion = feedResults->popVersion - 1;
-		while (!changeFeedInfo->mutations.empty() &&
-		       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
-			changeFeedInfo->mutations.pop_front();
-		}
-		auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-		data->addMutationToMutationLog(
-		    mLV,
-		    MutationRef(MutationRef::SetValue,
-		                persistChangeFeedKeys.begin.toString() + changeFeedInfo->id.toString(),
-		                changeFeedSSValue(changeFeedInfo->range,
-		                                  changeFeedInfo->emptyVersion + 1,
-		                                  changeFeedInfo->stopVersion,
-		                                  changeFeedInfo->metadataVersion)));
-		data->addMutationToMutationLog(mLV,
-		                               MutationRef(MutationRef::ClearRange,
-		                                           changeFeedDurableKey(changeFeedInfo->id, 0),
-		                                           changeFeedDurableKey(changeFeedInfo->id, feedResults->popVersion)));
-		++data->counters.kvSystemClearRanges;
-	}
-
-	// if we were popped or removed while fetching but it didn't pass the fetch version while writing, clean up here
-	if (versionsFetched > 0 && startVersion < changeFeedInfo->emptyVersion) {
-		CODE_PROBE(true, "Change feed cleaning up popped data after move");
-		ASSERT(firstVersion != invalidVersion);
-		ASSERT(lastVersion != invalidVersion);
-		Version endClear = std::min(lastVersion + 1, changeFeedInfo->emptyVersion);
-		if (endClear > firstVersion) {
-			auto& mLV2 = data->addVersionToMutationLog(data->data().getLatestVersion());
-			data->addMutationToMutationLog(mLV2,
-			                               MutationRef(MutationRef::ClearRange,
-			                                           changeFeedDurableKey(changeFeedInfo->id, firstVersion),
-			                                           changeFeedDurableKey(changeFeedInfo->id, endClear)));
-			++data->counters.kvSystemClearRanges;
-		}
-	}
-
-	TraceEvent(SevDebug, "FetchChangeFeedDone", data->thisServerID)
-	    .detail("FeedID", rangeId)
-	    .detail("Range", range)
-	    .detail("StartVersion", startVersion)
-	    .detail("EndVersion", endVersion)
-	    .detail("EmptyVersion", changeFeedInfo->emptyVersion)
-	    .detail("FirstFetchedVersion", firstVersion)
-	    .detail("LastFetchedVersion", lastVersion)
-	    .detail("VersionsFetched", versionsFetched)
-	    .detail("Removed", changeFeedInfo->removing);
-	return lastVersion;
-}
-
-// returns largest version fetched
-ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
-                                      Reference<ChangeFeedInfo> changeFeedInfo,
-                                      Version beginVersion,
-                                      Version endVersion,
-                                      ReadOptions readOptions) {
-	wait(delay(0)); // allow this actor to be cancelled by removals
-
-	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
-	    .detail("FeedID", changeFeedInfo->id)
-	    .detail("Range", changeFeedInfo->range)
-	    .detail("BeginVersion", beginVersion)
-	    .detail("EndVersion", endVersion);
-
-	auto cleanupPending = data->changeFeedCleanupDurable.find(changeFeedInfo->id);
-	if (cleanupPending != data->changeFeedCleanupDurable.end()) {
-		CODE_PROBE(true, "Change feed waiting for dirty previous move to finish");
-		TraceEvent(SevDebug, "FetchChangeFeedWaitCleanup", data->thisServerID)
-		    .detail("FeedID", changeFeedInfo->id)
-		    .detail("Range", changeFeedInfo->range)
-		    .detail("CleanupVersion", cleanupPending->second)
-		    .detail("EmptyVersion", changeFeedInfo->emptyVersion)
-		    .detail("BeginVersion", beginVersion)
-		    .detail("EndVersion", endVersion);
-		wait(data->durableVersion.whenAtLeast(cleanupPending->second + 1));
-		wait(delay(0));
-		// shard might have gotten moved away (again) while we were waiting
-		auto cleanupPendingAfter = data->changeFeedCleanupDurable.find(changeFeedInfo->id);
-		if (cleanupPendingAfter != data->changeFeedCleanupDurable.end()) {
-			ASSERT(cleanupPendingAfter->second >= endVersion);
-			TraceEvent(SevDebug, "FetchChangeFeedCancelledByCleanup", data->thisServerID)
-			    .detail("FeedID", changeFeedInfo->id)
-			    .detail("Range", changeFeedInfo->range)
-			    .detail("BeginVersion", beginVersion)
-			    .detail("EndVersion", endVersion);
-			return invalidVersion;
-		}
-	}
-
-	state bool seenNotRegistered = false;
-	loop {
-		try {
-			Version maxFetched = wait(fetchChangeFeedApplier(data,
-			                                                 changeFeedInfo,
-			                                                 changeFeedInfo->id,
-			                                                 changeFeedInfo->range,
-			                                                 changeFeedInfo->emptyVersion,
-			                                                 beginVersion,
-			                                                 endVersion,
-			                                                 readOptions));
-			data->fetchingChangeFeeds.insert(changeFeedInfo->id);
-			return maxFetched;
-		} catch (Error& e) {
-			if (e.code() != error_code_change_feed_not_registered) {
-				throw;
-			}
-		}
-
-		// There are two reasons for change_feed_not_registered:
-		//   1. The feed was just created, but the ss mutation stream is ahead of the GRV that
-		//   fetchChangeFeedApplier uses to read the change feed data from the database. In this case we need to
-		//   wait and retry
-		//   2. The feed was destroyed, but we missed a metadata update telling us this. In this case we need to
-		//   destroy the feed
-		// endVersion >= the metadata create version, so we can safely use it as a proxy
-		if (beginVersion != 0 || seenNotRegistered || endVersion <= data->desiredOldestVersion.get()) {
-			// If any of these are true, the feed must be destroyed.
-			Version cleanupVersion = data->data().getLatestVersion();
-
-			TraceEvent(SevDebug, "DestroyingChangeFeedFromFetch", data->thisServerID)
-			    .detail("FeedID", changeFeedInfo->id)
-			    .detail("Range", changeFeedInfo->range)
-			    .detail("Version", cleanupVersion);
-
-			if (g_network->isSimulated() && !g_simulator->restarted) {
-				// verify that the feed was actually destroyed and it's not an error in this inference logic.
-				// Restarting tests produce false positives because the validation state isn't kept across tests
-				ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.contains(changeFeedInfo->id.toString()));
-			}
-
-			Key beginClearKey = changeFeedInfo->id.withPrefix(persistChangeFeedKeys.begin);
-
-			auto& mLV = data->addVersionToMutationLog(cleanupVersion);
-			data->addMutationToMutationLog(
-			    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
-			++data->counters.kvSystemClearRanges;
-			data->addMutationToMutationLog(mLV,
-			                               MutationRef(MutationRef::ClearRange,
-			                                           changeFeedDurableKey(changeFeedInfo->id, 0),
-			                                           changeFeedDurableKey(changeFeedInfo->id, cleanupVersion)));
-			++data->counters.kvSystemClearRanges;
-
-			changeFeedInfo->destroy(cleanupVersion);
-
-			if (data->uidChangeFeed.contains(changeFeedInfo->id)) {
-				// only register range for cleanup if it has not been already cleaned up
-				data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
-			}
-
-			for (auto& it : data->changeFeedDestroys) {
-				it.second.send(changeFeedInfo->id);
-			}
-
-			return invalidVersion;
-		}
-
-		// otherwise assume the feed just hasn't been created on the SS we tried to read it from yet, wait for it to
-		// definitely be committed and retry
-		seenNotRegistered = true;
-		wait(data->desiredOldestVersion.whenAtLeast(endVersion));
-	}
-}
-
-ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
-                                                       KeyRange keys,
-                                                       PromiseStream<Key> destroyedFeeds,
-                                                       UID fetchKeysID) {
-
-	// Wait for current TLog batch to finish to ensure that we're fetching metadata at a version >= the version of
-	// the ChangeServerKeys mutation. This guarantees we don't miss any metadata between the previous batch's
-	// version (data->version) and the mutation version.
-	wait(data->version.whenAtLeast(data->version.get() + 1));
-	state Version fetchVersion = data->version.get();
-
-	TraceEvent(SevDebug, "FetchChangeFeedMetadata", data->thisServerID)
-	    .detail("Range", keys)
-	    .detail("FetchVersion", fetchVersion)
-	    .detail("FKID", fetchKeysID);
-
-	state OverlappingChangeFeedsInfo feedMetadata = wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion));
-	// rest of this actor needs to happen without waits that might yield to scheduler, to avoid races in feed
-	// metadata.
-
-	// Find set of feeds we currently have that were not present in fetch, to infer that they may have been
-	// destroyed.
-	state std::unordered_map<Key, Version> missingFeeds;
-	auto ranges = data->keyChangeFeed.intersectingRanges(keys);
-	for (auto& r : ranges) {
-		for (auto& cfInfo : r.value()) {
-			if (cfInfo->removing && !cfInfo->destroyed) {
-				missingFeeds.insert({ cfInfo->id, cfInfo->metadataVersion });
-			}
-		}
-	}
-
-	// handle change feeds destroyed while fetching overlapping info
-	while (destroyedFeeds.getFuture().isReady()) {
-		Key destroyed = waitNext(destroyedFeeds.getFuture());
-		for (int i = 0; i < feedMetadata.feeds.size(); i++) {
-			if (feedMetadata.feeds[i].feedId == destroyed) {
-				missingFeeds.erase(destroyed); // feed definitely destroyed, no need to infer
-				swapAndPop(&feedMetadata.feeds, i--);
-			}
-		}
-	}
-	// FIXME: might want to inject delay here sometimes in simulation, so that races that would only happen when a
-	// feed destroy causes a wait are more prominent?
-
-	std::vector<Key> feedIds;
-	feedIds.reserve(feedMetadata.feeds.size());
-	// create change feed metadata if it does not exist
-	for (auto& cfEntry : feedMetadata.feeds) {
-		auto cleanupEntry = data->changeFeedCleanupDurable.find(cfEntry.feedId);
-		bool cleanupPending = cleanupEntry != data->changeFeedCleanupDurable.end();
-		auto existingEntry = data->uidChangeFeed.find(cfEntry.feedId);
-		bool existing = existingEntry != data->uidChangeFeed.end();
-
-		TraceEvent(SevDebug, "FetchedChangeFeedInfo", data->thisServerID)
-		    .detail("FeedID", cfEntry.feedId)
-		    .detail("Range", cfEntry.range)
-		    .detail("FetchVersion", fetchVersion)
-		    .detail("EmptyVersion", cfEntry.emptyVersion)
-		    .detail("StopVersion", cfEntry.stopVersion)
-		    .detail("FeedMetadataVersion", cfEntry.feedMetadataVersion)
-		    .detail("Existing", existing)
-		    .detail("ExistingMetadataVersion", existing ? existingEntry->second->metadataVersion : invalidVersion)
-		    .detail("CleanupPendingVersion", cleanupPending ? cleanupEntry->second : invalidVersion)
-		    .detail("FKID", fetchKeysID);
-
-		bool addMutationToLog = false;
-		Reference<ChangeFeedInfo> changeFeedInfo;
-
-		if (!existing) {
-			CODE_PROBE(cleanupPending,
-			           "Fetch change feed which is cleanup pending. This means there was a move away and a move back, "
-			           "this will remake the metadata",
-			           probe::decoration::rare);
-
-			changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
-			changeFeedInfo->range = cfEntry.range;
-			changeFeedInfo->id = cfEntry.feedId;
-
-			changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
-			changeFeedInfo->stopVersion = cfEntry.stopVersion;
-			data->uidChangeFeed[cfEntry.feedId] = changeFeedInfo;
-			auto rs = data->keyChangeFeed.modify(cfEntry.range);
-			for (auto r = rs.begin(); r != rs.end(); ++r) {
-				r->value().push_back(changeFeedInfo);
-			}
-			data->keyChangeFeed.coalesce(cfEntry.range);
-
-			addMutationToLog = true;
-		} else {
-			changeFeedInfo = existingEntry->second;
-
-			CODE_PROBE(cfEntry.feedMetadataVersion > data->version.get(),
-			           "Change Feed fetched future metadata version");
-
-			auto fid = missingFeeds.find(cfEntry.feedId);
-			if (fid != missingFeeds.end()) {
-				missingFeeds.erase(fid);
-				ASSERT(!changeFeedInfo->destroyed);
-				// could possibly be not removing because it was reset  while
-				// waiting on destroyedFeeds by a private mutation or another fetch
-				if (changeFeedInfo->removing) {
-					TraceEvent(SevDebug, "ResetChangeFeedInfoFromFetch", data->thisServerID)
-					    .detail("FeedID", changeFeedInfo->id.printable())
-					    .detail("Range", changeFeedInfo->range)
-					    .detail("FetchVersion", fetchVersion)
-					    .detail("EmptyVersion", changeFeedInfo->emptyVersion)
-					    .detail("StopVersion", changeFeedInfo->stopVersion)
-					    .detail("PreviousMetadataVersion", changeFeedInfo->metadataVersion)
-					    .detail("NewMetadataVersion", cfEntry.feedMetadataVersion)
-					    .detail("FKID", fetchKeysID);
-
-					CODE_PROBE(true, "re-fetching feed scheduled for deletion! Un-mark it as removing");
-
-					// TODO only reset data if feed is still removing
-					changeFeedInfo->removing = false;
-					// reset fetch versions because everything previously fetched was cleaned up
-					changeFeedInfo->fetchVersion = invalidVersion;
-					changeFeedInfo->durableFetchVersion = NotifiedVersion();
-					addMutationToLog = true;
-				}
-			}
-
-			if (changeFeedInfo->destroyed) {
-				CODE_PROBE(true,
-				           "Change feed fetched and destroyed by other fetch while fetching metadata",
-				           probe::decoration::rare);
-				continue;
-			}
-
-			// we checked all feeds we already owned in this range at the start to reset them if they were removing,
-			// and this actor would have been cancelled if a later remove happened
-			ASSERT(!changeFeedInfo->removing);
-			if (cfEntry.stopVersion < changeFeedInfo->stopVersion) {
-				CODE_PROBE(true, "Change feed updated stop version from fetch metadata");
-				changeFeedInfo->stopVersion = cfEntry.stopVersion;
-				addMutationToLog = true;
-			}
-
-			// don't update empty version past SS version if SS is behind, it can cause issues
-			if (cfEntry.emptyVersion < data->version.get() && cfEntry.emptyVersion > changeFeedInfo->emptyVersion) {
-				CODE_PROBE(true, "Change feed updated empty version from fetch metadata");
-				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
-				addMutationToLog = true;
-			}
-		}
-		feedIds.push_back(cfEntry.feedId);
-		addMutationToLog |= changeFeedInfo->updateMetadataVersion(cfEntry.feedMetadataVersion);
-		if (addMutationToLog) {
-			ASSERT(changeFeedInfo.isValid());
-			Version logV = data->data().getLatestVersion();
-			auto& mLV = data->addVersionToMutationLog(logV);
-			data->addMutationToMutationLog(
-			    mLV,
-			    MutationRef(MutationRef::SetValue,
-			                persistChangeFeedKeys.begin.toString() + cfEntry.feedId.toString(),
-			                changeFeedSSValue(cfEntry.range,
-			                                  changeFeedInfo->emptyVersion + 1,
-			                                  changeFeedInfo->stopVersion,
-			                                  changeFeedInfo->metadataVersion)));
-			// if we updated pop version, remove mutations
-			while (!changeFeedInfo->mutations.empty() &&
-			       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
-				changeFeedInfo->mutations.pop_front();
-			}
-			if (BUGGIFY) {
-				data->maybeInjectTargetedRestart(logV);
-			}
-		}
-	}
-
-	for (auto& feed : missingFeeds) {
-		auto existingEntry = data->uidChangeFeed.find(feed.first);
-		ASSERT(existingEntry != data->uidChangeFeed.end());
-		ASSERT(existingEntry->second->removing);
-		ASSERT(!existingEntry->second->destroyed);
-
-		Version fetchedMetadataVersion = feedMetadata.getFeedMetadataVersion(existingEntry->second->range);
-		Version lastMetadataVersion = feed.second;
-		// Look for case where feed's range was moved away, feed was destroyed, and then feed's range was moved
-		// back. This happens where feed is removing, the fetch metadata is higher than the moved away version, and
-		// the feed isn't in the fetched response. In that case, the feed must have been destroyed between
-		// lastMetadataVersion and fetchedMetadataVersion
-		if (lastMetadataVersion >= fetchedMetadataVersion) {
-			CODE_PROBE(true, "Change Feed fetched higher metadata version before moved away", probe::decoration::rare);
-			continue;
-		}
-
-		Version cleanupVersion = data->data().getLatestVersion();
-
-		CODE_PROBE(true, "Destroying change feed from fetch metadata"); //
-		TraceEvent(SevDebug, "DestroyingChangeFeedFromFetchMetadata", data->thisServerID)
-		    .detail("FeedID", feed.first)
-		    .detail("Range", existingEntry->second->range)
-		    .detail("Version", cleanupVersion)
-		    .detail("FKID", fetchKeysID);
-
-		if (g_network->isSimulated() && !g_simulator->restarted) {
-			// verify that the feed was actually destroyed and it's not an error in this inference logic. Restarting
-			// tests produce false positives because the validation state isn't kept across tests
-			ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.contains(feed.first.toString()));
-		}
-
-		Key beginClearKey = feed.first.withPrefix(persistChangeFeedKeys.begin);
-
-		auto& mLV = data->addVersionToMutationLog(cleanupVersion);
-		data->addMutationToMutationLog(mLV,
-		                               MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
-		++data->counters.kvSystemClearRanges;
-		data->addMutationToMutationLog(mLV,
-		                               MutationRef(MutationRef::ClearRange,
-		                                           changeFeedDurableKey(feed.first, 0),
-		                                           changeFeedDurableKey(feed.first, cleanupVersion)));
-		++data->counters.kvSystemClearRanges;
-
-		existingEntry->second->destroy(cleanupVersion);
-		data->changeFeedCleanupDurable[feed.first] = cleanupVersion;
-
-		for (auto& it : data->changeFeedDestroys) {
-			it.second.send(feed.first);
-		}
-		if (BUGGIFY) {
-			data->maybeInjectTargetedRestart(cleanupVersion);
-		}
-	}
-	return feedIds;
-}
-
-ReadOptions readOptionsForFeedFetch(const ReadOptions& options, const KeyRangeRef& keys, const KeyRangeRef& feedRange) {
-	if (!feedRange.contains(keys)) {
-		return options;
-	}
-	// If feed range wholly contains shard range, cache on fetch because other shards will likely also fetch it
-	ReadOptions newOptions = options;
-	newOptions.cacheResult = true;
-	return newOptions;
-}
-
-// returns max version fetched for each feed
-// newFeedIds is used for the second fetch to get data for new feeds that weren't there for the first fetch
-ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer* data,
-                                                                   UID fetchKeysID,
-                                                                   KeyRange keys,
-                                                                   Version beginVersion,
-                                                                   Version endVersion,
-                                                                   PromiseStream<Key> destroyedFeeds,
-                                                                   std::vector<Key>* feedIds,
-                                                                   std::unordered_set<Key> newFeedIds,
-                                                                   ReadOptions readOptions) {
-	state std::unordered_map<Key, Version> feedMaxFetched;
-	if (feedIds->empty() && newFeedIds.empty()) {
-		return feedMaxFetched;
-	}
-
-	wait(data->fetchKeysParallelismChangeFeedLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismChangeFeedLock);
-
-	// find overlapping range feeds
-	state std::map<Key, Future<Version>> feedFetches;
-
-	try {
-		for (auto& feedId : *feedIds) {
-			auto feedIt = data->uidChangeFeed.find(feedId);
-			// feed may have been moved away or deleted after move was scheduled, do nothing in that case
-			if (feedIt != data->uidChangeFeed.end() && !feedIt->second->removing) {
-				ReadOptions fetchReadOptions = readOptionsForFeedFetch(readOptions, keys, feedIt->second->range);
-				feedFetches[feedIt->second->id] =
-				    fetchChangeFeed(data, feedIt->second, beginVersion, endVersion, fetchReadOptions);
-			}
-		}
-		for (auto& feedId : newFeedIds) {
-			auto feedIt = data->uidChangeFeed.find(feedId);
-			// feed may have been moved away or deleted while we took the feed lock, do nothing in that case
-			if (feedIt != data->uidChangeFeed.end() && !feedIt->second->removing) {
-				ReadOptions fetchReadOptions = readOptionsForFeedFetch(readOptions, keys, feedIt->second->range);
-				feedFetches[feedIt->second->id] =
-				    fetchChangeFeed(data, feedIt->second, 0, endVersion, fetchReadOptions);
-			}
-		}
-
-		loop {
-			Future<Version> nextFeed = Never();
-			if (!destroyedFeeds.getFuture().isReady()) {
-				bool done = true;
-				while (!feedFetches.empty()) {
-					if (feedFetches.begin()->second.isReady()) {
-						Version maxFetched = feedFetches.begin()->second.get();
-						if (maxFetched != invalidVersion) {
-							feedFetches[feedFetches.begin()->first] = maxFetched;
-						}
-						feedFetches.erase(feedFetches.begin());
-					} else {
-						nextFeed = feedFetches.begin()->second;
-						done = false;
-						break;
-					}
-				}
-				if (done) {
-					return feedMaxFetched;
-				}
-			}
-			choose {
-				when(state Key destroyed = waitNext(destroyedFeeds.getFuture())) {
-					wait(delay(0));
-					feedFetches.erase(destroyed);
-					for (int i = 0; i < feedIds->size(); i++) {
-						if ((*feedIds)[i] == destroyed) {
-							swapAndPop(feedIds, i--);
-						}
-					}
-				}
-				when(wait(success(nextFeed))) {}
-			}
-		}
-
-	} catch (Error& e) {
-		if (!data->shuttingDown) {
-			data->changeFeedDestroys.erase(fetchKeysID);
-		}
 		throw;
 	}
 }
@@ -8785,11 +6863,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		data->bulkLoadMetrics->addTask();
 	}
 
-	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we get
-	// for this key range, that apply to change feeds we don't know about yet because their metadata hasn't been
-	// fetched yet
-	data->changeFeedDestroys[fetchKeysID] = destroyedFeeds;
-
 	// delay(0) to force a return to the run loop before the work of fetchKeys is started.
 	//  This allows adding->start() to be called inline with CSK.
 	try {
@@ -8803,9 +6876,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			wait(delay(0));
 		}
 	} catch (Error& e) {
-		if (!data->shuttingDown) {
-			data->changeFeedDestroys.erase(fetchKeysID);
-		}
 		throw e;
 	}
 
@@ -8819,9 +6889,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("FKID", fetchKeysID)
 		    .detail("DataMoveId", dataMoveId)
 		    .detail("ConductBulkLoad", conductBulkLoad);
-
-		state Future<std::vector<Key>> fetchCFMetadata =
-		    fetchChangeFeedMetadata(data, keys, destroyedFeeds, fetchKeysID);
 
 		validate(data);
 
@@ -8858,11 +6925,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// until all mutations for a version have been processed. We need to take the durableVersionLock to ensure
 		// data->version is greater than the version of the mutation which caused the fetch to be initiated.
 
-		// We must also ensure we have fetched all change feed metadata BEFORE changing the phase to fetching to
-		// ensure change feed mutations get applied correctly
-		state std::vector<Key> changeFeedsToFetch;
-		std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
-		changeFeedsToFetch = _cfToFetch;
 		wait(data->durableVersionLock.take());
 
 		shard->phase = AddingShard::Fetching;
@@ -9140,6 +7202,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				if (lastError.code() == error_code_storage_replica_comparison_error) {
 					// The inconsistency could be because of the inclusion of a rolled back
 					// transaction(s)/version(s) in the returned results. Retry.
+
 					wait(data->knownCommittedVersion.whenAtLeast(fetchVersion));
 				}
 				if (blockBegin == keys.begin) {
@@ -9246,23 +7309,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// version being recovered. Instead we wait for the updateStorage loop to commit something (and consequently
 		// also what we have written)
 
-		state Future<std::unordered_map<Key, Version>> feedFetchMain = dispatchChangeFeeds(data,
-		                                                                                   fetchKeysID,
-		                                                                                   keys,
-		                                                                                   0,
-		                                                                                   fetchVersion + 1,
-		                                                                                   destroyedFeeds,
-		                                                                                   &changeFeedsToFetch,
-		                                                                                   std::unordered_set<Key>(),
-		                                                                                   readOptions);
-
 		state Future<Void> fetchDurable = data->durableVersion.whenAtLeast(data->storageVersion() + 1);
 		state Future<Void> dataArrive = data->version.whenAtLeast(fetchVersion);
 
 		holdingFKPL.release();
 		wait(dataArrive && fetchDurable);
-
-		state std::unordered_map<Key, Version> feedFetchedVersions = wait(feedFetchMain);
 
 		TraceEvent(SevDebug, "FKAfterFinalCommit", data->thisServerID)
 		    .detail("FKID", interval.pairID)
@@ -9279,6 +7330,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		FetchInjectionInfo* batch = wait(p.getFuture());
 		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
 
+		// TOOD(gglass): eliminate the need for the FetchingCF phase here.
 		shard->phase = AddingShard::FetchingCF;
 		ASSERT(data->version.get() >= fetchVersion);
 		// Choose a transferredVersion.  This choice and timing ensure that
@@ -9296,38 +7348,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		ASSERT(shard->transferredVersion > data->storageVersion());
 		ASSERT(shard->transferredVersion == data->data().getLatestVersion());
 
-		// find new change feeds for this range that didn't exist when we started the fetch
-		auto ranges = data->keyChangeFeed.intersectingRanges(keys);
-		std::unordered_set<Key> newChangeFeeds;
-		for (auto& r : ranges) {
-			for (auto& cfInfo : r.value()) {
-				CODE_PROBE(true, "SS fetching new change feed that didn't exist when fetch started");
-				if (!cfInfo->removing) {
-					newChangeFeeds.insert(cfInfo->id);
-				}
-			}
-		}
-		for (auto& cfId : changeFeedsToFetch) {
-			newChangeFeeds.erase(cfId);
-		}
-		// This is split into two fetches to reduce tail. Fetch [0 - fetchVersion+1)
-		// once fetchVersion is finalized, and [fetchVersion+1, transferredVersion) here once transferredVersion is
-		// finalized. Also fetch new change feeds alongside it
-		state Future<std::unordered_map<Key, Version>> feedFetchTransferred =
-		    dispatchChangeFeeds(data,
-		                        fetchKeysID,
-		                        keys,
-		                        fetchVersion + 1,
-		                        shard->transferredVersion,
-		                        destroyedFeeds,
-		                        &changeFeedsToFetch,
-		                        newChangeFeeds,
-		                        readOptions);
-
-		TraceEvent(SevDebug, "FetchKeysHaveData", data->thisServerID)
-		    .detail("FKID", interval.pairID)
-		    .detail("Version", shard->transferredVersion)
-		    .detail("StorageVersion", data->storageVersion());
 		validate(data);
 
 		// the minimal version in updates must be larger than fetchVersion
@@ -9362,19 +7382,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 
 		shard->updates.clear();
-
-		// wait on change feed fetch to complete writing to storage before marking data as available
-		std::unordered_map<Key, Version> feedFetchedVersions2 = wait(feedFetchTransferred);
-		for (auto& newFetch : feedFetchedVersions2) {
-			auto prevFetch = feedFetchedVersions.find(newFetch.first);
-			if (prevFetch != feedFetchedVersions.end()) {
-				prevFetch->second = std::max(prevFetch->second, newFetch.second);
-			} else {
-				feedFetchedVersions[newFetch.first] = newFetch.second;
-			}
-		}
-
-		data->changeFeedDestroys.erase(fetchKeysID);
 
 		shard->phase = AddingShard::Waiting;
 
@@ -9433,9 +7440,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("FKID", fetchKeysID)
 		    .errorUnsuppressed(e)
 		    .detail("Version", data->version.get());
-		if (!data->shuttingDown) {
-			data->changeFeedDestroys.erase(fetchKeysID);
-		}
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::FetchingCF) {
 				data->storage.clearRange(keys);
@@ -10564,70 +8568,6 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 	return Void();
 }
 
-// Finds any change feeds that no longer have shards on this server, and clean them up
-void cleanUpChangeFeeds(StorageServer* data, const KeyRangeRef& keys, Version version) {
-	std::map<Key, KeyRange> candidateFeeds;
-	auto ranges = data->keyChangeFeed.intersectingRanges(keys);
-	for (auto r : ranges) {
-		for (auto feed : r.value()) {
-			candidateFeeds[feed->id] = feed->range;
-		}
-	}
-	for (auto f : candidateFeeds) {
-		bool foundAssigned = false;
-		auto shards = data->shards.intersectingRanges(f.second);
-		for (auto shard : shards) {
-			if (shard->value()->assigned()) {
-				foundAssigned = true;
-				break;
-			}
-		}
-
-		if (!foundAssigned) {
-			Version durableVersion = data->data().getLatestVersion();
-			TraceEvent(SevDebug, "ChangeFeedCleanup", data->thisServerID)
-			    .detail("FeedID", f.first)
-			    .detail("Version", version)
-			    .detail("DurableVersion", durableVersion);
-
-			data->changeFeedCleanupDurable[f.first] = durableVersion;
-
-			Key beginClearKey = f.first.withPrefix(persistChangeFeedKeys.begin);
-			auto& mLV = data->addVersionToMutationLog(durableVersion);
-			data->addMutationToMutationLog(
-			    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
-			++data->counters.kvSystemClearRanges;
-			data->addMutationToMutationLog(mLV,
-			                               MutationRef(MutationRef::ClearRange,
-			                                           changeFeedDurableKey(f.first, 0),
-			                                           changeFeedDurableKey(f.first, version)));
-
-			// We can't actually remove this change feed fully until the mutations clearing its data become durable.
-			// If the SS restarted at version R before the clearing mutations became durable at version D (R < D),
-			// then the restarted SS would restore the change feed clients would be able to read data and would miss
-			// mutations from versions [R, D), up until we got the private mutation triggering the cleanup again.
-
-			auto feed = data->uidChangeFeed.find(f.first);
-			if (feed != data->uidChangeFeed.end()) {
-				feed->second->updateMetadataVersion(version);
-				feed->second->removing = true;
-				feed->second->moved(feed->second->range);
-				feed->second->newMutations.trigger();
-			}
-
-			if (BUGGIFY) {
-				data->maybeInjectTargetedRestart(durableVersion);
-			}
-		} else {
-			// if just part of feed's range is moved away
-			auto feed = data->uidChangeFeed.find(f.first);
-			if (feed != data->uidChangeFeed.end()) {
-				feed->second->moved(keys);
-			}
-		}
-	}
-}
-
 void changeServerKeys(StorageServer* data,
                       const KeyRangeRef& keys,
                       bool nowAssigned,
@@ -10787,10 +8727,6 @@ void changeServerKeys(StorageServer* data,
 		++data->counters.kvSystemClearRanges;
 	}
 	validate(data);
-
-	if (!nowAssigned) {
-		cleanUpChangeFeeds(data, keys, version);
-	}
 
 	if (data->trackShardAssignmentMinVersion != invalidVersion && version >= data->trackShardAssignmentMinVersion) {
 		// data->trackShardAssignmentMinVersion==invalidVersion means trackAssignment stops
@@ -11170,11 +9106,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	}
 	validate(data);
 
-	// find any change feeds that no longer have shards on this server, and clean them up
-	if (!nowAssigned) {
-		cleanUpChangeFeeds(data, keys, version);
-	}
-
 	if (data->trackShardAssignmentMinVersion != invalidVersion && version >= data->trackShardAssignmentMinVersion) {
 		// data->trackShardAssignmentMinVersion==invalidVersion means trackAssignment stops
 		data->shardAssignmentHistory.push_back(std::make_pair(version, keys));
@@ -11228,6 +9159,7 @@ void StorageServer::addMutation(Version version,
 	    .detail("ShardEnd", shard.end);
 
 	if (!fromFetch) {
+		// TODO(gglass): it might be possible to delete code in this condition.
 		// have to do change feed before applyMutation because nonExpanded wasn't copied into the mutation log
 		// arena, and thus would go out of scope if it wasn't copied into the change feed arena
 
@@ -11236,9 +9168,6 @@ void StorageServer::addMutation(Version version,
 		    mutation.type != MutationRef::ClearRange) {
 			encrypt.mutation = expanded.encrypt(encrypt.cipherKeys, mLog.arena(), BlobCipherMetrics::TLOG);
 		}
-
-		applyChangeFeedMutation(
-		    this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, encrypt, version, shard);
 	}
 	applyMutation(this, expanded, mLog.arena(), mutableData(), version);
 
@@ -11427,13 +9356,6 @@ private:
 				    .detail("RestoredVersion", restoredVersion)
 				    .detail("StorageVersion", data->storageVersion());
 			}
-			for (auto& it : data->uidChangeFeed) {
-				if (!it.second->removing && currentVersion < it.second->stopVersion) {
-					it.second->mutations.push_back(EncryptedMutationsAndVersionRef(currentVersion, rollbackVersion));
-					it.second->mutations.back().mutations.push_back_deep(it.second->mutations.back().arena(), m);
-					data->currentChangeFeeds.insert(it.first);
-				}
-			}
 
 			data->recoveryVersionSkips.emplace_back(rollbackVersion, currentVersion - rollbackVersion);
 		} else if (m.type == MutationRef::SetValue && m.param1 == killStoragePrivateKey) {
@@ -11475,176 +9397,6 @@ private:
 			data->primaryLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
 			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 			data->addMutationToMutationLog(mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2));
-		} else if (m.type == MutationRef::SetValue && m.param1.startsWith(changeFeedPrivatePrefix)) {
-			Key changeFeedId = m.param1.removePrefix(changeFeedPrivatePrefix);
-			KeyRange changeFeedRange;
-			Version popVersion;
-			ChangeFeedStatus status;
-			std::tie(changeFeedRange, popVersion, status) = decodeChangeFeedValue(m.param2);
-			auto feed = data->uidChangeFeed.find(changeFeedId);
-
-			TraceEvent(SevDebug, "ChangeFeedPrivateMutation", data->thisServerID)
-			    .detail("FeedID", changeFeedId)
-			    .detail("Range", changeFeedRange)
-			    .detail("Version", currentVersion)
-			    .detail("PopVersion", popVersion)
-			    .detail("Status", status);
-
-			// Because of data moves, we can get mutations operating on a change feed we don't yet know about,
-			// because the metadata fetch hasn't started yet
-			bool createdFeed = false;
-			bool popMutationLog = false;
-			bool addMutationToLog = false;
-			if (feed == data->uidChangeFeed.end() && status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
-				createdFeed = true;
-
-				Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
-				changeFeedInfo->range = changeFeedRange;
-				changeFeedInfo->id = changeFeedId;
-				if (status == ChangeFeedStatus::CHANGE_FEED_CREATE && popVersion == invalidVersion) {
-					// for a create, the empty version should be now, otherwise it will be set in a later pop
-					changeFeedInfo->emptyVersion = currentVersion - 1;
-				} else {
-					CODE_PROBE(true, "SS got non-create change feed private mutation before move created its metadata");
-					changeFeedInfo->emptyVersion = invalidVersion;
-				}
-				changeFeedInfo->metadataCreateVersion = currentVersion;
-				data->uidChangeFeed[changeFeedId] = changeFeedInfo;
-
-				feed = data->uidChangeFeed.find(changeFeedId);
-				ASSERT(feed != data->uidChangeFeed.end());
-
-				TraceEvent(SevDebug, "AddingChangeFeed", data->thisServerID)
-				    .detail("FeedID", changeFeedId)
-				    .detail("Range", changeFeedRange)
-				    .detail("EmptyVersion", feed->second->emptyVersion);
-
-				auto rs = data->keyChangeFeed.modify(changeFeedRange);
-				for (auto r = rs.begin(); r != rs.end(); ++r) {
-					r->value().push_back(changeFeedInfo);
-				}
-				data->keyChangeFeed.coalesce(changeFeedRange.contents());
-			} else if (feed != data->uidChangeFeed.end() && feed->second->removing && !feed->second->destroyed &&
-			           status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
-				// Because we got a private mutation for this change feed, the feed must have moved back after being
-				// moved away. Normally we would later find out about this via a fetch, but in the particular case
-				// where the private mutation is the creation of the change feed, and the following race occurred,
-				// we must refresh it here:
-				// 1. This SS found out about the feed from a fetch, from a SS with a higher version that already
-				// got the feed create mutation
-				// 2. The shard was moved away
-				// 3. The shard was moved back, and this SS fetched change feed metadata from a different SS that
-				// did not yet receive the private mutation, so the feed was not refreshed
-				// 4. This SS gets the private mutation, the feed is still marked as removing
-				TraceEvent(SevDebug, "ResetChangeFeedInfoFromPrivateMutation", data->thisServerID)
-				    .detail("FeedID", changeFeedId)
-				    .detail("Range", changeFeedRange)
-				    .detail("Version", currentVersion);
-
-				CODE_PROBE(true, "private mutation for feed scheduled for deletion! Un-mark it as removing");
-
-				feed->second->removing = false;
-				addMutationToLog = true;
-				// reset fetch versions because everything previously fetched was cleaned up
-				feed->second->fetchVersion = invalidVersion;
-				feed->second->durableFetchVersion = NotifiedVersion();
-			}
-			if (feed != data->uidChangeFeed.end()) {
-				feed->second->updateMetadataVersion(currentVersion);
-			}
-
-			if (popVersion != invalidVersion && status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
-				// pop the change feed at pop version, no matter what state it is in
-				if (popVersion - 1 > feed->second->emptyVersion) {
-					feed->second->emptyVersion = popVersion - 1;
-					while (!feed->second->mutations.empty() && feed->second->mutations.front().version < popVersion) {
-						feed->second->mutations.pop_front();
-					}
-					if (feed->second->storageVersion != invalidVersion) {
-						++data->counters.kvSystemClearRanges;
-						// do this clear in the mutation log, as we want it to be committed consistently with the
-						// popVersion update
-						popMutationLog = true;
-						if (popVersion > feed->second->storageVersion) {
-							feed->second->storageVersion = invalidVersion;
-							feed->second->durableVersion = invalidVersion;
-						}
-					}
-					if (!feed->second->destroyed) {
-						// if feed is destroyed, adding an extra mutation here would re-create it if SS restarted
-						addMutationToLog = true;
-					}
-				}
-
-			} else if (status == ChangeFeedStatus::CHANGE_FEED_CREATE && createdFeed) {
-				TraceEvent(SevDebug, "CreatingChangeFeed", data->thisServerID)
-				    .detail("FeedID", changeFeedId)
-				    .detail("Range", changeFeedRange)
-				    .detail("Version", currentVersion);
-				// no-op, already created metadata
-				addMutationToLog = true;
-			}
-			if (status == ChangeFeedStatus::CHANGE_FEED_STOP && currentVersion < feed->second->stopVersion) {
-				TraceEvent(SevDebug, "StoppingChangeFeed", data->thisServerID)
-				    .detail("FeedID", changeFeedId)
-				    .detail("Range", changeFeedRange)
-				    .detail("Version", currentVersion);
-				feed->second->stopVersion = currentVersion;
-				addMutationToLog = true;
-			}
-			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY && !createdFeed && feed != data->uidChangeFeed.end()) {
-				TraceEvent(SevDebug, "DestroyingChangeFeed", data->thisServerID)
-				    .detail("FeedID", changeFeedId)
-				    .detail("Range", changeFeedRange)
-				    .detail("Version", currentVersion);
-				Key beginClearKey = changeFeedId.withPrefix(persistChangeFeedKeys.begin);
-				Version cleanupVersion = data->data().getLatestVersion();
-				auto& mLV = data->addVersionToMutationLog(cleanupVersion);
-				data->addMutationToMutationLog(
-				    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
-				++data->counters.kvSystemClearRanges;
-				data->addMutationToMutationLog(mLV,
-				                               MutationRef(MutationRef::ClearRange,
-				                                           changeFeedDurableKey(feed->second->id, 0),
-				                                           changeFeedDurableKey(feed->second->id, currentVersion)));
-				++data->counters.kvSystemClearRanges;
-
-				feed->second->destroy(currentVersion);
-				data->changeFeedCleanupDurable[feed->first] = cleanupVersion;
-
-				if (BUGGIFY) {
-					data->maybeInjectTargetedRestart(cleanupVersion);
-				}
-			}
-
-			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
-				for (auto& it : data->changeFeedDestroys) {
-					it.second.send(changeFeedId);
-				}
-			}
-
-			if (addMutationToLog) {
-				Version logV = data->data().getLatestVersion();
-				auto& mLV = data->addVersionToMutationLog(logV);
-				data->addMutationToMutationLog(
-				    mLV,
-				    MutationRef(MutationRef::SetValue,
-				                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
-				                changeFeedSSValue(feed->second->range,
-				                                  feed->second->emptyVersion + 1,
-				                                  feed->second->stopVersion,
-				                                  feed->second->metadataVersion)));
-				if (popMutationLog) {
-					++data->counters.kvSystemClearRanges;
-					data->addMutationToMutationLog(mLV,
-					                               MutationRef(MutationRef::ClearRange,
-					                                           changeFeedDurableKey(feed->second->id, 0),
-					                                           changeFeedDurableKey(feed->second->id, popVersion)));
-				}
-				if (BUGGIFY) {
-					data->maybeInjectTargetedRestart(logV);
-				}
-			}
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
 		           m.param1.startsWith(TenantMetadata::tenantMapPrivatePrefix())) {
 			if (m.type == MutationRef::SetValue) {
@@ -12143,7 +9895,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		cloneCursor2->setProtocolVersion(data->logProtocol);
 		state SpanContext spanContext = SpanContext();
 		state double beforeTLogMsgsUpdates = now();
-		state std::set<Key> updatedChangeFeeds;
 		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
@@ -12159,12 +9910,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
 				++data->counters.updateVersions;
-				if (data->currentChangeFeeds.size()) {
-					data->changeFeedVersions.emplace_back(
-					    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver);
-					updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
-					data->currentChangeFeeds.clear();
-				}
 				ver = cloneCursor2->version().version;
 			}
 
@@ -12302,12 +10047,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
-		if (data->currentChangeFeeds.size()) {
-			data->changeFeedVersions.emplace_back(
-			    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver);
-			updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
-			data->currentChangeFeeds.clear();
-		}
 
 		if (ver != invalidVersion) {
 			data->lastVersionWithData = ver;
@@ -12350,13 +10089,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			data->prevVersion = data->version.get();
 			data->version.set(ver); // Triggers replies to waiting gets for new version(s)
-
-			for (auto& it : updatedChangeFeeds) {
-				auto feed = data->uidChangeFeed.find(it);
-				if (feed != data->uidChangeFeed.end()) {
-					feed->second->newMutations.trigger();
-				}
-			}
 
 			setDataVersion(data->thisServerID, data->version.get());
 			if (data->otherError.getFuture().isReady())
@@ -12878,69 +10610,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			}
 		}
 
-		std::set<Key> modifiedChangeFeeds = data->fetchingChangeFeeds;
-		data->fetchingChangeFeeds.clear();
-		while (!data->changeFeedVersions.empty() && data->changeFeedVersions.front().second <= newOldestVersion) {
-			modifiedChangeFeeds.insert(data->changeFeedVersions.front().first.begin(),
-			                           data->changeFeedVersions.front().first.end());
-			data->changeFeedVersions.pop_front();
-		}
-
-		state std::vector<std::pair<Key, Version>> feedFetchVersions;
-
-		state std::vector<Key> updatedChangeFeeds(modifiedChangeFeeds.begin(), modifiedChangeFeeds.end());
-		state int curFeed = 0;
-		state int64_t durableChangeFeedMutations = 0;
-		while (curFeed < updatedChangeFeeds.size()) {
-			auto info = data->uidChangeFeed.find(updatedChangeFeeds[curFeed]);
-			if (info != data->uidChangeFeed.end()) {
-				// Cannot yield in mutation updating loop because of race with fetchVersion
-				Version alreadyFetched = std::max(info->second->fetchVersion, info->second->durableFetchVersion.get());
-				if (info->second->removing) {
-					auto cleanupPending = data->changeFeedCleanupDurable.find(info->second->id);
-					if (cleanupPending != data->changeFeedCleanupDurable.end() &&
-					    cleanupPending->second <= newOldestVersion) {
-						// due to a race, we just applied a cleanup mutation, but feed updates happen just after.
-						// Don't write any mutations for this feed.
-						curFeed++;
-						continue;
-					}
-				}
-				for (auto& it : info->second->mutations) {
-					if (it.version <= alreadyFetched) {
-						continue;
-					} else if (it.version > newOldestVersion) {
-						break;
-					}
-					data->storage.writeKeyValue(
-					    KeyValueRef(changeFeedDurableKey(info->second->id, it.version),
-					                changeFeedDurableValue(it.encrypted.present() ? it.encrypted.get() : it.mutations,
-					                                       it.knownCommittedVersion)));
-					// FIXME: there appears to be a bug somewhere where the exact same mutation appears twice in a
-					// row in the stream. We should fix this assert to be strictly > and re-enable it
-					ASSERT(it.version >= info->second->storageVersion);
-					info->second->storageVersion = it.version;
-					durableChangeFeedMutations++;
-				}
-
-				if (info->second->fetchVersion != invalidVersion && !info->second->removing) {
-					feedFetchVersions.push_back(std::pair(info->second->id, info->second->fetchVersion));
-				}
-				// handle case where fetch had version ahead of last in-memory mutation
-				if (alreadyFetched > info->second->storageVersion) {
-					info->second->storageVersion = std::min(alreadyFetched, newOldestVersion);
-					if (alreadyFetched > info->second->storageVersion) {
-						// This change feed still has pending mutations fetched and written to storage that are
-						// higher than the new durableVersion. To ensure its storage and durable version get
-						// updated, we need to add it back to fetchingChangeFeeds
-						data->fetchingChangeFeeds.insert(info->first);
-					}
-				}
-				wait(yield(TaskPriority::UpdateStorage));
-			}
-			curFeed++;
-		}
-
 		// Set the new durable version as part of the outstanding change set, before commit
 		if (startOldestVersion != newOldestVersion)
 			data->storage.makeVersionDurable(newOldestVersion);
@@ -13072,69 +10741,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			durableInProgress.sendError(please_reboot());
 			throw please_reboot();
 		}
-
-		curFeed = 0;
-		while (curFeed < updatedChangeFeeds.size()) {
-			auto info = data->uidChangeFeed.find(updatedChangeFeeds[curFeed]);
-			if (info != data->uidChangeFeed.end()) {
-				while (!info->second->mutations.empty() && info->second->mutations.front().version < newOldestVersion) {
-					info->second->mutations.pop_front();
-				}
-				ASSERT(info->second->storageVersion >= info->second->durableVersion);
-				info->second->durableVersion = info->second->storageVersion;
-				wait(yield(TaskPriority::UpdateStorage));
-			}
-			curFeed++;
-		}
-
-		// if commit included fetched data from this change feed, update the fetched durable version
-		curFeed = 0;
-		while (curFeed < feedFetchVersions.size()) {
-			auto info = data->uidChangeFeed.find(feedFetchVersions[curFeed].first);
-			// Don't update if the feed is pending cleanup. Either it will get cleaned up and destroyed, or it will
-			// get fetched again, where the fetch version will get reset.
-			if (info != data->uidChangeFeed.end() && !data->changeFeedCleanupDurable.contains(info->second->id)) {
-				if (feedFetchVersions[curFeed].second > info->second->durableFetchVersion.get()) {
-					info->second->durableFetchVersion.set(feedFetchVersions[curFeed].second);
-				}
-				if (feedFetchVersions[curFeed].second == info->second->fetchVersion) {
-					// haven't fetched anything else since commit started, reset fetch version
-					info->second->fetchVersion = invalidVersion;
-				}
-			}
-			curFeed++;
-		}
-
-		// remove any entries from changeFeedCleanupPending that were persisted
-		auto cfCleanup = data->changeFeedCleanupDurable.begin();
-		while (cfCleanup != data->changeFeedCleanupDurable.end()) {
-			if (cfCleanup->second <= newOldestVersion) {
-				// remove from the data structure here, if it wasn't added back by another fetch or something
-				auto feed = data->uidChangeFeed.find(cfCleanup->first);
-				ASSERT(feed != data->uidChangeFeed.end());
-				if (feed->second->removing) {
-					auto rs = data->keyChangeFeed.modify(feed->second->range);
-					for (auto r = rs.begin(); r != rs.end(); ++r) {
-						auto& feedList = r->value();
-						for (int i = 0; i < feedList.size(); i++) {
-							if (feedList[i]->id == cfCleanup->first) {
-								swapAndPop(&feedList, i--);
-							}
-						}
-					}
-					data->keyChangeFeed.coalesce(feed->second->range.contents());
-
-					data->uidChangeFeed.erase(feed);
-				} else {
-					CODE_PROBE(true, "Feed re-fetched after remove");
-				}
-				cfCleanup = data->changeFeedCleanupDurable.erase(cfCleanup);
-			} else {
-				cfCleanup++;
-			}
-		}
-
-		data->counters.changeFeedMutationsDurable += durableChangeFeedMutations;
 
 		durableInProgress.send(Void());
 		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to
@@ -13571,7 +11177,6 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
 	state Future<RangeResult> fShardAssigned = storage->readRange(persistShardAssignedKeys);
 	state Future<RangeResult> fShardAvailable = storage->readRange(persistShardAvailableKeys);
-	state Future<RangeResult> fChangeFeeds = storage->readRange(persistChangeFeedKeys);
 	state Future<RangeResult> fPendingCheckpoints = storage->readRange(persistPendingCheckpointKeys);
 	state Future<RangeResult> fCheckpoints = storage->readRange(persistCheckpointKeys);
 	state Future<RangeResult> fMoveInShards = storage->readRange(persistMoveInShardsKeyRange());
@@ -13590,7 +11195,6 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	    std::vector{ fFormat, fID, ftssPairID, fssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
 	wait(waitForAll(std::vector{ fShardAssigned,
 	                             fShardAvailable,
-	                             fChangeFeeds,
 	                             fPendingCheckpoints,
 	                             fCheckpoints,
 	                             fMoveInShards,
@@ -13784,38 +11388,6 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		}
 	}
 
-	state RangeResult changeFeeds = fChangeFeeds.get();
-	data->bytesRestored += changeFeeds.logicalSize();
-	state int feedLoc;
-	for (feedLoc = 0; feedLoc < changeFeeds.size(); feedLoc++) {
-		Key changeFeedId = changeFeeds[feedLoc].key.removePrefix(persistChangeFeedKeys.begin);
-		KeyRange changeFeedRange;
-		Version popVersion, stopVersion, metadataVersion;
-		std::tie(changeFeedRange, popVersion, stopVersion, metadataVersion) =
-		    decodeChangeFeedSSValue(changeFeeds[feedLoc].value);
-		TraceEvent(SevDebug, "RestoringChangeFeed", data->thisServerID)
-		    .detail("FeedID", changeFeedId)
-		    .detail("Range", changeFeedRange)
-		    .detail("StopVersion", stopVersion)
-		    .detail("PopVer", popVersion)
-		    .detail("MetadataVersion", metadataVersion);
-		Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
-		changeFeedInfo->range = changeFeedRange;
-		changeFeedInfo->id = changeFeedId;
-		changeFeedInfo->durableVersion = version;
-		changeFeedInfo->storageVersion = version;
-		changeFeedInfo->emptyVersion = popVersion - 1;
-		changeFeedInfo->stopVersion = stopVersion;
-		changeFeedInfo->metadataVersion = metadataVersion;
-		data->uidChangeFeed[changeFeedId] = changeFeedInfo;
-		auto rs = data->keyChangeFeed.modify(changeFeedRange);
-		for (auto r = rs.begin(); r != rs.end(); ++r) {
-			r->value().push_back(changeFeedInfo);
-		}
-		wait(yield());
-	}
-	data->keyChangeFeed.coalesce(allKeys);
-
 	state RangeResult tenantMap = fTenantMap.get();
 	state int tenantMapLoc;
 	for (tenantMapLoc = 0; tenantMapLoc < tenantMap.size(); tenantMapLoc++) {
@@ -13832,6 +11404,13 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	}
 
 	// TODO: why is this seemingly random delay here?
+	// FIXME: yeah right, wtf?  The problem with stuff like this is
+	// that it is NOT CONFIDENCE INSPIRING.  So don't write stuff like
+	// this.  If you need to put in stuff like this, EXPLAIN WHY.
+	// Lack of an explanation is typically interpreted as "doesn't
+	// know" or "isn't really sure there is a good answer" or "author
+	// doesn't know what they are doing".  It's not a good look any
+	// which way.
 	wait(delay(0.0001));
 
 	if (!data->shardAware) {
@@ -14458,12 +12037,15 @@ ACTOR Future<Void> serveWatchValueRequests(StorageServer* self, FutureStream<Wat
 	}
 }
 
+// Change feed related message handlers that exist but do nothing.
+// The reason for these existing is that we do not want to change the StorageServerInterface
+// to remove change feed related interfaces.  Figure out how to do that later.
 ACTOR Future<Void> serveChangeFeedStreamRequests(StorageServer* self,
                                                  FutureStream<ChangeFeedStreamRequest> changeFeedStream) {
 	loop {
 		ChangeFeedStreamRequest req = waitNext(changeFeedStream);
-		// must notify change feed that its shard is moved away ASAP
-		self->actors.add(changeFeedStreamQ(self, req) || stopChangeFeedOnMove(self, req));
+		TraceEvent(SevWarn, "serveChangeFeedStreamRequests")
+			.detail("Unexpected", "Invocation");
 	}
 }
 
@@ -14472,14 +12054,16 @@ ACTOR Future<Void> serveOverlappingChangeFeedsRequests(
     FutureStream<OverlappingChangeFeedsRequest> overlappingChangeFeeds) {
 	loop {
 		OverlappingChangeFeedsRequest req = waitNext(overlappingChangeFeeds);
-		self->actors.add(self->readGuard(req, overlappingChangeFeedsQ));
+		TraceEvent(SevWarn, "serveOverlappingChangeFeedsRequests")
+			.detail("Unexpected", "Invocation");
 	}
 }
 
 ACTOR Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<ChangeFeedPopRequest> changeFeedPops) {
 	loop {
 		ChangeFeedPopRequest req = waitNext(changeFeedPops);
-		self->actors.add(self->readGuard(req, changeFeedPopQ));
+		TraceEvent(SevWarn, "serveChangeFeedPopRequests")
+			.detail("Unexpected", "Invocation");
 	}
 }
 
@@ -14488,7 +12072,8 @@ ACTOR Future<Void> serveChangeFeedVersionUpdateRequests(
     FutureStream<ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate) {
 	loop {
 		ChangeFeedVersionUpdateRequest req = waitNext(changeFeedVersionUpdate);
-		self->actors.add(self->readGuard(req, changeFeedVersionUpdateQ));
+		TraceEvent(SevWarn, "serveChangeFeedVersionUpdateRequests")
+			.detail("Unexpected", "Invocation");
 	}
 }
 
