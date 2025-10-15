@@ -18,7 +18,10 @@
 #
 FROM docker.io/rockylinux/rockylinux:9.6-minimal AS base
 
-RUN microdnf install -y \
+# Disable the faulty mirror list for RockyLinux for now. Since all the other images use the base image
+# as base we don't have to repeat this step.
+RUN sed -i.bak 's/^#baseurl=/baseurl=/; s/^mirrorlist=/#mirrorlist=/' /etc/yum.repos.d/rocky.repo && \ 
+    microdnf install -y \
     bind-utils \
     binutils \
     curl \
