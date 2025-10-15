@@ -158,8 +158,6 @@ FROM foundationdb-base AS foundationdb-kubernetes-sidecar
 # future it's fine to use python 3.9 here.
 # EOL for python 3.9 is 2025-10: https://devguide.python.org/versions/
 RUN microdnf -y install \
-    --setopt=timeout=180 \
-    --setopt=retries=5 \
     python3.9 \
     python3.9-pip && \
     microdnf clean all && \
@@ -204,8 +202,6 @@ ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/var/fdb/scripts/fdb.bash"]
 FROM foundationdb-base AS ycsb
 
 RUN microdnf -y install \
-    --setopt=timeout=180 \
-    --setopt=retries=5 \
     java-11-openjdk java-11-openjdk-devel && \
     microdnf clean all && \
     rm -rf /var/cache/yum
