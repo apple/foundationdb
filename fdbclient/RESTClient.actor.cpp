@@ -138,6 +138,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 		state bool connectionEstablished = false;
 
 		state Reference<HTTP::IncomingResponse> r;
+		state RESTConnectionPool::ReusableConnection rconn;
 
 		try {
 			// Start connecting
@@ -145,14 +146,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			    client->conectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
 
 			// Finish connecting, do request
-			state RESTConnectionPool::ReusableConnection rconn =
-			    wait(timeoutError(frconn, client->knobs.connect_timeout));
+			wait(store(rconn, timeoutError(frconn, client->knobs.connect_timeout)));
 			connectionEstablished = true;
 
 			remoteAddress = rconn.conn->getPeerAddress();
-			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(
-			    HTTP::doRequest(rconn.conn, req, sendReceiveRate, &statsPtr->bytes_sent, sendReceiveRate), reqTimeout));
-			r = _r;
+			wait(store(
+			    r,
+			    timeoutError(HTTP::doRequest(rconn.conn, req, sendReceiveRate, &statsPtr->bytes_sent, sendReceiveRate),
+			                 reqTimeout)));
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
@@ -161,6 +162,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			}
 			rconn.conn.clear();
 		} catch (Error& e) {
+			// Close the connection on error to satisfy Sim2Conn's assertion in simulation.
+			// If rconn holds a connection that hasn't been returned to the pool,
+			// we must close it before it's destroyed (when rconn goes out of scope).
+			// This sets closedByCaller = true in Sim2Conn, preventing assertion failures.
+			if (connectionEstablished && rconn.conn.isValid()) {
+				rconn.conn->close();
+				rconn.conn.clear();
+			}
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}

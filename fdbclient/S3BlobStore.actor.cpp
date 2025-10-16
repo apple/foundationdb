@@ -20,6 +20,8 @@
 
 #include "fdbclient/S3BlobStore.h"
 
+#include <sstream>
+#include "fdbrpc/HTTP.h"
 #include "fdbclient/ClientKnobs.h"
 #include "fdbclient/Knobs.h"
 #include "flow/FastRef.h"
@@ -27,6 +29,23 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
+
+// S3BlobStoreEndpoint::ConnectionPoolData destructor implementation
+S3BlobStoreEndpoint::ConnectionPoolData::~ConnectionPoolData() {
+	// In simulation, explicitly close all pooled connections before destruction.
+	// This satisfies Sim2Conn's assertion: !opened || closedByCaller
+	// Without this, connections would be destroyed without being closed, causing assertion failures.
+	if (g_network && g_network->isSimulated()) {
+		while (!pool.empty()) {
+			ReusableConnection& rconn = pool.front();
+			if (rconn.conn.isValid()) {
+				rconn.conn->close();
+			}
+			pool.pop();
+		}
+	}
+}
+
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
@@ -75,9 +94,6 @@ S3BlobStoreEndpoint::Stats S3BlobStoreEndpoint::Stats::operator-(const Stats& rh
 S3BlobStoreEndpoint::Stats S3BlobStoreEndpoint::s_stats;
 std::unique_ptr<S3BlobStoreEndpoint::BlobStats> S3BlobStoreEndpoint::blobStats;
 Future<Void> S3BlobStoreEndpoint::statsLogger = Never();
-
-std::unordered_map<BlobStoreConnectionPoolKey, Reference<S3BlobStoreEndpoint::ConnectionPoolData>>
-    S3BlobStoreEndpoint::globalConnectionPool;
 
 S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	secure_connection = 1;
@@ -199,6 +215,11 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 }
 
 std::string guessRegionFromDomain(std::string domain) {
+	// Special case for localhost/127.0.0.1 to prevent basic_string exception
+	if (domain == "127.0.0.1" || domain == "localhost") {
+		return "us-east-1";
+	}
+
 	static const std::vector<const char*> knownServices = { "s3.", "cos.", "oss-", "obs." };
 	boost::algorithm::to_lower(domain);
 
@@ -446,11 +467,15 @@ std::string S3BlobStoreEndpoint::constructResourcePath(const std::string& bucket
 	}
 
 	if (!object.empty()) {
-		// Don't add a slash if the object starts with one
-		if (!object.starts_with("/")) {
-			resource += "/";
+		// S3 object keys should not start with '/'. Strip any leading slashes.
+		std::string cleanedObject = object;
+		while (!cleanedObject.empty() && cleanedObject[0] == '/') {
+			cleanedObject = cleanedObject.substr(1);
 		}
-		resource += object;
+		if (!cleanedObject.empty()) {
+			resource += "/";
+			resource += cleanedObject;
+		}
 	}
 
 	return resource;
@@ -843,6 +868,10 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	} else {
 		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
 	}
+
+	// Ensure connection is valid before handshake
+	ASSERT(conn.isValid());
+
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnectionSuccess")
@@ -1074,6 +1103,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		state bool reusingConn = false;
 		state bool fastRetry = false;
 		state bool simulateS3TokenError = false;
+		state S3BlobStoreEndpoint::ReusableConnection rconn; // Moved outside try block for error handler access
 
 		try {
 			// Start connecting
@@ -1095,8 +1125,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			// Finish connecting, do request
-			state S3BlobStoreEndpoint::ReusableConnection rconn =
-			    wait(timeoutError(frconn, bstore->knobs.connect_timeout));
+			wait(store(rconn, timeoutError(frconn, bstore->knobs.connect_timeout)));
 			connectionEstablished = true;
 			connID = rconn.conn->getDebugID();
 			reqStartTimer = g_network->timer();
@@ -1140,7 +1169,11 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 					    rconn.conn, dryrunRequest, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate);
 					Reference<HTTP::IncomingResponse> _dryrunR = wait(timeoutError(dryrunResponse, requestTimeout));
 					dryrunR = _dryrunR;
-					std::string s3Error = parseErrorCodeFromS3(dryrunR->data.content);
+					// Only parse S3 error code for error responses (4xx/5xx), not successful responses (2xx)
+					std::string s3Error;
+					if (dryrunR->code >= 400) {
+						s3Error = parseErrorCodeFromS3(dryrunR->data.content);
+					}
 					if (dryrunR->code == badRequestCode && isS3TokenError(s3Error)) {
 						// authentication fails and s3 token error persists, retry with a HEAD dryrun request
 						// to avoid sending duplicate data indefinitly to save network bandwidth
@@ -1206,9 +1239,16 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			    .errorUnsuppressed(e)
 			    .detail("Verb", verb)
 			    .detail("Resource", resource);
+			// Close the connection on error to satisfy Sim2Conn's assertion in simulation.
+			// If rconn holds a connection that hasn't been returned to the pool,
+			// we must close it before it's destroyed (when rconn goes out of scope).
+			// This sets closedByCaller = true in Sim2Conn, preventing assertion failures.
+			if (connectionEstablished && rconn.conn.isValid()) {
+				rconn.conn->close();
+				rconn.conn.clear();
+			}
 			if (e.code() == error_code_actor_cancelled)
 				throw;
-			// TODO: should this also do rconn.conn.clear()? (would need to extend lifetime outside of try block)
 			err = e;
 		}
 
@@ -1263,7 +1303,12 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 
 		if (!err.present()) {
 			event.detail("ResponseCode", r->code);
-			std::string s3Error = parseErrorCodeFromS3(r->data.content);
+			// Only parse S3 error code for real error responses (4xx/5xx), not successful responses (2xx)
+			// Skip parsing for simulated errors where response content is still binary data
+			std::string s3Error;
+			if (r->code >= 400 && !simulateS3TokenError) {
+				s3Error = parseErrorCodeFromS3(r->data.content);
+			}
 			event.detail("S3ErrorCode", s3Error);
 			if (r->code == badRequestCode) {
 				if (isS3TokenError(s3Error) || simulateS3TokenError) {
@@ -1466,7 +1511,8 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 					if (key == nullptr) {
 						throw http_bad_response();
 					}
-					object.name = key->value();
+					// URL decode the object name since S3 XML responses contain URL-encoded names
+					object.name = HTTP::urlDecode(key->value());
 
 					xml_node<>* size = n->first_node("Size");
 					if (size == nullptr) {
@@ -2038,15 +2084,12 @@ ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore,
 			throw io_error();
 		}
 
-		try {
-			// Copy the output bytes, server could have sent more or less bytes than requested so copy at most length
-			// bytes
-			memcpy(data, r->data.content.data(), std::min<int64_t>(r->data.contentLen, length));
-			return r->data.contentLen;
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "S3BlobStoreReadObjectMemcpyError").detail("Error", e.what());
-			throw io_error();
-		}
+		// Copy the output bytes, server could have sent more or less bytes than requested so copy at most length
+		// bytes
+		int bytesToCopy = std::min<int64_t>(r->data.contentLen, length);
+		memcpy(data, r->data.content.data(), bytesToCopy);
+		// Return the number of bytes actually copied
+		return bytesToCopy;
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "S3BlobStoreEndpoint_ReadError")
 		    .error(e)
@@ -2488,6 +2531,44 @@ TEST_CASE("/backup/s3/virtual_hosting_list_resource_path") {
 	// In non-virtual hosting mode, constructResourcePath includes bucket
 	listResource = s3->constructResourcePath("test-bucket", "");
 	ASSERT(listResource == "/test-bucket"); // Bucket is part of path
+
+	return Void();
+}
+
+TEST_CASE("/backup/s3/constructResourcePath") {
+	// Test that leading slashes in object keys are properly stripped
+	// S3 object keys should not start with '/', but if passed, we normalize them
+
+	std::string url = "blobstore://s3.us-west-2.amazonaws.com?bucket=test-bucket";
+	std::string resource;
+	std::string error;
+	S3BlobStoreEndpoint::ParametersT parameters;
+	Reference<S3BlobStoreEndpoint> s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+
+	// Test normal object key (no leading slash)
+	ASSERT(s3->constructResourcePath("test-bucket", "normal/path/file.txt") == "/test-bucket/normal/path/file.txt");
+
+	// Test single leading slash - should be stripped
+	ASSERT(s3->constructResourcePath("test-bucket", "/leading/slash/file.txt") ==
+	       "/test-bucket/leading/slash/file.txt");
+
+	// Test multiple leading slashes - all should be stripped
+	ASSERT(s3->constructResourcePath("test-bucket", "///multiple/slashes.txt") == "/test-bucket/multiple/slashes.txt");
+
+	// Test object key that is only slashes - should result in empty object path
+	ASSERT(s3->constructResourcePath("test-bucket", "///") == "/test-bucket");
+
+	// Test empty object key
+	ASSERT(s3->constructResourcePath("test-bucket", "") == "/test-bucket");
+
+	// Test virtual hosting mode (bucket in hostname)
+	url = "blobstore://test-bucket.s3.us-west-2.amazonaws.com";
+	s3 = S3BlobStoreEndpoint::fromString(url, {}, &resource, &error, &parameters);
+
+	// Virtual hosting mode doesn't include bucket in path
+	ASSERT(s3->constructResourcePath("test-bucket", "normal/file.txt") == "/normal/file.txt");
+	ASSERT(s3->constructResourcePath("test-bucket", "/leading/slash.txt") == "/leading/slash.txt");
+	ASSERT(s3->constructResourcePath("test-bucket", "") == "");
 
 	return Void();
 }

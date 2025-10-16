@@ -49,6 +49,9 @@ public:
 	struct ReusableConnection {
 		Reference<IConnection> conn;
 		double expirationTime;
+
+		ReusableConnection() : expirationTime(0) {}
+		ReusableConnection(Reference<IConnection> c, double exp) : conn(c), expirationTime(exp) {}
 	};
 
 	// Maximum number of connections cached in the connection-pool.
@@ -57,6 +60,10 @@ public:
 	    connectionPoolMap;
 
 	RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
+
+	// Destructor implementation in RESTUtils.actor.cpp
+	// In simulation, explicitly closes all pooled connections before destruction
+	~RESTConnectionPool();
 
 	// Routine is responsible to provide an usable TCP connection object; it reuses an active connection from
 	// connection-pool if available, otherwise, establish a new TCP connection
