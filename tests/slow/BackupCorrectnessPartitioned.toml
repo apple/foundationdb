@@ -21,5 +21,6 @@ simBackupAgents = 'BackupToFile'
     backupAfter = 10.0
     restoreAfter = 60.0
     backupRangesCount = -1
+    encrypted = false
 
 

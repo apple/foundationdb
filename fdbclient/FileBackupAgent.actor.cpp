@@ -7632,12 +7632,15 @@ public:
 		// This is needed for S3 where metadata may not be immediately consistent
 		state BackupDescription desc = wait(bc->describeBackup(true, isBlobstoreUrl(urlStr) ? invalidVersion : 0));
 
-		if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
-			fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
-			throw restore_error();
-		} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
-			fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
-			throw restore_error();
+		// For non-blobstore URLs, validate encryption configuration matches backup
+		if (!isBlobstore) {
+			if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
+				fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
+				throw restore_error();
+			} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
+				fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
+				throw restore_error();
+			}
 		}
 
 		if (cxOrig.present()) {

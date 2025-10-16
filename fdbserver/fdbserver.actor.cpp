@@ -903,6 +903,47 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 	return Optional<bool>();
 }
 
+Optional<bool> checkFaultInjectionOverride(const char* testFile) {
+	std::ifstream ifs;
+	ifs.open(testFile, std::ifstream::in);
+	if (!ifs.good())
+		return 0;
+
+	std::string cline;
+
+	while (ifs.good()) {
+		getline(ifs, cline);
+		std::string line = removeWhitespace(std::string(cline));
+		if (!line.size() || line.find(';') == 0)
+			continue;
+
+		size_t found = line.find('=');
+		if (found == std::string::npos)
+			// hmmm, not good
+			continue;
+		std::string attrib = removeWhitespace(line.substr(0, found));
+		std::string value = removeWhitespace(line.substr(found + 1));
+
+		if (attrib == "faultInjection") {
+			// Testspec uses `on` or `off` (without quotes).
+			// TOML uses literal `true` and `false`.
+			if (!strcmp(value.c_str(), "on") || !strcmp(value.c_str(), "true")) {
+				ifs.close();
+				return true;
+			} else if (!strcmp(value.c_str(), "off") || !strcmp(value.c_str(), "false")) {
+				ifs.close();
+				return false;
+			} else {
+				fprintf(stderr, "ERROR: Unknown fault injection override state `%s'\n", value.c_str());
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
+	}
+
+	ifs.close();
+	return Optional<bool>();
+}
+
 // Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress
 // objects.
 std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
@@ -1905,6 +1946,10 @@ private:
 			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
 			if (buggifyOverride.present())
 				buggifyEnabled = buggifyOverride.get();
+
+			Optional<bool> faultInjectionOverride = checkFaultInjectionOverride(testFile);
+			if (faultInjectionOverride.present())
+				faultInjectionEnabled = faultInjectionOverride.get();
 		}
 
 		if (role == ServerRole::SearchMutations && !targetKey) {

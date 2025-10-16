@@ -1,5 +1,10 @@
 testClass = "Backup"
 
+[configuration]
+# Disable tenant mode because the Cycle and BackupAndRestoreCorrectness workloads
+# are not tenant-aware and will fail with tenant_not_found errors when randomly
+# assigned tenant modes by the test harness
+tenantModes = ['disabled']
 
 [[test]]
 testTitle = 'BackupAndRestore'

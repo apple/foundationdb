@@ -1,7 +1,10 @@
 [configuration]
 extraDatabaseMode = 'Single'
-# required tenant mode is not supported for Disaster Recovery yet
-tenantModes = ['disabled', 'optional']
+# Disable tenant mode because:
+# 1. Required tenant mode is not supported for Disaster Recovery yet
+# 2. The Cycle workload is not tenant-aware and will fail with tenant_not_found
+#    errors when assigned optional or optional_experimental tenant modes
+tenantModes = ['disabled']
 
 [[test]]
 testTitle = 'SharedDefaultBackupToFileThenDB'
