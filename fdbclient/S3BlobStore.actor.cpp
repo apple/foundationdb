@@ -2569,5 +2569,6 @@ TEST_CASE("/backup/s3/constructResourcePath") {
 	ASSERT(s3->constructResourcePath("test-bucket", "normal/file.txt") == "/normal/file.txt");
 	ASSERT(s3->constructResourcePath("test-bucket", "/leading/slash.txt") == "/leading/slash.txt");
 	ASSERT(s3->constructResourcePath("test-bucket", "") == "");
+
 	return Void();
 }
