@@ -6624,6 +6624,9 @@ public:
 		return Void();
 	}
 
+	// Helper function to check if a URL is a blobstore:// URL
+	static bool isBlobstoreUrl(const std::string& url) { return url.find("blobstore://") == 0; }
+
 	ACTOR static Future<Void> submitParallelRestore(Database cx,
 	                                                Key backupTag,
 	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -6636,7 +6639,10 @@ public:
 	                                                Key removePrefix) {
 		// Sanity check backup is valid
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString(), proxy, {});
-		state BackupDescription desc = wait(bc->describeBackup());
+		// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
+		// This is needed for S3 where metadata may not be immediately consistent
+		state BackupDescription desc =
+		    wait(bc->describeBackup(false, isBlobstoreUrl(bcUrl.toString()) ? invalidVersion : 0));
 		wait(desc.resolveVersionTimes(cx));
 
 		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
@@ -6827,7 +6833,9 @@ public:
 		state Reference<IBackupContainer> bc =
 		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName);
 		try {
-			wait(timeoutError(bc->create(), 30));
+			// Use longer timeout for blobstore:// URLs in simulation to handle slow S3 mock operations
+			state double createTimeout = (g_network->isSimulated() && isBlobstoreUrl(backupContainer)) ? 300.0 : 30.0;
+			wait(timeoutError(bc->create(), createTimeout));
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
@@ -7620,14 +7628,21 @@ public:
 		state Reference<IBackupContainer> bc =
 		    IBackupContainer::openContainer(url.toString(), proxy, encryptionKeyFileName);
 
-		state BackupDescription desc = wait(bc->describeBackup(true));
+		// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
+		// This is needed for S3 where metadata may not be immediately consistent
+		state std::string urlStr = url.toString();
+		state bool isBlobstore = isBlobstoreUrl(urlStr);
+		state BackupDescription desc = wait(bc->describeBackup(true, isBlobstore ? invalidVersion : 0));
 
-		if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
-			fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
-			throw restore_error();
-		} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
-			fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
-			throw restore_error();
+		// For non-blobstore URLs, validate encryption configuration matches backup
+		if (!isBlobstore) {
+			if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
+				fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
+				throw restore_error();
+			} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
+				fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
+				throw restore_error();
+			}
 		}
 
 		if (cxOrig.present()) {

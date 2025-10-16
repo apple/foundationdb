@@ -263,10 +263,35 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
                                                             const Optional<std::string>& encryptionKeyFileName) {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
-	Reference<IBackupContainer>& r = m_cache[url];
-	if (r)
-		return r;
+	// In simulation, disable caching for blobstore:// URLs to prevent cross-process connection issues.
+	//
+	// IBackupContainer objects contain S3BlobStoreEndpoint objects, which contain connection pools.
+	// Even though BLOBSTORE_GLOBAL_CONNECTION_POOL defaults to false (each endpoint has its own pool),
+	// when containers are cached globally and accessed by different simulated processes, the connection
+	// pools are shared across processes. This violates Sim2Conn's requirement that connections stay on
+	// their originating process, leading to assertion failures:
+	//   "g_simulator->getCurrentProcess() == self->peerProcess" at sim2.actor.cpp:500
+	//
+	// Fix: Disable caching for blobstore:// URLs in simulation so each process creates its own
+	// container with its own connection pool. File-based backups don't have this issue because they
+	// don't use process-bound network connections.
+	//
+	// Note: This only affects simulation; production always uses the cache for performance.
+	bool skipCache = false;
+	if (g_network && g_network->isSimulated()) {
+		StringRef u(url);
+		if (u.startsWith("blobstore://"_sr)) {
+			skipCache = true;
+		}
+	}
 
+	if (!skipCache) {
+		Reference<IBackupContainer>& r = m_cache[url];
+		if (r)
+			return r;
+	}
+
+	Reference<IBackupContainer> r;
 	try {
 		StringRef u(url);
 		if (u.startsWith("file://"_sr)) {
@@ -347,6 +372,12 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 		r->encryptionKeyFileName = encryptionKeyFileName;
 		r->URL = url;
+
+		// Cache the container if not skipping (i.e., not blobstore:// in simulation)
+		if (!skipCache) {
+			m_cache[url] = r;
+		}
+
 		return r;
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
