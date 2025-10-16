@@ -12044,8 +12044,7 @@ ACTOR Future<Void> serveChangeFeedStreamRequests(StorageServer* self,
                                                  FutureStream<ChangeFeedStreamRequest> changeFeedStream) {
 	loop {
 		ChangeFeedStreamRequest req = waitNext(changeFeedStream);
-		TraceEvent(SevWarn, "serveChangeFeedStreamRequests")
-			.detail("Unexpected", "Invocation");
+		TraceEvent(SevWarn, "serveChangeFeedStreamRequests").detail("Unexpected", "Invocation");
 	}
 }
 
@@ -12054,16 +12053,14 @@ ACTOR Future<Void> serveOverlappingChangeFeedsRequests(
     FutureStream<OverlappingChangeFeedsRequest> overlappingChangeFeeds) {
 	loop {
 		OverlappingChangeFeedsRequest req = waitNext(overlappingChangeFeeds);
-		TraceEvent(SevWarn, "serveOverlappingChangeFeedsRequests")
-			.detail("Unexpected", "Invocation");
+		TraceEvent(SevWarn, "serveOverlappingChangeFeedsRequests").detail("Unexpected", "Invocation");
 	}
 }
 
 ACTOR Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<ChangeFeedPopRequest> changeFeedPops) {
 	loop {
 		ChangeFeedPopRequest req = waitNext(changeFeedPops);
-		TraceEvent(SevWarn, "serveChangeFeedPopRequests")
-			.detail("Unexpected", "Invocation");
+		TraceEvent(SevWarn, "serveChangeFeedPopRequests").detail("Unexpected", "Invocation");
 	}
 }
 
@@ -12072,8 +12069,7 @@ ACTOR Future<Void> serveChangeFeedVersionUpdateRequests(
     FutureStream<ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate) {
 	loop {
 		ChangeFeedVersionUpdateRequest req = waitNext(changeFeedVersionUpdate);
-		TraceEvent(SevWarn, "serveChangeFeedVersionUpdateRequests")
-			.detail("Unexpected", "Invocation");
+		TraceEvent(SevWarn, "serveChangeFeedVersionUpdateRequests").detail("Unexpected", "Invocation");
 	}
 }
 

@@ -1080,7 +1080,6 @@ struct OverlappingChangeFeedEntry {
 	}
 };
 
-
 // NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
 // type is persisted in the database via StorageServerInterface, so just keep this around.
 struct OverlappingChangeFeedsReply {
