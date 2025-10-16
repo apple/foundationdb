@@ -285,13 +285,11 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 		}
 	}
 
-	if (!skipCache) {
-		Reference<IBackupContainer>& r = m_cache[url];
-		if (r)
-			return r;
-	}
-
-	Reference<IBackupContainer> r;
+	// Use a reference to the cache entry (for automatic cache population) unless we're skipping cache
+	Reference<IBackupContainer> r_local;
+	Reference<IBackupContainer>& r = skipCache ? r_local : m_cache[url];
+	if (r)
+		return r;
 	try {
 		StringRef u(url);
 		if (u.startsWith("file://"_sr)) {
