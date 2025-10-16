@@ -6624,9 +6624,6 @@ public:
 		return Void();
 	}
 
-	// Helper function to check if a URL is a blobstore:// URL
-	static bool isBlobstoreUrl(const std::string& url) { return url.find("blobstore://") == 0; }
-
 	ACTOR static Future<Void> submitParallelRestore(Database cx,
 	                                                Key backupTag,
 	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges,

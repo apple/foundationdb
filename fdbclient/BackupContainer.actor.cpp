@@ -68,6 +68,10 @@ Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 	return IBackupFile_impl::appendStringRefWithLen(Reference<IBackupFile>::addRef(this), s);
 }
 
+bool isBlobstoreUrl(const std::string& url) {
+	return url.find("blobstore://") == 0;
+}
+
 std::string IBackupContainer::ExpireProgress::toString() const {
 	std::string s = step + "...";
 	if (total > 0) {
@@ -277,13 +281,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 	// don't use process-bound network connections.
 	//
 	// Note: This only affects simulation; production always uses the cache for performance.
-	bool skipCache = false;
-	if (g_network && g_network->isSimulated()) {
-		StringRef u(url);
-		if (u.startsWith("blobstore://"_sr)) {
-			skipCache = true;
-		}
-	}
+	bool skipCache = g_network && g_network->isSimulated() && isBlobstoreUrl(url);
 
 	// Use a reference to the cache entry (for automatic cache population) unless we're skipping cache
 	Reference<IBackupContainer> r_local;
