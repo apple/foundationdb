@@ -1,6 +1,11 @@
 [configuration]
 minimumReplication = 2
 
+[[knobs]]
+cc_recovery_init_req_timeout = 10
+cc_recovery_init_req_growth_factor = 1.01
+cc_recovery_init_req_max_timeout = 15
+
 [[test]]
 testTitle = 'Clogged'
 connectionFailuresDisableDuration = 60
