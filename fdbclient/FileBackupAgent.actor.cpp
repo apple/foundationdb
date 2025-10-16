@@ -6642,8 +6642,7 @@ public:
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrlStr, proxy, {});
 		// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
 		// This is needed for S3 where metadata may not be immediately consistent
-		state BackupDescription desc =
-		    wait(bc->describeBackup(false, isBlobstoreUrl(bcUrlStr) ? invalidVersion : 0));
+		state BackupDescription desc = wait(bc->describeBackup(false, isBlobstoreUrl(bcUrlStr) ? invalidVersion : 0));
 		wait(desc.resolveVersionTimes(cx));
 
 		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
@@ -7627,13 +7626,11 @@ public:
 		}
 
 		state std::string urlStr = url.toString();
-		state Reference<IBackupContainer> bc =
-		    IBackupContainer::openContainer(urlStr, proxy, encryptionKeyFileName);
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(urlStr, proxy, encryptionKeyFileName);
 
 		// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
 		// This is needed for S3 where metadata may not be immediately consistent
-		state BackupDescription desc =
-		    wait(bc->describeBackup(true, isBlobstoreUrl(urlStr) ? invalidVersion : 0));
+		state BackupDescription desc = wait(bc->describeBackup(true, isBlobstoreUrl(urlStr) ? invalidVersion : 0));
 
 		if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
 			fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
