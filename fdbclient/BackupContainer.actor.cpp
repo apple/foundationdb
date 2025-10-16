@@ -370,7 +370,6 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 		r->encryptionKeyFileName = encryptionKeyFileName;
 		r->URL = url;
-
 		return r;
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
