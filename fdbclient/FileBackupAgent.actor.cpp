@@ -7634,20 +7634,12 @@ public:
 		state bool isBlobstore = isBlobstoreUrl(urlStr);
 		state BackupDescription desc = wait(bc->describeBackup(true, isBlobstore ? invalidVersion : 0));
 
-		// For non-blobstore URLs, validate encryption configuration matches backup.
-		// We skip this validation for blobstore:// URLs due to S3's eventual consistency model:
-		// the desc.fileLevelEncryption metadata may not be immediately available or accurate
-		// after backup creation, which could cause false validation failures. The actual encryption
-		// mismatch (if any) will be caught later when attempting to read/decrypt backup files.
-    // TODO: Remove this blobstore exception.
-		if (!isBlobstore) {
-			if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
-				fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
-				throw restore_error();
-			} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
-				fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
-				throw restore_error();
-			}
+		if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
+			fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
+			throw restore_error();
+		} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
+			fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
+			throw restore_error();
 		}
 
 		if (cxOrig.present()) {
