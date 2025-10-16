@@ -117,13 +117,14 @@ public:
 	void maybeStartStatsLogger() {
 		if (!blobStats && CLIENT_KNOBS->BLOBSTORE_ENABLE_LOGGING) {
 			blobStats = std::make_unique<BlobStats>();
-			specialCounter(
-			    blobStats->cc, "GlobalConnectionPoolCount", [this]() { return this->globalConnectionPool.size(); });
+			specialCounter(blobStats->cc, "GlobalConnectionPoolCount", [this]() {
+				return this->getGlobalConnectionPool().size();
+			});
 			specialCounter(blobStats->cc, "GlobalConnectionPoolSize", [this]() {
 				// FIXME: could track this explicitly via an int variable with extra logic, but this should be small and
 				// infrequent
 				int totalConnections = 0;
-				for (auto& it : this->globalConnectionPool) {
+				for (auto& it : this->getGlobalConnectionPool()) {
 					totalConnections += it.second->pool.size();
 				}
 				return totalConnections;
@@ -200,15 +201,71 @@ public:
 	struct ReusableConnection {
 		Reference<IConnection> conn;
 		double expirationTime;
+		// CROSS_PROCESS_FIX: Track which process created this connection
+		NetworkAddress creatingProcess;
+		ReusableConnection() : expirationTime(0) {
+			if (g_network && g_network->isSimulated()) {
+				creatingProcess = g_network->getLocalAddress();
+			}
+		}
+		ReusableConnection(Reference<IConnection> c, double exp) : conn(c), expirationTime(exp) {
+			if (g_network && g_network->isSimulated()) {
+				creatingProcess = g_network->getLocalAddress();
+			}
+		}
+
+		// CROSS_PROCESS_FIX: Copy constructor with cross-process detection
+		ReusableConnection(const ReusableConnection& other)
+		  : conn(other.conn), expirationTime(other.expirationTime), creatingProcess(other.creatingProcess) {
+			if (g_network && g_network->isSimulated() && creatingProcess.isValid() &&
+			    creatingProcess != g_network->getLocalAddress()) {
+				// Cross-process copy detected - invalidate the connection to prevent sharing
+				conn = Reference<IConnection>();
+				expirationTime = 0; // Mark as expired
+			}
+		}
+
+		// CROSS_PROCESS_FIX: Assignment operator with cross-process detection
+		ReusableConnection& operator=(const ReusableConnection& other) {
+			if (this != &other) {
+				conn = other.conn;
+				expirationTime = other.expirationTime;
+				creatingProcess = other.creatingProcess;
+				if (g_network && g_network->isSimulated() && creatingProcess.isValid() &&
+				    creatingProcess != g_network->getLocalAddress()) {
+					// Cross-process assignment detected - invalidate the connection to prevent sharing
+					conn = Reference<IConnection>();
+					expirationTime = 0; // Mark as expired
+				}
+			}
+			return *this;
+		}
 	};
 
 	// basically, reference counted queue with option to add other fields
 	struct ConnectionPoolData : NonCopyable, ReferenceCounted<ConnectionPoolData> {
 		std::queue<ReusableConnection> pool;
+
+		ConnectionPoolData() {}
+
+		// Destructor implementation in S3BlobStore.actor.cpp
+		// In simulation, explicitly closes all pooled connections before destruction
+		~ConnectionPoolData();
 	};
 
 	// global connection pool for multiple blobstore endpoints with same connection settings and request destination
-	static std::unordered_map<BlobStoreConnectionPoolKey, Reference<ConnectionPoolData>> globalConnectionPool;
+	// NOTE: This is disabled by default (BLOBSTORE_GLOBAL_CONNECTION_POOL=false), so each endpoint gets its own pool
+	static std::unordered_map<BlobStoreConnectionPoolKey, Reference<ConnectionPoolData>>& getGlobalConnectionPool() {
+		// Use process address as key to separate connection pools per simulated process
+		static std::map<NetworkAddress, std::unordered_map<BlobStoreConnectionPoolKey, Reference<ConnectionPoolData>>>
+		    processConnectionPools;
+
+		NetworkAddress currentProcess;
+		if (g_network && g_network->isSimulated()) {
+			currentProcess = g_network->getLocalAddress();
+		}
+		return processConnectionPools[currentProcess];
+	}
 
 	S3BlobStoreEndpoint(std::string const& host,
 	                    std::string const& service,
@@ -241,12 +298,12 @@ public:
 			connectionPool = makeReference<ConnectionPoolData>();
 		} else {
 			BlobStoreConnectionPoolKey key(host, service, region, knobs.isTLS());
-			auto it = globalConnectionPool.find(key);
-			if (it != globalConnectionPool.end()) {
+			auto it = getGlobalConnectionPool().find(key);
+			if (it != getGlobalConnectionPool().end()) {
 				connectionPool = it->second;
 			} else {
 				connectionPool = makeReference<ConnectionPoolData>();
-				globalConnectionPool.insert({ key, connectionPool });
+				getGlobalConnectionPool().insert({ key, connectionPool });
 			}
 		}
 		ASSERT(connectionPool.isValid());

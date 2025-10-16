@@ -436,6 +436,12 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	static std::vector<T> getReadyNonError(std::vector<Future<T>> const& futures);
 };
 
+// Recovery version calculation for version vector unicast
+Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
+    const std::vector<Reference<LogSet>>& logServers,
+    const std::tuple<int, std::vector<TLogLockResult>, bool>& logGroupResults,
+    Version minDV);
+
 template <class T>
 std::vector<T> TagPartitionedLogSystem::getReadyNonError(std::vector<Future<T>> const& futures) {
 	// Return the values of those futures which have (non-error) values ready

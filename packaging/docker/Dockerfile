@@ -2,7 +2,7 @@
 #
 # This source file is part of the FoundationDB open source project
 #
-# Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+# Copyright 2013-2025 Apple Inc. and the FoundationDB project authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,9 +16,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM docker.io/rockylinux/rockylinux:9.5-minimal AS base
+FROM docker.io/rockylinux/rockylinux:9.6-minimal AS base
 
-RUN microdnf install -y \
+# Disable the faulty mirror list for RockyLinux for now. Since all the other images use the base image
+# as base we don't have to repeat this step.
+RUN sed -i.bak 's/^#baseurl=/baseurl=/; s/^mirrorlist=/#mirrorlist=/' /etc/yum.repos.d/rocky.repo && \ 
+    microdnf install -y \
     bind-utils \
     binutils \
     curl \
@@ -57,29 +60,29 @@ RUN curl -Ls "https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TA
 
 WORKDIR /
 
-FROM docker.io/library/golang:1.24.4-bookworm AS go-build
+FROM docker.io/library/golang:1.24.9-bookworm AS go-build
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
 
 # Build the fdb-aws-s3-credentials-fetcher in a dedicated build as we don't want to build this image
 # on a regular base until we have a release plan for it.
-FROM go-build AS go-credentials-fetcher-build
-COPY fdb-aws-s3-credentials-fetcher/ /fdb-aws-s3-credentials-fetcher
-WORKDIR /fdb-aws-s3-credentials-fetcher
-RUN go build -o /fdb-aws-s3-credentials-fetcher *.go
+# FROM go-build AS go-credentials-fetcher-build
+# COPY fdb-aws-s3-credentials-fetcher/ /fdb-aws-s3-credentials-fetcher
+# WORKDIR /fdb-aws-s3-credentials-fetcher
+# RUN go build -o /fdb-aws-s3-credentials-fetcher *.go
 
 # For now use 'base'. Later, could use a more stripped down image
 # since this script needs little.
-FROM base AS fdb-aws-s3-credentials-fetcher-sidecar
-RUN groupadd --gid 4059 fdb && \
-    useradd --gid 4059 \
-            --uid 4059 \
-            --no-create-home \
-            --shell /bin/bash fdb
-USER fdb
-COPY --from=go-credentials-fetcher-build /fdb-aws-s3-credentials-fetcher /usr/bin/
-ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
+# FROM base AS fdb-aws-s3-credentials-fetcher-sidecar
+# RUN groupadd --gid 4059 fdb && \
+#     useradd --gid 4059 \
+#             --uid 4059 \
+#             --no-create-home \
+#             --shell /bin/bash fdb
+# USER fdb
+# COPY --from=go-credentials-fetcher-build /fdb-aws-s3-credentials-fetcher /usr/bin/
+# ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
 
 FROM base AS foundationdb-base
 ARG FDB_VERSION=7.3.63
