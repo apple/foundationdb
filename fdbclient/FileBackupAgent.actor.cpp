@@ -6624,6 +6624,9 @@ public:
 		return Void();
 	}
 
+	// Helper function to check if a URL is a blobstore:// URL
+	static bool isBlobstoreUrl(const std::string& url) { return url.find("blobstore://") == 0; }
+
 	ACTOR static Future<Void> submitParallelRestore(Database cx,
 	                                                Key backupTag,
 	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
@@ -6635,11 +6638,12 @@ public:
 	                                                Key addPrefix,
 	                                                Key removePrefix) {
 		// Sanity check backup is valid
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString(), proxy, {});
+		state std::string bcUrlStr = bcUrl.toString();
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrlStr, proxy, {});
 		// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
 		// This is needed for S3 where metadata may not be immediately consistent
 		state BackupDescription desc =
-		    wait(bc->describeBackup(false, isBlobstoreUrl(bcUrl.toString()) ? invalidVersion : 0));
+		    wait(bc->describeBackup(false, isBlobstoreUrl(bcUrlStr) ? invalidVersion : 0));
 		wait(desc.resolveVersionTimes(cx));
 
 		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
@@ -7622,14 +7626,14 @@ public:
 			throw restore_error();
 		}
 
+		state std::string urlStr = url.toString();
 		state Reference<IBackupContainer> bc =
-		    IBackupContainer::openContainer(url.toString(), proxy, encryptionKeyFileName);
+		    IBackupContainer::openContainer(urlStr, proxy, encryptionKeyFileName);
 
 		// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
 		// This is needed for S3 where metadata may not be immediately consistent
-		state std::string urlStr = url.toString();
-		state bool isBlobstore = isBlobstoreUrl(urlStr);
-		state BackupDescription desc = wait(bc->describeBackup(true, isBlobstore ? invalidVersion : 0));
+		state BackupDescription desc =
+		    wait(bc->describeBackup(true, isBlobstoreUrl(urlStr) ? invalidVersion : 0));
 
 		if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
 			fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
