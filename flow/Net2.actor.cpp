@@ -831,10 +831,20 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 
 		void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
 
+		void setTimeout(double seconds) {
+			timeval timeout;
+			timeout.tv_sec = seconds;
+			timeout.tv_usec = 0;
+			int nativeSock = socket.next_layer().native_handle();
+			setsockopt(nativeSock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+			setsockopt(nativeSock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+		}
+
 		ThreadReturnPromise<Void> done;
 		ssl_socket& socket;
 		ssl_socket::handshake_type type;
 		boost::system::error_code err;
+		double timeoutSecond = 0;
 		NetworkAddress peerAddr;
 	};
 
@@ -842,7 +852,13 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		try {
 			h.socket.next_layer().non_blocking(false, h.err);
 			if (!h.err.failed()) {
+				if (h.timeoutSecond > 0) {
+					h.setTimeout(h.timeoutSecond);
+				}
 				h.socket.handshake(h.type, h.err);
+				if (h.timeoutSecond > 0) {
+					h.setTimeout(0); // reset
+				}
 			}
 			if (!h.err.failed()) {
 				h.socket.next_layer().non_blocking(true, h.err);
@@ -959,6 +975,13 @@ public:
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
 				handshake->setPeerAddr(self->getPeerAddress());
+				if (FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS > 0) {
+					handshake->timeoutSecond = std::max(FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS,
+					                                    FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT * 1.5);
+					// Mutiplying by 1.5 to ensure the syscall timeout happens after the ssl shutdown
+				} else {
+					handshake->timeoutSecond = 0;
+				}
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -1012,6 +1035,9 @@ public:
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
 					g_net2->countServerTLSHandshakesTimedout++;
+					TraceEvent("N2_AcceptHandshakeTimeout", self->id)
+					    .suppressFor(1.0)
+					    .detail("PeerAddress", self->getPeerAddress());
 					throw connection_failed();
 				}
 			}
@@ -1058,6 +1084,13 @@ public:
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
 				handshake->setPeerAddr(self->getPeerAddress());
+				if (FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS > 0) {
+					handshake->timeoutSecond = std::max(FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS,
+					                                    FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT * 1.5);
+					// Mutiplying by 1.5 to ensure the syscall timeout happens after the ssl shutdown
+				} else {
+					handshake->timeoutSecond = 0;
+				}
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -1092,6 +1125,9 @@ public:
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
 					g_net2->countClientTLSHandshakesTimedout++;
+					TraceEvent("N2_ConnectHandshakeTimeout", self->id)
+					    .suppressFor(1.0)
+					    .detail("PeerAddress", self->getPeerAddress());
 					throw connection_failed();
 				}
 			}
@@ -2323,7 +2359,7 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	return Void();
 }
 
-void net2_test(){
+void net2_test() {
 	/*
 	g_network = newNet2();  // for promise serialization below
 

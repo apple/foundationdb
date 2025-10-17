@@ -137,6 +137,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TLS_HANDSHAKE_LIMIT,                                1000 );
 	init( DISABLE_MAINTHREAD_TLS_HANDSHAKE,                  false );
 	init( TLS_HANDSHAKE_FLOWLOCK_PRIORITY, static_cast<int>(TaskPriority::DefaultYield) );
+	init( TLS_HANDSHAKE_TIMEOUT_SECONDS,                       2.0 ); // 0 -> no timeout
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
 	init( NETWORK_TEST_REQUEST_COUNT,                            0 ); // 0 -> run forever
