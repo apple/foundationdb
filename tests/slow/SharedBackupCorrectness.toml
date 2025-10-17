@@ -1,9 +1,7 @@
 [configuration]
 extraDatabaseMode = 'LocalOrSingle'
-# Disable tenant mode because:
-# 1. DR (Disaster Recovery) is not currently supported in required tenant mode
-# 2. The Cycle workload is not tenant-aware and may fail with tenant_not_found errors
-tenantModes = ['disabled']
+# DR is not currently supported in required tenant mode
+tenantModes = ['disabled', 'optional']
 
 [[test]]
 testTitle = 'BackupAndRestore'

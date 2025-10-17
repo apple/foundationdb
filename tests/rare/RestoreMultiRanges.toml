@@ -12,5 +12,4 @@ simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'RestoreMultiRanges'
-    encrypted = false
 
