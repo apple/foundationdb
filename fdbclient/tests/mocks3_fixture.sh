@@ -96,7 +96,8 @@ start_mocks3() {
             # Check if the process is still running
             if ! kill -0 $MOCKS3_PID 2>/dev/null; then
                 # Process died - check if it was due to bind failure
-                if grep -q -i "address already in use\|bind.*failed\|cannot assign requested address" "$MOCKS3_LOG_FILE" 2>/dev/null; then
+                # Match various formats: "address already in use", "Local address in use", etc.
+                if grep -q -i "address.*in use\|.*address in use\|bind.*failed\|cannot assign requested address" "$MOCKS3_LOG_FILE" 2>/dev/null; then
                     echo "Port ${MOCKS3_PORT} already in use, trying next port"
                     bind_failed=true
                 else
