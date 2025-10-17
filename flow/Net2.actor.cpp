@@ -831,11 +831,14 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 
 		void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
 
+		void setDebugId(const UID& id) { debugId = id; }
+
 		ThreadReturnPromise<Void> done;
 		ssl_socket& socket;
 		ssl_socket::handshake_type type;
 		boost::system::error_code err;
 		NetworkAddress peerAddr;
+		UID debugId;
 	};
 
 	void action(Handshake& h) {
@@ -850,7 +853,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			if (h.err.failed()) {
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
-				                                                        : "N2_AcceptHandshakeError"_audit)
+				                                                        : "N2_AcceptHandshakeError"_audit,
+				           h.debugId)
 				    .detail("PeerAddr", h.getPeerAddress())
 				    .detail("PeerAddress", h.getPeerAddress())
 				    .detail("PeerEndPoint", h.getPeerEndPointAddress())
@@ -864,7 +868,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		} catch (...) {
 			TraceEvent(SevWarn,
 			           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError"_audit
-			                                                        : "N2_AcceptHandshakeUnknownError"_audit)
+			                                                        : "N2_AcceptHandshakeUnknownError"_audit,
+			           h.debugId)
 			    .detail("PeerAddr", h.getPeerAddress())
 			    .detail("PeerAddress", h.getPeerAddress())
 			    .detail("PeerEndPoint", h.getPeerEndPointAddress())
@@ -941,8 +946,25 @@ public:
 		init();
 	}
 
+	void setHandshakeTimeout(double seconds, const UID& debugId) {
+		timeval timeout;
+		timeout.tv_sec = seconds;
+		timeout.tv_usec = 0;
+		if (!ssl_sock.next_layer().is_open()) {
+			TraceEvent(SevWarn, "N2_SetSSLSocketTimeoutError", debugId)
+			    .detail("PeerAddr", peer_address)
+			    .detail("PeerAddress", peer_address)
+			    .detail("Message", "Invalid native socket handle");
+			return;
+		}
+		int nativeSock = ssl_sock.next_layer().native_handle();
+		setsockopt(nativeSock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+		setsockopt(nativeSock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+	}
+
 	ACTOR static void doAcceptHandshake(Reference<SSLConnection> self, Promise<Void> connected) {
 		state Hold<int> holder;
+		state bool hasSetHandshakeTimeout = false;
 
 		try {
 			Future<Void> onHandshook;
@@ -959,6 +981,14 @@ public:
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
 				handshake->setPeerAddr(self->getPeerAddress());
+				handshake->setDebugId(self->id);
+				if (FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS > 0) {
+					double timeoutSecond = std::max(FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS,
+					                                FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT * 1.5);
+					self->setHandshakeTimeout(timeoutSecond, self->id);
+					hasSetHandshakeTimeout = true;
+					// Mutiplying by 1.5 to ensure timeout never happens before ssl shutdown
+				}
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -970,6 +1000,9 @@ public:
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
 			wait(onHandshook);
+			if (hasSetHandshakeTimeout) {
+				self->setHandshakeTimeout(0, self->id); // reset
+			}
 			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
 		} catch (...) {
@@ -1012,6 +1045,9 @@ public:
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
 					g_net2->countServerTLSHandshakesTimedout++;
+					TraceEvent("N2_AcceptHandshakeTimeout", self->id)
+					    .suppressFor(1.0)
+					    .detail("PeerAddress", self->getPeerAddress());
 					throw connection_failed();
 				}
 			}
@@ -1035,6 +1071,7 @@ public:
 
 	ACTOR static void doConnectHandshake(Reference<SSLConnection> self, Promise<Void> connected) {
 		state Hold<int> holder;
+		state bool hasSetHandshakeTimeout = false;
 
 		try {
 			Future<Void> onHandshook;
@@ -1058,6 +1095,14 @@ public:
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
 				handshake->setPeerAddr(self->getPeerAddress());
+				handshake->setDebugId(self->id);
+				if (FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS > 0) {
+					double timeoutSecond = std::max(FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS,
+					                                FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT * 1.5);
+					self->setHandshakeTimeout(timeoutSecond, self->id);
+					hasSetHandshakeTimeout = true;
+					// Mutiplying by 1.5 to ensure timeout never happens before ssl shutdown
+				}
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
@@ -1069,6 +1114,9 @@ public:
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
 			wait(onHandshook);
+			if (hasSetHandshakeTimeout) {
+				self->setHandshakeTimeout(0, self->id); // reset
+			}
 			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
 		} catch (...) {
@@ -1092,6 +1140,9 @@ public:
 				}
 				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
 					g_net2->countClientTLSHandshakesTimedout++;
+					TraceEvent("N2_ConnectHandshakeTimeout", self->id)
+					    .suppressFor(1.0)
+					    .detail("PeerAddress", self->getPeerAddress());
 					throw connection_failed();
 				}
 			}
@@ -2323,7 +2374,7 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	return Void();
 }
 
-void net2_test(){
+void net2_test() {
 	/*
 	g_network = newNet2();  // for promise serialization below
 
