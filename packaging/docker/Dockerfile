@@ -65,24 +65,23 @@ COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
 
-# Build the fdb-aws-s3-credentials-fetcher in a dedicated build as we don't want to build this image
-# on a regular base until we have a release plan for it.
-# FROM go-build AS go-credentials-fetcher-build
-# COPY fdb-aws-s3-credentials-fetcher/ /fdb-aws-s3-credentials-fetcher
-# WORKDIR /fdb-aws-s3-credentials-fetcher
-# RUN go build -o /fdb-aws-s3-credentials-fetcher *.go
+# Build the fdb-aws-s3-credentials-fetcher in a dedicated build
+FROM go-build AS go-credentials-fetcher-build
+COPY fdb-aws-s3-credentials-fetcher/ /fdb-aws-s3-credentials-fetcher
+WORKDIR /fdb-aws-s3-credentials-fetcher
+RUN go build -o /fdb-aws-s3-credentials-fetcher *.go
 
 # For now use 'base'. Later, could use a more stripped down image
 # since this script needs little.
-# FROM base AS fdb-aws-s3-credentials-fetcher-sidecar
-# RUN groupadd --gid 4059 fdb && \
-#     useradd --gid 4059 \
-#             --uid 4059 \
-#             --no-create-home \
-#             --shell /bin/bash fdb
-# USER fdb
-# COPY --from=go-credentials-fetcher-build /fdb-aws-s3-credentials-fetcher /usr/bin/
-# ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
+FROM base AS fdb-aws-s3-credentials-fetcher-sidecar
+RUN groupadd --gid 4059 fdb && \
+    useradd --gid 4059 \
+            --uid 4059 \
+            --no-create-home \
+            --shell /bin/bash fdb
+USER fdb
+COPY --from=go-credentials-fetcher-build /fdb-aws-s3-credentials-fetcher /usr/bin/
+ENTRYPOINT ["/usr/bin/fdb-aws-s3-credentials-fetcher", "-dir", "/var/fdb"]
 
 FROM base AS foundationdb-base
 ARG FDB_VERSION=7.3.63
