@@ -147,10 +147,25 @@ start_mocks3() {
 shutdown_mocks3() {
     if [ -n "$MOCKS3_PID" ]; then
         echo "Shutting down MockS3Server (PID: $MOCKS3_PID)"
-        kill $MOCKS3_PID 2>/dev/null || true
-        wait $MOCKS3_PID 2>/dev/null || true
+        # Try graceful shutdown first
+        if kill -0 $MOCKS3_PID 2>/dev/null; then
+            kill $MOCKS3_PID 2>/dev/null || true
+            # Wait up to 5 seconds for graceful shutdown
+            for i in {1..5}; do
+                if ! kill -0 $MOCKS3_PID 2>/dev/null; then
+                    break
+                fi
+                sleep 1
+            done
+            # Force kill if still running
+            if kill -0 $MOCKS3_PID 2>/dev/null; then
+                echo "Force killing MockS3Server (PID: $MOCKS3_PID)"
+                kill -9 $MOCKS3_PID 2>/dev/null || true
+            fi
+            wait $MOCKS3_PID 2>/dev/null || true
+        fi
     fi
-    
+
     # Clean up log file
     if [ -n "$MOCKS3_LOG_FILE" ] && [ -f "$MOCKS3_LOG_FILE" ]; then
         rm -f "$MOCKS3_LOG_FILE"
