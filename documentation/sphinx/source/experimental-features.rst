@@ -9,6 +9,9 @@ Experimental features in FoundationDB are tools or functionalities that develope
 to test new ideas or capabilities within the database system. These features are not fully 
 developed or officially supported yet, so they should not be used for production.
 
+Experimental features may be removed with minimal warning in forthcoming releases
+(major.minor).
+
 A feature is flagged "production-ready" when either Apple or Snowflake(or any major contributor)
 is using the feature in production.
 

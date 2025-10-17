@@ -153,10 +153,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
 
-  # IGNORE below because we do not use tenant mode and it is likely to be
-  # deprecated/removed. rdar://157717454, rdar://134522214.
-  add_fdb_test(TEST_FILES rare/BlobRestoreTenantMode.toml IGNORE)
-
   add_fdb_test(TEST_FILES fast/BulkDumping.toml)
   add_fdb_test(TEST_FILES slow/BulkDumpingS3.toml)
   add_fdb_test(TEST_FILES fast/BulkLoading.toml)
