@@ -567,6 +567,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	CounterCollection cc;
 	Counter bytesInput;
+	Counter tempTagMessageCount;
 	Counter bytesDurable;
 	Counter blockingPeeks;
 	Counter blockingPeekTimeouts;
@@ -664,16 +665,16 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	  : initialized(false), queueCommittingVersion(0), knownCommittedVersion(0), durableKnownCommittedVersion(0),
 	    minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0), minPoppedTag(invalidTag),
 	    unpoppedRecoveredTagCount(0), cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc),
-	    bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
-	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
-	    nonEmptyPeeks("NonEmptyPeeks", cc), persistentDataUpdateBatches("PersistentDataUpdateBatches", cc),
-	    dirtyTagsProcessed("DirtyTagsProcessed", cc), logId(interf.id()), protocolVersion(protocolVersion),
-	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
-	    recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag),
-	    isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
-	    locality(tagLocalityInvalid), recruitmentID(recruitmentID), logSpillType(logSpillType),
-	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false),
-	    txsTags(txsTags) {
+	    tempTagMessageCount("TempTagMessageCount", cc), bytesDurable("BytesDurable", cc),
+	    blockingPeeks("BlockingPeeks", cc), blockingPeekTimeouts("BlockingPeekTimeouts", cc),
+	    emptyPeeks("EmptyPeeks", cc), nonEmptyPeeks("NonEmptyPeeks", cc),
+	    persistentDataUpdateBatches("PersistentDataUpdateBatches", cc), dirtyTagsProcessed("DirtyTagsProcessed", cc),
+	    logId(interf.id()), protocolVersion(protocolVersion), newPersistentDataVersion(invalidVersion),
+	    tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1), recoveryTxnVersion(1),
+	    logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
+	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
+	    recruitmentID(recruitmentID), logSpillType(logSpillType), allTags(tags.begin(), tags.end()),
+	    terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false), txsTags(txsTags) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -1041,7 +1042,8 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 		for (tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			state Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
 			if (tagData) {
-				tagsProcessedThisBatch++;
+				// poppedRecently implies updatePersistentPopped() will touch persistentData
+				state bool tagDidWork = tagData->poppedRecently;
 				wait(tagData->eraseMessagesBefore(tagData->popped, self, logData, TaskPriority::UpdateStorage));
 				state Version currentVersion = 0;
 				// Clear recently popped versions from persistentData if necessary
@@ -1067,6 +1069,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 						}
 						self->persistentData->set(KeyValueRef(
 						    persistTagMessagesKey(logData->logId, tagData->tag, currentVersion), wr.toValue()));
+						tagDidWork = true;
 					} else {
 						// spill everything else by reference
 						const IDiskQueue::location begin = logData->versionLocation[currentVersion].first;
@@ -1092,6 +1095,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 							*(uint32_t*)wr.getData() = refSpilledTagCount;
 							self->persistentData->set(KeyValueRef(
 							    persistTagMessageRefsKey(logData->logId, tagData->tag, lastVersion), wr.toValue()));
+							tagDidWork = true;
 							tagData->poppedLocation = std::min(tagData->poppedLocation, firstLocation);
 							refSpilledTagCount = 0;
 							wr = BinaryWriter(AssumeVersion(logData->protocolVersion));
@@ -1113,10 +1117,15 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 					*(uint32_t*)wr.getData() = refSpilledTagCount;
 					self->persistentData->set(
 					    KeyValueRef(persistTagMessageRefsKey(logData->logId, tagData->tag, lastVersion), wr.toValue()));
+					tagDidWork = true;
 					tagData->poppedLocation = std::min(tagData->poppedLocation, firstLocation);
 				}
 
 				wait(yield(TaskPriority::UpdateStorage));
+
+				if (tagDidWork) {
+					tagsProcessedThisBatch++;
+				}
 			}
 		}
 	}
@@ -1532,6 +1541,7 @@ void commitMessages(TLogData* self,
 	if (!taggedMessages.size()) {
 		return;
 	}
+	logData->tempTagMessageCount += taggedMessages.size();
 
 	int msgSize = 0;
 	for (auto& i : taggedMessages) {

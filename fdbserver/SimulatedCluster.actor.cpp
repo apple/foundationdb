@@ -2870,10 +2870,6 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	if (std::string_view(testFile).find("ChangeFeed") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
-	}
-
 	state ProtocolVersion protocolVersion = currentProtocolVersion();
 	if (testConfig.startIncompatibleProcess) {
 		// isolates right most 1 bit of compatibleProtocolVersionMask to make this protocolVersion incompatible

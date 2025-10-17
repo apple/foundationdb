@@ -36,6 +36,9 @@ class ReadYourWritesTransaction;
 Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const& v, Reference<ReadYourWritesTransaction> const& tr);
 Future<Version> timeKeeperVersionFromDatetime(std::string const& datetime, Database const& db);
 
+// Helper function to check if a URL is a blobstore:// URL
+bool isBlobstoreUrl(const std::string& url);
+
 // Append-only file interface for writing backup data
 // Once finish() is called the file cannot be further written to.
 // Backup containers should not attempt to use files for which finish was not called or did not complete.

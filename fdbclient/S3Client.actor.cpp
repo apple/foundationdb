@@ -58,6 +58,7 @@ struct PartState {
 	int64_t size = 0;
 	std::string checksum; // MD5 or SHA256 depending on integrity check setting
 	bool completed = false;
+	std::string partData; // Part data kept for sequential XXH64 checksum calculation after upload
 
 	PartState() = default; // Add explicit default constructor
 
@@ -290,7 +291,6 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
                                           std::string uploadID,
                                           Reference<IAsyncFile> file,
                                           PartState part,
-                                          XXH64_state_t* hashState,
                                           PartConfig config) {
 	state double startTime = now();
 	state PartState resultPart = part;
@@ -322,8 +322,10 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 				throw io_error();
 			}
 
-			// Update checksum with this part's data
-			XXH64_update(hashState, partData.data(), bytesRead);
+			// Store part data for sequential XXH64 checksum calculation after concurrent uploads complete
+			// to avoid race condition where multiple concurrent uploadPart actors all call
+			// XXH64_update(hashState, ...) on the same hash state simultaneously, corrupting it.
+			resultPart.partData = std::move(partData);
 
 			// Calculate hash for this part - use SHA256 if integrity check enabled, otherwise MD5
 			std::string checksum;
@@ -332,7 +334,7 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 				unsigned char hash[SHA256_DIGEST_LENGTH];
 				SHA256_CTX sha256;
 				SHA256_Init(&sha256);
-				SHA256_Update(&sha256, partData.data(), partData.size());
+				SHA256_Update(&sha256, resultPart.partData.data(), resultPart.partData.size());
 				SHA256_Final(hash, &sha256);
 				std::string hashAsStr = std::string((char*)hash, SHA256_DIGEST_LENGTH);
 				std::string sig = base64::encoder::from_string(hashAsStr);
@@ -341,7 +343,7 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 				checksum = sig;
 			} else {
 				// Calculate MD5 hash (original behavior)
-				checksum = HTTP::computeMD5Sum(partData);
+				checksum = HTTP::computeMD5Sum(resultPart.partData);
 			}
 
 			// Store the checksum (MD5 or SHA256 depending on integrity check setting)
@@ -349,11 +351,16 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 
 			// Reset the packet queue for each retry attempt
 			packets.discardAll();
-			PacketWriter pw(packets.getWriteBuffer(partData.size()), nullptr, Unversioned());
-			pw.serializeBytes(partData);
+			PacketWriter pw(packets.getWriteBuffer(resultPart.partData.size()), nullptr, Unversioned());
+			pw.serializeBytes(resultPart.partData);
 
-			std::string etag = wait(endpoint->uploadPart(
-			    bucket, objectName, uploadID, resultPart.partNumber, &packets, partData.size(), resultPart.checksum));
+			std::string etag = wait(endpoint->uploadPart(bucket,
+			                                             objectName,
+			                                             uploadID,
+			                                             resultPart.partNumber,
+			                                             &packets,
+			                                             resultPart.partData.size(),
+			                                             resultPart.checksum));
 
 			resultPart.etag = etag;
 			resultPart.completed = true;
@@ -460,8 +467,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 					part.size = partSize;
 					parts.push_back(part);
 
-					activeFutures.push_back(
-					    uploadPart(endpoint, bucket, objectName, uploadID, file, part, hashState, config));
+					activeFutures.push_back(uploadPart(endpoint, bucket, objectName, uploadID, file, part, config));
 					activePartIndices.push_back(partNumber - 1); // Store index into parts array
 
 					offset += partSize;
@@ -506,11 +512,24 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 				    .detail("S3ChecksumSHA256", s3Checksum.get());
 			}
 
+			// Calculate XXH64 checksum sequentially after all parts have completed.
+			// Parts are sorted by partNumber, ensuring checksum is calculated in correct order.
+			TraceEvent(SevDebug, "S3ClientCalculatingFileChecksum")
+			    .detail("Bucket", bucket)
+			    .detail("Object", objectName)
+			    .detail("NumParts", parts.size());
+
+			for (const auto& part : parts) {
+				if (!part.partData.empty()) {
+					XXH64_update(hashState, part.partData.data(), part.partData.size());
+				}
+			}
+
 			// Clear data after successful upload
 			numParts = parts.size();
 			parts.clear();
 
-			// Finalize checksum - no need to read file again!
+			// Finalize checksum
 			uint64_t hash = XXH64_digest(hashState);
 			XXH64_freeState(hashState);
 			checksum = format("%016llx", hash);

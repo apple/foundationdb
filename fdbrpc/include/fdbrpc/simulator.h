@@ -47,11 +47,6 @@
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
-struct ValidationData {
-	// global validation that missing refreshed feeds were previously destroyed
-	std::unordered_set<std::string> allDestroyedChangeFeedIDs;
-};
-
 namespace simulator {
 struct ProcessInfo;
 struct MachineInfo;
@@ -355,7 +350,6 @@ public:
 	bool willRestart = false;
 	bool restarted = false;
 	bool isConsistencyChecked = false;
-	ValidationData validationData;
 
 	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
 	bool setDiffProtocol; // true if a process with a different protocol version has been started

@@ -223,11 +223,6 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 
-// changefeed command
-ACTOR Future<bool> changeFeedCommandActor(Database localDb,
-                                          Optional<TenantMapEntry> tenantEntry,
-                                          std::vector<StringRef> tokens,
-                                          Future<Void> warn);
 // blobrestore command
 ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
 // hotrange command

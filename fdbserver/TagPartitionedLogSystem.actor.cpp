@@ -20,6 +20,7 @@
 
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
 #include <boost/dynamic_bitset.hpp>
+#include "flow/UnitTest.h"
 
 #include <utility>
 

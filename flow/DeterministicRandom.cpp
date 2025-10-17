@@ -171,6 +171,17 @@ void DeterministicRandom::delref() {
 	ReferenceCounted<DeterministicRandom>::delref();
 }
 
+// The nature of IRandom::truePercent API is that the output is random (still deterministic).
+// Testing randomness is tricky because there's no fixed value one can assert on.
+// For example, if truePercent(1%) is called 10,000 times, it's not always true that exactly
+// 100 times the function will return true.
+// This test solves such problems in two ways:
+//       1. It models the output of truePercent as a binomial distribution, and asserts that output is within a range.
+//          The range is decided based on standard deviations, typically 3 standard deviations are used.
+//       2. For each part of the test, a fixed seed is picked. This means that if one run passes, other runs should pass
+//          as well. We still need #1 above because rng implementation or platforms can change over time.
+// A more detailed discussion and math of this can be found here:
+//     https://github.com/apple/foundationdb/pull/12440/files#r2430230239
 TEST_CASE("/flow/DeterministicRandom/truePercent") {
 	constexpr int trials = 10000;
 
@@ -256,29 +267,6 @@ TEST_CASE("/flow/DeterministicRandom/truePercent") {
 		ASSERT(count10 < count30);
 		ASSERT(count30 < count70);
 		ASSERT(count70 < count90);
-	}
-
-	// Test invalid values - these should trigger assertions
-	{
-		DeterministicRandom rng(12345);
-
-		// Lambda to test invalid percentage values
-		auto testInvalidPercent = [&rng](int invalidPercent) {
-			try {
-				[[maybe_unused]] bool result = rng.truePercent(invalidPercent);
-				ASSERT(false); // should not reach here
-			} catch (...) {
-			}
-		};
-
-		// Test various invalid values
-		testInvalidPercent(0); // Should trigger ASSERT_GT(percent, 0)
-		testInvalidPercent(100); // Should trigger ASSERT_LT(percent, 100)
-		testInvalidPercent(-5); // Should trigger ASSERT_GT(percent, 0)
-		testInvalidPercent(150); // Should trigger ASSERT_LT(percent, 100)
-		testInvalidPercent(-100); // Another negative value test
-		testInvalidPercent(101); // Just over 100
-		testInvalidPercent(999); // Much larger than 100
 	}
 
 	return Void();

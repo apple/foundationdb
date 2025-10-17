@@ -20,7 +20,5 @@ List of features
 ================ =============== ================== ================== ================== 
  Redwood          Experimental    Production-ready   Production-ready   Production-ready  
  GetMappedRange                   Experimental       Experimental       Experimental      
- Tenant                           Experimental       Experimental       Experimental      
- ChangeFeed                       Experimental       Experimental       Experimental      
  Idempotent txn                   Experimental       Experimental       Experimental      
 ================ =============== ================== ================== ================== 

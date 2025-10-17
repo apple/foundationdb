@@ -30,6 +30,24 @@
 
 #include "flow/actorcompiler.h" // always the last include
 
+// RESTConnectionPool destructor implementation
+RESTConnectionPool::~RESTConnectionPool() {
+	// In simulation, explicitly close all pooled connections before destruction.
+	// This satisfies Sim2Conn's assertion: !opened || closedByCaller
+	// Without this, connections would be destroyed without being closed, causing assertion failures.
+	if (g_network && g_network->isSimulated()) {
+		for (auto& kv : connectionPoolMap) {
+			while (!kv.second.empty()) {
+				ReusableConnection& rconn = kv.second.front();
+				if (rconn.conn.isValid()) {
+					rconn.conn->close();
+				}
+				kv.second.pop();
+			}
+		}
+	}
+}
+
 const std::unordered_map<std::string, RESTConnectionType> RESTConnectionType::supportedConnTypes = {
 	{ "http", RESTConnectionType("http", RESTConnectionType::NOT_SECURE_CONNECTION) },
 	{ "https", RESTConnectionType("https", RESTConnectionType::SECURE_CONNECTION) }
