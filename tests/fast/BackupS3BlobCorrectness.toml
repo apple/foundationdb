@@ -24,7 +24,7 @@ runConsistencyCheck = false
     restoreAfter = 60.0
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
-    performRestore = false
+    performRestore = true
     backupRangesCount = -1
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
