@@ -987,7 +987,7 @@ public:
 					                                FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT * 1.5);
 					self->setHandshakeTimeout(timeoutSecond, self->id);
 					hasSetHandshakeTimeout = true;
-					// Mutiplying by 1.5 to ensure the syscall timeout happens after the ssl shutdown
+					// Mutiplying by 1.5 to ensure timeout never happens before ssl shutdown
 				}
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
@@ -1001,7 +1001,7 @@ public:
 			}
 			wait(onHandshook);
 			if (hasSetHandshakeTimeout) {
-				self->setHandshakeTimeout(0, self->id);
+				self->setHandshakeTimeout(0, self->id); // reset
 			}
 			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
@@ -1101,7 +1101,7 @@ public:
 					                                FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT * 1.5);
 					self->setHandshakeTimeout(timeoutSecond, self->id);
 					hasSetHandshakeTimeout = true;
-					// Mutiplying by 1.5 to ensure the syscall timeout happens after the ssl shutdown
+					// Mutiplying by 1.5 to ensure timeout never happens before ssl shutdown
 				}
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
@@ -1115,7 +1115,7 @@ public:
 			}
 			wait(onHandshook);
 			if (hasSetHandshakeTimeout) {
-				self->setHandshakeTimeout(0, self->id);
+				self->setHandshakeTimeout(0, self->id); // reset
 			}
 			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
