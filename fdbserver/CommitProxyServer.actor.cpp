@@ -651,6 +651,8 @@ struct CommitBatchContext {
 
 	double startTime;
 
+	std::shared_ptr<CommitBatchLatency> latencyMetrics = nullptr;
+
 	// The current stage of batch commit
 	std::string_view stage = UNSET;
 
@@ -910,6 +912,8 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
 
 	// since we are using just the former to limit the number of versions actually in flight!
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
+
+	latencyMetrics = std::make_shared<CommitBatchLatency>();
 }
 
 void CommitBatchContext::setupTraceBatch() {
@@ -958,7 +962,7 @@ double computeReleaseDelay(CommitBatchContext* self, double latencyBucket) {
 }
 
 ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
-
+	state std::chrono::high_resolution_clock::time_point startTimeHighRes = std::chrono::high_resolution_clock::now();
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
 	state const int64_t localBatchNumber = self->localBatchNumber;
@@ -1006,6 +1010,8 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		pProxyCommitData->stats.txnCommitOut += trs.size();
 		pProxyCommitData->stats.txnRejectedForQueuedTooLong += trs.size();
 		self->rejected = true;
+		self->latencyMetrics->preResolutionTime =
+		    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTimeHighRes).count();
 		return Void();
 	}
 
@@ -1056,6 +1062,8 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.GotCommitVersion");
 	}
 
+	self->latencyMetrics->preResolutionTime =
+	    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTimeHighRes).count();
 	return Void();
 }
 
@@ -1111,6 +1119,7 @@ EncryptCipherDomainId getEncryptDetailsFromMutationRef(ProxyCommitData* commitDa
 } // namespace
 
 ACTOR Future<Void> getResolution(CommitBatchContext* self) {
+	state std::chrono::high_resolution_clock::time_point startTime = std::chrono::high_resolution_clock::now();
 	state double resolutionStart = g_network->timer_monotonic();
 	// Sending these requests is the fuzzy border between phase 1 and phase 2; it could conceivably overlap with
 	// resolution processing but is still using CPU
@@ -1205,7 +1214,8 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys = wait(getCipherKeys);
 		self->cipherKeys = cipherKeys;
 	}
-
+	self->latencyMetrics->resolutionTime =
+	    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
 	return Void();
 }
 
@@ -2325,6 +2335,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 }
 
 ACTOR Future<Void> postResolution(CommitBatchContext* self) {
+	state std::chrono::high_resolution_clock::time_point startTime = std::chrono::high_resolution_clock::now();
 	state double postResolutionStart = g_network->timer_monotonic();
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
@@ -2612,10 +2623,13 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	}
 
 	pProxyCommitData->stats.processingMutationDist->sampleSeconds(g_network->timer_monotonic() - postResolutionQueuing);
+	self->latencyMetrics->postResolutionTime =
+	    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
 	return Void();
 }
 
 ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
+	state std::chrono::high_resolution_clock::time_point startTime = std::chrono::high_resolution_clock::now();
 	state double tLoggingStart = g_network->timer_monotonic();
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state Span span("MP:transactionLogging"_loc, self->span.context);
@@ -2654,10 +2668,13 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 	}
 	pProxyCommitData->logSystem->popTxs(self->msg.popTo);
 	pProxyCommitData->stats.tlogLoggingDist->sampleSeconds(g_network->timer_monotonic() - tLoggingStart);
+	self->latencyMetrics->transactionLoggingTime =
+	    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
 	return Void();
 }
 
 ACTOR Future<Void> reply(CommitBatchContext* self) {
+	state std::chrono::high_resolution_clock::time_point startTime = std::chrono::high_resolution_clock::now();
 	state double replyStart = g_network->timer_monotonic();
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state Span span("MP:reply"_loc, self->span.context);
@@ -2860,11 +2877,16 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	ASSERT_ABORT(pProxyCommitData->commitBatchesMemBytesCount >= 0);
 	wait(self->releaseFuture);
 	pProxyCommitData->stats.replyCommitDist->sampleSeconds(g_network->timer_monotonic() - replyStart);
+	self->latencyMetrics->replyTime =
+	    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
 	return Void();
 }
 
 // Commit one batch of transactions trs
 ACTOR Future<Void> commitBatchImpl(CommitBatchContext* pContext) {
+	pContext->latencyMetrics->reset();
+
+	state std::chrono::high_resolution_clock::time_point startTime = std::chrono::high_resolution_clock::now();
 	// WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as
 	// possible
 
@@ -2879,12 +2901,20 @@ ACTOR Future<Void> commitBatchImpl(CommitBatchContext* pContext) {
 	++pContext->pProxyCommitData->stats.commitBatchIn;
 	pContext->setupTraceBatch();
 
+	pContext->latencyMetrics->initializationTime =
+	    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
+
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined
 	/// and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	pContext->stage = PRE_RESOLUTION;
 	wait(CommitBatch::preresolutionProcessing(pContext));
 	if (pContext->rejected) {
 		pContext->pProxyCommitData->commitBatchesMemBytesCount -= pContext->currentBatchMemBytesCount;
+		pContext->latencyMetrics->totalTime =
+		    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
+		if (pContext->latencyMetrics->totalTime > SERVER_KNOBS->COMMIT_BATCH_TIME_LOG_CUTOFF_SEC) {
+			pContext->pProxyCommitData->serviceTracing->update(pContext->latencyMetrics);
+		}
 		return Void();
 	}
 
@@ -2907,6 +2937,12 @@ ACTOR Future<Void> commitBatchImpl(CommitBatchContext* pContext) {
 	wait(CommitBatch::reply(pContext));
 
 	pContext->stage = COMPLETE;
+
+	pContext->latencyMetrics->totalTime =
+	    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
+	if ((pContext->latencyMetrics->totalTime) > SERVER_KNOBS->COMMIT_BATCH_TIME_LOG_CUTOFF_SEC) {
+		pContext->pProxyCommitData->serviceTracing->update(pContext->latencyMetrics);
+	}
 	return Void();
 }
 
@@ -3811,6 +3847,13 @@ ACTOR Future<Void> logDetailedMetrics(ProxyCommitData* commitData) {
 	}
 }
 
+ACTOR Future<Void> commitProxyServiceTracingLogger(ProxyCommitData* commitData) {
+	loop {
+		wait(delay(SERVER_KNOBS->COMMIT_PROXY_SERVICE_LATENCY_LOG_INTERVAL));
+		commitData->serviceTracing->log();
+	}
+}
+
 ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          MasterInterface master,
                                          LifetimeToken masterLifetime,
@@ -3909,6 +3952,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(ddMetricsRequestServer(proxy, db));
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
 	addActor.send(logDetailedMetrics(&commitData));
+	addActor.send(commitProxyServiceTracingLogger(&commitData));
 
 	auto openDb = openDBOnServer(db);
 
