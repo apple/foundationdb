@@ -109,13 +109,6 @@ enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME }
 // New fast restore reuses the type from legacy slow restore
 enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
 
-// Helper function to check if a URL is a blobstore:// URL
-// For blobstore:// URLs, describeBackup needs to use invalidVersion to allow writing missing version properties
-// This is needed for S3 where metadata may not be immediately consistent
-static inline bool isBlobstoreUrl(const std::string& url) {
-	return url.find("blobstore://") == 0;
-}
-
 //
 enum {
 	// Backup constants
