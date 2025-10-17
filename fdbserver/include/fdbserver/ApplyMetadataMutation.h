@@ -74,8 +74,7 @@ inline bool isMetadataMutation(MutationRef const& m) {
 	// applyMetadataMutations
 	if (m.type == MutationRef::SetValue) {
 		return (m.param1.size() && m.param1[0] == systemKeys.begin[0] &&
-		        !m.param1.startsWith(nonMetadataSystemKeys.begin)) ||
-		       m.param1.startsWith(changeFeedPrefix);
+		        !m.param1.startsWith(nonMetadataSystemKeys.begin));
 	} else if (m.type == MutationRef::ClearRange) {
 		return m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] &&
 		       !nonMetadataSystemKeys.contains(KeyRangeRef(m.param1, m.param2));

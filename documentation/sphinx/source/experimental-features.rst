@@ -22,6 +22,5 @@ List of features
  GetMappedRange                   Experimental       Experimental       Experimental      
  Tenant                           Experimental       Experimental       Experimental      
  MetaCluster                      Experimental       Experimental       Experimental      
- ChangeFeed                       Experimental       Experimental       Experimental      
  Idempotent txn                   Experimental       Experimental       Experimental      
 ================ =============== ================== ================== ================== 
