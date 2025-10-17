@@ -831,6 +831,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 
 		void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
 
+		void setDebugId(const UID& id) { debugId = id; }
+
 		void setTimeout(double seconds) {
 			timeval timeout;
 			timeout.tv_sec = seconds;
@@ -846,6 +848,7 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		boost::system::error_code err;
 		double timeoutSecond = 0;
 		NetworkAddress peerAddr;
+		UID debugId;
 	};
 
 	void action(Handshake& h) {
@@ -866,7 +869,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			if (h.err.failed()) {
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
-				                                                        : "N2_AcceptHandshakeError"_audit)
+				                                                        : "N2_AcceptHandshakeError"_audit,
+				           h.debugId)
 				    .detail("PeerAddr", h.getPeerAddress())
 				    .detail("PeerAddress", h.getPeerAddress())
 				    .detail("PeerEndPoint", h.getPeerEndPointAddress())
@@ -880,7 +884,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		} catch (...) {
 			TraceEvent(SevWarn,
 			           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError"_audit
-			                                                        : "N2_AcceptHandshakeUnknownError"_audit)
+			                                                        : "N2_AcceptHandshakeUnknownError"_audit,
+			           h.debugId)
 			    .detail("PeerAddr", h.getPeerAddress())
 			    .detail("PeerAddress", h.getPeerAddress())
 			    .detail("PeerEndPoint", h.getPeerEndPointAddress())
@@ -975,6 +980,7 @@ public:
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
 				handshake->setPeerAddr(self->getPeerAddress());
+				handshake->setDebugId(self->id);
 				if (FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS > 0) {
 					handshake->timeoutSecond = std::max(FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS,
 					                                    FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT * 1.5);
@@ -1084,6 +1090,7 @@ public:
 				auto handshake =
 				    new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
 				handshake->setPeerAddr(self->getPeerAddress());
+				handshake->setDebugId(self->id);
 				if (FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS > 0) {
 					handshake->timeoutSecond = std::max(FLOW_KNOBS->TLS_HANDSHAKE_TIMEOUT_SECONDS,
 					                                    FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT * 1.5);
