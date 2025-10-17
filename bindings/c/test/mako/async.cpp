@@ -148,11 +148,6 @@ repeat_immediate_steps:
 						postNextTick();
 					}
 				}
-			} else {
-				// blob granules op error
-				updateErrorStats(f.error(), iter.op);
-				FutureRC rc = handleForOnError(tx, f, "BG_ON_ERROR", args.isAnyTimeoutEnabled());
-				onIterationEnd(rc);
 			}
 		});
 	}

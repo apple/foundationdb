@@ -93,7 +93,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
 
 		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
-		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.1)) {
+		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.5)) {
 			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
 		}
 
@@ -481,7 +481,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	                                              Database cx,
 	                                              FileBackupAgent* backupAgent,
 	                                              Standalone<StringRef> lastBackupContainer,
-	                                              UID randomID) {
+	                                              UID randomID,
+	                                              Optional<std::string> encryptionKeyFileName) {
 		state Transaction tr(cx);
 		state int rowCount = 0;
 		loop {
@@ -508,7 +509,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                                  normalKeys,
 				                                  Key(),
 				                                  Key(),
-				                                  self->locked)));
+				                                  self->locked,
+				                                  OnlyApplyMutationLogs::False,
+				                                  InconsistentSnapshotOnly::False,
+				                                  ::invalidVersion,
+				                                  encryptionKeyFileName)));
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID).log();
 				ASSERT(false);
 			} catch (Error& e) {
@@ -552,7 +557,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		                                  OnlyApplyMutationLogs::False,
 		                                  InconsistentSnapshotOnly::False,
 		                                  ::invalidVersion,
-		                                  self->encryptionKeyFileName)));
+		                                  lastBackupContainer->getEncryptionKeyFileName())));
 		printf("BackupCorrectness, backupAgent.restore finished for tag:%s\n", restoreTag.toString().c_str());
 		return Void();
 	}
@@ -658,10 +663,20 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			wait(startRestore);
 
 			if (lastBackupContainer && self->performRestore) {
+				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
+				                                                 lastBackupContainer->getProxy(),
+				                                                 lastBackupContainer->getEncryptionKeyFileName());
+				state BackupDescription desc = wait(container->describeBackup());
+
 				if (deterministicRandom()->random01() < 0.5) {
-					wait(attemptDirtyRestore(
-					    self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
+					wait(attemptDirtyRestore(self,
+					                         cx,
+					                         &backupAgent,
+					                         StringRef(lastBackupContainer->getURL()),
+					                         randomID,
+					                         lastBackupContainer->getEncryptionKeyFileName()));
 				}
+
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					for (auto& kvrange : self->backupRanges)
@@ -675,11 +690,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("RestoreAfter", self->restoreAfter)
 				    .detail("BackupTag", printable(self->backupTag));
 
-				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
-				                                                 lastBackupContainer->getProxy(),
-				                                                 lastBackupContainer->getEncryptionKeyFileName());
-				BackupDescription desc = wait(container->describeBackup());
-
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
 					if (deterministicRandom()->random01() < 0.1) {
@@ -687,8 +697,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					} else if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.maxRestorableVersion.get();
 					} else if (deterministicRandom()->random01() < 0.5) {
-						targetVersion = deterministicRandom()->randomInt64(desc.minRestorableVersion.get(),
-						                                                   desc.contiguousLogEnd.get());
+						targetVersion = (desc.minRestorableVersion.get() != desc.maxRestorableVersion.get())
+						                    ? deterministicRandom()->randomInt64(desc.minRestorableVersion.get(),
+						                                                         desc.maxRestorableVersion.get())
+						                    : desc.maxRestorableVersion.get();
 					}
 				}
 
@@ -750,7 +762,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						                                       OnlyApplyMutationLogs::False,
 						                                       InconsistentSnapshotOnly::False,
 						                                       ::invalidVersion,
-						                                       self->encryptionKeyFileName));
+						                                       lastBackupContainer->getEncryptionKeyFileName()));
 					}
 				} else {
 					multipleRangesInOneTag = true;
@@ -775,7 +787,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       OnlyApplyMutationLogs::False,
 					                                       InconsistentSnapshotOnly::False,
 					                                       ::invalidVersion,
-					                                       self->encryptionKeyFileName));
+					                                       lastBackupContainer->getEncryptionKeyFileName()));
 				}
 
 				// Sometimes kill and restart the restore
@@ -792,23 +804,24 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 									tr->clear(range);
 								return Void();
 							}));
-							restores[restoreIndex] = backupAgent.restore(cx,
-							                                             cx,
-							                                             restoreTags[restoreIndex],
-							                                             KeyRef(lastBackupContainer->getURL()),
-							                                             lastBackupContainer->getProxy(),
-							                                             self->restoreRanges,
-							                                             WaitForComplete::True,
-							                                             ::invalidVersion,
-							                                             Verbose::True,
-							                                             Key(),
-							                                             Key(),
-							                                             self->locked,
-							                                             UnlockDB::True,
-							                                             OnlyApplyMutationLogs::False,
-							                                             InconsistentSnapshotOnly::False,
-							                                             ::invalidVersion,
-							                                             self->encryptionKeyFileName);
+							restores[restoreIndex] =
+							    backupAgent.restore(cx,
+							                        cx,
+							                        restoreTags[restoreIndex],
+							                        KeyRef(lastBackupContainer->getURL()),
+							                        lastBackupContainer->getProxy(),
+							                        self->restoreRanges,
+							                        WaitForComplete::True,
+							                        ::invalidVersion,
+							                        Verbose::True,
+							                        Key(),
+							                        Key(),
+							                        self->locked,
+							                        UnlockDB::True,
+							                        OnlyApplyMutationLogs::False,
+							                        InconsistentSnapshotOnly::False,
+							                        ::invalidVersion,
+							                        lastBackupContainer->getEncryptionKeyFileName());
 						}
 					} else {
 						for (restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {
@@ -824,22 +837,23 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 									    tr->clear(self->restoreRanges[restoreIndex]);
 									    return Void();
 								    }));
-								restores[restoreIndex] = backupAgent.restore(cx,
-								                                             cx,
-								                                             restoreTags[restoreIndex],
-								                                             KeyRef(lastBackupContainer->getURL()),
-								                                             lastBackupContainer->getProxy(),
-								                                             WaitForComplete::True,
-								                                             ::invalidVersion,
-								                                             Verbose::True,
-								                                             self->restoreRanges[restoreIndex],
-								                                             Key(),
-								                                             Key(),
-								                                             self->locked,
-								                                             OnlyApplyMutationLogs::False,
-								                                             InconsistentSnapshotOnly::False,
-								                                             ::invalidVersion,
-								                                             self->encryptionKeyFileName);
+								restores[restoreIndex] =
+								    backupAgent.restore(cx,
+								                        cx,
+								                        restoreTags[restoreIndex],
+								                        KeyRef(lastBackupContainer->getURL()),
+								                        lastBackupContainer->getProxy(),
+								                        WaitForComplete::True,
+								                        ::invalidVersion,
+								                        Verbose::True,
+								                        self->restoreRanges[restoreIndex],
+								                        Key(),
+								                        Key(),
+								                        self->locked,
+								                        OnlyApplyMutationLogs::False,
+								                        InconsistentSnapshotOnly::False,
+								                        ::invalidVersion,
+								                        lastBackupContainer->getEncryptionKeyFileName());
 							}
 						}
 					}

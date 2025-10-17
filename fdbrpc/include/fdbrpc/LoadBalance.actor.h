@@ -30,6 +30,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
+#include "flow/Error.h"
 #include "flow/Knobs.h"
 
 #include "fdbrpc/FailureMonitor.h"
@@ -82,6 +83,7 @@ struct LoadBalancedReply {
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply);
 Optional<LoadBalancedReply> getLoadBalancedReply(const void*);
 
+// FIXME: use a less obscure name than `P` here
 ACTOR template <class Req, class Resp, class Interface, class Multi, bool P>
 Future<Void> tssComparison(Req req,
                            Future<ErrorOr<Resp>> fSource,
@@ -89,7 +91,7 @@ Future<Void> tssComparison(Req req,
                            TSSEndpointData tssData,
                            uint64_t srcEndpointId,
                            Reference<MultiInterface<Multi>> ssTeam,
-                           RequestStream<Req, P> Interface::*channel) {
+                           RequestStream<Req, P> Interface::* channel) {
 	state double startTime = now();
 	state Future<Optional<ErrorOr<Resp>>> fTssWithTimeout = timeout(fTss, FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT);
 	state int finished = 0;
@@ -285,7 +287,7 @@ Future<Void> replicaComparison(Req req,
                                Future<ErrorOr<Resp>> fSource,
                                uint64_t srcEndpointId,
                                Reference<MultiInterface<Multi>> ssTeam,
-                               RequestStream<Req, P> Interface::*channel,
+                               RequestStream<Req, P> Interface::* channel,
                                int requiredReplicas) {
 	state ErrorOr<Resp> src;
 
@@ -310,31 +312,55 @@ Future<Void> replicaComparison(Req req,
 			}
 		} else if (!srcLB.present() || !srcLB.get().error.present()) {
 			// Verify that the other SS servers in the team have the same data.
-			state std::vector<Future<Optional<ErrorOr<Resp>>>> restOfTeamFutures;
-			restOfTeamFutures.reserve(ssTeam->size() - 1);
+			std::vector<uint64_t> candidates;
+			// candidates includes all healthy SS endpoints in the team except the one we already
+			// have a response from
 			for (int i = 0; i < ssTeam->size(); i++) {
 				RequestStream<Req, P> const* si = &ssTeam->get(i, channel);
-				if (si->getEndpoint().token.first() !=
-				    srcEndpointId) { // don't re-request to SS we already have a response from
-					if (!IFailureMonitor::failureMonitor().getState(si->getEndpoint()).failed) {
-						resetReply(req);
-						restOfTeamFutures.push_back((
-						    requiredReplicas == BEST_EFFORT
-						        ? timeout(si->tryGetReply(req), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)
-						        : timeout(errorOr(si->getReply(req)), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)));
-					} else if (requiredReplicas == ALL_REPLICAS) {
-						TraceEvent(SevWarnAlways, "UnreachableStorageServer")
-						    .detail("SSID", ssTeam->getInterface(i).id());
-						throw unreachable_storage_replica();
-					}
+				if (si->getEndpoint().token.first() == srcEndpointId) {
+					// Don't re-request to SS we already have a response from
+					continue;
+				}
+				if (!IFailureMonitor::failureMonitor().getState(si->getEndpoint()).failed) {
+					candidates.push_back(si->getEndpoint().token.first());
+				} else if (requiredReplicas == ALL_REPLICAS) {
+					TraceEvent(SevWarnAlways, "UnreachableStorageServer").detail("SSID", ssTeam->getInterface(i).id());
+					throw unreachable_storage_replica();
 				}
 			}
-
-			if (requiredReplicas == BEST_EFFORT || requiredReplicas == ALL_REPLICAS) {
-				wait(waitForAllReady(restOfTeamFutures));
-			} else {
-				wait(waitForQuorumReplies(&restOfTeamFutures, requiredReplicas));
+			int numReplicaToRead = candidates.size();
+			if (requiredReplicas != BEST_EFFORT && requiredReplicas != ALL_REPLICAS) {
+				ASSERT(requiredReplicas > 0);
+				numReplicaToRead = std::min((int)candidates.size(), requiredReplicas);
+				if (FLOW_KNOBS->ENABLE_WARNING_READ_CONSISTENCY_CHECK_NOT_ENOUGH_REPLICA &&
+				    candidates.size() < requiredReplicas) {
+					TraceEvent(SevWarn, "ReplicaConsistencyCheckNotEnoughReplica")
+					    .suppressFor(5.0)
+					    .detail("RequiredReplicas", requiredReplicas)
+					    .detail("AvailableReplicas", candidates.size());
+				}
 			}
+			state std::vector<Future<Optional<ErrorOr<Resp>>>> restOfTeamFutures;
+			restOfTeamFutures.reserve(numReplicaToRead);
+			// Randomly select numReplicaToRead SSes to read from
+			deterministicRandom()->randomShuffle(candidates);
+			candidates.erase(candidates.begin() + numReplicaToRead, candidates.end());
+			std::unordered_set<uint64_t> ssToRead(candidates.begin(), candidates.end());
+
+			for (int i = 0; i < ssTeam->size(); i++) {
+				RequestStream<Req, P> const* si = &ssTeam->get(i, channel);
+				if (!ssToRead.contains(si->getEndpoint().token.first())) {
+					// Only send requests to the SSes that we randomly selected
+					continue;
+				}
+				resetReply(req);
+				restOfTeamFutures.push_back(
+				    (requiredReplicas == BEST_EFFORT
+				         ? timeout(si->tryGetReply(req), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)
+				         : timeout(errorOr(si->getReply(req)), FLOW_KNOBS->LOAD_BALANCE_FETCH_REPLICA_TIMEOUT)));
+			}
+
+			wait(waitForAllReady(restOfTeamFutures));
 
 			int numError = 0;
 			int numMismatch = 0;
@@ -386,6 +412,17 @@ Future<Void> replicaComparison(Req req,
 							}
 						}
 					}
+				}
+
+				// We must always propagate wrong_shard_server to the caller because it is signal to
+				// perform critical operations like invalidating the shard mapping cache.
+				if (replicaErrorCode == error_code_wrong_shard_server) {
+					TraceEvent(SevWarnAlways, "ReplicaComparisonReadError")
+					    .suppressFor(1.0)
+					    .detail("TeamSize", restOfTeamFutures.size() + 1)
+					    .detail("RequiredReplies", requiredReplicas)
+					    .detail("SSError", error_code_wrong_shard_server);
+					throw wrong_shard_server();
 				}
 			}
 
@@ -439,7 +476,7 @@ struct RequestData : NonCopyable {
 	                                     QueueModel* model,
 	                                     Future<Reply> ssResponse,
 	                                     Reference<MultiInterface<Multi>> alternatives,
-	                                     RequestStream<Request, P> Interface::*channel) {
+	                                     RequestStream<Request, P> Interface::* channel) {
 		if (model) {
 			// Send parallel request to TSS pair, if it exists
 			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
@@ -464,20 +501,35 @@ struct RequestData : NonCopyable {
 	Future<Void> maybeDoReplicaComparison(Request& request,
 	                                      QueueModel* model,
 	                                      Reference<MultiInterface<Multi>> alternatives,
-	                                      RequestStream<Request, P> Interface::*channel,
+	                                      RequestStream<Request, P> Interface::* channel,
 	                                      int requiredReplicas) {
 		if (model && (compareReplicas || FLOW_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS)) {
 			ASSERT(requestStream != nullptr);
-			int requiredReplicaCount =
-			    compareReplicas ? requiredReplicas : FLOW_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+			if (compareReplicas) {
+				// In case compareReplicas == true, we may read extra requiredReplicas replica.
+				// The value of compareReplicas is decided by the caller and the knobs.
+				// If the caller is fetchKeys, when ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT is on,
+				// the value is DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS.
+				// If the caller is backup agents, when ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS is on,
+				// the value is BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS.
+				// Otherwise, the value is 0.
+				return replicaComparison(request,
+				                         response,
+				                         requestStream->getEndpoint().token.first(),
+				                         alternatives,
+				                         channel,
+				                         requiredReplicas);
+			}
+			// In case ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS is on, we read extra
+			// READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS replica and conduct consistency
+			// check among replica for any read request.
 			return replicaComparison(request,
 			                         response,
 			                         requestStream->getEndpoint().token.first(),
 			                         alternatives,
 			                         channel,
-			                         requiredReplicaCount);
+			                         FLOW_KNOBS->READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS);
 		}
-
 		return Void();
 	}
 
@@ -489,7 +541,7 @@ struct RequestData : NonCopyable {
 	    Request& request,
 	    QueueModel* model,
 	    Reference<MultiInterface<Multi>> alternatives, // alternatives and channel passed through for TSS check
-	    RequestStream<Request, P> Interface::*channel) {
+	    RequestStream<Request, P> Interface::* channel) {
 		modelHolder = Reference<ModelHolder>();
 		requestStream = stream;
 		requestStarted = false;
@@ -636,10 +688,12 @@ struct RequestData : NonCopyable {
 // interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
 // If compareReplicas is set, does a consistency check by fetching and comparing results from storage
 // replicas (as many as specified by "requiredReplicas") and throws an exception if an inconsistency is found.
+// FIXME: reformat this minus the long inline comment about one parameter, so that the indentation of
+// the parameters is more to the right and not confusingly lined up with the code of this function.
 ACTOR template <class Interface, class Request, class Multi, bool P>
 Future<REPLY_TYPE(Request)> loadBalance(
     Reference<MultiInterface<Multi>> alternatives,
-    RequestStream<Request, P> Interface::*channel,
+    RequestStream<Request, P> Interface::* channel,
     Request request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
@@ -984,7 +1038,7 @@ Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const void*);
 // returned future.
 ACTOR template <class Interface, class Request, class Multi, bool P>
 Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> alternatives,
-                                             RequestStream<Request, P> Interface::*channel,
+                                             RequestStream<Request, P> Interface::* channel,
                                              Request request = Request(),
                                              TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
                                              AtMostOnce atMostOnce = AtMostOnce::False,

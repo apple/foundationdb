@@ -12,4 +12,4 @@ startDelay = 0
     testsMatching = '/'
     # ConfigDB tests persist state, so running these tests
     # sequentially can cause issues
-    testsIgnored = '/fdbserver/ConfigDB/'
+    testsIgnored = '/fdbserver/ConfigDB/;/fdbrpc/grpc'

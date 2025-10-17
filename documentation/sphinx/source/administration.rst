@@ -13,6 +13,9 @@ Administration
    moving-a-cluster
    tls
    authorization
+   bulkload-user
+   bulkdump
+   
 
 This document covers the administration of an existing FoundationDB cluster. We recommend you read this document before setting up a cluster for performance testing or production use.
 
@@ -752,7 +755,7 @@ For **RHEL/CentOS**, perform the upgrade using the rpm command:
     user@host$ sudo rpm -Uvh |package-rpm-clients| \\
     |package-rpm-server|
 
-The ``foundationdb-clients`` package also installs the :doc:`C <api-c>` API. If your clients use :doc:`Ruby <api-ruby>`, :doc:`Python <api-python>`, `Java <javadoc/index.html>`_, or `Go <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>`_, follow the instructions in the corresponding language documentation to install the APIs.
+The ``foundationdb-clients`` package also installs the :doc:`C <api-c>` API. If your clients use :doc:`Ruby <api-ruby>`, :doc:`Python <api-python>`, `Java <https://www.javadoc.io/doc/org.foundationdb/fdb-java/latest/index.html>`_, or `Go <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>`_, follow the instructions in the corresponding language documentation to install the APIs.
 
 Test the database
 -----------------
@@ -763,6 +766,15 @@ Remove old client library versions
 ----------------------------------
 
 You can now remove old client library versions from your clients. This is only to stop creating unnecessary connections.
+
+
+.. _bulkload_admin:
+
+BulkDump and BulkLoad
+=====================
+
+For how to use :command:`BulkDump` and :command:`BulkLoad`, see :doc:`bulkload-user`.
+For how :command:`BulkDump` works, see :doc:`bulkdump`.
 
 .. _version-specific-upgrading:
 

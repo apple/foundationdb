@@ -1180,9 +1180,6 @@ void usage() {
 	    "%-24s %s\n", "    --disable_client_bypass", "Disable client-bypass forcing mako to use multi-version client");
 	printf("%-24s %s\n", "    --json_report=PATH", "Output stats to the specified json file (Default: mako.json)");
 	printf("%-24s %s\n",
-	       "    --bg_file_path=PATH",
-	       "Read blob granule files from the local filesystem at PATH and materialize the results.");
-	printf("%-24s %s\n",
 	       "    --stats_export_path=PATH",
 	       "Write the serialized DDSketch data to file at PATH. Can be used in either run or build mode.");
 	printf(

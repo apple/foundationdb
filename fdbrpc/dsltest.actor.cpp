@@ -870,6 +870,7 @@ ACTOR [[flow_allow_discard]] Future<Void> actorTest10A(FutureStream<int> inputSt
 	for (i = 0; i < 5; i++) {
 		wait(go);
 		int input = waitNext(inputStream);
+		(void)input;
 	}
 	return Void();
 }

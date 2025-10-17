@@ -163,41 +163,6 @@ struct MutationAndVersionStream {
 	bool operator<(MutationAndVersionStream const& rhs) const { return next.version > rhs.next.version; }
 };
 
-struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
-	UID id;
-	Future<Void> updater;
-	NotifiedVersion version;
-	NotifiedVersion desired;
-	UID interfToken;
-	DatabaseContext* context;
-	double created;
-
-	~ChangeFeedStorageData();
-};
-
-struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
-	PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> mutations;
-	std::vector<ReplyPromiseStream<ChangeFeedStreamReply>> streams;
-
-	Version getVersion();
-	Future<Void> whenAtLeast(Version version);
-
-	UID dbgid;
-	DatabaseContext* context;
-	NotifiedVersion lastReturnedVersion;
-	std::vector<Reference<ChangeFeedStorageData>> storageData;
-	AsyncVar<int> notAtLatest;
-	Promise<Void> refresh;
-	Version maxSeenVersion;
-	Version endVersion = invalidVersion;
-	Version popVersion =
-	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
-	double created = 0;
-
-	explicit ChangeFeedData(DatabaseContext* context = nullptr);
-	~ChangeFeedData();
-};
-
 struct EndpointFailureInfo {
 	double startTime = 0;
 	double lastRefreshTime = 0;
@@ -210,54 +175,6 @@ struct KeyRangeLocationInfo {
 	KeyRangeLocationInfo() {}
 	KeyRangeLocationInfo(KeyRange range, Reference<LocationInfo> locations) : range(range), locations(locations) {}
 };
-
-struct OverlappingChangeFeedsInfo {
-	Arena arena;
-	VectorRef<OverlappingChangeFeedEntry> feeds;
-	// would prefer to use key range map but it complicates copy/move constructors
-	std::vector<std::pair<KeyRangeRef, Version>> feedMetadataVersions;
-
-	// for a feed that wasn't present, returns the metadata version it would have been fetched at.
-	Version getFeedMetadataVersion(const KeyRangeRef& feedRange) const;
-};
-
-struct ChangeFeedCacheRange {
-	Key tenantPrefix;
-	Key rangeId;
-	KeyRange range;
-
-	ChangeFeedCacheRange(Key tenantPrefix, Key rangeId, KeyRange range)
-	  : tenantPrefix(tenantPrefix), rangeId(rangeId), range(range) {}
-	ChangeFeedCacheRange(std::tuple<Key, Key, KeyRange> range)
-	  : tenantPrefix(std::get<0>(range)), rangeId(std::get<1>(range)), range(std::get<2>(range)) {}
-
-	bool operator==(const ChangeFeedCacheRange& rhs) const {
-		return tenantPrefix == rhs.tenantPrefix && rangeId == rhs.rangeId && range == rhs.range;
-	}
-};
-
-struct ChangeFeedCacheData : ReferenceCounted<ChangeFeedCacheData> {
-	Version version = -1; // The first version durably stored in the cache
-	Version latest =
-	    -1; // The last version durably store in the cache; this version will not be readable from disk before a commit
-	Version popped = -1; // The popped version of this change feed
-	bool active = false;
-	double inactiveTime = 0;
-};
-
-namespace std {
-template <>
-struct hash<ChangeFeedCacheRange> {
-	static constexpr std::hash<StringRef> hashFunc{};
-	std::size_t operator()(ChangeFeedCacheRange const& range) const {
-		std::size_t seed = 0;
-		boost::hash_combine(seed, hashFunc(range.rangeId));
-		boost::hash_combine(seed, hashFunc(range.range.begin));
-		boost::hash_combine(seed, hashFunc(range.range.end));
-		return seed;
-	}
-};
-} // namespace std
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
@@ -431,42 +348,6 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-	Future<Void> getChangeFeedStream(Reference<ChangeFeedData> results,
-	                                 Key rangeID,
-	                                 Version begin = 0,
-	                                 Version end = std::numeric_limits<Version>::max(),
-	                                 KeyRange range = allKeys,
-	                                 int replyBufferSize = -1,
-	                                 bool canReadPopped = true,
-	                                 ReadOptions readOptions = { ReadType::NORMAL, CacheResult::False },
-	                                 bool encrypted = false,
-	                                 Future<Key> tenantPrefix = Key());
-
-	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
-	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
-
-	// BlobGranule API.
-	Future<Key> purgeBlobGranules(KeyRange keyRange,
-	                              Version purgeVersion,
-	                              Optional<Reference<Tenant>> tenant,
-	                              bool force = false);
-	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
-
-	Future<bool> blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
-	Future<bool> blobbifyRangeBlocking(KeyRange range, Optional<Reference<Tenant>> tenant = {});
-	Future<bool> unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
-	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
-	                                                                int rangeLimit,
-	                                                                Optional<Reference<Tenant>> tenant = {});
-	Future<Version> verifyBlobRange(const KeyRange& range,
-	                                Optional<Version> version,
-	                                Optional<Reference<Tenant>> tenant = {});
-	Future<bool> flushBlobRange(const KeyRange& range,
-	                            bool compact,
-	                            Optional<Version> version,
-	                            Optional<Reference<Tenant>> tenant = {});
-	Future<bool> blobRestore(const KeyRange range, Optional<Version> version);
-
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
@@ -546,31 +427,15 @@ public:
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
 
 	std::map<UID, StorageServerInfo*> server_interf;
-	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
 
 	// map from ssid -> tss interface
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
-	// map from changeFeedId -> changeFeedRange
-	std::unordered_map<Key, KeyRange> changeFeedCache;
-	std::unordered_map<UID, ChangeFeedStorageData*> changeFeedUpdaters;
-	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
 
 	IKeyValueStore* storage = nullptr;
-	Future<Void> changeFeedStorageCommitter;
-	Future<Void> initializeChangeFeedCache = Void();
-	int64_t uncommittedCFBytes = 0;
-	Reference<AsyncVar<bool>> commitChangeFeedStorage;
-
-	std::unordered_map<ChangeFeedCacheRange, Reference<ChangeFeedCacheData>> changeFeedCaches;
-	std::unordered_map<Key, std::unordered_map<ChangeFeedCacheRange, Reference<ChangeFeedCacheData>>> rangeId_cacheData;
 
 	void setStorage(IKeyValueStore* storage);
-
-	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
-	Version getMinimumChangeFeedVersion();
-	void setDesiredChangeFeedVersion(Version v);
 
 	// map from ssid -> ss tag
 	// @note this map allows the client to identify the latest commit versions
@@ -616,8 +481,6 @@ public:
 	Counter transactionsCommitCompleted;
 	Counter transactionKeyServerLocationRequests;
 	Counter transactionKeyServerLocationRequestsCompleted;
-	Counter transactionBlobGranuleLocationRequests;
-	Counter transactionBlobGranuleLocationRequestsCompleted;
 	Counter transactionStatusRequests;
 	Counter transactionTenantLookupRequests;
 	Counter transactionTenantLookupRequestsCompleted;
@@ -633,27 +496,6 @@ public:
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
 	Counter transactionCommitVersionNotFoundForSS;
-
-	// Blob Granule Read metrics. Omit from logging if not used.
-	bool anyBGReads;
-	CounterCollection ccBG;
-	Counter bgReadInputBytes;
-	Counter bgReadOutputBytes;
-	Counter bgReadSnapshotRows;
-	Counter bgReadRowsCleared;
-	Counter bgReadRowsInserted;
-	Counter bgReadRowsUpdated;
-	DDSketch<double> bgLatencies, bgGranulesPerRequest;
-
-	// Change Feed metrics. Omit change feed metrics from logging if not used
-	bool usedAnyChangeFeeds;
-	CounterCollection ccFeed;
-	Counter feedStreamStarts;
-	Counter feedMergeStreamStarts;
-	Counter feedErrors;
-	Counter feedNonRetriableErrors;
-	Counter feedPops;
-	Counter feedPopsFallback;
 
 	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
@@ -683,7 +525,6 @@ public:
 
 	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
-	bool blobGranuleNoMaterialize = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;

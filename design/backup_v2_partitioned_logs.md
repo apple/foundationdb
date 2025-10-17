@@ -27,6 +27,7 @@ The design of old backup system is [here](https://github.com/apple/foundationdb/
 * **Version**: FDB continuously generate increasing number as version and use version to decide mutation ordering. Version number typically advance one million per second. To restore a FDB cluster to a specified date and time, the restore system first convert the date and time to the corresponding version number and restore the cluster to the version number.
 * **Epoch**: A generation of FDB’s transaction system. After a component of the transaction system failed, FDB automatically initiates a recovery and restores the system in a new healthy generation, which is called an epoch.
 * **Backup worker**: is a new role added to the FDB cluster that is responsible for pulling mutations from transaction logs and saving them to blob storage.
+* **Backup agent**: is a set of processes that performs the following tasks. For the old backup systems (before this version), the backup agent is responsible for reading mutations (i.e., backup mutations created at commit proxies) and key range snapshots from storage servers and saving them to blob storage. For the new backup systems, the backup agent is solely responsible for reading key range snapshots from storage servers, and saving them to blob storage. In other words, the responsibility of saving mutation logs has shifted to the backup worker.
 * **Tag**: A tag is a short address for a mutation’s destination, which includes a locality (`int8_t`, representing the data center ID and a negative number denotes special system locality) and an ID (`int16_t`). The idea is that the tag is a small data structure that consumes less bytes than using IP addresses or storage server’s UIDs (16 bytes each), since tags are associated with each mutation and are stored both in memory and on disk.
 * **Tag partitioned log system**: FDB’s write-ahead log is a tag partitioned log system, where each mutation is assigned a number of tags.
 * **Log router tag**: is a special system tag, e.g., `-2:0` where locality `-2` means log router tag and `0` means ID. If attached to a mutation, originally this tag means the mutation should be sent to a remote log router. In the new backup system, we reuse this tag for backup workers to receive all mutations in a number of partitioned streams.
@@ -69,7 +70,7 @@ A command line tool `fdbconvert` has been written to convert new backup logs int
 * How to start a new type backup: e.g.,
 
   ```
-  fdbbackup start -C fdb.cluster -p -d blob_url
+  fdbbackup start -C fdb.cluster --partitioned-log-experimental -d blob_url
   ```
 
 ### KPI's and Health
@@ -168,7 +169,7 @@ From an end-to-end perspective, the new backup system works in the following ste
 4. Periodically, backup workers upload mutations to the requested blob storage, and save the progress into the database;
 5. The backup is restorable when backup workers have saved versions that are larger than the complete snapshot’s end version, and the backup is stopped if a stop on restorable flag is set in the request.
 
-The new backup has four major components: 1) backup workers; 2) recruitment of backup workers; 3) extension of tag partitioned log system to support pseudo tags; 4) integration with existing `TaskBucket` based backup command interface; and 5) integration with the Performant Restore System.
+The new backup has five major components: 1) backup workers; 2) recruitment of backup workers; 3) extension of tag partitioned log system to support pseudo tags; 4) integration with existing `TaskBucket` based backup command interface; and 5) integration with the existing `TaskBucket` based restore system to read partitioned mutation logs.
 
 ### Backup workers
 
@@ -217,13 +218,13 @@ To support multiple consumers of the log router tag, the peek and pop has been e
 
 Note the introduction of pseudo tags opens the possibility for more usage scenarios. For instance, a change stream can be implemented with a pseudo tag, where the new consumer can look at each mutation and emit mutations on specified key ranges.
 
-### Integration with existing taskbucket based backup command interface
+### Integration with existing `TaskBucket` based backup command interface
 
 We strive to keep the operational interface the same as the old backup system. That is, the new backup is initiated by the client as before with an additional flag. FDB cluster receives the backup request, sees the flag being set, and uses the new system for generating mutation logs.
 
 By default, backup workers are not enabled in the system. When operators submit a new backup request for the first time, the database performs a configuration change (`backup_worker_enabled:=1`) that enables backup workers.
 
-The operator’s backup request can indicate if an old backup or a new backup is used. This is a command line option (i.e., `-p` or `--partitioned-log`) in the `fdbbackup` command. A backup request of the new type is started in the following steps:
+The operator’s backup request can indicate if an old backup or a new backup is used. This is a command line option (i.e., `--partitioned-log-experimental`) in the `fdbbackup` command. A backup request of the new type is started in the following steps:
 
 1. Operators use `fdbbackup` tool to write the backup range to a system key, i.e., `\xff\x02/backupStarted`.
 2. All backup workers monitor the key `\xff\x02/backupStarted`, see the change, and start logging mutations.
@@ -256,8 +257,16 @@ The command line for pause or resume backups remains the same, but the implement
 
 * Partitioned mutation logs are stored in `plogs/XXXX/XXXX` directory and their names are in the format of `log,[startVersion],[endVersion],[UID],[N-of-M],[blockSize]`, where `M` is total partition number, `N` can be any number from `0` to `M - 1`. In contrast, old mutation logs are stored in `logs/XXXX/XXXX` directory and are named differently.
 * To restore a version range, all partitioned logs for the range needs to be available. The restore process should read all partitioned logs, and combine mutations from different logs into one mutation stream, ordered by `(commit_version, subsequence)` pair. It is guaranteed that all mutations form a total order. Note in the old backup files, there is no subsequence number, as each version’s mutations are serialized in order in one file.
+* [PR #11901](https://github.com/apple/foundationdb/pull/11901) adds `RestoreDispatchPartitionedTaskFunc` to support restoring from partitioned-log-format backup. At a high level, backup agents will read partitioned mutation logs from the blob store, convert them into the old mutation log format in memory, and write mutations to the target database. All the rest of restore process is the same as before.
 
-### Integration with the [Performant Restore System](https://github.com/apple/foundationdb/issues/1049)
+  Specifically, `StartFullRestoreTaskFunc` kicks off the process by setting up some variable and start the first `RestoreDispatchPartitionedTaskFunc`, and each `RestoreDispatchPartitionedTaskFunc` with an input range `[v0, v1)` is to orchestrate the restore of both log and range file, then start the next `RestoreDispatchPartitionedTaskFunc` with an input range `[v1, v2)`, or finish the process if `v1 > targetVersion`.
+
+  There are many `RestoreRangeTaskFunc` for a single `RestoreDispatchPartitionedTaskFunc`, each responsible to restore a block of a range file, and one `RestoreLogDataPartitionedTaskFunc` for a single `RestoreDispatchPartitionedTaskFunc`. `RestoreRangeTaskFunc` would restore the keys to their original key while `RestoreLogDataPartitionedTaskFunc` would restore the keys to an intermediate state with a certain prefix(`alog`), which can be recognized by the commit proxy later to convert them back from this intermediate format into their original mutations. This is to make sure smaller version mutations do not override later version range file keys.
+
+
+### Integration with the [Performant Restore System](https://github.com/apple/foundationdb/issues/1049) (Deprecated)
+
+The Performant Restore System is deprecated and will be removed in the future, since the system is not fault tolerant during the restore. We have made changes to the current restore system to support the new backup file structure and format. This is kept in the code so we have additional coverage for simulation tests of the new backup system.
 
 As discussed above, the new backup system split mutation logs into multiple partitions. Thus, the restore process must verify the backup files are continuous for all partitions with the restore’s version range. This is possible because each log file name has the information about its partition number and the total number of partitions.
 
@@ -330,8 +339,6 @@ System operator can control the following backup properties:
 
 The feature will be tested both in simulation and in real clusters:
 
-* New test cases are added into the test folder in FDB. The nightly correctness (i.e., simulation) tests will test the correctness of both backup and restore.
+* New test cases are added into the test folder in FDB. The nightly correctness (i.e., simulation) tests will test the correctness of both backup and restore. [PR #12019](https://github.com/apple/foundationdb/pull/12019) added tests to switch between old backup and new backup, and then perform a random restore from one of the backups.
 * Tests will be added to constantly backup a cluster with the new backup system and restore the backup to ensure the restore works on real clusters. During the time period of active backup, the cluster should have better write performance than using old backup system.
 * Tests should also be conducted with production data. This ensures backup data is restorable and catches potential bugs in backup and restore. This test is preferably conducted regularly, e.g., weekly per cluster.
-
-Before the restore system is available, the testing strategy for backup files is to keep old backup system running. Thus, both new backup files and old backup files are generated. Then both types of log files are decoded and compared against. The new backup file is considered correct if its content matches the content of old log files.

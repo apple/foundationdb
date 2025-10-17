@@ -210,7 +210,9 @@ struct SpecialTraceMetricType
 #define TRACE_METRIC_TYPE(from, to)                                                                                    \
 	template <>                                                                                                        \
 	struct SpecialTraceMetricType<from> : std::true_type {                                                             \
-		static to getValue(from v) { return v; }                                                                       \
+		static to getValue(from v) {                                                                                   \
+			return v;                                                                                                  \
+		}                                                                                                              \
 	}
 
 TRACE_METRIC_TYPE(double, double);
@@ -594,7 +596,8 @@ extern std::atomic<trace_clock_t> g_trace_clock;
 extern TraceBatch g_traceBatch;
 
 #define DUMPTOKEN(name)                                                                                                \
-	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
+	!g_network->isSimulated() &&                                                                                       \
+	    TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
 #define DisabledTraceEvent(...) false && TraceEvent()
 #endif

@@ -316,8 +316,7 @@ typedef enum _ESOArgType {
 } ESOArgType;
 
 //! this option definition must be the last entry in the table
-#define SO_END_OF_OPTIONS                                                                                              \
-	{ -1, nullptr, SO_NONE }
+#define SO_END_OF_OPTIONS { -1, nullptr, SO_NONE }
 
 #ifdef _DEBUG
 #ifdef _MSC_VER
@@ -518,7 +517,9 @@ private:
 	}
 	bool IsEqual(SOCHAR a_cLeft, SOCHAR a_cRight, int a_nArgType) const;
 
-	inline void Copy(SOCHAR** ppDst, SOCHAR** ppSrc, int nCount) const {
+	// Disable ASAN in here. Its complaining memcpy-param-overlap when
+	// we shuffle the argv array by doing Copys in ShuffleArg.
+	__attribute__((no_sanitize("address"))) inline void Copy(SOCHAR** ppDst, SOCHAR** ppSrc, int nCount) const {
 #ifdef SO_MAX_ARGS
 		// keep our promise of no CLIB usage
 		while (nCount-- > 0)

@@ -49,7 +49,7 @@ function(install_symlink)
         TO "../${rel_path}bin/${IN_FILE_NAME}"
         DESTINATION "usr/lib64/${IN_LINK_NAME}"
         COMPONENTS
-        "${IN_COMPONENT}-el7"
+        "${IN_COMPONENT}-el9"
         "${IN_COMPONENT}-deb")
       install_symlink_impl(
         TO "../${rel_path}bin/${IN_FILE_NAME}"
@@ -64,7 +64,7 @@ function(install_symlink)
         TO "../${rel_path}bin/${IN_FILE_NAME}"
         DESTINATION "usr/bin/${IN_LINK_NAME}"
         COMPONENTS
-        "${IN_COMPONENT}-el7"
+        "${IN_COMPONENT}-el9"
         "${IN_COMPONENT}-deb")
     elseif("${IN_LINK_DIR}" MATCHES "fdbmonitor")
       install_symlink_impl(
@@ -75,7 +75,7 @@ function(install_symlink)
         TO "../../${rel_path}bin/${IN_FILE_NAME}"
         DESTINATION "usr/lib/foundationdb/${IN_LINK_NAME}"
         COMPONENTS
-        "${IN_COMPONENT}-el7"
+        "${IN_COMPONENT}-el9"
         "${IN_COMPONENT}-deb")
     else()
       message(FATAL_ERROR "Unknown LINK_DIR ${IN_LINK_DIR}")

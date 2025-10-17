@@ -79,15 +79,6 @@ public:
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
 	virtual Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) = 0;
 	virtual Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) = 0;
-	virtual Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(KeyRange const& range, int rangeLimit) = 0;
-	virtual Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranules(KeyRange const& range,
-	                                                                            Version begin,
-	                                                                            Optional<Version> readVersion,
-	                                                                            Version* readVersionOut = nullptr) = 0;
-	virtual Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(KeyRange const& range,
-	                                                                                   Optional<Version> summaryVersion,
-	                                                                                   int rangeLimit) = 0;
-	virtual void addGranuleMaterializeStats(const GranuleMaterializeStats& stats) = 0;
 	virtual void addReadConflictRange(KeyRangeRef const& keys) = 0;
 	virtual void makeSelfConflicting() = 0;
 	virtual void atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType) = 0;

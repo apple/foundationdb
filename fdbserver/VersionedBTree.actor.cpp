@@ -8328,7 +8328,7 @@ public:
 		}));
 	}
 
-	~KeyValueStoreRedwood() override{};
+	~KeyValueStoreRedwood() override {};
 
 private:
 	std::string m_filename;
@@ -10037,8 +10037,8 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	return Void();
 }
 
-struct SimpleCounter {
-	SimpleCounter() : x(0), t(timer()), start(t), xt(0) {}
+struct ReallySimpleCounter {
+	ReallySimpleCounter() : x(0), t(timer()), start(t), xt(0) {}
 	void operator+=(int n) { x += n; }
 	void operator++() { x++; }
 	int64_t get() { return x; }
@@ -10302,12 +10302,12 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state Version version = lastVer + 1;
 
-	state SimpleCounter mutationBytes;
-	state SimpleCounter keyBytesInserted;
-	state SimpleCounter valueBytesInserted;
-	state SimpleCounter sets;
-	state SimpleCounter rangeClears;
-	state SimpleCounter keyBytesCleared;
+	state ReallySimpleCounter mutationBytes;
+	state ReallySimpleCounter keyBytesInserted;
+	state ReallySimpleCounter valueBytesInserted;
+	state ReallySimpleCounter sets;
+	state ReallySimpleCounter rangeClears;
+	state ReallySimpleCounter keyBytesCleared;
 	state int mutationBytesThisCommit = 0;
 	state int mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 

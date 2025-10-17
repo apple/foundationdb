@@ -59,6 +59,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	bool unseedCheck{ true };
+	bool skipSetup{ false }; // Useful for restarting tests
 	Key keyPrefix;
 
 	std::vector<Future<Void>> clients;
@@ -76,6 +77,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 		unseedCheck = getOption(options, "unseedCheck"_sr, true);
+		skipSetup = getOption(options, "skipSetup"_sr, false);
 		if constexpr (MultiTenancy) {
 			ASSERT(g_network->isSimulated());
 			this->useToken = getOption(options, "useToken"_sr, true);
@@ -87,6 +89,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	Future<Void> setup(Database const& cx) override {
 		if (!unseedCheck) {
 			noUnseed = true;
+		}
+		if (skipSetup) {
+			return Void();
 		}
 		Future<Void> prepare;
 		if constexpr (MultiTenancy) {
@@ -130,6 +135,11 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	Key keyForIndex(int n) { return key(n); }
 	Key key(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }
 	Value value(int n) { return doubleToTestKey(n, keyPrefix); }
+	KeyRange keyRange(int n) {
+		Key beginKey = doubleToTestKey((double)n / nodeCount, keyPrefix);
+		Key endKey = beginKey.withSuffix(" end"_sr);
+		return KeyRangeRef(beginKey, endKey);
+	}
 	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
 
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
@@ -153,6 +163,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 
 	ACTOR Future<Void> cycleClient(Database cx, CycleWorkload* self, double delay) {
 		state double lastTime = now();
+		TraceEvent("CycleClientStart").log();
 		try {
 			loop {
 				wait(poisson(&lastTime, delay));
@@ -171,8 +182,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						self->setAuthToken(tr);
 						// Reverse next and next^2 node
 						Optional<Value> v = wait(tr.get(self->key(r)));
-						if (!v.present())
+						if (!v.present()) {
 							self->badRead("KeyR", r, tr);
+						}
 						state int r2 = self->fromValue(v.get());
 						Optional<Value> v2 = wait(tr.get(self->key(r2)));
 						if (!v2.present())
@@ -181,18 +193,27 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						Optional<Value> v3 = wait(tr.get(self->key(r3)));
 						if (!v3.present())
 							self->badRead("KeyR3", r3, tr);
-						int r4 = self->fromValue(v3.get());
+						state int r4 = self->fromValue(v3.get());
 
-						tr.clear(self->key(r)); //< Shouldn't have an effect, but will break with wrong ordering
+						// Single key clear range op will be converted to point delete inside storage engine. Generating
+						// a larger range here to increase test coverage.
+						tr.clear(
+						    self->keyRange(r),
+						    AddConflictRange::True); //< Shouldn't have an effect, but will break with wrong ordering
 						tr.set(self->key(r), self->value(r3));
 						tr.set(self->key(r2), self->value(r4));
 						tr.set(self->key(r3), self->value(r2));
-						// TraceEvent("CyclicTest").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
-						// TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
-						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
+						// TraceEvent("CyclicTest1").detail("RawKey", r).detail("RawValue", r3).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString()).log();
+						// TraceEvent("CyclicTest2").detail("RawKey", r2).detail("RawValue", r4).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString()).log();
+						// TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString()).log();
 
 						wait(tr.commit());
-						// TraceEvent("CycleCommit");
+						// TraceEvent("CyclicTestCommit")
+						// 	.detail("R1", r)
+						// 	.detail("R2", r2)
+						// 	.detail("R3", r3)
+						// 	.detail("R4", r4)
+						// 	.log();
 						break;
 					} catch (Error& e) {
 						if (e.code() == error_code_transaction_too_old)

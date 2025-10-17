@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include "flow/GetSourceVersion.h"
+
+// This is a generated file.
 #include "flow/SourceVersion.h"
 
 const char* getSourceVersion() {

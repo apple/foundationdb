@@ -233,65 +233,6 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 	return std::make_pair(maxQueueSize, maxPoppedVersionLag);
 }
 
-// Returns a vector of blob worker interfaces which have been persisted under the system key space
-ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx,
-                                                              bool use_system_priority = false,
-                                                              Version* grv = nullptr) {
-	state Transaction tr(cx);
-	loop {
-		if (use_system_priority) {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		}
-		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		try {
-			RangeResult blobWorkersList = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(!blobWorkersList.more && blobWorkersList.size() < CLIENT_KNOBS->TOO_MANY);
-
-			std::vector<BlobWorkerInterface> blobWorkers;
-			blobWorkers.reserve(blobWorkersList.size());
-			for (int i = 0; i < blobWorkersList.size(); i++) {
-				blobWorkers.push_back(decodeBlobWorkerListValue(blobWorkersList[i].value));
-			}
-			if (grv) {
-				*grv = tr.getReadVersion().get();
-			}
-			return blobWorkers;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-ACTOR Future<std::vector<std::pair<UID, UID>>> getBlobWorkerAffinity(Database cx,
-                                                                     bool use_system_priority = false,
-                                                                     Version* grv = nullptr) {
-	state Transaction tr(cx);
-	loop {
-		if (use_system_priority) {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		}
-		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		try {
-			RangeResult blobWorkerAffinity = wait(tr.getRange(blobWorkerAffinityKeys, CLIENT_KNOBS->TOO_MANY));
-
-			std::vector<std::pair<UID, UID>> affinities;
-			affinities.reserve(blobWorkerAffinity.size());
-			for (int i = 0; i < blobWorkerAffinity.size(); i++) {
-				affinities.push_back(std::make_pair(decodeBlobWorkerAffinityKey(blobWorkerAffinity[i].key),
-				                                    decodeBlobWorkerAffinityValue(blobWorkerAffinity[i].value)));
-			}
-			if (grv) {
-				*grv = tr.getReadVersion().get();
-			}
-			return affinities;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {
 	state Transaction tr(cx);
 	loop {
@@ -1057,6 +998,10 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	printf("Set perpetual_storage_wiggle=0 ...\n");
 	state Version version = wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
+
+	printf("Disabling backup worker ...\n");
+	wait(disableBackupWorker(cx));
+	printf("Disabled backup worker.\n");
 
 	wait(disableConsistencyScanInSim(cx, false));
 

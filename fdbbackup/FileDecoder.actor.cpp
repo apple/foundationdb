@@ -31,7 +31,7 @@
 #include <io.h>
 #endif
 
-#include "fdbbackup/BackupTLSConfig.h"
+#include "fdbclient/BackupTLSConfig.h"
 #include "fdbclient/BuildFlags.h"
 #include "fdbbackup/FileConverter.h"
 #include "fdbbackup/Decode.h"
@@ -334,6 +334,10 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 
 		case OPT_HEX_KEY_PREFIX:
 			param->prefixes.push_back(decode_hex_string(args->OptionArg(), err));
+			break;
+
+		case OPT_PROXY:
+			param->proxy = args->OptionArg();
 			break;
 
 		case OPT_BEGIN_VERSION_FILTER:

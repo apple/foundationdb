@@ -124,6 +124,10 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( FAST_WATCH_TIMEOUT,                     20.0 ); if( randomize && BUGGIFY ) FAST_WATCH_TIMEOUT = 1.0;
 	init( WATCH_TIMEOUT,                          30.0 ); if( randomize && BUGGIFY ) WATCH_TIMEOUT = 20.0;
 
+	// Versions -- knobs that control 5s timeout
+	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND
+	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND);  // Must be the same as SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS
+
 	// Core
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
 	init( LOG_RANGE_BLOCK_SIZE, CORE_VERSIONSPERSECOND );
@@ -168,7 +172,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BACKUP_MAP_KEY_UPPER_LIMIT,              1e5 ); if( buggifyMapLimits ) BACKUP_MAP_KEY_UPPER_LIMIT = 30;
 	init( BACKUP_COPY_TASKS,                        90 );
 	init( BACKUP_BLOCK_SIZE,   LOG_RANGE_BLOCK_SIZE/10 );
-	init( BACKUP_ALLOW_DRYRUN,                    true );
+	init( BACKUP_ALLOW_DRYRUN,                   false );
 	init( COPY_LOG_BLOCK_SIZE,              LOG_RANGE_BLOCK_SIZE ); // the maximum possible value due the getLogRanges limitations
 	init( COPY_LOG_BLOCKS_PER_TASK,               1000 );
 	init( COPY_LOG_PREFETCH_BLOCKS,                  3 );
@@ -176,14 +180,13 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( COPY_LOG_TASK_DURATION_NANOS,	      1e10 ); // 10 seconds
 	init( BACKUP_TASKS_PER_AGENT,                   10 );
 	init( BACKUP_POLL_PROGRESS_SECONDS,             10 );
-	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND
-	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS, 5 * VERSIONS_PER_SECOND);  // Must be the same as SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
 	init( BACKUP_DISPATCH_ADDTASK_SIZE,             50 );
 	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
 	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 20;
+	init (RESTORE_PARTITIONED_BATCH_VERSION_SIZE, 10000000); // each step restores 10s worth of data
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );
 	init( APPLY_MIN_LOCK_BYTES,                   11e6 ); //Must be bigger than TRANSACTION_SIZE_LIMIT
@@ -196,10 +199,13 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 	init( FASTRESTORE_ATOMICOP_WEIGHT,               1 ); if( randomize && BUGGIFY ) { FASTRESTORE_ATOMICOP_WEIGHT = deterministicRandom()->random01() * 200 + 1; }
 	init( RESTORE_RANGES_READ_BATCH,             10000 );
-	init( BLOB_GRANULE_RESTORE_CHECK_INTERVAL,      10 );
+
 	init( BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH, false );
-	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS, true );
-	init( CONSISTENCY_CHECK_REQUIRED_REPLICAS,      -2 ); // Do consistency check based on all available storage replicas
+	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS, false ); if( randomize && BUGGIFY ) { ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS = true; }
+	init( BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS, -2 ); // Do consistency check based on all available storage replicas
+	init( BULKLOAD_JOB_HISTORY_COUNT_MAX,           10 ); if (randomize && BUGGIFY) BULKLOAD_JOB_HISTORY_COUNT_MAX = deterministicRandom()->randomInt(1, 10);
+	init( BULKLOAD_VERBOSE_LEVEL,                   10 );
+	init( S3CLIENT_VERBOSE_LEVEL,                   10 );
 
 	// Configuration
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );
@@ -229,12 +235,13 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( BLOBSTORE_CONCURRENT_WRITES_PER_FILE,      5 );
 	init( BLOBSTORE_CONCURRENT_READS_PER_FILE,       3 );
-	init( BLOBSTORE_ENABLE_READ_CACHE,            true );
+	init( BLOBSTORE_ENABLE_READ_CACHE,            true ); if ( randomize && BUGGIFY ) BLOBSTORE_ENABLE_READ_CACHE = deterministicRandom()->coinflip();
 	init( BLOBSTORE_READ_BLOCK_SIZE,       1024 * 1024 );
 	init( BLOBSTORE_READ_AHEAD_BLOCKS,               0 );
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
 	init( BLOBSTORE_MULTIPART_MAX_PART_SIZE,  20000000 );
 	init( BLOBSTORE_MULTIPART_MIN_PART_SIZE,   5242880 );
+	init( BLOBSTORE_MULTIPART_RETRY_DELAY_MS,     1000 );
 	init( BLOBSTORE_GLOBAL_CONNECTION_POOL,      false );
 	init( BLOBSTORE_ENABLE_LOGGING,               true );
 	init( BLOBSTORE_STATS_LOGGING_INTERVAL,       10.0 );
@@ -248,11 +255,15 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR,      60  );
 	init( BLOBSTORE_MAX_DELAY_CONNECTION_FAILED,    10  );
+	init (BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK,true );
 
 	init( BLOBSTORE_LIST_REQUESTS_PER_SECOND,       200 );
 	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
+
+	// Request 1000 keys at a time, the maximum allowed
+	init( BLOBSTORE_LIST_MAX_KEYS_PER_PAGE,        1000 );
 
 	// Dynamic Knobs
 	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );
@@ -286,6 +297,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	//fdbcli
 	init( CLI_CONNECT_PARALLELISM,                  400 );
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
+	init( CLI_PRINT_INVALID_CONFIGURATION,		  false );
 
 	// trace
 	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );
@@ -307,13 +319,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
-
-	// Blob granules
-	init( BG_MAX_GRANULE_PARALLELISM,                10 );
-	init( BG_TOO_MANY_GRANULES,                   20000 );
-	init( BLOB_METADATA_REFRESH_INTERVAL,          3600 ); if ( randomize && BUGGIFY ) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 120); }
-	init( DETERMINISTIC_BLOB_METADATA,            false ); if( randomize && BUGGIFY_WITH_PROB(0.01) ) DETERMINISTIC_BLOB_METADATA = true;
-	init( ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE,  false ); if ( randomize && BUGGIFY ) { ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE = true; }
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
@@ -341,8 +346,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( REST_KMS_ALLOW_NOT_SECURE_CONNECTION,     false ); if ( randomize && BUGGIFY ) REST_KMS_ALLOW_NOT_SECURE_CONNECTION = !REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
 	init( SIM_KMS_VAULT_MAX_KEYS,                    4096 );
 
-	init( ENABLE_MUTATION_CHECKSUM,                  true ); if ( randomize && BUGGIFY ) ENABLE_MUTATION_CHECKSUM = deterministicRandom()->coinflip(); // Enable this after deserialiser is ported to 7.3.
-	init( ENABLE_ACCUMULATIVE_CHECKSUM,              true ); if ( randomize && BUGGIFY ) ENABLE_ACCUMULATIVE_CHECKSUM = deterministicRandom()->coinflip(); // Enable this after deserialiser is ported to 7.3.
+	init( ENABLE_MUTATION_CHECKSUM,                 false ); if ( randomize && BUGGIFY ) ENABLE_MUTATION_CHECKSUM = deterministicRandom()->coinflip();
+	init( ENABLE_ACCUMULATIVE_CHECKSUM,             false ); if ( randomize && BUGGIFY ) ENABLE_ACCUMULATIVE_CHECKSUM = deterministicRandom()->coinflip();
 	init( ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING,     false );
 	// clang-format on
 }

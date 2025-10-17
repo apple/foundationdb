@@ -37,11 +37,11 @@ struct TransactionLineage : LineageProperties<TransactionLineage> {
 	UID txID;
 	Operation operation = Operation::Unset;
 
-	bool isSet(uint64_t TransactionLineage::*member) const { return this->*member > 0; }
-	bool isSet(UID TransactionLineage::*member) const {
+	bool isSet(uint64_t TransactionLineage::* member) const { return this->*member > 0; }
+	bool isSet(UID TransactionLineage::* member) const {
 		return static_cast<UID>(this->*member).first() > 0 && static_cast<UID>(this->*member).second() > 0;
 	}
-	bool isSet(Operation TransactionLineage::*member) const { return this->*member != Operation::Unset; }
+	bool isSet(Operation TransactionLineage::* member) const { return this->*member != Operation::Unset; }
 };
 
 struct TransactionLineageCollector : IALPCollector<TransactionLineage> {
@@ -93,11 +93,11 @@ struct TransactionLineageCollector : IALPCollector<TransactionLineage> {
 template <class T, class V>
 class ScopedLineage {
 	V before;
-	V T::*member;
+	V T::* member;
 	bool valid = true;
 
 public:
-	ScopedLineage(V T::*member, V const& value) : member(member) {
+	ScopedLineage(V T::* member, V const& value) : member(member) {
 		auto& val = getCurrentLineage()->modify(member);
 		before = val;
 		val = value;
@@ -127,7 +127,7 @@ public:
 };
 
 template <class T, class V>
-ScopedLineage<T, V> make_scoped_lineage(V T::*member, V const& value) {
+ScopedLineage<T, V> make_scoped_lineage(V T::* member, V const& value) {
 	return ScopedLineage<T, V>(member, value);
 }
 #endif

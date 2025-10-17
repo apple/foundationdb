@@ -28,7 +28,8 @@ CommonStorageCounters::CommonStorageCounters(const std::string& name,
   : cc(name, id), finishedQueries("FinishedQueries", cc), bytesQueried("BytesQueried", cc),
     bytesFetched("BytesFetched", cc), bytesInput("BytesInput", cc), mutationBytes("MutationBytes", cc),
     kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
-    clearRangeMutations("ClearRangeMutations", cc) {
+    clearRangeMutations("ClearRangeMutations", cc), kvFetchServed("KVFetchServed", cc),
+    kvFetchBytesServed("KVFetchBytesServed", cc), fetchKeyErrors("FetchKeyErrors", cc) {
 	if (metrics) {
 		specialCounter(cc, "BytesStored", [metrics]() { return metrics->byteSample.getEstimate(allKeys); });
 		specialCounter(cc, "BytesReadSampleCount", [metrics]() { return metrics->bytesReadSample.queue.size(); });
@@ -366,7 +367,8 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
                                              int64_t versionLag,
                                              double lastUpdate,
                                              int64_t bytesDurable,
-                                             int64_t bytesInput) const {
+                                             int64_t bytesInput,
+                                             int ongoingBulkLoadTaskCount) const {
 	GetStorageMetricsReply rep;
 
 	// SOMEDAY: make bytes dynamic with hard disk space
@@ -398,6 +400,8 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 
 	rep.bytesDurable = bytesDurable;
 	rep.bytesInput = bytesInput;
+
+	rep.ongoingBulkLoadTaskCount = ongoingBulkLoadTaskCount;
 
 	req.reply.send(rep);
 }

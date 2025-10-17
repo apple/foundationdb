@@ -36,6 +36,9 @@ class ReadYourWritesTransaction;
 Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const& v, Reference<ReadYourWritesTransaction> const& tr);
 Future<Version> timeKeeperVersionFromDatetime(std::string const& datetime, Database const& db);
 
+// Helper function to check if a URL is a blobstore:// URL
+bool isBlobstoreUrl(const std::string& url);
+
 // Append-only file interface for writing backup data
 // Once finish() is called the file cannot be further written to.
 // Backup containers should not attempt to use files for which finish was not called or did not complete.
@@ -180,6 +183,7 @@ struct BackupDescription {
 	Optional<Version> minRestorableVersion;
 	std::string extendedDetail; // Freeform container-specific info.
 	bool partitioned; // If this backup contains partitioned mutation logs.
+	bool fileLevelEncryption; // If this backup contains encrypted files.
 
 	// Resolves the versions above to timestamps using a given database's TimeKeeper data.
 	// toString will use this information if present.
@@ -310,6 +314,8 @@ public:
 	std::string const& getURL() const { return URL; }
 	Optional<std::string> const& getProxy() const { return proxy; }
 	Optional<std::string> const& getEncryptionKeyFileName() const { return encryptionKeyFileName; }
+
+	virtual Future<Void> writeEncryptionMetadata() = 0;
 
 	static std::string lastOpenError;
 

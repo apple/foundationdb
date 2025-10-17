@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <memory>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BULKLOADUTIL_ACTOR_G_H)
 #define FDBSERVER_BULKLOADUTIL_ACTOR_G_H
 #include "fdbserver/BulkLoadUtil.actor.g.h"
@@ -28,39 +29,63 @@
 #include "fdbclient/BulkLoading.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-struct SSBulkLoadFileSet {
-	std::unordered_set<std::string> dataFileList;
-	Optional<std::string> bytesSampleFile;
-	std::string folder;
-	SSBulkLoadFileSet() = default;
-	std::string toString() {
-		std::string res = "SSBulkLoadFileSet: [DataFiles]: " + describe(dataFileList);
-		if (bytesSampleFile.present()) {
-			res = res + ", [BytesSampleFile]: " + bytesSampleFile.get();
-		}
-		res = res + ", [Folder]: " + folder;
-		return res;
-	}
-};
+// Erase file folder
+void clearFileFolder(const std::string& folderPath, const UID& logId = UID(), bool ignoreError = false);
 
-std::string generateRandomBulkLoadDataFileName();
+// Erase and recreate file folder
+void resetFileFolder(const std::string& folderPath);
 
-std::string generateRandomBulkLoadBytesSampleFileName();
+// Asynchronously copy file from one path to another.
+ACTOR Future<Void> copyBulkFile(std::string fromFile, std::string toFile, size_t fileBytesMax);
 
-ACTOR Future<Optional<BulkLoadState>> getBulkLoadStateFromDataMove(Database cx, UID dataMoveId, UID logId);
+// Asynchronously read file bytes from local file.
+ACTOR Future<Void> readBulkFileBytes(std::string path, int64_t maxLength, std::shared_ptr<std::string> output);
 
-void bulkLoadFileCopy(std::string fromFile, std::string toFile, size_t fileBytesMax);
+// Asynchronously write file bytes to local file.
+ACTOR Future<Void> writeBulkFileBytes(std::string path, std::shared_ptr<std::string> content);
 
-ACTOR Future<SSBulkLoadFileSet> bulkLoadTransportCP_impl(std::string dir,
-                                                         BulkLoadState bulkLoadState,
-                                                         size_t fileBytesMax,
-                                                         UID logId);
-
-ACTOR Future<Optional<std::string>> getBytesSamplingFromSSTFiles(std::string folderToGenerate,
-                                                                 std::unordered_set<std::string> dataFiles,
+// Get the bulkLoadTask metadata of the dataMoveMetadata since the atLeastVersion given the dataMoveId
+// This actor is stuck if the actor is failed to read the dataMoveMetadata.
+ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
+                                                                 UID dataMoveId,
+                                                                 Version atLeastVersion,
                                                                  UID logId);
 
-void checkContent(std::unordered_set<std::string> dataFiles, UID logId);
+ACTOR Future<BulkLoadFileSet> bulkLoadDownloadTaskFileSet(BulkLoadTransportMethod transportMethod,
+                                                          BulkLoadFileSet fromRemoteFileSet,
+                                                          std::string toLocalRoot,
+                                                          UID logId);
+
+ACTOR Future<Void> bulkLoadDownloadTaskFileSets(BulkLoadTransportMethod transportMethod,
+                                                std::shared_ptr<BulkLoadFileSetKeyMap> fromRemoteFileSets,
+                                                std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets,
+                                                std::string toLocalRoot,
+                                                UID logId);
+
+ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath,
+                                             std::string byteSampleFileFullPath,
+                                             UID logId);
+
+// Download job manifest file which is generated when dumping the data
+ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod transportMethod,
+                                                   std::string localJobManifestFilePath,
+                                                   std::string remoteJobManifestFilePath,
+                                                   UID logId);
+
+// Extract manifest entries from job manifest file with the input range
+ACTOR Future<KeyRange> getBulkLoadJobFileManifestEntryFromJobManifestFile(
+    std::string localJobManifestFilePath,
+    KeyRange range,
+    UID logId,
+    std::shared_ptr<BulkLoadManifestFileMap> manifestMap);
+
+// Get BulkLoad manifest metadata from the entry in the job manifest file
+ACTOR Future<BulkLoadManifestSet> getBulkLoadManifestMetadataFromEntry(
+    std::vector<BulkLoadJobFileManifestEntry> manifestEntries,
+    std::string manifestLocalTempFolder,
+    BulkLoadTransportMethod transportMethod,
+    std::string jobRoot,
+    UID logId);
 
 #include "flow/unactorcompiler.h"
 #endif

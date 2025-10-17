@@ -96,6 +96,7 @@ set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -436,6 +437,8 @@ else()
       $<${is_cxx_compile}:-Wno-unused-command-line-argument>
       # Disable C++ 20 warning for ambiguous operator.
       $<${is_cxx_compile}:-Wno-ambiguous-reversed-operator>
+      # Disable for clang 19
+      $<${is_cxx_compile}:-Wno-vla-cxx-extension>
       )
     # These need to be disabled for FDB's RocksDB storage server implementation
     add_compile_options(
@@ -482,6 +485,10 @@ else()
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
+    # Needed for gcc 13
+    #add_compile_options($<${is_cxx_compile}:-Wno-missing-template-keyword>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-template-keyword>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-free-nonheap-object>)
   endif()
   add_compile_options(
     $<${is_cxx_compile}:-Wno-error=format>

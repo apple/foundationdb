@@ -55,22 +55,7 @@ public:
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) override {
 		throw client_invalid_operation();
 	}
-	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(KeyRange const& range, int rowLimit) override {
-		throw client_invalid_operation();
-	}
-	Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranules(KeyRange const& range,
-	                                                                    Version begin,
-	                                                                    Optional<Version> readVersion,
-	                                                                    Version* readVersionOut) override {
-		throw client_invalid_operation();
-	}
-	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(KeyRange const& range,
-	                                                                           Optional<Version> readVersion,
-	                                                                           int rangeLimit) override {
-		throw client_invalid_operation();
-	}
 	Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) override { throw client_invalid_operation(); }
-	void addGranuleMaterializeStats(const GranuleMaterializeStats& stats) override { throw client_invalid_operation(); }
 	void addReadConflictRange(KeyRangeRef const& keys) override { throw client_invalid_operation(); }
 	void makeSelfConflicting() override { throw client_invalid_operation(); }
 	void atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType) override {
@@ -81,7 +66,7 @@ public:
 	Future<Standalone<StringRef>> getVersionstamp() override { throw client_invalid_operation(); }
 
 	// Implemented:
-	void getWriteConflicts(KeyRangeMap<bool>* result) override{};
+	void getWriteConflicts(KeyRangeMap<bool>* result) override {};
 
 	void debugTrace(BaseTraceEvent&& event) override {
 		event.detail("CommitResult", "Deferred logging unsupported").log();

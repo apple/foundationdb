@@ -74,9 +74,44 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINA
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
 
-add_flow_target(EXECUTABLE NAME s3cp SRCS S3Cp.actor.cpp)
-target_include_directories(s3cp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
-target_link_libraries(s3cp PRIVATE fdbclient)
+add_flow_target(EXECUTABLE NAME s3client SRCS S3Client_cli.actor.cpp)
+target_include_directories(s3client PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/flow/include"
+    "${CMAKE_BINARY_DIR}/flow/include"
+    "${CMAKE_SOURCE_DIR}/fdbrpc/include"
+    "${CMAKE_BINARY_DIR}/fdbrpc/include"
+    "${CMAKE_SOURCE_DIR}/contrib/md5/include"
+    "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
+    "/opt/boost_1_86_0_clang/include"
+)
+
+target_link_libraries(s3client PRIVATE
+    fdbclient
+    fdbrpc
+    flow
+    msgpack
+    md5
+    libb64
+    stacktrace
+    fmt
+    crc32
+    eio
+    rapidxml
+    boost_target
+    boost_target_program_options
+)
+
+if(UNIX AND NOT APPLE)
+    target_link_libraries(s3client PRIVATE folly_memcpy)
+endif()
+
+if(${COROUTINE_IMPL} STREQUAL libcoro)
+    target_link_libraries(s3client PRIVATE coro)
+endif()
+
+add_dependencies(s3client fdboptions)
 
 # Setup the Swift sources in FDBClient.
 if(WITH_SWIFT)
@@ -144,5 +179,6 @@ endif()
 
 if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   enable_testing()
-  add_test(NAME s3cp_test COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3cp_test.sh ${CMAKE_BINARY_DIR})
+  add_test(NAME s3client_test COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3client_test.sh ${CMAKE_BINARY_DIR})
+  add_test(NAME bulkload_test COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/bulkload_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
 endif()

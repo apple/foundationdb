@@ -147,6 +147,8 @@ ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 bool tokencmp(StringRef token, const char* command);
 // print the usage of the specified command
 void printUsage(StringRef command);
+// print the long description of the specified command
+void printLongDesc(StringRef command);
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
@@ -207,9 +209,9 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 // Retrieve shard information command
 ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
 // Bulk loading command
-ACTOR Future<UID> bulkLoadCommandActor(Reference<IClusterConnectionRecord> clusterFile,
-                                       Database cx,
-                                       std::vector<StringRef> tokens);
+ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens);
+// Bulk dumping command
+ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command
@@ -226,20 +228,6 @@ ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 // metacluster command
 Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
-// changefeed command
-ACTOR Future<bool> changeFeedCommandActor(Database localDb,
-                                          Optional<TenantMapEntry> tenantEntry,
-                                          std::vector<StringRef> tokens,
-                                          Future<Void> warn);
-// blobrange command
-ACTOR Future<bool> blobRangeCommandActor(Database localDb,
-                                         Optional<TenantMapEntry> tenantEntry,
-                                         std::vector<StringRef> tokens);
-
-// blobkey command
-ACTOR Future<bool> blobKeyCommandActor(Database localDb,
-                                       Optional<TenantMapEntry> tenantEntry,
-                                       std::vector<StringRef> tokens);
 // blobrestore command
 ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
 // hotrange command

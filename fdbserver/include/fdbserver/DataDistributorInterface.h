@@ -42,7 +42,6 @@ struct DataDistributorInterface {
 	RequestStream<struct GetStorageWigglerStateRequest> storageWigglerState;
 	RequestStream<struct TriggerAuditRequest> triggerAudit;
 	RequestStream<struct TenantsOverStorageQuotaRequest> tenantsOverStorageQuota;
-	RequestStream<struct PrepareBlobRestoreRequest> prepareBlobRestoreReq;
 
 	DataDistributorInterface() = default;
 	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
@@ -66,8 +65,7 @@ struct DataDistributorInterface {
 		           distributorSplitRange,
 		           storageWigglerState,
 		           triggerAudit,
-		           tenantsOverStorageQuota,
-		           prepareBlobRestoreReq);
+		           tenantsOverStorageQuota);
 	}
 };
 
@@ -162,6 +160,7 @@ struct GetDataDistributorMetricsRequest {
 	}
 };
 
+// FIXME: explain purpose
 struct DistributorSnapRequest {
 	constexpr static FileIdentifier file_identifier = 5427684;
 	Arena arena;
@@ -193,6 +192,7 @@ struct DistributorExclusionSafetyCheckReply {
 	}
 };
 
+// FIXME: explain purpose
 struct DistributorExclusionSafetyCheckRequest {
 	constexpr static FileIdentifier file_identifier = 5830931;
 	std::vector<AddressExclusion> exclusions;

@@ -127,49 +127,6 @@ class RangeQueryTest {
 			}
 
 			@Override
-			public CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion,
-					boolean force, Executor e) {
-				throw new UnsupportedOperationException("Unimplemented method 'purgeBlobGranules'");
-			}
-
-			@Override
-			public CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor e) {
-				throw new UnsupportedOperationException("Unimplemented method 'waitPurgeGranulesComplete'");
-			}
-
-			@Override
-			public CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
-				throw new UnsupportedOperationException("Unimplemented method 'blobbifyRange'");
-			}
-
-			@Override
-			public CompletableFuture<Boolean> blobbifyRangeBlocking(byte[] beginKey, byte[] endKey, Executor e) {
-				throw new UnsupportedOperationException("Unimplemented method 'blobbifyRangeBlocking'");
-			}
-
-			@Override
-			public CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
-				throw new UnsupportedOperationException("Unimplemented method 'unblobbifyRange'");
-			}
-
-			@Override
-			public CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey,
-					int rangeLimit, Executor e) {
-				throw new UnsupportedOperationException("Unimplemented method 'listBlobbifiedRanges'");
-			}
-
-			@Override
-			public CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e) {
-				throw new UnsupportedOperationException("Unimplemented method 'verifyBlobRange'");
-			}
-
-			@Override
-			public CompletableFuture<Boolean> flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact,
-					long version, Executor e) {
-				throw new UnsupportedOperationException("Unimplemented method 'flushBlobRange'");
-			}
-
-			@Override
 			public <T> T read(Function<? super ReadTransaction, T> retryable, Executor e) {
 				throw new UnsupportedOperationException("Unimplemented method 'read'");
 			}

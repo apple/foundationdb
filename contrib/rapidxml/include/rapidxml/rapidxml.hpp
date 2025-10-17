@@ -84,7 +84,7 @@ public:
 
 	//! Gets pointer to character data where error happened.
 	//! Ch should be the same as char type of xml_document that produced the error.
-	//! \return Pointer to location within the parsed string where error occured.
+	//! \return Pointer to location within the parsed string where error occurred.
 	template <class Ch>
 	Ch* where() const {
 		return reinterpret_cast<Ch*>(m_where);
@@ -398,7 +398,7 @@ public:
 	~memory_pool() { clear(); }
 
 	//! Allocates a new node from the pool, and optionally assigns name and value to it.
-	//! If the allocation request cannot be accomodated, this function will throw <code>std::bad_alloc</code>.
+	//! If the allocation request cannot be accommodated, this function will throw <code>std::bad_alloc</code>.
 	//! If exceptions are disabled by defining RAPIDXML_NO_EXCEPTIONS, this function
 	//! will call rapidxml::parse_error_handler() function.
 	//! \param type Type of node to create.
@@ -434,7 +434,7 @@ public:
 	}
 
 	//! Allocates a new attribute from the pool, and optionally assigns name and value to it.
-	//! If the allocation request cannot be accomodated, this function will throw <code>std::bad_alloc</code>.
+	//! If the allocation request cannot be accommodated, this function will throw <code>std::bad_alloc</code>.
 	//! If exceptions are disabled by defining RAPIDXML_NO_EXCEPTIONS, this function
 	//! will call rapidxml::parse_error_handler() function.
 	//! \param name Name to assign to the attribute, or 0 to assign no name.
@@ -464,7 +464,7 @@ public:
 	}
 
 	//! Allocates a char array of given size from the pool, and optionally copies a given string to it.
-	//! If the allocation request cannot be accomodated, this function will throw <code>std::bad_alloc</code>.
+	//! If the allocation request cannot be accommodated, this function will throw <code>std::bad_alloc</code>.
 	//! If exceptions are disabled by defining RAPIDXML_NO_EXCEPTIONS, this function
 	//! will call rapidxml::parse_error_handler() function.
 	//! \param source String to initialize the allocated memory with, or 0 to not initialize it.
@@ -2252,7 +2252,7 @@ private:
 				} else {
 					// Child node
 					++text; // Skip '<'
-					if (xml_node<Ch>* child = parse_node<Flags & ~parse_open_only>(text))
+					if (xml_node<Ch>* child = parse_node < Flags & ~parse_open_only > (text))
 						node->append_node(child);
 				}
 				break;

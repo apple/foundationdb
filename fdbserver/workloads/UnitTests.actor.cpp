@@ -45,8 +45,6 @@ void forceLinkRESTKmsConnectorTest();
 void forceLinkCompressionUtilsTest();
 void forceLinkAtomicTests();
 void forceLinkIdempotencyIdTests();
-void forceLinkBlobConnectionProviderTests();
-void forceLinkArenaStringTests();
 void forceLinkActorCollectionTests();
 void forceLinkDDSketchTests();
 void forceLinkCommitProxyTests();
@@ -55,13 +53,16 @@ void forceLinkRandomKeyValueUtilsTests();
 void forceLinkSimKmsVaultTests();
 void forceLinkRESTSimKmsVaultTest();
 void forceLinkActorFuzzUnitTests();
+void forceLinkGrpcTests();
+void forceLinkGrpcTests2();
+void forceLinkSimpleCounterTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
 
 	bool enabled;
 	std::string testPattern;
-	Optional<std::string> testsIgnored;
+	std::vector<std::string> testsIgnored;
 	int testRunLimit;
 	UnitTestParameters testParams;
 	bool cleanupAfterTests;
@@ -76,7 +77,12 @@ struct UnitTestWorkload : TestWorkload {
 		enabled = !clientId; // only do this on the "first" client
 		testPattern = getOption(options, "testsMatching"_sr, Value()).toString();
 		if (hasOption(options, "testsIgnored"_sr)) {
-			testsIgnored = getOption(options, "testsIgnored"_sr, Value()).toString();
+			auto ignored = getOption(options, "testsIgnored"_sr, Value());
+			for (auto s : ignored.splitAny(";"_sr)) {
+				auto str = s.toString();
+				str.erase(remove_if(str.begin(), str.end(), isspace), str.end());
+				testsIgnored.push_back(str);
+			}
 		}
 		testRunLimit = getOption(options, "maxTestCases"_sr, -1);
 		if (g_network->isSimulated()) {
@@ -116,8 +122,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkCompressionUtilsTest();
 		forceLinkAtomicTests();
 		forceLinkIdempotencyIdTests();
-		forceLinkBlobConnectionProviderTests();
-		forceLinkArenaStringTests();
 		forceLinkActorCollectionTests();
 		forceLinkDDSketchTests();
 		forceLinkWipedStringTests();
@@ -125,6 +129,12 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkSimKmsVaultTests();
 		forceLinkRESTSimKmsVaultTest();
 		forceLinkActorFuzzUnitTests();
+		forceLinkSimpleCounterTests();
+
+#ifdef FLOW_GRPC_ENABLED
+		forceLinkGrpcTests();
+		forceLinkGrpcTests2();
+#endif
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -146,8 +156,17 @@ struct UnitTestWorkload : TestWorkload {
 	}
 
 	bool testMatched(std::string const& testName) const {
-		return StringRef(testName).startsWith(testPattern) &&
-		       (!testsIgnored.present() || !StringRef(testName).startsWith(testsIgnored.get()));
+		if (!StringRef(testName).startsWith(testPattern)) {
+			return false;
+		}
+
+		for (auto ignorePatt : testsIgnored) {
+			if (StringRef(testName).startsWith(ignorePatt)) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	ACTOR static Future<Void> runUnitTests(UnitTestWorkload* self) {

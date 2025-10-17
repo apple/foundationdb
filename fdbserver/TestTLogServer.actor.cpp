@@ -36,6 +36,105 @@
 
 #include "flow/actorcompiler.h" // must be last include
 
+namespace {
+
+OldTLogConf buildOldTLogConf(const TLogTestContext& oldCtx, int numLogServers, int8_t primaryLocality) {
+	OldTLogConf oldTLogConf;
+	oldTLogConf.tLogs = oldCtx.dbInfo.logSystemConfig.tLogs;
+	for (int i = 0; i < numLogServers && i < oldTLogConf.tLogs.size(); ++i) {
+		oldTLogConf.tLogs[i].locality = primaryLocality;
+		oldTLogConf.tLogs[i].isLocal = true;
+	}
+	oldTLogConf.epochBegin = oldCtx.initVersion;
+	oldTLogConf.epochEnd = oldCtx.numCommits;
+	oldTLogConf.logRouterTags = 0;
+	oldTLogConf.recoverAt = oldCtx.initVersion;
+	oldTLogConf.epoch = oldCtx.epoch;
+	return oldTLogConf;
+}
+
+std::string makeDiskQueueBasename(const TLogTestContext& ctx, UID tLogId) {
+	return ctx.diskQueueBasename + "." + tLogId.toString() + "." + std::to_string(ctx.epoch) + ".";
+}
+
+std::string makeKVStoreBasename(const TestTLogOptions& options, const TLogTestContext& ctx, UID tLogId) {
+	return options.kvStoreFilename + "." + tLogId.toString() + "." + std::to_string(ctx.epoch) + ".";
+}
+
+InitializeTLogRequest buildInitializeRequest(const TLogTestContext& ctx) {
+	InitializeTLogRequest req;
+	std::vector<Tag> tags;
+	tags.reserve(ctx.numTags);
+	for (uint32_t tagID = 0; tagID < ctx.numTags; tagID++) {
+		tags.emplace_back(ctx.tagLocality, tagID);
+	}
+	req.epoch = 1;
+	req.allTags = tags;
+	req.isPrimary = true;
+	req.locality = ctx.primaryLocality;
+	req.recoveryTransactionVersion = ctx.initVersion;
+	return req;
+}
+
+struct TempStorageFiles {
+	std::string queueBase;
+	std::string queueExt;
+	std::string kvBase;
+	std::string kvExt;
+	bool active{ false };
+
+	TempStorageFiles() = default;
+	TempStorageFiles(std::string queueBase, std::string queueExt, std::string kvBase, std::string kvExt)
+	  : queueBase(std::move(queueBase)), queueExt(std::move(queueExt)), kvBase(std::move(kvBase)),
+	    kvExt(std::move(kvExt)), active(true) {}
+
+	~TempStorageFiles() { cleanup(); }
+
+	void cleanup() {
+		if (!active)
+			return;
+		if (!queueBase.empty()) {
+			deleteFile(queueBase + "0." + queueExt);
+			deleteFile(queueBase + "1." + queueExt);
+		}
+		if (!kvBase.empty()) {
+			deleteFile(kvBase + "0." + kvExt);
+			deleteFile(kvBase + "1." + kvExt);
+		}
+		active = false;
+	}
+};
+
+struct StorageResources {
+	std::string diskQueueFilename;
+	std::string kvStoreFilename;
+	TempStorageFiles tempFiles;
+
+	StorageResources() = default;
+	StorageResources(std::string dq, std::string kv, TempStorageFiles files)
+	  : diskQueueFilename(std::move(dq)), kvStoreFilename(std::move(kv)), tempFiles(std::move(files)) {}
+};
+
+StorageResources setupPersistentStorage(Reference<TLogContext> tLogContext,
+                                        const TLogTestContext& testContext,
+                                        const TestTLogOptions& options) {
+	std::string diskQueueFilename = options.dataFolder + "/" + makeDiskQueueBasename(testContext, tLogContext->tLogID);
+	tLogContext->persistentQueue =
+	    openDiskQueue(diskQueueFilename, options.diskQueueExtension, tLogContext->tLogID, DiskQueueVersion::V2);
+
+	std::string kvStoreFilename =
+	    options.dataFolder + "/" + makeKVStoreBasename(options, testContext, tLogContext->tLogID);
+	tLogContext->persistentData = keyValueStoreMemory(kvStoreFilename,
+	                                                  tLogContext->tLogID,
+	                                                  options.kvMemoryLimit,
+	                                                  options.kvStoreExtension,
+	                                                  KeyValueStoreType::MEMORY_RADIXTREE);
+
+	TempStorageFiles tempFiles(
+	    diskQueueFilename, options.diskQueueExtension, kvStoreFilename, options.kvStoreExtension);
+	return StorageResources(diskQueueFilename, kvStoreFilename, std::move(tempFiles));
+}
+
 Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions,
                                                Optional<Reference<TLogTestContext>> oldTLogTestContext) {
 	Reference<TLogTestContext> context(new TLogTestContext(tLogOptions));
@@ -49,21 +148,12 @@ Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions,
 	context->tagLocality = context->primaryLocality;
 	context->dbInfo = ServerDBInfo();
 	if (oldTLogTestContext.present()) {
-		OldTLogConf oldTLogConf;
-		oldTLogConf.tLogs = oldTLogTestContext.get()->dbInfo.logSystemConfig.tLogs;
-		for (uint32_t i = 0; i < context->numLogServers; i++) {
-			oldTLogConf.tLogs[i].locality = oldTLogTestContext.get()->primaryLocality;
-			oldTLogConf.tLogs[i].isLocal = true;
-		}
-		oldTLogConf.epochBegin = oldTLogTestContext.get()->initVersion;
-		oldTLogConf.epochEnd = oldTLogTestContext.get()->numCommits;
-		oldTLogConf.logRouterTags = 0;
-		oldTLogConf.recoverAt = oldTLogTestContext.get()->initVersion;
-		oldTLogConf.epoch = oldTLogTestContext.get()->epoch;
-		context->tagLocality = oldTLogTestContext.get()->primaryLocality;
-		context->epoch = oldTLogTestContext.get()->epoch + 1;
-		context->dbInfo.logSystemConfig.oldTLogs.push_back(oldTLogConf);
-		context->commitHistory = oldTLogTestContext.get()->commitHistory;
+		const TLogTestContext& oldCtx = *oldTLogTestContext.get();
+		context->dbInfo.logSystemConfig.oldTLogs.push_back(
+		    buildOldTLogConf(oldCtx, context->numLogServers, oldCtx.primaryLocality));
+		context->tagLocality = oldCtx.primaryLocality;
+		context->epoch = oldCtx.epoch + 1;
+		context->commitHistory = oldCtx.commitHistory;
 	}
 	context->dbInfo.logSystemConfig.logSystemType = LogSystemType::tagPartitioned;
 	context->dbInfo.logSystemConfig.recruitmentID = deterministicRandom()->randomUniqueID();
@@ -73,6 +163,8 @@ Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions,
 
 	return context;
 }
+
+} // namespace
 
 // Create and start a tLog. If optional parmeters are set, the tLog is a new generation of "tLogID"
 // as described by initReq. Otherwise, it is a newborn generation 0 tLog.
@@ -93,20 +185,7 @@ ACTOR Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContex
 	std::filesystem::create_directory(tLogOptions.dataFolder);
 
 	// create persistent storage
-	std::string diskQueueBasename = pTLogTestContext->diskQueueBasename + "." + pTLogContext->tLogID.toString() + "." +
-	                                std::to_string(pTLogTestContext->epoch) + ".";
-	state std::string diskQueueFilename = tLogOptions.dataFolder + "/" + diskQueueBasename;
-	pTLogContext->persistentQueue =
-	    openDiskQueue(diskQueueFilename, tLogOptions.diskQueueExtension, pTLogContext->tLogID, DiskQueueVersion::V2);
-
-	state std::string kvStoreFilename = tLogOptions.dataFolder + "/" + tLogOptions.kvStoreFilename + "." +
-	                                    pTLogContext->tLogID.toString() + "." +
-	                                    std::to_string(pTLogTestContext->epoch) + ".";
-	pTLogContext->persistentData = keyValueStoreMemory(kvStoreFilename,
-	                                                   pTLogContext->tLogID,
-	                                                   tLogOptions.kvMemoryLimit,
-	                                                   tLogOptions.kvStoreExtension,
-	                                                   KeyValueStoreType::MEMORY_RADIXTREE);
+	state StorageResources storage = setupPersistentStorage(pTLogContext, *pTLogTestContext, tLogOptions);
 
 	// prepare tLog construction.
 	Standalone<StringRef> machineID = "machine"_sr;
@@ -137,21 +216,7 @@ ACTOR Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContex
 	                               activeSharedTLog,
 	                               enablePrimaryTxnSystemHealthCheck);
 
-	state InitializeTLogRequest initTLogReq = InitializeTLogRequest();
-	if (initReq != nullptr) {
-		initTLogReq = *initReq;
-	} else {
-		std::vector<Tag> tags;
-		for (uint32_t tagID = 0; tagID < pTLogTestContext->numTags; tagID++) {
-			Tag tag(pTLogTestContext->tagLocality, tagID);
-			tags.push_back(tag);
-		}
-		initTLogReq.epoch = 1;
-		initTLogReq.allTags = tags;
-		initTLogReq.isPrimary = true;
-		initTLogReq.locality = pTLogTestContext->primaryLocality;
-		initTLogReq.recoveryTransactionVersion = pTLogTestContext->initVersion;
-	}
+	state InitializeTLogRequest initTLogReq = initReq != nullptr ? *initReq : buildInitializeRequest(*pTLogTestContext);
 
 	TLogInterface interface = wait(promiseStream.getReply(initTLogReq));
 	pTLogContext->TestTLogInterface = interface;
@@ -172,11 +237,7 @@ ACTOR Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContex
 
 	wait(delay(1.0));
 
-	// delete old disk queue files
-	deleteFile(diskQueueFilename + "0." + tLogOptions.diskQueueExtension);
-	deleteFile(diskQueueFilename + "1." + tLogOptions.diskQueueExtension);
-	deleteFile(kvStoreFilename + "0." + tLogOptions.kvStoreExtension);
-	deleteFile(kvStoreFilename + "1." + tLogOptions.kvStoreExtension);
+	storage.tempFiles.cleanup();
 
 	return Void();
 }

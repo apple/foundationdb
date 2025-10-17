@@ -646,7 +646,16 @@ int main(int argc, char** argv) {
 					int delay = cmd->get_and_update_current_restart_delay();
 					if (!cmd->quiet) {
 						if (WIFEXITED(child_status)) {
-							Severity priority = (WEXITSTATUS(child_status) == 0) ? SevWarn : SevError;
+							Severity priority;
+							// If the process exited successfully, e.g. because someone restarted the process
+							// with fdbcli kill we don't want to delay the restart. We only want to delay
+							// the restart if the process was exited unsuccessfully (exit code different from 0).
+							if (WEXITSTATUS(child_status) == 0) {
+								priority = SevWarn;
+								delay = 0;
+							} else {
+								priority = SevError;
+							}
 							log_process_msg(priority,
 							                cmd->ssection.c_str(),
 							                "Process %d exited %d, restarting in %d seconds\n",

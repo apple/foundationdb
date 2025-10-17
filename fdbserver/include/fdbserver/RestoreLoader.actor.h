@@ -136,7 +136,7 @@ struct RestoreLoaderSchedSendLoadParamRequest {
 	double start;
 
 	explicit RestoreLoaderSchedSendLoadParamRequest(int batchIndex, Promise<Void> toSched, double start)
-	  : batchIndex(batchIndex), toSched(toSched), start(start){};
+	  : batchIndex(batchIndex), toSched(toSched), start(start) {};
 	RestoreLoaderSchedSendLoadParamRequest() = default;
 
 	bool operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) const {

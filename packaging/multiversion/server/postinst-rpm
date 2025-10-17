@@ -9,7 +9,7 @@ chmod -R 0750 /var/lib/foundationdb/data /var/log/foundationdb
 
 mkdir -p /usr/lib/foundationdb
 update-alternatives --install /usr/sbin/fdbserver fdbserver /usr/lib/foundationdb-@FDB_VERSION@@FDB_BUILDTIME_STRING@/sbin/fdbserver @ALTERNATIVES_PRIORITY@ \
-    --slave /usr/lib/foundationdb/fdbmonitor fdbmonitor /usr/lib/foundationdb-@FDB_VERSION@@FDB_BUILDTIME_STRING@/sbin/fdbmonitor \
+    --slave /usr/sbin/fdbmonitor fdbmonitor /usr/lib/foundationdb-@FDB_VERSION@@FDB_BUILDTIME_STRING@/sbin/fdbmonitor \
     --slave /lib/systemd/system/foundationdb.service foundationdb.service /usr/lib/foundationdb-@FDB_VERSION@@FDB_BUILDTIME_STRING@/lib/systemd/system/foundationdb.service
 
 if mkdir /etc/foundationdb

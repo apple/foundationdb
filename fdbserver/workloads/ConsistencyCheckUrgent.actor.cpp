@@ -189,6 +189,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			// Step 1: Get source server id of the shard
 			state std::vector<UID> sourceStorageServers;
 			state std::vector<UID> destStorageServers;
+			state std::unordered_map<UID, Tag> storageServerToTagMap; // populated only when version vector is enabled
 			retryCount = 0;
 			loop {
 				try {
@@ -203,6 +204,12 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					                      sourceStorageServers,
 					                      destStorageServers,
 					                      false);
+					if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+						storageServerToTagMap.reserve(UIDtoTagMap.size());
+						for (auto& it : UIDtoTagMap) {
+							storageServerToTagMap[decodeServerTagKey(it.key)] = decodeServerTagValue(it.value);
+						}
+					}
 					break;
 				} catch (Error& e) {
 					if (e.code() == error_code_actor_cancelled) {
@@ -276,6 +283,17 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 						}
 						storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
 					}
+					if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+						for (int j = 0; j < storageServers.size(); j++) {
+							auto iter = storageServerToTagMap.find(storageServers[j]);
+							ASSERT_WE_THINK(iter != storageServerToTagMap.end());
+							// Note: This workload doesn't use the NativeAPI getRange() API for reading
+							// data, so we will need to explicitly populate the (ssid, tag) mapping in
+							// "cx" - this is so version vector APIs can correctly fetch the latest commit
+							// versions of storage servers.
+							cx->addSSIdTagMapping(storageServerInterfaces[j].id(), iter->second);
+						}
+					}
 					break;
 				} catch (Error& e) {
 					if (e.code() == error_code_actor_cancelled) {
@@ -317,6 +335,10 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					state int j = 0;
 					for (j = 0; j < storageServerInterfaces.size(); j++) {
 						resetReply(req);
+						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+							cx->getLatestCommitVersion(
+							    storageServerInterfaces[j], req.version, req.ssLatestCommitVersions);
+						}
 						keyValueFutures.push_back(
 						    storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 					}

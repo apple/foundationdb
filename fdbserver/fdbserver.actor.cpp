@@ -27,6 +27,7 @@
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <vector>
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -53,6 +54,7 @@
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -85,6 +87,7 @@
 #include "flow/FaultInjection.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "flow/SimpleCounter.h"
 
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
@@ -132,7 +135,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
 	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE
 };
@@ -218,7 +221,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io-trust-warn-only",        SO_NONE },
 	{ OPT_TRACE_FORMAT,          "--trace-format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist-binpath",         SO_REQ_SEP },
-	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob-credential-file",      SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS,      "--blob-credentials",          SO_REQ_SEP },
+	{ OPT_PROXY,                 "--proxy",                     SO_REQ_SEP },
 	{ OPT_CONFIG_PATH,           "--config-path",               SO_REQ_SEP },
 	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
 	{ OPT_NO_CONFIG_DB,          "--no-config-db",              SO_NONE },
@@ -257,10 +261,6 @@ extern const char* getSourceVersion();
 extern void flushTraceFileVoid();
 
 extern const int MAX_CLUSTER_FILE_BYTES;
-
-#ifdef ALLOC_INSTRUMENTATION
-extern uint8_t* g_extra_memory;
-#endif
 
 bool enableFailures = true;
 
@@ -404,6 +404,14 @@ ACTOR Future<Void> histogramReport() {
 		wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
 
 		GetHistogramRegistry().logReport();
+	}
+}
+
+ACTOR Future<Void> metricsReport() {
+	loop {
+		wait(delay(SERVER_KNOBS->GENERIC_METRICS_REPORT_INTERVAL));
+
+		simpleCounterReport();
 	}
 }
 
@@ -696,6 +704,10 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " Machine class (valid options are storage, transaction,"
 	                 " resolution, grv_proxy, commit_proxy, master, test, unset, stateless, log, router,"
 	                 " and cluster_controller).");
+	printOptionUsage("--blob-credentials FILE",
+	                 "File containing blob credentials in JSON format. Can be specified "
+	                 "multiple times for multiple files. See fdbbackup usage for more details.");
+	printOptionUsage("--proxy PROXY:PORT", "IP:port or host:port to proxy server for connecting to external network.");
 	printOptionUsage("--profiler-",
 	                 "Set an actor profiler option. Supported options are:\n"
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
@@ -1075,7 +1087,7 @@ struct CLIOptions {
 	std::string testServersStr;
 	std::string whitelistBinPaths;
 
-	std::vector<std::string> publicAddressStrs, listenAddressStrs;
+	std::vector<std::string> publicAddressStrs, listenAddressStrs, grpcAddressStrs;
 	NetworkAddressList publicAddresses, listenAddresses;
 
 	const char* targetKey = nullptr;
@@ -1102,6 +1114,7 @@ struct CLIOptions {
 	bool fileIoWarnOnly = false;
 	uint64_t rsssize = -1;
 	std::vector<std::string> blobCredentials; // used for fast restore workers & backup workers
+	Optional<std::string> proxy;
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
@@ -1134,6 +1147,10 @@ struct CLIOptions {
 		} catch (Error&) {
 			printHelpTeaser(name);
 			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		for (auto& s : grpcAddressStrs) {
+			fmt::printf("gRPC Endpoint: %s\n", s);
 		}
 
 		if (role == ServerRole::ConsistencyCheck || role == ServerRole::ConsistencyCheckUrgent) {
@@ -1341,7 +1358,13 @@ private:
 			case OPT_PUBLICADDR:
 				argStr = args.OptionArg();
 				boost::split(tmpStrings, argStr, [](char c) { return c == ','; });
-				publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
+				for (auto& addr : tmpStrings) {
+					if (addr.ends_with(":grpc")) {
+						grpcAddressStrs.push_back(addr.substr(0, addr.size() - std::string(":grpc").size()));
+					} else {
+						publicAddressStrs.push_back(addr);
+					}
+				}
 				break;
 			case OPT_LISTEN:
 				argStr = args.OptionArg();
@@ -1643,23 +1666,16 @@ private:
 			case OPT_WHITELIST_BINPATH:
 				whitelistBinPaths = args.OptionArg();
 				break;
-			case OPT_BLOB_CREDENTIAL_FILE:
+			case OPT_BLOB_CREDENTIALS:
 				// Add blob credential following backup agent example
 				blobCredentials.push_back(args.OptionArg());
-				printf("blob credential file:%s\n", blobCredentials.back().c_str());
-
-				blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
-				if (blobCredsFromENV != nullptr) {
-					fprintf(stderr, "[WARNING] Set blob credential via env variable is not tested yet\n");
-					TraceEvent(SevError, "FastRestoreGetBlobCredentialFile")
-					    .detail("Reason", "Set blob credential via env variable is not tested yet");
-					StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
-					do {
-						StringRef file = t.eat(":");
-						if (file.size() != 0) {
-							blobCredentials.push_back(file.toString());
-						}
-					} while (t.size() != 0);
+				break;
+			case OPT_PROXY:
+				proxy = args.OptionArg();
+				if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
+					fprintf(stderr, "ERROR: proxy format should be either IP:port or host:port\n");
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
 				break;
 			case OPT_CONFIG_PATH:
@@ -1784,6 +1800,28 @@ private:
 				}
 				break;
 			}
+			}
+		}
+		// Sets up blob credentials, including one from the environment FDB_BLOB_CREDENTIALS.
+		// Below is top-half of BackupTLSConfig::setupBlobCredentials().
+		const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+		if (blobCredsFromENV != nullptr) {
+			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
+			do {
+				StringRef file = t.eat(":");
+				if (file.size() != 0)
+					blobCredentials.push_back(file.toString());
+			} while (t.size() != 0);
+		}
+
+		// Sets up proxy from ENV if it is not set by arg.
+		const char* proxyENV = getenv("FDB_PROXY");
+		if (proxyENV != nullptr && !proxy.present()) {
+			proxy = proxyENV;
+			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
+				fprintf(stderr, "ERROR: proxy format should be either IP:port or host:port\n");
+				printHelpTeaser(argv[0]);
+				flushAndExit(FDB_EXIT_ERROR);
 			}
 		}
 
@@ -1963,9 +2001,6 @@ int main(int argc, char* argv[]) {
 	try {
 		platformInit();
 
-#ifdef ALLOC_INSTRUMENTATION
-		g_extra_memory = new uint8_t[1000000];
-#endif
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error
@@ -1974,11 +2009,6 @@ int main(int argc, char* argv[]) {
 
 		// Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
-
-#ifdef _WIN32
-		// Windows needs a gentle nudge to format floats correctly
-		//_set_output_format(_TWO_DIGIT_EXPONENT);
-#endif
 
 		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
@@ -2052,8 +2082,8 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
 
-		// Initialize the thread pool
 		CoroThreadPool::init();
+
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents
 		// are logged. This thread will eventually run the network, so call it now.
 		TraceEvent::setNetworkThread();
@@ -2219,6 +2249,7 @@ int main(int argc, char* argv[]) {
 			TraceEvent("Simulation").detail("TestFile", opts.testFile);
 
 			auto histogramReportActor = histogramReport();
+			auto metricsReportActor = metricsReport();
 
 			CLIENT_KNOBS->trace();
 			FLOW_KNOBS->trace();
@@ -2226,7 +2257,9 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests", "fdbblob" };
+			const std::set<std::string> allowedDirectories = { ".",       "..",       "backups", "unittests",
+				                                               "fdbblob", "bulkdump", "bulkload" };
+			// bulkdump and bulkload folders are used by bulkloading and bulkdumping simulation tests
 
 			for (const auto& dir : directories) {
 				if (dir.size() != 32 && !allowedDirectories.contains(dir) && dir.find("snap") == std::string::npos) {
@@ -2337,8 +2370,6 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
-				g_knobs.setKnob("enable_blob_granule_compression",
-				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 				g_knobs.setKnob("encrypt_header_auth_token_enabled",
 				                KnobValue::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
 				g_knobs.setKnob("encrypt_header_auth_token_algo",
@@ -2362,6 +2393,10 @@ int main(int argc, char* argv[]) {
 					pFiles->push_back(f);
 				}
 			}
+
+			// Update proxy string
+			Optional<std::string>* pProxy = (Optional<std::string>*)g_network->global(INetwork::enProxy);
+			*pProxy = opts.proxy;
 
 			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
 			if (opts.processClass == ProcessClass::FastRestoreClass) {
@@ -2402,8 +2437,14 @@ int main(int argc, char* argv[]) {
 				                      opts.configDBType,
 				                      opts.consistencyCheckUrgentMode));
 				actors.push_back(histogramReport());
-				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+				actors.push_back(metricsReport());
 
+#ifdef FLOW_GRPC_ENABLED
+				if (opts.grpcAddressStrs.size() > 0) {
+					FlowGrpc::init(&opts.tlsConfig, NetworkAddress::parse(opts.grpcAddressStrs[0]));
+					actors.push_back(GrpcServer::instance()->run());
+				}
+#endif
 				f = stopAfter(waitForAll(actors));
 				g_network->run();
 			}
@@ -2454,6 +2495,7 @@ int main(int argc, char* argv[]) {
 			setupRunLoopProfiler();
 			auto m =
 			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
+			auto metricsReportActor = metricsReport();
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_UNIT_TESTS,
 			                       TEST_HERE,

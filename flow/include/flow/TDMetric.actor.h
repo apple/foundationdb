@@ -772,7 +772,7 @@ struct BaseMetric {
 	virtual void rollMetric(uint64_t t) = 0;
 
 	virtual void flushData(const MetricKeyRef& mk, uint64_t rollTime, MetricBatch& batch) = 0;
-	virtual void registerFields(const MetricKeyRef& mk, std::vector<Standalone<StringRef>>& fieldKeys){};
+	virtual void registerFields(const MetricKeyRef& mk, std::vector<Standalone<StringRef>>& fieldKeys) {};
 
 	// Set the metric's config.  An assert will fail if the metric is enabled before the metrics collection is
 	// available.
@@ -799,7 +799,7 @@ struct BaseMetric {
 	// Metrics should verify their underlying storage on Enable because they could have been initially created
 	// at a time when the knobs were not initialized.
 	virtual void onEnable() = 0;
-	virtual void onDisable(){};
+	virtual void onDisable() {};
 
 	// Combines checking this metric's configured minimum level and any collection-wide throttling
 	// This should only be called after it is determined that a metric is enabled.
@@ -823,7 +823,7 @@ struct BaseEventMetric : BaseMetric {
 	BaseEventMetric(MetricNameRef const& name) : BaseMetric(name) {}
 
 	// Needed for MetricUtil
-	static const StringRef metricType;
+	alignas(8) static const StringRef metricType;
 	Void getValue() const { return Void(); }
 	~BaseEventMetric() override {}
 
@@ -1271,7 +1271,7 @@ struct ContinuousMetric final : NonCopyable,
                                 MetricUtil<ContinuousMetric<T>, T>,
                                 BaseMetric {
 	// Needed for MetricUtil
-	static const StringRef metricType;
+	alignas(8) static const StringRef metricType;
 
 private:
 	EventField<TimeAndValue<T>> field;

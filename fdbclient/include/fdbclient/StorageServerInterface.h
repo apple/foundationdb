@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/Audit.h"
+#include "fdbclient/BulkDumping.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/StorageServerShard.h"
@@ -42,6 +43,7 @@
 #include "fdbclient/VersionVector.h"
 
 // Dead code, removed in the next protocol version
+// FIXME: assess removal of unneeded protocol related types.
 struct VersionReply {
 	constexpr static FileIdentifier file_identifier = 3;
 
@@ -125,6 +127,7 @@ struct StorageServerInterface {
 	RequestStream<struct AuditStorageRequest> auditStorage;
 	RequestStream<struct GetHotShardsRequest> getHotShards;
 	RequestStream<struct GetStorageCheckSumRequest> getCheckSum;
+	RequestStream<struct BulkDumpRequest> bulkdump;
 
 private:
 	bool acceptingRequests;
@@ -194,6 +197,7 @@ public:
 			getHotShards = RequestStream<struct GetHotShardsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
 			getCheckSum =
 			    RequestStream<struct GetStorageCheckSumRequest>(getValue.getEndpoint().getAdjustedEndpoint(25));
+			bulkdump = RequestStream<struct BulkDumpRequest>(getValue.getEndpoint().getAdjustedEndpoint(26));
 		}
 	}
 	bool operator==(StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
@@ -226,6 +230,7 @@ public:
 		streams.push_back(auditStorage.getReceiver());
 		streams.push_back(getHotShards.getReceiver());
 		streams.push_back(getCheckSum.getReceiver());
+		streams.push_back(bulkdump.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -387,6 +392,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
+	Optional<TaskPriority> taskID; // includes the information about read purpose
 
 	GetKeyValuesRequest() {}
 
@@ -406,6 +412,7 @@ struct GetKeyValuesRequest : TimedRequest {
 		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
+		           taskID,
 		           arena);
 	}
 };
@@ -443,6 +450,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
+	Optional<TaskPriority> taskID; // includes the information about read purpose
 
 	GetMappedKeyValuesRequest() {}
 
@@ -463,6 +471,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
+		           taskID,
 		           arena);
 	}
 };
@@ -894,6 +903,8 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct ChangeFeedStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanContext spanContext;
@@ -929,6 +940,8 @@ struct ChangeFeedStreamRequest {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct ChangeFeedPopRequest {
 	constexpr static FileIdentifier file_identifier = 10726174;
 	Key rangeID;
@@ -1034,6 +1047,8 @@ struct FetchCheckpointKeyValuesRequest {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct OverlappingChangeFeedEntry {
 	KeyRef feedId;
 	KeyRangeRef range;
@@ -1065,6 +1080,8 @@ struct OverlappingChangeFeedEntry {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct OverlappingChangeFeedsReply {
 	constexpr static FileIdentifier file_identifier = 11815134;
 	VectorRef<OverlappingChangeFeedEntry> feeds;
@@ -1083,6 +1100,8 @@ struct OverlappingChangeFeedsReply {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct OverlappingChangeFeedsRequest {
 	constexpr static FileIdentifier file_identifier = 7228462;
 	KeyRange range;
@@ -1098,6 +1117,8 @@ struct OverlappingChangeFeedsRequest {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct ChangeFeedVersionUpdateReply {
 	constexpr static FileIdentifier file_identifier = 4246160;
 	Version version = 0;
@@ -1111,6 +1132,8 @@ struct ChangeFeedVersionUpdateReply {
 	}
 };
 
+// NOTE: This is obsolete and not used, but a RequestStream interface dependent on this
+// type is persisted in the database via StorageServerInterface, so just keep this around.
 struct ChangeFeedVersionUpdateRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	Version minVersion;
@@ -1134,12 +1157,22 @@ struct GetStorageMetricsReply {
 	int64_t versionLag = 0;
 	double lastUpdate = 0;
 	int64_t bytesDurable = 0, bytesInput = 0;
+	int ongoingBulkLoadTaskCount = 0;
 
 	GetStorageMetricsReply() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, available, capacity, bytesInputRate, versionLag, lastUpdate, bytesDurable, bytesInput);
+		serializer(ar,
+		           load,
+		           available,
+		           capacity,
+		           bytesInputRate,
+		           versionLag,
+		           lastUpdate,
+		           bytesDurable,
+		           bytesInput,
+		           ongoingBulkLoadTaskCount);
 	}
 };
 
@@ -1290,6 +1323,26 @@ struct GetStorageCheckSumRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, ranges, actionId, checkSumMethod, reply);
+	}
+};
+
+struct BulkDumpRequest {
+	constexpr static FileIdentifier file_identifier = 3828145;
+	std::vector<UID> checksumServers;
+	BulkDumpState bulkDumpState;
+	ReplyPromise<BulkDumpState> reply;
+
+	BulkDumpRequest() {}
+	BulkDumpRequest(const std::vector<UID>& checksumServers, const BulkDumpState& bulkDumpState)
+	  : checksumServers(checksumServers), bulkDumpState(bulkDumpState) {};
+
+	std::string toString() const {
+		return "[BulkDumpState]: " + bulkDumpState.toString() + ", [ChecksumServers]: " + describe(checksumServers);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checksumServers, bulkDumpState, reply);
 	}
 };
 

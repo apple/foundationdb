@@ -64,6 +64,7 @@ public:
 	virtual int clientId() const = 0;
 	virtual int clientCount() const = 0;
 	virtual int64_t sharedRandomNumber() const = 0;
+	virtual FDBFuture* delay(double seconds) const = 0;
 };
 
 struct FDBPromise {
@@ -85,7 +86,7 @@ struct FDBPerfMetric {
 	std::string name;
 	double value;
 	bool averaged;
-	std::string format_code = "0.3g";
+	std::string format_code = "%.3g";
 };
 
 class DLLEXPORT FDBWorkload {

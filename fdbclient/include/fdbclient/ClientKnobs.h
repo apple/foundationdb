@@ -124,6 +124,10 @@ public:
 
 	double IS_ACCEPTABLE_DELAY;
 
+	// Versions -- knobs that control 5s timeout
+	int64_t VERSIONS_PER_SECOND; // Copy of SERVER_KNOBS, as we can't link with it.
+	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS; // Copy of SERVER_KNOBS, as we can't link with it.
+
 	// Core
 	int64_t CORE_VERSIONSPERSECOND; // This is defined within the server but used for knobs based on server value
 	int LOG_RANGE_BLOCK_SIZE;
@@ -175,8 +179,6 @@ public:
 	double COPY_LOG_TASK_DURATION_NANOS;
 	int BACKUP_TASKS_PER_AGENT;
 	int BACKUP_POLL_PROGRESS_SECONDS;
-	int64_t VERSIONS_PER_SECOND; // Copy of SERVER_KNOBS, as we can't link with it.
-	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS; // Copy of SERVER_KNOBS, as we can't link with it.
 	int SIM_BACKUP_TASKS_PER_AGENT;
 	int BACKUP_RANGEFILE_BLOCK_SIZE;
 	int BACKUP_LOGFILE_BLOCK_SIZE;
@@ -185,6 +187,7 @@ public:
 	int RESTORE_DISPATCH_ADDTASK_SIZE;
 	int RESTORE_DISPATCH_BATCH_SIZE;
 	int RESTORE_WRITE_TX_SIZE;
+	int RESTORE_PARTITIONED_BATCH_VERSION_SIZE;
 	int APPLY_MAX_LOCK_BYTES;
 	int APPLY_MIN_LOCK_BYTES;
 	int APPLY_BLOCK_SIZE;
@@ -196,10 +199,16 @@ public:
 	double MIN_CLEANUP_SECONDS;
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
 	int RESTORE_RANGES_READ_BATCH;
-	int BLOB_GRANULE_RESTORE_CHECK_INTERVAL;
+
 	bool BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH;
 	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS;
-	int CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+	int BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+	int BULKLOAD_JOB_HISTORY_COUNT_MAX; // the max number of bulk load job history to keep. The oldest job history will
+	                                    // be removed when the count exceeds this value. Set to 0 to disable history.
+	                                    // Do not set the value to a large number, e.g. <= 10.
+	int BULKLOAD_VERBOSE_LEVEL; // Set to 1 to minimize the verbosity. Set to 5 to turn on all events for performance
+	                            // insights. Set to 10 to turn on all events.
+	int S3CLIENT_VERBOSE_LEVEL; // Similar to BULKLOAD_VERBOSE_LEVEL
 
 	// Configuration
 	int32_t DEFAULT_AUTO_COMMIT_PROXIES;
@@ -239,6 +248,7 @@ public:
 	int BLOBSTORE_CONCURRENT_REQUESTS;
 	int BLOBSTORE_MULTIPART_MAX_PART_SIZE;
 	int BLOBSTORE_MULTIPART_MIN_PART_SIZE;
+	int BLOBSTORE_MULTIPART_RETRY_DELAY_MS;
 	int BLOBSTORE_CONCURRENT_UPLOADS;
 	int BLOBSTORE_CONCURRENT_LISTS;
 	int BLOBSTORE_CONCURRENT_WRITES_PER_FILE;
@@ -249,6 +259,7 @@ public:
 	int BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
 	int BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	int BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
+	int BLOBSTORE_LIST_MAX_KEYS_PER_PAGE;
 	bool BLOBSTORE_GLOBAL_CONNECTION_POOL;
 	bool BLOBSTORE_ENABLE_LOGGING;
 	double BLOBSTORE_STATS_LOGGING_INTERVAL;
@@ -256,7 +267,18 @@ public:
 	double BLOBSTORE_LATENCY_LOGGING_ACCURACY;
 	int BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR;
 	int BLOBSTORE_MAX_DELAY_CONNECTION_FAILED;
-
+	bool
+	    BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK; // Enable integrity check of download. When not set, on upload, we
+	                                             // we volunteer an md5 of the content and upload will fail if our
+	                                             // md5 doesn't match that calculated by the server. When this flag
+	                                             // is set, we hash the content using sha256 and have the server store
+	                                             // the hash in the object metadata. On download, if this flag is set
+	                                             // we will check the serverside proffered hash against that we
+	                                             // calculate on the received content.  If no match, throw an error. See
+	                                             // https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html
+	                                             // This download check only works for small files. For large files,
+	                                             // we run a separate checksum. See design/s3-checksumming.md
+	                                             //
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX; // Available in both normal and urgent mode
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME; // Available in normal mode
 	int CONSISTENCY_CHECK_URGENT_NEXT_WAIT_TIME; // Available in urgent mode
@@ -274,6 +296,7 @@ public:
 	// fdbcli
 	int CLI_CONNECT_PARALLELISM;
 	double CLI_CONNECT_TIMEOUT;
+	bool CLI_PRINT_INVALID_CONFIGURATION;
 
 	// trace
 	int TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH;
@@ -300,13 +323,6 @@ public:
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
-
-	// Blob Granules
-	int BG_MAX_GRANULE_PARALLELISM;
-	int BG_TOO_MANY_GRANULES;
-	int64_t BLOB_METADATA_REFRESH_INTERVAL;
-	bool DETERMINISTIC_BLOB_METADATA;
-	bool ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.

@@ -62,6 +62,8 @@ public:
 		_keyIndexArray.clear();
 		_cacheArray.clear();
 		_keymap->clear();
+		_cachedAttribName = Optional<std::string>();
+		_cachedKey = Optional<AttribKey>();
 	}
 
 	LocalitySet& copy(LocalitySet const& source) {
@@ -339,7 +341,11 @@ public:
 		       _entryArray.size());
 	}
 
-	void clearCache() { _cacheArray.clear(); }
+	void clearCache() {
+		_cacheArray.clear();
+		_cachedAttribName = Optional<std::string>();
+		_cachedKey = Optional<AttribKey>();
+	}
 
 	AttribKey keyIndex(std::string const& value) const { return AttribKey(_keymap->convertString(value)); }
 	AttribKey keyIndex(char const* value) const { return keyIndex(std::string(value)); }
@@ -486,6 +492,12 @@ public:
 	Reference<StringToIntMap> _keymap;
 
 	virtual std::vector<std::vector<AttribValue>> const& getKeyValueArray() const { return _keyValueArray; }
+	// Pointer to the "root" localitySet within the policy tree.
+	LocalitySet* _localitygroup;
+	// Caches are stored on the root to be shared by derived sets.
+	// When set, avoids map lookups when there is only a single PolicyAcross rule in the policy.
+	Optional<std::string> _cachedAttribName; // e.g., "zoneid", "rack"
+	Optional<AttribKey> _cachedKey; // relies on invariant: indexKey == groupIndexKey
 
 protected:
 	virtual Reference<StringToIntMap>& getGroupValueMap() { return _localitygroup->getGroupValueMap(); }
@@ -500,7 +512,6 @@ protected:
 	std::vector<AttribKey> _keyIndexArray;
 	std::vector<LocalityCacheRecord> _cacheArray;
 
-	LocalitySet* _localitygroup;
 	long long unsigned int _cachehits;
 	long long unsigned int _cachemisses;
 };

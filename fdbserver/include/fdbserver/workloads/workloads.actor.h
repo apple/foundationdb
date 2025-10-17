@@ -79,7 +79,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
 	}
-	virtual ~TestWorkload(){};
+	virtual ~TestWorkload() {};
 	virtual Future<Void> initialized() { return Void(); }
 	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
 	// the workload factory. Instead, provide a static member variable called name.
@@ -197,7 +197,7 @@ struct KVWorkload : TestWorkload {
 	uint64_t nodeCount;
 	int64_t nodePrefix;
 	int actorCount, keyBytes, maxValueBytes, minValueBytes;
-	double absentFrac;
+	double absentFrac, zeroPaddingRatio;
 
 	explicit KVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
@@ -206,6 +206,7 @@ struct KVWorkload : TestWorkload {
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 4);
 		maxValueBytes = getOption(options, "valueBytes"_sr, 96);
 		minValueBytes = getOption(options, "minValueBytes"_sr, maxValueBytes);
+		zeroPaddingRatio = getOption(options, "zeroPaddingRatio"_sr, 0.15);
 		ASSERT(minValueBytes <= maxValueBytes);
 
 		absentFrac = getOption(options, "absentFrac"_sr, 0.0);
@@ -217,6 +218,19 @@ struct KVWorkload : TestWorkload {
 	Key keyForIndex(uint64_t index, bool absent) const;
 	// the reverse process of keyForIndex() without division. Set absent=true to ignore the last byte in Key
 	int64_t indexForKey(const KeyRef& key, bool absent = false) const;
+
+	virtual Value randomValue() const {
+		int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
+		int zeroPadding = static_cast<int>(zeroPaddingRatio * length);
+		if (zeroPadding > length) {
+			zeroPadding = length;
+		}
+		std::string valueString = deterministicRandom()->randomAlphaNumeric(length);
+		for (int i = 0; i < zeroPadding; ++i) {
+			valueString[i] = '\0';
+		}
+		return StringRef((uint8_t*)valueString.c_str(), length);
+	}
 };
 
 struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
@@ -245,7 +259,10 @@ struct WorkloadFactory : IWorkloadFactory {
 	bool runInUntrustedClient;
 	WorkloadFactory(UntrustedMode runInUntrustedClient = UntrustedMode::False)
 	  : runInUntrustedClient(runInUntrustedClient) {
-		factories()[WorkloadType::NAME] = Reference<IWorkloadFactory>::addRef(this);
+		auto& f = factories();
+		std::string name = WorkloadType::NAME;
+		ASSERT(!f.contains(name));
+		f[name] = Reference<IWorkloadFactory>::addRef(this);
 	}
 	Reference<TestWorkload> create(WorkloadContext const& wcx) override {
 		if (g_network->isSimulated() && runInUntrustedClient) {

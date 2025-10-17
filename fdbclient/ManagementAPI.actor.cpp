@@ -19,11 +19,16 @@
  */
 
 #include <cinttypes>
+#include <cstddef>
 #include <string>
 #include <vector>
 
+#include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RangeLock.h"
+#include "flow/Error.h"
 #include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
@@ -177,16 +182,6 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				return out;
 			}
 			out[p + key] = format("%d", type);
-		}
-
-		if (key == "blob_granules_enabled") {
-			int enabled = std::stoi(value);
-			if (enabled != 0 && enabled != 1) {
-				printf("Error: Only 0 or 1 are valid values for blob_granules_enabled. "
-				       "1 enables blob granules and 0 disables them.\n");
-				return out;
-			}
-			out[p + key] = value;
 		}
 
 		if (key == "tenant_mode") {
@@ -510,6 +505,34 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 	return options.count(p + "log_replicas") == 1 && options.count(p + "log_anti_quorum") == 1 &&
 	       options.count(p + "storage_replicas") == 1 && options.count(p + "log_engine") == 1 &&
 	       options.count(p + "storage_engine") == 1;
+}
+
+ACTOR Future<Void> disableBackupWorker(Database cx) {
+	DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
+	if (!configuration.backupWorkerEnabled) {
+		TraceEvent("BackupWorkerAlreadyDisabled");
+		return Void();
+	}
+	ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=0", true));
+	if (res != ConfigurationResult::SUCCESS) {
+		TraceEvent("BackupWorkerDisableFailed").detail("Result", res);
+		throw operation_failed();
+	}
+	return Void();
+}
+
+ACTOR Future<Void> enableBackupWorker(Database cx) {
+	DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
+	if (configuration.backupWorkerEnabled) {
+		TraceEvent("BackupWorkerAlreadyEnabled");
+		return Void();
+	}
+	ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true));
+	if (res != ConfigurationResult::SUCCESS) {
+		TraceEvent("BackupWorkerEnableFailed").detail("Result", res);
+		throw operation_failed();
+	}
+	return Void();
 }
 
 /*
@@ -2604,92 +2627,6 @@ ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UI
 	return Void();
 }
 
-ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStatus status, KeyRange range) {
-	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-	Optional<Value> val = wait(tr->get(rangeIDKey));
-	if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
-		if (!val.present()) {
-			tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, status));
-		} else if (std::get<0>(decodeChangeFeedValue(val.get())) != range) {
-			throw unsupported_operation();
-		}
-	} else if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
-		if (val.present()) {
-			tr->set(rangeIDKey,
-			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
-			                        std::get<1>(decodeChangeFeedValue(val.get())),
-			                        status));
-		} else {
-			throw unsupported_operation();
-		}
-	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
-		if (val.present()) {
-			if (g_network->isSimulated()) {
-				g_simulator->validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
-			}
-			tr->set(rangeIDKey,
-			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
-			                        std::get<1>(decodeChangeFeedValue(val.get())),
-			                        status));
-			tr->clear(rangeIDKey);
-		}
-	}
-	return Void();
-}
-
-ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
-                                    Key rangeID,
-                                    ChangeFeedStatus status,
-                                    KeyRange range) {
-	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-	Optional<Value> val = wait(tr->get(rangeIDKey));
-	if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
-		if (!val.present()) {
-			tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, status));
-		} else if (std::get<0>(decodeChangeFeedValue(val.get())) != range) {
-			throw unsupported_operation();
-		}
-	} else if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
-		if (val.present()) {
-			tr->set(rangeIDKey,
-			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
-			                        std::get<1>(decodeChangeFeedValue(val.get())),
-			                        status));
-		} else {
-			throw unsupported_operation();
-		}
-	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
-		if (val.present()) {
-			if (g_network->isSimulated()) {
-				g_simulator->validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
-			}
-			tr->set(rangeIDKey,
-			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
-			                        std::get<1>(decodeChangeFeedValue(val.get())),
-			                        status));
-			tr->clear(rangeIDKey);
-		}
-	}
-	return Void();
-}
-
-ACTOR Future<Void> updateChangeFeed(Database cx, Key rangeID, ChangeFeedStatus status, KeyRange range) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			wait(updateChangeFeed(&tr, rangeID, status, range));
-			wait(tr.commit());
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<Void> advanceVersion(Database cx, Version v) {
 	state Transaction tr(cx);
 	loop {
@@ -2817,7 +2754,9 @@ ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
 				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
 				tr.set(bulkLoadModeKey, wr.toValue());
 				wait(tr.commit());
-				TraceEvent("DDBulkLoadModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
+				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadEngineModeKeyChanged")
+				    .detail("NewMode", mode)
+				    .detail("OldMode", oldMode);
 			}
 			return oldMode;
 		} catch (Error& e) {
@@ -2826,16 +2765,627 @@ ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
 	}
 }
 
-ACTOR Future<std::vector<BulkLoadState>> getValidBulkLoadTasksWithinRange(
-    Database cx,
-    KeyRange rangeToRead,
-    size_t limit = 10,
-    Optional<BulkLoadPhase> phase = Optional<BulkLoadPhase>()) {
+ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask) {
+	ASSERT(normalKeys.contains(bulkLoadTask.getRange()) &&
+	       (bulkLoadTask.phase == BulkLoadPhase::Submitted ||
+	        (bulkLoadTask.phase == BulkLoadPhase::Complete && bulkLoadTask.hasEmptyData())));
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	bulkLoadTask.submitTime = now();
+	wait(krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTask.getRange(), bulkLoadTaskStateValue(bulkLoadTask)));
+	return Void();
+}
+
+// Get bulk load task metadata with range and taskId and phase selector
+// Throw error if the task is outdated or the task is not in any input phase at the tr read version
+// TODO: check jobId
+ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
+                                                KeyRange range,
+                                                UID taskId,
+                                                std::vector<BulkLoadPhase> phases) {
+	state BulkLoadTaskState bulkLoadTaskState;
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	RangeResult result = wait(krmGetRanges(tr, bulkLoadTaskPrefix, range));
+	if (result.size() > 2) {
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
+		    .detail("Reason", "TooManyRanges")
+		    .detail("Range", printable(range))
+		    .detail("Size", result.size())
+		    .detail("TaskId", taskId.toString())
+		    .backtrace();
+		throw bulkload_task_outdated();
+	} else if (result[0].value.empty()) {
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
+		    .detail("Reason", "EmptyValue")
+		    .detail("Range", printable(range))
+		    .detail("TaskId", taskId.toString())
+		    .backtrace();
+		throw bulkload_task_outdated();
+	}
+	ASSERT(result.size() == 2);
+	bulkLoadTaskState = decodeBulkLoadTaskState(result[0].value);
+	if (!bulkLoadTaskState.isValid()) {
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
+		    .detail("Reason", "HasBeenCleared")
+		    .detail("Range", printable(range))
+		    .detail("TaskId", taskId.toString())
+		    .backtrace();
+		throw bulkload_task_outdated();
+	}
+	ASSERT(bulkLoadTaskState.getTaskId().isValid());
+	if (taskId != bulkLoadTaskState.getTaskId()) {
+		// This task is overwritten by a newer task
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
+		    .detail("Reason", "TaskIdMismatch")
+		    .detail("Range", printable(range))
+		    .detail("TaskId", taskId.toString())
+		    .detail("TaskIdInDB", bulkLoadTaskState.getTaskId().toString())
+		    .backtrace();
+		throw bulkload_task_outdated();
+	}
+	KeyRange currentRange = KeyRangeRef(result[0].key, result[1].key);
+	if (bulkLoadTaskState.getRange() != currentRange) {
+		// This task is partially overwritten by a newer task
+		ASSERT(bulkLoadTaskState.getRange().contains(currentRange));
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
+		    .detail("Reason", "RangeMismatch")
+		    .detail("Range", printable(range))
+		    .detail("TaskId", taskId.toString())
+		    .detail("RangeInDB", printable(currentRange))
+		    .detail("RangeInTask", printable(bulkLoadTaskState.getRange()))
+		    .backtrace();
+		throw bulkload_task_outdated();
+	}
+	if (phases.size() > 0 && !bulkLoadTaskState.onAnyPhase(phases)) {
+		TraceEvent(SevWarn, "GetBulkLoadTaskError")
+		    .detail("Reason", "PhaseMismatch")
+		    .detail("Range", printable(range))
+		    .detail("TaskId", taskId.toString())
+		    .detail("Phase", bulkLoadTaskState.phase)
+		    .backtrace();
+		throw bulkload_task_outdated();
+	}
+	return bulkLoadTaskState;
+}
+
+ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId) {
+	state BulkLoadTaskState bulkLoadTaskState;
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	wait(store(bulkLoadTaskState,
+	           getBulkLoadTask(
+	               tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })));
+	if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
+		TraceEvent(SevWarnAlways, "ManagementAPIAcknowledgeErrorTask")
+		    .detail("TaskId", taskId.toString())
+		    .detail("Range", printable(range));
+	}
+	bulkLoadTaskState.phase = BulkLoadPhase::Acknowledged;
+	ASSERT(range == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
+	ASSERT(normalKeys.contains(range));
+	wait(krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState)));
+	return Void();
+}
+
+// This is the only place to update job history map. So, we check the number of job history entries here is sufficient
+// to maintain that the number of jobs in the history is no more than BULKLOAD_JOB_HISTORY_COUNT_MAX.
+ACTOR Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState) {
+	state Key newJobKey = bulkLoadJobHistoryKeyFor(jobState.getJobId());
+	state RangeResult jobHistoryResult;
+	state Optional<BulkLoadJobState> oldestJobState; // Set to remove when the job history is full.
+	state Key beginKey = bulkLoadJobHistoryKeys.begin;
+	state Key endKey = bulkLoadJobHistoryKeys.end;
+	loop {
+		jobHistoryResult.clear();
+		wait(store(jobHistoryResult,
+		           tr->getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX * 2)));
+		// Set limit twice the max count to check the number of jobs in the history is no more than the max
+		// count.
+		for (int i = 0; i < jobHistoryResult.size(); i++) {
+			ASSERT_WE_THINK(!jobHistoryResult[i].value.empty());
+			if (jobHistoryResult[i].value.empty()) {
+				TraceEvent(SevError, "DDBulkLoadJobHistoryHasEmptyValue", jobState.getJobId());
+				continue;
+			}
+			BulkLoadJobState jobStateInHistory = decodeBulkLoadJobState(jobHistoryResult[i].value);
+			ASSERT_WE_THINK(jobStateInHistory.isValid());
+			if (!jobStateInHistory.isValid()) {
+				TraceEvent(SevError, "DDBulkLoadJobHistoryInvalidState", jobState.getJobId())
+				    .detail("JobState", jobStateInHistory.toString());
+				continue;
+			}
+			if (jobStateInHistory.getJobId() == jobState.getJobId()) {
+				tr->set(newJobKey, bulkLoadJobValue(jobState));
+				// BulkLoad job with the same jobId can run for multiple times, we only keep the latest one
+				// in the history.
+				return Void();
+			}
+			if (jobHistoryResult.size() > CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX) {
+				TraceEvent(SevError, "DDBulkLoadJobHistoryCountExceed", jobState.getJobId())
+				    .detail("JobHistoryCount", jobHistoryResult.size())
+				    .detail("More", jobHistoryResult.more);
+			}
+			if (jobHistoryResult.size() >= CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX && oldestJobState.present() &&
+			    jobStateInHistory.getSubmitTime() < oldestJobState.get().getSubmitTime()) {
+				oldestJobState = jobStateInHistory;
+			}
+		}
+		if (jobHistoryResult.more) {
+			beginKey = keyAfter(jobHistoryResult.back().key);
+		} else {
+			break;
+		}
+	}
+	if (oldestJobState.present()) {
+		tr->clear(bulkLoadJobHistoryKeyFor(oldestJobState.get().getJobId()));
+	}
+	tr->set(newJobKey, bulkLoadJobValue(jobState));
+	return Void();
+}
+
+ACTOR Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
+	state RangeResult jobHistoryResult;
+	state Key beginKey = bulkLoadJobHistoryKeys.begin;
+	state Key endKey = bulkLoadJobHistoryKeys.end;
+	state Transaction tr(cx);
+	state std::vector<BulkLoadJobState> res;
+	loop {
+		try {
+			jobHistoryResult.clear();
+			wait(store(jobHistoryResult,
+			           tr.getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX)));
+			for (int i = 0; i < jobHistoryResult.size(); i++) {
+				BulkLoadJobState jobState = decodeBulkLoadJobState(jobHistoryResult[i].value);
+				ASSERT_WE_THINK(jobState.isValid());
+				if (!jobState.isValid()) {
+					TraceEvent(SevError, "DDBulkLoadJobHistoryInvalidState").detail("JobState", jobState.toString());
+					continue;
+				}
+				res.push_back(jobState);
+			}
+			if (jobHistoryResult.more) {
+				beginKey = keyAfter(jobHistoryResult.back().key);
+			} else {
+				break;
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return res;
+}
+
+ACTOR Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			if (jobId.present()) {
+				tr.clear(bulkLoadJobHistoryKeyFor(jobId.get()));
+			} else {
+				tr.clear(bulkLoadJobHistoryKeys);
+			}
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
+	state RangeResult rangeResult;
+	// At most one job at a time, so looking at the first returned range is sufficient
+	wait(store(rangeResult, krmGetRanges(tr, bulkLoadJobPrefix, normalKeys)));
+	for (int i = 0; i < rangeResult.size() - 1; ++i) {
+		if (rangeResult[i].value.empty()) {
+			continue;
+		}
+		BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
+		if (!jobState.isValid()) {
+			continue;
+		}
+		return jobState;
+	}
+	return Optional<BulkLoadJobState>();
+}
+
+ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
+	state Transaction tr(cx);
+	state Optional<BulkLoadJobState> aliveJob;
+	loop {
+		try {
+			wait(store(aliveJob, getSubmittedBulkLoadJob(&tr)));
+			if (!aliveJob.present()) {
+				return Void(); // Has been cancelled
+			}
+			if (aliveJob.get().getJobId() != jobId) {
+				throw bulkload_task_outdated(); // jobId is outdated
+			}
+			// Change DD key to trigger DD restarts
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << dataDistributionModeLock;
+			tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+			BinaryWriter wrLastWrite(Unversioned());
+			wrLastWrite << deterministicRandom()->randomUniqueID();
+			tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
+			// Clear all metadata of the job
+			ASSERT(!aliveJob.get().getJobRange().empty());
+			wait(krmSetRangeCoalescing(&tr,
+			                           bulkLoadJobPrefix,
+			                           aliveJob.get().getJobRange(),
+			                           normalKeys,
+			                           bulkLoadJobValue(BulkLoadJobState())));
+			// Clear all metadata of the task. The task and the job is guaranteed to be consistent.
+			wait(krmSetRangeCoalescing(&tr,
+			                           bulkLoadTaskPrefix,
+			                           aliveJob.get().getJobRange(),
+			                           normalKeys,
+			                           bulkLoadTaskStateValue(BulkLoadTaskState())));
+			// Add cancelled job to history
+			aliveJob.get().setEndTime(now());
+			aliveJob.get().setCancelledPhase();
+			wait(addBulkLoadJobToHistory(&tr, aliveJob.get()));
+			wait(releaseExclusiveReadLockOnRange(&tr, aliveJob.get().getJobRange(), rangeLockNameForBulkLoad));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			// Currently, only bulkload job uses the range lock, and one job exists at a time.
+			// TODO(BulkLoad): support multiple jobs at a time
+			ASSERT(e.code() != error_code_range_unlock_reject);
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+// TODO(Zhe): clear bulkload task metadata within the input range
+ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
+	ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);
+	state Transaction tr(cx);
+	loop {
+		try {
+			// There is at most one bulkLoad job or bulkDump job at a time globally
+			Optional<BulkDumpState> aliveBulkDumpJob = wait(getSubmittedBulkDumpJob(&tr));
+			if (aliveBulkDumpJob.present()) {
+				TraceEvent(SevWarn, "SubmitBulkLoadJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Conflict to a running BulkDump job")
+				    .detail("SubmitBulkLoadJob", jobState.toString())
+				    .detail("ExistBulkDumpJob", aliveBulkDumpJob.get().toString());
+				throw bulkload_task_failed();
+			}
+			Optional<BulkLoadJobState> aliveJob = wait(getSubmittedBulkLoadJob(&tr));
+			if (aliveJob.present()) {
+				if (aliveJob.get().getJobId() == jobState.getJobId()) {
+					return Void(); // The job has been submitted.
+				}
+				TraceEvent(SevWarn, "SubmitBulkLoadJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Conflict to a running BulkLoad job")
+				    .detail("SubmitJob", jobState.toString())
+				    .detail("ExistJob", aliveJob.get().toString());
+				throw bulkload_task_failed();
+			}
+			if (jobState.getPhase() != BulkLoadJobPhase::Submitted) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadJobError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Input input phase is not submit")
+				    .detail("Task", jobState.toString());
+				throw bulkload_task_failed();
+			}
+			if (!normalKeys.contains(jobState.getJobRange())) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadJobError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Input range is out of scope")
+				    .detail("SubmitBulkLoadJob", jobState.toString());
+				throw bulkload_task_failed();
+			}
+			ASSERT(!jobState.getJobRange().empty());
+			// Init the map of task states
+			wait(krmSetRange(
+			    &tr, bulkLoadTaskPrefix, jobState.getJobRange(), bulkLoadTaskStateValue(BulkLoadTaskState())));
+			// Persist job metadata
+			wait(krmSetRange(&tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(jobState)));
+			// Take lock on the job range
+			wait(takeExclusiveReadLockOnRange(&tr, jobState.getJobRange(), rangeLockNameForBulkLoad));
+			wait(tr.commit());
+			TraceEvent(SevInfo, "BulkLoadJobSubmitted")
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .detail("SubmitBulkLoadJob", jobState.toString());
+			break;
+		} catch (Error& e) {
+			// Currently, only bulkload job uses the range lock, and one job exists at a time.
+			// TODO(BulkLoad): support multiple jobs at a time
+			ASSERT(e.code() != error_code_range_lock_reject);
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx) {
+	state RangeResult rangeResult;
+	state Transaction tr(cx);
+	state Key beginKey = normalKeys.begin;
+	state Key endKey = normalKeys.end;
+	while (beginKey < endKey) {
+		try {
+			rangeResult.clear();
+			wait(store(rangeResult, krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey))));
+			for (int i = 0; i < rangeResult.size() - 1; i++) {
+				if (rangeResult[i].value.empty()) {
+					continue;
+				}
+				BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
+				if (!jobState.isValid()) {
+					continue;
+				}
+				// If a job is fully completed, the metadata should be removed from bulkLoadJobKeys
+				// The metadata is added to bulkload history.
+				return jobState;
+			}
+			beginKey = rangeResult.back().key;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Optional<BulkLoadJobState>();
+}
+
+ACTOR Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange jobRange) {
+	state Transaction tr(cx);
+	state Key beginKey = jobRange.begin;
+	state Key endKey = jobRange.end;
+	state Optional<Key> lastKey;
+	state BulkLoadTaskState existTask;
+	state RangeResult bulkLoadTaskResult;
+	state int i = 0;
+	while (beginKey < endKey) {
+		try {
+			tr.reset();
+			bulkLoadTaskResult.clear();
+			wait(store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey))));
+			i = 0;
+			for (; i < bulkLoadTaskResult.size() - 1; i++) {
+				if (bulkLoadTaskResult[i].value.empty()) {
+					lastKey = bulkLoadTaskResult[i + 1].key;
+					continue;
+				}
+				existTask = decodeBulkLoadTaskState(bulkLoadTaskResult[i].value);
+				if (!existTask.isValid()) {
+					lastKey = bulkLoadTaskResult[i + 1].key;
+					continue; // Has been acknowledged and cleared by the engine
+				}
+				if (existTask.getJobId() != jobId) {
+					throw bulkload_task_outdated();
+				}
+				if (existTask.getRange() != KeyRangeRef(bulkLoadTaskResult[i].key, bulkLoadTaskResult[i + 1].key)) {
+					continue; // The task has been overlapped by other tasks
+				}
+				if (existTask.phase == BulkLoadPhase::Error) {
+					TraceEvent(SevWarnAlways, "ManagementAPIAcknowledgeErrorBulkLoadTask")
+					    .detail("JobId", jobId)
+					    .detail("JobRange", jobRange)
+					    .detail("ExistTaskID", existTask.getTaskId())
+					    .detail("ExistTaskRange", existTask.getRange())
+					    .detail("ExistTaskJobId", existTask.getJobId());
+					wait(setBulkLoadFinalizeTransaction(&tr, existTask.getRange(), existTask.getTaskId()));
+				}
+				lastKey = bulkLoadTaskResult[i + 1].key;
+				break; // We actively break because we do not want transaction large
+			}
+			wait(tr.commit());
+			ASSERT(lastKey.present());
+			beginKey = lastKey.get();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<int> setBulkDumpMode(Database cx, int mode) {
+	state Transaction tr(cx);
+	state BinaryWriter wr(Unversioned());
+	wr << mode;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state int oldMode = 0;
+			Optional<Value> oldModeValue = wait(tr.get(bulkDumpModeKey));
+			if (oldModeValue.present()) {
+				BinaryReader rd(oldModeValue.get(), Unversioned());
+				rd >> oldMode;
+			}
+			if (oldMode != mode) {
+				BinaryWriter wrMyOwner(Unversioned());
+				wrMyOwner << dataDistributionModeLock;
+				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+				BinaryWriter wrLastWrite(Unversioned());
+				wrLastWrite << deterministicRandom()->randomUniqueID(); // triger DD restarts
+				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
+				tr.set(bulkDumpModeKey, wr.toValue());
+				wait(tr.commit());
+				TraceEvent(SevInfo, "DDBulkDumpModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
+			}
+			return oldMode;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<int> getBulkDumpMode(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state int oldMode = 0;
+			Optional<Value> oldModeValue = wait(tr.get(bulkDumpModeKey));
+			if (oldModeValue.present()) {
+				BinaryReader rd(oldModeValue.get(), Unversioned());
+				rd >> oldMode;
+			}
+			return oldMode;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Return job Id if existing any bulk dump job globally.
+// There is at most one bulk dump job at any time on the entire key space.
+// A job of a range can spawn multiple tasks according to the shard boundary.
+// Those tasks share the same job Id (aka belonging to the same job).
+ACTOR Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
+	state RangeResult rangeResult;
+	state KeyRange rangeToRead = normalKeys;
+	state Key beginKey = normalKeys.begin;
+	while (beginKey < normalKeys.end) {
+		try {
+			rangeResult.clear();
+			wait(store(rangeResult,
+			           krmGetRanges(tr,
+			                        bulkDumpPrefix,
+			                        KeyRangeRef(beginKey, normalKeys.end),
+			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+			// krmGetRanges splits the result into batches.
+			// Check first batch is enough since we only check if any task exists
+			for (int i = 0; i < rangeResult.size() - 1; ++i) {
+				if (rangeResult[i].value.empty()) {
+					continue;
+				}
+				BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+				if (!bulkDumpState.isValid()) {
+					continue;
+				}
+				return bulkDumpState;
+			}
+			beginKey = rangeResult.back().key;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return Optional<BulkDumpState>();
+}
+
+ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			// There is at most one bulkLoad job or bulkDump job at a time globally
+			Optional<BulkLoadJobState> aliveBulkLoadJob = wait(getSubmittedBulkLoadJob(&tr));
+			if (aliveBulkLoadJob.present()) {
+				TraceEvent(SevWarn, "SubmitBulkDumpJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Conflict to a running BulkLoad job")
+				    .detail("AliveBulkLoadJob", aliveBulkLoadJob.get().toString())
+				    .detail("NewJob", bulkDumpJob.toString());
+				throw bulkdump_task_failed();
+			}
+			Optional<BulkDumpState> aliveJob = wait(getSubmittedBulkDumpJob(&tr));
+			if (aliveJob.present()) {
+				if (aliveJob.get().getJobId() == bulkDumpJob.getJobId()) {
+					return Void(); // The job has been persisted
+				}
+				TraceEvent(SevWarn, "SubmitBulkDumpJobFailed")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Conflict to a running BulkDump job")
+				    .detail("AliveJob", aliveJob.get().toString())
+				    .detail("NewJob", bulkDumpJob.toString());
+				throw bulkdump_task_failed();
+			}
+			if (bulkDumpJob.getPhase() != BulkDumpPhase::Submitted) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkDumpJobError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Input phase is not submitted")
+				    .detail("NewJob", bulkDumpJob.toString());
+				throw bulkdump_task_failed();
+			}
+			if (!normalKeys.contains(bulkDumpJob.getJobRange())) {
+				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkDumpJobError")
+				    .setMaxEventLength(-1)
+				    .setMaxFieldLength(-1)
+				    .detail("Reason", "Input range is out of scope")
+				    .detail("NewJob", bulkDumpJob.toString());
+				throw bulkdump_task_failed();
+			}
+			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpJob.getJobRange(), bulkDumpStateValue(bulkDumpJob)));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
+	state Transaction tr(cx);
+	state Key beginKey = normalKeys.begin;
+	state Key endKey = normalKeys.end;
+	state BulkDumpState existJob;
+	state KeyRange rangeToRead;
+	state RangeResult bulkDumpResult;
+	while (beginKey < endKey) {
+		try {
+			bulkDumpResult.clear();
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			wait(store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead)));
+			for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
+				if (bulkDumpResult[i].value.empty()) {
+					continue;
+				}
+				existJob = decodeBulkDumpState(bulkDumpResult[i].value);
+				if (!existJob.isValid()) {
+					continue;
+				}
+				// We only clear the metadata if it has the same jobId as the input Id.
+				// When there is a new jobId persisted different than the input Id,
+				// a new job has been submitted successfully. Since a new job can be submitted successfully if and only
+				// if no old metadata exists (the old job metadata has been cleared). So, we can stop at this point.
+				if (existJob.getJobId() != jobId) {
+					TraceEvent(SevWarn, "DDBulkDumpJobHasChanged")
+					    .detail("InputJobID", jobId.toString())
+					    .detail("ExistJobID", existJob.getJobId().toString());
+					throw bulkload_task_outdated();
+				}
+			}
+			wait(krmSetRangeCoalescing(
+			    &tr, bulkDumpPrefix, rangeToRead, normalKeys, bulkDumpStateValue(BulkDumpState())));
+			wait(tr.commit());
+			tr.reset();
+
+			beginKey = bulkDumpResult.back().key;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
 	state Transaction tr(cx);
 	state Key readBegin = rangeToRead.begin;
 	state Key readEnd = rangeToRead.end;
 	state RangeResult rangeResult;
-	state std::vector<BulkLoadState> res;
+	state size_t completeTaskCount = 0;
 	while (readBegin < readEnd) {
 		state int retryCount = 0;
 		loop {
@@ -2845,7 +3395,7 @@ ACTOR Future<std::vector<BulkLoadState>> getValidBulkLoadTasksWithinRange(
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(store(rangeResult,
 				           krmGetRanges(&tr,
-				                        bulkLoadPrefix,
+				                        bulkDumpPrefix,
 				                        KeyRangeRef(readBegin, readEnd),
 				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
 				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
@@ -2862,120 +3412,19 @@ ACTOR Future<std::vector<BulkLoadState>> getValidBulkLoadTasksWithinRange(
 			if (rangeResult[i].value.empty()) {
 				continue;
 			}
-			BulkLoadState bulkLoadState = decodeBulkLoadState(rangeResult[i].value);
-			KeyRange range = Standalone(KeyRangeRef(rangeResult[i].key, rangeResult[i + 1].key));
-			if (range != bulkLoadState.getRange()) {
-				ASSERT(bulkLoadState.getRange().contains(range));
-				continue;
-			}
-			if (!phase.present() || phase.get() == bulkLoadState.phase) {
-				res.push_back(bulkLoadState);
-			}
-			if (res.size() >= limit) {
-				return res;
+			BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+			if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
+				completeTaskCount++;
 			}
 		}
 		readBegin = rangeResult.back().key;
 	}
-
-	return res;
+	return completeTaskCount;
 }
 
-// Submit bulkload task and overwrite any existing task and lock range
-ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			if (bulkLoadTask.phase != BulkLoadPhase::Submitted) {
-				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Reason", "WrongPhase")
-				    .detail("Task", bulkLoadTask.toString());
-				throw bulkload_task_failed();
-			}
-			if (!normalKeys.contains(bulkLoadTask.getRange())) {
-				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "SubmitBulkLoadTaskError")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .detail("Reason", "RangeOutOfScope")
-				    .detail("Task", bulkLoadTask.toString());
-				throw bulkload_task_failed();
-			}
-			wait(turnOffUserWriteTrafficForBulkLoad(&tr, bulkLoadTask.getRange()));
-			bulkLoadTask.submitTime = now();
-			wait(krmSetRange(&tr, bulkLoadPrefix, bulkLoadTask.getRange(), bulkLoadStateValue(bulkLoadTask)));
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
-}
-
-// Get bulk load task metadata with range and taskId and phase selector
-// Throw error if the task is outdated or the task is not in any input phase at the tr read version
-ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
-                                            KeyRange range,
-                                            UID taskId,
-                                            std::vector<BulkLoadPhase> phases) {
-	state BulkLoadState bulkLoadState;
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	RangeResult result = wait(krmGetRanges(tr, bulkLoadPrefix, range));
-	if (result.size() > 2) {
-		throw bulkload_task_outdated();
-	} else if (result[0].value.empty()) {
-		throw bulkload_task_outdated();
-	}
-	ASSERT(result.size() == 2);
-	bulkLoadState = decodeBulkLoadState(result[0].value);
-	ASSERT(bulkLoadState.getTaskId().isValid());
-	if (taskId != bulkLoadState.getTaskId()) {
-		// This task is overwritten by a newer task
-		throw bulkload_task_outdated();
-	}
-	KeyRange currentRange = KeyRangeRef(result[0].key, result[1].key);
-	if (bulkLoadState.getRange() != currentRange) {
-		// This task is partially overwritten by a newer task
-		ASSERT(bulkLoadState.getRange().contains(currentRange));
-		throw bulkload_task_outdated();
-	}
-	if (phases.size() > 0 && !bulkLoadState.onAnyPhase(phases)) {
-		throw bulkload_task_outdated();
-	}
-	return bulkLoadState;
-}
-
-// Update bulkload task to acknowledge state and unlock the range
-ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId) {
-	state Transaction tr(cx);
-	loop {
-		state BulkLoadState bulkLoadState;
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(store(bulkLoadState,
-			           getBulkLoadTask(&tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged })));
-			bulkLoadState.phase = BulkLoadPhase::Acknowledged;
-			ASSERT(range == bulkLoadState.getRange() && taskId == bulkLoadState.getTaskId());
-			ASSERT(normalKeys.contains(range));
-			wait(krmSetRange(&tr, bulkLoadPrefix, bulkLoadState.getRange(), bulkLoadStateValue(bulkLoadState)));
-			wait(turnOnUserWriteTrafficForBulkLoad(&tr, bulkLoadState.getRange()));
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
-}
-
-// Persist a new owner if input uniqueId is not existing; Update description if input uniqueId exists
-ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description) {
-	if (uniqueId.empty() || description.empty()) {
+// Persist a new owner if input ownerUniqueID is not existing; Update description if input ownerUniqueID exists
+ACTOR Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description) {
+	if (ownerUniqueID.empty() || description.empty()) {
 		throw range_lock_failed();
 	}
 	state Transaction tr(cx);
@@ -2983,7 +3432,7 @@ ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(uniqueId)));
+			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
 			RangeLockOwner owner;
 			if (res.present()) {
 				owner = decodeRangeLockOwner(res.get());
@@ -2993,9 +3442,9 @@ ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std
 				}
 				owner.setDescription(description);
 			} else {
-				owner = RangeLockOwner(uniqueId, description);
+				owner = RangeLockOwner(ownerUniqueID, description);
 			}
-			tr.set(rangeLockOwnerKeyFor(uniqueId), rangeLockOwnerValue(owner));
+			tr.set(rangeLockOwnerKeyFor(ownerUniqueID), rangeLockOwnerValue(owner));
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
@@ -3004,8 +3453,8 @@ ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std
 	}
 }
 
-ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId) {
-	if (uniqueId.empty()) {
+ACTOR Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID) {
+	if (ownerUniqueID.empty()) {
 		throw range_lock_failed();
 	}
 	state Transaction tr(cx);
@@ -3013,13 +3462,13 @@ ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(uniqueId)));
+			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
 			if (!res.present()) {
 				return Void();
 			}
 			RangeLockOwner owner = decodeRangeLockOwner(res.get());
 			ASSERT(owner.isValid());
-			tr.clear(rangeLockOwnerKeyFor(uniqueId));
+			tr.clear(rangeLockOwnerKeyFor(ownerUniqueID));
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
@@ -3028,13 +3477,13 @@ ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId) {
 	}
 }
 
-ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId) {
+ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(uniqueId)));
+			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
 			if (!res.present()) {
 				return Optional<RangeLockOwner>();
 			}
@@ -3052,7 +3501,7 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 	state Key beginKey = rangeLockOwnerKeys.begin;
 	state Key endKey = rangeLockOwnerKeys.end;
 	state Transaction tr(cx);
-	loop {
+	while (beginKey < endKey) {
 		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -3061,32 +3510,30 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 			for (const auto& kv : result) {
 				RangeLockOwner owner = decodeRangeLockOwner(kv.value);
 				ASSERT(owner.isValid());
-				RangeLockOwnerName uidFromKey = decodeRangeLockOwnerKey(kv.key);
-				ASSERT(owner.getUniqueId() == uidFromKey);
 				res.push_back(owner);
+				beginKey = keyAfter(kv.key);
 			}
-			if (result[result.size() - 1].key == endKey) {
-				return res;
-			} else {
-				beginKey = result[result.size() - 1].key;
-				tr.reset();
+			if (!result.more) {
+				break;
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
+	return res;
 }
 
 // Not transactional
-ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange range) {
+ACTOR Future<std::vector<std::pair<KeyRange, RangeLockState>>>
+findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwnerName> ownerName) {
 	if (range.end > normalKeys.end) {
 		throw range_lock_failed();
 	}
-	state std::vector<KeyRange> lockedRanges;
+	state std::vector<std::pair<KeyRange, RangeLockState>> lockedRanges;
 	state Key beginKey = range.begin;
 	state Key endKey = range.end;
 	state Transaction tr(cx);
-	loop {
+	while (beginKey < endKey) {
 		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -3098,16 +3545,15 @@ ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange ran
 				}
 				RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(result[i].value);
 				ASSERT(rangeLockStateSet.isValid());
-				if (rangeLockStateSet.isLockedFor(RangeLockType::ReadLockOnRange)) {
-					lockedRanges.push_back(Standalone(KeyRangeRef(result[i].key, result[i + 1].key)));
+				if (rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
+				    (!ownerName.present() ||
+				     ownerName.get() == rangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId())) {
+					// Exclusive lock can only have one lock in the set, so we just check the first lock in the set
+					lockedRanges.push_back(std::make_pair(Standalone(KeyRangeRef(result[i].key, result[i + 1].key)),
+					                                      rangeLockStateSet.getAllLockStats()[0]));
 				}
 			}
-			if (result[result.size() - 1].key == range.end) {
-				break;
-			} else {
-				beginKey = result[result.size() - 1].key;
-				tr.reset();
-			}
+			beginKey = result.back().key;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -3115,134 +3561,191 @@ ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange ran
 	return lockedRanges;
 }
 
-// Transactional
-ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range) {
+// Validate the input range and owner.
+// If invalid, reject the request by throwing range_lock_failed error.
+// If the range has been locked, reject the request by throwing range_lock_reject error.
+ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
+                                                      KeyRange range,
+                                                      RangeLockOwnerName ownerUniqueID) {
+	// Check input range
 	if (range.end > normalKeys.end) {
-		throw bulkload_task_failed();
-	}
-	tr->addWriteConflictRange(normalKeys);
-	// Validate
-	state Key beginKey = range.begin;
-	state Key endKey = range.end;
-	state KeyRange rangeToRead;
-	while (beginKey < endKey) {
-		rangeToRead = KeyRangeRef(beginKey, endKey);
-		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
-		for (int i = 0; i < res.size() - 1; i++) {
-			if (res[i].value.empty()) {
-				continue;
-			}
-			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
-			ASSERT(rangeLockStateSet.isValid());
-			for (const auto& [lockId, lock] : rangeLockStateSet.getLocks()) {
-				if (lock == RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad)) {
-					continue;
-				}
-				// TODO(BulkLoad): should cancel this task
-				TraceEvent(SevError, "DDBulkLoadSeeUnexpectedRangeLock")
-				    .detail("Lock", lock.toString())
-				    .detail("Range", rangeToRead);
-				throw not_implemented();
-			}
-		}
-		beginKey = res[res.size() - 1].key;
-	}
-	// Lock range exclusively by overwiting the range
-	RangeLockStateSet rangeLockStateSet;
-	rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad));
-	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(rangeLockStateSet)));
-	TraceEvent(SevInfo, "DDBulkLoadTurnOffWriteTraffic").detail("Range", range);
-	return Void();
-}
-
-// Transactional
-ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range) {
-	if (range.end > normalKeys.end) {
-		throw bulkload_task_failed();
-	}
-	// Validate
-	state Key beginKey = range.begin;
-	state Key endKey = range.end;
-	state KeyRange rangeToRead;
-	while (beginKey < endKey) {
-		rangeToRead = KeyRangeRef(beginKey, endKey);
-		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
-		for (int i = 0; i < res.size() - 1; i++) {
-			if (res[i].value.empty()) {
-				continue;
-			}
-			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
-			ASSERT(rangeLockStateSet.isValid());
-			for (const auto& [lockId, lock] : rangeLockStateSet.getLocks()) {
-				if (lock != RangeLockState(RangeLockType::ReadLockOnRange, rangeLockNameForBulkLoad)) {
-					TraceEvent(SevError, "DDBulkLoadSeeUnexpectedRangeLock")
-					    .detail("Lock", lock.toString())
-					    .detail("Range", rangeToRead);
-					ASSERT_WE_THINK(false);
-					// TODO(BulkLoad): make lock exclusive to other applications
-					// This is unexpected because others should see the exclusive lock of bulk load
-					// and give up locking the range
-				}
-			}
-		}
-		beginKey = res[res.size() - 1].key;
-	}
-	// Unlock exclusively by overwiting the range
-	// TODO(BulkLoad): use exclusive write lock for bulk load in the future
-	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, StringRef()));
-	TraceEvent(SevInfo, "DDBulkLoadTurnOnWriteTraffic").detail("Range", range);
-	return Void();
-}
-
-// Not transactional
-ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID) {
-	if (range.end > normalKeys.end) {
+		TraceEvent(SevDebug, "PrepareExclusiveRangeLockOperationFailed")
+		    .detail("Reason", "Range out of scope")
+		    .detail("Range", range);
 		throw range_lock_failed();
 	}
+	// Check owner
+	state Optional<Value> ownerValue = wait(tr->get(rangeLockOwnerKeyFor(ownerUniqueID)));
+	if (!ownerValue.present()) {
+		TraceEvent(SevDebug, "PrepareExclusiveRangeLockOperationFailed")
+		    .detail("Reason", "Owner not found")
+		    .detail("Owner", ownerUniqueID)
+		    .detail("Range", range);
+		throw range_lock_failed();
+	}
+	state RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
+	ASSERT(owner.isValid());
+	// Check lock state on the entire input range. Throw exception if the range has been locked by a different owner.
 	state Key beginKey = range.begin;
 	state Key endKey = range.end;
+	state KeyRange rangeToRead;
+	while (beginKey < endKey) {
+		rangeToRead = KeyRangeRef(beginKey, endKey);
+		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
+		for (int i = 0; i < res.size() - 1; i++) {
+			if (res[i].value.empty()) {
+				continue;
+			}
+			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
+			ASSERT(rangeLockStateSet.isValid());
+			auto lockSet = rangeLockStateSet.getLocks();
+			if (!lockSet.empty() && (!rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) ||
+			                         lockSet.find(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range)
+			                                          .getLockUniqueString()) == lockSet.end())) {
+				TraceEvent(SevDebug, "PrepareExclusiveRangeLockOperationFailed")
+				    .detail("Reason", "Locked")
+				    .detail("NewLockType", RangeLockType::ExclusiveReadLock)
+				    .detail("NewLockRange", range)
+				    .detail("NewLockOwner", ownerUniqueID)
+				    .detail("ExistingLocks", rangeLockStateSet.toString());
+				throw range_lock_reject(); // Has been locked
+			}
+		}
+		beginKey = res[res.size() - 1].key;
+	}
+	return Void();
+}
+
+ACTOR Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr,
+                                                        KeyRange range,
+                                                        RangeLockOwnerName ownerUniqueID) {
+	// Check input range
+	if (range.end > normalKeys.end) {
+		TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
+		    .detail("Reason", "Range out of scope")
+		    .detail("Range", range);
+		throw range_lock_failed();
+	}
+	// Check owner
+	state Optional<Value> ownerValue = wait(tr->get(rangeLockOwnerKeyFor(ownerUniqueID)));
+	if (!ownerValue.present()) {
+		TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
+		    .detail("Reason", "Owner not found")
+		    .detail("Owner", ownerUniqueID)
+		    .detail("Range", range);
+		throw range_lock_failed();
+	}
+	state RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
+	ASSERT(owner.isValid());
+
+	// Check lock state on the entire input range. Throw exception if the range has been locked by a different owner.
+	state Key beginKey = range.begin;
+	state Key endKey = range.end;
+	state KeyRange rangeToRead;
+	while (beginKey < endKey) {
+		rangeToRead = KeyRangeRef(beginKey, endKey);
+		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
+		for (int i = 0; i < res.size() - 1; i++) {
+			if (res[i].value.empty()) {
+				continue;
+			}
+			RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(res[i].value);
+			ASSERT(rangeLockStateSet.isValid());
+			auto lockSet = rangeLockStateSet.getLocks();
+			if (!lockSet.empty() && (!rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) ||
+			                         lockSet.find(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range)
+			                                          .getLockUniqueString()) == lockSet.end())) {
+				TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
+				    .detail("Reason", "Has been locked by a different user or the same user with a different range")
+				    .detail("UnLockOwner", ownerUniqueID)
+				    .detail("UnLockRange", range)
+				    .detail("ExistingLocks", rangeLockStateSet.toString());
+				throw range_unlock_reject();
+			}
+		}
+		beginKey = res[res.size() - 1].key;
+	}
+	return Void();
+}
+
+// Transactional. One transaction can call takeExclusiveReadLockOnRange at most for one time.
+// This is the limitation of the krmSetRangeCoalescing.
+ACTOR Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	// Add conflict range
+	tr->addWriteConflictRange(range);
+	wait(prepareExclusiveRangeLockOperation(tr, range, ownerUniqueID));
+	// At this point, no lock presents on the range.
+	// Lock range by writting the range.
+	RangeLockStateSet rangeLockStateSet;
+	rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range));
+	wait(krmSetRange(tr, rangeLockPrefix, range, rangeLockStateSetValue(rangeLockStateSet)));
+	TraceEvent(SevInfo, "TakeExclusiveReadLockTransactionOnRange").detail("Range", range);
+	return Void();
+}
+
+// Transactional. One transaction can call releaseExclusiveReadLockOnRange at most for one time.
+// This is the limitation of the krmSetRangeCoalescing.
+ACTOR Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	wait(prepareExclusiveRangeUnlockOperation(tr, range, ownerUniqueID));
+	// At this point, no lock presents on the range.
+	// Unlock by overwiting the range.
+	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(RangeLockStateSet())));
+	TraceEvent(SevInfo, "ReleaseExclusiveReadLockTransactionOnRange").detail("Range", range);
+	return Void();
+}
+
+ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID) {
+	state Key beginKey = normalKeys.begin;
+	state Key endKey = normalKeys.end;
 	state Transaction tr(cx);
-	loop {
-		state KeyRange rangeToLock = Standalone(KeyRangeRef(beginKey, endKey));
+	state int i = 0;
+	state RangeResult result;
+	state KeyRange rangeToRead;
+	state RangeLockStateSet currentRangeLockStateSet;
+	state KeyRange currentRange;
+	state Key beginKeyToClear;
+	state Key endKeyToClear;
+	while (beginKey < endKey) {
+		rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
+			tr.reset();
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.addWriteConflictRange(normalKeys);
-
-			// Step 1: Check owner
-			state Optional<Value> ownerValue = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
-			if (!ownerValue.present()) {
-				throw range_lock_failed();
-			}
-			state RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
-			ASSERT(owner.isValid());
-
-			// Step 2: Get all locks on the range and add the new lock
-			state RangeResult result = wait(krmGetRanges(&tr, rangeLockPrefix, rangeToLock));
-			state int i = 0;
+			result.clear();
+			wait(store(result, krmGetRanges(&tr, rangeLockPrefix, rangeToRead)));
+			i = 0;
+			beginKeyToClear = result[0].key;
+			endKeyToClear = result[0].key; // Expanding when currentRange is valid to clear
 			for (; i < result.size() - 1; i++) {
-				KeyRange lockRange = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
-				RangeLockStateSet rangeLockStateSet;
-				if (!result[i].value.empty()) {
-					rangeLockStateSet = decodeRangeLockStateSet(result[i].value);
+				currentRange = KeyRangeRef(result[i].key, result[i + 1].key);
+				if (result[i].value.empty()) {
+					endKeyToClear = currentRange.end;
+					continue;
 				}
-				rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ReadLockOnRange, owner.getUniqueId()));
-				ASSERT(rangeLockStateSet.isValid());
-				wait(krmSetRangeCoalescing(
-				    &tr, rangeLockPrefix, lockRange, normalKeys, rangeLockStateSetValue(rangeLockStateSet)));
+				currentRangeLockStateSet = decodeRangeLockStateSet(result[i].value);
+				ASSERT(currentRangeLockStateSet.isValid());
+				if (currentRangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
+				    currentRangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId() == ownerUniqueID) {
+					// If this range is exclusively locked by the input owner, we will clear it.
+					endKeyToClear = currentRange.end;
+					continue;
+				}
+				break;
+			}
+			if (beginKeyToClear != endKeyToClear) {
+				ASSERT(endKeyToClear > beginKeyToClear);
+				wait(krmSetRangeCoalescing(&tr,
+				                           rangeLockPrefix,
+				                           KeyRangeRef(beginKeyToClear, endKeyToClear),
+				                           normalKeys,
+				                           rangeLockStateSetValue(RangeLockStateSet())));
 				wait(tr.commit());
-				tr.reset();
-				beginKey = result[i + 1].key;
-				break;
 			}
-
-			// Step 3: Exit if all ranges have been locked
-			if (beginKey == range.end) {
-				break;
-			}
-
-			wait(delay(0.1));
-
+			beginKey = currentRange.end; // We skip the currentRange if it is not locked by the input owner.
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -3250,55 +3753,31 @@ ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string 
 	return Void();
 }
 
-// Not transactional
-ACTOR Future<Void> releaseReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID) {
-	if (range.end > normalKeys.end) {
-		throw range_lock_failed();
-	}
-	state Key beginKey = range.begin;
-	state Key endKey = range.end;
+// Transactional
+ACTOR Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID) {
 	state Transaction tr(cx);
 	loop {
-		state KeyRange rangeToLock = Standalone(KeyRangeRef(beginKey, endKey));
 		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			wait(takeExclusiveReadLockOnRange(&tr, range, ownerUniqueID));
+			wait(tr.commit());
+			TraceEvent(SevInfo, "TakeExclusiveReadLockOnRange").detail("Range", range);
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
 
-			// Step 1: Check owner
-			state Optional<Value> ownerValue = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
-			if (!ownerValue.present()) {
-				throw range_lock_failed();
-			}
-			state RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
-			ASSERT(owner.isValid());
-
-			// Step 2: Get all locks on the range and remove the lock
-			state RangeResult result = wait(krmGetRanges(&tr, rangeLockPrefix, rangeToLock));
-			state int i = 0;
-			for (; i < result.size() - 1; i++) {
-				KeyRange lockRange = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
-				if (result[i].value.empty()) {
-					beginKey = result[i + 1].key;
-					continue;
-				}
-				RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(result[i].value);
-				rangeLockStateSet.remove(RangeLockState(RangeLockType::ReadLockOnRange, owner.getUniqueId()));
-				ASSERT(rangeLockStateSet.isValid());
-				wait(krmSetRangeCoalescing(
-				    &tr, rangeLockPrefix, lockRange, normalKeys, rangeLockStateSetValue(rangeLockStateSet)));
-				wait(tr.commit());
-				tr.reset();
-				beginKey = result[i + 1].key;
-				break;
-			}
-
-			// Step 3: Exit if all ranges have been unlocked
-			if (beginKey == range.end) {
-				break;
-			}
-
-			wait(delay(0.1));
-
+// Transactional
+ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			wait(releaseExclusiveReadLockOnRange(&tr, range, ownerUniqueID));
+			wait(tr.commit());
+			TraceEvent(SevInfo, "ReleaseExclusiveReadLockOnRange").detail("Range", range);
+			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}

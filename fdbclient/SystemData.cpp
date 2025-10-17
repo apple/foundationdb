@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/SystemData.h"
-#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
@@ -1119,6 +1118,7 @@ const KeyRangeRef backupProgressKeys("\xff\x02/backupProgress/"_sr, "\xff\x02/ba
 const KeyRef backupProgressPrefix = backupProgressKeys.begin;
 const KeyRef backupStartedKey = "\xff\x02/backupStarted"_sr;
 extern const KeyRef backupPausedKey = "\xff\x02/backupPaused"_sr;
+extern const KeyRef backupWorkerMaxNoopVersionKey = "\xff\x02/backupWorkerMaxNoopVersion"_sr;
 
 const Key backupProgressKeyFor(UID workerID) {
 	BinaryWriter wr(Unversioned());
@@ -1196,18 +1196,71 @@ const UID dataDistributionModeLock = UID(6345, 3425);
 
 // Bulk loading keys
 const KeyRef bulkLoadModeKey = "\xff/bulkLoadMode"_sr;
-const KeyRangeRef bulkLoadKeys = KeyRangeRef("\xff/bulkLoad/"_sr, "\xff/bulkLoad0"_sr);
-const KeyRef bulkLoadPrefix = bulkLoadKeys.begin;
+const KeyRangeRef bulkLoadTaskKeys = KeyRangeRef("\xff/bulkLoadTask/"_sr, "\xff/bulkLoadTask0"_sr);
+const KeyRef bulkLoadTaskPrefix = bulkLoadTaskKeys.begin;
 
-const Value bulkLoadStateValue(const BulkLoadState& bulkLoadState) {
-	return ObjectWriter::toValue(bulkLoadState, IncludeVersion());
+const Value bulkLoadTaskStateValue(const BulkLoadTaskState& bulkLoadTaskState) {
+	return ObjectWriter::toValue(bulkLoadTaskState, IncludeVersion());
 }
 
-BulkLoadState decodeBulkLoadState(const ValueRef& value) {
-	BulkLoadState bulkLoadState;
+BulkLoadTaskState decodeBulkLoadTaskState(const ValueRef& value) {
+	BulkLoadTaskState bulkLoadTaskState;
 	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(bulkLoadState);
-	return bulkLoadState;
+	reader.deserialize(bulkLoadTaskState);
+	return bulkLoadTaskState;
+}
+
+const Value ssBulkLoadMetadataValue(const SSBulkLoadMetadata& ssBulkLoadMetadata) {
+	return ObjectWriter::toValue(ssBulkLoadMetadata, IncludeVersion());
+}
+
+SSBulkLoadMetadata decodeSSBulkLoadMetadata(const ValueRef& value) {
+	SSBulkLoadMetadata ssBulkLoadMetadata;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(ssBulkLoadMetadata);
+	return ssBulkLoadMetadata;
+}
+
+const KeyRangeRef bulkLoadJobKeys = KeyRangeRef("\xff/bulkLoadJob/"_sr, "\xff/bulkLoadJob0"_sr);
+const KeyRef bulkLoadJobPrefix = bulkLoadJobKeys.begin;
+
+const Value bulkLoadJobValue(const BulkLoadJobState& bulkLoadJobState) {
+	return ObjectWriter::toValue(bulkLoadJobState, IncludeVersion());
+}
+
+BulkLoadJobState decodeBulkLoadJobState(const ValueRef& value) {
+	BulkLoadJobState bulkLoadJobState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(bulkLoadJobState);
+	return bulkLoadJobState;
+}
+
+const KeyRangeRef bulkLoadJobHistoryKeys = KeyRangeRef("\xff/bulkLoadJobHistory/"_sr, "\xff/bulkLoadJobHistory0"_sr);
+const KeyRef bulkLoadJobHistoryPrefix = bulkLoadJobHistoryKeys.begin;
+
+// BulkLoad job with the same jobId can run for multiple times, we only keep the latest one
+// in the history.
+const Key bulkLoadJobHistoryKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkLoadJobHistoryPrefix);
+	wr.serializeBytes(StringRef(jobId.toString()));
+	return wr.toValue();
+}
+
+// Bulk dumping keys
+const KeyRef bulkDumpModeKey = "\xff/bulkDumpMode"_sr;
+const KeyRangeRef bulkDumpKeys = KeyRangeRef("\xff/bulkDump/"_sr, "\xff/bulkDump0"_sr);
+const KeyRef bulkDumpPrefix = bulkDumpKeys.begin;
+
+const Value bulkDumpStateValue(const BulkDumpState& bulkDumpState) {
+	return ObjectWriter::toValue(bulkDumpState, IncludeVersion());
+}
+
+BulkDumpState decodeBulkDumpState(const ValueRef& value) {
+	BulkDumpState bulkDumpState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(bulkDumpState);
+	return bulkDumpState;
 }
 
 // Range Lock
@@ -1235,13 +1288,6 @@ const Key rangeLockOwnerKeyFor(const RangeLockOwnerName& ownerUniqueID) {
 	wr.serializeBytes(rangeLockOwnerPrefix);
 	wr.serializeBytes(StringRef(ownerUniqueID));
 	return wr.toValue();
-}
-
-const RangeLockOwnerName decodeRangeLockOwnerKey(const KeyRef& key) {
-	std::string ownerUniqueID;
-	BinaryReader rd(key.removePrefix(rangeLockOwnerPrefix), Unversioned());
-	rd >> ownerUniqueID;
-	return ownerUniqueID;
 }
 
 const Value rangeLockOwnerValue(const RangeLockOwner& rangeLockOwner) {
@@ -1496,546 +1542,10 @@ const KeyRef writeRecoveryKey = "\xff/writeRecovery"_sr;
 const ValueRef writeRecoveryKeyTrue = "1"_sr;
 const KeyRef snapshotEndVersionKey = "\xff/snapshotEndVersion"_sr;
 
-const KeyRangeRef changeFeedKeys("\xff\x02/feed/"_sr, "\xff\x02/feed0"_sr);
-const KeyRef changeFeedPrefix = changeFeedKeys.begin;
-const KeyRef changeFeedPrivatePrefix = "\xff\xff\x02/feed/"_sr;
-
-const Value changeFeedValue(KeyRangeRef const& range, Version popVersion, ChangeFeedStatus status) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
-	wr << range;
-	wr << popVersion;
-	wr << status;
-	return wr.toValue();
-}
-
-std::tuple<KeyRange, Version, ChangeFeedStatus> decodeChangeFeedValue(ValueRef const& value) {
-	KeyRange range;
-	Version version;
-	ChangeFeedStatus status;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> range;
-	reader >> version;
-	reader >> status;
-	return std::make_tuple(range, version, status);
-}
-
-const KeyRangeRef changeFeedDurableKeys("\xff\xff/cf/"_sr, "\xff\xff/cf0"_sr);
-const KeyRef changeFeedDurablePrefix = changeFeedDurableKeys.begin;
-
-const Value changeFeedDurableKey(Key const& feed, Version version) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withChangeFeed()));
-	wr.serializeBytes(changeFeedDurablePrefix);
-	wr << feed;
-	wr << bigEndian64(version);
-	return wr.toValue();
-}
-std::pair<Key, Version> decodeChangeFeedDurableKey(ValueRef const& key) {
-	Key feed;
-	Version version;
-	BinaryReader reader(key.removePrefix(changeFeedDurablePrefix), AssumeVersion(ProtocolVersion::withChangeFeed()));
-	reader >> feed;
-	reader >> version;
-	return std::make_pair(feed, bigEndian64(version));
-}
-const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations, Version knownCommittedVersion) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
-	wr << mutations;
-	wr << knownCommittedVersion;
-	return wr.toValue();
-}
-std::pair<Standalone<VectorRef<MutationRef>>, Version> decodeChangeFeedDurableValue(ValueRef const& value) {
-	Standalone<VectorRef<MutationRef>> mutations;
-	Version knownCommittedVersion;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> mutations;
-	reader >> knownCommittedVersion;
-	return std::make_pair(mutations, knownCommittedVersion);
-}
-
-const KeyRangeRef changeFeedCacheKeys("\xff\xff/cc/"_sr, "\xff\xff/cc0"_sr);
-const KeyRef changeFeedCachePrefix = changeFeedCacheKeys.begin;
-
-const Value changeFeedCacheKey(Key const& prefix, Key const& feed, KeyRange const& range, Version version) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withChangeFeed()));
-	wr.serializeBytes(prefix);
-	wr.serializeBytes(changeFeedCachePrefix);
-	wr << feed;
-	wr << range;
-	wr << bigEndian64(version);
-	return wr.toValue();
-}
-std::tuple<Key, KeyRange, Version> decodeChangeFeedCacheKey(KeyRef const& prefix, ValueRef const& key) {
-	Key feed;
-	KeyRange range;
-	Version version;
-	BinaryReader reader(key.removePrefix(prefix).removePrefix(changeFeedCachePrefix),
-	                    AssumeVersion(ProtocolVersion::withChangeFeed()));
-	reader >> feed;
-	reader >> range;
-	reader >> version;
-	return std::make_tuple(feed, range, bigEndian64(version));
-}
-
-// The versions of these mutations must be less than or equal to the version in the changeFeedCacheKey
-const Value changeFeedCacheValue(Standalone<VectorRef<MutationsAndVersionRef>> const& mutations) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
-	wr << mutations;
-	return wr.toValue();
-}
-Standalone<VectorRef<MutationsAndVersionRef>> decodeChangeFeedCacheValue(ValueRef const& value) {
-	Standalone<VectorRef<MutationsAndVersionRef>> mutations;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> mutations;
-	return mutations;
-}
-
-const KeyRangeRef changeFeedCacheFeedKeys("\xff\xff/ccd/"_sr, "\xff\xff/ccd0"_sr);
-const KeyRef changeFeedCacheFeedPrefix = changeFeedCacheFeedKeys.begin;
-
-const Value changeFeedCacheFeedKey(Key const& prefix, Key const& feed, KeyRange const& range) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withChangeFeed()));
-	wr.serializeBytes(changeFeedCacheFeedPrefix);
-	wr << prefix;
-	wr << feed;
-	wr << range;
-	return wr.toValue();
-}
-std::tuple<Key, Key, KeyRange> decodeChangeFeedCacheFeedKey(ValueRef const& key) {
-	Key prefix;
-	Key feed;
-	KeyRange range;
-	BinaryReader reader(key.removePrefix(changeFeedCacheFeedPrefix), AssumeVersion(ProtocolVersion::withChangeFeed()));
-	reader >> prefix;
-	reader >> feed;
-	reader >> range;
-	return std::make_tuple(prefix, feed, range);
-}
-const Value changeFeedCacheFeedValue(Version const& version, Version const& popped) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
-	wr << version;
-	wr << popped;
-	return wr.toValue();
-}
-std::pair<Version, Version> decodeChangeFeedCacheFeedValue(ValueRef const& value) {
-	Version version;
-	Version popped;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> version;
-	reader >> popped;
-	return std::make_pair(version, popped);
-}
-
 const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
 const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
 const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
 const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
-
-// key to watch for changes in active blob ranges + KeyRangeMap of active blob ranges
-// Blob Manager + Worker stuff is all \xff\x02 to avoid Transaction State Store
-const KeyRef blobRangeChangeKey = "\xff\x02/blobRangeChange"_sr;
-const KeyRangeRef blobRangeKeys("\xff\x02/blobRange/"_sr, "\xff\x02/blobRange0"_sr);
-const KeyRangeRef blobRangeChangeLogKeys("\xff\x02/blobRangeLog/"_sr, "\xff\x02/blobRangeLog0"_sr);
-const KeyRef blobManagerEpochKey = "\xff\x02/blobManagerEpoch"_sr;
-
-const Value blobManagerEpochValueFor(int64_t epoch) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << epoch;
-	return wr.toValue();
-}
-
-int64_t decodeBlobManagerEpochValue(ValueRef const& value) {
-	int64_t epoch;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> epoch;
-	return epoch;
-}
-
-// blob granule data
-const KeyRef blobRangeActive = "1"_sr;
-const KeyRef blobRangeInactive = StringRef();
-
-bool isBlobRangeActive(const ValueRef& blobRangeValue) {
-	// Empty or "0" is inactive
-	// "1" is active
-	// Support future change where serialized metadata struct is also active
-	return !blobRangeValue.empty() && blobRangeValue != blobRangeInactive;
-}
-
-const Key blobRangeChangeLogReadKeyFor(Version version) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobRangeChangeLog()));
-	wr.serializeBytes(blobRangeChangeLogKeys.begin);
-	wr << bigEndian64(version);
-	return wr.toValue();
-}
-
-const Value blobRangeChangeLogValueFor(const Standalone<BlobRangeChangeLogRef>& value) {
-	return ObjectWriter::toValue(value, IncludeVersion(ProtocolVersion::withBlobRangeChangeLog()));
-}
-
-Standalone<BlobRangeChangeLogRef> decodeBlobRangeChangeLogValue(ValueRef const& value) {
-	Standalone<BlobRangeChangeLogRef> result;
-	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(result);
-	return result;
-}
-
-const KeyRangeRef blobGranuleFileKeys("\xff\x02/bgf/"_sr, "\xff\x02/bgf0"_sr);
-const KeyRangeRef blobGranuleMappingKeys("\xff\x02/bgm/"_sr, "\xff\x02/bgm0"_sr);
-const KeyRangeRef blobGranuleLockKeys("\xff\x02/bgl/"_sr, "\xff\x02/bgl0"_sr);
-const KeyRangeRef blobGranuleSplitKeys("\xff\x02/bgs/"_sr, "\xff\x02/bgs0"_sr);
-const KeyRangeRef blobGranuleMergeKeys("\xff\x02/bgmerge/"_sr, "\xff\x02/bgmerge0"_sr);
-const KeyRangeRef blobGranuleMergeBoundaryKeys("\xff\x02/bgmergebounds/"_sr, "\xff\x02/bgmergebounds0"_sr);
-const KeyRangeRef blobGranuleHistoryKeys("\xff\x02/bgh/"_sr, "\xff\x02/bgh0"_sr);
-const KeyRangeRef blobGranulePurgeKeys("\xff\x02/bgp/"_sr, "\xff\x02/bgp0"_sr);
-const KeyRangeRef blobGranuleForcePurgedKeys("\xff\x02/bgpforce/"_sr, "\xff\x02/bgpforce0"_sr);
-const KeyRef blobGranulePurgeChangeKey = "\xff\x02/bgpChange"_sr;
-
-const uint8_t BG_FILE_TYPE_DELTA = 'D';
-const uint8_t BG_FILE_TYPE_SNAPSHOT = 'S';
-
-const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType) {
-	ASSERT(fileType == 'D' || fileType == 'S');
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobGranuleFileKeys.begin);
-	wr << granuleID;
-	wr << bigEndian64(fileVersion);
-	wr << fileType;
-	return wr.toValue();
-}
-
-std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key) {
-	UID granuleID;
-	Version fileVersion;
-	uint8_t fileType;
-	BinaryReader reader(key.removePrefix(blobGranuleFileKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
-	reader >> granuleID;
-	reader >> fileVersion;
-	reader >> fileType;
-	ASSERT(fileType == 'D' || fileType == 'S');
-	return std::tuple(granuleID, bigEndian64(fileVersion), fileType);
-}
-
-const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobGranuleFileKeys.begin);
-	wr << granuleID;
-	Key startKey = wr.toValue();
-	return KeyRangeRef(startKey, strinc(startKey));
-}
-
-const Value blobGranuleFileValueFor(StringRef const& filename,
-                                    int64_t offset,
-                                    int64_t length,
-                                    int64_t fullFileLength,
-                                    int64_t logicalSize,
-                                    Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta) {
-	auto protocolVersion = CLIENT_KNOBS->ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE
-	                           ? ProtocolVersion::withBlobGranuleFileLogicalSize()
-	                           : ProtocolVersion::withBlobGranule();
-	BinaryWriter wr(IncludeVersion(protocolVersion));
-	wr << filename;
-	wr << offset;
-	wr << length;
-	wr << fullFileLength;
-	wr << cipherKeysMeta;
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE) {
-		wr << logicalSize;
-	}
-	return wr.toValue();
-}
-
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
-decodeBlobGranuleFileValue(ValueRef const& value) {
-	StringRef filename;
-	int64_t offset;
-	int64_t length;
-	int64_t fullFileLength;
-	int64_t logicalSize;
-	Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
-
-	BinaryReader reader(value, IncludeVersion());
-	reader >> filename;
-	reader >> offset;
-	reader >> length;
-	reader >> fullFileLength;
-	reader >> cipherKeysMeta;
-	if (reader.protocolVersion().hasBlobGranuleFileLogicalSize()) {
-		reader >> logicalSize;
-	} else {
-		// fall back to estimating logical size as physical size
-		logicalSize = length;
-	}
-	return std::tuple(filename, offset, length, fullFileLength, logicalSize, cipherKeysMeta);
-}
-
-const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << version;
-	wr << range;
-	wr << force;
-	return wr.toValue();
-}
-
-std::tuple<Version, KeyRange, bool> decodeBlobGranulePurgeValue(ValueRef const& value) {
-	Version version;
-	KeyRange range;
-	bool force;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> version;
-	reader >> range;
-	reader >> force;
-	return std::tuple(version, range, force);
-}
-
-const Value blobGranuleMappingValueFor(UID const& workerID) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << workerID;
-	return wr.toValue();
-}
-
-UID decodeBlobGranuleMappingValue(ValueRef const& value) {
-	UID workerID;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> workerID;
-	return workerID;
-}
-
-const Key blobGranuleLockKeyFor(KeyRangeRef const& keyRange) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobGranuleLockKeys.begin);
-	wr << keyRange;
-	return wr.toValue();
-}
-
-const Value blobGranuleLockValueFor(int64_t epoch, int64_t seqno, UID changeFeedId) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << epoch;
-	wr << seqno;
-	wr << changeFeedId;
-	return wr.toValue();
-}
-
-std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(const ValueRef& value) {
-	int64_t epoch, seqno;
-	UID changeFeedId;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> epoch;
-	reader >> seqno;
-	reader >> changeFeedId;
-	return std::make_tuple(epoch, seqno, changeFeedId);
-}
-
-const Key blobGranuleSplitKeyFor(UID const& parentGranuleID, UID const& granuleID) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobGranuleSplitKeys.begin);
-	wr << parentGranuleID;
-	wr << granuleID;
-	return wr.toValue();
-}
-
-std::pair<UID, UID> decodeBlobGranuleSplitKey(KeyRef const& key) {
-	UID parentGranuleID;
-	UID granuleID;
-	BinaryReader reader(key.removePrefix(blobGranuleSplitKeys.begin),
-	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
-
-	reader >> parentGranuleID;
-	reader >> granuleID;
-	return std::pair(parentGranuleID, granuleID);
-}
-
-const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobGranuleSplitKeys.begin);
-	wr << parentGranuleID;
-
-	Key startKey = wr.toValue();
-	return KeyRangeRef(startKey, strinc(startKey));
-}
-
-const Key blobGranuleMergeKeyFor(UID const& mergeGranuleID) {
-	// TODO should we bump this assumed version to 7.2 as blob granule merging is not in 7.1? 7.1 won't try to read this
-	// data though since it didn't exist before
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobGranuleMergeKeys.begin);
-	wr << mergeGranuleID;
-
-	return wr.toValue();
-}
-
-UID decodeBlobGranuleMergeKey(KeyRef const& key) {
-	UID mergeGranuleID;
-	BinaryReader reader(key.removePrefix(blobGranuleMergeKeys.begin),
-	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
-
-	reader >> mergeGranuleID;
-	return mergeGranuleID;
-}
-
-const Value blobGranuleSplitValueFor(BlobGranuleSplitState st) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << st;
-	return addVersionStampAtEnd(wr.toValue());
-}
-
-std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const ValueRef& value) {
-	BlobGranuleSplitState st;
-	Version v;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> st;
-	reader >> v;
-
-	return std::pair(st, bigEndian64(v));
-}
-
-const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
-                                     std::vector<UID> parentGranuleIDs,
-                                     std::vector<Key> parentGranuleRanges,
-                                     std::vector<Version> parentGranuleStartVersions) {
-	ASSERT(parentGranuleIDs.size() == parentGranuleRanges.size() - 1);
-	ASSERT(parentGranuleIDs.size() == parentGranuleStartVersions.size());
-
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << mergeKeyRange;
-	wr << parentGranuleIDs;
-	wr << parentGranuleRanges;
-	wr << parentGranuleStartVersions;
-	return addVersionStampAtEnd(wr.toValue());
-}
-std::tuple<KeyRange, Version, std::vector<UID>, std::vector<Key>, std::vector<Version>> decodeBlobGranuleMergeValue(
-    ValueRef const& value) {
-	KeyRange range;
-	Version v;
-	std::vector<UID> parentGranuleIDs;
-	std::vector<Key> parentGranuleRanges;
-	std::vector<Version> parentGranuleStartVersions;
-
-	BinaryReader reader(value, IncludeVersion());
-	reader >> range;
-	reader >> parentGranuleIDs;
-	reader >> parentGranuleRanges;
-	reader >> parentGranuleStartVersions;
-	reader >> v;
-
-	ASSERT(parentGranuleIDs.size() == parentGranuleRanges.size() - 1);
-	ASSERT(parentGranuleIDs.size() == parentGranuleStartVersions.size());
-	ASSERT(bigEndian64(v) >= 0);
-
-	return std::tuple(range, bigEndian64(v), parentGranuleIDs, parentGranuleRanges, parentGranuleStartVersions);
-}
-
-const Key blobGranuleMergeBoundaryKeyFor(const KeyRef& key) {
-	return key.withPrefix(blobGranuleMergeBoundaryKeys.begin);
-}
-
-const Value blobGranuleMergeBoundaryValueFor(BlobGranuleMergeBoundary const& boundary) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << boundary;
-	return wr.toValue();
-}
-
-Standalone<BlobGranuleMergeBoundary> decodeBlobGranuleMergeBoundaryValue(const ValueRef& value) {
-	Standalone<BlobGranuleMergeBoundary> boundaryValue;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> boundaryValue;
-	return boundaryValue;
-}
-
-const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobGranuleHistoryKeys.begin);
-	wr << range;
-	wr << bigEndian64(version);
-	return wr.toValue();
-}
-
-std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(const KeyRef& key) {
-	KeyRangeRef keyRange;
-	Version version;
-	BinaryReader reader(key.removePrefix(blobGranuleHistoryKeys.begin),
-	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
-	reader >> keyRange;
-	reader >> version;
-	return std::make_pair(keyRange, bigEndian64(version));
-}
-
-const KeyRange blobGranuleHistoryKeyRangeFor(KeyRangeRef const& range) {
-	return KeyRangeRef(blobGranuleHistoryKeyFor(range, 0), blobGranuleHistoryKeyFor(range, MAX_VERSION));
-}
-
-const Value blobGranuleHistoryValueFor(Standalone<BlobGranuleHistoryValue> const& historyValue) {
-	ASSERT(historyValue.parentVersions.empty() ||
-	       historyValue.parentBoundaries.size() - 1 == historyValue.parentVersions.size());
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << historyValue;
-	return wr.toValue();
-}
-
-Standalone<BlobGranuleHistoryValue> decodeBlobGranuleHistoryValue(const ValueRef& value) {
-	Standalone<BlobGranuleHistoryValue> historyValue;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> historyValue;
-	ASSERT(historyValue.parentVersions.empty() ||
-	       historyValue.parentBoundaries.size() - 1 == historyValue.parentVersions.size());
-	return historyValue;
-}
-
-const KeyRangeRef blobWorkerListKeys("\xff\x02/bwList/"_sr, "\xff\x02/bwList0"_sr);
-
-const Key blobWorkerListKeyFor(UID workerID) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobWorkerListKeys.begin);
-	wr << workerID;
-	return wr.toValue();
-}
-
-UID decodeBlobWorkerListKey(KeyRef const& key) {
-	UID workerID;
-	BinaryReader reader(key.removePrefix(blobWorkerListKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
-	reader >> workerID;
-	return workerID;
-}
-
-const Value blobWorkerListValue(BlobWorkerInterface const& worker) {
-	return ObjectWriter::toValue(worker, IncludeVersion(ProtocolVersion::withBlobGranule()));
-}
-
-BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
-	BlobWorkerInterface interf;
-	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(interf);
-	return interf;
-}
-
-const KeyRangeRef blobWorkerAffinityKeys("\xff\x02/bwa/"_sr, "\xff\x02/bwa0"_sr);
-
-const Key blobWorkerAffinityKeyFor(UID workerID) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobWorkerAffinityKeys.begin);
-	wr << workerID;
-	return wr.toValue();
-}
-
-UID decodeBlobWorkerAffinityKey(KeyRef const& key) {
-	UID workerID;
-	BinaryReader reader(key.removePrefix(blobWorkerAffinityKeys.begin),
-	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
-	reader >> workerID;
-	return workerID;
-}
-
-const Value blobWorkerAffinityValue(UID const& id) {
-	return ObjectWriter::toValue(id, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
-}
-
-UID decodeBlobWorkerAffinityValue(ValueRef const& value) {
-	UID id;
-	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(id);
-	return id;
-}
-
-const Key blobManifestVersionKey = "\xff\x02/blobManifestVersion"_sr;
 
 const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
 const KeyRef idempotencyIdsExpiredVersion("\xff\x02/idmpExpiredVersion"_sr);

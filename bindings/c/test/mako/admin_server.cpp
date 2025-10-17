@@ -183,30 +183,6 @@ boost::optional<std::string> AdminServer::createTenant(fdb::Database db, int id_
 		}
 		logr.info("create_tenants [{}-{}) OK ({:.3f}s)", id_begin, id_end, toDoubleSeconds(stopwatch.stop().diff()));
 		stopwatch.start();
-		logr.info("blobbify_tenants [{}-{})", id_begin, id_end);
-		for (auto id = id_begin; id < id_end; id++) {
-			while (true) {
-				auto tenant = db.openTenant(fdb::toBytesRef(getTenantNameByIndex(id)));
-				std::string range_end = "\xff";
-				auto blobbify_future = tenant.blobbifyRange(fdb::BytesRef(), fdb::toBytesRef(range_end));
-				const auto rc = waitAndHandleError(tx, blobbify_future);
-				if (rc == FutureRC::OK) {
-					if (!blobbify_future.get()) {
-						return fmt::format("failed to blobbify tenant {}", id);
-					}
-					break;
-				} else if (rc == FutureRC::RETRY) {
-					logr.info("blobbify_tenants retryable error: {}", blobbify_future.error().what());
-					continue;
-				} else {
-					logr.error("blobbify_tenants unretryable error: {}", blobbify_future.error().what());
-					return fmt::format("critical error encountered while blobbifying tenant {}: {}",
-					                   id,
-					                   blobbify_future.error().what());
-				}
-			}
-		}
-		logr.info("blobbify_tenants [{}-{}) OK ({:.3f}s)", id_begin, id_end, toDoubleSeconds(stopwatch.stop().diff()));
 		return {};
 	} catch (const std::exception& e) {
 		return std::string(e.what());

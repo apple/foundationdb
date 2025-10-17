@@ -133,7 +133,7 @@ function(add_fdb_test)
       -b ${PROJECT_BINARY_DIR}
       -t ${test_type}
       -O ${OLD_FDBSERVER_BINARY}
-      --config "@CTEST_CONFIGURATION_TYPE@"
+      --config "${CMAKE_BUILD_TYPE}"
       --crash
       --aggregate-traces ${TEST_AGGREGATE_TRACES}
       --log-format ${TEST_LOG_FORMAT}
@@ -390,9 +390,11 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
   add_custom_target(${target_name} DEPENDS ${target_dependency})
   add_custom_command(
     TARGET ${target_name}
+    POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_flow_tester> ${build_directory}/tests/flow/bin/fdb_flow_tester
     COMMENT "Copy Flow tester for bindingtester")
 
+  add_dependencies(${target_name} python_binding)
   set(generated_binding_files python/fdb/fdboptions.py python/fdb/apiversion.py)
   if(WITH_JAVA_BINDING)
     if(NOT FDB_RELEASE)
@@ -402,6 +404,7 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
     endif()
     add_custom_command(
       TARGET ${target_name}
+      POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy
         ${CMAKE_BINARY_DIR}/packages/fdb-java-${FDB_VERSION}${not_fdb_release_string}.jar
         ${build_directory}/tests/java/foundationdb-client.jar
@@ -423,9 +426,20 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
       COMMENT "Copy generated.go for bindingtester")
   endif()
 
+  if(WITH_SWIFT_BINDING)
+    add_dependencies(${target_name} stacktester_swift)
+    add_custom_command(
+      TARGET ${target_name}
+      POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/bindings/swift/bin/stacktester_swift"
+                                       "${build_directory}/tests/swift/bin/stacktester_swift"
+      COMMENT "Copy stacktester_swift for bindingtester")
+  endif()
+
   foreach(generated IN LISTS generated_binding_files)
     add_custom_command(
       TARGET ${target_name}
+      POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/${generated} ${build_directory}/tests/${generated}
       COMMENT "Copy ${generated} to bindingtester")
   endforeach()
@@ -647,7 +661,7 @@ endfunction()
 
 # Creates a single cluster before running the specified command (usually a ctest test)
 function(add_fdbclient_test)
-  set(options DISABLED ENABLED DISABLE_TENANTS DISABLE_LOG_DUMP API_TEST_BLOB_GRANULES_ENABLED TLS_ENABLED)
+  set(options DISABLED ENABLED DISABLE_TENANTS DISABLE_LOG_DUMP TLS_ENABLED)
   set(oneValueArgs NAME PROCESS_NUMBER TEST_TIMEOUT WORKING_DIRECTORY)
   set(multiValueArgs COMMAND)
   cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
@@ -675,9 +689,6 @@ function(add_fdbclient_test)
   endif()
   if(T_DISABLE_TENANTS)
     list(APPEND TMP_CLUSTER_CMD --disable-tenants)
-  endif()
-  if(T_API_TEST_BLOB_GRANULES_ENABLED)
-    list(APPEND TMP_CLUSTER_CMD --blob-granules-enabled)
   endif()
   if(T_TLS_ENABLED)
     list(APPEND TMP_CLUSTER_CMD --tls-enabled)

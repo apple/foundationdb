@@ -18,7 +18,6 @@ class TempCluster(LocalCluster):
         build_dir: str,
         process_number: int = 1,
         port: str = None,
-        blob_granules_enabled: bool = False,
         tls_config: TLSConfig = None,
         authorization_kty: str = "",
         authorization_keypair_id: str = "",
@@ -43,7 +42,6 @@ class TempCluster(LocalCluster):
             self.build_dir.joinpath("bin", "fdbcli"),
             process_number,
             port=port,
-            blob_granules_enabled=blob_granules_enabled,
             enable_encryption_at_rest=enable_encryption_at_rest,
             tls_config=tls_config,
             mkcert_binary=self.build_dir.joinpath("bin", "mkcert"),
@@ -121,7 +119,6 @@ if __name__ == "__main__":
     with TempCluster(
         args.build_dir,
         args.process_number,
-        blob_granules_enabled=args.blob_granules_enabled,
         tls_config=tls_config,
         enable_tenants=enable_tenants,
         authorization_kty=args.authorization_kty,

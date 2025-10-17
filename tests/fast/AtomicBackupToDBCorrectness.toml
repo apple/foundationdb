@@ -10,8 +10,8 @@ simBackupAgents = 'BackupToDB'
 
     [[test.workload]]
     testName = 'AtomicOps'
-    nodeCount = 30000
-    transactionsPerSecond = 2500.0
+    nodeCount = 10000
+    transactionsPerSecond = 750.0
     testDuration = 30.0
 
     [[test.workload]]

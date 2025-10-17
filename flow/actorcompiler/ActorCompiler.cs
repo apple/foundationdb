@@ -975,7 +975,13 @@ namespace actorcompiler
             {
                 string getFunc = ch.Stmt.wait.isWaitNext ? "pop" : "get";
                 LineNumber(cx.target, ch.Stmt.wait.FirstSourceLine);
-                cx.target.WriteLine("{2}<{3}> {0} = {1};", ch.Future, ch.Stmt.wait.futureExpression, ch.Stmt.wait.isWaitNext ? "FutureStream" : "StrictFuture", ch.Stmt.wait.result.type);
+                if (ch.Stmt.wait.isWaitNext) {
+                    cx.target.WriteLine("auto {0} = {1};", ch.Future, ch.Stmt.wait.futureExpression);
+                    cx.target.WriteLine("static_assert(std::is_same<decltype({0}), FutureStream<{1}>>::value || std::is_same<decltype({0}), ThreadFutureStream<{1}>>::value, \"invalid type\");", ch.Future, ch.Stmt.wait.result.type);
+
+                } else {
+                    cx.target.WriteLine("{2}<{3}> {0} = {1};", ch.Future, ch.Stmt.wait.futureExpression, "StrictFuture", ch.Stmt.wait.result.type);
+                }
 
                 if (firstChoice)
                 {

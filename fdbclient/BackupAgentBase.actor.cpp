@@ -188,9 +188,12 @@ Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion,
 	return ret;
 }
 
+// Given a begin and end version, get the prefix in the database for this range
+// i.e. applyLogKeys.begin/backupUid/hash(uint8)/version(64bites)/part
+// returns multiple key ranges, each of length APPLY_BLOCK_SIZE
+// e.g. (64, 200) -> [(64, 128), (128, 192), (192, 200)]
 Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid) {
 	Standalone<VectorRef<KeyRangeRef>> ret;
-
 	Key baLogRangePrefix = backupUid.withPrefix(applyLogKeys.begin);
 
 	//TraceEvent("GetLogRanges").detail("BackupUid", backupUid).detail("Prefix", baLogRangePrefix);
@@ -312,6 +315,7 @@ void _addResult(bool* tenantMapChanging,
  by "value" parameter), breaking it up into the individual MutationRefs (that constitute the transaction), decrypting
  each mutation (if needed) and adding/removing prefixes from the mutations. The final mutations are then added to the
  "result" vector alongside their encrypted counterparts (which is added to the "encryptedResult" vector)
+ Each `value` is a param2
 */
 ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                VectorRef<MutationRef>* result,
@@ -325,7 +329,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                Reference<KeyRangeMap<Version>> key_version,
                                                Database cx,
                                                std::map<int64_t, TenantName>* tenantMap,
-                                               bool provisionalProxy) {
+                                               bool provisionalProxy,
+                                               std::shared_ptr<DatabaseConfiguration> dbConfig) {
 	try {
 		state uint64_t offset(0);
 		uint64_t protocolVersion = 0;
@@ -344,15 +349,21 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 		offset += sizeof(uint32_t);
 		state uint32_t consumed = 0;
 
-		if (totalBytes + offset > value.size())
+		if (totalBytes + offset > value.size()) {
+			TraceEvent(SevError, "OffsetOutOfBoundary")
+			    .detail("TotalBytes", totalBytes)
+			    .detail("Offset", offset)
+			    .detail("Version", version)
+			    .detail("ValueSize", value.size());
 			throw restore_missing_data();
+		}
 
 		state int originalOffset = offset;
-		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		state KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
 
 		while (consumed < totalBytes) {
 			uint32_t type = 0;
+			// encoding format: type|kLen|vLen|Key|Value
 			memcpy(&type, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
 			state uint32_t len1 = 0;
@@ -364,6 +375,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 
 			ASSERT(offset + len1 + len2 <= value.size() && isValidMutationType(type));
 
+			// Construct MutationRef from StringRef
 			state MutationRef logValue;
 			state Arena tempArena;
 			logValue.type = type;
@@ -372,15 +384,15 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			logValue.param2 = value.substr(offset, len2);
 			offset += len2;
 			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
-			ASSERT(!config.encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());
+			ASSERT(!dbConfig->encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());
 
 			// Check for valid tenant in required tenant mode. If the tenant does not exist in our tenant map then
 			// we EXCLUDE the mutation (of that respective tenant) during the restore. NOTE: This simply allows a
 			// restore to make progress in the event of tenant deletion, but tenant deletion should be considered
 			// carefully so that we do not run into this case. We do this check here so if encrypted mutations are not
 			// found in the tenant map then we exit early without needing to reach out to the EKP.
-			if (config.tenantMode == TenantMode::REQUIRED &&
-			    config.encryptionAtRestMode.mode != EncryptionAtRestMode::CLUSTER_AWARE &&
+			if (dbConfig->tenantMode == TenantMode::REQUIRED &&
+			    dbConfig->encryptionAtRestMode.mode != EncryptionAtRestMode::CLUSTER_AWARE &&
 			    !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
 				consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 				continue;
@@ -413,8 +425,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			ASSERT(!logValue.isEncrypted());
 
 			// If the mutation was encrypted using cluster aware encryption then check after decryption
-			if (config.tenantMode == TenantMode::REQUIRED &&
-			    config.encryptionAtRestMode.mode == EncryptionAtRestMode::CLUSTER_AWARE &&
+			if (dbConfig->tenantMode == TenantMode::REQUIRED &&
+			    dbConfig->encryptionAtRestMode.mode == EncryptionAtRestMode::CLUSTER_AWARE &&
 			    !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
 				consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 				continue;
@@ -461,6 +473,9 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			} else {
 				Version ver = key_version->rangeContaining(logValue.param1).value();
 				//TraceEvent("ApplyMutation").detail("LogValue", logValue).detail("Version", version).detail("Ver", ver).detail("Apply", version > ver && ver != invalidVersion);
+				// version: version of this mutation decoded from log
+				// ver: the old version stored in keyVersionMap
+				// as a result, only add this mutation in log when the version is larger(to work with range file)
 				if (version > ver && ver != invalidVersion) {
 					if (removePrefix.size()) {
 						logValue.param1 = logValue.param1.removePrefix(removePrefix);
@@ -487,6 +502,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			TraceEvent(SevError, "BA_DecodeBackupLogValue")
 			    .detail("UnexpectedExtraDataSize", value.size())
 			    .detail("Offset", offset)
+			    .detail("GroupKey", version)
 			    .detail("TotalBytes", totalBytes)
 			    .detail("Consumed", consumed)
 			    .detail("OriginalOffset", originalOffset);
@@ -551,7 +567,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			if (CLIENT_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS) {
 				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
-				int64_t requiredReplicas = CLIENT_KNOBS->CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+				int64_t requiredReplicas = CLIENT_KNOBS->BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
 				tr.setOption(FDBTransactionOptions::CONSISTENCY_CHECK_REQUIRED_REPLICAS,
 				             StringRef((uint8_t*)&requiredReplicas, sizeof(int64_t)));
 			}
@@ -606,6 +622,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 	}
 }
 
+// read each version, potentially multiple part within the same version
 ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RCGroup> results,
                                  Future<Void> active,
@@ -658,14 +675,24 @@ ACTOR Future<Void> readCommitted(Database cx,
 			wait(lock->take(TaskPriority::DefaultYield, rangevalue.expectedSize() + rcGroup.items.expectedSize()));
 			releaser = FlowLock::Releaser(*lock, rangevalue.expectedSize() + rcGroup.items.expectedSize());
 
+			// iterate on a version range, each key-value pair is (version, part)
 			for (auto& s : rangevalue) {
-				uint64_t groupKey = groupBy(s.key).first;
-				//TraceEvent("Log_ReadCommitted").detail("GroupKey", groupKey).detail("SkipGroup", skipGroup).detail("NextKey", nextKey.key).detail("End", end.key).detail("Valuesize", value.size()).detail("Index",index++).detail("Size",s.value.size());
+				Version groupKey = groupBy(s.key).first; // mutation's commit version
+				// TraceEvent("Log_ReadCommitted")
+				//     .detail("GroupKey", groupKey)
+				//     .detail("SkipGroup", skipGroup)
+				//     .detail("Begin", range.begin)
+				//     .detail("End", range.end)
+				//     .detail("Size", s.value.size());
 				if (groupKey != skipGroup) {
 					if (rcGroup.version == -1) {
 						rcGroup.version = tr.getReadVersion().get();
 						rcGroup.groupKey = groupKey;
 					} else if (rcGroup.groupKey != groupKey) {
+						// if seeing a different version, then send result directly, and then create another
+						// rcGroup as a result, each rcgroup is for a single version, but a single version can span
+						// different rcgroups
+
 						//TraceEvent("Log_ReadCommitted").detail("SendGroup0", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("DataLength",rcGroup.items[0].value.size());
 						// state uint32_t len(0);
 						// for (size_t j = 0; j < rcGroup.items.size(); ++j) {
@@ -684,6 +711,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 						rcGroup.version = tr.getReadVersion().get();
 						rcGroup.groupKey = groupKey;
 					}
+					// each item is a partition, ref: kvMutationLogToTransactions,
 					rcGroup.items.push_back_deep(rcGroup.items.arena(), s);
 				}
 			}
@@ -725,6 +753,8 @@ Future<Void> readCommitted(Database cx,
 	    cx, results, Void(), lock, range, groupBy, Terminator::True, AccessSystemKeys::True, LockAware::True);
 }
 
+// restore transaction has to be first in the batch, or it is the only txn in batch to make sure it never conflicts with
+// others.
 ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
                                                 Key uid,
                                                 Version newBeginVersion,
@@ -732,10 +762,8 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
                                                 NotifiedVersion* committedVersion,
                                                 int* totalBytes,
                                                 int* mutationSize,
-                                                PromiseStream<Future<Void>> addActor,
                                                 FlowLock* commitLock,
-                                                PublicRequestStream<CommitTransactionRequest> commit,
-                                                bool tenantMapChanging) {
+                                                PublicRequestStream<CommitTransactionRequest> commit) {
 	Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
 	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
 	Key rangeEnd = getApplyKey(newBeginVersion, uid);
@@ -758,16 +786,18 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	*totalBytes += *mutationSize;
 	wait(commitLock->take(TaskPriority::DefaultYield, *mutationSize));
 	Future<Void> commitAndUnlock = commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize);
-	if (tenantMapChanging) {
-		// If tenant map is changing, we need to wait until it's committed before processing next mutations.
-		// Next muations need the updated tenant map for filtering.
-		wait(commitAndUnlock);
-	} else {
-		addActor.send(commitAndUnlock);
-	}
+	// If tenant map is changing, we need to wait until it's committed before processing next mutations.
+	// Next muations need the updated tenant map for filtering.
+	// Because we are bumping applyBegin version, we need to wait for the commit to be done.
+	// Otherwise, an update to the applyEnd key will trigger another applyMutation() which can
+	// have an overlapping range with the current applyMutation() and cause conflicts.
+	wait(commitAndUnlock);
 	return Void();
 }
 
+// Decodes the backup mutation log and send the mutations to the CommitProxy.
+// The mutation logs are grouped by version and passed in as a stream of RCGroup from readCommitted().
+// The mutations are then decoded and sent to the CommitProxy in a batch.
 ACTOR Future<int> kvMutationLogToTransactions(Database cx,
                                               PromiseStream<RCGroup> results,
                                               Reference<FlowLock> lock,
@@ -778,14 +808,15 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
                                               NotifiedVersion* committedVersion,
                                               Optional<Version> endVersion,
                                               Key rangeBegin,
-                                              PromiseStream<Future<Void>> addActor,
                                               FlowLock* commitLock,
                                               Reference<KeyRangeMap<Version>> keyVersion,
                                               std::map<int64_t, TenantName>* tenantMap,
-                                              bool provisionalProxy) {
+                                              bool provisionalProxy,
+                                              std::shared_ptr<DatabaseConfiguration> dbConfig) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
 	state int totalBytes = 0;
+	// outer loop to batch multiple versions while inner loop for each version
 	loop {
 		state CommitTransactionRequest req;
 		state Version newBeginVersion = invalidVersion;
@@ -800,7 +831,10 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				tenantMapChanging = false;
 
 				BinaryWriter bw(Unversioned());
+
 				for (int i = 0; i < group.items.size(); ++i) {
+					// each value is a partition
+					// ref: https://github.com/apple/foundationdb/blob/release-6.2/design/backup-dataFormat.md
 					bw.serializeBytes(group.items[i].value);
 				}
 				// Parse a single transaction from the backup mutation log
@@ -817,7 +851,8 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				                          keyVersion,
 				                          cx,
 				                          tenantMap,
-				                          provisionalProxy));
+				                          provisionalProxy,
+				                          dbConfig));
 
 				// A single call to decodeBackupLogValue (above) will only parse mutations from a single transaction,
 				// however in the code below we batch the results across several calls to decodeBackupLogValue and send
@@ -839,10 +874,8 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 					                                  committedVersion,
 					                                  &totalBytes,
 					                                  &mutationSize,
-					                                  addActor,
 					                                  commitLock,
-					                                  commit,
-					                                  false));
+					                                  commit));
 					req = CommitTransactionRequest();
 					mutationSize = 0;
 				}
@@ -875,17 +908,9 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				throw;
 			}
 		}
-		wait(sendCommitTransactionRequest(req,
-		                                  uid,
-		                                  newBeginVersion,
-		                                  rangeBegin,
-		                                  committedVersion,
-		                                  &totalBytes,
-		                                  &mutationSize,
-		                                  addActor,
-		                                  commitLock,
-		                                  commit,
-		                                  tenantMapChanging));
+		// TraceEvent("MutationLogRestore").detail("BeginVersion", newBeginVersion);
+		wait(sendCommitTransactionRequest(
+		    req, uid, newBeginVersion, rangeBegin, committedVersion, &totalBytes, &mutationSize, commitLock, commit));
 		if (endOfStream) {
 			return totalBytes;
 		}
@@ -910,6 +935,12 @@ ACTOR Future<Void> coalesceKeyVersionCache(Key uid,
 			lastVersion = it.value();
 		} else {
 			Version ver = it.value();
+			// ver: version from keyVersion
+			// endVersion: after applying a batch of versions from log files, the largest version
+			// if ver < endVersion, that means this key in keyVersion is outdated
+			// in this case, run ClearRange on the keyVersionMapRange prefix for this key,
+			// so that the alog key is the truth, otherwise, keyVersionMapRange should be the truth
+			// each key needs to be individually checked, though range file is for a range, log file is not
 			if (ver < endVersion && lastVersion < endVersion && ver != invalidVersion &&
 			    lastVersion != invalidVersion) {
 				Key removeKey = it.range().begin.withPrefix(mapPrefix);
@@ -954,12 +985,16 @@ ACTOR Future<Void> applyMutations(Database cx,
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
 	state int maxBytes = CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES;
+	state std::shared_ptr<DatabaseConfiguration> dbConfig = std::make_shared<DatabaseConfiguration>();
 
 	keyVersion->insert(metadataVersionKey, 0);
 
 	try {
+		wait(store(*dbConfig, getDatabaseConfiguration(cx)));
+
 		loop {
 			if (beginVersion >= *endVersion) {
+				// Why do we need to take a lock here?
 				wait(commitLock.take(TaskPriority::DefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES));
 				commitLock.release(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 				if (beginVersion >= *endVersion) {
@@ -968,15 +1003,22 @@ ACTOR Future<Void> applyMutations(Database cx,
 			}
 
 			int rangeCount = std::max(1, CLIENT_KNOBS->APPLY_MAX_LOCK_BYTES / maxBytes);
+			// newEndVersion can only be at most of size APPLY_BLOCK_SIZE
 			state Version newEndVersion = std::min(*endVersion,
 			                                       ((beginVersion / CLIENT_KNOBS->APPLY_BLOCK_SIZE) + rangeCount) *
 			                                           CLIENT_KNOBS->APPLY_BLOCK_SIZE);
+
+			// ranges each represent a partition of version, e.g. [100, 200], [201, 300], [301, 400]
+			// (64, 200) -> [(64, 128), (128, 192), (192, 200)] assuming block size is 64
+			// ranges have format: applyLogKeys.begin/uid/hash(uint8)/version(64bites)/part
 			state Standalone<VectorRef<KeyRangeRef>> ranges = getApplyRanges(beginVersion, newEndVersion, uid);
 			state size_t idx;
 			state std::vector<PromiseStream<RCGroup>> results;
 			state std::vector<Future<Void>> rc;
 			state std::vector<Reference<FlowLock>> locks;
 
+			// each RCGroup is for a single version, each results[i] is for a single range who can have multiple
+			// versions
 			for (int i = 0; i < ranges.size(); ++i) {
 				results.push_back(PromiseStream<RCGroup>());
 				locks.push_back(makeReference<FlowLock>(
@@ -997,11 +1039,11 @@ ACTOR Future<Void> applyMutations(Database cx,
 				                                     committedVersion,
 				                                     idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
 				                                     ranges[idx].begin,
-				                                     addActor,
 				                                     &commitLock,
 				                                     keyVersion,
 				                                     tenantMap,
-				                                     provisionalProxy));
+				                                     provisionalProxy,
+				                                     dbConfig));
 				maxBytes = std::max<int>(CLIENT_KNOBS->APPLY_MAX_INCREASE_FACTOR * bytes, maxBytes);
 				if (error.isError())
 					throw error.getError();
@@ -1408,7 +1450,6 @@ VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), prefixRange(TenantMetadata::subspace()));
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(),
 		                                  singleKeyRange(metacluster::metadata::metaclusterRegistration().key));
-		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), blobRangeKeys);
 	}
 
 	return systemBackupRanges;

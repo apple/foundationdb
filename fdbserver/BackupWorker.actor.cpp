@@ -48,12 +48,13 @@ struct VersionedMessage {
 	VectorRef<Tag> tags;
 	Arena arena; // Keep a reference to the memory containing the message
 	Arena decryptArena; // Arena used for decrypt buffer.
-	size_t bytes; // arena's size when inserted, which can grow afterwards
 
-	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a, size_t n)
-	  : version(v), message(m), tags(t), arena(a), bytes(n) {}
+	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
+	  : version(v), message(m), tags(t), arena(a) {}
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
+	// Returns the estimated size of the message in bytes, assuming 6 tags.
+	size_t getEstimatedSize() const { return message.size() + TagsAndMessage::getHeaderSize(6); }
 
 	// Returns true if the message is a mutation that could be backed up (normal keys, system key backup ranges, or the
 	// metadata version key)
@@ -275,12 +276,14 @@ struct BackupData {
 
 	CounterCollection cc;
 	Future<Void> logger;
+	Future<Void> noopPopper; // holds actor to save progress in NOOP mode
+	AsyncVar<Version> popTrigger; // trigger to pop version in NOOP mode
 
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo> const> db, const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), popVersion(req.startVersion - 1),
-	    db(db), pulledVersion(0), paused(false), lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)),
+	    db(db), pulledVersion(0), paused(false), lock(new FlowLock(SERVER_KNOBS->BACKUP_WORKER_LOCK_BYTES)),
 	    cc("BackupWorker", myId.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
@@ -291,6 +294,8 @@ struct BackupData {
 		specialCounter(cc, "AvailableBytes", [this]() { return this->lock->available(); });
 		logger =
 		    cc.traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "BackupWorkerMetrics");
+		popTrigger.set(invalidVersion);
+		noopPopper = _noopPopper(this);
 	}
 
 	bool pullFinished() const { return endVersion.present() && pulledVersion.get() > endVersion.get(); }
@@ -344,6 +349,10 @@ struct BackupData {
 		}
 		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
+		DisabledTraceEvent("BackupWorkerPop", myId)
+		    .detail("Tag", popTag)
+		    .detail("SavedVersion", savedVersion)
+		    .detail("PopVersion", popVersion);
 		logSystem.get()->pop(std::max(popVersion, savedVersion), popTag);
 	}
 
@@ -364,23 +373,14 @@ struct BackupData {
 		if (num == 0)
 			return;
 
-		if (messages.size() == num) {
-			messages.clear();
-			TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("ReleaseAll", lock->activePermits());
-			lock->release(lock->activePermits());
-			return;
+		// Accumulate erased message sizes
+		int64_t bytes = 0;
+		for (int i = 0; i < num; i++) {
+			bytes += messages[i].getEstimatedSize();
 		}
-
-		// keep track of each arena and accumulate their sizes
-		int64_t bytes = messages[0].bytes;
-		for (int i = 1; i < num; i++) {
-			const Arena& a = messages[i].arena;
-			const Arena& b = messages[i - 1].arena;
-			if (!a.sameArena(b)) {
-				bytes += messages[i].bytes;
-				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("Release", messages[i].bytes);
-			}
-		}
+		TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId)
+		    .detail("Release", bytes)
+		    .detail("Total", lock->activePermits());
 		lock->release(bytes);
 		messages.erase(messages.begin(), messages.begin() + num);
 	}
@@ -390,6 +390,9 @@ struct BackupData {
 		const Version ver = endVersion.get();
 		while (!messages.empty()) {
 			if (messages.back().getVersion() > ver) {
+				size_t bytes = messages.back().getEstimatedSize();
+				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("Release", bytes);
+				lock->release(bytes);
 				messages.pop_back();
 			} else {
 				return;
@@ -436,6 +439,57 @@ struct BackupData {
 		}
 		if (modified)
 			changedTrigger.trigger();
+	}
+
+	// Update the NOOP popped version so that when backup is started or resumed,
+	// the worker can ignore any versions that are already popped.
+	ACTOR static Future<Void> _saveNoopVersion(BackupData* self, Version poppedVersion) {
+		state Transaction tr(self->cx);
+
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				Optional<Value> noopValue = wait(tr.get(backupWorkerMaxNoopVersionKey));
+				if (noopValue.present()) {
+					Version noopVersion = BinaryReader::fromStringRef<Version>(noopValue.get(), Unversioned());
+					if (poppedVersion > noopVersion) {
+						tr.set(backupWorkerMaxNoopVersionKey, BinaryWriter::toValue(poppedVersion, Unversioned()));
+					}
+				} else {
+					tr.set(backupWorkerMaxNoopVersionKey, BinaryWriter::toValue(poppedVersion, Unversioned()));
+				}
+
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> _noopPopper(BackupData* self) {
+		state Future<Void> onChange = self->popTrigger.onChange();
+
+		loop {
+			wait(onChange);
+			onChange = self->popTrigger.onChange();
+			if (!self->pulling) {
+				// Save the noop pop version, which sets min version for
+				// the next backup job. Note this version may change after the wait.
+				state Version popVersion = self->popTrigger.get();
+				ASSERT(self->popVersion <= popVersion);
+				wait(_saveNoopVersion(self, popVersion));
+				self->popVersion = popVersion;
+				TraceEvent("BackupWorkerNoopPop", self->myId)
+				    .detail("Tag", self->tag)
+				    .detail("SavedVersion", self->savedVersion)
+				    .detail("PopVersion", popVersion);
+				self->pop();
+			}
+		}
 	}
 
 	ACTOR static Future<Void> _waitAllInfoReady(BackupData* self) {
@@ -671,6 +725,7 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
                                StringRef mutation,
                                int64_t* blockEnd,
                                int blockSize) {
+	// format: version, subversion, messageSize, message
 	state int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + mutation.size();
 
 	// Convert to big Endianness for version.version, version.sub, and msgSize
@@ -789,14 +844,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 		    .detail("BackupID", activeUids[i])
 		    .detail("TagId", self->tag.id)
 		    .detail("File", logFiles[i]->getFileName());
-	}
-
-	// Fetch cipher keys if any of the messages are encrypted.
-	if (!cipherDetails.empty()) {
-		std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
-		        self->db, cipherDetails, BlobCipherMetrics::BLOB_GRANULE));
-		cipherKeys = getCipherKeysResult;
 	}
 
 	blockEnds = std::vector<int64_t>(logFiles.size(), 0);
@@ -941,14 +988,48 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 	}
 }
 
+ACTOR static Future<Version> getNoopVersion(BackupData* self) {
+	state Transaction tr(self->cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+			Optional<Value> noopValue = wait(tr.get(backupWorkerMaxNoopVersionKey));
+			if (noopValue.present()) {
+				return BinaryReader::fromStringRef<Version>(noopValue.get(), Unversioned());
+			} else {
+				return invalidVersion;
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 // Pulls data from TLog servers using LogRouter tag.
 ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
-	state Version tagAt = std::max(self->pulledVersion.get(), std::max(self->startVersion, self->savedVersion));
-	state Arena prev;
 
-	TraceEvent("BackupWorkerPull", self->myId).log();
+	// Going out of noop mode, the popVersion could be larger than
+	// savedVersion or ongoing pop version, i.e., popTrigger.get(),
+	// and we can't peek messages between savedVersion and popVersion.
+	state Version tagAt = std::max({ self->pulledVersion.get(),
+	                                 self->startVersion,
+	                                 self->savedVersion,
+	                                 self->popVersion,
+	                                 self->popTrigger.get() });
+
+	TraceEvent("BackupWorkerPull", self->myId)
+	    .detail("Tag", self->tag)
+	    .detail("Version", tagAt)
+	    .detail("PopVersion", self->popVersion)
+	    .detail("TriggerVersion", self->popTrigger.get())
+	    .detail("StartVersion", self->startVersion)
+	    .detail("SavedVersion", self->savedVersion);
 	loop {
 		while (self->paused.get()) {
 			wait(self->paused.onChange());
@@ -956,6 +1037,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 		loop choose {
 			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+				DisabledTraceEvent("BackupWorkerGotMore", self->myId)
+				    .detail("Tag", self->tag)
+				    .detail("CursorVersion", r->version().version);
 				break;
 			}
 			when(wait(logSystemChange)) {
@@ -968,23 +1052,47 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 				logSystemChange = self->logSystem.onChange();
 			}
 		}
+		// When TLog sets popped version, it means mutations between popped() and tagAt are unavailable
+		// on the TLog. So, we should stop pulling data from the TLog.
+		if (r->popped() > 0) {
+			Version maxNoopVersion = wait(getNoopVersion(self));
+			Severity sev = maxNoopVersion != invalidVersion && maxNoopVersion < r->popped() ? SevError : SevWarnAlways;
+			TraceEvent(sev, "BackupWorkerPullMissingMutations", self->myId)
+			    .detail("Tag", self->tag)
+			    .detail("BackupEpoch", self->backupEpoch)
+			    .detail("Popped", r->popped())
+			    .detail("NoopPoppedVersion", maxNoopVersion)
+			    .detail("ExpectedPeekVersion", tagAt);
+			ASSERT(self->backupEpoch < self->recruitedEpoch && maxNoopVersion >= r->popped());
+			// This can only happen when the backup was in NOOP mode in the previous epoch,
+			// where NOOP mode popped version is larger than the expected peek version.
+			// CC recruits this worker from epoch's begin version, which is lower than the
+			// noop popped version. So it's ok for this worker to continue from the popped
+			// version. Max noop popped version (maybe from a different tag) should be larger
+			// than the popped version.
+		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
+		state int64_t peekedBytes = 0;
+		// Hold messages until we know how many we can take, self->messages always
+		// contains messages that we have reserved memory for. Therefore, lock->release()
+		// will always encounter message with reserved memory.
+		state std::vector<VersionedMessage> tmpMessages;
 		while (r->hasMessage()) {
-			state size_t takeBytes = 0;
-			if (!prev.sameArena(r->arena())) {
-				TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
-				    .detail("Take", r->arena().getSize())
-				    .detail("Current", self->lock->activePermits());
-
-				takeBytes = r->arena().getSize(); // more bytes can be allocated after the wait.
-				wait(self->lock->take(TaskPriority::DefaultYield, takeBytes));
-				prev = r->arena();
-			}
-			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena(), takeBytes);
+			tmpMessages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
+			peekedBytes += tmpMessages.back().getEstimatedSize();
 			r->nextMessage();
+		}
+		if (peekedBytes > 0) {
+			TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
+			    .detail("Take", peekedBytes)
+			    .detail("Current", self->lock->activePermits());
+			wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
+			self->messages.insert(self->messages.end(),
+			                      std::make_move_iterator(tmpMessages.begin()),
+			                      std::make_move_iterator(tmpMessages.end()));
 		}
 
 		tagAt = r->version().version;
@@ -1035,14 +1143,18 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 				}
 				when(wait(success(committedVersion) || delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
 					if (committedVersion.isReady()) {
-						self->popVersion =
-						    std::max(self->popVersion, std::max(committedVersion.get(), self->savedVersion));
+						Version newPopVersion =
+						    std::max({ self->popVersion, self->savedVersion, committedVersion.get() });
 						self->minKnownCommittedVersion =
 						    std::max(committedVersion.get(), self->minKnownCommittedVersion);
-						TraceEvent("BackupWorkerNoopPop", self->myId)
-						    .detail("SavedVersion", self->savedVersion)
-						    .detail("PopVersion", self->popVersion);
-						self->pop(); // Pop while the worker is in this NOOP state.
+						if (newPopVersion < self->popTrigger.get()) {
+							// this can happen if a different GRV proxy replies
+							DisabledTraceEvent("BackupWorkerSkipTrigger", self->myId)
+							    .detail("Version", newPopVersion)
+							    .detail("OldPop", self->popTrigger.get());
+						} else {
+							self->popTrigger.set(newPopVersion);
+						}
 						committedVersion = Never();
 					} else {
 						committedVersion = self->getMinKnownCommittedVersion();

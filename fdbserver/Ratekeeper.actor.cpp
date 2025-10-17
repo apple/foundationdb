@@ -29,40 +29,40 @@
 
 #include "flow/actorcompiler.h" // must be last include
 
-const char* limitReasonName[] = { "workload",
-	                              "storage_server_write_queue_size",
-	                              "storage_server_write_bandwidth_mvcc",
-	                              "storage_server_readable_behind",
-	                              "log_server_mvcc_write_bandwidth",
-	                              "log_server_write_queue",
-	                              "storage_server_min_free_space",
-	                              "storage_server_min_free_space_ratio",
-	                              "log_server_min_free_space",
-	                              "log_server_min_free_space_ratio",
-	                              "storage_server_durability_lag",
-	                              "storage_server_list_fetch_failed",
-	                              "blob_worker_lag",
-	                              "blob_worker_missing" };
+const char* limitReasonName[] = {
+	"workload",
+	"storage_server_write_queue_size",
+	"storage_server_write_bandwidth_mvcc",
+	"storage_server_readable_behind",
+	"log_server_mvcc_write_bandwidth",
+	"log_server_write_queue",
+	"storage_server_min_free_space",
+	"storage_server_min_free_space_ratio",
+	"log_server_min_free_space",
+	"log_server_min_free_space_ratio",
+	"storage_server_durability_lag",
+	"storage_server_list_fetch_failed",
+};
 static_assert(sizeof(limitReasonName) / sizeof(limitReasonName[0]) == limitReason_t_end, "limitReasonDesc table size");
 
 int limitReasonEnd = limitReason_t_end;
 
 // NOTE: This has a corresponding table in Script.cs (see RatekeeperReason graph)
 // IF UPDATING THIS ARRAY, UPDATE SCRIPT.CS!
-const char* limitReasonDesc[] = { "Workload or read performance.",
-	                              "Storage server performance (storage queue).",
-	                              "Storage server MVCC memory.",
-	                              "Storage server version falling behind.",
-	                              "Log server MVCC memory.",
-	                              "Storage server performance (log queue).",
-	                              "Storage server running out of space (approaching 100MB limit).",
-	                              "Storage server running out of space (approaching 5% limit).",
-	                              "Log server running out of space (approaching 100MB limit).",
-	                              "Log server running out of space (approaching 5% limit).",
-	                              "Storage server durable version falling behind.",
-	                              "Unable to fetch storage server list.",
-	                              "Blob worker granule version falling behind.",
-	                              "No blob workers are reporting metrics." };
+const char* limitReasonDesc[] = {
+	"Workload or read performance.",
+	"Storage server performance (storage queue).",
+	"Storage server MVCC memory.",
+	"Storage server version falling behind.",
+	"Log server MVCC memory.",
+	"Storage server performance (log queue).",
+	"Storage server running out of space (approaching 100MB limit).",
+	"Storage server running out of space (approaching 5% limit).",
+	"Log server running out of space (approaching 100MB limit).",
+	"Log server running out of space (approaching 5% limit).",
+	"Storage server durable version falling behind.",
+	"Unable to fetch storage server list.",
+};
 
 static_assert(sizeof(limitReasonDesc) / sizeof(limitReasonDesc[0]) == limitReason_t_end, "limitReasonDesc table size");
 
@@ -260,7 +260,7 @@ public:
 	ACTOR static Future<Void> trackTLogQueueInfo(Ratekeeper* self, TLogInterface tli) {
 		self->tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
 		state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
-		TraceEvent("RkTrackTlog", self->id).detail("TransactionLog", tli.id());
+		TraceEvent("RkTrackTLog", self->id).detail("TransactionLog", tli.id());
 		try {
 			loop {
 				ErrorOr<TLogQueuingMetricsReply> reply = wait(tli.getQueuingMetrics.getReplyUnlessFailedFor(
@@ -283,7 +283,7 @@ public:
 			// including cancellation
 			self->tlogQueueInfo.erase(myQueueInfo);
 			if (e.code() != error_code_actor_cancelled) {
-				TraceEvent("RkTrackTlogError", self->id).detail("TransactionLog", tli.id()).errorUnsuppressed(e);
+				TraceEvent("RkTrackTLogError", self->id).detail("TransactionLog", tli.id()).errorUnsuppressed(e);
 			}
 			throw;
 		}
@@ -316,24 +316,6 @@ public:
 				}
 			}
 			when(wait(err.getFuture())) {}
-		}
-	}
-
-	ACTOR static Future<bool> checkAnyBlobRanges(Database db) {
-		state Transaction tr(db);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				// FIXME: check if any active ranges. This still returns true if there are inactive ranges, but it
-				// mostly serves its purpose to allow setting blob_granules_enabled=1 on a cluster that has no blob
-				// workers currently.
-				RangeResult anyData = wait(tr.getRange(blobRangeKeys, 1));
-				return !anyData.empty();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
 		}
 	}
 
@@ -381,98 +363,6 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-		state std::vector<BlobWorkerInterface> blobWorkers;
-		state int workerFetchCount = 0;
-		state bool blobWorkerDead = false;
-		state double lastLoggedTime = 0;
-
-		loop {
-			while (!self->configuration.blobGranulesEnabled) {
-				// FIXME: clear blob worker state if granules were previously enabled?
-				wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
-			}
-
-			state Version grv;
-			state Future<Void> blobWorkerDelay =
-			    delay(SERVER_KNOBS->METRIC_UPDATE_RATE * FLOW_KNOBS->DELAY_JITTER_OFFSET);
-			int fetchAmount = SERVER_KNOBS->BW_FETCH_WORKERS_INTERVAL /
-			                  (SERVER_KNOBS->METRIC_UPDATE_RATE * FLOW_KNOBS->DELAY_JITTER_OFFSET);
-			if (++workerFetchCount == fetchAmount || blobWorkerDead) {
-				workerFetchCount = 0;
-				state Future<bool> anyBlobRangesCheck = checkAnyBlobRanges(self->db);
-				wait(store(blobWorkers, getBlobWorkers(self->db, true, &grv)));
-				wait(store(self->anyBlobRanges, anyBlobRangesCheck));
-			} else {
-				grv = self->maxVersion;
-			}
-
-			if (blobWorkers.size() > 0) {
-				state Future<Optional<BlobManagerBlockedReply>> blockedAssignments;
-				if (dbInfo->get().blobManager.present()) {
-					blockedAssignments =
-					    timeout(brokenPromiseToNever(dbInfo->get().blobManager.get().blobManagerBlockedReq.getReply(
-					                BlobManagerBlockedRequest())),
-					            SERVER_KNOBS->BLOB_WORKER_TIMEOUT);
-				}
-				state std::vector<Future<Optional<MinBlobVersionReply>>> aliveVersions;
-				aliveVersions.reserve(blobWorkers.size());
-				for (auto& it : blobWorkers) {
-					MinBlobVersionRequest req;
-					req.grv = grv;
-					aliveVersions.push_back(timeout(brokenPromiseToNever(it.minBlobVersionRequest.getReply(req)),
-					                                SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
-				}
-				if (blockedAssignments.isValid()) {
-					wait(success(blockedAssignments));
-					if (blockedAssignments.get().present() && blockedAssignments.get().get().blockedAssignments == 0) {
-						self->unblockedAssignmentTime = now();
-					}
-				}
-				wait(waitForAll(aliveVersions));
-				Version minVer = grv;
-				blobWorkerDead = false;
-				int minIdx = 0;
-				for (int i = 0; i < blobWorkers.size(); i++) {
-					if (aliveVersions[i].get().present()) {
-						if (aliveVersions[i].get().get().version < minVer) {
-							minVer = aliveVersions[i].get().get().version;
-							minIdx = i;
-						}
-					} else {
-						blobWorkerDead = true;
-						minVer = 0;
-						minIdx = i;
-						break;
-					}
-				}
-				if (minVer > 0 && blobWorkers.size() > 0 &&
-				    now() - self->unblockedAssignmentTime < SERVER_KNOBS->BW_MAX_BLOCKED_INTERVAL) {
-					while (!self->blobWorkerVersionHistory.empty() &&
-					       minVer < self->blobWorkerVersionHistory.back().second) {
-						self->blobWorkerVersionHistory.pop_back();
-					}
-					self->blobWorkerVersionHistory.push_back(std::make_pair(now(), minVer));
-				}
-				while (self->blobWorkerVersionHistory.size() > SERVER_KNOBS->MIN_BW_HISTORY &&
-				       self->blobWorkerVersionHistory[1].first <
-				           self->blobWorkerVersionHistory.back().first - SERVER_KNOBS->BW_ESTIMATION_INTERVAL) {
-					self->blobWorkerVersionHistory.pop_front();
-				}
-				if (now() - lastLoggedTime > SERVER_KNOBS->BW_RW_LOGGING_INTERVAL) {
-					lastLoggedTime = now();
-					TraceEvent("RkMinBlobWorkerVersion")
-					    .detail("BWVersion", minVer)
-					    .detail("MaxVer", self->maxVersion)
-					    .detail("MinId", blobWorkers.size() > 0 ? blobWorkers[minIdx].id() : UID())
-					    .detail("BMBlocked",
-					            now() - self->unblockedAssignmentTime >= SERVER_KNOBS->BW_MAX_BLOCKED_INTERVAL);
-				}
-			}
-			wait(blobWorkerDelay);
-		}
-	}
-
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state ActorOwningSelfRef<Ratekeeper> pSelf(
 		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
@@ -494,9 +384,6 @@ public:
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
-		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
-			self.addActor.send(self.monitorBlobWorkers(dbInfo));
-		}
 
 		if (SERVER_KNOBS->HOT_SHARD_THROTTLING_ENABLED) {
 			self.addActor.send(self.monitorHotShards(dbInfo));
@@ -551,31 +438,6 @@ public:
 					}
 					self.actualTpsHistory.push_back(actualTps);
 
-					if (self.configuration.blobGranulesEnabled && SERVER_KNOBS->BW_THROTTLING_ENABLED) {
-						Version maxVersion = 0;
-						int64_t totalReleased = 0;
-						int64_t batchReleased = 0;
-						for (auto& it : self.grvProxyInfo) {
-							maxVersion = std::max(maxVersion, it.second.version);
-							totalReleased += it.second.totalTransactions;
-							batchReleased += it.second.batchTransactions;
-						}
-						self.version_transactions[maxVersion] =
-						    Ratekeeper::VersionInfo(totalReleased, batchReleased, now());
-
-						loop {
-							auto secondEntry = self.version_transactions.begin();
-							++secondEntry;
-							if (secondEntry != self.version_transactions.end() &&
-							    secondEntry->second.created < now() - (2 * SERVER_KNOBS->TARGET_BW_LAG) &&
-							    (self.blobWorkerVersionHistory.empty() ||
-							     secondEntry->first < self.blobWorkerVersionHistory.front().second)) {
-								self.version_transactions.erase(self.version_transactions.begin());
-							} else {
-								break;
-							}
-						}
-					}
 					while (self.version_recovery.size() > CLIENT_KNOBS->MAX_GENERATIONS) {
 						self.version_recovery.erase(self.version_recovery.begin());
 					}
@@ -757,10 +619,6 @@ Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const
 	return RatekeeperImpl::monitorHotShards(this, dbInfo);
 }
 
-Future<Void> Ratekeeper::monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	return RatekeeperImpl::monitorBlobWorkers(this, dbInfo);
-}
-
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	return RatekeeperImpl::run(rkInterf, dbInfo);
 }
@@ -800,8 +658,9 @@ void Ratekeeper::updateCommitCostEstimation(
     UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation) {
 	for (auto it = storageQueueInfo.begin(); it != storageQueueInfo.end(); ++it) {
 		auto tagCostIt = costEstimation.find(it->key);
-		if (tagCostIt == costEstimation.end())
+		if (tagCostIt == costEstimation.end()) {
 			continue;
+		}
 		for (const auto& [tagName, cost] : tagCostIt->second) {
 			it->value.addCommitCost(tagName, cost);
 		}
@@ -823,8 +682,6 @@ static std::string getIgnoredZonesReasons(
 }
 
 void Ratekeeper::updateRate(RatekeeperLimits* limits) {
-	// double controlFactor = ;  // dt / eFoldingTime
-
 	double actualTps = smoothReleasedTransactions.smoothRate();
 	actualTpsMetric = (int64_t)actualTps;
 	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back
@@ -857,8 +714,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	// ratio
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC))
+		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC)) {
 			continue;
+		}
 		++sscount;
 
 		limitReason_t ssLimitReason = limitReason_t::unlimited;
@@ -906,7 +764,6 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		}
 
 		double inputRate = ss.getSmoothInputBytesRate();
-		// inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
 
 		/*if( deterministicRandom()->random01() < 0.1 ) {
 		  std::string name = "RatekeeperUpdateRate" + limits.context;
@@ -932,8 +789,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		    ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0);
 		double limitTps = std::min(actualTps * maxBytesPerSecond / std::max(1.0e-8, inputRate),
 		                           maxBytesPerSecond * SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
-		if (ssLimitReason == limitReason_t::unlimited)
+		if (ssLimitReason == limitReason_t::unlimited) {
 			ssLimitReason = limitReason_t::storage_server_write_bandwidth_mvcc;
+		}
 
 		if (targetRateRatio > 0 && inputRate > 0) {
 			ASSERT(inputRate != 0);
@@ -1062,139 +920,6 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		break;
 	}
 
-	if (configuration.blobGranulesEnabled && SERVER_KNOBS->BW_THROTTLING_ENABLED && anyBlobRanges) {
-		Version lastBWVer = 0;
-		auto lastIter = version_transactions.end();
-		if (!blobWorkerVersionHistory.empty()) {
-			lastBWVer = blobWorkerVersionHistory.back().second;
-			lastIter = version_transactions.lower_bound(lastBWVer);
-			if (lastIter != version_transactions.end()) {
-				blobWorkerTime = lastIter->second.created;
-			} else {
-				blobWorkerTime = std::max(blobWorkerTime,
-				                          now() - (maxVersion - lastBWVer) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND);
-			}
-		}
-		double blobWorkerLag = (now() - blobWorkerTime) - getRecoveryDuration(lastBWVer);
-		if (blobWorkerLag > limits->bwLagTarget / 2 && !blobWorkerVersionHistory.empty()) {
-			double elapsed = blobWorkerVersionHistory.back().first - blobWorkerVersionHistory.front().first;
-			Version firstBWVer = blobWorkerVersionHistory.front().second;
-			ASSERT(lastBWVer >= firstBWVer);
-			if (elapsed > SERVER_KNOBS->BW_ESTIMATION_INTERVAL / 2) {
-				auto firstIter = version_transactions.upper_bound(firstBWVer);
-				if (lastIter != version_transactions.end() && firstIter != version_transactions.begin()) {
-					--firstIter;
-					double targetRateRatio;
-					if (blobWorkerLag > 3 * limits->bwLagTarget) {
-						targetRateRatio = 0;
-						ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-						       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
-					} else if (blobWorkerLag > limits->bwLagTarget) {
-						targetRateRatio = SERVER_KNOBS->BW_LAG_DECREASE_AMOUNT;
-					} else {
-						targetRateRatio = SERVER_KNOBS->BW_LAG_INCREASE_AMOUNT;
-					}
-					int64_t totalTransactions =
-					    lastIter->second.totalTransactions - firstIter->second.totalTransactions;
-					int64_t batchTransactions =
-					    lastIter->second.batchTransactions - firstIter->second.batchTransactions;
-					int64_t normalTransactions = totalTransactions - batchTransactions;
-					double bwTPS;
-					if (limits->bwLagTarget == SERVER_KNOBS->TARGET_BW_LAG) {
-						bwTPS = targetRateRatio * (totalTransactions) / elapsed;
-					} else {
-						bwTPS = std::max(0.0, ((targetRateRatio * (totalTransactions)) - normalTransactions) / elapsed);
-					}
-
-					if (bwTPS < limits->tpsLimit) {
-						if (printRateKeepLimitReasonDetails) {
-							TraceEvent("RatekeeperLimitReasonDetails")
-							    .detail("Reason", limitReason_t::blob_worker_lag)
-							    .detail("BWLag", blobWorkerLag)
-							    .detail("BWRate", bwTPS)
-							    .detail("Ratio", targetRateRatio)
-							    .detail("Released", totalTransactions)
-							    .detail("Elapsed", elapsed)
-							    .detail("LastVer", lastBWVer)
-							    .detail("RecoveryDuration", getRecoveryDuration(lastBWVer));
-						}
-						limits->tpsLimit = bwTPS;
-						limitReason = limitReason_t::blob_worker_lag;
-					}
-				} else if (blobWorkerLag > limits->bwLagTarget) {
-					double maxTps = 0;
-					for (int i = 0; i < actualTpsHistory.size(); i++) {
-						maxTps = std::max(maxTps, actualTpsHistory[i]);
-					}
-					double bwProgress =
-					    std::min(elapsed, (lastBWVer - firstBWVer) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND);
-					double bwTPS = maxTps * bwProgress / elapsed;
-
-					if (blobWorkerLag > 3 * limits->bwLagTarget) {
-						limits->tpsLimit = 0.0;
-						if (printRateKeepLimitReasonDetails) {
-							TraceEvent("RatekeeperLimitReasonDetails")
-							    .detail("Reason", limitReason_t::blob_worker_missing)
-							    .detail("LastValid", lastIter != version_transactions.end())
-							    .detail("FirstValid", firstIter != version_transactions.begin())
-							    .detail("FirstVersion",
-							            version_transactions.size() ? version_transactions.begin()->first : -1)
-							    .detail("FirstBWVer", firstBWVer)
-							    .detail("LastBWVer", lastBWVer)
-							    .detail("VerTransactions", version_transactions.size())
-							    .detail("RecoveryDuration", getRecoveryDuration(lastBWVer));
-						}
-						limitReason = limitReason_t::blob_worker_missing;
-						ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-						       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
-					} else if (bwTPS < limits->tpsLimit) {
-						if (printRateKeepLimitReasonDetails) {
-							TraceEvent("RatekeeperLimitReasonDetails")
-							    .detail("Reason", limitReason_t::blob_worker_lag)
-							    .detail("BWLag", blobWorkerLag)
-							    .detail("BWRate", bwTPS)
-							    .detail("MaxTPS", maxTps)
-							    .detail("Progress", bwProgress)
-							    .detail("Elapsed", elapsed);
-						}
-						limits->tpsLimit = bwTPS;
-						limitReason = limitReason_t::blob_worker_lag;
-					}
-				}
-			} else if (blobWorkerLag > 3 * limits->bwLagTarget) {
-				limits->tpsLimit = 0.0;
-				if (printRateKeepLimitReasonDetails) {
-					TraceEvent("RatekeeperLimitReasonDetails")
-					    .detail("Reason", limitReason_t::blob_worker_missing)
-					    .detail("Elapsed", elapsed)
-					    .detail("LastVer", lastBWVer)
-					    .detail("FirstVer", firstBWVer)
-					    .detail("BWLag", blobWorkerLag)
-					    .detail("RecoveryDuration", getRecoveryDuration(lastBWVer));
-					;
-				}
-				limitReason = limitReason_t::blob_worker_missing;
-				ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-				       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
-			}
-		} else if (blobWorkerLag > 3 * limits->bwLagTarget) {
-			limits->tpsLimit = 0.0;
-			if (printRateKeepLimitReasonDetails) {
-				TraceEvent("RatekeeperLimitReasonDetails")
-				    .detail("Reason", limitReason_t::blob_worker_missing)
-				    .detail("BWLag", blobWorkerLag)
-				    .detail("RecoveryDuration", getRecoveryDuration(lastBWVer))
-				    .detail("HistorySize", blobWorkerVersionHistory.size());
-			}
-			limitReason = limitReason_t::blob_worker_missing;
-			ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-			       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
-		}
-	} else {
-		blobWorkerTime = now();
-		unblockedAssignmentTime = now();
-	}
-
 	healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
 	healthMetrics.limitingStorageQueue = limitingStorageQueueStorageServer;
 	healthMetrics.worstStorageDurabilityLag = worstDurabilityLag;
@@ -1209,8 +934,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		Version minLimitingSSVer = std::numeric_limits<Version>::max();
 		for (const auto& it : storageQueueInfo) {
 			auto& ss = it.value;
-			if (!ss.valid || (remoteDC.present() && ss.locality.dcId() == remoteDC))
+			if (!ss.valid || (remoteDC.present() && ss.locality.dcId() == remoteDC)) {
 				continue;
+			}
 
 			minSSVer = std::min(minSSVer, ss.lastReply.version);
 
@@ -1223,8 +949,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		Version maxTLVer = std::numeric_limits<Version>::min();
 		for (const auto& it : tlogQueueInfo) {
 			auto& tl = it.value;
-			if (!tl.valid)
+			if (!tl.valid) {
 				continue;
+			}
 			maxTLVer = std::max(maxTLVer, tl.getLastCommittedVersion());
 		}
 
@@ -1243,8 +970,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	int tlcount = 0;
 	for (auto& it : tlogQueueInfo) {
 		auto const& tl = it.value;
-		if (!tl.valid)
+		if (!tl.valid) {
 			continue;
+		}
 		++tlcount;
 
 		limitReason_t tlogLimitReason = limitReason_t::log_server_write_queue;
@@ -1285,7 +1013,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		if (tl.lastReply.bytesInput - tl.lastReply.bytesDurable > tl.lastReply.storageBytes.free - minFreeSpace / 2) {
 			if (now() - lastWarning > 5.0) {
 				lastWarning = now();
-				TraceEvent(SevWarnAlways, "RkTlogMinFreeSpaceZero", id).detail("ReasonId", tl.id);
+				TraceEvent(SevWarnAlways, "RkTLogMinFreeSpaceZero", id).detail("ReasonId", tl.id);
 			}
 			reasonID = tl.id;
 			limitReason = limitReason_t::log_server_min_free_space;
@@ -1324,8 +1052,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 			double smoothedRate =
 			    std::max(tl.getVerySmoothDurableBytesRate(), actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
 			double x = smoothedRate / (inputRate * targetRateRatio);
-			if (targetRateRatio < .75) //< FIXME: KNOB for 2.0
+			if (targetRateRatio < .75) { //< FIXME: KNOB for 2.0
 				x = std::max(x, 0.95);
+			}
 			double lim = actualTps * x;
 			if (lim < limits->tpsLimit) {
 				limits->tpsLimit = lim;
@@ -1450,8 +1179,9 @@ void Ratekeeper::getSSVersionLag(Version& maxSSPrimaryVersion, Version& maxSSRem
 	maxSSPrimaryVersion = maxSSRemoteVersion = invalidVersion;
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		if (!ss.valid || !ss.acceptingRequests)
+		if (!ss.valid || !ss.acceptingRequests) {
 			continue;
+		}
 
 		if (remoteDC.present() && ss.locality.dcId() == remoteDC) {
 			maxSSRemoteVersion = std::max(ss.getLatestVersion(), maxSSRemoteVersion);

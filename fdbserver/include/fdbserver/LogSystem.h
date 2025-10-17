@@ -102,10 +102,12 @@ public:
 
 	bool satisfiesPolicy(const std::vector<LocalityEntry>& locations);
 
-	void getPushLocations(VectorRef<Tag> tags,
-	                      std::vector<int>& locations,
-	                      int locationOffset,
-	                      bool allLocations = false);
+	void getPushLocations(
+	    VectorRef<Tag> tags,
+	    std::vector<int>& locations,
+	    int locationOffset,
+	    bool allLocations = false,
+	    const Optional<Reference<LocalitySet>>& restrictedLogSet = Optional<Reference<LocalitySet>>());
 
 private:
 	std::vector<LocalityEntry> alsoServers, resultEntries;
@@ -227,12 +229,16 @@ struct ILogSystem {
 		int fastReplies;
 		int unknownReplies;
 
+		bool returnEmptyIfStopped; // the source log server can return an empty version range if this flag is set; valid
+		                           // only when version vector/unicast is enabled
+
 		ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf,
 		                 Tag tag,
 		                 Version begin,
 		                 Version end,
 		                 bool returnIfBlocked,
-		                 bool parallelGetMore);
+		                 bool parallelGetMore,
+		                 bool returnEmtpyIfStopped = false);
 		ServerPeekCursor(TLogPeekReply const& results,
 		                 LogMessageVersion const& messageVersion,
 		                 LogMessageVersion const& end,
@@ -292,7 +298,8 @@ struct ILogSystem {
 		                 bool parallelGetMore,
 		                 std::vector<LocalityData> const& tLogLocalities,
 		                 Reference<IReplicationPolicy> const tLogPolicy,
-		                 int tLogReplicationFactor);
+		                 int tLogReplicationFactor,
+		                 const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
 		MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
 		                 LogMessageVersion const& messageVersion,
 		                 int bestServer,
@@ -341,6 +348,7 @@ struct ILogSystem {
 		bool useBestSet;
 		UID randomID;
 		Future<Void> more;
+		Optional<Version> end;
 
 		SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 		              int bestSet,
@@ -348,7 +356,8 @@ struct ILogSystem {
 		              Tag tag,
 		              Version begin,
 		              Version end,
-		              bool parallelGetMore);
+		              bool parallelGetMore,
+		              const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
 		SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 		              std::vector<std::vector<Reference<IPeekCursor>>> const& serverCursors,
 		              LogMessageVersion const& messageVersion,
@@ -499,7 +508,8 @@ struct ILogSystem {
 
 	virtual bool remoteStorageRecovered() const = 0;
 
-	virtual void purgeOldRecoveredGenerations() = 0;
+	virtual void purgeOldRecoveredGenerationsCoreState(DBCoreState&) = 0;
+	virtual void purgeOldRecoveredGenerationsInMemory(const DBCoreState&) = 0;
 
 	virtual Future<Void> onCoreStateChanged() const = 0;
 	// Returns if and when the output of toCoreState() would change (for example, when older logs can be discarded from
@@ -555,11 +565,14 @@ struct ILogSystem {
 	// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is
 	// correspondingly less expensive)
 
-	virtual Reference<IPeekCursor> peekLogRouter(UID dbgid,
-	                                             Version begin,
-	                                             Tag tag,
-	                                             bool useSatellite,
-	                                             Optional<Version> end = Optional<Version>()) = 0;
+	virtual Reference<IPeekCursor> peekLogRouter(
+	    UID dbgid,
+	    Version begin,
+	    Tag tag,
+	    bool useSatellite,
+	    Optional<Version> end = Optional<Version>(),
+	    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds =
+	        Optional<std::map<uint8_t, std::vector<uint16_t>>>()) = 0;
 	// Same contract as peek(), but can only peek from the logs elected in the same generation.
 	// If the preferred log server is down, a different log from the same generation will merge results locally before
 	// sending them to the log router.
@@ -670,11 +683,19 @@ struct ILogSystem {
 
 	virtual void getPushLocations(VectorRef<Tag> tags,
 	                              std::vector<int>& locations,
-	                              bool allLocations = false) const = 0;
+	                              bool allLocations = false,
+	                              Optional<std::vector<Reference<LocalitySet>>> fromLocations =
+	                                  Optional<std::vector<Reference<LocalitySet>>>()) const = 0;
 
-	void getPushLocations(std::vector<Tag> const& tags, std::vector<int>& locations, bool allLocations = false) {
-		getPushLocations(VectorRef<Tag>((Tag*)&tags.front(), tags.size()), locations, allLocations);
+	void getPushLocations(
+	    std::vector<Tag> const& tags,
+	    std::vector<int>& locations,
+	    bool allLocations = false,
+	    Optional<std::vector<Reference<LocalitySet>>> fromLocations = Optional<std::vector<Reference<LocalitySet>>>()) {
+		getPushLocations(VectorRef<Tag>((Tag*)&tags.front(), tags.size()), locations, allLocations, fromLocations);
 	}
+
+	virtual std::vector<Reference<LocalitySet>> getPushLocationsForTags(std::vector<int>& fromLocations) const = 0;
 
 	virtual bool hasRemoteLogs() const = 0;
 
@@ -785,10 +806,14 @@ struct LogPushData : NonCopyable {
 		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
 	}
 
-	void setShardChanged() { shardChanged = true; }
-	bool isShardChanged() const { return shardChanged; }
+	void setLogsChanged() { logsChanged = true; }
+	bool haveLogsChanged() const { return logsChanged; }
 
 	void writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations);
+
+	void setPushLocationsForTags(std::vector<int> fromLocationsVec) {
+		fromLocations = logSystem->getPushLocationsForTags(fromLocationsVec);
+	}
 
 	template <class T>
 	void writeTypedMessage(T const& item, bool metadataMessage = false, bool allLocations = false);
@@ -825,13 +850,14 @@ private:
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<bool> messagesWritten; // if messagesWriter has written anything
 	std::vector<int> msg_locations;
+	Optional<std::vector<Reference<LocalitySet>>> fromLocations;
 	// Stores message locations that have had span information written to them
 	// for the current transaction. Adding transaction info will reset this
 	// field.
 	std::unordered_set<int> writtenLocations;
 	uint32_t subsequence;
 	SpanContext spanContext;
-	bool shardChanged = false; // if keyServers has any changes, i.e., shard boundary modifications.
+	bool logsChanged = false; // if keyServers has any changes, i.e., shard boundary modifications.
 
 	// Writes transaction info to the message stream at the given location if
 	// it has not already been written (for the current transaction). Returns
@@ -854,7 +880,7 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 		prev_tags.push_back(tag);
 	}
 	msg_locations.clear();
-	logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
+	logSystem->getPushLocations(prev_tags, msg_locations, allLocations, fromLocations);
 
 	BinaryWriter bw(AssumeVersion(g_network->protocolVersion()));
 

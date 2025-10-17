@@ -651,7 +651,6 @@ The subclasses of the ``ApiWorkload`` inherit the following configuration option
 The FDB server configuration can be specialized in the section ``[[server]]``:
 
 - ``tenants_enabled``: enable multitenancy (default: true)
-- ``blob_granules_enabled``:  enable support for blob granules (default: false)
 - ``tls_enabled``: enable TLS (default: false)
 - ``tls_client_chain_len``: the length of the client-side TLS chain (default: 2)
 - ``tls_server_chain_len``: the length of the server-side TLS chain (default: 3)

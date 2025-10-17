@@ -135,7 +135,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
 	init( TLS_MALLOC_ARENA_MAX,                                  6 );
 	init( TLS_HANDSHAKE_LIMIT,                                1000 );
-
+	init( DISABLE_MAINTHREAD_TLS_HANDSHAKE,                  false );
+	init( TLS_HANDSHAKE_FLOWLOCK_PRIORITY, static_cast<int>(TaskPriority::DefaultYield) );
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
 	init( NETWORK_TEST_REQUEST_COUNT,                            0 ); // 0 -> run forever
@@ -309,7 +310,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TSS_LARGE_TRACE_SIZE,                              50000 );
 	init( LOAD_BALANCE_FETCH_REPLICA_TIMEOUT,                  5.0 );
 	init( ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS,         false ); if( randomize && BUGGIFY ) ENABLE_REPLICA_CONSISTENCY_CHECK_ON_READS = true;
-	init( CONSISTENCY_CHECK_REQUIRED_REPLICAS,                  -2 ); // Do consistency check based on all available storage replicas
+	init( READ_CONSISTENCY_CHECK_REQUIRED_REPLICAS,             -2 ); // Do consistency check based on all available storage replicas
+	init( ENABLE_WARNING_READ_CONSISTENCY_CHECK_NOT_ENOUGH_REPLICA, false); if (randomize && BUGGIFY) { ENABLE_WARNING_READ_CONSISTENCY_CHECK_NOT_ENOUGH_REPLICA = true; }
 
 	// Health Monitor
 	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;

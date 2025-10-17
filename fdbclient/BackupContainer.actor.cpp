@@ -68,6 +68,10 @@ Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 	return IBackupFile_impl::appendStringRefWithLen(Reference<IBackupFile>::addRef(this), s);
 }
 
+bool isBlobstoreUrl(const std::string& url) {
+	return url.find("blobstore://") == 0;
+}
+
 std::string IBackupContainer::ExpireProgress::toString() const {
 	std::string s = step + "...";
 	if (total > 0) {
@@ -134,6 +138,7 @@ std::string BackupDescription::toString() const {
 	info.append(format("URL: %s\n", url.c_str()));
 	info.append(format("Restorable: %s\n", maxRestorableVersion.present() ? "true" : "false"));
 	info.append(format("Partitioned logs: %s\n", partitioned ? "true" : "false"));
+	info.append(format("File-level encryption: %s\n", fileLevelEncryption ? "true" : "false"));
 
 	auto formatVersion = [&](Version v) {
 		std::string s;
@@ -262,10 +267,27 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
                                                             const Optional<std::string>& encryptionKeyFileName) {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
-	Reference<IBackupContainer>& r = m_cache[url];
+	// In simulation, disable caching for blobstore:// URLs to prevent cross-process connection issues.
+	//
+	// IBackupContainer objects contain S3BlobStoreEndpoint objects, which contain connection pools.
+	// Even though BLOBSTORE_GLOBAL_CONNECTION_POOL defaults to false (each endpoint has its own pool),
+	// when containers are cached globally and accessed by different simulated processes, the connection
+	// pools are shared across processes. This violates Sim2Conn's requirement that connections stay on
+	// their originating process, leading to assertion failures:
+	//   "g_simulator->getCurrentProcess() == self->peerProcess" at sim2.actor.cpp:500
+	//
+	// Fix: Disable caching for blobstore:// URLs in simulation so each process creates its own
+	// container with its own connection pool. File-based backups don't have this issue because they
+	// don't use process-bound network connections.
+	//
+	// Note: This only affects simulation; production always uses the cache for performance.
+	bool skipCache = g_network && g_network->isSimulated() && isBlobstoreUrl(url);
+
+	// Use a reference to the cache entry (for automatic cache population) unless we're skipping cache
+	Reference<IBackupContainer> r_local;
+	Reference<IBackupContainer>& r = skipCache ? r_local : m_cache[url];
 	if (r)
 		return r;
-
 	try {
 		StringRef u(url);
 		if (u.startsWith("file://"_sr)) {

@@ -36,7 +36,7 @@ System requirements
 * 4GB **ECC** RAM (per fdbserver process)
 * Storage
 
-  * SSDs are required when storing data sets larger than memory (using the ``ssd`` storage engine).
+  * SSDs are required when storing data sets larger than memory (using the ``ssd`` or ``ssd-redwood-v1`` or ``ssd-rocksdb-v1`` storage engine).
   * HDDs are OK when storing data sets smaller than memory (using the ``memory`` storage engine).
   * For more information, see :ref:`configuration-configuring-storage-subsystem`.
 
@@ -297,7 +297,7 @@ Contains default parameters for all fdbserver processes on this machine. These s
 * ``class``: Process class specifying the roles that will be taken in the cluster. Recommended options are ``storage``, ``transaction``, ``stateless``. See :ref:`guidelines-process-class-config` for process class config recommendations.
 * ``memory``: Maximum resident memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. Setting to 0 means unlimited. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is *not* recommended to decrease the value of this parameter below its default value. It may be *increased* if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the ``storage-memory``  or ``cache-memory`` parameters are increased, the ``memory`` parameter should be increased by an equal amount.
 * ``memory-vsize``: Maximum virtual memory used by the process. The default value is 0, which means unlimited. When specified without a unit, MiB is assumed. Same as ``memory``, this parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted.
-* ``storage-memory``: Maximum memory used for data storage. This parameter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage-memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
+* ``storage-memory``: Maximum memory used for data storage. This parameter is used *only* with memory storage engine, not with the other storage engines. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage-memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
 * ``cache-memory``: Maximum memory used for caching pages from disk. The default value is 2GiB. When specified without a unit, MiB is assumed. If you increase the ``cache-memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
 * ``locality-machineid``: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.
 * ``locality-zoneid``: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.
@@ -325,7 +325,7 @@ Backup agent sections
 .. code-block:: ini
 
     [backup_agent]
-    command = /usr/lib/foundationdb/backup_agent/backup_agent
+    command = /usr/bin/backup_agent
     
     [backup_agent.1]
 
@@ -455,9 +455,9 @@ Configuring the storage subsystem
 Storage engines
 ---------------
 
-A storage engine is the part of the database that is responsible for storing data to disk. FoundationDB has two storage engines options, ``ssd`` and ``memory``.
+A storage engine is the part of the database that is responsible for storing data to disk. FoundationDB has four storage engines options, ``ssd``, ``ssd-redwood-v1``, ``ssd-rocksdb-v1`` and ``memory``.
 
-For both storage engines, FoundationDB commits transactions to disk with the number of copies indicated by the redundancy mode before reporting them committed. This procedure guarantees the *durability* needed for full ACID compliance. At the point of the commit, FoundationDB may have only *logged* the transaction, deferring the work of updating the disk representation. This deferral has significant advantages for latency and burst performance. Due to this deferral, it is possible for disk space usage to continue increasing after the last commit.
+For all storage engines, FoundationDB commits transactions to disk with the number of copies indicated by the redundancy mode before reporting them committed. This procedure guarantees the *durability* needed for full ACID compliance. At the point of the commit, FoundationDB may have only *logged* the transaction, deferring the work of updating the disk representation. This deferral has significant advantages for latency and burst performance. Due to this deferral, it is possible for disk space usage to continue increasing after the last commit.
 
 To change the storage engine, use the ``configure`` command of ``fdbcli``. For example::
 
@@ -497,6 +497,20 @@ To change the storage engine, use the ``configure`` command of ``fdbcli``. For e
     By default, each process using the memory storage engine is limited to storing 1 GB of data (including overhead). This limit can be changed using the ``storage_memory`` parameter as documented in :ref:`foundationdb.conf <foundationdb-conf>`.
 	
     When using the ``memory`` engine, especially with a larger memory limit, it can take some time (seconds to minutes) for a storage machine to start up. This is because it needs to reconstruct its in-memory data structure from the logs stored on disk.
+
+.. _configuration-storage-engine-redwood:
+
+``ssd-redwood-v1`` storage engine
+    *(optimized for SSD storage)*
+
+    Data is stored on disk in B-tree data structures optimized for use on :ref:`SSDs <ssd-info>`. This is an improved version of the SSD storage engine SQLite, expected to offer higher throughput and lower write amplification depending on the workload.
+
+.. _configuration-storage-engine-rocksdb:
+
+``ssd-rocksdb-v1`` storage engine
+    *(optimized for SSD storage)*
+
+    Data is stored on disk using LSM-tree (Log-Structured Merge Tree) data structures optimized for use on :ref:SSDs <ssd-info>. Data can be compressed and undergoes regular compaction, optimizing storage efficiency and reducing read amplification. RocksDB’s extensive tuning options allow the storage engine to be customized for both workload characteristics and hardware configurations.
 
 Storage locations
 ---------------------

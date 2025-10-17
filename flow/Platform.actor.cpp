@@ -54,6 +54,7 @@
 #include "flow/Knobs.h"
 #include "flow/Platform.actor.h"
 #include "flow/ScopeExit.h"
+#include "flow/SimpleCounter.h"
 #include "flow/StreamCipher.h"
 #include "flow/Trace.h"
 #include "flow/Trace.h"
@@ -815,7 +816,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	totalTime = t_user + t_nice + t_system + t_idle + t_iowait + t_irq + t_softirq + t_steal + t_guest;
 	idleTime = t_idle + t_iowait;
 
-	if (!DEBUG_DETERMINISM && logDetails)
+	if (!DEBUG_DETERMINISM && logDetails && !g_network->isSimulated())
 		TraceEvent("MachineLoadDetail")
 		    .detail("User", t_user)
 		    .detail("Nice", t_nice)
@@ -828,23 +829,17 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 		    .detail("Guest", t_guest);
 }
 
-void getDiskStatistics(std::string const& directory,
-                       uint64_t& currentIOs,
-                       uint64_t& readMilliSecs,
-                       uint64_t& writeMilliSecs,
-                       uint64_t& IOMilliSecs,
-                       uint64_t& reads,
-                       uint64_t& writes,
-                       uint64_t& writeSectors,
-                       uint64_t& readSectors) {
+// This is inside the __linux__ ifdef
+DiskStatistics getDiskStatistics(std::string const& directory) {
 	INJECT_FAULT(platform_error, "getDiskStatistics"); // Getting disks statistics failed
-	currentIOs = 0;
 
 	struct stat buf;
 	if (stat(directory.c_str(), &buf)) {
 		TraceEvent(SevError, "GetDiskStatisticsStatError").detail("Directory", directory).GetLastError();
 		throw platform_error();
 	}
+
+	DiskStatistics diskStats;
 
 	std::ifstream proc_stream("/proc/diskstats", std::ifstream::in);
 	while (proc_stream.good()) {
@@ -917,29 +912,44 @@ void getDiskStatistics(std::string const& directory,
 			disk_stream >> ticks;
 			disk_stream >> aveq;
 
-			currentIOs = cur_ios;
-			readMilliSecs = rd_ticks;
-			writeMilliSecs = wr_ticks;
-			IOMilliSecs = ticks;
-			reads = rd_ios;
-			writes = wr_ios;
-			writeSectors = wr_sectors;
-			readSectors = rd_sectors;
+			diskStats.currentIOs = cur_ios;
+			diskStats.readMilliSecs = rd_ticks;
+			diskStats.writeMilliSecs = wr_ticks;
+			diskStats.IOMilliSecs = ticks;
+			diskStats.reads = rd_ios;
+			diskStats.writes = wr_ios;
+			diskStats.readSectors = rd_sectors;
+			diskStats.writeSectors = wr_sectors;
 
-			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("Ignore", ignore).detail("RdIos", rd_ios)
-			//	.detail("RdMerges", rd_merges).detail("RdSectors", rd_sectors).detail("RdTicks",
-			// rd_ticks).detail("WrIos", wr_ios).detail("WrMerges", wr_merges) 	.detail("WrSectors",
-			// wr_sectors).detail("WrTicks", wr_ticks).detail("CurIos", cur_ios).detail("Ticks", ticks).detail("Aveq",
-			// aveq) 	.detail("CurrentIOs", currentIOs).detail("BusyTicks", busyTicks).detail("Reads",
-			// reads).detail("Writes", writes).detail("WriteSectors", writeSectors)
-			//  .detail("ReadSectors", readSectors);
-			return;
-		} else
+			// Argument for why we believe that Linux sectors are exactly 512 bytes:
+			//
+			// 1) In general in UNIX user<->kernel interfaces I believe this has been true for 30+ years
+			//
+			// 2) Concretely, in Linux, we have the following documentation (reviewed July 2025):
+			//    a) RE: /proc/diskstats: https://www.kernel.org/doc/html/latest/admin-guide/iostats.html,
+			//       says that /proc/diskstats (which we are reading in code just above) generates
+			//       output identical to /sys/block/<device>/stat.
+			//    b) RE: /sys/block/<device>/stat: https://www.kernel.org/doc/html/latest/block/stat.html
+			//       says "The sectors in question are the standard UNIX 512-byte sectors".
+			//
+			// One might wonder, why doesn't Linux just count bytes in 64-bit counters?
+			// Well, who knows.  32 bits of quantized 512-byte sectors ought to be enough for anybody, right?
+			// It's left as an exercise for the reader to calculate how frequently these counters
+			// will overflow on a moderately busy system where a device is doing 1MB/sec.
+			diskStats.readBytes = rd_sectors * uint64_t{ 512 };
+			diskStats.writeBytes = wr_sectors * uint64_t{ 512 };
+
+			return diskStats;
+		} else {
 			disk_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+		}
 	}
 
-	if (!g_network->isSimulated())
+	if (!g_network->isSimulated()) {
 		TraceEvent(SevWarn, "GetDiskStatisticsDeviceNotFound").detail("Directory", directory);
+	}
+
+	return diskStats;
 }
 
 dev_t getDeviceId(std::string path) {
@@ -1061,24 +1071,10 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	// need to add logging here to TraceEvent
 }
 
-void getDiskStatistics(std::string const& directory,
-                       uint64_t& currentIOs,
-                       uint64_t& readMilliSecs,
-                       uint64_t& writeMilliSecs,
-                       uint64_t& IOMilliSecs,
-                       uint64_t& reads,
-                       uint64_t& writes,
-                       uint64_t& writeSectors,
-                       uint64_t& readSectors) {
+// XXX: this is inside __FreeBSD__ ifdef.
+// This is not likely to be well tested.
+DiskStatistics getDiskStatistics(std::string const& directory) {
 	INJECT_FAULT(platform_error, "getDiskStatistics"); // getting disk stats failed
-	currentIOs = 0;
-	readMilliSecs = 0; // This will not be used because we cannot get its value.
-	writeMilliSecs = 0; // This will not be used because we cannot get its value.
-	IOMilliSecs = 0;
-	reads = 0;
-	writes = 0;
-	writeSectors = 0;
-	readSectors = 0;
 
 	struct stat buf;
 	if (stat(directory.c_str(), &buf)) {
@@ -1098,9 +1094,10 @@ void getDiskStatistics(std::string const& directory,
 
 	int dn;
 	u_int64_t total_transfers_read, total_transfers_write;
-	u_int64_t total_blocks_read, total_blocks_write;
+	u_int64_t total_bytes_read, total_bytes_written;
 	u_int64_t queue_len;
 	long double ms_per_transaction;
+	DiskStatistics diskStats;
 
 	dscur.dinfo = (struct devinfo*)calloc(1, sizeof(struct devinfo));
 	if (dscur.dinfo == nullptr) {
@@ -1116,7 +1113,6 @@ void getDiskStatistics(std::string const& directory,
 	num_devices = dscur.dinfo->numdevs;
 
 	for (dn = 0; dn < num_devices; dn++) {
-
 		if (devstat_compute_statistics(&dscur.dinfo->devices[dn],
 		                               nullptr,
 		                               etime,
@@ -1126,10 +1122,10 @@ void getDiskStatistics(std::string const& directory,
 		                               &total_transfers_read,
 		                               DSM_TOTAL_TRANSFERS_WRITE,
 		                               &total_transfers_write,
-		                               DSM_TOTAL_BLOCKS_READ,
-		                               &total_blocks_read,
-		                               DSM_TOTAL_BLOCKS_WRITE,
-		                               &total_blocks_write,
+		                               DSM_TOTAL_BYTES_READ,
+		                               &total_bytes_read,
+		                               DSM_TOTAL_BYTES_WRITE,
+		                               &total_bytes_written,
 		                               DSM_QUEUE_LENGTH,
 		                               &queue_len,
 		                               DSM_NONE) != 0) {
@@ -1137,12 +1133,14 @@ void getDiskStatistics(std::string const& directory,
 			throw platform_error();
 		}
 
-		currentIOs += queue_len;
-		IOMilliSecs += (u_int64_t)ms_per_transaction;
-		reads += total_transfers_read;
-		writes += total_transfers_write;
-		writeSectors += total_blocks_read;
-		readSectors += total_blocks_write;
+		diskStats.currentIOs += queue_len;
+		diskStats.IOMilliSecs += (u_int64_t)ms_per_transaction;
+		diskStats.reads += total_transfers_read;
+		diskStats.writes += total_transfers_write;
+		diskStats.readSectors += total_bytes_read / 512;
+		diskStats.writeSectors += total_bytes_written / 512;
+		diskStats.readBytes += total_bytes_read;
+		diskStats.writeBytes += total_bytes_written;
 	}
 }
 
@@ -1245,22 +1243,9 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 	            r_load.cpu_ticks[CPU_STATE_SYSTEM];
 }
 
-void getDiskStatistics(std::string const& directory,
-                       uint64_t& currentIOs,
-                       uint64_t& readMilliSecs,
-                       uint64_t& writeMilliSecs,
-                       uint64_t& IOMilliSecs,
-                       uint64_t& reads,
-                       uint64_t& writes,
-                       uint64_t& writeSectors,
-                       uint64_t& readSectors) {
+// This is inside the __APPLE__ ifdef
+DiskStatistics getDiskStatistics(std::string const& directory) {
 	INJECT_FAULT(platform_error, "getDiskStatistics"); // Getting disk stats failed (macOS)
-	currentIOs = 0; // This will not be used because we cannot get its value.
-	readMilliSecs = 0;
-	writeMilliSecs = 0;
-	IOMilliSecs = 0;
-	writeSectors = 0;
-	readSectors = 0;
 
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
@@ -1331,37 +1316,37 @@ void getDiskStatistics(std::string const& directory,
 
 	CFNumberRef number;
 
+	DiskStatistics diskStats;
+
 	if ((number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsReadsKey)))) {
-		CFNumberGetValue(number, kCFNumberSInt64Type, &reads);
+		CFNumberGetValue(number, kCFNumberSInt64Type, &diskStats.reads);
 	}
 
 	if ((number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsWritesKey)))) {
-		CFNumberGetValue(number, kCFNumberSInt64Type, &writes);
+		CFNumberGetValue(number, kCFNumberSInt64Type, &diskStats.writes);
 	}
 
 	uint64_t nanoSecs;
 	if ((number =
 	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalReadTimeKey)))) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
-		readMilliSecs += nanoSecs;
-		IOMilliSecs += nanoSecs;
+		diskStats.readMilliSecs += nanoSecs / 1000000;
+		diskStats.IOMilliSecs += nanoSecs / 1000000;
 	}
 	if ((number =
 	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalWriteTimeKey)))) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
-		writeMilliSecs += nanoSecs;
-		IOMilliSecs += nanoSecs;
+		diskStats.writeMilliSecs += nanoSecs / 1000000;
+		diskStats.IOMilliSecs += nanoSecs / 1000000;
 	}
-	// nanoseconds to milliseconds
-	readMilliSecs /= 1000000;
-	writeMilliSecs /= 1000000;
-	IOMilliSecs /= 1000000;
 
 	CFRelease(disk_dict);
 	IOObjectRelease(disk);
 	IOObjectRelease(disk_list);
+
+	return diskStats;
 }
-#endif
+#endif // __APPLE__
 
 #if defined(_WIN32)
 std::vector<std::string> expandWildcardPath(const char* wildcardPath) {
@@ -1461,17 +1446,18 @@ struct SystemStatisticsState {
 	  : Query(nullptr), QueueLengthCounter(nullptr), DiskTimeCounter(nullptr), ReadsCounter(nullptr),
 	    WritesCounter(nullptr), WriteBytesCounter(nullptr), ProcessorIdleCounter(nullptr), lastTime(0),
 	    lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0) {}
+
 #elif defined(__unixish__)
 	uint64_t machineLastSent, machineLastReceived;
 	uint64_t machineLastOutSegs, machineLastRetransSegs;
-	uint64_t lastReadMilliSecs, lastWriteMilliSecs, lastIOMilliSecs, lastReads, lastWrites, lastWriteSectors,
-	    lastReadSectors;
+
+	DiskStatistics lastDiskStats;
+
 	uint64_t lastClockIdleTime, lastClockTotalTime;
 	SystemStatisticsState()
 	  : lastTime(0), lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0),
 	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0),
-	    lastReadMilliSecs(0), lastWriteMilliSecs(0), lastIOMilliSecs(0), lastReads(0), lastWrites(0),
-	    lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0), lastClockTotalTime(0) {}
+	    lastClockIdleTime(0), lastClockTotalTime(0) {}
 #else
 #error Port me!
 #endif
@@ -1747,51 +1733,40 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	(*statState)->machineLastSent = machineNowSent;
 	(*statState)->machineLastReceived = machineNowReceived;
 	(*statState)->machineLastOutSegs = machineOutSegs;
+
 	(*statState)->machineLastRetransSegs = machineRetransSegs;
 
-	uint64_t currentIOs;
-	uint64_t nowReadMilliSecs = (*statState)->lastReadMilliSecs;
-	uint64_t nowWriteMilliSecs = (*statState)->lastWriteMilliSecs;
-	uint64_t nowIOMilliSecs = (*statState)->lastIOMilliSecs;
-	uint64_t nowReads = (*statState)->lastReads;
-	uint64_t nowWrites = (*statState)->lastWrites;
-	uint64_t nowWriteSectors = (*statState)->lastWriteSectors;
-	uint64_t nowReadSectors = (*statState)->lastReadSectors;
-
 	if (dataFolder != "") {
-		getDiskStatistics(dataFolder,
-		                  currentIOs,
-		                  nowReadMilliSecs,
-		                  nowWriteMilliSecs,
-		                  nowIOMilliSecs,
-		                  nowReads,
-		                  nowWrites,
-		                  nowWriteSectors,
-		                  nowReadSectors);
-		returnStats.processDiskQueueDepth = currentIOs;
-		returnStats.processDiskReadCount = nowReads;
-		returnStats.processDiskWriteCount = nowWrites;
+		DiskStatistics currentDiskStats = getDiskStatistics(dataFolder);
+
+		returnStats.processDiskQueueDepth = currentDiskStats.currentIOs;
+		returnStats.processDiskReadCount = currentDiskStats.reads;
+		returnStats.processDiskWriteCount = currentDiskStats.writes;
+
 		if (returnStats.initialized) {
 			returnStats.processDiskIdleSeconds = std::max<double>(
 			    0,
 			    returnStats.elapsed -
-			        std::min<double>(returnStats.elapsed, (nowIOMilliSecs - (*statState)->lastIOMilliSecs) / 1000.0));
+			        std::min<double>(returnStats.elapsed,
+			                         (currentDiskStats.IOMilliSecs - (*statState)->lastDiskStats.IOMilliSecs) /
+			                             1000.0));
 			returnStats.processDiskReadSeconds =
-			    std::min<double>(returnStats.elapsed, (nowReadMilliSecs - (*statState)->lastReadMilliSecs) / 1000.0);
-			returnStats.processDiskWriteSeconds =
-			    std::min<double>(returnStats.elapsed, (nowWriteMilliSecs - (*statState)->lastWriteMilliSecs) / 1000.0);
-			returnStats.processDiskRead = (nowReads - (*statState)->lastReads);
-			returnStats.processDiskWrite = (nowWrites - (*statState)->lastWrites);
-			returnStats.processDiskWriteSectors = (nowWriteSectors - (*statState)->lastWriteSectors);
-			returnStats.processDiskReadSectors = (nowReadSectors - (*statState)->lastReadSectors);
+			    std::min<double>(returnStats.elapsed,
+			                     (currentDiskStats.readMilliSecs - (*statState)->lastDiskStats.readMilliSecs) / 1000.0);
+			returnStats.processDiskWriteSeconds = std::min<double>(
+			    returnStats.elapsed,
+			    (currentDiskStats.writeMilliSecs - (*statState)->lastDiskStats.writeMilliSecs) / 1000.0);
+			returnStats.processDiskRead = (currentDiskStats.reads - (*statState)->lastDiskStats.reads);
+			returnStats.processDiskWrite = (currentDiskStats.writes - (*statState)->lastDiskStats.writes);
+			returnStats.processDiskReadSectors =
+			    (currentDiskStats.readSectors - (*statState)->lastDiskStats.readSectors);
+			returnStats.processDiskWriteSectors =
+			    (currentDiskStats.writeSectors - (*statState)->lastDiskStats.writeSectors);
+			returnStats.processDiskReadBytes = (currentDiskStats.readBytes - (*statState)->lastDiskStats.readBytes);
+			returnStats.processDiskWriteBytes = (currentDiskStats.writeBytes - (*statState)->lastDiskStats.writeBytes);
 		}
-		(*statState)->lastIOMilliSecs = nowIOMilliSecs;
-		(*statState)->lastReadMilliSecs = nowReadMilliSecs;
-		(*statState)->lastWriteMilliSecs = nowWriteMilliSecs;
-		(*statState)->lastReads = nowReads;
-		(*statState)->lastWrites = nowWrites;
-		(*statState)->lastWriteSectors = nowWriteSectors;
-		(*statState)->lastReadSectors = nowReadSectors;
+
+		(*statState)->lastDiskStats = currentDiskStats;
 	}
 
 	uint64_t clockIdleTime = (*statState)->lastClockIdleTime;
@@ -2104,9 +2079,9 @@ static void enableLargePages() {
 	ModifyPrivilege(SE_LOCK_MEMORY_NAME, true);
 	largePagesPrivilegeEnabled = true;
 #else
-		// SOMEDAY: can/should we teach the client how to enable large pages
-		// on Linux? Or just rely on the system to have been configured as
-		// desired?
+	// SOMEDAY: can/should we teach the client how to enable large pages
+	// on Linux? Or just rely on the system to have been configured as
+	// desired?
 #endif
 }
 
@@ -2140,17 +2115,21 @@ static void mprotectSafe(void* p, size_t s, int prot) {
 }
 
 static void* mmapInternal(size_t length, int flags, bool guardPages) {
+	static SimpleCounter<int64_t>* bytes = SimpleCounter<int64_t>::makeCounter("/flow/platform/mmapBytes");
+
 	if (guardPages && FLOW_KNOBS->FAST_ALLOC_ALLOW_GUARD_PAGES) {
 		static size_t pageSize = sysconf(_SC_PAGESIZE);
 		length = RightAlign(length, pageSize);
 		length += 2 * pageSize; // Map enough for the guard pages
 		void* resultWithGuardPages = mmapSafe(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+		bytes->increment(length);
 		// left guard page
 		mprotectSafe(resultWithGuardPages, pageSize, PROT_NONE);
 		// right guard page
 		mprotectSafe((void*)(uintptr_t(resultWithGuardPages) + length - pageSize), pageSize, PROT_NONE);
 		return (void*)(uintptr_t(resultWithGuardPages) + pageSize);
 	} else {
+		bytes->increment(length);
 		return mmapSafe(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
 	}
 }
@@ -2205,36 +2184,6 @@ void* allocate(size_t length, bool allowLargePages, bool includeGuardPages) {
 	return block;
 }
 
-#if 0
-void* numaAllocate(size_t size) {
-	void* thePtr = (void*)0xA00000000LL;
-	enableLargePages();
-
-	size_t vaPageSize = 2<<20;//64<<10;
-	int nVAPages = size / vaPageSize;
-
-	int nodes;
-	if (!GetNumaHighestNodeNumber((PULONG)&nodes)) {
-		TraceEvent(SevError, "GetNumaHighestNodeNumber").getLastError();
-		throw platform_error();
-	}
-	++nodes;
-
-	for(int i=0; i<nodes; i++) {
-		char* p = (char*)thePtr + i*nVAPages/nodes*vaPageSize;
-		char* e = (char*)thePtr + (i+1)*nVAPages/nodes*vaPageSize;
-		//printf("  %p + %lld\n", p, e-p);
-		// SOMEDAY: removed NUMA extensions for compatibility with Windows Server 2003 -- make execution dynamic
-		if (!VirtualAlloc/*ExNuma*/(/*GetCurrentProcess(),*/ p, e-p, MEM_COMMIT|MEM_RESERVE|MEM_LARGE_PAGES, PAGE_READWRITE/*, i*/)) {
-			Error e = platform_error();
-			TraceEvent(e, "VirtualAlloc").GetLastError();
-			throw e;
-		}
-	}
-	return thePtr;
-}
-#endif
-
 void setAffinity(int proc) {
 #if defined(_WIN32)
 	/*if (SetProcessAffinityMask(GetCurrentProcess(), 0x5555))//0x5555555555555555UL))
@@ -2268,11 +2217,16 @@ int getRandomSeed() {
 	}
 #else
 	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed)) {
+	if (devRandom == -1) {
 		TraceEvent(SevError, "OpenURandom").GetLastError();
 		throw platform_error();
 	}
+	int nbytes = read(devRandom, &randomSeed, sizeof(randomSeed));
 	close(devRandom);
+	if (nbytes != sizeof(randomSeed)) {
+		TraceEvent(SevError, "ReadURandom").GetLastError();
+		throw platform_error();
+	}
 #endif
 
 	return randomSeed;
@@ -2334,8 +2288,8 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		if (!f)
 			throw io_error();
 #ifdef _WIN32
-			// In Windows case, ReplaceFile API is used which preserves the ownership,
-			// ACLs and other attributes of the original file
+		// In Windows case, ReplaceFile API is used which preserves the ownership,
+		// ACLs and other attributes of the original file
 #elif defined(__unixish__)
 		// get the uid/gid/mode bits of old file and set it on new file, else fail
 		struct stat info;
@@ -3074,8 +3028,11 @@ std::string readFileBytes(std::string const& filename, size_t maxSize) {
 	return ret;
 }
 
-void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
-	std::ofstream ofs(filename, std::fstream::out | std::fstream::binary);
+void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count, bool append) {
+	auto fflags = std::fstream::out | std::fstream::binary;
+	if (append)
+		fflags |= std::fstream::app;
+	std::ofstream ofs(filename, fflags);
 	if (!ofs.good()) {
 		TraceEvent("WriteFileBytes_FileOpenError").detail("Filename", filename).GetLastError();
 		throw io_error();
@@ -3188,7 +3145,15 @@ std::string getDefaultClusterFilePath() {
 #ifdef __linux__
 #include <cxxabi.h>
 #endif
-uint8_t* g_extra_memory;
+static uint8_t* g_extra_memory;
+
+// Allocate some memory on startup so that we can free it if outOfMemory() is
+// called. This gives some breathing room to generate diagnostics.
+void allocInstrumentationInit(void) {
+	g_extra_memory = new uint8_t[1000000];
+}
+#else
+void allocInstrumentationInit() {}
 #endif
 
 namespace platform {
@@ -3246,16 +3211,7 @@ void outOfMemory() {
 
 	for (auto i = traceCounts.begin(); i != traceCounts.end(); ++i) {
 		std::vector<void*>* frames = i->second.backTrace;
-		std::string backTraceStr;
-#if defined(_WIN32)
-		char buf[1024];
-		for (int j = 1; j < frames->size(); j++) {
-			_snprintf(buf, 1024, "%p ", frames->at(j));
-			backTraceStr += buf;
-		}
-#else
-		backTraceStr = format_backtrace(&(*frames)[0], frames->size());
-#endif
+		std::string backTraceStr = format_backtrace(&(*frames)[0], frames->size());
 		TraceEvent("MemSample")
 		    .detail("Count", (int64_t)i->second.count)
 		    .detail("TotalSize", i->second.totalSize)
@@ -3290,6 +3246,9 @@ void outOfMemory() {
 	TRACEALLOCATOR(8192);
 	g_traceBatch.dump();
 #endif
+
+	TraceEvent(SevWarn, "OutOfMemorySimpleCounterReportFollows");
+	simpleCounterReport(SevWarn);
 
 	criticalError(FDB_EXIT_NO_MEM, "OutOfMemory", "Out of memory");
 }
@@ -3369,7 +3328,11 @@ size_t TmpFile::read(uint8_t* buff, size_t len) {
 }
 
 void TmpFile::write(const uint8_t* buff, size_t len) {
-	writeFileBytes(filename, buff, len);
+	writeFileBytes(filename, buff, len, false);
+}
+
+void TmpFile::append(const uint8_t* buff, size_t len) {
+	writeFileBytes(filename, buff, len, true);
 }
 
 bool TmpFile::destroyFile() {
@@ -3433,7 +3396,16 @@ extern "C" void flushAndExit(int exitCode) {
 	crashAndDie();
 }
 
-#ifdef __unixish__
+#ifndef __unixish__
+namespace platform {
+std::string get_backtrace() {
+	return std::string();
+}
+ImageInfo getImageInfo() {
+	return ImageInfo();
+}
+} // namespace platform
+#else
 #include <dlfcn.h>
 
 #ifdef __linux__
@@ -3453,23 +3425,13 @@ platform::ImageInfo getImageInfo(const void* symbol) {
 
 	if (res != 0) {
 		imageInfo.fileName = info.dli_fname;
-		std::string imageFile = basename(info.dli_fname);
-		// If we have a client library that doesn't end in the appropriate extension, we will get the wrong debug
-		// suffix. This should only be a cosmetic problem, though.
-#ifdef __linux__
-		imageInfo.offset = (void*)linkMap->l_addr;
-		if (imageFile.length() >= 3 && imageFile.rfind(".so") == imageFile.length() - 3) {
-			imageInfo.symbolFileName = imageFile + "-debug";
-		}
-#else
-		imageInfo.offset = info.dli_fbase;
-		if (imageFile.length() >= 6 && imageFile.rfind(".dylib") == imageFile.length() - 6) {
-			imageInfo.symbolFileName = imageFile + "-debug";
-		}
-#endif
-		else {
-			imageInfo.symbolFileName = imageFile + ".debug";
-		}
+		// Previously this code would guess "debug" related binary name suffixes.
+		// If you run a binary called fdbserver.debug, it would emit an addr2line
+		// command referencing a binary called "fdbserver.debug.debug".
+		// This is not helpful.  If the developer needs to point the command
+		// to a different binary than then one they executed, then they can
+		// simply edit the emitted command.
+		imageInfo.symbolFileName = info.dli_fname;
 	}
 
 	return imageInfo;
@@ -3498,42 +3460,53 @@ size_t raw_backtrace(void** addresses, int maxStackDepth) {
 #endif
 }
 
-std::string format_backtrace(void** addresses, int numAddresses) {
-	ImageInfo const& imageInfo = getCachedImageInfo();
-#ifdef __APPLE__
-	std::string s = format("atos -o %s -arch x86_64 -l %p", imageInfo.symbolFileName.c_str(), imageInfo.offset);
-	for (int i = 1; i < numAddresses; i++) {
-		s += format(" %p", addresses[i]);
-	}
-#else
-	std::string s = format("addr2line -e %s -p -C -f -i", imageInfo.symbolFileName.c_str());
-	for (int i = 1; i < numAddresses; i++) {
-		s += format(" %p", (char*)addresses[i] - (char*)imageInfo.offset);
-	}
-#endif
-	return s;
-}
-
 std::string get_backtrace() {
 	void* addresses[50];
 	size_t size = raw_backtrace(addresses, 50);
 	return format_backtrace(addresses, size);
 }
 } // namespace platform
-#else
+#endif // __unixish__
 
 namespace platform {
-std::string get_backtrace() {
-	return std::string();
-}
 std::string format_backtrace(void** addresses, int numAddresses) {
-	return std::string();
-}
-ImageInfo getImageInfo() {
-	return ImageInfo();
+	ImageInfo const& imageInfo = getCachedImageInfo();
+
+	std::string s;
+#if defined(_WIN32)
+	char buf[32];
+	for (int i = 1; i < numAddresses; i++) {
+		_snprintf(buf, sizeof(buf), "%p ", addresses[i]);
+		s += buf;
+	}
+#else
+#ifdef __APPLE__
+	s = format("atos -o %s -arch x86_64 -l %p", imageInfo.symbolFileName.c_str(), imageInfo.offset);
+	for (int i = 1; i < numAddresses; i++) {
+		s += format(" %p", addresses[i]);
+	}
+#else
+	// Specify an absolute addr2line path to avoid the unhelpful
+	// `addr2line` shell alias that is baked into the FDB dev VM
+	// /root/.bashrc.  It is easier to change the code here to
+	// emit a better command than it is to edit or remove that alias
+	// from the .bashrc, so that is what we are going to do.
+	// Also, one less moving part means less confusion.
+	std::string addr2linePath;
+#ifdef __clang__
+	addr2linePath = "/usr/local/bin/llvm-addr2line";
+#else
+	addr2linePath = "/usr/bin/addr2line";
+#endif
+	s = format("%s -e %s -p -C -f -i", addr2linePath.c_str(), imageInfo.symbolFileName.c_str());
+	for (int i = 1; i < numAddresses; i++) {
+		s += format(" %p", (char*)addresses[i] - (char*)imageInfo.offset);
+	}
+#endif
+#endif
+	return s;
 }
 } // namespace platform
-#endif
 
 bool isLibraryLoaded(const char* lib_path) {
 #if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
@@ -3674,6 +3647,8 @@ void platformInit() {
 		              "clock_gettime(CLOCK_MONOTONIC, ...) returned an error. Check your kernel and glibc versions.");
 	}
 #endif
+
+	allocInstrumentationInit();
 }
 
 std::vector<std::function<void()>> g_crashHandlerCallbacks;

@@ -1407,6 +1407,7 @@ void getFakeEncryptCipherResponse(StringRef jsonReqRef,
 
 	rapidjson::Value cipherKeyDetails(rapidjson::kArrayType);
 	for (const auto& detail : reqDoc[CIPHER_KEY_DETAILS_TAG].GetArray()) {
+		// Fix: Initialize JSON value as object type to prevent undefined behavior
 		rapidjson::Value keyDetail(rapidjson::kObjectType);
 
 		ASSERT(detail.HasMember(ENCRYPT_DOMAIN_ID_TAG));
@@ -1740,7 +1741,7 @@ void testMalformedDetailNotObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher
 	doc.SetObject();
 
 	rapidjson::Value cDetails(rapidjson::kArrayType);
-	rapidjson::Value detail;
+	rapidjson::Value detail(rapidjson::kObjectType);
 	rapidjson::Value key(isCipher ? BASE_CIPHER_ID_TAG : BLOB_METADATA_DOMAIN_ID_TAG, doc.GetAllocator());
 	rapidjson::Value id;
 	id.SetUint(12345);

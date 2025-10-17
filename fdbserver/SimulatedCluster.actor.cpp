@@ -127,17 +127,13 @@ bool isValidSimulationStorageEngineValue(const std::underlying_type_t<Simulation
 
 constexpr int MACHINE_REBOOT_TIME = 10;
 
-// The max number of extra blob worker machines we might (i.e. randomly) add to the simulated cluster.
-// Note that this is in addition to the two we always have.
-constexpr int NUM_EXTRA_BW_MACHINES = 5;
-
 bool destructed = false;
 
 // Configuration details specified in workload test files that change the simulation
 // environment details
 class TestConfig : public BasicTestConfig {
 	class ConfigBuilder {
-		using value_type = toml::basic_value<toml::discard_comments>;
+		using value_type = toml::value;
 		using base_variant = std::variant<int,
 		                                  float,
 		                                  double,
@@ -408,9 +404,6 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "randomlyRenameZoneId") {
 				randomlyRenameZoneId = strcmp(value.c_str(), "true") == 0;
 			}
-			if (attrib == "blobGranulesEnabled") {
-				blobGranulesEnabled = strcmp(value.c_str(), "true") == 0;
-			}
 			if (attrib == "simHTTPServerEnabled") {
 				simHTTPServerEnabled = strcmp(value.c_str(), "true") == 0;
 			}
@@ -489,7 +482,6 @@ public:
 	Optional<bool> generateFearless, buggify;
 	Optional<std::string> config;
 	Optional<std::string> remoteConfig;
-	bool blobGranulesEnabled = false;
 	bool randomlyRenameZoneId = false;
 	bool simHTTPServerEnabled = true;
 
@@ -576,7 +568,6 @@ public:
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
 		    .add("extraStorageMachineCountPerDC", &extraStorageMachineCountPerDC)
-		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
@@ -646,7 +637,8 @@ T simulate(const T& in) {
 }
 
 ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
-	state std::vector<Future<Void>> agentFutures;
+	state Future<Void> agentFuture;
+	state FileBackupAgent fileAgent;
 
 	while (g_simulator->backupAgents == ISimulator::BackupAgentType::WaitForType) {
 		wait(delay(1.0));
@@ -655,17 +647,16 @@ ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 	if (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
 		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
-		state FileBackupAgent fileAgent;
-		agentFutures.push_back(fileAgent.run(
-		    cx, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
+		TraceEvent("SimBackupAgentsStarting").log();
+		agentFuture =
+		    fileAgent.run(cx, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT);
 
 		while (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
 			wait(delay(1.0));
 		}
 
-		for (auto it : agentFutures) {
-			it.cancel();
-		}
+		TraceEvent("SimBackupAgentsStopping").log();
+		agentFuture.cancel();
 	}
 
 	wait(Future<Void>(Never()));
@@ -1669,18 +1660,23 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 	if (testConfig.resolverCount.present()) {
 		db.resolverCount = testConfig.resolverCount.get();
 	}
-	db.blobGranulesEnabled = testConfig.blobGranulesEnabled;
 }
 
 // Sets generateFearless and number of dataCenters based on testConfig details
 // The number of datacenters may be overwritten in setRegions
 void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
-	generateFearless =
-	    testConfig.simpleConfig ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
-	if (testConfig.generateFearless.present()) {
-		// overwrite whatever decision we made before
-		generateFearless = testConfig.generateFearless.get();
+
+#ifdef NO_MULTIREGION_TEST
+	if (testConfig.minimumRegions > 1 || (testConfig.generateFearless.present() && testConfig.generateFearless.get())) {
+		throw internal_error_msg("Test requires multi-region while the flag is turned off in the build process");
 	}
+	generateFearless = false;
+#else
+	generateFearless =
+	    testConfig.generateFearless.present()
+	        ? testConfig.generateFearless.get()
+	        : (!testConfig.simpleConfig && (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5));
+#endif
 	datacenters =
 	    testConfig.simpleConfig
 	        ? 1
@@ -1706,75 +1702,10 @@ void SimulationConfig::setTenantMode(const TestConfig& testConfig) {
 }
 
 void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
-	// Enable encryption siginificantly reduces chance that a storage engine other than redwood got selected
-	// We want storage servers are selected by simulation tests with roughly equal chance
-	// If encryptMode is not specified explicitly, with high probability, we disable encryption
-	if (testConfig.encryptModes.empty() &&
-	    deterministicRandom()->random01() < SERVER_KNOBS->DISABLED_ENCRYPTION_PROBABILITY_SIM) {
-		EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
-		TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
-		CODE_PROBE(true, "Enforce to disable encryption in simulation", probe::decoration::rare);
-		set_config("encryption_at_rest_mode=" + encryptionMode.toString());
-		return;
-	}
-
-	std::vector<bool> available;
-	std::vector<double> probability;
-	if (!testConfig.encryptModes.empty()) {
-		// If encryptModes are specified explicitly, give them equal probability to be chosen.
-		available = std::vector<bool>(EncryptionAtRestMode::END, false);
-		probability = std::vector<double>(EncryptionAtRestMode::END, 0);
-		for (auto& mode : testConfig.encryptModes) {
-			available[EncryptionAtRestMode::fromString(mode).mode] = true;
-			probability[EncryptionAtRestMode::fromString(mode).mode] = 1.0 / testConfig.encryptModes.size();
-		}
-	} else {
-		// If encryptModes are not specified, give encryption higher chance to be enabled.
-		// The good thing is testing with encryption on doesn't loss test coverage for most of the other features.
-		available = std::vector<bool>(EncryptionAtRestMode::END, true);
-		// Enabling encryption require the use of Redwood storage engine, but we don't want to test with Redwood with
-		// high probability in simulation. Setting total probability of encryption being enabled to be close to 1/6,
-		// since we have 6 storage engine type currently.
-		probability = { 0.85, 0.1, 0.05 };
-		// Only Redwood support encryption. Disable encryption if Redwood is not available.
-		if ((testConfig.storageEngineType.present() &&
-		     testConfig.storageEngineType != SimulationStorageEngine::REDWOOD) ||
-		    testConfig.excludedStorageEngineType(SimulationStorageEngine::REDWOOD)) {
-			available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
-			available[(int)EncryptionAtRestMode::CLUSTER_AWARE] = false;
-		}
-	}
-	// domain_aware mode is supported only with required tenant mode.
-	if (db.tenantMode != TenantMode::REQUIRED) {
-		available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
-	}
-	int lastAvailableMode = EncryptionAtRestMode::END;
-	double totalProbability = 0;
-	for (int mode = 0; mode < (int)EncryptionAtRestMode::END; mode++) {
-		if (available[mode]) {
-			lastAvailableMode = mode;
-			totalProbability += probability[mode];
-		}
-	}
-	ASSERT(lastAvailableMode != EncryptionAtRestMode::END); // At least one mode available
-	double r = deterministicRandom()->random01() * totalProbability;
-	EncryptionAtRestMode encryptionMode;
-	for (int mode = 0;; mode++) {
-		if (available[mode] && (r < probability[mode] || mode == lastAvailableMode)) {
-			encryptionMode = (EncryptionAtRestMode::Mode)mode;
-			break;
-		}
-		r -= probability[mode];
-	}
+	// Non-DISABLED encryption at rest values are experimental and are being removed.
+	EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
 	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
-	CODE_PROBE(
-	    encryptionMode == EncryptionAtRestMode::DISABLED, "Disabled encryption in simulation", probe::decoration::rare);
-	CODE_PROBE(encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE,
-	           "Enabled cluster-aware encryption in simulation",
-	           probe::decoration::rare);
-	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE,
-	           "Enabled domain-aware encryption in simulation",
-	           probe::decoration::rare);
+	CODE_PROBE(true, "Enforce to disable encryption in simulation", probe::decoration::rare);
 	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
 }
 
@@ -1811,11 +1742,6 @@ void shardedRocksDBStorageEngineConfig(SimulationConfig* simCfg) {
 	CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine", probe::assert::hasRocksDB);
 	simCfg->set_config("encryption_at_rest_mode=disabled");
 	simCfg->set_config("ssd-sharded-rocksdb");
-	// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
-	// background threads.
-	TraceEvent(SevWarnAlways, "ShardedRocksDBNonDeterminism")
-	    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
-	noUnseed = true;
 }
 
 const std::unordered_map<SimulationStorageEngine, StorageEngineConfigFunc> STORAGE_ENGINE_CONFIG_MAPPER = {
@@ -1851,7 +1777,12 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 	StringRef reason;
 	SimulationStorageEngine result = SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE;
 
-	if (testConfig.storageEngineType.present()) {
+	if (isEncryptionEnabled) {
+		// Only storage engine supporting encryption is Redwood.
+		reason = "EncryptionEnabled"_sr;
+		result = SimulationStorageEngine::REDWOOD;
+
+	} else if (testConfig.storageEngineType.present()) {
 		reason = "ConfigureSpecified"_sr;
 		result = testConfig.storageEngineType.get();
 		if (testConfig.excludedStorageEngineType(result) ||
@@ -1861,6 +1792,13 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 			TraceEvent(SevError, "StorageEngineNotSupported").detail("StorageEngineType", result);
 			ASSERT(false);
 		}
+
+	} else if (SERVER_KNOBS->ENFORCE_SHARDED_ROCKSDB_SIM_IF_AVALIABLE &&
+	           testConfig.storageEngineExcludeTypes.find(SimulationStorageEngine::SHARDED_ROCKSDB) ==
+	               testConfig.storageEngineExcludeTypes.end()) {
+		reason = "ENFORCE_SHARDED_ROCKSDB_SIM_IF_AVALIABLE is enabled"_sr;
+		result = SimulationStorageEngine::SHARDED_ROCKSDB;
+
 	} else {
 		std::unordered_set<SimulationStorageEngine> storageEngineAvailable;
 		for (const auto& storageEngine : SIMULATION_STORAGE_ENGINE) {
@@ -1900,12 +1838,6 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 		if (result == SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE) {
 			UNREACHABLE();
 		}
-	}
-
-	if (isEncryptionEnabled) {
-		// Only storage engine supporting encryption is Redwood.
-		reason = "EncryptionEnabled"_sr;
-		result = SimulationStorageEngine::REDWOOD;
 	}
 
 	TraceEvent(SevInfo, "SimulationStorageEngine")
@@ -2345,10 +2277,12 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
+#if (!NO_MULTIREGION_TEST)
 	if (!testConfig.singleRegion &&
 	    (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5))) {
 		setRegions(testConfig);
 	}
+#endif
 	setMachineCount(testConfig);
 	setCoordinators(testConfig);
 
@@ -2387,8 +2321,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
 	}
-
-	g_simulator->blobGranulesEnabled = simconfig.db.blobGranulesEnabled;
 
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
 	std::string startingConfigString = "new";
@@ -2652,10 +2584,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		int storageCacheMachines = dc == 0 ? 1 : 0;
 		int blobWorkerMachines = 0;
 		int simHTTPMachines = 0;
-		if (testConfig.blobGranulesEnabled) {
-			int blobWorkerProcesses = 1 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
-			blobWorkerMachines = std::max(1, blobWorkerProcesses / processesPerMachine);
-		}
 		if (testConfig.simHTTPServerEnabled) {
 			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
 			fmt::print("sim http machines = {0}\n", simHTTPMachines);
@@ -2932,24 +2860,13 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
 	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-	    // NOTE: PhysicalShardMove and BulkLoading are required to have SHARDED_ROCKSDB storage engine working.
-	    // Inside the TOML file, the SHARD_ENCODE_LOCATION_METADATA is overridden, however, the
-	    // override will not take effect until the test starts. Here, we do an additional check
-	    // for this special simulation test.
+	    // NOTE: PhysicalShardMove and BulkLoading and Bulkdumping are required to have SHARDED_ROCKSDB storage engine
+	    // working. Inside the TOML file, the SHARD_ENCODE_LOCATION_METADATA is overridden, however, the override will
+	    // not take effect until the test starts. Here, we do an additional check for this special simulation test.
 	    (std::string_view(testFile).find("PhysicalShardMove") == std::string_view::npos &&
-	     std::string_view(testFile).find("BulkLoading") == std::string_view::npos)) {
-		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
-	}
-
-	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
-	}
-
-	if (std::string_view(testFile).find("BlobRestore") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
-	}
-
-	if (std::string_view(testFile).find("ChangeFeed") != std::string_view::npos) {
+	     std::string_view(testFile).find("BulkLoading") == std::string_view::npos &&
+	     std::string_view(testFile).find("BulkDumping") == std::string_view::npos &&
+	     std::string_view(testFile).find("ShardedRocksNondeterministicTest") == std::string_view::npos)) {
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 

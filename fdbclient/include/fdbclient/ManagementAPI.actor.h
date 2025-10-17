@@ -144,13 +144,6 @@ ACTOR Future<Void> unlockDatabase(Database cx, UID id);
 ACTOR Future<Void> checkDatabaseLock(Transaction* tr, UID id);
 ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id);
 
-ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStatus status, KeyRange range = KeyRange());
-ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
-                                    Key rangeID,
-                                    ChangeFeedStatus status,
-                                    KeyRange range = KeyRange());
-ACTOR Future<Void> updateChangeFeed(Database cx, Key rangeID, ChangeFeedStatus status, KeyRange range = KeyRange());
-
 ACTOR Future<Void> advanceVersion(Database cx, Version v);
 
 ACTOR Future<int> setDDMode(Database cx, int mode);
@@ -170,52 +163,102 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
                                      double timeoutSeconds);
 
 // Set bulk load mode
+// When the mode is on, DD will periodically check if there is any bulkload task to do by scaning the metadata.
 ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
 
-// Get valid bulk load task state within the input range
-ACTOR Future<std::vector<BulkLoadState>> getValidBulkLoadTasksWithinRange(Database cx,
-                                                                          KeyRange rangeToRead,
-                                                                          size_t limit,
-                                                                          Optional<BulkLoadPhase> phase);
+// Create a bulkload task submission transaction without commit
+// Used by ManagementAPI and bulkdumpRestore at DD
+ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);
 
-// Submit a bulk load task
-ACTOR Future<Void> submitBulkLoadTask(Database cx, BulkLoadState bulkLoadTask);
-
-// Acknowledge a bulk load task if it has been completed
-ACTOR Future<Void> acknowledgeBulkLoadTask(Database cx, KeyRange range, UID taskId);
+// Create an bulkload task acknowledge transaction without commit
+// Used by ManagementAPI and bulkdumpRestore at DD
+ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId);
 
 // Get bulk load task for the input range and taskId
-ACTOR Future<BulkLoadState> getBulkLoadTask(Transaction* tr,
-                                            KeyRange range,
-                                            UID taskId,
-                                            std::vector<BulkLoadPhase> phases);
+ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
+                                                KeyRange range,
+                                                UID taskId,
+                                                std::vector<BulkLoadPhase> phases);
+
+// Add bulkLoad job to history map
+ACTOR Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState);
+
+// Get all past bulkLoad jobs from history map
+ACTOR Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx);
+
+// Erase all bulkLoad job history metadata if jobId is not provided. Otherwise, erase the job with the given jobId.
+ACTOR Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId = Optional<UID>());
+
+// Get the current running bulk load job
+ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx);
+
+// Cancel bulkLoad job for the given jobId
+ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId);
+
+// Acknowledge all bulk load tasks that are in the Error phase.
+// After acknowledge, the write traffic to the task's range is turned on and the task's metadata is cleared by the bulk
+// load engine.
+ACTOR Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange jobRange);
+
+// Submit a BulkLoad job: loading data from a remote folder using bulkloading mechanism.
+// There is at most one BulkLoad or one BulkDump job at a time.
+// If there is any existing BulkLoad or BulkDump job, reject the new job.
+ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState);
+
+// Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
+// the metadata.
+ACTOR Future<int> setBulkDumpMode(Database cx, int mode);
+
+// Get bulk dump mode value.
+ACTOR Future<int> getBulkDumpMode(Database cx);
+
+// TODO(BulkDump): Cancel or clear the BulkDump job
+ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId);
+
+// Submit a bulkdump job: dumping data to a remote folder by storage servers.
+// There is at most one BulkLoad or one BulkDump job at a time.
+// If there is any existing BulkLoad or BulkDump job, reject the new job.
+ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob);
+
+// Return the existing job metadata
+ACTOR Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr);
+
+// Get total number of completed tasks within the input range
+ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);
 
 // Persist a rangeLock owner to database metadata
 // A range can only be locked by a registered owner
-ACTOR Future<Void> registerRangeLockOwner(Database cx, std::string uniqueId, std::string description);
+ACTOR Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);
 
 // Remove an owner form the database metadata
-ACTOR Future<Void> removeRangeLockOwner(Database cx, std::string uniqueId);
+ACTOR Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
 
 // Get all registered rangeLock owner
 ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx);
 
-ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, std::string uniqueId);
+// Get a rangeLock owner by ownerUniqueID
+ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID);
 
-// Turn off user traffic for bulk load based on range lock
-ACTOR Future<Void> turnOffUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range);
+// Block write traffic to a user range (the input range must be within normalKeys).
+// One transaction can call releaseExclusiveReadLockOnRange at most for one time.
+ACTOR Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
-// Turn on user traffic for bulk load based on range lock
-ACTOR Future<Void> turnOnUserWriteTrafficForBulkLoad(Transaction* tr, KeyRange range);
+ACTOR Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
-// Lock a user range (the input range must be within normalKeys)
-ACTOR Future<Void> takeReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);
+// Unblock a user range (the input range must be within normalKeys).
+// One transaction can call releaseExclusiveReadLockOnRange at most for one time.
+ACTOR Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
-// Unlock a user range (the input range must be within normalKeys)
-ACTOR Future<Void> releaseReadLockOnRange(Database cx, KeyRange range, std::string ownerUniqueID);
+ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID);
 
 // Get locked ranges within the input range (the input range must be within normalKeys)
-ACTOR Future<std::vector<KeyRange>> getReadLockOnRange(Database cx, KeyRange range);
+ACTOR Future<std::vector<std::pair<KeyRange, RangeLockState>>> findExclusiveReadLockOnRange(
+    Database cx,
+    KeyRange range,
+    Optional<RangeLockOwnerName> ownerName = Optional<RangeLockOwnerName>());
+
+// Clear all exclusive read lock by the input user. Not transactional.
+ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
@@ -238,6 +281,9 @@ bool schemaMatch(json_spirit::mValue const& schema,
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
+
+ACTOR Future<Void> disableBackupWorker(Database cx);
+ACTOR Future<Void> enableBackupWorker(Database cx);
 
 #include "flow/unactorcompiler.h"
 #endif

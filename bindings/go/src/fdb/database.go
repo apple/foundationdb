@@ -31,6 +31,10 @@ import (
 	"runtime"
 )
 
+// ErrMultiVersionClientUnavailable is returned when the multi-version client API is unavailable.
+// Client status information is available only when such API is enabled.
+var ErrMultiVersionClientUnavailable = errors.New("multi-version client API is unavailable")
+
 // Database is a handle to a FoundationDB database. Database is a lightweight
 // object that may be efficiently copied, and is safe for concurrent use by
 // multiple goroutines.
@@ -108,7 +112,9 @@ func (d Database) CreateTransaction() (Transaction, error) {
 // from the go bindings. If a suspendDuration > 0 is provided the rebooted process will be
 // suspended for suspendDuration seconds. If checkFile is set to true the process will check
 // if the data directory is writeable by creating a validation file. The address must be a
-// process address is the form of IP:Port pair.
+// process address is the form of IP:Port pair without the :tls suffix if the cluster is running
+// with TLS enabled. The address can also be multiple processes addresses concated by a comma, e.g.
+// "IP1:Port,IP2:port", in this case the RebootWorker will reboot all provided addresses concurrently.
 func (d Database) RebootWorker(address string, checkFile bool, suspendDuration int) error {
 	t := &futureInt64{
 		future: newFutureWithDb(
@@ -133,25 +139,54 @@ func (d Database) RebootWorker(address string, checkFile bool, suspendDuration i
 	return err
 }
 
-func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, e error) {
+// GetClientStatus returns a JSON byte slice containing database client-side status information.
+// At the top level the report describes the status of the Multi-Version Client database - its initialization state, the protocol version, the available client versions; it also embeds the status of the actual version-specific database and within it the addresses of various FDB server roles the client is aware of and their connection status.
+// NOTE: ErrMultiVersionClientUnavailable will be returned if the Multi-Version client API was not enabled.
+func (d Database) GetClientStatus() ([]byte, error) {
+	if apiVersion == 0 {
+		return nil, errAPIVersionUnset
+	}
+
+	st := &futureByteSlice{
+		future: newFutureWithDb(d.database, nil, C.fdb_database_get_client_status(d.ptr)),
+	}
+
+	b, err := st.Get()
+	if err != nil {
+		return nil, err
+	}
+	if len(b) == 0 {
+		return nil, ErrMultiVersionClientUnavailable
+	}
+
+	return b, nil
+}
+
+func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, err error) {
 	for {
-		ret, e = wrapped()
+		ret, err = wrapped()
 
 		// No error means success!
-		if e == nil {
+		if err == nil {
 			return
 		}
 
 		// Check if the error chain contains an
 		// fdb.Error
 		var ep Error
-		if errors.As(e, &ep) {
-			e = onError(ep).Get()
+		if errors.As(err, &ep) {
+			processedErr := onError(ep).Get()
+			var newEp Error
+			if !errors.As(processedErr, &newEp) || newEp.Code != ep.Code {
+				// override original error only if not an Error or code changed
+				// fdb_transaction_on_error(), called by OnError, will currently almost always return same error as the original one
+				err = processedErr
+			}
 		}
 
 		// If OnError returns an error, then it's not
 		// retryable; otherwise take another pass at things
-		if e != nil {
+		if err != nil {
 			return
 		}
 	}
@@ -180,19 +215,19 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 // See the Transactor interface for an example of using Transact with
 // Transaction and Database objects.
 func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{}, error) {
-	tr, e := d.CreateTransaction()
+	tr, err := d.CreateTransaction()
 	// Any error here is non-retryable
-	if e != nil {
-		return nil, e
+	if err != nil {
+		return nil, err
 	}
 
-	wrapped := func() (ret interface{}, e error) {
-		defer panicToError(&e)
+	wrapped := func() (ret interface{}, err error) {
+		defer panicToError(&err)
 
-		ret, e = f(tr)
+		ret, err = f(tr)
 
-		if e == nil {
-			e = tr.Commit().Get()
+		if err == nil {
+			err = tr.Commit().Get()
 		}
 
 		return
@@ -213,7 +248,8 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 //
 // The transaction is retried if the error is or wraps a retryable Error.
 // The error is unwrapped.
-// Read transactions are never committed and destroyed before returning to caller.
+// Read transactions are never committed and destroyed automatically via GC,
+// once all their futures go out of scope.
 //
 // Do not return Future objects from the function provided to ReadTransact. The
 // Transaction created by ReadTransact may be finalized at any point after
@@ -224,16 +260,16 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
 func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (interface{}, error) {
-	tr, e := d.CreateTransaction()
-	if e != nil {
+	tr, err := d.CreateTransaction()
+	if err != nil {
 		// Any error here is non-retryable
-		return nil, e
+		return nil, err
 	}
 
-	wrapped := func() (ret interface{}, e error) {
-		defer panicToError(&e)
+	wrapped := func() (ret interface{}, err error) {
+		defer panicToError(&err)
 
-		ret, e = f(tr)
+		ret, err = f(tr)
 
 		// read-only transactions are not committed and will be destroyed automatically via GC,
 		// once all the futures go out of scope
@@ -262,9 +298,9 @@ func (d Database) Options() DatabaseOptions {
 // If readVersion is non-zero, the boundary keys as of readVersion will be
 // returned.
 func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion int64) ([]Key, error) {
-	tr, e := d.CreateTransaction()
-	if e != nil {
-		return nil, e
+	tr, err := d.CreateTransaction()
+	if err != nil {
+		return nil, err
 	}
 
 	if readVersion != 0 {
@@ -280,9 +316,9 @@ func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion 
 		append(Key("\xFF/keyServers/"), ek.FDBKey()...),
 	}
 
-	kvs, e := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).GetSliceWithError()
-	if e != nil {
-		return nil, e
+	kvs, err := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).GetSliceWithError()
+	if err != nil {
+		return nil, err
 	}
 
 	size := len(kvs)

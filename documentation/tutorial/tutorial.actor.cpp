@@ -133,7 +133,14 @@ struct GetInterfaceRequest {
 struct EchoRequest {
 	constexpr static FileIdentifier file_identifier = 10624019;
 	std::string message;
-	// this variable has to be called reply!
+
+	// NOTES:
+	// 1) This variable has to be called reply!
+	// 2) Do not be mislead into thinking that just because we say
+	//    ReplyPromise<std::string> below that you can also say
+	//    ReplyPromise<int> elsewhere.
+	// 3) There is no good documentation about this. You'll have to
+	//    just read the code or ask your local team.
 	ReplyPromise<std::string> reply;
 
 	template <class Ar>

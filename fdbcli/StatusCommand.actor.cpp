@@ -26,7 +26,6 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/StatusClient.h"
-#include "fdbclient/BlobRestoreCommon.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -202,6 +201,17 @@ std::string logBackupDR(const char* context, std::map<std::string, std::string> 
 } // namespace
 
 namespace fdb_cli {
+
+std::string toBytesString(double bytes) {
+	if (bytes >= 1e12) {
+		return format("%.3f TB", (bytes / 1e12));
+	} else if (bytes >= 1e9) {
+		return format("%.3f GB", (bytes / 1e9));
+	} else {
+		// no decimal points for MB
+		return format("%d MB", (int)round(bytes / 1e6));
+	}
+}
 
 void printStatus(StatusObjectReader statusObj,
                  StatusClient::StatusLevel level,
@@ -414,7 +424,6 @@ void printStatus(StatusObjectReader statusObj,
 			outputString += "\nConfiguration:";
 			std::string outputStringCache = outputString;
 			bool isOldMemory = false;
-			bool blobGranuleEnabled{ false };
 			try {
 				// Configuration section
 				// FIXME: Should we suppress this if there are cluster messages implying that the database has no
@@ -441,12 +450,6 @@ void printStatus(StatusObjectReader statusObj,
 				    "\n  Log engine             - " + (statusObjConfig.get("log_engine", strVal) ? strVal : "unknown");
 
 				int intVal = 0;
-				if (statusObjConfig.get("blob_granules_enabled", intVal) && intVal) {
-					blobGranuleEnabled = true;
-				}
-				if (blobGranuleEnabled) {
-					outputString += "\n  Blob granules          - enabled";
-				}
 
 				outputString += "\n  Encryption at-rest     - ";
 				if (statusObjConfig.get("encryption_at_rest_mode", strVal)) {
@@ -796,16 +799,16 @@ void printStatus(StatusObjectReader statusObj,
 
 				if (statusObjData.has("total_kv_size_bytes")) {
 					double totalDBBytes = statusObjData.last().get_int64();
+					outputString += toBytesString(totalDBBytes);
+				} else {
+					outputString += "unknown";
+				}
 
-					if (totalDBBytes >= 1e12)
-						outputString += format("%.3f TB", (totalDBBytes / 1e12));
+				outputString += "\n  System keyspace sizes  - ";
 
-					else if (totalDBBytes >= 1e9)
-						outputString += format("%.3f GB", (totalDBBytes / 1e9));
-
-					else
-						// no decimal points for MB
-						outputString += format("%d MB", (int)round(totalDBBytes / 1e6));
+				if (statusObjData.has("system_kv_size_bytes")) {
+					double systemBytes = statusObjData.last().get_int64();
+					outputString += toBytesString(systemBytes);
 				} else {
 					outputString += "unknown";
 				}
@@ -814,16 +817,7 @@ void printStatus(StatusObjectReader statusObj,
 
 				if (statusObjData.has("total_disk_used_bytes")) {
 					double totalDiskUsed = statusObjData.last().get_int64();
-
-					if (totalDiskUsed >= 1e12)
-						outputString += format("%.3f TB", (totalDiskUsed / 1e12));
-
-					else if (totalDiskUsed >= 1e9)
-						outputString += format("%.3f GB", (totalDiskUsed / 1e9));
-
-					else
-						// no decimal points for MB
-						outputString += format("%d MB", (int)round(totalDiskUsed / 1e6));
+					outputString += toBytesString(totalDiskUsed);
 				} else
 					outputString += "unknown";
 
@@ -1120,106 +1114,6 @@ void printStatus(StatusObjectReader statusObj,
 					printedCoordinators = true;
 					outputString += "\n\nCoordination servers:";
 					outputString += getCoordinatorsInfoString(statusObj);
-				}
-
-				if (blobGranuleEnabled) {
-					outputString += "\n\nBlob Granules:";
-					if (statusObjCluster.has("blob_granules")) {
-						StatusObjectReader statusObjBlobGranules = statusObjCluster["blob_granules"];
-						if (statusObjBlobGranules.has("number_of_blob_workers")) {
-							auto numWorkers = statusObjBlobGranules["number_of_blob_workers"].get_int();
-							outputString += "\n  Number of Workers      - " + format("%d", numWorkers);
-						}
-						if (statusObjBlobGranules.has("number_of_key_ranges")) {
-							auto numKeyRanges = statusObjBlobGranules["number_of_key_ranges"].get_int();
-							outputString += "\n  Number of Key Ranges   - " + format("%d", numKeyRanges);
-						}
-						if (statusObjBlobGranules.has("last_manifest_dump_ts")) {
-							auto dumpTs = statusObjBlobGranules["last_manifest_dump_ts"].get_int64();
-							auto epoch = statusObjBlobGranules["last_manifest_epoch"].get_int64();
-							auto seqNo = statusObjBlobGranules["last_manifest_seq_no"].get_int64();
-							auto sizeInBytes = statusObjBlobGranules["last_manifest_size_in_bytes"].get_int64();
-							if (sizeInBytes > 0) {
-								auto value = fmt::format("{}.{} dumped at {:%H:%M}. Total {} bytes.",
-								                         epoch,
-								                         seqNo,
-								                         fmt::localtime(dumpTs),
-								                         sizeInBytes);
-								outputString += "\n  Last Manifest          - " + value;
-							} else {
-								outputString += "\n  Last Manifest          - Not dumped yet";
-							}
-						}
-						if (statusObjBlobGranules.has("mutation_log_location")) {
-							auto url = statusObjBlobGranules["mutation_log_location"].get_str();
-							if (statusObjBlobGranules.has("mutation_log_begin_version") &&
-							    statusObjBlobGranules.has("mutation_log_end_version")) {
-								auto begin = statusObjBlobGranules["mutation_log_begin_version"].get_int64();
-								auto end = statusObjBlobGranules["mutation_log_end_version"].get_int64();
-								outputString += "\n  Restorable log version - ";
-								outputString += fmt::format("{} - {}", begin, end);
-							} else {
-								outputString += "\n  Restorable log version - N/A";
-							}
-						}
-					}
-
-					if (statusObjCluster.has("blob_restore")) {
-						StatusObjectReader statusObjBlobRestore = statusObjCluster["blob_restore"];
-						if (statusObjBlobRestore.has("blob_full_restore_phase")) {
-							std::string statusStr;
-							int progress = statusObjBlobRestore["blob_full_restore_phase_progress"].get_int();
-							std::string error = statusObjBlobRestore["blob_full_restore_error"].get_str();
-							int64_t startTs = statusObjBlobRestore["blob_full_restore_start_ts"].get_int64();
-							int64_t phaseStartTs = statusObjBlobRestore["blob_full_restore_phase_start_ts"].get_int64();
-							std::string tsShortStr = fmt::format("{:%H:%M}", fmt::localtime(phaseStartTs));
-							std::string tsLongStr = fmt::format("{:%m/%d/%y %H:%M:%S}", fmt::localtime(phaseStartTs));
-
-							switch (statusObjBlobRestore["blob_full_restore_phase"].get_int()) {
-							case BlobRestorePhase::INIT:
-								statusStr = "Initializing";
-								break;
-							case BlobRestorePhase::STARTING_MIGRATOR:
-								statusStr = "Starting migrator";
-								break;
-							case BlobRestorePhase::LOADING_MANIFEST:
-								statusStr = fmt::format("Loading manifest. Started at {}", tsShortStr);
-								break;
-							case BlobRestorePhase::LOADED_MANIFEST:
-								statusStr = fmt::format("Manifest is loaded at {}", tsShortStr);
-								break;
-							case BlobRestorePhase::COPYING_DATA:
-								statusStr = fmt::format("Copying data {}%. Started at {}", progress, tsShortStr);
-								if (progress > 0) {
-									int eta = (100 - progress) * (now() - phaseStartTs) / progress / 60;
-									if (eta > 1) {
-										statusStr += fmt::format(". ETA {} minutes", eta);
-									} else {
-										statusStr += fmt::format(". ETA about one minute");
-									}
-								}
-								break;
-							case BlobRestorePhase::COPIED_DATA:
-								statusStr = fmt::format("Copied successfully at {}", tsShortStr);
-								break;
-							case BlobRestorePhase::APPLYING_MLOGS:
-								statusStr = fmt::format("Applying mutation logs. Started at {}", tsShortStr);
-								break;
-							case BlobRestorePhase::DONE:
-								statusStr = fmt::format("Completed at {}. Total {} minutes used",
-								                        tsLongStr,
-								                        int(phaseStartTs - startTs) / 60);
-								break;
-							case BlobRestorePhase::ERROR:
-								statusStr = fmt::format("Aborted with fatal error at {}. {}", tsLongStr, error);
-								break;
-							default:
-								statusStr = "Unexpected phase";
-							}
-
-							outputString += "\n  Full Restore           - " + statusStr;
-						}
-					}
 				}
 			}
 

@@ -8,17 +8,18 @@ set(SRCS
   src/fdb/directory/directory.go
   src/fdb/doc.go
   src/fdb/transaction.go
-  src/fdb/directory/directoryLayer.go
+  src/fdb/directory/directory_layer.go
   src/fdb/errors.go
+  src/fdb/errors_test.go
   src/fdb/keyselector.go
   src/fdb/tuple/tuple.go
   src/fdb/cluster.go
-  src/fdb/directory/directoryPartition.go
+  src/fdb/directory/directory_partition.go
   src/fdb/fdb.go
   src/fdb/range.go
   src/fdb/tuple/tuple_test.go
   src/fdb/database.go
-  src/fdb/directory/directorySubspace.go
+  src/fdb/directory/directory_subspace.go
   src/fdb/fdb_test.go
   src/fdb/snapshot.go
 

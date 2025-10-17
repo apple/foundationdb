@@ -19,6 +19,7 @@
  */
 #include <vector>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -46,7 +47,7 @@ struct QueuePushWorkload : TestWorkload {
 		actorCount = getOption(options, "actorCount"_sr, 50);
 
 		valueBytes = getOption(options, "valueBytes"_sr, 96);
-		valueString = std::string(valueBytes, 'x');
+		valueString = deterministicRandom()->randomAlphaNumeric(valueBytes);
 
 		forward = getOption(options, "forward"_sr, true);
 

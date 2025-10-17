@@ -112,17 +112,22 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 
 		std::set<StorageServerInterface> t;
 		std::set<Optional<Standalone<StringRef>>> machines;
+		std::set<Optional<Standalone<StringRef>>> dataHalls;
 		while (t.size() < teamSize && storageServers.size()) {
 			auto s = storageServers.back();
 			storageServers.pop_back();
-			if (!machines.contains(s.locality.zoneId())) {
+			if (!machines.contains(s.locality.zoneId()) &&
+			    (!s.locality.dataHallId().present() || !dataHalls.contains(s.locality.dataHallId()))) {
 				machines.insert(s.locality.zoneId());
+				dataHalls.insert(s.locality.dataHallId());
 				t.insert(s);
 			}
 		}
 
 		if (t.size() < teamSize) {
-			TraceEvent(SevWarnAlways, "LessThanThreeUniqueMachines").log();
+			TraceEvent(SevWarnAlways, "LessThanUniqueMachines")
+			    .detail("TargetTeamSize", teamSize)
+			    .detail("TeamSelected", t.size());
 			throw operation_failed();
 		}
 
@@ -158,11 +163,14 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 			state DDEnabledState ddEnabledState;
 			std::unique_ptr<MoveKeysParams> params;
 			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-				UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
-				                               AssignEmptyRange(false),
-				                               DataMoveType::PHYSICAL,
-				                               DataMovementReason::TEAM_HEALTHY,
-				                               UnassignShard(false));
+				UID dataMoveId =
+				    newDataMoveId(deterministicRandom()->randomUInt64(),
+				                  AssignEmptyRange(false),
+				                  deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY
+				                      ? DataMoveType::PHYSICAL
+				                      : DataMoveType::LOGICAL,
+				                  DataMovementReason::TEAM_HEALTHY,
+				                  UnassignShard(false));
 				params = std::make_unique<MoveKeysParams>(dataMoveId,
 				                                          std::vector<KeyRange>{ keys },
 				                                          destinationTeamIDs,
@@ -175,7 +183,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 				                                          relocateShardInterval.pairID,
 				                                          &ddEnabledState,
 				                                          CancelConflictingDataMoves::True,
-				                                          Optional<BulkLoadState>());
+				                                          Optional<BulkLoadTaskState>());
 			} else {
 				UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 				                               AssignEmptyRange(false),
@@ -194,7 +202,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 				                                          relocateShardInterval.pairID,
 				                                          &ddEnabledState,
 				                                          CancelConflictingDataMoves::True,
-				                                          Optional<BulkLoadState>());
+				                                          Optional<BulkLoadTaskState>());
 			}
 			wait(moveKeys(cx, *params));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");

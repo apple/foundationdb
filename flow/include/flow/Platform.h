@@ -196,45 +196,65 @@ void waitThread(THREAD_HANDLE thread);
 // Linux-only for now.  Set thread priority.
 void setThreadPriority(int pri);
 
+// See
+// https://github.com/apple/foundationdb/blob/7a9217a392fdb8568b10aa430c8c55b59756b5ac/contrib/debug_determinism/README.md
+// for what this is about.
 #define DEBUG_DETERMINISM 0
 
 std::string removeWhitespace(const std::string& t);
 
-struct SystemStatistics {
-	bool initialized;
-	double elapsed;
-	double processCPUSeconds, mainThreadCPUSeconds;
-	uint64_t processMemory;
-	uint64_t processResidentMemory;
-	uint64_t processDiskTotalBytes;
-	uint64_t processDiskFreeBytes;
-	double processDiskQueueDepth;
-	double processDiskIdleSeconds;
-	double processDiskReadSeconds;
-	double processDiskWriteSeconds;
-	double processDiskRead;
-	double processDiskWrite;
-	uint64_t processDiskReadCount;
-	uint64_t processDiskWriteCount;
-	double processDiskWriteSectors;
-	double processDiskReadSectors;
-	double machineMegabitsSent;
-	double machineMegabitsReceived;
-	uint64_t machineOutSegs;
-	uint64_t machineRetransSegs;
-	double machineCPUSeconds;
-	int64_t machineTotalRAM;
-	int64_t machineCommittedRAM;
-	int64_t machineAvailableRAM;
+// Not all fields are returned on all platforms.
+// Check the implementations of getDiskStatistics to see exactly what
+// they return.
+struct DiskStatistics {
+	uint64_t currentIOs = 0;
+	uint64_t readMilliSecs = 0;
+	uint64_t writeMilliSecs = 0;
+	uint64_t IOMilliSecs = 0;
+	uint64_t reads = 0;
+	uint64_t writes = 0;
+	uint64_t readSectors = 0;
+	uint64_t writeSectors = 0;
+	uint64_t readBytes = 0;
+	uint64_t writeBytes = 0;
+};
 
-	SystemStatistics()
-	  : initialized(false), elapsed(0), processCPUSeconds(0), mainThreadCPUSeconds(0), processMemory(0),
-	    processResidentMemory(0), processDiskTotalBytes(0), processDiskFreeBytes(0), processDiskQueueDepth(0),
-	    processDiskIdleSeconds(0), processDiskReadSeconds(0), processDiskWriteSeconds(0), processDiskRead(0),
-	    processDiskWrite(0), processDiskReadCount(0), processDiskWriteCount(0), processDiskWriteSectors(0),
-	    processDiskReadSectors(0), machineMegabitsSent(0), machineMegabitsReceived(0), machineOutSegs(0),
-	    machineRetransSegs(0), machineCPUSeconds(0), machineTotalRAM(0), machineCommittedRAM(0),
-	    machineAvailableRAM(0) {}
+struct SystemStatistics {
+	bool initialized = false;
+	double elapsed = 0;
+	double processCPUSeconds = 0;
+	double mainThreadCPUSeconds = 0;
+	uint64_t processMemory = 0;
+	uint64_t processResidentMemory = 0;
+
+	// FIXME: the following are not process-specific, so the names
+	// don't make sense.
+	// FIXME: some of these are counters that just increment. Others are
+	// deltas that are computed over some recent time period.  Update the
+	// names to make it clear which are which.
+	uint64_t processDiskTotalBytes = 0;
+	uint64_t processDiskFreeBytes = 0;
+	double processDiskQueueDepth = 0;
+	double processDiskIdleSeconds = 0;
+	double processDiskReadSeconds = 0;
+	double processDiskWriteSeconds = 0;
+	double processDiskRead = 0;
+	double processDiskWrite = 0;
+	uint64_t processDiskReadCount = 0;
+	uint64_t processDiskWriteCount = 0;
+	double processDiskReadSectors = 0;
+	double processDiskWriteSectors = 0;
+	double processDiskReadBytes = 0;
+	double processDiskWriteBytes = 0;
+
+	double machineMegabitsSent = 0;
+	double machineMegabitsReceived = 0;
+	uint64_t machineOutSegs = 0;
+	uint64_t machineRetransSegs = 0;
+	double machineCPUSeconds = 0;
+	int64_t machineTotalRAM = 0;
+	int64_t machineCommittedRAM = 0;
+	int64_t machineAvailableRAM = 0;
 };
 
 struct SystemStatisticsState;
@@ -276,14 +296,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total);
 
 void getNetworkTraffic(uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs, uint64_t& retransSegs);
 
-void getDiskStatistics(std::string const& directory,
-                       uint64_t& currentIOs,
-                       uint64_t& readMilliSecs,
-                       uint64_t& writeMilliSecs,
-                       uint64_t& IOMilliSecs,
-                       uint64_t& reads,
-                       uint64_t& writes,
-                       uint64_t& writeSectors);
+DiskStatistics getDiskStatistics(std::string const& directory);
 
 void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails);
 
@@ -350,7 +363,7 @@ std::string readFileBytes(std::string const& filename, size_t maxSize);
 size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len);
 
 // Write data buffer into file
-void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count);
+void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count, bool append = false);
 
 // Write text into file
 void writeFile(std::string const& filename, std::string const& content);
@@ -429,10 +442,10 @@ int setEnvironmentVar(const char* name, const char* value, int overwrite);
 
 std::string getWorkingDirectory();
 
-// Returns the absolute platform-dependant path for server-based files
+// Returns the absolute platform-dependent path for server-based files
 std::string getDefaultConfigPath();
 
-// Returns the absolute platform-dependant path for the default fdb.cluster file
+// Returns the absolute platform-dependent path for the default fdb.cluster file
 std::string getDefaultClusterFilePath();
 
 struct ImageInfo {
@@ -462,6 +475,7 @@ public:
 	~TmpFile();
 	size_t read(uint8_t* buff, size_t len);
 	void write(const uint8_t* buff, size_t len);
+	void append(const uint8_t* buff, size_t len);
 	bool destroyFile();
 	std::string getFileName() const { return filename; }
 

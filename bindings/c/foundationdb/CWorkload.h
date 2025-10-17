@@ -25,11 +25,21 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define FDB_WORKLOAD_API_VERSION 1
+
+typedef struct FDB_future FDBFuture;
 typedef struct FDB_database FDBDatabase;
+
 typedef struct Opaque_promise OpaquePromise;
 typedef struct Opaque_workload OpaqueWorkload;
 typedef struct Opaque_workloadContext OpaqueWorkloadContext;
 typedef struct Opaque_metrics OpaqueMetrics;
+
+// Pure C bindings, equivalent to the C++ bindings in `CppWorkload.h`
+// documented here: https://apple.github.io/foundationdb/client-testing.html.
+
+// API changes may add pointers at the end of the virtual tables (_VT)
+// It is advised to never dereference or copy these structures, only using them through a pointer.
 
 // Log severity levels.
 // FDBSeverity_Error automatically stops the simulation.
@@ -57,60 +67,67 @@ typedef struct FDBMetric {
 	bool avg;
 } FDBMetric;
 
-// Wrapper around an owned C++ string.
+// Wrapper around an owned C++ `string`.
 // The `free` function must be called on `inner` before releasing the string.
 typedef struct FDBString {
 	const char* inner;
-	void (*free)(const char* inner);
+	struct FDBString_VT {
+		void (*free)(const char* inner);
+	}* vt;
 } FDBString;
 
-// Wrapper around a borrowed C++ vector<FDBMetric>.
+// Wrapper around a borrowed C++ `vector<FDBMetric>`.
 typedef struct FDBMetrics {
 	OpaqueMetrics* inner;
-	void (*reserve)(OpaqueMetrics* inner, int n);
-	void (*push)(OpaqueMetrics* inner, FDBMetric val);
+	struct FDBMetrics_VT {
+		void (*reserve)(OpaqueMetrics* inner, int n);
+		void (*push)(OpaqueMetrics* inner, FDBMetric val);
+	}* vt;
 } FDBMetrics;
 
-// Wrapper around an owned C++ GenericPromise<bool>
+// Wrapper around an owned C++ `GenericPromise<bool>`.
 // Calling `send` resolves the promise (the value is meaningless).
 // Calling `free` before resolving the promise triggers a "broken promise" error.
 typedef struct FDBPromise {
 	OpaquePromise* inner;
-	void (*send)(OpaquePromise* inner, bool val);
-	void (*free)(OpaquePromise* inner);
+	struct FDBPromise_VT {
+		void (*free)(OpaquePromise* inner);
+		void (*send)(OpaquePromise* inner, bool val);
+	}* vt;
 } FDBPromise;
 
-// Wrapper around a borrowed ExternalWorkload's context
+// Wrapper around a borrowed `ExternalWorkload`'s context.
 // All pointer-based arguments are borrowed and managed by the workload.
 typedef struct FDBWorkloadContext {
+	int api_version;
 	OpaqueWorkloadContext* inner;
-	// Log a message with severity and optional details.
-	// `details` is an array of key-value pairs, and `n` specifies the array size.
-	void (*trace)(OpaqueWorkloadContext* inner, FDBSeverity sev, const char* name, const FDBStringPair* details, int n);
-	uint64_t (*getProcessID)(OpaqueWorkloadContext* inner);
-	void (*setProcessID)(OpaqueWorkloadContext* inner, uint64_t processID);
-	// Return the current simulated time in seconds (starts at zero)
-	double (*now)(OpaqueWorkloadContext* inner);
-	uint32_t (*rnd)(OpaqueWorkloadContext* inner);
-	// Get an option by name, returning `defaultValue` if the option is not found.
-	// Getting an option consumes it, querying it again returns the empty string.
-	FDBString (*getOption)(OpaqueWorkloadContext* inner, const char* name, const char* defaultValue);
-	int (*clientId)(OpaqueWorkloadContext* inner);
-	int (*clientCount)(OpaqueWorkloadContext* inner);
-	int64_t (*sharedRandomNumber)(OpaqueWorkloadContext* inner);
+	struct FDBWorkloadContext_VT {
+		// Log a message with severity and optional details.
+		// `details` is an array of key-value pairs, and `n` specifies the array size.
+		void (*trace)(OpaqueWorkloadContext* inner,
+		              FDBSeverity sev,
+		              const char* name,
+		              const FDBStringPair* details,
+		              int n);
+		uint64_t (*getProcessID)(OpaqueWorkloadContext* inner);
+		void (*setProcessID)(OpaqueWorkloadContext* inner, uint64_t processID);
+		// Return the current simulated time in seconds (starts at zero).
+		double (*now)(OpaqueWorkloadContext* inner);
+		// Return a random number (different each time and for all clients).
+		uint32_t (*rnd)(OpaqueWorkloadContext* inner);
+		// Return an option by name, returning `defaultValue` if the option is not found.
+		// Return an option, consumming it, querying it again returns the empty string.
+		FDBString (*getOption)(OpaqueWorkloadContext* inner, const char* name, const char* defaultValue);
+		int (*clientId)(OpaqueWorkloadContext* inner);
+		int (*clientCount)(OpaqueWorkloadContext* inner);
+		// Return a random seed (same each time and for all clients).
+		int64_t (*sharedRandomNumber)(OpaqueWorkloadContext* inner);
+		// Return a future that will be ready after a given time. This internally uses TaskPriority::DefaultDelay.
+		FDBFuture* (*delay)(OpaqueWorkloadContext* inner, double seconds);
+	}* vt;
 } FDBWorkloadContext;
 
 // Interface for a workload implementation in C.
-// Workloads must expose an entry point named `workloadCFactory`:
-// extern FDBWorkload workloadCFactory(const char* name, FDBWorkloadContext context);
-// This function must return a valid instance of the FDBWorkload structure.
-// A specific implementation can be chosen based on the name passed.
-// The client C workload must be allocated, initialized and passed as pointer
-// in `inner`. It is advised to store the context alongside the workload as
-// it can't be retrieved it later. No function pointer can be left null.
-//
-// All methods directly map to a corresponding C++ methods in `CppWorkload.h`
-// documented here: https://apple.github.io/foundationdb/client-testing.html.
 //
 // Simulation stages (setup, start, and check) are executed sequentially.
 // A stage finishes when its associated promise is resolved. If a promise
@@ -119,14 +136,25 @@ typedef struct FDBWorkloadContext {
 // Workload functions should not block. If an operation must wait for database interaction,
 // it should initiate the action, register a callback, and return.
 typedef struct FDBWorkload {
+	int api_version;
 	OpaqueWorkload* inner;
-	void (*setup)(OpaqueWorkload* inner, FDBDatabase* db, FDBPromise done);
-	void (*start)(OpaqueWorkload* inner, FDBDatabase* db, FDBPromise done);
-	void (*check)(OpaqueWorkload* inner, FDBDatabase* db, FDBPromise done);
-	void (*getMetrics)(OpaqueWorkload* inner, FDBMetrics out);
-	// The timeout in simulated seconds for the check stage
-	double (*getCheckTimeout)(OpaqueWorkload* inner);
-	void (*free)(OpaqueWorkload* inner);
+	struct FDBWorkload_VT {
+		void (*free)(OpaqueWorkload* inner);
+		void (*setup)(OpaqueWorkload* inner, FDBDatabase* db, FDBPromise done);
+		void (*start)(OpaqueWorkload* inner, FDBDatabase* db, FDBPromise done);
+		void (*check)(OpaqueWorkload* inner, FDBDatabase* db, FDBPromise done);
+		void (*getMetrics)(OpaqueWorkload* inner, FDBMetrics out);
+		// The timeout in simulated seconds for the check stage
+		double (*getCheckTimeout)(OpaqueWorkload* inner);
+	}* vt;
 } FDBWorkload;
+
+// The C workload entrypoint.
+// This function must return a valid instance of the `FDBWorkload` struct.
+// A specific implementation can be chosen based on the name passed.
+// The client C workload must be allocated, initialized and passed as pointer
+// in `inner`. It is advised to store the context alongside the workload as
+// it can't be retrieved later. No function pointer can be left null.
+FDBWorkload workloadCFactory(const char* name, FDBWorkloadContext context);
 
 #endif

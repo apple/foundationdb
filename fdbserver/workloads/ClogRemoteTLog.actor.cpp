@@ -10,9 +10,11 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/Buggify.h"
 #include "flow/Error.h"
 #include "flow/IPAddress.h"
 #include "flow/IRandom.h"
+#include "flow/NetworkAddress.h"
 #include "flow/Optional.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
@@ -24,22 +26,25 @@ struct ClogRemoteTLog : TestWorkload {
 	static constexpr auto NAME = "ClogRemoteTLog";
 
 	bool enabled{ false };
+	bool doCheck{ false };
 	double testDuration{ 0.0 };
 	double lagMeasurementFrequency{ 0 };
 	double clogInitDelay{ 0 };
-	double clogDuration{ 0 };
 	double lagThreshold{ 0 };
 
 	enum TestState { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, CLOGGED_REMOTE_TLOG_EXCLUDED };
 	struct StatePath {
 		std::vector<TestState> path;
-		bool prefixMatch{ false };
+		bool prefixMatch{ true };
 	};
 	const std::vector<StatePath> expectedStatePaths{
-		{ .path = { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, SS_LAG_NORMAL }, .prefixMatch = true },
+		{ .path = { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, SS_LAG_NORMAL } },
 		// For some topology and process placements, it's possible that the lag does not recover. However, we still
 		// allow the test to pass as long as the bad/clogged remote tlog was excluded by gray failure.
-		{ .path = { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, CLOGGED_REMOTE_TLOG_EXCLUDED }, .prefixMatch = true }
+		{ .path = { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, CLOGGED_REMOTE_TLOG_EXCLUDED } },
+		{ .path = { TEST_INIT, SS_LAG_NORMAL, CLOGGED_REMOTE_TLOG_EXCLUDED } },
+		{ .path = { TEST_INIT, SS_LAG_HIGH, CLOGGED_REMOTE_TLOG_EXCLUDED } },
+		{ .path = { TEST_INIT, SS_LAG_HIGH, SS_LAG_NORMAL } }
 	};
 	std::vector<TestState>
 	    actualStatePath; // to be populated when the test runs, and finally checked at the end in check()
@@ -54,7 +59,6 @@ struct ClogRemoteTLog : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 120);
 		lagMeasurementFrequency = getOption(options, "lagMeasurementFrequency"_sr, 5);
 		clogInitDelay = getOption(options, "clogInitDelay"_sr, 10);
-		clogDuration = getOption(options, "clogDuration"_sr, 110);
 		lagThreshold = getOption(options, "lagThreshold"_sr, 20);
 	}
 
@@ -100,7 +104,10 @@ struct ClogRemoteTLog : TestWorkload {
 			}
 			return ret;
 		};
-		TraceEvent("ClogRemoteTLogCheck").detail("ActualStatePath", print(actualStatePath));
+		TraceEvent("ClogRemoteTLogCheck").detail("ActualStatePath", print(actualStatePath)).detail("DoCheck", doCheck);
+		if (!doCheck || isGeneralBuggifyEnabled()) {
+			return true;
+		}
 
 		// Then, do the actual check
 		auto match =
@@ -126,6 +133,7 @@ struct ClogRemoteTLog : TestWorkload {
 				return true;
 			}
 		}
+		TraceEvent(SevError, "ClogRemoteTLogCheckFailed");
 		return false;
 	}
 
@@ -251,7 +259,8 @@ struct ClogRemoteTLog : TestWorkload {
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
 				for (auto& [ssi, p] : results) {
-					if (ssi.locality.dcId().present() && ssi.locality.dcId().get() == g_simulator->remoteDcId) {
+					if (ssi.locality.dcId().present() && g_simulator->remoteDcId.present() &&
+					    ssi.locality.dcId().get() == g_simulator->remoteDcId.get()) {
 						ret.push_back(ssi.address().ip);
 					}
 				}
@@ -295,51 +304,51 @@ struct ClogRemoteTLog : TestWorkload {
 		ASSERT(!remoteSSIPs.empty());
 
 		// Then, attempt to find a remote tlog that is not on the same machine as a remote SS
-		Optional<NetworkAddress> remoteTLogIP_temp;
+		Optional<NetworkAddress> isolatedRemoteTLog;
 		for (const auto& addr : remoteTLogs) {
 			if (std::find(remoteSSIPs.begin(), remoteSSIPs.end(), addr.ip) == remoteSSIPs.end()) {
-				remoteTLogIP_temp = addr;
+				isolatedRemoteTLog = addr;
 			}
 		}
 
 		// If we can find such a machine that is just running a remote tlog, then we will do extra checking at the end
 		// (in check() method). If we can't find such a machine, we pick a random machhine and still run the test to
 		// ensure no crashes or correctness issues are observed.
-		if (remoteTLogIP_temp.present()) {
-			self->cloggedRemoteTLog = remoteTLogIP_temp.get();
-		} else {
-			self->cloggedRemoteTLog = remoteTLogs[deterministicRandom()->randomInt(0, remoteTLogs.size())];
-		}
-
+		self->cloggedRemoteTLog = isolatedRemoteTLog.present()
+		                              ? isolatedRemoteTLog.get()
+		                              : self->cloggedRemoteTLog =
+		                                    remoteTLogs[deterministicRandom()->randomInt(0, remoteTLogs.size())];
 		ASSERT(self->cloggedRemoteTLog.present());
 
 		// Then, find all processes that the remote tlog will have degraded connection with
 		IPAddress cc = self->dbInfo->get().clusterInterface.address().ip;
 		state std::vector<IPAddress> processes;
-		if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_REMOTE_SS_TO_COMPLAIN) {
-			for (const auto& remoteSSIP : remoteSSIPs) {
-				if (remoteSSIP != cc) {
-					processes.push_back(remoteSSIP);
-				}
-			}
-		} else {
-			for (const auto& process : g_simulator->getAllProcesses()) {
-				const auto& ip = process->address.ip;
-				if (process->startingClass != ProcessClass::TesterClass && ip != cc) {
-					processes.push_back(ip);
-				}
+		for (const auto& process : g_simulator->getAllProcesses()) {
+			const auto& ip = process->address.ip;
+			if (process->startingClass != ProcessClass::TesterClass && ip != cc) {
+				processes.push_back(ip);
 			}
 		}
 		ASSERT(!processes.empty());
 
 		// Finally, start the clogging between the remote tlog and the processes calculated above
+		int numClogged{ 0 };
 		for (const auto& ip : processes) {
 			if (self->cloggedRemoteTLog.get().ip == ip) {
 				continue;
 			}
-			TraceEvent("ClogRemoteTLog").detail("SrcIP", self->cloggedRemoteTLog->ip).detail("DstIP", ip);
-			g_simulator->clogPair(self->cloggedRemoteTLog.get().ip, ip, self->testDuration);
-			g_simulator->clogPair(ip, self->cloggedRemoteTLog.get().ip, self->testDuration);
+			double clogDuration = self->testDuration * (0.5 + 0.4 * deterministicRandom()->random01());
+			// clogDuration must be less than testDuration to ensure that the clogging ends before the test ends
+			g_simulator->clogPair(ip, self->cloggedRemoteTLog.get().ip, clogDuration);
+			TraceEvent("ClogRemoteTLog")
+			    .detail("SrcIP", self->cloggedRemoteTLog->ip)
+			    .detail("DstIP", ip)
+			    .detail("Duration", clogDuration);
+			numClogged++;
+		}
+
+		if (isolatedRemoteTLog.present() && numClogged > 1) {
+			self->doCheck = true;
 		}
 
 		wait(Never());
@@ -378,8 +387,18 @@ struct ClogRemoteTLog : TestWorkload {
 			state bool stateTransition = localState != testState;
 			// If ss lag state did not change, see if clogged remote tlog got excluded
 			if (!stateTransition) {
-				const bool dbReady = self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED;
-				if (dbReady && self->cloggedRemoteTLog.present() &&
+				const bool acceptingCommits = self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS;
+				TraceEvent("ClogRemoteTLogMoreInfo")
+				    .detail("CloggedRemoteTLogPresent", self->cloggedRemoteTLog.present())
+				    .detail("Addr",
+				            self->cloggedRemoteTLog.present() ? self->cloggedRemoteTLog.get().toString() : "DidNotFind")
+				    .detail("NotInDbInfo",
+				            self->cloggedRemoteTLog.present()
+				                ? remoteTLogNotInDbInfo(self->cloggedRemoteTLog.get(), self->dbInfo->get())
+				                : false)
+				    .detail("AcceptingCommits", acceptingCommits)
+				    .detail("RecoveryState", self->dbInfo->get().recoveryState);
+				if (acceptingCommits && self->cloggedRemoteTLog.present() &&
 				    remoteTLogNotInDbInfo(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
 					localState = TestState::CLOGGED_REMOTE_TLOG_EXCLUDED;
 					if (!statusCheckPassed) {

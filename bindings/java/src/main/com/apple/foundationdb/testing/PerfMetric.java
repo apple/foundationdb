@@ -27,11 +27,11 @@ public class PerfMetric {
 	private String formatCode;
 
 	public PerfMetric(String name, double value) {
-		this(name, value, true, "0.3g");
+		this(name, value, true, "%.3g");
 	}
 
 	public PerfMetric(String name, double value, boolean averaged) {
-		this(name, value, averaged, "0.3g");
+		this(name, value, averaged, "%.3g");
 	}
 
 	public PerfMetric(String name, double value, boolean averaged, String formatCode) {

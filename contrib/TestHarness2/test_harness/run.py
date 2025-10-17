@@ -73,7 +73,7 @@ class TestPicker:
         self.rare_priority: int = int(os.getenv("RARE_PRIORITY", 10))
 
         for subdir in self.test_dir.iterdir():
-            if subdir.is_dir() and subdir.name in config.test_dirs:
+            if subdir.is_dir() and subdir.name in config.test_types_to_run:
                 self.walk_test_dir(subdir)
         self.stat_fetcher: StatFetcher
         if config.stats is not None or config.joshua_dir is None:
@@ -384,7 +384,7 @@ class TestRun:
         if Version.of_binary(self.binary) < "6.1.0":
             self.trace_format = None
         self.use_tls_plugin = Version.of_binary(self.binary) < "5.2.0"
-        self.temp_path = config.run_dir / str(self.uid)
+        self.temp_path = config.run_temp_dir / str(self.uid)
         # state for the run
         self.retryable_error: bool = False
         self.summary: Summary = Summary(
@@ -415,23 +415,46 @@ class TestRun:
 
     def _run_joshua_logtool(self):
         """Calls Joshua LogTool to upload the test logs if 1) test failed 2) test is RocksDB related"""
-        if not os.path.exists("joshua_logtool.py"):
-            raise RuntimeError("joshua_logtool.py missing")
+        # Look for joshua_logtool.py in multiple locations
+        # First try: relative to this script's location (contrib/TestHarness2/test_harness/run.py)
+        script_dir = Path(__file__).parent.parent.parent  # Go up 3 levels to repo root
+        joshua_logtool_script = script_dir / "contrib" / "joshua_logtool.py"
+
+        if not joshua_logtool_script.exists():
+            # Second try: contrib directory relative to current working directory
+            joshua_logtool_script = Path("contrib/joshua_logtool.py")
+            if not joshua_logtool_script.exists():
+                # Third try: current directory for backwards compatibility
+                joshua_logtool_script = Path("joshua_logtool.py")
+                if not joshua_logtool_script.exists():
+                    return {"stdout": "", "stderr": "joshua_logtool.py not found", "exit_code": -1, "tool_skipped": True}
+
+        # Debug: Print paths to understand directory structure
+        print(f"DEBUG: self.temp_path = {self.temp_path}", file=sys.stderr)
+        print(f"DEBUG: self.temp_path.parent = {self.temp_path.parent}", file=sys.stderr)
+        print(f"DEBUG: self.temp_path.parent.parent = {self.temp_path.parent.parent}", file=sys.stderr)
+        
+        # The app logs (app_log.txt, python_app_stdout.log, python_app_stderr.log) are in the test-specific directory
+        # which is self.temp_path.parent, not the top-level directory
+        test_specific_dir = self.temp_path.parent
+        print(f"DEBUG: test_specific_dir (self.temp_path.parent) = {test_specific_dir}", file=sys.stderr)
+        
         command = [
-            "python3",
-            "joshua_logtool.py",
+            sys.executable,
+            str(joshua_logtool_script),
             "upload",
-            "--test-uid",
-            str(self.uid),
-            "--log-directory",
-            str(self.temp_path),
-            "--check-rocksdb",
+            "--test-uid", str(self.uid),
+            "--log-directory", str(test_specific_dir)
         ]
+
+        # Note: joshua_logtool now uploads all tests by default when enabled
+        # No RocksDB filtering is applied unless explicitly requested
         result = subprocess.run(command, capture_output=True, text=True)
         return {
             "stdout": result.stdout,
             "stderr": result.stderr,
             "exit_code": result.returncode,
+            "tool_skipped": False,
         }
 
     def run(self):
@@ -524,20 +547,8 @@ class TestRun:
         self.summary.valgrind_out_file = valgrind_file
         self.summary.error_out = err_out
         self.summary.summarize(self.temp_path, " ".join(command))
-        if not self.summary.is_negative_test and not self.summary.ok():
-            logtool_result = self._run_joshua_logtool()
-            child = SummaryTree("JoshuaLogTool")
-            child.attributes["ExitCode"] = str(logtool_result["exit_code"])
-            child.attributes["StdOut"] = logtool_result["stdout"]
-            child.attributes["StdErr"] = logtool_result["stderr"]
-            self.summary.out.append(child)
-        else:
-            child = SummaryTree("JoshuaLogTool")
-            child.attributes["IsNegative"] = str(self.summary.is_negative_test)
-            child.attributes["IsOk"] = str(self.summary.ok())
-            child.attributes["HasError"] = str(self.summary.error)
-            child.attributes["JoshuaLogToolIgnored"] = str(True)
-            self.summary.out.append(child)
+        # Note: joshua_logtool is called after determinism analysis file organization
+        # in the run_tests method to ensure files are properly organized
 
         return self.summary.ok()
 
@@ -558,14 +569,16 @@ def decorate_summary(out: SummaryTree, test_file: Path, seed: int, buggify: bool
 class TestRunner:
     def __init__(self):
         self.uid = uuid.uuid4()
-        self.test_path: Path = Path("tests")
+        self.test_path: Path = config.test_source_dir
         self.cluster_file: str | None = None
         self.fdb_app_dir: str | None = None
         self.binary_chooser = OldBinaries()
         self.test_picker = TestPicker(self.test_path, self.binary_chooser.binaries)
 
+
+
     def backup_sim_dir(self, seed: int):
-        temp_dir = config.run_dir / str(self.uid)
+        temp_dir = config.run_temp_dir / str(self.uid)
         src_dir = temp_dir / "simfdb"
         assert src_dir.is_dir()
         dest_dir = temp_dir / "simfdb.{}".format(seed)
@@ -573,12 +586,156 @@ class TestRunner:
         shutil.copytree(src_dir, dest_dir)
 
     def restore_sim_dir(self, seed: int):
-        temp_dir = config.run_dir / str(self.uid)
+        temp_dir = config.run_temp_dir / str(self.uid)
         src_dir = temp_dir / "simfdb.{}".format(seed)
         assert src_dir.exists()
         dest_dir = temp_dir / "simfdb"
         shutil.rmtree(dest_dir)
         shutil.move(src_dir, dest_dir)
+
+
+    def backup_trace_files(self, seed: int):
+        """Backup trace files before determinism check to preserve initial run traces."""
+        temp_dir = config.run_temp_dir / str(self.uid)
+        trace_files = list(temp_dir.glob("trace.*.json"))
+        
+        if not trace_files:
+            return
+            
+        # Create backup directory for initial run traces
+        backup_dir = temp_dir / f"trace_backup_{seed}"
+        backup_dir.mkdir(exist_ok=True)
+        
+        # Move trace files to backup (not copy) to clear the main directory
+        for trace_file in trace_files:
+            shutil.move(trace_file, backup_dir / trace_file.name)
+            
+        print(f"Moved {len(trace_files)} trace files to backup {backup_dir}", file=sys.stderr)
+
+    def restore_trace_files(self, seed: int):
+        """Restore trace files after determinism check for analysis."""
+        temp_dir = config.run_temp_dir / str(self.uid)
+        backup_dir = temp_dir / f"trace_backup_{seed}"
+        
+        if not backup_dir.exists():
+            return
+            
+        # Create analysis directory structure
+        analysis_dir = temp_dir / f"determinism_analysis_{self.uid}"
+        analysis_dir.mkdir(exist_ok=True)
+        
+        initial_run_dir = analysis_dir / "initial_run"
+        determinism_check_dir = analysis_dir / "determinism_check"
+        
+        initial_run_dir.mkdir(exist_ok=True)
+        determinism_check_dir.mkdir(exist_ok=True)
+        
+        # Get initial trace names before moving them
+        initial_trace_names = {f.name for f in backup_dir.glob("trace.*.json")}
+        
+        # Move backed up traces to initial_run directory
+        for trace_file in backup_dir.glob("trace.*.json"):
+            shutil.move(trace_file, initial_run_dir / trace_file.name)
+        
+        # Move ONLY the determinism check trace files to determinism_check directory
+        # These are the NEW files from the determinism check run
+        current_traces = list(temp_dir.glob("trace.*.json"))
+        
+        for trace_file in current_traces:
+            # Only move files that are NOT duplicates of the initial run
+            if trace_file.name not in initial_trace_names:
+                shutil.move(trace_file, determinism_check_dir / trace_file.name)
+            else:
+                # This is a duplicate of an initial run file - check if it's identical
+                initial_file = initial_run_dir / trace_file.name
+                if initial_file.exists():
+                    # Compare file contents
+                    if trace_file.read_bytes() == initial_file.read_bytes():
+                        # Identical file - remove the duplicate
+                        trace_file.unlink()
+                        print(f"Removed identical duplicate trace file: {trace_file.name}", file=sys.stderr)
+                    else:
+                        # Same name but different content - keep it with a new name
+                        new_name = f"determinism_check_{trace_file.name}"
+                        shutil.move(trace_file, determinism_check_dir / new_name)
+                        print(f"Renamed non-identical duplicate: {trace_file.name} -> {new_name}", file=sys.stderr)
+                else:
+                    # Shouldn't happen, but move it anyway
+                    shutil.move(trace_file, determinism_check_dir / trace_file.name)
+        
+        # Clean up backup directory
+        shutil.rmtree(backup_dir)
+        
+        # Create analysis instructions
+        readme_file = analysis_dir / "README.txt"
+        with open(readme_file, 'w') as f:
+            f.write(f"DETERMINISM CHECK FAILED - Analysis Files\n")
+            f.write(f"==========================================\n\n")
+            f.write(f"Test UID: {self.uid}\n")
+            f.write(f"Seed: {seed}\n\n")
+            f.write(f"Directory Structure:\n")
+            f.write(f"- initial_run/: Trace files from the first run\n")
+            f.write(f"- determinism_check/: Trace files from the determinism check (second run only)\n\n")
+            f.write(f"To analyze the determinism failure:\n")
+            f.write(f"python3 contrib/TestHarness2/analyze_determinism_failure.py {initial_run_dir} {determinism_check_dir}\n\n")
+        
+        print(f"Determinism check failed. Analysis files created in {analysis_dir}", file=sys.stderr)
+
+    def _run_joshua_logtool_for_test(self, test_run):
+        """Run joshua_logtool for a test run after file organization is complete."""
+        print(f"DEBUG: _run_joshua_logtool_for_test called for test {test_run.uid}", file=sys.stderr)
+        print(f"DEBUG: test_run.summary.is_negative_test = {test_run.summary.is_negative_test}", file=sys.stderr)
+        print(f"DEBUG: test_run.summary.ok() = {test_run.summary.ok()}", file=sys.stderr)
+        
+        force_joshua_logtool = os.getenv("TH_FORCE_JOSHUA_LOGTOOL", "false").lower() in ("true", "1", "yes")
+        archive_logs_on_failure = os.getenv("TH_ARCHIVE_LOGS_ON_FAILURE", "false").lower() in ("true", "1", "yes")
+        enable_joshua_logtool = os.getenv("TH_ENABLE_JOSHUA_LOGTOOL", "false").lower() in ("true", "1", "yes")
+        
+        print(f"DEBUG: TH_FORCE_JOSHUA_LOGTOOL = {force_joshua_logtool}", file=sys.stderr)
+        print(f"DEBUG: TH_ARCHIVE_LOGS_ON_FAILURE = {archive_logs_on_failure}", file=sys.stderr)
+        print(f"DEBUG: TH_ENABLE_JOSHUA_LOGTOOL = {enable_joshua_logtool}", file=sys.stderr)
+        
+        if not test_run.summary.is_negative_test and (not test_run.summary.ok() or force_joshua_logtool):
+            print(f"DEBUG: Conditions met for joshua_logtool execution", file=sys.stderr)
+            
+            if not archive_logs_on_failure or not enable_joshua_logtool:
+                print(f"DEBUG: joshua_logtool skipped - archive_logs_on_failure={archive_logs_on_failure}, enable_joshua_logtool={enable_joshua_logtool}", file=sys.stderr)
+                child = SummaryTree("JoshuaLogTool")
+                child.attributes["ExitCode"] = "0"
+                child.attributes["Note"] = "Skipped - joshua_logtool not enabled"
+                test_run.summary.out.append(child)
+            else:
+                print(f"DEBUG: Calling joshua_logtool", file=sys.stderr)
+                try:
+                    logtool_result = test_run._run_joshua_logtool()
+                    print(f"DEBUG: joshua_logtool result: {logtool_result}", file=sys.stderr)
+                except Exception as e:
+                    print(f"DEBUG: joshua_logtool exception: {e}", file=sys.stderr)
+                    logtool_result = {
+                        "stdout": "",
+                        "stderr": f"joshua_logtool failed: {e}",
+                        "exit_code": -1,
+                        "tool_skipped": True
+                    }
+
+                child = SummaryTree("JoshuaLogTool")
+                child.attributes["ExitCode"] = str(logtool_result["exit_code"])
+                if not logtool_result.get("tool_skipped", False):
+                    if logtool_result["exit_code"] == 0:
+                        stderr_lines = logtool_result["stderr"].split("\n") if logtool_result["stderr"] else []
+                        success_lines = [line for line in stderr_lines if "SUCCESS - Uploaded" in line]
+                        if success_lines:
+                            child.attributes["Note"] = success_lines[-1].replace("JOSHUA_LOGTOOL: ", "")
+                        else:
+                            child.attributes["Note"] = "Upload completed"
+                    else:
+                        child.attributes["StdOut"] = logtool_result["stdout"]
+                        child.attributes["StdErr"] = logtool_result["stderr"]
+                else:
+                    child.attributes["Note"] = logtool_result["stderr"]
+                test_run.summary.out.append(child)
+        else:
+            print(f"DEBUG: Conditions NOT met for joshua_logtool execution", file=sys.stderr)
 
     def run_tests(
         self, test_files: List[Path], seed: int, test_picker: TestPicker
@@ -617,6 +774,11 @@ class TestRunner:
                 and run.summary.unseed >= 0
             ):
                 run.summary.out.append(run.summary.list_simfdb())
+            
+            # Run joshua_logtool for regular test failures (non-determinism)
+            if not result:
+                self._run_joshua_logtool_for_test(run)
+            
             run.summary.out.dump(sys.stdout)
             if not result:
                 return False
@@ -626,6 +788,9 @@ class TestRunner:
                 and run.summary.unseed is not None
                 and run.summary.unseed >= 0
             ):
+                # Backup trace files before determinism check
+                self.backup_trace_files(seed + count)
+                
                 run2 = TestRun(
                     binary,
                     file.absolute(),
@@ -641,8 +806,18 @@ class TestRunner:
                 decorate_summary(
                     run2.summary.out, file, seed + count, run.buggify_enabled
                 )
-                run2.summary.out.dump(sys.stdout)
                 result = result and run2.success
+
+                # Organize trace files for analysis if determinism check failed
+                if not result:
+                    self.restore_trace_files(seed + count)
+                    
+                    # Run joshua_logtool after file organization for determinism failures
+                    self._run_joshua_logtool_for_test(run2)
+                
+                # Dump XML output after joshua_logtool has been called
+                run2.summary.out.dump(sys.stdout)
+
                 if not result:
                     return False
         return result
@@ -655,6 +830,13 @@ class TestRunner:
         )
         test_files = self.test_picker.choose_test()
         success = self.run_tests(test_files, seed, self.test_picker)
-        if config.clean_up:
-            shutil.rmtree(config.run_dir / str(self.uid))
+        
+        # Check if we should preserve logs on failure
+        archive_logs_on_failure = os.getenv("TH_ARCHIVE_LOGS_ON_FAILURE", "false").lower() in ("true", "1", "yes")
+        if config.clean_up and (success or not archive_logs_on_failure):
+            # Only clean up if test succeeded OR if archive_logs_on_failure is not set
+            shutil.rmtree(config.run_temp_dir / str(self.uid))
+        elif not success and archive_logs_on_failure:
+            print(f"DEBUG: Preserving logs due to TH_ARCHIVE_LOGS_ON_FAILURE=true", file=sys.stderr)
+        
         return success

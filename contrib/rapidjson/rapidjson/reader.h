@@ -369,8 +369,7 @@ inline const char* SkipWhitespace_SIMD(const char* p) {
 			return p;
 
 // The rest of string
-#define C16(c)                                                                                                         \
-	{ c, c, c, c, c, c, c, c, c, c, c, c, c, c, c, c }
+#define C16(c) { c, c, c, c, c, c, c, c, c, c, c, c, c, c, c, c }
 	static const char whitespaces[4][16] = { C16(' '), C16('\n'), C16('\r'), C16('\t') };
 #undef C16
 
@@ -406,8 +405,7 @@ inline const char* SkipWhitespace_SIMD(const char* p, const char* end) {
 		return p;
 
 // The rest of string
-#define C16(c)                                                                                                         \
-	{ c, c, c, c, c, c, c, c, c, c, c, c, c, c, c, c }
+#define C16(c) { c, c, c, c, c, c, c, c, c, c, c, c, c, c, c, c }
 	static const char whitespaces[4][16] = { C16(' '), C16('\n'), C16('\r'), C16('\t') };
 #undef C16
 
@@ -543,7 +541,7 @@ public:
 		return Parse<kParseDefaultFlags>(is, handler);
 	}
 
-	//! Whether a parse error has occured in the last parsing.
+	//! Whether a parse error has occurred in the last parsing.
 	bool HasParseError() const { return parseResult_.IsError(); }
 
 	//! Get the \ref ParseErrorCode of last parsing.

@@ -33,14 +33,28 @@ static constexpr int _PAGE_SIZE = 4096;
 class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
 	bool ALLOW_DANGEROUS_KNOBS;
-	// Versions
-	int64_t VERSIONS_PER_SECOND;
+
+	// Versions -- knobs that control 5s timeout
+	int64_t VERSIONS_PER_SECOND; // Mainly used to represent the rate at which the sequencer can increase the versions
+	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS; // Used in various roles (Blob*, DD, LR, RK, SC) but most importantly
+	                                            // used in CP and SS.
+	                                            // In SS, this governs how long versioned data stays readable. In other
+	                                            // words, when a client’s read version falls more than this many
+	                                            // versions behind the storage servers’ latest committed version
+	                                            // (in memory), the storage server replies with transaction_too_old.
+	                                            // Practically, it’s the MVCC retention budget.
+	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS; // Used in the commit path in Resolver and CP. Governs how far back in
+	                                             // history a commit request is still accepted. In other words,
+	                                             // proxies/resolvers refuse to commit a transaction whose read version
+	                                             // is more than this many versions behind the current commit version,
+	                                             // returning transaction_too_old.
+
+	// Versions -- other
 	int64_t MAX_VERSIONS_IN_FLIGHT;
 	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
-	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
-	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 	bool ENABLE_VERSION_VECTOR;
 	bool ENABLE_VERSION_VECTOR_TLOG_UNICAST;
+	bool ENABLE_VERSION_VECTOR_REPLY_RECOVERY;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
 	double MAX_VERSION_RATE_MODIFIER;
@@ -198,8 +212,11 @@ public:
 	// STORAGE_FETCH_KEYS_RATE_LIMIT.
 	int FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD;
 
-	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT;
-	int CONSISTENCY_CHECK_REQUIRED_REPLICAS;
+	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT; // Enable to check replica consistency on data movement
+	int DATAMOVE_CONSISTENCY_CHECK_REQUIRED_REPLICAS; // The number of extra replicas to check for replica consistency
+	                                                  // on data movement read range requests by fetchKeys
+	bool ENABLE_CONSERVATIVE_RELOCATION_WHEN_REPLICA_CONSISTENCY_CHECK; // Enable to slow down relocation when replica
+	                                                                    // consistency check on data movement is enabled
 
 	// Probability that a team redundant data move set TrueBest when get destination team
 	double PROBABILITY_TEAM_REDUNDANT_DATAMOVE_CHOOSE_TRUE_BEST_DEST;
@@ -228,7 +245,6 @@ public:
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].
 	bool ENABLE_PHYSICAL_SHARD_MOVE_EXPERIMENT;
-	bool BULKLOAD_ONLY_USE_PHYSICAL_SHARD_MOVE; // If true, bulk load only uses physical shard move
 	int64_t MAX_PHYSICAL_SHARD_BYTES;
 	double PHYSICAL_SHARD_METRICS_DELAY;
 	double ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME;
@@ -277,6 +293,10 @@ public:
 	                                                // balanced/filledup before starting the next wiggle.
 	double PERPETUAL_WIGGLE_DELAY; // The max interval between the last wiggle finish and the next wiggle start
 	bool PERPETUAL_WIGGLE_DISABLE_REMOVER; // Whether the start of perpetual wiggle replace team remover
+	bool PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET;
+	double PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO; // Pause wiggle until all Storage servers have minimumn
+	                                                   // of PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO disk
+	                                                   // space available.
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
@@ -394,12 +414,37 @@ public:
 	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
 	                                    // under replicated shards
 	int BULKLOAD_FILE_BYTES_MAX; // the maximum bytes of files to inject by bulk loading
+	int BULKLOAD_BYTE_SAMPLE_BATCH_KEY_COUNT; // the maximum key count that can be successively sampled when bulkload
 	double DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC; // seconds to delay shard boundary change when blocked by bulk
 	                                                    // loading
 	int DD_BULKLOAD_TASK_METADATA_READ_SIZE; // the number of bulk load tasks read from metadata at a time
 	int DD_BULKLOAD_PARALLELISM; // the maximum number of running bulk load tasks
 	double DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk load scheduler has to wait
 	                                              // between two rounds
+	double DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC; // the minimal seconds that the bulk dump scheduler has to wait
+	                                              // between two rounds
+	double DD_BULKLOAD_JOB_MONITOR_PERIOD_SEC; // the seconds that the bulkload job monitor to read the task metadata
+	                                           // when monitoring the task progress
+	int DD_BULKDUMP_BUILD_JOB_MANIFEST_BATCH_SIZE; // the number of lines in a batch when generating bulkload job
+	                                               // manifest file
+	int SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST; // the max number of batch count per bulkdump request to a SS
+	int BULKLOAD_ASYNC_READ_WRITE_BLOCK_SIZE; // the block size when performing async read/write for bulkload
+	int MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK; // the max number of manifest that a bulkload task can process
+	bool BULKLOAD_SIM_FAILURE_INJECTION; // Set to true to inject failure in bulkload simulation
+	double DD_BULKLOAD_POWER_OF_D_RATIO; // When selecting the dest team, DD randomly chooses 1/D portion of all valid
+	                                     // teams as the candidates and the DD selects the team with the minimal number
+	                                     // of ongoing tasks from the candidates as the dest team.
+	double DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC; // the seconds that the bulkload task submitter has to wait
+	                                                 // between two tasks
+	bool CC_ENFORCE_USE_UNFIT_DD_IN_SIM; // Set for CC to enforce to use an unfit DD in the simulation. This knob takes
+	                                     // effect only in the simulation.
+	bool DISABLE_AUDIT_STORAGE_FINAL_REPLICA_CHECK_IN_SIM; // Set to disable audit storage replica check in the
+	                                                       // simulation.
+	int DD_BULKDUMP_PARALLELISM; // the max number of concurrent bulk dump tasks in DD
+	int SS_SERVE_BULKDUMP_PARALLELISM; // the number of bulk dump tasks that can concurrently happen at a SS
+	int64_t SS_BULKDUMP_BATCH_BYTES; // the max bytes when SS creates a batch to dump
+	int SS_BULKLOAD_GETRANGE_BATCH_SIZE; // the max number of keys to scan before do context switch
+	int DD_HEALTHY_ZONE_READ_RETRY_COUNT; // numbers of attempts to read \xff\02/healthyZone on startup
 
 	// Run storage engine on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
@@ -464,6 +509,8 @@ public:
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
 	bool ROCKSDB_MUTE_LOGS;
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+	int64_t ROCKSDB_TTL_COMPACTION_SECONDS;
+	int64_t ROCKSDB_MAX_COMPACTION_BYTES;
 	int ROCKSDB_PREFIX_LEN;
 	double ROCKSDB_MEMTABLE_PREFIX_BLOOM_SIZE_RATIO;
 	int ROCKSDB_BLOOM_BITS_PER_KEY;
@@ -517,6 +564,7 @@ public:
 	int ROCKSDB_SINGLEKEY_DELETES_MAX;
 	bool ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE;
+	int ROCKSDB_CLEARRANGES_LIMIT_PER_COMMIT; // Max number of clearranges per commit with rocksdb kvstore.
 	bool ROCKSDB_ENABLE_COMPACT_ON_DELETION;
 	int64_t ROCKSDB_CDCF_SLIDING_WINDOW_SIZE; // CDCF: CompactOnDeletionCollectorFactory
 	int64_t ROCKSDB_CDCF_DELETION_TRIGGER; // CDCF: CompactOnDeletionCollectorFactory
@@ -569,9 +617,11 @@ public:
 	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
-	bool ROCKSDB_METRICS_IN_SIMULATION; // Whether rocksdb traceevent metrics will be emitted in simulation. Note that
-	                                    // turning this on in simulation could lead to non-deterministic runs since we
-	                                    // rely on rocksdb metadata.
+	bool ROCKSDB_ENABLE_NONDETERMINISM; // Whether rocksdb nondeterministic behavior should be enabled in simulation.
+	                                    // Note that turning this on in simulation could lead to non-deterministic runs
+	                                    // since we rely on rocksdb metadata. This knob also applies to sharded rocks
+	                                    // storage engine.
+	bool SHARDED_ROCKSDB_ALLOW_MULTIPLE_RANGES;
 	bool SHARDED_ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
 	int SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
@@ -588,6 +638,7 @@ public:
 	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE;
 	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
 	bool SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
+	int SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD;
 	int SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t SHARDED_ROCKSDB_BLOCK_CACHE_SIZE;
 	double SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
@@ -601,9 +652,14 @@ public:
 	int SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
 	bool SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE;
 	int SHARDED_ROCKSDB_MAX_OPEN_FILES;
+	int SHARDED_ROCKSDB_COMPACTION_PRI;
 	bool SHARDED_ROCKSDB_READ_ASYNC_IO;
 	int SHARDED_ROCKSDB_PREFIX_LEN;
+	int SHARDED_ROCKSDB_BLOOM_FILTER_BITS;
+	double SHARDED_ROCKSDB_MEMTABLE_BLOOM_FILTER_RATIO;
 	double SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
+	bool SHARDED_ROCKSDB_USE_DIRECT_IO;
+	bool ENFORCE_SHARDED_ROCKSDB_SIM_IF_AVALIABLE; // set to enforce shardedrocks in simulation as much as possible
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -630,7 +686,6 @@ public:
 	int START_TRANSACTION_MAX_QUEUE_SIZE;
 	int KEY_LOCATION_MAX_QUEUE_SIZE;
 	int TENANT_ID_REQUEST_MAX_QUEUE_SIZE;
-	int BLOB_GRANULE_LOCATION_MAX_QUEUE_SIZE;
 	double COMMIT_PROXY_LIVENESS_TIMEOUT;
 	double COMMIT_PROXY_MAX_LIVENESS_TIMEOUT;
 
@@ -708,7 +763,7 @@ public:
 	double BACKUP_TIMEOUT; // master's reaction time for backup failure
 	double BACKUP_NOOP_POP_DELAY;
 	int BACKUP_FILE_BLOCK_BYTES;
-	int64_t BACKUP_LOCK_BYTES;
+	int64_t BACKUP_WORKER_LOCK_BYTES;
 	double BACKUP_UPLOAD_DELAY;
 
 	// Cluster Controller
@@ -758,6 +813,8 @@ public:
 	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE; // The maximum number of degraded peers when excluding a server. When the
 	                                        // number of degraded peers is more than this value, we will not exclude
 	                                        // this server since it may because of server overload.
+	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE_MIN; // Similar to CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE which is an upper
+	                                            // bound, this is a lower bound.
 	int CC_MAX_EXCLUSION_DUE_TO_HEALTH; // The max number of degraded servers to exclude by Cluster Controller due to
 	                                    // degraded health.
 	bool CC_HEALTH_TRIGGER_RECOVERY; // If true, cluster controller will kill the master to trigger recovery when
@@ -765,8 +822,9 @@ public:
 	double CC_TRACKING_HEALTH_RECOVERY_INTERVAL; // The number of recovery count should not exceed
 	                                             // CC_MAX_HEALTH_RECOVERY_COUNT within
 	                                             // CC_TRACKING_HEALTH_RECOVERY_INTERVAL.
-	int CC_MAX_HEALTH_RECOVERY_COUNT; // The max number of recoveries can be triggered due to worker health within
-	                                  // CC_TRACKING_HEALTH_RECOVERY_INTERVAL
+	int CC_MAX_HEALTH_RECOVERY_COUNT; // The max number recoveries that can be triggered due to worker
+	                                  // health within CC_TRACKING_HEALTH_RECOVERY_INTERVAL. This count accounts for any
+	                                  // recovery trigger including non-gray failure ones.
 	bool CC_HEALTH_TRIGGER_FAILOVER; // Whether to enable health triggered failover in CC.
 	int CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION; // The minimum number of degraded servers that can trigger a
 	                                               // failover.
@@ -784,9 +842,9 @@ public:
 	                                                         // remote log routers are experiencing degradation
 	                                                         // (latency) with their peers. Gray failure may trigger
 	                                                         // recovery based on this.
-	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether
-	                                             // remote log routers are disconnected from their peers. Gray failure
-	                                             // may trigger recovery based on this.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_DISCONNECT_MONITORING; // When enabled, gray failure tries to detect whether
+	                                                        // remote log routers are disconnected from their peers.
+	                                                        // Gray failure may trigger recovery based on this.
 	bool CC_ENABLE_REMOTE_TLOG_DEGRADATION_MONITORING; // When enabled, gray failure tries to detect whether remote
 	                                                   // tlogs are experiencing degradation (latency) with their peers.
 	                                                   // Gray failure may trigger recovery based on this.
@@ -804,6 +862,15 @@ public:
 	bool CC_GRAY_FAILURE_STATUS_JSON; // When enabled, returns gray failure information in machine readable status json.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
+	double CC_RECOVERY_INIT_REQ_TIMEOUT; // Base timeout (seconds) for transaction system initialization during
+	                                     // recovery. Only applies to initializing_transaction_servers phase.
+	double CC_RECOVERY_INIT_REQ_GROWTH_FACTOR; // Base of the exponential backoff calculation. The timeout is calculated
+	                                           // as: base_timeout * (growth_factor ^ unfinished_recoveries). Must be >
+	                                           // 1 and <= 10 to prevent overflow.
+	double CC_RECOVERY_INIT_REQ_MAX_TIMEOUT; // Maximum timeout (seconds) for transaction system initialization. Only
+	                                         // applies to initializing_transaction_servers phase.
+	int CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES; // Maximum unfinished recoveries after which transaction system
+	                                                    // intilization timeouts above do not apply.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -872,7 +939,6 @@ public:
 	int64_t STORAGE_HARD_LIMIT_VERSION_OVERAGE;
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
-	bool STORAGE_INCLUDE_FEED_STORAGE_QUEUE;
 	double STORAGE_FETCH_KEYS_DELAY;
 	bool STORAGE_FETCH_KEYS_USE_COMMIT_BUDGET;
 	int64_t STORAGE_FETCH_KEYS_RATE_LIMIT; // Unit: MB/s
@@ -1036,7 +1102,6 @@ public:
 	int FETCH_BLOCK_BYTES;
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int FETCH_KEYS_PARALLELISM;
-	int FETCH_KEYS_PARALLELISM_CHANGE_FEED;
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
 	int SERVE_AUDIT_STORAGE_PARALLELISM;
@@ -1091,7 +1156,6 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
-	int64_t CHANGEFEEDSTREAM_LIMIT_BYTES;
 	int64_t BLOBWORKERSTATUSSTREAM_LIMIT_BYTES;
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool QUICK_GET_VALUE_FALLBACK;
@@ -1102,7 +1166,6 @@ public:
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
-	int STORAGE_FEED_QUERY_HARD_LIMIT;
 	std::string STORAGESERVER_READ_PRIORITIES;
 	int STORAGE_SERVER_READ_CONCURRENCY;
 	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
@@ -1196,6 +1259,7 @@ public:
 	int CONFIGURATION_ROWS_TO_FETCH;
 	bool DISABLE_DUPLICATE_LOG_WARNING;
 	double HISTOGRAM_REPORT_INTERVAL;
+	double GENERIC_METRICS_REPORT_INTERVAL;
 
 	// Timekeeper
 	int64_t TIME_KEEPER_DELAY;
@@ -1203,6 +1267,7 @@ public:
 
 	// Fast Restore
 	// TODO: After 6.3, review FR knobs, remove unneeded ones and change default value
+	// TODO(gglass): revisit the above FR
 	int64_t FASTRESTORE_FAILURE_TIMEOUT;
 	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
 	double FASTRESTORE_SAMPLING_PERCENT;
@@ -1300,92 +1365,8 @@ public:
 	double ENCRYPTION_LOGGING_INTERVAL;
 	double DISABLED_ENCRYPTION_PROBABILITY_SIM; // Probability that encryption is forced to be disabled in simulation
 
-	// Compression
-	bool ENABLE_BLOB_GRANULE_COMPRESSION;
-	std::string BLOB_GRANULE_COMPRESSION_FILTER;
-
 	// Key Management Service (KMS) Connector
 	std::string KMS_CONNECTOR_TYPE;
-
-	// blob granule stuff
-	// FIXME: configure url with database configuration instead of knob eventually
-	std::string BG_URL;
-
-	// Whether to use knobs or EKP for blob metadata and credentials
-	std::string BG_METADATA_SOURCE;
-
-	bool BG_USE_BLOB_RANGE_CHANGE_LOG;
-
-	int BG_SNAPSHOT_FILE_TARGET_BYTES;
-	int BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES;
-	int BG_DELTA_FILE_TARGET_BYTES;
-	int BG_DELTA_FILE_TARGET_CHUNK_BYTES;
-	int BG_DELTA_BYTES_BEFORE_COMPACT;
-	int BG_MAX_SPLIT_FANOUT;
-	int BG_MAX_MERGE_FANIN;
-	int BG_HOT_SNAPSHOT_VERSIONS;
-	int BG_CONSISTENCY_CHECK_ENABLED;
-	int BG_CONSISTENCY_CHECK_TARGET_SPEED_KB;
-	bool BG_ENABLE_MERGING;
-	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
-	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
-	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
-	bool BG_ENABLE_SPLIT_TRUNCATED;
-	bool BG_ENABLE_READ_DRIVEN_COMPACTION;
-	int BG_RDC_BYTES_FACTOR;
-	int BG_RDC_READ_FACTOR;
-	bool BG_WRITE_MULTIPART;
-	bool BG_ENABLE_DYNAMIC_WRITE_AMP;
-	double BG_DYNAMIC_WRITE_AMP_MIN_FACTOR;
-	double BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR;
-
-	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
-	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
-	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
-	int BLOB_WORKER_RDC_PARALLELISM;
-	// The resnapshot/delta parallelism knobs are deprecated and replaced by the budget_bytes knobs! FIXME: remove after
-	// next release
-	int64_t BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES;
-	int64_t BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES;
-
-	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
-	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
-	double BLOB_WORKERLIST_FETCH_INTERVAL;
-	double BLOB_WORKER_BATCH_GRV_INTERVAL;
-	double BLOB_WORKER_EMPTY_GRV_INTERVAL;
-	int BLOB_WORKER_GRV_HISTORY_MAX_SIZE;
-	int64_t BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY;
-	bool BLOB_WORKER_DO_REJECT_WHEN_FULL;
-	double BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD;
-	double BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
-	bool BLOB_WORKER_DISK_ENABLED;
-	int BLOB_WORKER_STORE_TYPE;
-	double BLOB_WORKER_REJOIN_TIME;
-
-	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
-	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
-	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
-	int BLOB_MANAGER_CONCURRENT_MERGE_CHECKS;
-	bool BLOB_MANAGER_ENABLE_MEDIAN_ASSIGNMENT_LIMITING;
-	double BLOB_MANAGER_MEDIAN_ASSIGNMENT_ALLOWANCE;
-	int BLOB_MANAGER_MEDIAN_ASSIGNMENT_MIN_SAMPLES_PER_WORKER;
-	int BLOB_MANAGER_MEDIAN_ASSIGNMENT_MAX_SAMPLES_PER_WORKER;
-	double BGCC_TIMEOUT;
-	double BGCC_MIN_INTERVAL;
-	bool BLOB_MANIFEST_BACKUP;
-	double BLOB_MANIFEST_BACKUP_INTERVAL;
-	double BLOB_MIGRATOR_CHECK_INTERVAL;
-	int BLOB_MANIFEST_RW_ROWS;
-	int BLOB_MANIFEST_MAX_ROWS_PER_TRANSACTION;
-	int BLOB_MANIFEST_RETRY_INTERVAL;
-	int BLOB_MIGRATOR_ERROR_RETRIES;
-	int BLOB_MIGRATOR_PREPARE_TIMEOUT;
-	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
-	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
-	int BLOB_RESTORE_MLOGS_RETENTION_SECS;
-	int BLOB_RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
-	int BLOB_GRANULES_FLUSH_BATCH_SIZE;
-	bool BLOB_RESTORE_SKIP_EMPTY_RANGES;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;
@@ -1420,6 +1401,8 @@ public:
 
 	// Swift: Enable the Swift runtime hooks and use Swift implementations where possible
 	bool FLOW_WITH_SWIFT;
+
+	bool BULK_LOAD_USE_SST_INGEST; // Enable direct SST file ingestion for RocksDB storage engines
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

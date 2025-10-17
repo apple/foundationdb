@@ -76,8 +76,7 @@ struct SuppressionMap {
 
 	std::map<std::string, SuppressionInfo> suppressionMap;
 
-	// Returns -1 if this event is suppressed
-	int64_t checkAndInsertSuppression(std::string type, double duration) {
+	int64_t checkAndInsertSuppression(std::string type, double duration, bool& suppress) {
 		ASSERT(g_network);
 		if (suppressionMap.size() >= FLOW_KNOBS->MAX_TRACE_SUPPRESSIONS) {
 			TraceEvent(SevWarnAlways, "ClearingTraceSuppressionMap").log();
@@ -85,15 +84,17 @@ struct SuppressionMap {
 		}
 
 		auto insertion = suppressionMap.insert(std::make_pair(type, SuppressionInfo()));
+		int64_t suppressedEventCount;
 		if (insertion.second || insertion.first->second.endTime <= now()) {
-			int64_t suppressedEventCount = insertion.first->second.suppressedEventCount;
+			suppress = false;
+			suppressedEventCount = insertion.first->second.suppressedEventCount;
 			insertion.first->second.endTime = now() + duration;
 			insertion.first->second.suppressedEventCount = 0;
-			return suppressedEventCount;
 		} else {
-			++insertion.first->second.suppressedEventCount;
-			return -1;
+			suppress = true;
+			suppressedEventCount = ++insertion.first->second.suppressedEventCount;
 		}
+		return suppressedEventCount;
 	}
 };
 
@@ -265,7 +266,6 @@ public:
 		};
 		void action(WriteBuffer& a) {
 			for (const auto& event : a.events) {
-				event.validateFormat();
 				logWriter->write(formatter->formatEvent(event));
 			}
 
@@ -277,7 +277,7 @@ public:
 		struct Ping final : TypedAction<WriterThread, Ping> {
 			ThreadReturnPromise<Void> ack;
 
-			explicit Ping(){};
+			explicit Ping() {};
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action(Ping& ping) {
@@ -1223,18 +1223,14 @@ BaseTraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEvent
 			return *this;
 		}
 
-		if (g_network) {
-			if (isNetworkThread()) {
-				int64_t suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, duration);
-				if (suppressedEventCount < 0)
-					enabled.suppress();
-				if (enabled && logSuppressedEventCount) {
-					detail("SuppressedEventCount", suppressedEventCount);
-				}
-			} else {
-				TraceEvent(SevWarnAlways, "SuppressionFromNonNetworkThread").detail("Event", type);
-				// Choosing a detail name that is unlikely to collide with other names
-				detail("__InvalidSuppression__", "");
+		if (g_network && isNetworkThread()) {
+			bool suppress = false;
+			int64_t suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, duration, suppress);
+			if (suppress) {
+				enabled.suppress();
+			}
+			if (enabled && logSuppressedEventCount) {
+				detail("SuppressedEventCount", suppressedEventCount);
 			}
 		}
 
@@ -1788,39 +1784,6 @@ std::string TraceEventFields::toString() const {
 	}
 
 	return str;
-}
-
-bool validateField(const char* key, bool allowUnderscores) {
-	if ((key[0] < 'A' || key[0] > 'Z') && key[0] != '_') {
-		return false;
-	}
-
-	const char* underscore = strchr(key, '_');
-	while (underscore) {
-		if (!allowUnderscores || ((underscore[1] < 'A' || underscore[1] > 'Z') && key[0] != '_' && key[0] != '\0')) {
-			return false;
-		}
-
-		underscore = strchr(&underscore[1], '_');
-	}
-
-	return true;
-}
-
-void TraceEventFields::validateFormat() const {
-	if (g_network && g_network->isSimulated()) {
-		for (Field field : fields) {
-			if (!validateField(field.first.c_str(), false)) {
-				fprintf(stderr,
-				        "Trace event detail name `%s' is invalid in:\n\t%s\n",
-				        field.first.c_str(),
-				        toString().c_str());
-			}
-			if (field.first == "Type" && !validateField(field.second.c_str(), true)) {
-				fprintf(stderr, "Trace event detail Type `%s' is invalid\n", field.second.c_str());
-			}
-		}
-	}
 }
 
 std::string traceableStringToString(const char* value, size_t S) {

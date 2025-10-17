@@ -8,7 +8,7 @@ This document explains at the high level how the recovery works in a single clus
 
 ## `ServerDBInfo` data structure
 
-This data structure contains transient information which is broadcast to all workers for a database, permitting them to communicate with each other. It contains, for example, the interfaces for cluster controller (CC), master, ratekeeper, and resolver, and holds the log system's configuration. Only part of the data structure, such as `ClientDBInfo` that contains the list of GRV proxies and commit proxies, is available to the client.
+This data structure contains transient information which is broadcast to all workers for a database, permitting them to communicate with each other. It contains, for example, the interfaces for cluster controller (CC), master (i.e., the sequencer in FDB paper), ratekeeper, and resolver, and holds the log system's configuration. Only part of the data structure, such as `ClientDBInfo` that contains the list of GRV proxies and commit proxies, is available to the client.
 
 Whenever a field of the `ServerDBInfo`is changed, the new value of the field, say new master's interface, will be sent to the CC and CC will propagate the new `ServerDBInfo` to all workers in the cluster.
 
@@ -39,9 +39,9 @@ Once coordinators think there is no CC in a cluster, they will start leader elec
 
 Although only one CC can succeed in recovery, which is guaranteed by Paxos algorithm, there exist scenarios when multiple CCs can exist in a  transient time period.
 
-Scenario 1: A majority of coordinators reboot at the same time and the current running CC is still alive. When those coordinators reboot, they may likely choose a different process as CC. The new CC will start to recruit a new master and kicks off  `ClusterRecovery` actor that drives the recovery. The old CC will know the existence of the new CC when it sends heart-beat to coordinators periodically (in sub-seconds). The old CC will kill itself, once it was told by a majority of coordinators about the existence of the new CC. Old roles (say master) will commit suicide as well after the old CC dies. This prevents the cluster to have two sets of transaction systems. In summary, the cluster may have both the old CC and new CC alive in sub-seconds before the old CC confirms the existence of the new CC.
+Scenario 1: A majority of coordinators reboot at the same time and the current running CC is still alive. When those coordinators reboot, they may likely choose a different process as CC. The new CC kicks off  `ClusterRecovery` actor that drives the recovery. The old CC will know the existence of the new CC when it sends heart-beat to coordinators periodically (in sub-seconds). The old CC will kill itself, once it was told by a majority of coordinators about the existence of the new CC. Old roles (such as master and proxies) will commit suicide as well after the old CC dies. This prevents the cluster to have two sets of transaction systems. In summary, the cluster may have both the old CC and new CC alive in sub-seconds before the old CC confirms the existence of the new CC.
 
-Scenario 2: Network partition makes the current running CC unable to connect to a majority of coordinators. Before the CC detects it, the coordinators can elect a new CC and recovery will happen. Typically, the old CC can quickly realize it cannot connect to a majority of coordinators and kill itself. In the rare situation when the old CC does not die within a short time period *and* the network partition is resolved before the old CC dies, the new CC can recruit a new master, which leads to two masters in the cluster. Only one master can succeed the recovery because only one master can lock the cstate (see Phase 2: LOCKING_CSTATE).
+Scenario 2: Network partition makes the current running CC unable to connect to a majority of coordinators. Before the CC detects it, the coordinators can elect a new CC and recovery will happen. Typically, the old CC can quickly realize it cannot connect to a majority of coordinators and it will kill itself. In the rare situation when the old CC does not die within a short time period *and* the network partition is resolved before the old CC dies. Only one CC can succeed the recovery because only one CC can lock the cstate (see Phase 2: LOCKING_CSTATE).
 
 (The management of the CC's liveness is tricky to be implemented correctly. After four major revisions of the code, this functionality *should* be bug-free certified by Evan. ;))
 
@@ -50,7 +50,7 @@ Scenario 2: Network partition makes the current running CC unable to connect to 
 Cluster controller (CC) decides if recovery should be triggered. In case the current running CC crashes or cannot be reached by a majority of coordinators, coordinators will start leader election to select a CC. Stateless processes, which do not have a file behind it such as the processes that run master, are favored to run CC. In the rare situation when the majority of coordinators cannot be reached, say a majority of coordinators' machines crash, CC cannot be selected successfully and the recovery will get stuck.
 
 
-Recovery has 9 phases, which are defined as the 9 states in the source code: READING_CSTATE = 1, LOCKING_CSTATE = 2, RECRUITING = 3, RECOVERY_TRANSACTION = 4, WRITING_CSTATE = 5, ACCEPTING_COMMITS = 6, ALL_LOGS_RECRUITED = 7, STORAGE_RECOVERED = 8, FULLY_RECOVERED = 9.
+Recovery has 9 phases, which are defined as the 9 states in the source code: `READING_CSTATE = 1, LOCKING_CSTATE = 2, RECRUITING = 3, RECOVERY_TRANSACTION = 4, WRITING_CSTATE = 5, ACCEPTING_COMMITS = 6, ALL_LOGS_RECRUITED = 7, STORAGE_RECOVERED = 8, FULLY_RECOVERED = 9`.
 
 The recovery process is like a state machine, changing from one state to the next state. `ClusterRecovery.actor` implements the cluster recovery. We will describe in the rest of this document what each phase does to drive the recovery to the next state.
 
@@ -61,30 +61,27 @@ The system tracks the information of each recovery phase via trace events. In pa
 
 This phase reads the coordinated state (cstate) from coordinators. The cstate includes the DBCoreState structure which describes the transaction systems (such as transaction logs (tLog) and tLogs’ configuration, logRouterTags (the number of log router tags), txsTags, old generations' tLogs, and recovery count) that exist before the recovery. The coordinated state can have multiple generations of tLogs.
 
-The transaction system state before the recovery is the starting point for the current recovery to construct the configuration of the next-generation transaction system. Note FDB’s transaction system’s generation increases for each recovery.
+The transaction system state before the recovery is the starting point for the current recovery to construct the configuration of the next-generation transaction system. Note FDB’s transaction system’s generation number increases for each recovery.
 
 
 ## Phase 2: LOCKING_CSTATE
 
-This phase locks the coordinated state (cstate) to make sure there is only one master who can change the cstate. Otherwise, we may end up with more than one master accepting commits after the recovery. To achieve that, the master needs to get currently alive tLogs’ interfaces and sends commands to tLogs to lock their states, preventing them from accepting any further writes.
+This phase locks the coordinated state (cstate) to make sure there is only one CC who can change the cstate. Otherwise, we may end up with more than one master accepting commits after the recovery. To achieve that, the CC needs to get currently alive tLogs’ interfaces and sends commands to tLogs to lock their states, preventing them from accepting any further writes.
 
-Recall that `ServerDBInfo` has master's interface and is propagated by CC to every process in a cluster. The current running tLogs can use the master interface in its `ServerDBInfo` to send itself's interface to master.
-Master simply waits on receiving the `TLogRejoinRequest` streams: for each tLog’s interface received, the master compares the interface ID with the tLog ID read from cstate. Once the master collects enough old tLog interfaces, it will use the interfaces to lock those tLogs.
+Recall that `ServerDBInfo` has CC's interface and is propagated by CC to every process in a cluster. The current running tLogs can use the CC interface in its `ServerDBInfo` to send its interface to CC.
+CC simply waits on receiving the `TLogRejoinRequest` streams: for each tLog’s interface received, the CC compares the interface ID with the tLog ID read from cstate. Once the CC collects enough old tLog interfaces, it will use the interfaces to lock those tLogs.
 The logic of collecting tLogs’ interfaces is implemented in `trackRejoins()` function.
 The logic of locking the tLogs is implemented in `epochEnd()` function in [TagPartitionedLogSystems.actor.cpp](https://github.com/apple/foundationdb/blob/main/fdbserver/TagPartitionedLogSystem.actor.cpp).
 
-
 Once we lock the cstate, we bump the `recoveryCount` by 1 and write the `recoveryCount` to the cstate. Each tLog in a recovery attempt records the `recoveryCount` and monitors the change of the variable. If the `recoveryCount` increases, becoming larger than the recorded value, the tLog will terminate itself. This mechanism makes sure that when multiple recovery attempts happen concurrently, only tLogs in the most recent recovery will be running. tLogs in other recovery attempts can release their memory earlier, reducing the memory pressure during recovery. This is an important memory optimization before shared tLogs, which allows tLogs in different generations to share the same memory, is introduced.
 
+*How does each tLog know the current CC’s interface?*
 
-*How does each tLog know the current master’s interface?*
+CC interface is stored in `serverDBInfo`. The CC broadcasts `serverDBInfo` to all processes. tLog processes (i,e., tLog workers) monitor the `serverDBInfo` in an actor `rejoinClusterController`. When the `serverDBInfo` changes, it will register itself to the new CC. The logic for a tLog worker to monitor `serverDBInfo` change is implemented in `monitorServerDBInfo()` actor.
 
-Master interface is stored in `serverDBInfo`. Once the CC recruits the master, it updates the `serverDBInfo` with the master’s interface. CC will send the updated `serverDBInfo`, which has the master’s interface, to all processes. tLog processes (i,e., tLog workers) monitor the `serverDBInfo` in an actor. when the `serverDBInfo` changes, it will register itself to the new master. The logic for a tLog worker to monitor `serverDBInfo` change is implemented in `monitorServerDBInfo()` actor.
+*How does each role, such as tLog and data distributor (DD), register its interface to CC?*
 
-
-*How does each role, such as tLog and data distributor (DD), register its interface to master and CC?*
-
-* tLog monitors `serverDBInfo` change and sends its interface to the new master;
+* tLog monitors `serverDBInfo` change and sends its interface to the new CC;
 
 * Data distributor (DD) and Ratekeeper rejoin themselves to CC because they are no longer a part of the recovery process (they have been moved out of the master process since 6.2 release, before which they are part of the master process recovery in the FDB recovery procedure);
 
@@ -93,12 +90,18 @@ Master interface is stored in `serverDBInfo`. Once the CC recruits the master, i
 
 ## Phase 3: RECRUITING
 
-Once the CC locks the cstate, it will recruit the still-alive tLogs from the previous generation for the benefit of faster recovery. The CC gets the old tLogs’ interfaces from the READING_CSTATE phase and uses those interfaces to track which old tLog are still alive, the implementation of which is in `trackRejoins()`.
+Once the CC locks the cstate, it will read the transaction state store, and recruit the still-alive tLogs from the previous generation (for
+the benefit of faster recovery).
+Recruiting active tLogs is done by sending a "lock" message to each tLog. Once a tLog is locked it will not accept new commits to ingress new data, but
+old data can still be peeked by a storage server.
+The CC gets the old tLogs’ interfaces from the READING_CSTATE phase and uses those interfaces to track which old tLogs are still accessible, the implementation of which is in `trackRejoins()`. A locked tLog will reply to the CC with its `knownCommittedVersion` and `durable version`.
 
+Once the CC gets enough tLogs, it calculates the known committed version (i.e., `knownCommittedVersion`). `knownCommittedVersion` is the highest version that a commit proxy tells a given tLog that it had durably committed on *all* "local" tLogs (tLogs in remote DCs are not included).
 
-Once the CC gets enough tLogs, it calculates the known committed version (i.e., `knownCommittedVersion` in code). `knownCommittedVersion` is the highest version that a commit proxy tells a given tLog that it had durably committed on *all* tLogs. The CC's is the maximum of all of that. `knownCommittedVersion` is  important, because it defines the lower bound of what version range of mutations need to be copied to the new generation. That is, any versions larger than the master's `knownCommittedVersion` is not guaranteed to persist on all replicas. The CC chooses a *recovery version*, which is the minimum of durable versions on all tLogs of the old generation, and recruits a new set of tLogs that copy all data between `knownCommittedVersion + 1` and `recoveryVersion` from old tLogs. This copy makes sure data within the range has enough replicas to satisfy the replication policy.
+The CC's finds the maximum `knownCommittedVersion` of all the tLogs. This defines the lower bound of what version range of mutations needs to be copied to the new generation. That is, any versions larger than the CC's `knownCommittedVersion` are not guaranteed to persist on all replicas. The CC chooses a *recovery version*, which is the minimum of durable versions on all tLogs of the old generation, and recruits a new set of tLogs that copy all data between `knownCommittedVersion + 1` and `recoveryVersion` from old tLogs. This copy makes sure data within the range has enough replicas to satisfy the replication policy.
 
-Later, the CC will use the recruited tLogs to create a new `TagPartitionedLogSystem` for the new generation.
+Later, the CC will use the recruited tLogs and `recoveryVersion` to create a new `TagPartitionedLogSystem` for the new generation.
+Note that tLogs can continue to rejoin the cluster after the `recoveryVersion` has been calculated but before the log system has been created.
 
 **An example of `knownCommittedVersion` and `recoveryVersion`:**
 
@@ -114,9 +117,7 @@ Consider an old generation with three TLogs: `A, B, C`. Their durable versions a
 
 * Situation 1: Too many tLogs in the previous generation permanently died, say due to hardware failure. If force recovery is allowed by system administrator, the CC can choose to force recovery, which can cause data loss; otherwise, to unblock the recovery, system administrator has to bring up those died tLogs, for example by copying their files onto new hardware.
 
-
-* Situation 2: A tLog may die after it reports alive to the CC in the RECRUITING phase. This may cause the `knownCommittedVersion` calculated by the CC in this phase to no longer be valid in the next phases. When this happens, the CC will detect it, terminate the current recovery, and start a new recovery.
-
+* Situation 2: A tLog may die after it reports alive to the CC in the RECRUITING phase. This may cause the `RecoveryVersion` calculated by the CC in this phase to no longer be valid in the next phases (see [getDurableVersion()](https://github.com/apple/foundationdb/blob/cf7c8f41b22612c4a8a632ea6f173d891b00380d/fdbserver/TagPartitionedLogSystem.actor.cpp#L1940)). When this happens, the CC will detect it (that the previous computed recovery version is no longer viable, because the tail of versions are no longer retrievable from current set of live TLogs), terminate the current recovery, and start a new recovery. See https://github.com/apple/foundationdb/blob/cf7c8f41b22612c4a8a632ea6f173d891b00380d/fdbserver/TagPartitionedLogSystem.actor.cpp#L2468-L2525, where changes to TLogs can cause changes to old log system (`outLogSystem->set(logSystem);`), which in turn causes the recovery loop https://github.com/apple/foundationdb/blob/cf7c8f41b22612c4a8a632ea6f173d891b00380d/fdbserver/ClusterRecovery.actor.cpp#L1582-L1610 to abandon progress and restart.
 
 Once we have a `knownCommittedVersion`, the CC will reconstruct the [transaction state store](https://github.com/apple/foundationdb/blob/main/design/transaction-state-store.md) by peeking the txnStateTag in oldLogSystem.
 Recall that the txnStateStore includes the transaction system’s configuration, such as the assignment of shards to SS and to tLogs and that the txnStateStore was durable on disk in the oldLogSystem.
@@ -129,19 +130,19 @@ At this point, we have recovered the txnStateStore, recruited new GRV proxies, c
 Recovery can get stuck at the following two steps:
 
 **Reading the txnStateStore step.**
+In parallel to recruiting tLogs, an actor to read the transaction state store is run.
 Recovery typically won’t get stuck at reading the txnStateStore step because once the CC can lock tLogs, it should always be able to read the txnStateStore for the tLogs.
 
-
-However, reading the txnStateStore can be slow because it needs to read from disk (through `openDiskQueueAdapter()` function) and the txnStateStore size increases as the cluster size increases. Recovery can take a long time if reading the txnStateStore is slow. To achieve faster recovery, we have improved the speed of reading the txnStateStore in FDB 6.2 by parallelly reading the txnStateStore on multiple tLogs based on tags.
-
+Reading the entire txnStateStore from one tLog could be slow because the disk must be read, and the txnStateStore size increases as the cluster size increases. To achieve faster recovery, each tLog stores a subset of the transaction store. When changes to the transaction state store are made (or snapshots of it are taken) these changes are sent to a random tLog team.
 
 **Recruiting roles step.**
-There are cases where the recovery can get stuck at recruiting enough roles for the txn system configuration. For example, if a cluster with replica factor equal to three has only three tLogs and one of them dies during the recovery, the cluster will not succeed in recruiting 3 tLogs and the recovery will get stuck. Another example is when a new database is created and the cluster does not have a valid txnStateStore. To get out of this situation, the CC will use an emergency transaction to forcibly change the configuration such that the recruitment can succeed. This configuration change may temporarily violate the contract of the desired configuration, but it is only temporary.
+There are cases where the recovery can get stuck at recruiting enough roles for the txn system configuration. For example, if a cluster with replica factor equal to three has only three tLogs and one of them dies during the recovery, the cluster will not succeed in recruiting 3 tLogs and the recovery will get stuck.
+
+Another example is when a new database is created and the cluster does not have a valid txnStateStore. To get out of this situation, the CC will use an emergency transaction to forcibly change the configuration such that the recruitment can succeed. This configuration change may temporarily violate the contract of the desired configuration, but it is only temporary.
 
 ServerKnob::CLUSTER_RECOVERY_EVENT_NAME_PREFIX defines the prefix for cluster recovery trace events. Hereafter, referred as 'RecoveryEventPrefix' in this document.
 
 We can use the trace event `<RecoveryEventPrefix>RecoveredConfig`, which dumps the information of the new transaction system’s configuration, to diagnose why the recovery is blocked in this phase.
-
 
 ## Phase 4: RECOVERY_TRANSACTION
 
@@ -171,9 +172,9 @@ Once the cstate is written, the CC sets the `cstateUpdated` promise and moves to
 
 
 The cstate update is done in `trackTlogRecovery()` actor.
-The actor keeps running until the recovery finishes the FULLY_RECOVERED phase.
+The actor keeps running until the recovery finishes the `FULLY_RECOVERED` phase.
 The actor needs to update the cstates at the following phases:
-ALL_LOGS_RECRUITED, STORAGE_RECOVERED, and FULLY_RECOVERED.
+`ALL_LOGS_RECRUITED`, `STORAGE_RECOVERED`, and `FULLY_RECOVERED`.
 For example, when the old tLogs are no longer needed, the CC will write the coordinators’ state again.
 
 
@@ -187,17 +188,18 @@ The transaction system starts to accept new transactions. This doesn't mean that
 
 ## Phase 7: ALL_LOGS_RECRUITED
 
-The CC sets the recovery phase to ALL_LOGS_RECRUITED when the number of new tLogs it receives is equal to the expected tLogs based on the cluster configuration. This is done in the `trackTlogRecovery()` actor.
+The CC sets the recovery phase to `ALL_LOGS_RECRUITED` when the number of new tLogs it receives is equal to the expected tLogs based on the cluster configuration. This is done in the `trackTlogRecovery()` actor.
 
 The difference between this phase and getting to Phase 3 is that the CC is waiting for *older generations* of tLogs to be cleaned up at this phase.
 
 ## Phase 8: STORAGE_RECOVERED
 
 Storage servers need old tLogs in previous generations to recover storage servers’ state. For example, a storage server may be offline for a long time, lagging behind in pulling mutations assigned to it. We have to keep the old tLogs who have those mutations until no storage server needs them.
-
-When all tLogs are no longer needed and deleted, the CC moves to the STORAGE_RECOVERED phase. This is done by checking if oldTLogData is empty in the `trackTlogRecovery()` actor.
+Hence a TLog process has only 1 active log and potentitally multiple non-active logs with data from old generations,
+and each old generation "shares" a disk with the tLog running in the active generation.
+When older generation tLogs are no longer needed and deleted, the CC moves to the `STORAGE_RECOVERED` phase. This is done by checking if oldTLogData is empty in the `trackTlogRecovery()` actor.
 
 
 ## Phase 9: FULLY_RECOVERED
 
-When the CC has all new tLogs and has removed all old tLogs -- both STORAGE_RECOVERED and ALL_LOGS_RECRUITED have been satisfied -- the CC will mark the recovery state as FULLY_RECOVERED.
+When the CC has all new tLogs and has removed all old tLogs -- both `STORAGE_RECOVERED` and `ALL_LOGS_RECRUITED` have been satisfied -- the CC will mark the recovery state as `FULLY_RECOVERED`.

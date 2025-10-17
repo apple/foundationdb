@@ -101,18 +101,19 @@ class ThreadSpinLockHolder {
 
 public:
 	ThreadSpinLockHolder(ThreadSpinLock& lock) : lock(lock) { lock.enter(); }
+	ThreadSpinLockHolder(const ThreadSpinLockHolder& lock) = delete;
 	~ThreadSpinLockHolder() { lock.leave(); }
 };
 
 class ThreadUnsafeSpinLock {
 public:
-	void enter(){};
-	void leave(){};
-	void assertNotEntered(){};
+	void enter() {};
+	void leave() {};
+	void assertNotEntered() {};
 };
 class ThreadUnsafeSpinLockHolder {
 public:
-	ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&){};
+	ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&) {};
 };
 
 #if FLOW_THREAD_SAFE

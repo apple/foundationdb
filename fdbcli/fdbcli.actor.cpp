@@ -96,6 +96,7 @@ enum {
 	OPT_EXEC,
 	OPT_NO_STATUS,
 	OPT_NO_HINTS,
+	OPT_NO_HISTORY,
 	OPT_STATUS_FROM_JSON,
 	OPT_VERSION,
 	OPT_BUILD_FLAGS,
@@ -117,6 +118,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
 	                                  { OPT_NO_STATUS, "--no-status", SO_NONE },
 	                                  { OPT_NO_HINTS, "--no-hints", SO_NONE },
+	                                  { OPT_NO_HISTORY, "--no-history", SO_NONE },
 	                                  { OPT_HELP, "-?", SO_NONE },
 	                                  { OPT_HELP, "-h", SO_NONE },
 	                                  { OPT_HELP, "--help", SO_NONE },
@@ -490,6 +492,7 @@ static void printProgramUsage(const char* name) {
 	       "                 are supported. Has no effect unless --log is specified.\n"
 	       "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
 	       "                 and then exits.\n"
+	       "  --no-history   Disables loading and saving the command history file.\n"
 	       "  --no-status    Disables the initial status check done when starting\n"
 	       "                 the CLI.\n"
 	       "  --api-version  APIVERSION\n"
@@ -919,6 +922,7 @@ struct CLIOptions {
 	Optional<std::string> exec;
 	bool initialStatusCheck = true;
 	bool cliHints = true;
+	bool cliHistory = true;
 	bool useFutureProtocolVersion = false;
 	bool debugTLS = false;
 	std::string tlsCertPath;
@@ -1022,6 +1026,9 @@ struct CLIOptions {
 			break;
 		case OPT_NO_HINTS:
 			cliHints = false;
+			break;
+		case OPT_NO_HISTORY:
+			cliHistory = false;
 			break;
 		case OPT_USE_FUTURE_PROTOCOL_VERSION:
 			useFutureProtocolVersion = true;
@@ -1434,27 +1441,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "changefeed")) {
-					bool _result = wait(makeInterruptable(changeFeedCommandActor(localDb, tenantEntry, tokens, warn)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "blobrange")) {
-					bool _result = wait(makeInterruptable(blobRangeCommandActor(localDb, tenantEntry, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "blobkey")) {
-					bool _result = wait(makeInterruptable(blobKeyCommandActor(localDb, tenantEntry, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
 				if (tokencmp(tokens[0], "unlock")) {
 					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
 					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
@@ -1715,9 +1701,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "bulkload")) {
-					UID taskId = wait(makeInterruptable(bulkLoadCommandActor(ccf, localDb, tokens)));
+					UID taskId = wait(makeInterruptable(bulkLoadCommandActor(localDb, tokens)));
 					if (taskId.isValid()) {
-						printf("Received bulkload task: %s\n", taskId.toString().c_str());
+						printf("Received Job ID: %s\n", taskId.toString().c_str());
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "bulkdump")) {
+					UID jobId = wait(makeInterruptable(bulkDumpCommandActor(localDb, tokens)));
+					if (jobId.isValid()) {
+						printf("Received Job ID: %s\n", jobId.toString().c_str());
 					}
 					continue;
 				}
@@ -2364,19 +2358,20 @@ ACTOR Future<int> runCli(CLIOptions opt, Reference<ClusterConnectionFile> ccf) {
 	    false);
 
 	state std::string historyFilename;
-	try {
-		historyFilename = joinPath(getUserHomeDirectory(), ".fdbcli_history");
-		linenoise.historyLoad(historyFilename);
-	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ErrorLoadingCliHistory")
-		    .error(e)
-		    .detail("Filename", historyFilename.empty() ? "<unknown>" : historyFilename)
-		    .GetLastError();
+	if (opt.cliHistory) {
+		try {
+			historyFilename = joinPath(getUserHomeDirectory(), ".fdbcli_history");
+			linenoise.historyLoad(historyFilename);
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "ErrorLoadingCliHistory")
+			    .error(e)
+			    .detail("Filename", historyFilename.empty() ? "<unknown>" : historyFilename)
+			    .GetLastError();
+		}
 	}
-
 	state int result = wait(cli(opt, &linenoise, ccf));
 
-	if (!historyFilename.empty()) {
+	if (opt.cliHistory && !historyFilename.empty()) {
 		try {
 			linenoise.historySave(historyFilename);
 		} catch (Error& e) {

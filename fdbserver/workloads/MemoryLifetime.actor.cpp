@@ -20,7 +20,6 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
-#include "flow/DeterministicRandom.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -31,16 +30,8 @@ struct MemoryLifetime : KVWorkload {
 	double testDuration;
 	std::vector<Future<Void>> clients;
 
-	std::string valueString;
-
 	MemoryLifetime(WorkloadContext const& wcx) : KVWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
-		valueString = std::string(maxValueBytes, '.');
-	}
-
-	Value randomValue() const {
-		return StringRef((uint8_t*)valueString.c_str(),
-		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
 	}
 
 	KeySelector getRandomKeySelector() const {
@@ -72,6 +63,7 @@ struct MemoryLifetime : KVWorkload {
 		state Snapshot snapshot = Snapshot::False;
 		loop {
 			try {
+				tr = ReadYourWritesTransaction(cx);
 				int op = deterministicRandom()->randomInt(0, 4);
 				if (op == 0) {
 					reverse.set(deterministicRandom()->coinflip());

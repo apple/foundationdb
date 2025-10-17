@@ -34,7 +34,6 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/Locality.h"
@@ -55,8 +54,6 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
-	Future<Void> haltBlobManager;
-	Future<Void> haltBlobMigrator;
 	Future<Void> haltEncryptKeyProxy;
 	Future<Void> haltConsistencyScan;
 	Standalone<VectorRef<StringRef>> issues;
@@ -80,7 +77,7 @@ struct WorkerInfo : NonCopyable {
 	WorkerInfo(WorkerInfo&& r) noexcept
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
-	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), haltBlobManager(r.haltBlobManager),
+	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor),
 	    haltEncryptKeyProxy(r.haltEncryptKeyProxy), haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
@@ -92,7 +89,6 @@ struct WorkerInfo : NonCopyable {
 		details = std::move(r.details);
 		haltRatekeeper = r.haltRatekeeper;
 		haltDistributor = r.haltDistributor;
-		haltBlobManager = r.haltBlobManager;
 		haltEncryptKeyProxy = r.haltEncryptKeyProxy;
 		issues = r.issues;
 	}
@@ -142,13 +138,13 @@ public:
 		DatabaseConfiguration config; // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
-		int unfinishedRecoveries;
+		int unfinishedRecoveries; // Counter tracking incomplete recovery attempts. Incremented when a new
+		                          // sequencer/master is recruited, reset to 0 when recovery reaches fully_recovered.
+		                          // A high value indicates multiple recovery attempts that failed to complete.
 		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 		Future<Void> clientCounter;
 		int clientCount;
-		AsyncVar<bool> blobGranulesEnabled;
-		AsyncVar<bool> blobRestoreEnabled;
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
 		Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration;
@@ -164,8 +160,7 @@ public:
 		                               EnableLocalityLoadBalance::True,
 		                               TaskPriority::DefaultEndpoint,
 		                               LockAware::True)), // SOMEDAY: Locality!
-		    unfinishedRecoveries(0), cachePopulated(false), clientCount(0),
-		    blobGranulesEnabled(config.blobGranulesEnabled), blobRestoreEnabled(false) {
+		    unfinishedRecoveries(0), cachePopulated(false), clientCount(0) {
 			clientCounter = countClients(this);
 		}
 
@@ -182,22 +177,6 @@ public:
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.ratekeeper = interf;
-			serverInfo->set(newInfo);
-		}
-
-		void setBlobManager(const BlobManagerInterface& interf) {
-			auto newInfo = serverInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.blobManager = interf;
-			serverInfo->set(newInfo);
-		}
-
-		void setBlobMigrator(const BlobMigratorInterface& interf) {
-			auto newInfo = serverInfo->get();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.blobMigrator = interf;
 			serverInfo->set(newInfo);
 		}
 
@@ -231,10 +210,6 @@ public:
 				newInfo.distributor = Optional<DataDistributorInterface>();
 			} else if (t == ProcessClass::RatekeeperClass) {
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
-			} else if (t == ProcessClass::BlobManagerClass) {
-				newInfo.blobManager = Optional<BlobManagerInterface>();
-			} else if (t == ProcessClass::BlobMigratorClass) {
-				newInfo.blobMigrator = Optional<BlobMigratorInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
 				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
@@ -332,10 +307,6 @@ public:
 		        db.serverInfo->get().distributor.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().ratekeeper.present() &&
 		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().blobManager.present() &&
-		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().blobMigrator.present() &&
-		        db.serverInfo->get().blobMigrator.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().client.encryptKeyProxy.present() &&
 		        db.serverInfo->get().client.encryptKeyProxy.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().consistencyScan.present() &&
@@ -391,26 +362,6 @@ public:
 
 			if (bestInfo.present()) {
 				return bestInfo.get();
-			}
-		}
-
-		throw no_more_servers();
-	}
-
-	// Returns a worker that can be used by a blob worker
-	// Note: we restrict the set of possible workers to those in the same DC as the BM/CC
-	WorkerDetails getBlobWorker(RecruitBlobWorkerRequest const& req) {
-		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
-		for (auto& it : id_worker) {
-			// the worker must be available, have the same dcID as CC,
-			// not be one of the excluded addrs from req and have the appropiate fitness
-			if (workerAvailable(it.second, false) &&
-			    clusterControllerDcId == it.second.details.interf.locality.dcId() &&
-			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
-			    (!it.second.details.interf.secondaryAddress().present() ||
-			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
-			    it.second.details.processClass.machineClassFitness(ProcessClass::BlobWorker) == ProcessClass::BestFit) {
-				return it.second.details;
 			}
 		}
 
@@ -2261,12 +2212,6 @@ public:
 					updateKnownIds(&firstUsed);
 					updateKnownIds(&secondUsed);
 
-					// auto mworker = id_worker.find(masterProcessId);
-					//TraceEvent("CompareAddressesMaster")
-					//    .detail("Master",
-					//            mworker != id_worker.end() ? mworker->second.details.interf.address() :
-					//            NetworkAddress());
-
 					updateIdUsed(rep.tLogs, firstUsed);
 					updateIdUsed(compare.tLogs, secondUsed);
 					compareWorkers(
@@ -3208,7 +3153,8 @@ public:
 		// For degraded server that are complained by more than SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE, we
 		// don't know if it is a hot server, or the network is bad. We remove from the returned degraded server list.
 		for (const auto& badServer : currentDegradedServers) {
-			if (degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
+			if (degradedLinkDst2Src[badServer].size() >= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE_MIN &&
+			    degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
 				currentDegradationInfo.degradedServers.insert(badServer);
 			}
 		}
@@ -3258,6 +3204,12 @@ public:
 	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
 	// transaction system in the primary data center.
 	bool shouldTriggerRecoveryDueToDegradedServers() {
+		const bool ccExcluded = id_worker[clusterControllerProcessId].priorityInfo.isExcluded;
+		TraceEvent(SevInfo, "ShouldTriggerRecoveryDueToDegradedServers")
+		    .detail("DegradedServersSize", degradationInfo.degradedServers.size())
+		    .detail("DisconnectedServersSize", degradationInfo.disconnectedServers.size())
+		    .detail("CCExcluded", ccExcluded);
+
 		if (degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size() >
 		    SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
 			return false;
@@ -3265,11 +3217,14 @@ public:
 
 		// Do not trigger recovery if the cluster controller is excluded, since the master will change
 		// anyways once the cluster controller is moved
-		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+		if (ccExcluded) {
 			return false;
 		}
 
-		return transactionSystemContainsDegradedServers();
+		const bool txnSystemContainsDegradedServers = transactionSystemContainsDegradedServers();
+		TraceEvent(SevInfo, "ShouldTriggerRecoveryDueToDegradedServers")
+		    .detail("TransactionSystemContainsDegradedServers", txnSystemContainsDegradedServers);
+		return txnSystemContainsDegradedServers;
 	}
 	// Returns true when the cluster controller should trigger a failover due to degraded servers used in the
 	// transaction system in the primary data center, and no degradation in the remote data center.
@@ -3345,7 +3300,6 @@ public:
 	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
 	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
-	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
 	ActorCollection ac;
 	UpdateWorkerList updateWorkerList;
 	Future<Void> outstandingRequestChecker;

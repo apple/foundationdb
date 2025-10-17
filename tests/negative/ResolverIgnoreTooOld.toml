@@ -1,5 +1,8 @@
 [[knobs]]
 enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+
 max_read_transaction_life_versions = 1000000
 max_write_transaction_life_versions = 1000000
 

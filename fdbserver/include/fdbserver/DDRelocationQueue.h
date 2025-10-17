@@ -59,7 +59,7 @@ public:
 	TraceInterval interval;
 	std::shared_ptr<DataMove> dataMove;
 
-	Optional<DDBulkLoadTask> bulkLoadTask;
+	Optional<DDBulkLoadEngineTask> bulkLoadTask;
 
 	RelocateData();
 	explicit RelocateData(RelocateShard const& rs);

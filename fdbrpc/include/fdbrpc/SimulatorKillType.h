@@ -24,6 +24,7 @@
 namespace simulator {
 
 // Order matters!
+// FIXME: explain why it matters.
 enum KillType {
 	KillInstantly,
 	InjectFaults,

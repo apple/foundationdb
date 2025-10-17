@@ -121,9 +121,26 @@ configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_CURRENT_BINARY_
 file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
 set(FDB_CURRENT_VERSION ${PROJECT_VERSION})
-set(FDB_FUTURE_VERSION "7.5.0")
-set(FDB_PREV_RELEASE_VERSION "7.3.41")
-set(FDB_PREV2_RELEASE_VERSION "7.1.33")
+set(FDB_FUTURE_VERSION "8.0.0")
+set(FDB_PREV_RELEASE_VERSION "7.3.59")
+set(FDB_PREV2_RELEASE_VERSION "7.1.61")
+
+set(MULTIREGION_TEST TRUE)
+option(NO_MULTIREGION_TEST "Disable multiregion simulation tests" OFF)
+
+if (NO_MULTIREGION_TEST)
+    set(MULTIREGION_TEST FALSE)
+    add_definitions(-DNO_MULTIREGION_TEST)
+    message(STATUS "NO_MULTIREGION_TEST is ON")
+endif()
+
+set(RESTART_TEST TRUE)
+option(NO_RESTART_TEST "Disable restart simulation tests" OFF)
+if (NO_RESTART_TEST)
+    set(RESTART_TEST FALSE)
+    add_definitions(-DNO_RESTART_TEST)
+    message(STATUS "NO_RESTART_TEST is ON")
+endif()
 
 ################################################################################
 # Flow

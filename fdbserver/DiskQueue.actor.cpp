@@ -400,7 +400,7 @@ public:
 					}
 				}
 			} else {
-				// Extend self->files[1] to accomodate the new write and about 10MB or 2x current size for future
+				// Extend self->files[1] to accommodate the new write and about 10MB or 2x current size for future
 				// writes.
 				/*TraceEvent("RDQExtend", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
 				    .detail("ExtensionBytes", fileExtensionBytes);*/
@@ -1575,7 +1575,7 @@ public:
 	                         DiskQueueVersion diskQueueVersion,
 	                         int64_t fileSizeWarningLimit)
 	  : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), pushed(0),
-	    popped(0), committed(0){};
+	    popped(0), committed(0) {};
 
 	// IClosable
 	Future<Void> getError() const override { return queue->getError(); }

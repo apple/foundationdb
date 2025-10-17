@@ -30,7 +30,6 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <string>
 
 struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "RandomRangeLock";
@@ -84,11 +83,11 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		}
 	}
 
-	ACTOR Future<Void> lockActor(Database cx, RandomRangeLockWorkload* self) {
+	ACTOR Future<Void> lockActor(Database cx, RandomRangeLockWorkload* self, std::string rangeLockOwnerNamePrefix) {
 		state double testDuration = deterministicRandom()->random01() * self->maxLockDuration;
 		state double testStartDelay = deterministicRandom()->random01() * self->maxStartDelay;
 		state std::string rangeLockOwnerName =
-		    "Owner" + std::to_string(deterministicRandom()->randomInt(0, self->lockActorCount));
+		    rangeLockOwnerNamePrefix + "-" + std::to_string(deterministicRandom()->randomInt(0, self->lockActorCount));
 		// Here we intentionally introduced duplicated owner name between different lockActor
 		std::string lockOwnerDescription = rangeLockOwnerName + ":" + self->getRandomStringRef().toString();
 		wait(registerRangeLockOwner(cx, rangeLockOwnerName, lockOwnerDescription));
@@ -102,34 +101,71 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		try {
 			Optional<RangeLockOwner> owner = wait(getRangeLockOwner(cx, rangeLockOwnerName));
 			ASSERT(owner.present());
-			ASSERT(owner.get().getUniqueId() == rangeLockOwnerName);
-			wait(takeReadLockOnRange(cx, range, rangeLockOwnerName));
+			ASSERT(owner.get().getOwnerUniqueId() == rangeLockOwnerName);
+			wait(takeExclusiveReadLockOnRange(cx, range, rangeLockOwnerName));
 			TraceEvent(SevWarnAlways, "InjectRangeLocked")
 			    .detail("RangeLockOwnerName", rangeLockOwnerName)
 			    .detail("Range", range)
 			    .detail("LockTime", testDuration);
 			ASSERT(range.end <= normalKeys.end);
 		} catch (Error& e) {
-			if (e.code() != error_code_range_lock_failed) {
-				throw e;
-			} else {
+			if (e.code() == error_code_range_lock_failed) {
+				TraceEvent(SevWarnAlways, "InjectRangeLockFailed")
+				    .detail("RangeLockOwnerName", rangeLockOwnerName)
+				    .detail("Range", range)
+				    .detail("LockTime", testDuration);
 				ASSERT(range.end > normalKeys.end);
+			} else if (e.code() == error_code_range_lock_reject) {
+				TraceEvent(SevWarnAlways, "InjectRangeLockRejected")
+				    .detail("RangeLockOwnerName", rangeLockOwnerName)
+				    .detail("Range", range)
+				    .detail("LockTime", testDuration);
+				// pass
+			} else {
+				TraceEvent(SevError, "InjectRangeLockError")
+				    .errorUnsuppressed(e)
+				    .detail("RangeLockOwnerName", rangeLockOwnerName)
+				    .detail("Range", range)
+				    .detail("LockTime", testDuration);
+				throw e;
 			}
 		}
 		wait(delay(testDuration));
+
+		TraceEvent(SevWarnAlways, "InjectRangeUnlockSubmit")
+		    .detail("RangeLockOwnerName", rangeLockOwnerName)
+		    .detail("Range", range)
+		    .detail("LockStartDelayTime", testStartDelay)
+		    .detail("LockTime", testDuration);
 		try {
-			wait(releaseReadLockOnRange(cx, range, rangeLockOwnerName));
+			wait(releaseExclusiveReadLockOnRange(cx, range, rangeLockOwnerName));
 			TraceEvent(SevWarnAlways, "InjectRangeUnlocked")
 			    .detail("RangeLockOwnerName", rangeLockOwnerName)
 			    .detail("Range", range);
 			ASSERT(range.end <= normalKeys.end);
 		} catch (Error& e) {
-			if (e.code() != error_code_range_lock_failed) {
-				throw e;
-			} else {
+			if (e.code() == error_code_range_lock_failed) {
+				TraceEvent(SevWarnAlways, "InjectRangeUnlockFailed")
+				    .detail("RangeLockOwnerName", rangeLockOwnerName)
+				    .detail("Range", range)
+				    .detail("LockTime", testDuration);
 				ASSERT(range.end > normalKeys.end);
+			} else if (e.code() == error_code_range_unlock_reject) {
+				TraceEvent(SevWarnAlways, "InjectRangeUnlockRejected")
+				    .detail("RangeLockOwnerName", rangeLockOwnerName)
+				    .detail("Range", range)
+				    .detail("LockTime", testDuration);
+				// pass
+			} else {
+				TraceEvent(SevError, "InjectRangeUnlockError")
+				    .errorUnsuppressed(e)
+				    .detail("RangeLockOwnerName", rangeLockOwnerName)
+				    .detail("Range", range)
+				    .detail("LockTime", testDuration);
+				throw e;
 			}
 		}
+
 		return Void();
 	}
 
@@ -144,11 +180,22 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			// The rangeLock mechanism should approperiately handled those conflict.
 			// When all actors complete, it is expected that all locks are removed,
 			// and this injected workload should not block other workloads.
+			state std::string rangeLockOwnerNamePrefix = "Owner" + std::to_string(self->clientId);
 			std::vector<Future<Void>> actors;
 			for (int i = 0; i < self->lockActorCount; i++) {
-				actors.push_back(self->lockActor(cx, self));
+				actors.push_back(self->lockActor(cx, self, rangeLockOwnerNamePrefix));
 			}
 			wait(waitForAll(actors));
+
+			// Make sure all ranges locked by the workload client are unlocked
+			state int j = 0;
+			for (; j < self->lockActorCount; j++) {
+				std::vector<std::pair<KeyRange, RangeLockState>> res = wait(
+				    findExclusiveReadLockOnRange(cx, normalKeys, rangeLockOwnerNamePrefix + "-" + std::to_string(j)));
+				ASSERT(res.empty());
+			}
+
+			TraceEvent("RandomRangeLockWorkloadEnd").detail("OwnerPrefix", rangeLockOwnerNamePrefix);
 		}
 		return Void();
 	}

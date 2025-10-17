@@ -24,9 +24,11 @@ import (
 	"context"
 	"io"
 	"os"
+	"os/signal"
 	"path"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 
@@ -187,8 +189,10 @@ func main() {
 				os.Exit(1)
 			}
 		}
+		done := make(chan os.Signal, 1)
+		signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 		logger.Info("Waiting for process to be terminated")
-		done := make(chan bool)
+		// Will block here until a signal is received, e.g. when the container/pod is shutdown
 		<-done
 	default:
 		logger.Error(nil, "Unknown execution mode", "mode", mode)

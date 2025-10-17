@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/CoordinationInterface.h"
@@ -140,81 +139,6 @@ ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<Pro
 	});
 }
 
-ThreadFuture<Key> ThreadSafeDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
-	DatabaseContext* db = this->db;
-	KeyRange range = keyRange;
-	return onMainThread([db, range, purgeVersion, force]() -> Future<Key> {
-		db->checkDeferredError();
-		return db->purgeBlobGranules(range, purgeVersion, {}, force);
-	});
-}
-
-ThreadFuture<Void> ThreadSafeDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
-	DatabaseContext* db = this->db;
-	Key key = purgeKey;
-	return onMainThread([db, key]() -> Future<Void> {
-		db->checkDeferredError();
-		return db->waitPurgeGranulesComplete(key);
-	});
-}
-
-ThreadFuture<bool> ThreadSafeDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
-	DatabaseContext* db = this->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<bool> {
-		db->checkDeferredError();
-		return db->blobbifyRange(range);
-	});
-}
-
-ThreadFuture<bool> ThreadSafeDatabase::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
-	DatabaseContext* db = this->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<bool> {
-		db->checkDeferredError();
-		return db->blobbifyRangeBlocking(range);
-	});
-}
-
-ThreadFuture<bool> ThreadSafeDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
-	DatabaseContext* db = this->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<bool> {
-		db->checkDeferredError();
-		return db->unblobbifyRange(range);
-	});
-}
-
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeDatabase::listBlobbifiedRanges(const KeyRangeRef& keyRange,
-                                                                                          int rangeLimit) {
-	DatabaseContext* db = this->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
-		db->checkDeferredError();
-		return db->listBlobbifiedRanges(range, rangeLimit);
-	});
-}
-
-ThreadFuture<Version> ThreadSafeDatabase::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
-	DatabaseContext* db = this->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<Version> {
-		db->checkDeferredError();
-		return db->verifyBlobRange(range, version);
-	});
-}
-
-ThreadFuture<bool> ThreadSafeDatabase::flushBlobRange(const KeyRangeRef& keyRange,
-                                                      bool compact,
-                                                      Optional<Version> version) {
-	DatabaseContext* db = this->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<bool> {
-		db->checkDeferredError();
-		return db->flushBlobRange(range, compact, version);
-	});
-}
-
 ThreadSafeDatabase::ThreadSafeDatabase(ConnectionRecordType connectionRecordType,
                                        std::string connectionRecordString,
                                        int apiVersion) {
@@ -266,88 +190,6 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 ThreadFuture<int64_t> ThreadSafeTenant::getId() {
 	Tenant* tenant = this->tenant;
 	return onMainThread([tenant]() -> Future<int64_t> { return tenant->getIdFuture(); });
-}
-
-ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
-	DatabaseContext* db = this->db->db;
-	Tenant* tenantPtr = this->tenant;
-	KeyRange range = keyRange;
-	return onMainThread([db, range, purgeVersion, tenantPtr, force]() -> Future<Key> {
-		db->addref();
-		return db->purgeBlobGranules(range, purgeVersion, Reference<Tenant>::addRef(tenantPtr), force);
-	});
-}
-
-ThreadFuture<Void> ThreadSafeTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
-	DatabaseContext* db = this->db->db;
-	Key key = purgeKey;
-	return onMainThread([db, key]() -> Future<Void> {
-		db->checkDeferredError();
-		return db->waitPurgeGranulesComplete(key);
-	});
-}
-
-ThreadFuture<bool> ThreadSafeTenant::blobbifyRange(const KeyRangeRef& keyRange) {
-	DatabaseContext* db = this->db->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<bool> {
-		db->checkDeferredError();
-		db->addref();
-		return db->blobbifyRange(range, Reference<Tenant>::addRef(tenant));
-	});
-}
-
-ThreadFuture<bool> ThreadSafeTenant::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
-	DatabaseContext* db = this->db->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<bool> {
-		db->checkDeferredError();
-		db->addref();
-		return db->blobbifyRangeBlocking(range, Reference<Tenant>::addRef(tenant));
-	});
-}
-
-ThreadFuture<bool> ThreadSafeTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
-	DatabaseContext* db = this->db->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<bool> {
-		db->checkDeferredError();
-		db->addref();
-		return db->unblobbifyRange(range, Reference<Tenant>::addRef(tenant));
-	});
-}
-
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTenant::listBlobbifiedRanges(const KeyRangeRef& keyRange,
-                                                                                        int rangeLimit) {
-	DatabaseContext* db = this->db->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
-		db->checkDeferredError();
-		db->addref();
-		return db->listBlobbifiedRanges(range, rangeLimit, Reference<Tenant>::addRef(tenant));
-	});
-}
-
-ThreadFuture<Version> ThreadSafeTenant::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
-	DatabaseContext* db = this->db->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<Version> {
-		db->checkDeferredError();
-		db->addref();
-		return db->verifyBlobRange(range, version, Reference<Tenant>::addRef(tenant));
-	});
-}
-
-ThreadFuture<bool> ThreadSafeTenant::flushBlobRange(const KeyRangeRef& keyRange,
-                                                    bool compact,
-                                                    Optional<Version> version) {
-	DatabaseContext* db = this->db->db;
-	KeyRange range = keyRange;
-	return onMainThread([=]() -> Future<bool> {
-		db->checkDeferredError();
-		db->addref();
-		return db->flushBlobRange(range, compact, version, Reference<Tenant>::addRef(tenant));
-	});
 }
 
 ThreadSafeTenant::~ThreadSafeTenant() {
@@ -518,71 +360,6 @@ ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddre
 	return onMainThread([tr, k]() -> Future<Standalone<VectorRef<const char*>>> {
 		tr->checkDeferredError();
 		return tr->getAddressesForKey(k);
-	});
-}
-
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTransaction::getBlobGranuleRanges(
-    const KeyRangeRef& keyRange,
-    int rangeLimit) {
-	ISingleThreadTransaction* tr = this->tr;
-	KeyRange r = keyRange;
-
-	return onMainThread([=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
-		tr->checkDeferredError();
-		return tr->getBlobGranuleRanges(r, rangeLimit);
-	});
-}
-
-ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRangeRef& keyRange,
-                                                                  Version beginVersion,
-                                                                  Optional<Version> readVersion,
-                                                                  ReadBlobGranuleContext granule_context) {
-	// This should not be called directly, bypassMultiversionApi should not be set
-	return ThreadResult<RangeResult>(unsupported_operation());
-}
-
-ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> ThreadSafeTransaction::readBlobGranulesStart(
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Optional<Version> readVersion,
-    Version* readVersionOut) {
-	ISingleThreadTransaction* tr = this->tr;
-	KeyRange r = keyRange;
-
-	return onMainThread(
-	    [tr, r, beginVersion, readVersion, readVersionOut]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
-		    tr->checkDeferredError();
-		    return tr->readBlobGranules(r, beginVersion, readVersion, readVersionOut);
-	    });
-}
-
-ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
-    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Version readVersion,
-    ReadBlobGranuleContext granuleContext) {
-	// do this work off of fdb network threads for performance!
-	Standalone<VectorRef<BlobGranuleChunkRef>> files = startFuture.get();
-	GranuleMaterializeStats stats;
-	auto ret = loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext, stats);
-	if (!ret.isError()) {
-		ISingleThreadTransaction* tr = this->tr;
-		onMainThreadVoid([tr, stats]() { tr->addGranuleMaterializeStats(stats); });
-	}
-	return ret;
-}
-
-ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> ThreadSafeTransaction::summarizeBlobGranules(
-    const KeyRangeRef& keyRange,
-    Optional<Version> summaryVersion,
-    int rangeLimit) {
-	ISingleThreadTransaction* tr = this->tr;
-	KeyRange r = keyRange;
-
-	return onMainThread([=]() -> Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> {
-		tr->checkDeferredError();
-		return tr->summarizeBlobGranules(r, summaryVersion, rangeLimit);
 	});
 }
 

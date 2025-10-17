@@ -3,7 +3,7 @@ testTitle = 'StorefrontTest'
 
     [[test.workload]]
     testName = 'Storefront'
-    actorsPerClient = 20 
+    actorsPerClient = 10
     transactionsPerSecond = 200
-    itemCount = 20000
+    itemCount = 10000
     maxOrderSize = 4

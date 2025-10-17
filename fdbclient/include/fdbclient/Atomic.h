@@ -301,7 +301,7 @@ inline void transformVersionstampKey(StringRef& key, Version version, uint16_t t
 }
 
 inline void transformVersionstampMutation(MutationRef& mutation,
-                                          StringRef MutationRef::*param,
+                                          StringRef MutationRef::* param,
                                           Version version,
                                           uint16_t transactionNumber) {
 	mutation.clearChecksumAndAccumulativeIndex();

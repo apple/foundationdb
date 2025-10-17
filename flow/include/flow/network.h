@@ -170,91 +170,93 @@ public:
 		enHistogram = 18,
 		enTokenCache = 19,
 		enMetrics = 20,
+		enGrpcState = 21,
+		enProxy = 22,
 		COUNT // Add new fields before this enumerator
 	};
 
 	virtual void longTaskCheck(const char* name) {}
 
-	virtual double now() const = 0;
 	// Provides a clock that advances at a similar rate on all connected endpoints
-	// FIXME: Return a fixed point Time class
+	virtual double now() const = 0;
 
-	virtual double timer() = 0;
 	// A wrapper for directly getting the system time. The time returned by now() only updates in the run loop,
 	// so it cannot be used to measure times of functions that do not have wait statements.
+	virtual double timer() = 0;
 
 	// Simulation version of timer_int for convenience, based on timer()
 	// Returns epoch nanoseconds
 	uint64_t timer_int() { return (uint64_t)(g_network->timer() * 1e9); }
 
-	virtual double timer_monotonic() = 0;
 	// Similar to timer, but monotonic
+	virtual double timer_monotonic() = 0;
 
 	virtual void _swiftEnqueue(void* task) = 0;
 
+	// Returns a future that will be set after seconds have elapsed
 	virtual Future<class Void> delay(double seconds, TaskPriority taskID) = 0;
-	// The given future will be set after seconds have elapsed
 
+	// Returns a future that will be set after seconds have
+	// elapsed. Delays with the same time and TaskPriority will be
+	// executed in the order they were issue.
 	virtual Future<class Void> orderedDelay(double seconds, TaskPriority taskID) = 0;
-	// The given future will be set after seconds have elapsed, delays with the same time and TaskPriority will be
-	// executed in the order they were issues
 
+	// Returns a future that will be set immediately or after higher-priority tasks have executed.
 	virtual Future<class Void> yield(TaskPriority taskID) = 0;
-	// The given future will be set immediately or after higher-priority tasks have executed
 
+	// Returns true if a call to yield would result in a delay.
 	virtual bool check_yield(TaskPriority taskID) = 0;
-	// Returns true if a call to yield would result in a delay
 
+	// Returns the taskID/priority of the current task.
 	virtual TaskPriority getCurrentTask() const = 0;
-	// Gets the taskID/priority of the current task
 
+	// Sets the taskID/priority of the current task, without yielding.
 	virtual void setCurrentTask(TaskPriority taskID) = 0;
-	// Sets the taskID/priority of the current task, without yielding
 
 	virtual flowGlobalType global(int id) const = 0;
 	virtual void setGlobal(size_t id, flowGlobalType v) = 0;
 
+	// Terminate the program.
 	virtual void stop() = 0;
-	// Terminate the program
 
-	virtual void addStopCallback(std::function<void()> fn) = 0;
-	// Calls `fn` when stop() is called.
+	// Arranges to call `fn` when stop() is called.
 	// addStopCallback can be called more than once, and each added `fn` will be run once.
+	virtual void addStopCallback(std::function<void()> fn) = 0;
 
+	// Returns true if this network is a local simulation.
 	virtual bool isSimulated() const = 0;
-	// Returns true if this network is a local simulation
 
+	// Returns true if the current thread is the main thread.
 	virtual bool isOnMainThread() const = 0;
-	// Returns true if the current thread is the main thread
 
-	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) = 0;
 	// Executes signal.send(Void()) on a/the thread belonging to this network in FIFO order
+	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) = 0;
 
+	// Starts a thread and returns a handle to it
 	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*),
 	                                  void* arg,
 	                                  int stackSize = 0,
 	                                  const char* name = nullptr) = 0;
-	// Starts a thread and returns a handle to it
 
-	virtual void run() = 0;
 	// Devotes this thread to running the network (generally until stop())
+	virtual void run() = 0;
 
-	virtual void initMetrics() {}
 	// Metrics must be initialized after FlowTransport::createInstance has been called
+	virtual void initMetrics() {}
 
 	// TLS must be initialized before using the network
 	enum ETLSInitState { NONE = 0, CONFIG = 1, CONNECT = 2, LISTEN = 3 };
 	virtual void initTLS(ETLSInitState targetState = CONFIG) {}
 
-	virtual const TLSConfig& getTLSConfig() const = 0;
 	// Return the TLS Configuration
+	virtual const TLSConfig& getTLSConfig() const = 0;
 
-	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) = 0;
 	// Gets the number of free and total bytes available on the disk which contains directory
+	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) = 0;
 
-	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const = 0;
 	// Returns true if it is reasonably certain that a connection to the given address would be a fast loopback
 	// connection
+	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const = 0;
 
 	// If the network has not been run and this function has not been previously called, returns true. Otherwise,
 	// returns false.

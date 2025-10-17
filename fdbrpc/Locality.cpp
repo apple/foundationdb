@@ -21,12 +21,12 @@
 #include "fdbrpc/Locality.h"
 
 const UID LocalityData::UNSET_ID = UID(0x0ccb4e0feddb5583, 0x010f6b77d9d10ece);
-const StringRef LocalityData::keyProcessId = "processid"_sr;
-const StringRef LocalityData::keyZoneId = "zoneid"_sr;
-const StringRef LocalityData::keyDcId = "dcid"_sr;
-const StringRef LocalityData::keyMachineId = "machineid"_sr;
-const StringRef LocalityData::keyDataHallId = "data_hall"_sr;
-const StringRef LocalityData::ExcludeLocalityPrefix = "locality_"_sr;
+alignas(8) const StringRef LocalityData::keyProcessId = "processid"_sr;
+alignas(8) const StringRef LocalityData::keyZoneId = "zoneid"_sr;
+alignas(8) const StringRef LocalityData::keyDcId = "dcid"_sr;
+alignas(8) const StringRef LocalityData::keyMachineId = "machineid"_sr;
+alignas(8) const StringRef LocalityData::keyDataHallId = "data_hall"_sr;
+alignas(8) const StringRef LocalityData::ExcludeLocalityPrefix = "locality_"_sr;
 
 ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const {
 	switch (role) {
@@ -37,14 +37,12 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::TransactionClass:
-			return ProcessClass::WorstFit;
 		case ProcessClass::LogClass:
 			return ProcessClass::WorstFit;
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
 		case ProcessClass::BlobWorkerClass:
-			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::NeverAssign;
 		}
@@ -184,15 +182,10 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::MasterClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::CommitProxyClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::GrvProxyClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::LogRouterClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
@@ -287,7 +280,6 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::MasterClass:
-			return ProcessClass::OkayFit;
 		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::OkayFit;
 		default:

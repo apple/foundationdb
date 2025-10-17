@@ -109,12 +109,6 @@ def run_tester(args, cluster, test_file):
     if args.retain_client_lib_copies:
         cmd += ["--retain-client-lib-copies"]
 
-    if cluster.blob_granules_enabled:
-        cmd += [
-            "--blob-granule-local-file-path",
-            str(cluster.data.joinpath("fdbblob")) + os.sep,
-        ]
-
     if cluster.tls_config is not None:
         cmd += [
             "--tls-ca-file",
@@ -163,7 +157,6 @@ class TestConfig:
         config = toml.load(test_file)
         server_config = config.get("server", [{}])[0]
         self.tenants_enabled = server_config.get("tenants_enabled", True)
-        self.blob_granules_enabled = server_config.get("blob_granules_enabled", False)
         self.enable_encryption_at_rest = server_config.get(
             "enable_encryption_at_rest", False
         )
@@ -191,7 +184,6 @@ def run_test(args, test_file):
         args.build_dir,
         config.num_processes,
         enable_tenants=config.tenants_enabled,
-        blob_granules_enabled=config.blob_granules_enabled,
         enable_encryption_at_rest=config.enable_encryption_at_rest,
         tls_config=tls_config,
     ) as cluster:

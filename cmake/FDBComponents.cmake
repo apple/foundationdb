@@ -149,6 +149,33 @@ else()
 endif()
 
 ################################################################################
+# Swift
+################################################################################
+
+option(BUILD_SWIFT_BINDING "build swift binding" ON)
+if(BUILD_SWIFT_BINDING AND NOT WITH_C_BINDING)
+  message(WARNING "Swift binding depends on C binding, but C binding is not enabled")
+endif()
+if(NOT BUILD_SWIFT_BINDING OR NOT BUILD_C_BINDING)
+  set(WITH_SWIFT_BINDING OFF)
+else()
+  if(NOT EXISTS "${CMAKE_SOURCE_DIR}/bindings/swift")
+    message(WARNING "Swift bindings directory not found at ${CMAKE_SOURCE_DIR}/bindings/swift, disabling Swift binding")
+    set(WITH_SWIFT_BINDING OFF)
+  else()
+    find_program(SWIFT_EXECUTABLE swift)
+    if(SWIFT_EXECUTABLE AND CMAKE_Swift_COMPILER)
+      set(WITH_SWIFT_BINDING ON)
+    else()
+      set(WITH_SWIFT_BINDING OFF)
+    endif()
+    if (USE_SANITIZER)
+      set(WITH_SWIFT_BINDING OFF)
+    endif()
+  endif()
+endif()
+
+################################################################################
 # Ruby
 ################################################################################
 
@@ -189,7 +216,7 @@ if(toml11_FOUND)
   add_library(toml11_target INTERFACE)
   target_link_libraries(toml11_target INTERFACE toml11::toml11)
 else()
-  include(ExternalProject)  
+  include(ExternalProject)
   ExternalProject_add(toml11Project
     URL "https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz"
     URL_HASH SHA256=bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d
@@ -233,6 +260,54 @@ endif()
 
 ################################################################################
 
+set(WITH_GRPC ON CACHE BOOL "Build FDB with gRPC support")
+
+if (WITH_GRPC)
+  # Setup search paths.
+  if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$" AND USE_LIBCXX)
+    list(APPEND CMAKE_PREFIX_PATH /opt/grpc_clang)
+    message(STATUS "Using Clang version of gRPC")
+  else ()
+    list(APPEND CMAKE_PREFIX_PATH /opt/grpc)
+    message(STATUS "Using g++ version of gRPC")
+  endif ()
+
+  # Find dependencies for gRPC.
+  find_program(PROTOC_EXECUTABLE protoc
+    HINTS ${CMAKE_PREFIX_PATH}
+    PATH_SUFFIXES bin 
+  )
+  if (PROTOC_EXECUTABLE)
+    execute_process(
+      COMMAND ${PROTOC_EXECUTABLE} --version
+      OUTPUT_VARIABLE PROTOC_VERSION
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    string(REGEX MATCH "([0-9]+\\.[0-9]+)+" PROTOC_VERSION ${PROTOC_VERSION})
+    message(STATUS "protoc version: ${PROTOC_COMPILER} ${PROTOC_VERSION}")
+
+    if (PROTOC_VERSION VERSION_LESS "29.0")
+      message(WARNING "protoc version ${PROTOC_VERSION} is too old. Required: 29.0+")
+      set(PROTOC_EXECUTABLE NOTFOUND)
+    endif()
+  else ()
+    message(WARNING "protoc executable not found")
+  endif()
+
+  find_package(absl CONFIG)
+  find_package(utf8_range CONFIG)
+  find_package(protobuf CONFIG)
+  find_package(gRPC CONFIG)
+
+  if (PROTOC_EXECUTABLE AND gRPC_FOUND)
+    message(STATUS "gRPC found. Enabling gRPC for Flow.")
+    add_compile_definitions(FLOW_GRPC_ENABLED)
+  else()
+    message(WARNING "gRPC can't be enabled because of missing dependencies")
+    set(WITH_GRPC OFF)
+  endif()
+endif()
+
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)
 
@@ -245,6 +320,7 @@ function(print_components)
   message(STATUS "Build Python Bindings:                ${WITH_PYTHON_BINDING}")
   message(STATUS "Build Java Bindings:                  ${WITH_JAVA_BINDING}")
   message(STATUS "Build Go bindings:                    ${WITH_GO_BINDING}")
+  message(STATUS "Build Swift bindings:                 ${WITH_SWIFT_BINDING}")
   message(STATUS "Build Ruby bindings:                  ${WITH_RUBY_BINDING}")
   message(STATUS "Build Swift (depends on Swift):       ${WITH_SWIFT}")
   message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
@@ -252,6 +328,7 @@ function(print_components)
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
   message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB}")
   message(STATUS "Build with AWS SDK:                   ${WITH_AWS_BACKUP}")
+  message(STATUS "Build with gRPC:                      ${WITH_GRPC}")
   message(STATUS "=========================================")
 endfunction()
 

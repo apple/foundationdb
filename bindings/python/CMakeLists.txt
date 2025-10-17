@@ -83,7 +83,7 @@ set(package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${not_f
 add_custom_command(OUTPUT ${package_file}
   COMMAND $<TARGET_FILE:Python3::Interpreter> -m ensurepip
   COMMAND $<TARGET_FILE:Python3::Interpreter> -m pip install --upgrade build
-  COMMAND $<TARGET_FILE:Python3::Interpreter> -m build &&
+  COMMAND $<TARGET_FILE:Python3::Interpreter> -m build --sdist &&
           ${CMAKE_COMMAND} -E copy dist/${setup_file_name} ${package_file}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   COMMENT "Create Python package")

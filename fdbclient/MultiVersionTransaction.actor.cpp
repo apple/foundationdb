@@ -270,114 +270,6 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(c
 	});
 }
 
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTransaction::getBlobGranuleRanges(const KeyRangeRef& keyRange,
-                                                                                     int rangeLimit) {
-	if (!api->transactionGetBlobGranuleRanges) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->transactionGetBlobGranuleRanges(
-	    tr, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), rangeLimit);
-	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyRange* keyRanges;
-		int keyRangesLength;
-		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
-		ASSERT(!error);
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
-		                                          Arena());
-	});
-}
-
-ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& keyRange,
-                                                          Version beginVersion,
-                                                          Optional<Version> readVersion,
-                                                          ReadBlobGranuleContext granuleContext) {
-	return unsupported_operation();
-}
-
-ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> DLTransaction::readBlobGranulesStart(
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Optional<Version> readVersion,
-    Version* readVersionOut) {
-	if (!api->transactionReadBlobGranulesStart) {
-		return unsupported_operation();
-	}
-
-	int64_t rv = readVersion.present() ? readVersion.get() : latestVersion;
-
-	FdbCApi::FDBFuture* f = api->transactionReadBlobGranulesStart(tr,
-	                                                              keyRange.begin.begin(),
-	                                                              keyRange.begin.size(),
-	                                                              keyRange.end.begin(),
-	                                                              keyRange.end.size(),
-	                                                              beginVersion,
-	                                                              rv,
-	                                                              readVersionOut);
-
-	return ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>>(
-	    (ThreadSingleAssignmentVar<Standalone<VectorRef<BlobGranuleChunkRef>>>*)(f));
-};
-
-ThreadResult<RangeResult> DLTransaction::readBlobGranulesFinish(
-    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Version readVersion,
-    ReadBlobGranuleContext granuleContext) {
-	if (!api->transactionReadBlobGranulesFinish) {
-		return unsupported_operation();
-	}
-
-	// convert back to fdb future for API
-	FdbCApi::FDBFuture* f = (FdbCApi::FDBFuture*)(startFuture.extractPtr());
-
-	// FIXME: better way to convert here?
-	FdbCApi::FDBReadBlobGranuleContext context;
-	context.userContext = granuleContext.userContext;
-	context.start_load_f = granuleContext.start_load_f;
-	context.get_load_f = granuleContext.get_load_f;
-	context.free_load_f = granuleContext.free_load_f;
-	context.debugNoMaterialize = granuleContext.debugNoMaterialize;
-	context.granuleParallelism = granuleContext.granuleParallelism;
-
-	FdbCApi::FDBResult* r = api->transactionReadBlobGranulesFinish(tr,
-	                                                               f,
-	                                                               keyRange.begin.begin(),
-	                                                               keyRange.begin.size(),
-	                                                               keyRange.end.begin(),
-	                                                               keyRange.end.size(),
-	                                                               beginVersion,
-	                                                               readVersion,
-	                                                               &context);
-
-	return ThreadResult<RangeResult>((ThreadSingleAssignmentVar<RangeResult>*)(r));
-};
-
-ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>
-DLTransaction::summarizeBlobGranules(const KeyRangeRef& keyRange, Optional<Version> summaryVersion, int rangeLimit) {
-	if (!api->transactionSummarizeBlobGranules) {
-		return unsupported_operation();
-	}
-
-	int64_t sv = summaryVersion.present() ? summaryVersion.get() : latestVersion;
-
-	FdbCApi::FDBFuture* f = api->transactionSummarizeBlobGranules(
-	    tr, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), sv, rangeLimit);
-
-	return toThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>(
-	    api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		    const FdbCApi::FDBGranuleSummary* summaries;
-		    int summariesLength;
-		    FdbCApi::fdb_error_t error = api->futureGetGranuleSummaryArray(f, &summaries, &summariesLength);
-		    ASSERT(!error);
-		    // The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		    return Standalone<VectorRef<BlobGranuleSummaryRef>>(
-		        VectorRef<BlobGranuleSummaryRef>((BlobGranuleSummaryRef*)summaries, summariesLength), Arena());
-	    });
-}
-
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	throwIfError(api->transactionAddConflictRange(
 	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ));
@@ -522,142 +414,6 @@ ThreadFuture<int64_t> DLTenant::getId() {
 	});
 }
 
-ThreadFuture<Key> DLTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
-	if (!api->tenantPurgeBlobGranules) {
-		return unsupported_operation();
-	}
-	FdbCApi::FDBFuture* f = api->tenantPurgeBlobGranules(tenant,
-	                                                     keyRange.begin.begin(),
-	                                                     keyRange.begin.size(),
-	                                                     keyRange.end.begin(),
-	                                                     keyRange.end.size(),
-	                                                     purgeVersion,
-	                                                     force);
-
-	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const uint8_t* key;
-		int keyLength;
-		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
-		ASSERT(!error);
-
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Key(KeyRef(key, keyLength), Arena());
-	});
-}
-
-ThreadFuture<Void> DLTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
-	if (!api->tenantWaitPurgeGranulesComplete) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->tenantWaitPurgeGranulesComplete(tenant, purgeKey.begin(), purgeKey.size());
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
-}
-
-ThreadFuture<bool> DLTenant::blobbifyRange(const KeyRangeRef& keyRange) {
-	if (!api->tenantBlobbifyRange) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->tenantBlobbifyRange(
-	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
-
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		FdbCApi::fdb_bool_t ret = false;
-		ASSERT(!api->futureGetBool(f, &ret));
-		return ret;
-	});
-}
-
-ThreadFuture<bool> DLTenant::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
-	if (!api->tenantBlobbifyRangeBlocking) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->tenantBlobbifyRangeBlocking(
-	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
-
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		FdbCApi::fdb_bool_t ret = false;
-		ASSERT(!api->futureGetBool(f, &ret));
-		return ret;
-	});
-}
-
-ThreadFuture<bool> DLTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
-	if (!api->tenantUnblobbifyRange) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->tenantUnblobbifyRange(
-	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
-
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		FdbCApi::fdb_bool_t ret = false;
-		ASSERT(!api->futureGetBool(f, &ret));
-		return ret;
-	});
-}
-
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTenant::listBlobbifiedRanges(const KeyRangeRef& keyRange,
-                                                                                int rangeLimit) {
-	if (!api->tenantListBlobbifiedRanges) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->tenantListBlobbifiedRanges(
-	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), rangeLimit);
-
-	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyRange* keyRanges;
-		int keyRangesLength;
-		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
-		ASSERT(!error);
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed.
-		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
-		                                          Arena());
-	});
-}
-
-ThreadFuture<Version> DLTenant::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
-	if (!api->tenantVerifyBlobRange) {
-		return unsupported_operation();
-	}
-
-	Version readVersion = version.present() ? version.get() : latestVersion;
-
-	FdbCApi::FDBFuture* f = api->tenantVerifyBlobRange(
-	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), readVersion);
-
-	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		Version version = invalidVersion;
-		ASSERT(!api->futureGetInt64(f, &version));
-		return version;
-	});
-}
-
-ThreadFuture<bool> DLTenant::flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) {
-	if (!api->tenantFlushBlobRange) {
-		return unsupported_operation();
-	}
-
-	Version readVersion = version.present() ? version.get() : latestVersion;
-
-	FdbCApi::FDBFuture* f = api->tenantFlushBlobRange(tenant,
-	                                                  keyRange.begin.begin(),
-	                                                  keyRange.begin.size(),
-	                                                  keyRange.end.begin(),
-	                                                  keyRange.end.size(),
-	                                                  compact,
-	                                                  readVersion);
-
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		FdbCApi::fdb_bool_t ret = false;
-		ASSERT(!api->futureGetBool(f, &ret));
-		return ret;
-	});
-}
-
 // DLDatabase
 DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
 	addref();
@@ -778,142 +534,6 @@ ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVer
 	});
 }
 
-ThreadFuture<Key> DLDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
-	if (!api->databasePurgeBlobGranules) {
-		return unsupported_operation();
-	}
-	FdbCApi::FDBFuture* f = api->databasePurgeBlobGranules(db,
-	                                                       keyRange.begin.begin(),
-	                                                       keyRange.begin.size(),
-	                                                       keyRange.end.begin(),
-	                                                       keyRange.end.size(),
-	                                                       purgeVersion,
-	                                                       force);
-
-	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const uint8_t* key;
-		int keyLength;
-		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
-		ASSERT(!error);
-
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Key(KeyRef(key, keyLength), Arena());
-	});
-}
-
-ThreadFuture<Void> DLDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
-	if (!api->databaseWaitPurgeGranulesComplete) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->databaseWaitPurgeGranulesComplete(db, purgeKey.begin(), purgeKey.size());
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
-}
-
-ThreadFuture<bool> DLDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
-	if (!api->databaseBlobbifyRange) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->databaseBlobbifyRange(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
-
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		FdbCApi::fdb_bool_t ret = false;
-		ASSERT(!api->futureGetBool(f, &ret));
-		return ret;
-	});
-}
-
-ThreadFuture<bool> DLDatabase::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
-	if (!api->databaseBlobbifyRangeBlocking) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->databaseBlobbifyRangeBlocking(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
-
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		FdbCApi::fdb_bool_t ret = false;
-		ASSERT(!api->futureGetBool(f, &ret));
-		return ret;
-	});
-}
-
-ThreadFuture<bool> DLDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
-	if (!api->databaseUnblobbifyRange) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->databaseUnblobbifyRange(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
-
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		FdbCApi::fdb_bool_t ret = false;
-		ASSERT(!api->futureGetBool(f, &ret));
-		return ret;
-	});
-}
-
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLDatabase::listBlobbifiedRanges(const KeyRangeRef& keyRange,
-                                                                                  int rangeLimit) {
-	if (!api->databaseListBlobbifiedRanges) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->databaseListBlobbifiedRanges(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), rangeLimit);
-
-	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyRange* keyRanges;
-		int keyRangesLength;
-		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
-		ASSERT(!error);
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed.
-		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
-		                                          Arena());
-	});
-}
-
-ThreadFuture<Version> DLDatabase::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
-	if (!api->databaseVerifyBlobRange) {
-		return unsupported_operation();
-	}
-
-	Version readVersion = version.present() ? version.get() : latestVersion;
-
-	FdbCApi::FDBFuture* f = api->databaseVerifyBlobRange(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), readVersion);
-
-	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		Version version = invalidVersion;
-		ASSERT(!api->futureGetInt64(f, &version));
-		return version;
-	});
-}
-
-ThreadFuture<bool> DLDatabase::flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) {
-	if (!api->databaseFlushBlobRange) {
-		return unsupported_operation();
-	}
-
-	Version readVersion = version.present() ? version.get() : latestVersion;
-
-	FdbCApi::FDBFuture* f = api->databaseFlushBlobRange(db,
-	                                                    keyRange.begin.begin(),
-	                                                    keyRange.begin.size(),
-	                                                    keyRange.end.begin(),
-	                                                    keyRange.end.size(),
-	                                                    compact,
-	                                                    readVersion);
-
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		FdbCApi::fdb_bool_t ret = false;
-		ASSERT(!api->futureGetBool(f, &ret));
-		return ret;
-	});
-}
-
 ThreadFuture<Standalone<StringRef>> DLDatabase::getClientStatus() {
 	if (!api->databaseGetClientStatus) {
 		return unsupported_operation();
@@ -1013,43 +633,6 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
-	loadClientFunction(
-	    &api->databasePurgeBlobGranules, lib, fdbCPath, "fdb_database_purge_blob_granules", headerVersion >= 710);
-	loadClientFunction(&api->databaseWaitPurgeGranulesComplete,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_database_wait_purge_granules_complete",
-	                   headerVersion >= 710);
-	loadClientFunction(&api->databaseBlobbifyRange,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_database_blobbify_range",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-	loadClientFunction(&api->databaseBlobbifyRangeBlocking,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_database_blobbify_range_blocking",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
-	loadClientFunction(&api->databaseUnblobbifyRange,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_database_unblobbify_range",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-	loadClientFunction(&api->databaseListBlobbifiedRanges,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_database_list_blobbified_ranges",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-	loadClientFunction(&api->databaseVerifyBlobRange,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_database_verify_blob_range",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-	loadClientFunction(&api->databaseFlushBlobRange,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_database_flush_blob_range",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
 	loadClientFunction(&api->databaseGetClientStatus,
 	                   lib,
 	                   fdbCPath,
@@ -1057,46 +640,6 @@ void DLApi::init() {
 	                   headerVersion >= ApiVersion::withGetClientStatus().version());
 	loadClientFunction(
 	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
-	loadClientFunction(&api->tenantPurgeBlobGranules,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_tenant_purge_blob_granules",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
-	loadClientFunction(&api->tenantWaitPurgeGranulesComplete,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_tenant_wait_purge_granules_complete",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
-	loadClientFunction(&api->tenantBlobbifyRange,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_tenant_blobbify_range",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
-	loadClientFunction(&api->tenantBlobbifyRangeBlocking,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_tenant_blobbify_range_blocking",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
-	loadClientFunction(&api->tenantUnblobbifyRange,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_tenant_unblobbify_range",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
-	loadClientFunction(&api->tenantListBlobbifiedRanges,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_tenant_list_blobbified_ranges",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
-	loadClientFunction(&api->tenantVerifyBlobRange,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_tenant_verify_blob_range",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
-	loadClientFunction(&api->tenantFlushBlobRange,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_tenant_flush_blob_range",
-	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
 	loadClientFunction(&api->tenantGetId,
 	                   lib,
 	                   fdbCPath,
@@ -1164,28 +707,6 @@ void DLApi::init() {
 	                   "fdb_transaction_get_range_split_points",
 	                   headerVersion >= 700);
 
-	loadClientFunction(&api->transactionGetBlobGranuleRanges,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_get_blob_granule_ranges",
-	                   headerVersion >= 710);
-	loadClientFunction(
-	    &api->transactionReadBlobGranules, lib, fdbCPath, "fdb_transaction_read_blob_granules", headerVersion >= 710);
-	loadClientFunction(&api->transactionReadBlobGranulesStart,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_read_blob_granules_start",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-	loadClientFunction(&api->transactionReadBlobGranulesFinish,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_read_blob_granules_finish",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-	loadClientFunction(&api->transactionSummarizeBlobGranules,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_summarize_blob_granules",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->futureGetDouble,
 	                   lib,
 	                   fdbCPath,
@@ -1213,11 +734,6 @@ void DLApi::init() {
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
 	loadClientFunction(
 	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 710);
-	loadClientFunction(&api->futureGetGranuleSummaryArray,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_future_get_granule_summary_array",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
@@ -1563,68 +1079,6 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionTransaction::getRangeSpl
 	return executeOperation(&ITransaction::getRangeSplitPoints, range, std::forward<int64_t>(chunkSize));
 }
 
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTransaction::getBlobGranuleRanges(
-    const KeyRangeRef& keyRange,
-    int rangeLimit) {
-	return executeOperation(&ITransaction::getBlobGranuleRanges, keyRange, std::forward<int>(rangeLimit));
-}
-
-ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRangeRef& keyRange,
-                                                                    Version beginVersion,
-                                                                    Optional<Version> readVersion,
-                                                                    ReadBlobGranuleContext granuleContext) {
-	// FIXME: prevent from calling this from another main thread?
-	auto tr = getTransaction();
-	if (tr.transaction) {
-		Version readVersionOut;
-		auto f = tr.transaction->readBlobGranulesStart(keyRange, beginVersion, readVersion, &readVersionOut);
-		auto abortableF = abortableFuture(f, tr.onChange);
-		abortableF.blockUntilReadyCheckOnMainThread();
-		if (abortableF.isError()) {
-			return ThreadResult<RangeResult>(abortableF.getError());
-		}
-		if (granuleContext.debugNoMaterialize) {
-			return ThreadResult<RangeResult>(blob_granule_not_materialized());
-		}
-		return tr.transaction->readBlobGranulesFinish(
-		    abortableF, keyRange, beginVersion, readVersionOut, granuleContext);
-	} else {
-		return abortableTimeoutResult<RangeResult>(tr.onChange);
-	}
-}
-
-ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> MultiVersionTransaction::readBlobGranulesStart(
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Optional<Version> readVersion,
-    Version* readVersionOut) {
-	return executeOperation(&ITransaction::readBlobGranulesStart,
-	                        keyRange,
-	                        std::forward<Version>(beginVersion),
-	                        std::forward<Optional<Version>>(readVersion),
-	                        std::forward<Version*>(readVersionOut));
-}
-
-ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranulesFinish(
-    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Version readVersion,
-    ReadBlobGranuleContext granuleContext) {
-	// can't call this directly
-	return ThreadResult<RangeResult>(unsupported_operation());
-}
-
-ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> MultiVersionTransaction::summarizeBlobGranules(
-    const KeyRangeRef& keyRange,
-    Optional<Version> summaryVersion,
-    int rangeLimit) {
-	return executeOperation(&ITransaction::summarizeBlobGranules,
-	                        keyRange,
-	                        std::forward<Optional<Version>>(summaryVersion),
-	                        std::forward<int>(rangeLimit));
-}
-
 void MultiVersionTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
 	auto tr = getTransaction();
 	if (tr.transaction) {
@@ -1966,43 +1420,6 @@ ThreadFuture<int64_t> MultiVersionTenant::getId() {
 	return executeOperation(&ITenant::getId);
 }
 
-ThreadFuture<Key> MultiVersionTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
-	return executeOperation(
-	    &ITenant::purgeBlobGranules, keyRange, std::forward<Version>(purgeVersion), std::forward<bool>(force));
-}
-
-ThreadFuture<Void> MultiVersionTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
-	return executeOperation(&ITenant::waitPurgeGranulesComplete, purgeKey);
-}
-
-ThreadFuture<bool> MultiVersionTenant::blobbifyRange(const KeyRangeRef& keyRange) {
-	return executeOperation(&ITenant::blobbifyRange, keyRange);
-}
-
-ThreadFuture<bool> MultiVersionTenant::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
-	return executeOperation(&ITenant::blobbifyRangeBlocking, keyRange);
-}
-
-ThreadFuture<bool> MultiVersionTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
-	return executeOperation(&ITenant::unblobbifyRange, keyRange);
-}
-
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTenant::listBlobbifiedRanges(const KeyRangeRef& keyRange,
-                                                                                          int rangeLimit) {
-	return executeOperation(&ITenant::listBlobbifiedRanges, keyRange, std::forward<int>(rangeLimit));
-}
-
-ThreadFuture<Version> MultiVersionTenant::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
-	return executeOperation(&ITenant::verifyBlobRange, keyRange, std::forward<Optional<Version>>(version));
-}
-
-ThreadFuture<bool> MultiVersionTenant::flushBlobRange(const KeyRangeRef& keyRange,
-                                                      bool compact,
-                                                      Optional<Version> version) {
-	return executeOperation(
-	    &ITenant::flushBlobRange, keyRange, std::forward<bool>(compact), std::forward<Optional<Version>>(version));
-}
-
 MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db, TenantNameRef tenantName)
   : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db),
     closed(false) {
@@ -2078,22 +1495,6 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 					// but we may not see trace logs from this client until a successful connection
 					// is established.
 					TraceEvent(SevWarnAlways, "FailedToInitializeExternalClient")
-					    .error(e)
-					    .detail("LibraryPath", client->libPath)
-					    .detail("ConnectionRecord", connectionRecord);
-				}
-			}
-		});
-
-		// For clients older than 6.2 we create and maintain our database connection
-		api->runOnExternalClients(threadIdx, [this, &connectionRecord](Reference<ClientInfo> client) {
-			if (!client->protocolVersion.hasCloseUnusedConnection()) {
-				try {
-					dbState->legacyDatabaseConnections[client->protocolVersion] =
-					    connectionRecord.createDatabase(client->api);
-				} catch (Error& e) {
-					// This connection is discarded
-					TraceEvent(SevWarnAlways, "FailedToCreateLegacyDatabaseConnection")
 					    .error(e)
 					    .detail("LibraryPath", client->libPath)
 					    .detail("ConnectionRecord", connectionRecord);
@@ -2211,45 +1612,6 @@ double MultiVersionDatabase::getMainThreadBusyness() {
 	return localClientBusyness;
 }
 
-ThreadFuture<Key> MultiVersionDatabase::purgeBlobGranules(const KeyRangeRef& keyRange,
-                                                          Version purgeVersion,
-                                                          bool force) {
-	return executeOperation(
-	    &IDatabase::purgeBlobGranules, keyRange, std::forward<Version>(purgeVersion), std::forward<bool>(force));
-}
-
-ThreadFuture<Void> MultiVersionDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
-	return executeOperation(&IDatabase::waitPurgeGranulesComplete, purgeKey);
-}
-
-ThreadFuture<bool> MultiVersionDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
-	return executeOperation(&IDatabase::blobbifyRange, keyRange);
-}
-
-ThreadFuture<bool> MultiVersionDatabase::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
-	return executeOperation(&IDatabase::blobbifyRangeBlocking, keyRange);
-}
-
-ThreadFuture<bool> MultiVersionDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
-	return executeOperation(&IDatabase::unblobbifyRange, keyRange);
-}
-
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionDatabase::listBlobbifiedRanges(const KeyRangeRef& keyRange,
-                                                                                            int rangeLimit) {
-	return executeOperation(&IDatabase::listBlobbifiedRanges, keyRange, std::forward<int>(rangeLimit));
-}
-
-ThreadFuture<Version> MultiVersionDatabase::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
-	return executeOperation(&IDatabase::verifyBlobRange, keyRange, std::forward<Optional<Version>>(version));
-}
-
-ThreadFuture<bool> MultiVersionDatabase::flushBlobRange(const KeyRangeRef& keyRange,
-                                                        bool compact,
-                                                        Optional<Version> version) {
-	return executeOperation(
-	    &IDatabase::flushBlobRange, keyRange, std::forward<bool>(compact), std::forward<Optional<Version>>(version));
-}
-
 // Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is given, the future won't return until the protocol version is different than expected
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
@@ -2327,21 +1689,11 @@ void MultiVersionDatabase::DatabaseState::addClient(Reference<ClientInfo> client
 
 		MultiVersionApi::api->updateSupportedVersions();
 	}
-
-	if (!client->protocolVersion.hasInexpensiveMultiVersionClient() && !client->failed) {
-		TraceEvent("AddingLegacyVersionMonitor")
-		    .detail("LibPath", client->libPath)
-		    .detail("ProtocolVersion", client->protocolVersion);
-
-		legacyVersionMonitors.emplace_back(new LegacyVersionMonitor(client));
-	}
 }
 
 // Watch the cluster protocol version for changes and update the database state when it does.
 // Must be called from the main thread
 ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion() {
-	startLegacyVersionMonitors();
-
 	Optional<ProtocolVersion> expected = dbProtocolVersion;
 	ThreadFuture<ProtocolVersion> f = versionMonitorDb->getServerProtocol(dbProtocolVersion);
 
@@ -2530,22 +1882,7 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 	protocolVersionMonitor = monitorProtocolVersion();
 }
 
-// Starts version monitors for old client versions that don't support connect packet monitoring (<= 5.0).
-// Must be called from the main thread
-void MultiVersionDatabase::DatabaseState::startLegacyVersionMonitors() {
-	for (auto itr = legacyVersionMonitors.begin(); itr != legacyVersionMonitors.end(); ++itr) {
-		while (itr != legacyVersionMonitors.end() && (*itr)->client->failed) {
-			(*itr)->close();
-			itr = legacyVersionMonitors.erase(itr);
-		}
-		if (itr != legacyVersionMonitors.end() &&
-		    (!dbProtocolVersion.present() || (*itr)->client->protocolVersion != dbProtocolVersion.get())) {
-			(*itr)->startConnectionMonitor(Reference<DatabaseState>::addRef(this));
-		}
-	}
-}
-
-// Cleans up state for the legacy version monitors to break reference cycles
+// Cleans up state for the version monitors to break reference cycles
 void MultiVersionDatabase::DatabaseState::close() {
 	Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
 	onMainThreadVoid([self]() {
@@ -2553,11 +1890,6 @@ void MultiVersionDatabase::DatabaseState::close() {
 		if (self->protocolVersionMonitor.isValid()) {
 			self->protocolVersionMonitor.cancel();
 		}
-		for (auto monitor : self->legacyVersionMonitors) {
-			monitor->close();
-		}
-
-		self->legacyVersionMonitors.clear();
 	});
 }
 
@@ -2645,67 +1977,6 @@ Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
 	}
 	statusObj["Healthy"] = initializationState == InitializationState::CREATED && dbContextHealthy;
 	return StringRef(json_spirit::write_string(json_spirit::mValue(statusObj)));
-}
-
-// Starts the connection monitor by creating a database object at an old version.
-// Must be called from the main thread
-void MultiVersionDatabase::LegacyVersionMonitor::startConnectionMonitor(
-    Reference<MultiVersionDatabase::DatabaseState> dbState) {
-	if (!monitorRunning) {
-		monitorRunning = true;
-
-		auto itr = dbState->legacyDatabaseConnections.find(client->protocolVersion);
-		ASSERT(itr != dbState->legacyDatabaseConnections.end());
-
-		db = itr->second;
-		tr = Reference<ITransaction>();
-
-		TraceEvent("StartingLegacyVersionMonitor").detail("ProtocolVersion", client->protocolVersion);
-		Reference<LegacyVersionMonitor> self = Reference<LegacyVersionMonitor>::addRef(this);
-		versionMonitor =
-		    mapThreadFuture<Void, Void>(db.castTo<DLDatabase>()->onReady(), [self, dbState](ErrorOr<Void> ready) {
-			    onMainThreadVoid([self, ready, dbState]() {
-				    if (ready.isError()) {
-					    if (ready.getError().code() != error_code_operation_cancelled) {
-						    TraceEvent(SevError, "FailedToOpenDatabaseOnClient")
-						        .error(ready.getError())
-						        .detail("LibPath", self->client->libPath);
-
-						    self->client->failed = true;
-						    MultiVersionApi::api->updateSupportedVersions();
-					    }
-				    } else {
-					    self->runGrvProbe(dbState);
-				    }
-			    });
-
-			    return ready;
-		    });
-	}
-}
-
-// Runs a GRV probe on the cluster to determine if the client version is compatible with the cluster.
-// Must be called from main thread
-void MultiVersionDatabase::LegacyVersionMonitor::runGrvProbe(Reference<MultiVersionDatabase::DatabaseState> dbState) {
-	tr = db->createTransaction();
-	Reference<LegacyVersionMonitor> self = Reference<LegacyVersionMonitor>::addRef(this);
-	versionMonitor = mapThreadFuture<Version, Void>(tr->getReadVersion(), [self, dbState](ErrorOr<Version> v) {
-		// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
-		if (!v.isError() || v.getError().code() != error_code_operation_cancelled) {
-			onMainThreadVoid([self, dbState]() {
-				self->monitorRunning = false;
-				dbState->protocolVersionChanged(self->client->protocolVersion);
-			});
-		}
-
-		return v.map([](Version v) { return Void(); });
-	});
-}
-
-void MultiVersionDatabase::LegacyVersionMonitor::close() {
-	if (versionMonitor.isValid()) {
-		versionMonitor.cancel();
-	}
 }
 
 // MultiVersionApi

@@ -366,7 +366,7 @@ private:
 			ThreadReturnPromise<RangeResult> result;
 		};
 
-		explicit Reader(DB& db, CF& cf, const UID& logId);
+		explicit Reader(DB& db, CF& cf, std::vector<rocksdb::ColumnFamilyHandle*>& handles, const UID& logId);
 		~Reader() override {}
 
 		void init() override {}
@@ -385,7 +385,7 @@ private:
 
 		DB& db;
 		CF& cf;
-		std::vector<rocksdb::ColumnFamilyHandle*> handles;
+		std::vector<rocksdb::ColumnFamilyHandle*>& handles;
 		double readRangeTimeout;
 		const UID logId;
 	};
@@ -396,6 +396,7 @@ private:
 
 	DB db = nullptr;
 	CF cf = nullptr;
+	std::vector<rocksdb::ColumnFamilyHandle*> handles;
 	std::string path;
 	const UID logId;
 	Version version;
@@ -419,7 +420,7 @@ RocksDBColumnFamilyReader::RocksDBColumnFamilyReader(const CheckpointMetaData& c
 		threads = createGenericThreadPool();
 	}
 	for (int i = 0; i < SERVER_KNOBS->ROCKSDB_CHECKPOINT_READER_PARALLELISM; ++i) {
-		threads->addThread(new Reader(db, cf, logId), "fdb-rocks-cr");
+		threads->addThread(new Reader(db, cf, handles, logId), "fdb-rocks-cr");
 	}
 	if (checkpoint.getFormat() == DataMoveRocksCF) {
 		const RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
@@ -462,7 +463,11 @@ std::unique_ptr<ICheckpointIterator> RocksDBColumnFamilyReader::getIterator(KeyR
 	}
 }
 
-RocksDBColumnFamilyReader::Reader::Reader(DB& db, CF& cf, const UID& logId) : db(db), cf(cf), logId(logId) {}
+RocksDBColumnFamilyReader::Reader::Reader(DB& db,
+                                          CF& cf,
+                                          std::vector<rocksdb::ColumnFamilyHandle*>& handles,
+                                          const UID& logId)
+  : db(db), cf(cf), handles(handles), logId(logId) {}
 
 void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader::OpenAction& a) {
 	TraceEvent(SevDebug, "RocksDBCheckpointReaderInitBegin", logId).detail("Checkpoint", a.checkpoint.toString());
@@ -482,7 +487,10 @@ void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader
 	TraceEvent(SevDebug, "RocksDBColumnFamilyReaderInputFiles", logId).detail("Files", describe(files));
 	const std::string path = joinPath(rocksCF.sstFiles.front().db_path, checkpointReaderSubDir);
 
+	// Try to read the existing DB, the checkpoint could have been imported already.
 	rocksdb::Status status = tryOpenForRead(path);
+
+	// Existing DB is not ready to use, redo checkpoint import.
 	if (!status.ok()) {
 		TraceEvent(SevDebug, "RocksDBCheckpointOpenForReadFailed", logId)
 		    .detail("Status", status.ToString())
@@ -576,18 +584,22 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::tryOpenForRead(const std::str
 	status = db->Get(readOptions, db->DefaultColumnFamily(), toSlice(readerInitialized), &value);
 	if (!status.ok() && !status.IsNotFound()) {
 		logRocksDBError(status, "CheckpointCheckInitState", logId);
+		auto closeStatus = closeInternal(path, /*deleteOnClose=*/true);
+		if (!closeStatus.ok()) {
+			logRocksDBError(closeStatus, "CheckpointCloseInternal", logId);
+		}
+		delete db;
 		return status;
 	}
 
 	if (status.IsNotFound()) {
 		status = closeInternal(path, /*deleteOnClose=*/true);
 		if (!status.ok()) {
-			return status;
-		} else {
-			delete db;
-			TraceEvent(SevDebug, "RocksDBCheckpointReaderTryOpenError", logId).detail("Path", path);
-			return rocksdb::Status::Aborted();
+			logRocksDBError(status, "CheckpointCloseInternal", logId);
 		}
+		delete db;
+		TraceEvent(SevDebug, "RocksDBCheckpointReaderTryOpenError", logId).detail("Path", path);
+		return rocksdb::Status::Aborted();
 	}
 
 	ASSERT(handles.size() == 2);
@@ -721,7 +733,7 @@ ACTOR Future<Void> RocksDBColumnFamilyReader::doClose(RocksDBColumnFamilyReader*
 class RocksDBSstFileWriter : public IRocksDBSstFileWriter {
 public:
 	RocksDBSstFileWriter()
-	  : writer(std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false){};
+	  : writer(std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false) {};
 
 	void open(const std::string localFile) override;
 
@@ -777,7 +789,15 @@ bool RocksDBSstFileWriter::finish() {
 
 class RocksDBSstFileReader : public IRocksDBSstFileReader {
 public:
-	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())){};
+	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())) {};
+
+	RocksDBSstFileReader(const KeyRange& rangeBoundary, size_t rowLimit, size_t byteLimit)
+	  : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())), rowLimit(rowLimit),
+	    byteLimit(byteLimit) {
+		beginSlice = toSlice(rangeBoundary.begin);
+		endSlice = toSlice(rangeBoundary.end);
+	};
+
 	~RocksDBSstFileReader() {}
 
 	void open(const std::string localFile) override;
@@ -786,18 +806,37 @@ public:
 
 	bool hasNext() const override;
 
+	RangeResult getRange(const KeyRange& range) override;
+
 private:
 	std::unique_ptr<rocksdb::SstFileReader> sstReader;
 	std::unique_ptr<rocksdb::Iterator> iter;
 	std::string localFile;
+	rocksdb::Slice beginSlice;
+	rocksdb::Slice endSlice;
+	size_t byteLimit = -1;
+	size_t rowLimit = -1;
 };
 
 void RocksDBSstFileReader::open(const std::string localFile) {
 	this->localFile = abspath(localFile);
 	rocksdb::Status status = sstReader->Open(this->localFile);
 	if (status.ok()) {
-		iter.reset(sstReader->NewIterator(getReadOptions()));
-		iter->SeekToFirst();
+		rocksdb::ReadOptions readOptions = getReadOptions();
+		if (!beginSlice.empty()) {
+			readOptions.iterate_lower_bound = &beginSlice;
+		}
+		if (!endSlice.empty()) {
+			readOptions.iterate_upper_bound = &endSlice;
+			// Note that iterator can return the endSlice but this endSlice is out of the range.
+			// So, we need to check whether the key from iterator is out of the range.
+		}
+		iter.reset(sstReader->NewIterator(readOptions));
+		if (!beginSlice.empty()) {
+			iter->Seek(beginSlice);
+		} else {
+			iter->SeekToFirst();
+		}
 	} else {
 		TraceEvent(SevError, "RocksDBSstFileReaderWrapperOpenFileError")
 		    .detail("LocalFile", this->localFile)
@@ -813,6 +852,45 @@ KeyValue RocksDBSstFileReader::next() {
 	KeyValue res(KeyValueRef(toStringRef(this->iter->key()), toStringRef(this->iter->value())));
 	iter->Next();
 	return res;
+}
+
+// TODO(BulkLoad): current the bulkload is the only place using the method.
+// This is implemented as the sync call for the simplicity. In the future
+// we will implement this as async call using action.
+RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
+	RangeResult rep;
+	size_t expectedSize = 0;
+	size_t keyCount = 0;
+	ASSERT(iter != nullptr);
+	iter->Seek(toSlice(range.begin));
+	if (!iter->Valid() || toStringRef(iter->key()) >= range.end) {
+		rep.more = false;
+		return rep;
+	}
+	while (true) {
+		KeyValue kv = KeyValueRef(toStringRef(iter->key()), toStringRef(iter->value()));
+		rep.push_back_deep(rep.arena(), kv);
+		expectedSize = expectedSize + kv.expectedSize();
+		keyCount++;
+		if (g_network->isSimulated() && SERVER_KNOBS->BULKLOAD_SIM_FAILURE_INJECTION &&
+		    deterministicRandom()->random01() < 0.1) {
+			TraceEvent(SevWarnAlways, "TryGetRangeForBulkLoadInjectError");
+			throw operation_failed();
+		}
+		if ((byteLimit > 0 && expectedSize >= byteLimit) || (rowLimit > 0 && keyCount >= rowLimit)) {
+			break;
+		}
+
+		iter->Next(); // Go to next at first, then decide if the rep has more.
+		if (!iter->Valid()) {
+			break;
+		}
+		if (toStringRef(iter->key()) >= range.end) {
+			break;
+		}
+	}
+	rep.more = iter->Valid() && toStringRef(iter->key()) < range.end;
+	return rep;
 }
 
 class RocksDBCheckpointByteSampleReader : public ICheckpointByteSampleReader {
@@ -971,7 +1049,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	wait(success(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID)));
 	rocksCF.sstFiles[idx].db_path = dir;
 	rocksCF.sstFiles[idx].fetched = true;
-	metaData->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
+	metaData->setSerializedCheckpoint(ObjectWriter::toValue(rocksCF, IncludeVersion()));
 	if (cFun) {
 		wait(cFun(*metaData));
 	}
@@ -1109,7 +1187,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				} else {
 					rcp.fetchedFiles.emplace_back(emptySstFilePath, range, totalBytes);
 				}
-				metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+				metaData->setSerializedCheckpoint(ObjectWriter::toValue(rcp, IncludeVersion()));
 				if (!fileExists(localFile)) {
 					TraceEvent(SevWarn, "FetchCheckpointRangeEndFileNotFound", metaData->checkpointID)
 					    .detail("Range", range)
@@ -1338,6 +1416,17 @@ std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader() {
 	return nullptr;
 }
 
+std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader(const KeyRange& range,
+                                                               size_t rowLimit,
+                                                               size_t byteLimit) {
+#ifdef WITH_ROCKSDB
+	std::unique_ptr<IRocksDBSstFileReader> sstReader =
+	    std::make_unique<RocksDBSstFileReader>(range, rowLimit, byteLimit);
+	return sstReader;
+#endif // WITH_ROCKSDB
+	return nullptr;
+}
+
 std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const CheckpointMetaData& checkpoint) {
 #ifdef WITH_ROCKSDB
 	return std::make_unique<RocksDBCheckpointByteSampleReader>(checkpoint);
@@ -1347,21 +1436,21 @@ std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint) {
 	RocksDBColumnFamilyCheckpoint rocksCF;
-	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
 	reader.deserialize(rocksCF);
 	return rocksCF;
 }
 
 RocksDBCheckpoint getRocksCheckpoint(const CheckpointMetaData& checkpoint) {
 	RocksDBCheckpoint rocksCheckpoint;
-	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
 	reader.deserialize(rocksCheckpoint);
 	return rocksCheckpoint;
 }
 
 RocksDBCheckpointKeyValues getRocksKeyValuesCheckpoint(const CheckpointMetaData& checkpoint) {
 	RocksDBCheckpointKeyValues rocksCheckpoint;
-	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
 	reader.deserialize(rocksCheckpoint);
 	return rocksCheckpoint;
 }

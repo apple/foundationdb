@@ -46,9 +46,9 @@ function create_fake_website_directory () {
     # 2) fetch the stripped binaries and multiple client library versions
     #    from artifactory_base_url
     # 3) copy the unstripped binaries and client library from the current local
-    #    build_output of foundationdb
+    #    build_output of foundationdb. If CLANG=1 use cbuild_output.
     # 4) copy the stripped binaries and client library from the current local
-    #    build_output of foundationdb
+    #    build_output of foundationdb. If CLANG=1 use cbuild_output.
     ############################################################################
     logg "FETCHING BINARIES"
     case "${stripped_binaries_and_from_where}" in
@@ -204,7 +204,11 @@ function build_and_push_images () {
             --tag "${image_tag}" \
             --file Dockerfile \
             --target "${image}" .
-        if [ "${image}" == 'foundationdb' ] || [ "${image}" == 'foundationdb-kubernetes-sidecar' ] || [ "${image}" == 'ycsb' ] ; then
+        if [ "${image}" == 'foundationdb' ] || \
+              [ "${image}" == 'foundationdb-kubernetes-sidecar' ] || \
+              [ "${image}" == 'fdb-aws-s3-credentials-fetcher-sidecar' ] || \
+              [ "${image}" == 'ycsb' ] || \
+              [ "${image}" == 'fdb-kubernetes-monitor' ]; then
             tags_to_push+=("${image_tag}")
         fi
     done
@@ -241,13 +245,12 @@ echo "${blue}###################################################################
 ################################################################################
 artifactory_base_url="${ARTIFACTORY_URL:-https://artifactory.foundationdb.org}"
 aws_region="us-west-2"
-aws_account_id=$(aws --output text sts get-caller-identity --query 'Account')
 build_date=$(date +"%Y-%m-%dT%H:%M:%S%z")
 build_output_directory="${script_dir}/../../"
 source_code_diretory=$(awk -F= '/foundationdb_SOURCE_DIR:STATIC/{print $2}' "${build_output_directory}/CMakeCache.txt")
 commit_sha=$(cd "${source_code_diretory}" && git rev-parse --verify HEAD --short=10)
 fdb_version=$(cat "${build_output_directory}/version.txt")
-fdb_library_versions=( '6.3.25' '7.1.57' '7.3.37' "${fdb_version}" )
+fdb_library_versions=( '7.3.63' "${fdb_version}" )
 fdb_website="https://github.com/apple/foundationdb/releases/download"
 image_list=(
     'base'
@@ -255,6 +258,7 @@ image_list=(
     'foundationdb-base'
     'foundationdb'
     'fdb-kubernetes-monitor'
+    'fdb-aws-s3-credentials-fetcher-sidecar'
     'foundationdb-kubernetes-sidecar'
     'ycsb'
 )
@@ -267,7 +271,11 @@ if [ -n "${OKTETO_NAMESPACE+x}" ]; then
     imdsv2_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
     aws_region=$(curl -H "X-aws-ec2-metadata-token: ${imdsv2_token}" "http://169.254.169.254/latest/meta-data/placement/region")
     aws_account_id=$(aws --output text sts get-caller-identity --query 'Account')
-    build_output_directory="${HOME}/build_output"
+    if [ "${CLANG:-0}" -eq 1 ]; then
+        build_output_directory="${HOME}/cbuild_output"
+    else
+        build_output_directory="${HOME}/build_output"
+    fi
     fdb_library_versions=( "${fdb_version}" )
     registry="${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com"
     tag_base="${registry}/foundationdb/"

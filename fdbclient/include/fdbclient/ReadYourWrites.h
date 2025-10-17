@@ -122,17 +122,6 @@ public:
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;
 	Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) override;
 
-	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRange& range, int rangeLimit) override;
-	Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranules(const KeyRange& range,
-	                                                                    Version begin,
-	                                                                    Optional<Version> readVersion,
-	                                                                    Version* readVersionOut) override;
-
-	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRange& range,
-	                                                                           Optional<Version> summaryVersion,
-	                                                                           int rangeLimit) override;
-	void addGranuleMaterializeStats(const GranuleMaterializeStats& stats) override;
-
 	void addReadConflictRange(KeyRangeRef const& keys) override;
 	void makeSelfConflicting() override { tr.makeSelfConflicting(); }
 

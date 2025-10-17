@@ -1,32 +1,43 @@
 [configuration]
-config = 'triple'
-storageEngineType = 5
-processesPerMachine = 2
-machineCount = 15
-extraStorageMachineCountPerDC = 8
-tenantModes = ['disabled'] # Do not support tenant
-encryptModes = ['disabled'] # Do not support encryption
+storageEngineExcludeTypes = [5] #FIXME: remove after allowing to do bulkloading with fetchKey and shardedrocksdb
+
+# Do not support tenant, encryption, and TSS
+tenantModes = ['disabled']
+encryptModes = ['disabled']
+disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
 
 [[knobs]]
 # This knob is commented out since the knob override is done *after* the simulation system is set up. However,
 # this is not going to completely work:
 # The purpose of setting the knob to true was to enable the shard rocksdb storage engine
 # The shard rocksdb storage engine is set up before this knob is overridden
-# The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check
-# so for this BulkLoading test, the shard RocksDB storage engine is always turned on.
+# The temporary fix is that in SimulatedCluster.cpp:simulationSetupAndRun, we are doing one additional check.
 shard_encode_location_metadata = true
 
-# BulkLoad relies on RangeLock
+# Rely on RangeLock
 enable_read_lock_on_range = true
+
+# Do not support version vector
 enable_version_vector = false
 enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
 
 # Set high enough sample rate to test bytes sampling
 min_byte_sampling_probability = 0.5
 
+# CC can repeatedly re-recruit new DD for the unfit recruitment which can block the test.
+cc_enforce_use_unfit_dd_in_sim = true
+
+# AuditStorage replica check can cause tooManyTraceEvents because both tests are large
+disable_audit_storage_final_replica_check_in_sim = true
+
+# Since the machineCount is large, this test produces more trace events to complete
+max_trace_lines = 5000000
+
 [[test]]
 testTitle = 'BulkLoadingWorkload'
 useDB = true
+waitForQuiescence = false
 
     [[test.workload]]
     testName = 'BulkLoadingWorkload'

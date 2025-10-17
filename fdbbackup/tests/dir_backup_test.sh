@@ -56,7 +56,7 @@ function backup {
     --log --logdir="${scratch_dir}"
   then
     err "Start fdbbackup failed"
-    exit 1
+    return 1
   fi
 }
 
@@ -70,11 +70,11 @@ function restore {
   # https://forums.foundationdb.org/t/restoring-a-completed-backup-version-results-in-an-error/1845
   if ! backup=$(ls -dt "${scratch_dir}"/backups/backup-* | head -1 ); then
     err "Failed to list backups under ${scratch_dir}/backups/"
-    exit 1
+    return 1
   fi
   if ! backup_name=$(basename "${backup}"); then
     err "Failed to get basename"
-    exit 1
+    return 1
   fi
   if ! "${local_build_dir}"/bin/fdbrestore start \
     --dest-cluster-file "${scratch_dir}/loopback_cluster/fdb.cluster" \
@@ -83,7 +83,7 @@ function restore {
     --log --logdir="${scratch_dir}"
   then
     err "Start fdbrestore failed"
-    exit 1
+    return 1
   fi
 }
 
@@ -97,32 +97,32 @@ function test_dir_backup_and_restore {
   # Just do a few keys.
   if ! load_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed loading data into fdb"
-    exit 1
+    return 1
   fi
   log "Run backup"
   if ! backup "${local_build_dir}" "${scratch_dir}"; then
     err "Failed backup"
-    exit 1
+    return 1
   fi
   log "Clear fdb data"
   if ! clear_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed clear data in fdb"
-    exit 1
+    return 1
   fi
   log "Restore"
   if ! restore "${local_build_dir}" "${scratch_dir}"; then
     err "Failed restore"
-    exit 1
+    return 1
   fi
   log "Verify restore"
   if ! verify_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed verification of data in fdb"
-    exit 1
+    return 1
   fi
   log "Check for Severity=40 errors"
   if ! grep_for_severity40 "${scratch_dir}"; then
     err "Found Severity=40 errors in logs"
-    exit 1
+    return 1
   fi
 }
 
@@ -135,9 +135,9 @@ if ! cwd=$( cd -P "$( dirname "${path}" )" >/dev/null 2>&1 && pwd ); then
   err "Failed dirname on ${path}"
   exit 1
 fi
-# Source in the fdb cluster and backup_common fixtures.
+# Source in the fdb cluster and tests_common fixtures.
 # shellcheck source=/dev/null
-if ! source "${cwd}/fdb_cluster_fixture.sh"; then
+if ! source "${cwd}/../../fdbclient/tests/fdb_cluster_fixture.sh"; then
   err "Failed to source fdb_cluster_fixture.sh"
   exit 1
 fi
@@ -145,8 +145,8 @@ fi
 # So we read less keys.
 export FDB_DATA_KEYCOUNT=10
 # shellcheck source=/dev/null
-if ! source "${cwd}/backup_common.sh"; then
-  err "Failed to source fdb_cluster_fixture.sh"
+if ! source "${cwd}/../../fdbclient/tests/tests_common.sh"; then
+  err "Failed to source tests_common.sh"
   exit 1
 fi
 
@@ -183,7 +183,7 @@ SCRATCH_DIR=$(resolve_to_absolute_path "${tmpdir}")
 readonly SCRATCH_DIR
 
 # Startup fdb cluster and backup agent.
-if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${SCRATCH_DIR}"; then
+if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${SCRATCH_DIR}" 1; then
   err "Failed start FDB cluster"
   exit 1
 fi

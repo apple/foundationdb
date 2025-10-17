@@ -22,7 +22,9 @@
 #define FLOW_FASTALLOC_H
 #pragma once
 
+#include "flow/Error.h"
 #include "flow/Platform.h"
+#include "flow/SimpleCounter.h"
 #include "flow/config.h"
 
 // ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be
@@ -32,6 +34,9 @@
 // #define ALLOC_INSTRUMENTATION ENABLED(NOT_IN_CLEAN)
 //  The form "(1==1)" in this context is used to satisfy both clang and vc++ with a single syntax.  Clang rejects "1"
 //  and vc++ rejects "true".
+// FIXME: this has been set to true for 4+ years.  We probably do not need the "not thread safe"
+// version of the code.  Consider removing this and just making it thread safe.
+// Also, explain why thread safety is required here and not elsewhere (e.g. Arena and ArenaBlock).
 #define FASTALLOC_THREAD_SAFE (FLOW_THREAD_SAFE || (1 == 1))
 
 #if VALGRIND
@@ -180,6 +185,11 @@ void hugeArenaSample(int size);
 void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
 
+// These are thin wrappers around operator new and operator delete
+// and exist so that we can update metrics inside them.
+void* countedNew(size_t nbytes);
+void countedDelete(size_t nbytes, void* ptr);
+
 // Allow temporary overriding of default allocators used by arena to let memory survive deallocation and test
 // correctness of memory policy (e.g. zeroing out sensitive contents after use)
 namespace keepalive_allocator {
@@ -213,6 +223,12 @@ std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet();
 } // namespace keepalive_allocator
 
 force_inline uint8_t* allocateAndMaybeKeepalive(size_t size) {
+	static SimpleCounter<int64_t>* calls =
+	    SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/AllocateAndMaybeKeepaliveCalls");
+	static SimpleCounter<int64_t>* bytes =
+	    SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/AllocateAndMaybeKeepaliveBytes");
+	calls->increment(1);
+	bytes->increment(size);
 	uint8_t* p;
 	if (keepalive_allocator::isActive()) [[unlikely]]
 		p = static_cast<uint8_t*>(keepalive_allocator::allocate(size));
@@ -227,6 +243,9 @@ force_inline uint8_t* allocateAndMaybeKeepalive(size_t size) {
 }
 
 force_inline void freeOrMaybeKeepalive(void* ptr) {
+	static SimpleCounter<int64_t>* calls =
+	    SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/FreeOrMaybeKeepaliveCalls");
+	calls->increment(1);
 	if (keepalive_allocator::isActive()) [[unlikely]]
 		keepalive_allocator::invalidate(ptr);
 	else
@@ -234,7 +253,7 @@ force_inline void freeOrMaybeKeepalive(void* ptr) {
 }
 
 inline constexpr int nextFastAllocatedSize(int x) {
-	assert(x > 0 && x <= 16384);
+	ASSERT(x > 0 && x <= 16384);
 	if (x <= 16)
 		return 16;
 	else if (x <= 32)
@@ -261,6 +280,13 @@ inline constexpr int nextFastAllocatedSize(int x) {
 		return 16384;
 }
 
+// NOTE: for maintaining metrics on objects/bytes allocated and
+// deleted, we rely on FastAllocated<T>::allocate,
+// FastAllocated<T>::release, countedNew(), and countedDelete() to
+// update metrics for code paths that do cause allocations or frees.
+// Do not add uninstrumented operator new or operator delete
+// invocations.
+
 template <class Object>
 class FastAllocated {
 public:
@@ -273,7 +299,7 @@ public:
 			void* p = FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
 			return p;
 		} else {
-			void* p = new uint8_t[nextFastAllocatedSize(sizeof(Object))];
+			void* p = countedNew(nextFastAllocatedSize(sizeof(Object)));
 			return p;
 		}
 	}
@@ -284,7 +310,7 @@ public:
 		if constexpr (sizeof(Object) <= 256) {
 			FastAllocator<sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object))>::release(s);
 		} else {
-			delete[] reinterpret_cast<uint8_t*>(s);
+			countedDelete(nextFastAllocatedSize(sizeof(Object)), s);
 		}
 	}
 	// Redefine placement new so you can still use it
@@ -305,7 +331,7 @@ public:
 		return FastAllocator<128>::allocate();
 	if (size <= 256)
 		return FastAllocator<256>::allocate();
-	return new uint8_t[size];
+	return countedNew(size);
 }
 
 inline void freeFast(int size, void* ptr) {
@@ -321,12 +347,16 @@ inline void freeFast(int size, void* ptr) {
 		return FastAllocator<128>::release(ptr);
 	if (size <= 256)
 		return FastAllocator<256>::release(ptr);
-	delete[] (uint8_t*)ptr;
+	countedDelete(size, ptr);
 }
 
 // Allocate a block of memory aligned to 4096 bytes. Size must be a multiple of
 // 4096. Guaranteed not to return null. Use freeFast4kAligned to free.
 [[nodiscard]] inline void* allocateFast4kAligned(int size) {
+	static SimpleCounter<int64_t>* bytes =
+	    SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/Fast4AlignedBytesAllocated");
+	bytes->increment(size);
+
 #if !defined(USE_JEMALLOC)
 	// Use FastAllocator for sizes it supports to avoid internal fragmentation in some implementations of aligned_alloc
 	if (size <= 4096)
@@ -336,6 +366,7 @@ inline void freeFast(int size, void* ptr) {
 	if (size <= 16384)
 		return FastAllocator<16384>::allocate();
 #endif
+
 	auto* result = aligned_alloc(4096, size);
 	if (result == nullptr) {
 		platform::outOfMemory();
@@ -345,6 +376,10 @@ inline void freeFast(int size, void* ptr) {
 
 // Free a pointer returned from allocateFast4kAligned(size)
 inline void freeFast4kAligned(int size, void* ptr) {
+	static SimpleCounter<int64_t>* bytes =
+	    SimpleCounter<int64_t>::makeCounter("/flow/fastalloc/Fast4AlignedBytesFreed");
+	bytes->increment(size);
+
 #if !defined(USE_JEMALLOC)
 	// Sizes supported by FastAllocator must be release via FastAllocator
 	if (size <= 4096)

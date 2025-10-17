@@ -19,17 +19,12 @@
  */
 
 #include <cinttypes>
-#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
-#include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbserver/BlobManagerInterface.h"
 #include "flow/genericactors.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbserver/Status.actor.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
@@ -544,6 +539,7 @@ struct RolesInfo {
 			obj.setKeyRawNumber("local_rate", storageMetrics.getValue("LocalRate"));
 			obj["fetched_versions"] = StatusCounter(storageMetrics.getValue("FetchedVersions")).getStatus();
 			obj["fetches_from_logs"] = StatusCounter(storageMetrics.getValue("FetchesFromLogs")).getStatus();
+			obj["rocksdb_version"] = storageMetrics.getValue("RocksDBVersion");
 
 			Version version = storageMetrics.getInt64("Version");
 			Version durableVersion = storageMetrics.getInt64("DurableVersion");
@@ -626,7 +622,7 @@ struct RolesInfo {
 				rocksdbMetricsObj.setKeyRawNumber("sst_reader_bytes",
 				                                  rocksdbMetrics.getValue("EstimateSstReaderBytes"));
 				rocksdbMetricsObj.setKeyRawNumber("block_cache_usage", rocksdbMetrics.getValue("BlockCacheUsage"));
-				rocksdbMetricsObj.setKey("block_cache_limit", SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
+				rocksdbMetricsObj.setKeyRawNumber("block_cache_limit", rocksdbMetrics.getValue("BlockCacheSize"));
 				rocksdbMetricsObj.setKeyRawNumber("throttled_commits", rocksdbMetrics.getValue("CommitDelayed"));
 				rocksdbMetricsObj.setKeyRawNumber("write_stall_microseconds", rocksdbMetrics.getValue("StallMicros"));
 
@@ -634,7 +630,9 @@ struct RolesInfo {
 			}
 
 		} catch (AttributeNotFoundError& e) {
-			TraceEvent(SevWarnAlways, "StorageServerStatusJson").detail("MissingAttribute", e.getMissingAttribute());
+			TraceEvent(SevWarnAlways, "StorageServerStatusJson")
+			    .suppressFor(5.0)
+			    .detail("MissingAttribute", e.getMissingAttribute());
 		}
 		if (pDataLagSeconds) {
 			*pDataLagSeconds = dataLagSeconds;
@@ -772,7 +770,6 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     std::vector<std::pair<TLogInterface, EventMap>> tLogs,
     std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
     std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
-    std::vector<BlobWorkerInterface> blobWorkers,
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> coordinatorAddresses,
     Database cx,
@@ -847,14 +844,6 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	if (db->get().ratekeeper.present()) {
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
-	}
-
-	if (configuration.present() && configuration.get().blobGranulesEnabled && db->get().blobManager.present()) {
-		roles.addRole("blob_manager", db->get().blobManager.get());
-	}
-
-	if (configuration.present() && configuration.get().blobGranulesEnabled && db->get().blobMigrator.present()) {
-		roles.addRole("blob_migrator", db->get().blobMigrator.get());
 	}
 
 	if (db->get().consistencyScan.present()) {
@@ -934,13 +923,6 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	for (res = resolvers.begin(); res != resolvers.end(); ++res) {
 		roles.addRole("resolver", *res);
 		wait(yield());
-	}
-
-	if (configuration.present() && configuration.get().blobGranulesEnabled) {
-		for (auto blobWorker : blobWorkers) {
-			roles.addRole("blob_worker", blobWorker);
-			wait(yield());
-		}
 	}
 
 	for (workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
@@ -2426,117 +2408,6 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
-    Database cx,
-    Optional<BlobManagerInterface> managerIntf,
-    std::vector<BlobWorkerInterface> workers,
-    std::unordered_map<NetworkAddress, WorkerInterface> addressWorkersMap,
-    std::set<std::string>* incompleteReason) {
-
-	state JsonBuilderObject statusObj;
-	state std::vector<Future<Optional<TraceEventFields>>> futures;
-
-	statusObj["number_of_blob_workers"] = static_cast<int>(workers.size());
-	try {
-		state BlobGranuleBackupConfig config;
-		bool backupEnabled = wait(config.enabled().getD(SystemDBWriteLockedNow(cx.getReference())));
-		statusObj["blob_granules_backup_enabled"] = backupEnabled;
-		if (backupEnabled) {
-			std::string manifestUrl = wait(config.manifestUrl().getD(SystemDBWriteLockedNow(cx.getReference())));
-			statusObj["blob_granules_manifest_url"] = manifestUrl;
-			std::string mlogsUrl = wait(config.mutationLogsUrl().getD(SystemDBWriteLockedNow(cx.getReference())));
-			statusObj["blob_granules_mlogs_url"] = mlogsUrl;
-		}
-		// Blob manager status
-		if (managerIntf.present()) {
-			Optional<TraceEventFields> fields = wait(timeoutError(
-			    latestEventOnWorker(addressWorkersMap[managerIntf.get().address()], "BlobManagerMetrics"), 2.0));
-			if (fields.present()) {
-				statusObj["last_flush_version"] = fields.get().getUint64("LastFlushVersion");
-				statusObj["last_manifest_dump_ts"] = fields.get().getUint64("LastManifestDumpTs");
-				statusObj["last_manifest_seq_no"] = fields.get().getUint64("LastManifestSeqNo");
-				statusObj["last_manifest_epoch"] = fields.get().getUint64("Epoch");
-				statusObj["last_manifest_size_in_bytes"] = fields.get().getUint64("ManifestSizeInBytes");
-				statusObj["last_truncation_version"] = fields.get().getUint64("LastMLogTruncationVersion");
-			}
-		}
-
-		// Blob workers status
-		for (auto& intf : workers) {
-			auto workerIntf = addressWorkersMap[intf.address()];
-			futures.push_back(latestEventOnWorker(workerIntf, "BlobWorkerMetrics"));
-		}
-
-		wait(timeoutError(waitForAll(futures), 2.0));
-
-		state int totalRanges = 0;
-		for (auto future : futures) {
-			if (future.get().present()) {
-				auto latestTrace = future.get().get();
-				int numRanges = latestTrace.getInt("NumRangesAssigned");
-				totalRanges += numRanges;
-
-				JsonBuilderObject workerStatusObj;
-				workerStatusObj["number_of_key_ranges"] = numRanges;
-				workerStatusObj["put_requests"] = StatusCounter(latestTrace.getValue("S3PutReqs")).getStatus();
-				workerStatusObj["get_requests"] = StatusCounter(latestTrace.getValue("S3GetReqs")).getStatus();
-				workerStatusObj["delete_requests"] = StatusCounter(latestTrace.getValue("S3DeleteReqs")).getStatus();
-				workerStatusObj["bytes_buffered"] = latestTrace.getInt64("MutationBytesBuffered");
-				workerStatusObj["compression_bytes_raw"] =
-				    StatusCounter(latestTrace.getValue("CompressionBytesRaw")).getStatus();
-				workerStatusObj["compression_bytes_final"] =
-				    StatusCounter(latestTrace.getValue("CompressionBytesFinal")).getStatus();
-				statusObj[latestTrace.getValue("ID")] = workerStatusObj;
-			}
-		}
-		statusObj["number_of_key_ranges"] = totalRanges;
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-		incompleteReason->insert("Unknown blob worker stats");
-	}
-	return statusObj;
-}
-
-ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std::set<std::string>* incompleteReason) {
-	state JsonBuilderObject statusObj;
-	state Transaction tr(db);
-	try {
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state BlobGranuleRestoreConfig config;
-				state BlobRestorePhase phase =
-				    wait(config.phase().getD(&tr, Snapshot::False, BlobRestorePhase::UNINIT));
-				if (phase > BlobRestorePhase::UNINIT) {
-					statusObj["blob_full_restore_phase"] = phase;
-					int progress = wait(config.progress().getD(&tr));
-					statusObj["blob_full_restore_phase_progress"] = progress;
-					int64_t phaseStartTs = wait(config.phaseStartTs().getD(&tr, phase));
-					statusObj["blob_full_restore_phase_start_ts"] = phaseStartTs;
-					int64_t startTs = wait(config.phaseStartTs().getD(&tr, BlobRestorePhase::INIT));
-					statusObj["blob_full_restore_start_ts"] = startTs;
-					std::string error = wait(config.error().getD(&tr));
-					statusObj["blob_full_restore_error"] = error;
-					Version targetVersion = wait(config.targetVersion().getD(&tr));
-					statusObj["blob_full_restore_version"] = targetVersion;
-				}
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-		incompleteReason->insert("Unable to query blob restore status");
-	}
-
-	return statusObj;
-}
-
 static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
                                      const std::vector<TLogSet>& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
@@ -3242,7 +3113,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::vector<std::pair<TLogInterface, EventMap>> tLogs;
 		state std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
 		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
-		state std::vector<BlobWorkerInterface> blobWorkers;
 
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
@@ -3326,11 +3196,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    errorOr(getCommitProxiesAndMetrics(db, address_workers));
 			state Future<ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture =
 			    errorOr(getGrvProxiesAndMetrics(db, address_workers));
-			state Future<ErrorOr<std::vector<BlobWorkerInterface>>> blobWorkersFuture;
-
-			if (configuration.present() && configuration.get().blobGranulesEnabled) {
-				blobWorkersFuture = errorOr(timeoutError(getBlobWorkers(cx, true), 5.0));
-			}
 
 			state int minStorageReplicasRemaining = -1;
 			state int fullyReplicatedRegions = -1;
@@ -3523,17 +3388,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				    JsonBuilder::makeMessage("grv_proxies_error", "Timed out trying to retrieve grv proxies."));
 			}
 
-			// ...also blob workers
-			if (configuration.present() && configuration.get().blobGranulesEnabled) {
-				ErrorOr<std::vector<BlobWorkerInterface>> _blobWorkers = wait(blobWorkersFuture);
-				if (_blobWorkers.present()) {
-					blobWorkers = _blobWorkers.get();
-				} else {
-					messages.push_back(
-					    JsonBuilder::makeMessage("blob_workers_error", "Timed out trying to retrieve blob workers."));
-				}
-			}
-
 			wait(waitForAll(warningFutures));
 		} else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
@@ -3557,7 +3411,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              tLogs,
 		                              commitProxies,
 		                              grvProxies,
-		                              blobWorkers,
 		                              coordinators,
 		                              coordinatorAddresses,
 		                              cx,
@@ -3566,28 +3419,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
-
-		if (configuration.present() && configuration.get().blobGranulesEnabled) {
-			ErrorOr<JsonBuilderObject> blobGranulesStatus = wait(errorOr(
-			    timeoutError(blobGranulesStatusFetcher(
-			                     cx, db->get().blobManager, blobWorkers, address_workers, &status_incomplete_reasons),
-			                 2.0)));
-			if (blobGranulesStatus.present()) {
-				statusObj["blob_granules"] = blobGranulesStatus.get();
-			} else {
-				messages.push_back(JsonString::makeMessage("fetch_blob_granule_status_timed_out",
-				                                           "Fetch BlobGranule status timed out."));
-			}
-
-			ErrorOr<JsonBuilderObject> blobRestoreStatus =
-			    wait(errorOr(timeoutError(blobRestoreStatusFetcher(cx, &status_incomplete_reasons), 2.0)));
-			if (blobRestoreStatus.present()) {
-				statusObj["blob_restore"] = blobRestoreStatus.get();
-			} else {
-				messages.push_back(JsonString::makeMessage("fetch_blob_restore_status_timed_out",
-				                                           "Fetch BlobRestore status timed out."));
-			}
-		}
 
 		JsonBuilderArray incompatibleConnectionsArray;
 		for (auto it : incompatibleConnections) {

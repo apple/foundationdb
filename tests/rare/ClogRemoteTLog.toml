@@ -12,16 +12,18 @@ worker_health_monitor_interval = 10
 cc_enable_worker_health_monitor = true
 cc_health_trigger_recovery = true
 cc_enable_remote_tlog_degradation_monitoring = true
+gray_failure_allow_remote_ss_to_complain = true
 cc_worker_health_checking_interval = 45
 cc_min_degradation_interval = 30
 cc_degraded_peer_degree_to_exclude = 10
-cc_max_health_recovery_count = 1
+cc_max_health_recovery_count = 3
 cc_only_consider_intra_dc_latency = true
 cc_tracking_health_recovery_interval = 60
 peer_latency_degradation_threshold = 1
-peer_latency_degradation_percentile = 1
-peer_latency_check_min_population = 2
-cc_max_exclusion_due_to_health = 5
+peer_latency_degradation_percentile = 0.5
+peer_latency_check_min_population = 10
+cc_max_exclusion_due_to_health = 3
+cc_degraded_peer_degree_to_exclude_min = 2
 
 [[test]]
 testTitle = "ClogRemoteTLog"
@@ -30,13 +32,12 @@ testTitle = "ClogRemoteTLog"
 testName = 'Cycle'
 nodeCount = 30
 transactionsPerSecond = 250.0
-testDuration = 120.0
+testDuration = 360.0
 expectedRate = 0
 
 [[test.workload]]
 testName = 'ClogRemoteTLog'
 lagMeasurementFrequency = 5.0
 clogInitDelay = 10.0
-clogDuration = 110.0
-testDuration = 120.0
+testDuration = 360.0
 lagThreshold = 20.0

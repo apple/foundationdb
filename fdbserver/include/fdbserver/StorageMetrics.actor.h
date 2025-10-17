@@ -132,7 +132,8 @@ struct StorageServerMetrics {
 	                       int64_t versionLag,
 	                       double lastUpdate,
 	                       int64_t bytesDurable,
-	                       int64_t bytesInput) const;
+	                       int64_t bytesInput,
+	                       int ongoingBulkLoadTaskCount) const;
 
 	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
 
@@ -204,6 +205,15 @@ struct CommonStorageCounters {
 	Counter bytesFetched;
 	// The number of key-value pairs fetched by fetchKeys()
 	Counter kvFetched;
+
+	// Bytes replied for fetchKeys
+	Counter kvFetchBytesServed;
+
+	// The number of key-value pairs replied for fetchKeys
+	Counter kvFetchServed;
+
+	// The number of fetchKeys errors
+	Counter fetchKeyErrors;
 
 	// name and id are the inputs to CounterCollection initialization. If metrics provided, the caller should guarantee
 	// the lifetime of metrics is longer than this counter

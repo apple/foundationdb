@@ -174,7 +174,7 @@ struct ClogTlogWorkload : TestWorkload {
 		state bool useGrayFailureToRecover = false;
 		if (deterministicRandom()->coinflip() && self->useDisconnection) {
 			// Use gray failure instead of exclusion to recover the cluster.
-			TraceEvent("ClogTlogUseGrayFailreToRecover").log();
+			TraceEvent("ClogTLogUseGrayFailreToRecover").log();
 			useGrayFailureToRecover = true;
 		}
 
@@ -193,7 +193,7 @@ struct ClogTlogWorkload : TestWorkload {
 			}
 			when(wait(delayUntil(workloadEnd))) {
 				// Expect to reach fully recovered state before workload ends
-				TraceEvent(SevError, "ClogTlogFailure").detail("RecoveryState", self->dbInfo->get().recoveryState);
+				TraceEvent(SevError, "ClogTLogFailure").detail("RecoveryState", self->dbInfo->get().recoveryState);
 				return Void();
 			}
 		}

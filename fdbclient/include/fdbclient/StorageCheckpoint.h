@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2025 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -88,6 +88,10 @@ struct CheckpointMetaData {
 	CheckpointFormat getFormat() const { return static_cast<CheckpointFormat>(format); }
 
 	void setFormat(CheckpointFormat format) { this->format = static_cast<int16_t>(format); }
+
+	void setSerializedCheckpoint(Standalone<StringRef> checkpoint);
+
+	Standalone<StringRef> getSerializedCheckpoint() const;
 
 	bool hasRange(const KeyRangeRef range) const {
 		for (const auto& checkpointRange : ranges) {
@@ -174,7 +178,7 @@ struct DataMoveMetaData {
 	std::set<UID> checkpoints;
 	int16_t phase; // DataMoveMetaData::Phase.
 	int8_t mode;
-	Optional<BulkLoadState> bulkLoadState; // set if the data move is a bulk load data move
+	Optional<BulkLoadTaskState> bulkLoadTaskState; // set if the data move is a bulk load data move
 
 	DataMoveMetaData() = default;
 	DataMoveMetaData(UID id, Version version, KeyRange range) : id(id), version(version), priority(0), mode(0) {
@@ -194,15 +198,15 @@ struct DataMoveMetaData {
 		                  ", [Phase]: " + std::to_string(static_cast<int>(phase)) +
 		                  ", [Source Servers]: " + describe(src) + ", [Destination Servers]: " + describe(dest) +
 		                  ", [Checkpoints]: " + describe(checkpoints);
-		if (bulkLoadState.present()) {
-			res = res + ", [BulkLoadState]: " + bulkLoadState.get().toString();
+		if (bulkLoadTaskState.present()) {
+			res = res + ", [BulkLoadTaskID]: " + bulkLoadTaskState.get().getTaskId().toString();
 		}
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode, bulkLoadState);
+		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode, bulkLoadTaskState);
 	}
 };
 

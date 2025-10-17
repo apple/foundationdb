@@ -63,6 +63,9 @@ void removeCachedDNS(const std::string& host, const std::string& service) {
 	INetworkConnections::net()->removeCachedDNS(host, service);
 }
 
+// FIXME: explain the purpose of these variables, their update
+// discipline, and the API calls that use them.
+
 namespace {
 
 NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
@@ -71,7 +74,16 @@ Future<Void> g_currentDeliveryPeerDisconnect;
 
 } // namespace
 
+// FIXME: stop referring to messages as "packets".  Packets are known
+// to the network infrastructure (routers, etc) and are layed out in
+// compliance with widely adopted industry standards such as TCP and
+// IP.  Messages, on the other hand, are generally not understoody
+// beyond the boundaries of the application that defines them.
+// Certainly this applies to FDB messages.  So we should refer to FDB
+// messages as "messages".
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
+
+// FIXME: explain what this is for
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
 FDB_BOOLEAN_PARAM(InReadSocket);
@@ -327,6 +339,7 @@ public:
 	NetworkAddressCachedString localAddresses;
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
+	// FIXME: explain what the std::pair<double, double> represent:
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
 	HealthMonitor healthMonitor;
 	std::set<NetworkAddress> orderedAddresses;
@@ -344,9 +357,11 @@ public:
 	Int64MetricHandle countConnClosedWithError;
 	Int64MetricHandle countConnClosedWithoutError;
 
+	// FIXME: explain what the std::pair<int64_t, double> represent:
 	std::map<NetworkAddress, std::pair<uint64_t, double>> incompatiblePeers;
 	AsyncTrigger incompatiblePeersChanged;
 	uint32_t numIncompatibleConnections;
+	// FIXME: explain the map
 	std::map<uint64_t, double> multiVersionConnections;
 	double lastIncompatibleMessage;
 	uint64_t transportId;
@@ -359,6 +374,7 @@ public:
 	std::unordered_map<Standalone<StringRef>, PublicKey> publicKeys;
 
 	struct ConnectionHistoryEntry {
+		// FIXME: explain why int64_t and not double is used to represent time
 		int64_t time;
 		NetworkAddress addr;
 		bool failed;
@@ -481,6 +497,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 			if (peer && (peer->pingLatencies.getPopulationSize() >= 10 || peer->connectFailedCount > 0 ||
 			             peer->timeoutCount > 0)) {
 				TraceEvent("PingLatency")
+				    .suppressFor(30.0)
 				    .detail("Elapsed", now() - peer->lastLoggedTime)
 				    .detail("PeerAddr", lastAddress)
 				    .detail("PeerAddress", lastAddress)
@@ -520,6 +537,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 	}
 }
 
+// FIXME: why doesn't this just pass a IPAllowList for this to copy, rather than a pointer?
 TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList)
   : endpoints(maxWellKnownEndpoints), endpointNotFoundReceiver(endpoints), pingReceiver(endpoints),
     numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId),
@@ -537,6 +555,7 @@ TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IP
 struct ConnectPacket {
 	// The value does not include the size of `connectPacketLength` itself,
 	// but only the other fields of this structure.
+	// FIXME: document the wire protocol in more detail than just the prior sentence.
 	uint32_t connectPacketLength = 0;
 	ProtocolVersion protocolVersion; // Expect currentProtocolVersion
 
@@ -617,6 +636,23 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 			// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
 			// We ignore this block for incompatible clients because pings from server would trigger the
 			// peer->resetPing and prevent 'connection_failed' due to ping timeout.
+			// FIXME: why don't we just close the connection if the peer is incompatible?  This isn't
+			// directly related to the code here but here is info from @vishesh suggesting it might be
+			// possible:
+			// This existed for two reasons (both in context of MultiVersionClient)
+			//  (1) While the peer is incompatible, don't try reconnecting to it.
+			//  (2) We can just mark it incompatible and never
+			//  reconnect however, this will create an issue during
+			//  upgrades when clients will not reconnect unless
+			//  restarted.
+			//
+			// However, since 7.1 or 7.2 I think, we only keep one
+			// version in MultiVersionClient active and dynamically
+			// switch to the compatible one, and if it becomes
+			// incompatible it can swtich over to correct one using
+			// the version reported in ConnectPacket.
+			//
+			// TLDR; We can probably close the connection now as we don't have any older clusters running either.
 			state double lastRefreshed = now();
 			state int64_t lastBytesReceived = peer->bytesReceived;
 			loop {
@@ -636,6 +672,9 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 		// We cannot let an error be thrown from connectionMonitor while still on the stack from scanPackets in
 		// connectionReader because then it would not call the destructor of connectionReader when connectionReader is
 		// cancelled.
+		// FIXME: Why should actors are about stacks?  Is there a better way to deal with this than having to
+		// anticipate and insert non-functional (from the point of what this actor is supposed to accomplish)
+		// delays like this just to avoid distributed (across multiple actors) logic bugs and memory leaks?
 		wait(delay(0, TaskPriority::ReadSocket));
 
 		if (peer->reliable.empty() && peer->unsent.empty() && peer->outstandingReplies == 0) {
@@ -696,12 +735,9 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 ACTOR Future<Void> connectionWriter(Reference<Peer> self, Reference<IConnection> conn) {
 	state double lastWriteTime = now();
 	loop {
-		// wait( delay(0, TaskPriority::WriteSocket) );
 		wait(delayJittered(
 		    std::max<double>(FLOW_KNOBS->MIN_COALESCE_DELAY, FLOW_KNOBS->MAX_COALESCE_DELAY - (now() - lastWriteTime)),
 		    TaskPriority::WriteSocket));
-		// wait( delay(500e-6, TaskPriority::WriteSocket) );
-		// wait( yield(TaskPriority::WriteSocket) );
 
 		// Send until there is nothing left to send
 		loop {
@@ -811,7 +847,14 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 						when(Reference<IConnection> _conn =
 						         wait(INetworkConnections::net()->connect(self->destination))) {
 							conn = _conn;
+							static SimpleCounter<int64_t>* countOutgoingConnectionCreated =
+							    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/OutgoingConnectionCreated");
+							countOutgoingConnectionCreated->increment(1);
 							wait(conn->connectHandshake());
+							static SimpleCounter<int64_t>* countOutgoingConnectionHandshakeComplete =
+							    SimpleCounter<int64_t>::makeCounter(
+							        "/Transport/TLS/OutgoingConnectionHandshakeComplete");
+							countOutgoingConnectionHandshakeComplete->increment(1);
 							self->connectLatencies.addSample(now() - self->lastConnectTime);
 							if (FlowTransport::isClient()) {
 								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
@@ -1103,19 +1146,15 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 		prependConnectPacket();
 		connect = connectionKeeper(self, conn, reader);
 	} else {
+		// Keep our prior connection
 		TraceEvent("RedundantConnection", conn->getDebugID())
 		    .suppressFor(1.0)
 		    .detail("FromAddr", conn->getPeerAddress().toString())
 		    .detail("CanonicalAddr", destination)
 		    .detail("LocalAddr", compatibleAddr);
 
-		// Keep our prior connection
 		reader.cancel();
 		conn->close();
-
-		// Send an (ignored) packet to make sure that, if our outgoing connection died before the peer made this
-		// connection attempt, we eventually find out that our connection is dead, close it, and then respond to the
-		// next connection reattempt from peer.
 	}
 }
 
@@ -1225,8 +1264,8 @@ ACTOR static void deliver(TransportData* self,
 }
 
 static void scanPackets(TransportData* transport,
-                        uint8_t*& unprocessed_begin,
-                        const uint8_t* e,
+                        uint8_t*& unprocessed_begin, // FIXME: why isn't this called `start`?
+                        const uint8_t* e, // FIXME: why isn't this called `end`?
                         Arena& arena,
                         NetworkAddress const& peerAddress,
                         bool isTrustedPeer,
@@ -1236,12 +1275,17 @@ static void scanPackets(TransportData* transport,
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
+	// FIXME: explain how we are sure that it's not more than 64K plus one packet
 	uint8_t* p = unprocessed_begin;
 
 	const bool checksumEnabled = !peerAddress.isTLS();
 	loop {
 		uint32_t packetLen;
 		XXH64_hash_t packetChecksum;
+
+		// Note that these potentially unaligned loads work on x86 and newer ARM but will blow up
+		// on many other architectures.  Whether this will be a problem in the future
+		// is hard to tell.
 
 		// Read packet length if size is sufficient or stop
 		if (e - p < PACKET_LEN_WIDTH)
@@ -1453,6 +1497,8 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 				state bool readWillBlock = totalReadBytes != readAllBytes;
 
 				if (expectConnectPacket && unprocessed_end - unprocessed_begin >= CONNECT_PACKET_V0_SIZE) {
+					// FIXME: this block might go in a separate function whose purpose, obviously, would
+					// be to process a connect message.
 					// At the beginning of a connection, we expect to receive a packet containing the protocol version
 					// and the listening port of the remote process
 					int32_t connectPacketSize = ((ConnectPacket*)unprocessed_begin)->totalPacketSize();
@@ -1497,11 +1543,17 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 								    now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 							}
 							compatible = false;
+							static SimpleCounter<int64_t>* countConnectionIncompatible =
+							    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/ConnectionIncompatible");
+							countConnectionIncompatible->increment(1);
 							if (!protocolVersion.hasInexpensiveMultiVersionClient()) {
 								if (peer) {
 									peer->protocolVersion->set(protocolVersion);
 								}
-
+								static SimpleCounter<int64_t>* countConnectionIncompatibleWithVeryOldClient =
+								    SimpleCounter<int64_t>::makeCounter(
+								        "/Transport/TLS/ConnectionIncompatibleWithVeryOldClient");
+								countConnectionIncompatibleWithVeryOldClient->increment(1);
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but
 								// it's safer to keep the old behavior.
 								throw incompatible_protocol_version();
@@ -1601,6 +1653,9 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 	entry.addr = conn->getPeerAddress();
 	try {
 		wait(conn->acceptHandshake());
+		static SimpleCounter<int64_t>* countIncomingConnectionHandshakeAccepted =
+		    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionHandshakeAccepted");
+		countIncomingConnectionHandshakeAccepted->increment(1);
 		state Promise<Reference<Peer>> onConnected;
 		state Future<Void> reader = connectionReader(self, conn, Reference<Peer>(), onConnected);
 		if (FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
@@ -1617,15 +1672,24 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 			}
 			when(wait(delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
 				CODE_PROBE(true, "Incoming connection timed out");
+				static SimpleCounter<int64_t>* countIncomingConnectionTimedout =
+				    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionTimedout");
+				countIncomingConnectionTimedout->increment(1);
 				throw timed_out();
 			}
 		}
+		static SimpleCounter<int64_t>* countIncomingConnectionConnected =
+		    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionConnected");
+		countIncomingConnectionConnected->increment(1);
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
 			TraceEvent("IncomingConnectionError", conn->getDebugID())
 			    .errorUnsuppressed(e)
 			    .suppressFor(1.0)
 			    .detail("FromAddress", conn->getPeerAddress());
+			static SimpleCounter<int64_t>* countIncomingConnectionFailed =
+			    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionFailed");
+			countIncomingConnectionFailed->increment(1);
 			if (FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
 				entry.failed = true;
 				self->connectionHistory.push_back(entry);
@@ -1651,6 +1715,9 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 	try {
 		loop {
 			Reference<IConnection> conn = wait(listener->accept());
+			static SimpleCounter<int64_t>* countIncomingConnectionCreated =
+			    SimpleCounter<int64_t>::makeCounter("/Transport/TLS/IncomingConnectionCreated");
+			countIncomingConnectionCreated->increment(1);
 			if (conn) {
 				TraceEvent("ConnectionFrom", conn->getDebugID())
 				    .suppressFor(1.0)
@@ -1777,12 +1844,6 @@ NetworkAddress FlowTransport::getLocalAddress() const {
 
 Standalone<StringRef> FlowTransport::getLocalAddressAsString() const {
 	return self->localAddresses.getLocalAddressAsString();
-}
-
-void FlowTransport::setLocalAddress(NetworkAddress const& address) {
-	auto newAddress = self->localAddresses.getAddressList();
-	newAddress.address = address;
-	self->localAddresses.setAddressList(newAddress);
 }
 
 const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAllPeers() const {

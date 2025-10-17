@@ -22,6 +22,9 @@
 #define FLOW_DETERIMINISTIC_RANDOM_H
 #pragma once
 
+#include <boost/random/mersenne_twister.hpp>
+#include <boost/random/uniform_int_distribution.hpp>
+
 #include <cinttypes>
 #include "flow/IRandom.h"
 #include "flow/Error.h"
@@ -38,7 +41,14 @@
 class SWIFT_CXX_REF_DETERMINISTICRANDOM DeterministicRandom final : public IRandom,
                                                                     public ReferenceCounted<DeterministicRandom> {
 private:
-	std::mt19937 random;
+	// Use boost::random::mt19937 to get consistent output across
+	// different compilers and therefore across different C++ standard
+	// library implementations. In other words, don't rely on the
+	// standard library for this.
+	//
+	// This is not expected to affect performance.  See e.g.
+	// https://chatgpt.com/share/68800ee9-3270-800b-aa84-4567167f02ab
+	boost::random::mt19937 rng;
 	uint64_t next;
 	bool useRandLog;
 
@@ -56,6 +66,7 @@ public:
 	char randomAlphaNumeric() override;
 	std::string randomAlphaNumeric(int length) override;
 	void randomBytes(uint8_t* buf, int length) override;
+	bool truePercent(const int percent) override;
 	uint64_t peek() const override;
 	void addref() override;
 	void delref() override;

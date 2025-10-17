@@ -43,14 +43,14 @@
 #define SevFRDebugInfo SevVerbose
 // #define SevFRDebugInfo SevInfo
 
-struct VersionedMutation {
+struct VersionedMutationSerialized {
 	MutationRef mutation;
 	LogMessageVersion version;
 
-	VersionedMutation() = default;
-	explicit VersionedMutation(MutationRef mutation, LogMessageVersion version)
+	VersionedMutationSerialized() = default;
+	explicit VersionedMutationSerialized(MutationRef mutation, LogMessageVersion version)
 	  : mutation(mutation), version(version) {}
-	explicit VersionedMutation(Arena& arena, const VersionedMutation& vm)
+	explicit VersionedMutationSerialized(Arena& arena, const VersionedMutationSerialized& vm)
 	  : mutation(arena, vm.mutation), version(vm.version) {}
 
 	template <class Ar>
@@ -77,7 +77,7 @@ struct SampledMutation {
 
 using MutationsVec = Standalone<VectorRef<MutationRef>>;
 using LogMessageVersionVec = Standalone<VectorRef<LogMessageVersion>>;
-using VersionedMutationsVec = Standalone<VectorRef<VersionedMutation>>;
+using VersionedMutationsVec = Standalone<VectorRef<VersionedMutationSerialized>>;
 using SampledMutationsVec = Standalone<VectorRef<SampledMutation>>;
 
 enum class RestoreRole { Invalid = 0, Controller = 1, Loader, Applier };

@@ -101,6 +101,12 @@ public: // workload functions
 		// FIXME: the data movement should be delayed while taking snapshots, the workload at present doesn't know the
 		// DD is disabled by the snapshot
 		out.insert("RandomMoveKeys");
+
+		// A combination of this workload only doing snapshot once and attrition fault injection means that it's
+		// possible that not all ss/tlog/coordinator data gets snapshotted. This workload does retry on snapshot errors
+		// but note that the absence of machines is not considered an error from snapshot request point of view.
+		// Since snapshot restart tests rely on snapshot data, attrition fault injection is disabled for this workload.
+		out.insert("Attrition");
 	}
 
 	ACTOR Future<Void> _create_keys(Database cx, std::string prefix, bool even = true) {

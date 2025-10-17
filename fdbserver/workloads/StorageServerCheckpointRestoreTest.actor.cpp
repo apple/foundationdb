@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
@@ -86,11 +87,14 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		// Create checkpoint.
 		state Transaction tr(cx);
 		state CheckpointFormat format = DataMoveRocksCF;
-		state UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
-		                                     AssignEmptyRange(false),
-		                                     DataMoveType::PHYSICAL,
-		                                     DataMovementReason::TEAM_HEALTHY,
-		                                     UnassignShard(false));
+		state UID dataMoveId =
+		    newDataMoveId(deterministicRandom()->randomUInt64(),
+		                  AssignEmptyRange(false),
+		                  deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY
+		                      ? DataMoveType::PHYSICAL
+		                      : DataMoveType::LOGICAL,
+		                  DataMovementReason::TEAM_HEALTHY,
+		                  UnassignShard(false));
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);

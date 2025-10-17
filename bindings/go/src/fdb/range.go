@@ -161,9 +161,9 @@ func (rr RangeResult) GetSliceWithError() ([]KeyValue, error) {
 // complete. The current goroutine will be blocked until all reads have
 // completed.
 func (rr RangeResult) GetSliceOrPanic() []KeyValue {
-	kvs, e := rr.GetSliceWithError()
-	if e != nil {
-		panic(e)
+	kvs, err := rr.GetSliceWithError()
+	if err != nil {
+		panic(err)
 	}
 	return kvs
 }
@@ -256,9 +256,9 @@ func (ri *RangeIterator) fetchNextBatch() {
 // asynchronous operations associated with this range did not successfully
 // complete. The Advance method of this RangeIterator must have returned true
 // prior to calling Get.
-func (ri *RangeIterator) Get() (kv KeyValue, e error) {
+func (ri *RangeIterator) Get() (kv KeyValue, err error) {
 	if ri.err != nil {
-		e = ri.err
+		err = ri.err
 		return
 	}
 
@@ -278,9 +278,9 @@ func (ri *RangeIterator) Get() (kv KeyValue, e error) {
 // complete. The Advance method of this RangeIterator must have returned true
 // prior to calling MustGet.
 func (ri *RangeIterator) MustGet() KeyValue {
-	kv, e := ri.Get()
-	if e != nil {
-		panic(e)
+	kv, err := ri.Get()
+	if err != nil {
+		panic(err)
 	}
 	return kv
 }
@@ -310,9 +310,9 @@ func Strinc(prefix []byte) ([]byte, error) {
 func PrefixRange(prefix []byte) (KeyRange, error) {
 	begin := make([]byte, len(prefix))
 	copy(begin, prefix)
-	end, e := Strinc(begin)
-	if e != nil {
-		return KeyRange{}, e
+	end, err := Strinc(begin)
+	if err != nil {
+		return KeyRange{}, err
 	}
 	return KeyRange{Key(begin), Key(end)}, nil
 }

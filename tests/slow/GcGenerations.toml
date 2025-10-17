@@ -10,6 +10,11 @@ remoteConfig = 'remote_double'
 max_write_transaction_life_versions = 5000000
 record_recover_at_in_cstate = true
 track_tlog_recovery = true
+# The GcGenerations workload intentionally builds up generations by injecting network degradation and timed
+# usage of process restarts. How long to inject network degradation is a sensitive value. Having
+# a high cc_recovery_init_req_growth_factor could mean that network degradation is healed too early, which
+# we do not want in this test. Therefore, a low value like 1.01 is used.
+cc_recovery_init_req_growth_factor = 1.01
 
 [[test]]
 testTitle = 'GcGenerations'

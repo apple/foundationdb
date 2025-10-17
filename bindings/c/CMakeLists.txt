@@ -106,8 +106,6 @@ if(NOT WIN32)
     test/mako/admin_server.cpp
     test/mako/async.hpp
     test/mako/async.cpp
-    test/mako/blob_granules.hpp
-    test/mako/blob_granules.cpp
     test/mako/future.hpp
     test/mako/limit.hpp
     test/mako/logger.hpp
@@ -149,10 +147,6 @@ if(NOT WIN32)
     test/apitester/TesterApiWorkload.h
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
-    test/apitester/TesterBlobGranuleCorrectnessWorkload.cpp
-    test/apitester/TesterBlobGranuleErrorsWorkload.cpp
-    test/apitester/TesterBlobGranuleUtil.cpp
-    test/apitester/TesterBlobGranuleUtil.h
     test/apitester/TesterCancelTransactionWorkload.cpp
     test/apitester/TesterCorrectnessWorkload.cpp
     test/apitester/TesterExampleWorkload.cpp
@@ -295,9 +289,28 @@ if(NOT WIN32)
     )
 
     file(GLOB API_TEST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/test/apitester/tests/*.toml")
+    set(PATTERNS_TO_SKIP "XXXX")
+    if (USE_ASAN)
+      set(PATTERNS_TO_SKIP
+        ".*Tenant.*"       # skip Tenant tests because we don't use
+      )
+    endif()
     foreach(test_file ${API_TEST_FILES})
       get_filename_component(file_name "${test_file}" NAME_WE)
       set(test_name "fdb_c_api_test_${file_name}")
+
+      # skip tests that match the patterns in PATTERNS_TO_SKIP
+      set(SKIP_FILE FALSE)
+      foreach(PATTERN ${PATTERNS_TO_SKIP})
+          if(file_name MATCHES "${PATTERN}")
+              set(SKIP_FILE TRUE)
+              break()
+          endif()
+      endforeach()
+      if(SKIP_FILE)
+        continue()
+      endif()
+
       add_python_venv_test(NAME "${test_name}"
         COMMAND python ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
           --build-dir ${CMAKE_BINARY_DIR}
@@ -314,15 +327,6 @@ if(NOT WIN32)
       --build-dir ${CMAKE_BINARY_DIR}
       --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
       --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
-      --process-number 3
-      )
-
-    add_python_venv_test(NAME fdb_c_upgrade_to_future_version_blob_granules
-      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/ApiBlobGranulesCorrectness.toml
-      --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
-      --blob-granules-enabled
       --process-number 3
       )
 
@@ -382,22 +386,54 @@ if(NOT WIN32)
 
 endif()
 
-set(c_workloads_srcs
+set(cpp_workloads_srcs
   test/workloads/workloads.cpp
   test/workloads/workloads.h
   test/workloads/SimpleWorkload.cpp)
 
+set(c_workloads_srcs
+  test/workloads/CWorkload.c)
+
 if(OPEN_FOR_IDE)
+  add_library(cpp_workloads OBJECT ${cpp_workloads_srcs})
   add_library(c_workloads OBJECT ${c_workloads_srcs})
 else()
+  add_library(cpp_workloads SHARED ${cpp_workloads_srcs})
   add_library(c_workloads SHARED ${c_workloads_srcs})
 endif()
+set_target_properties(cpp_workloads PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
 set_target_properties(c_workloads PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
+target_link_libraries(cpp_workloads PUBLIC fdb_c)
+target_include_directories(c_workloads PUBLIC ${CMAKE_SOURCE_DIR}/bindings/c)
 target_link_libraries(c_workloads PUBLIC fdb_c)
 
 if(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
-  target_link_options(c_workloads PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map,-z,nodelete")
+  # Add the -Wl,--undefined-version flag to the linker command to allow
+  # undefined symbols in version scripts. Clang 19 doesn't allow this and would
+  # complain with "symbol not defined" errors.
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19.0.0")
+    target_link_options(cpp_workloads PRIVATE
+      "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map"
+      "LINKER:-z,nodelete"
+      "LINKER:--undefined-version"
+    )
+    target_link_options(c_workloads PRIVATE
+      "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map"
+      "LINKER:-z,nodelete"
+      "LINKER:--undefined-version"
+    )
+  else()
+    target_link_options(cpp_workloads PRIVATE
+      "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map"
+      "LINKER:-z,nodelete"
+    )
+    target_link_options(c_workloads PRIVATE
+      "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map"
+      "LINKER:-z,nodelete"
+    )
+  endif()
 endif()
 
 # Generate shim library in Linux builds

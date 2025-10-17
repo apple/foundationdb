@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package fdbrpc.test;
+
+service TestEchoService {
+    rpc Echo(EchoRequest) returns (EchoResponse);
+    rpc EchoRecvStream10(EchoRequest) returns (stream EchoResponse);
+    rpc EchoSendStream10(stream EchoRequest) returns (EchoResponse);
+}
+
+message EchoRequest {
+    string message = 1;
+}
+
+message EchoResponse {
+    string message = 1;
+}

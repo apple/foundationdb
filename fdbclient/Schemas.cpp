@@ -173,6 +173,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                      "throttled_commits":12341234,
                      "write_stall_microseconds":12341234
                   },
+                  "rocksdb_version":"9.7.3",
                   "data_version":12341234,
                   "durable_version":12341234,
                   "data_lag": {
@@ -898,7 +899,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "aggressive",
              "gradual"
          ]},
-         "blob_granules_enabled":0,
          "tenant_mode": {
              "$enum":[
              "disabled",

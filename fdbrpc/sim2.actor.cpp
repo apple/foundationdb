@@ -71,13 +71,14 @@
 
 ISimulator* g_simulator = nullptr;
 thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
+thread_local bool ISimulator::isMainThread = false;
 
 ISimulator::ISimulator()
   : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
     allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED), isStopped(false),
     lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
     connectionFailureEnableTime(0), disableTLogRecoveryFinish(false), backupAgents(BackupAgentType::WaitForType),
-    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false), blobGranulesEnabled(false) {}
+    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
 ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -224,7 +225,7 @@ WipedString ISimulator::makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow) 
 	return WipedString(authz::jwt::signToken(arena, tokenSpec, key));
 }
 
-int openCount = 0;
+int openFileCount = 0;
 
 struct SimClogging {
 	double getSendDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) const {
@@ -577,7 +578,6 @@ private:
 	}
 
 	void rollRandomClose() {
-		// make sure connections between parenta and their childs are not closed
 		if (!stableConnection &&
 		    now() - g_simulator->lastConnectionFailure > g_simulator->connectionFailuresDisableDuration &&
 		    deterministicRandom()->random01() < .00001) {
@@ -672,12 +672,12 @@ public:
 		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
-		if (++openCount >= 6000) {
+		if (++openFileCount >= 6000) {
 			TraceEvent(SevError, "TooManyFiles").log();
 			ASSERT(false);
 		}
 
-		if (openCount == 4000) {
+		if (openFileCount == 4000) {
 			disableConnectionFailures("TooManyFiles");
 		}
 
@@ -741,11 +741,11 @@ public:
 
 	~SimpleFile() override {
 		_close(h);
-		--openCount;
+		--openFileCount;
 	}
 
 private:
-	int h;
+	int h; // normally this would be called `fd`
 
 	// Performance parameters of simulated disk
 	Reference<DiskParameters> diskParameters;
@@ -1049,9 +1049,6 @@ private:
 
 class Sim2 final : public ISimulator, public INetworkConnections {
 public:
-	// Implement INetwork interface
-	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating
-	// machines and time
 	double now() const override { return time; }
 
 	// timer() can be up to 0.1 seconds ahead of now()
@@ -1401,6 +1398,7 @@ public:
 
 	static void runLoop(Sim2* self) {
 		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
+		ISimulator::isMainThread = true;
 		int lastPrintTime = 0;
 		while (!self->isStopped) {
 			if (self->taskQueue.canSleep()) {
@@ -1434,8 +1432,8 @@ public:
 		}
 	}
 
-	// Implement ISimulator interface
 	void run() override { runLoop(this); }
+
 	ProcessInfo* newProcess(const char* name,
 	                        IPAddress ip,
 	                        uint16_t port,
@@ -1483,6 +1481,7 @@ public:
 			addresses.secondaryAddress = NetworkAddress(ip, port + 1, true, false);
 		}
 
+		// FIXME: why would a ProcessInfo be called `m`?
 		ProcessInfo* m =
 		    new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
 		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
@@ -1506,6 +1505,8 @@ public:
 		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
 		m->setGlobal(INetwork::enMetrics, (flowGlobalType)&m->metrics);
 
+		// FIXME: we are not creating a new machine. We are creating a new process.  Why is
+		// the first argument to TraceEvent here talking about a new machine?
 		TraceEvent("NewMachine")
 		    .detail("Name", name)
 		    .detail("Address", m->address)
@@ -1581,47 +1582,6 @@ public:
 			primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
 		}
 		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
-	}
-
-	// The following function will determine if a machine can be remove in case when it has a blob worker
-	bool canKillMachineWithBlobWorkers(Optional<Standalone<StringRef>> machineId, KillType kt, KillType* ktFinal) {
-		// Allow if no blob workers, or it's a reboot(without removing the machine)
-		// FIXME: this should be ||
-		if (!blobGranulesEnabled && kt >= KillType::RebootAndDelete) {
-			return true;
-		}
-
-		// Allow if the machine doesn't support blob worker
-		MachineInfo& currentMachine = machines[machineId];
-		bool hasBlobWorker = false;
-		for (auto processInfo : currentMachine.processes) {
-			if (processInfo->startingClass == ProcessClass::BlobWorkerClass) {
-				hasBlobWorker = true;
-				break;
-			}
-		}
-		if (!hasBlobWorker)
-			return true;
-
-		// Count # remaining support blob workers in current dc
-		auto currentDcId = currentMachine.machineProcess->locality.dcId();
-		int nLeft = 0;
-		for (auto processInfo : getAllProcesses()) {
-			if (currentDcId != processInfo->locality.dcId() || // skip other dc
-			    processInfo->startingClass != ProcessClass::BlobWorkerClass || // skip non blob workers
-			    processInfo->failed || // if process was killed but has not yet been removed from the process list
-			    processInfo->locality.machineId() == machineId) { // skip current machine
-				continue;
-			}
-			nLeft++; // alive blob workers after killing machineId
-		}
-
-		// Ensure there is at least 1 remaining blob workers after removing current machine
-		if (nLeft <= 1) {
-			*ktFinal = KillType::RebootAndDelete; // reboot and delete data, but keep this machine
-			return false;
-		}
-		return true;
 	}
 
 	// The following function will determine if the specified configuration of available and dead processes can allow
@@ -2071,13 +2031,6 @@ public:
 		    ((kt == KillType::KillInstantly) || (kt == KillType::InjectFaults) || (kt == KillType::FailDisk) ||
 		     (kt == KillType::RebootAndDelete) || (kt == KillType::RebootProcessAndDelete))) {
 
-			if (!canKillMachineWithBlobWorkers(machineId, kt, &kt)) {
-				TraceEvent("CanKillMachineWithBlobWorkers")
-				    .detail("MachineId", machineId)
-				    .detail("KillType", kt)
-				    .detail("OrigKillType", ktOrig);
-			}
-
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			int protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
 
@@ -2493,6 +2446,7 @@ public:
 	}
 
 	// Assumes the simulator is already onProcess for proc
+	// FIXME: delete the above comment and add an ASSERT about this condition.
 	void startRequestHandlerOnProcess(ProcessInfo* process,
 	                                  Reference<HTTP::SimServerContext> serverContext,
 	                                  Reference<HTTP::SimRegisteredHandlerContext> handlerContext) {
@@ -2615,7 +2569,6 @@ public:
 		check_yield(TaskPriority::Zero);
 	}
 
-	// Implementation
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		ProcessInfo* machine;
@@ -2666,7 +2619,7 @@ public:
 		PromiseTask* p = new PromiseTask(getCurrentProcess(), std::move(signal));
 		taskQueue.addReadyThreadSafe(isOnMainThread(), taskID, p);
 	}
-	bool isOnMainThread() const override { return net2->isOnMainThread(); }
+	bool isOnMainThread() const override { return ISimulator::isMainThread; }
 	Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
 		return delay(0, taskID, process);
 	}
@@ -2690,7 +2643,6 @@ public:
 
 	std::vector<std::function<void()>> stopCallbacks;
 
-	// Sim2Net network;
 	INetwork* net2;
 
 	// Map from machine IP -> machine disk space info
@@ -3015,20 +2967,41 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 	return delayUntil(diskParameters->nextOperation + randomLatency);
 }
 
-void enableConnectionFailures(std::string const& context) {
+void enableConnectionFailures(std::string const& context, double duration) {
 	if (g_network->isSimulated()) {
 		g_simulator->connectionFailuresDisableDuration = 0;
 		g_simulator->speedUpSimulation = false;
 		g_simulator->connectionFailureEnableTime = now();
-		TraceEvent(SevWarnAlways, ("EnableConnectionFailures_" + context).c_str());
+		g_simulator->connectionFailureDisableTime = now() + duration;
+		TraceEvent(SevWarnAlways, ("EnableConnectionFailures_" + context).c_str()).detail("Duration", duration);
 	}
 }
 
-void disableConnectionFailures(std::string const& context) {
+double disableConnectionFailures(std::string const& context, ForceDisable flag) {
 	if (g_network->isSimulated()) {
-		g_simulator->connectionFailuresDisableDuration = DISABLE_CONNECTION_FAILURE_FOREVER;
-		g_simulator->speedUpSimulation = true;
-		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
+		if (now() < g_simulator->connectionFailureDisableTime && flag == ForceDisable::False) {
+			TraceEvent(("DisableConnectionFailuresDelayed_" + context).c_str())
+			    .detail("Until", g_simulator->connectionFailureDisableTime);
+			return g_simulator->connectionFailureDisableTime - now();
+		} else {
+			g_simulator->connectionFailuresDisableDuration = DISABLE_CONNECTION_FAILURE_FOREVER;
+			g_simulator->speedUpSimulation = true;
+			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
+			return 0;
+		}
+	}
+	return 0;
+}
+
+void extendConnectionFailures(std::string const& context, double duration) {
+	if (g_network->isSimulated()) {
+		if (g_simulator->speedUpSimulation) {
+			enableConnectionFailures(context, duration);
+		} else {
+			g_simulator->connectionFailureDisableTime =
+			    std::max(now() + duration, g_simulator->connectionFailureDisableTime);
+			TraceEvent(SevWarnAlways, ("ExtendConnectionFailures_" + context).c_str()).detail("Duration", duration);
+		}
 	}
 }
 

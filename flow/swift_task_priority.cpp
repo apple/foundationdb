@@ -222,7 +222,8 @@ TaskPriority swift_priority_to_net2(swift::JobPriority p) {
 		fp = TaskPriority::TLogSpilledPeekReply;
 		break;
 	case 12:
-		fp = TaskPriority::BlobWorkerReadChangeFeed;
+		// Priority 12 deleted.
+		ASSERT(false);
 		break;
 	case 11:
 		fp = TaskPriority::BlobWorkerUpdateFDB;

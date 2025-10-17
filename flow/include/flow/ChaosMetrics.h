@@ -23,6 +23,11 @@
 
 struct TraceEvent;
 
+// FIXME: simulation testing involves injection of a lot of chaos
+// (e.g. from the description here: https://apple.github.io/foundationdb/testing.html).
+// Explain how the specifics in this file differ from normal, background chaos
+// that simulation already puts into the simulated environment.
+
 // Chaos Metrics - We periodically log chaosMetrics to make sure that chaos events are happening
 // Only includes DiskDelays which encapsulates all type delays and BitFlips for now
 // Expand as per need

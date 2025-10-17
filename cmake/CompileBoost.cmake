@@ -9,7 +9,7 @@ function(compile_boost)
 
   # Configure bootstrap command
   set(BOOTSTRAP_COMMAND "./bootstrap.sh")
-  set(BOOTSTRAP_LIBRARIES "context,filesystem,iostreams,system,serialization,program_options")
+  set(BOOTSTRAP_LIBRARIES "context,filesystem,iostreams,system,serialization,program_options,url")
 
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
   # Can't build Boost with Intel compiler, use clang instead.
@@ -71,7 +71,7 @@ function(compile_boost)
   # Build boost
   include(ExternalProject)
 
-  set(BOOST_SRC_URL https://boostorg.jfrog.io/artifactory/main/release/1.86.0/source/boost_1_86_0.tar.bz2)
+  set(BOOST_SRC_URL https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2)
   set(BOOST_SRC_SHA SHA256=1bed88e40401b2cb7a1f76d4bab499e352fa4d0c5f31c0dbae64e24d34d7513b)
 
   if(USE_ASAN)
@@ -99,6 +99,7 @@ function(compile_boost)
                        "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_serialization.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_system.a"
+                       "${BOOST_INSTALL_DIR}/lib/libboost_url.a"
 					   "${BOOST_INSTALL_DIR}/lib/libboost_program_options.a")
 
   add_library(${COMPILE_BOOST_TARGET}_context STATIC IMPORTED)
@@ -125,9 +126,13 @@ function(compile_boost)
   add_dependencies(${COMPILE_BOOST_TARGET}_system ${COMPILE_BOOST_TARGET}Project)
   set_target_properties(${COMPILE_BOOST_TARGET}_system PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_system.a")
 
+  add_library(${COMPILE_BOOST_TARGET}_url STATIC IMPORTED)
+  add_dependencies(${COMPILE_BOOST_TARGET}_url ${COMPILE_BOOST_TARGET}Project)
+  set_target_properties(${COMPILE_BOOST_TARGET}_url PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_url.a")
+
   add_library(${COMPILE_BOOST_TARGET} INTERFACE)
   target_include_directories(${COMPILE_BOOST_TARGET} SYSTEM INTERFACE ${BOOST_INSTALL_DIR}/include)
-  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}_iostreams ${COMPILE_BOOST_TARGET}_system ${COMPILE_BOOST_TARGET}_serialization)
+  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}_iostreams ${COMPILE_BOOST_TARGET}_system ${COMPILE_BOOST_TARGET}_serialization ${COMPILE_BOOST_TARGET}_url)
 
 endfunction(compile_boost)
 
@@ -173,16 +178,26 @@ if(WIN32)
   # properly for config mode. So we use the old way on Windows
   #  find_package(Boost 1.72.0 EXACT QUIET REQUIRED CONFIG PATHS ${BOOST_HINT_PATHS})
   # I think depending on the cmake version this will cause weird warnings
-  find_package(Boost 1.86 COMPONENTS filesystem iostreams serialization system program_options)
+  find_package(Boost 1.86 COMPONENTS filesystem iostreams serialization system program_options url)
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::filesystem Boost::iostreams Boost::serialization Boost::system)
+  target_link_libraries(boost_target INTERFACE Boost::boost Boost::filesystem Boost::iostreams Boost::serialization Boost::system Boost::url)
+  
+  # Add zstd library since boost::iostreams may depend on it
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(ZSTD QUIET libzstd)
+    if(ZSTD_FOUND)
+      target_link_libraries(boost_target INTERFACE ${ZSTD_LIBRARIES})
+      target_link_directories(boost_target INTERFACE ${ZSTD_LIBRARY_DIRS})
+    endif()
+  endif()
 
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)
   return()
 endif()
 
-find_package(Boost 1.86.0 EXACT QUIET COMPONENTS context filesystem iostreams program_options serialization system CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.86.0 EXACT QUIET COMPONENTS context filesystem iostreams program_options serialization system url CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
 # The precompiled boost silently broke in CI.  While investigating, I considered extending
@@ -200,7 +215,19 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 #
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system)
+  target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system Boost::url)
+  
+  # Add zstd library since boost::iostreams may depend on it when compiled with homebrew on macOS
+  if(APPLE)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(ZSTD QUIET libzstd)
+      if(ZSTD_FOUND)
+        target_link_libraries(boost_target INTERFACE ${ZSTD_LIBRARIES})
+        target_link_directories(boost_target INTERFACE ${ZSTD_LIBRARY_DIRS})
+      endif()
+    endif()
+  endif()
 
   add_library(boost_target_program_options INTERFACE)
   target_link_libraries(boost_target_program_options INTERFACE Boost::boost Boost::program_options)

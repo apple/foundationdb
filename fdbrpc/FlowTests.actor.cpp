@@ -20,7 +20,10 @@
 
 // Unit tests for the flow language and libraries
 
+#include <chrono>
+#include <thread>
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
@@ -29,6 +32,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
+#include "fdbrpc/grpc/AsyncTaskExecutor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void forceLinkFlowTests() {}
@@ -551,10 +555,8 @@ TEST_CASE("/flow/flow/callbacks") {
 	int result = 0;
 	bool happened = false;
 
-	onReady(
-	    std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
-	onReady(
-	    p.getFuture(), [&happened](int) { happened = true; }, [&happened](Error) { happened = true; });
+	onReady(std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(p.getFuture(), [&happened](int) { happened = true; }, [&happened](Error) { happened = true; });
 	ASSERT(!f.isValid());
 	ASSERT(p.isValid() && !p.isSet() && p.getFutureReferenceCount() == 1);
 	ASSERT(result == 0 && !happened);
@@ -564,16 +566,14 @@ TEST_CASE("/flow/flow/callbacks") {
 	ASSERT(p.isValid() && p.isSet() && p.getFutureReferenceCount() == 0 && p.getFuture().get() == 123);
 
 	result = 0;
-	onReady(
-	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 	ASSERT(result == 123);
 	ASSERT(p.isValid() && p.isSet() && p.getFutureReferenceCount() == 0 && p.getFuture().get() == 123);
 
 	p = Promise<int>();
 	f = p.getFuture();
 	result = 0;
-	onReady(
-	    std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -e.code(); });
+	onReady(std::move(f), [&result](int x) { result = x; }, [&result](Error e) { result = -e.code(); });
 	ASSERT(!f.isValid());
 	ASSERT(p.isValid() && !p.isSet() && p.getFutureReferenceCount() == 1);
 	ASSERT(result == 0);
@@ -588,8 +588,7 @@ TEST_CASE("/flow/flow/promisestream callbacks") {
 
 	int result = 0;
 
-	onReady(
-	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 
 	ASSERT(result == 0);
 
@@ -599,14 +598,12 @@ TEST_CASE("/flow/flow/promisestream callbacks") {
 	ASSERT(result == 123);
 	result = 0;
 
-	onReady(
-	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 
 	ASSERT(result == 456);
 	result = 0;
 
-	onReady(
-	    p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
+	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e) { result = -1; });
 
 	ASSERT(result == 0);
 
@@ -1613,6 +1610,182 @@ TEST_CASE("/flow/flow/FlowMutex") {
 	} catch (Error& e) {
 		printf("Error at count=%d\n", count + 1);
 		ASSERT(false);
+	}
+
+	return Void();
+}
+
+using namespace std::chrono_literals;
+
+TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Simple") {
+	state AsyncTaskExecutor exc(1);
+	noUnseed = true;
+	ThreadReturnPromiseStream<int> stream;
+	state ThreadFutureStream<int> f = stream.getFuture();
+	state Future<Void> t = exc.post([stream = std::move(stream)]() mutable {
+		for (int i = 0; i < 10; ++i) {
+			stream.send(i);
+			std::cout << "Sent: " << i << std::endl;
+			std::this_thread::sleep_for(10ms);
+		}
+		stream.sendError(end_of_stream());
+		return Void();
+	});
+
+	state int n = 0;
+	while (true) {
+		try {
+			state int i = waitNext(f);
+			std::cout << "Got: " << i << std::endl;
+			wait(delay(0.1));
+			ASSERT(i == n);
+			++n;
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_end_of_stream);
+			ASSERT(n == 10);
+			break;
+		}
+	}
+
+	wait(t);
+	return Void();
+}
+
+TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Seq") {
+	state AsyncTaskExecutor exc(1);
+	noUnseed = true;
+	ThreadReturnPromiseStream<int> stream;
+	state ThreadFutureStream<int> f = stream.getFuture();
+	state Future<Void> t = exc.post([stream = std::move(stream)]() mutable {
+		for (int i = 0; i <= 3; ++i) {
+			stream.send(i);
+			std::this_thread::sleep_for(100ms);
+		}
+		stream.sendError(end_of_stream());
+		return Void();
+	});
+
+	int r0 = waitNext(f);
+	ASSERT(r0 == 0);
+	int r1 = waitNext(f);
+	ASSERT(r1 == 1);
+	int r2 = waitNext(f);
+	ASSERT(r2 == 2);
+	wait(delay(1.0));
+	int r3 = waitNext(f);
+	ASSERT(r3 == 3);
+	wait(t);
+	return Void();
+}
+
+TEST_CASE("/flow/thread/ThreadReturnPromiseStream_Error") {
+	state AsyncTaskExecutor exc(1);
+	noUnseed = true;
+
+	{
+		ThreadReturnPromiseStream<int> s1;
+		state ThreadFutureStream<int> f1 = s1.getFuture();
+		state Future<Void> t1 = exc.post([s1 = std::move(s1)]() mutable {
+			std::this_thread::sleep_for(2s);
+			return Void();
+		});
+
+		try {
+			int _ = waitNext(f1);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_broken_promise);
+		}
+
+		wait(t1);
+	}
+
+	{
+		ThreadReturnPromiseStream<int> s2;
+		state ThreadFutureStream<int> f2 = s2.getFuture();
+		state Future<Void> t2 = exc.post([s2 = std::move(s2)]() mutable {
+			std::this_thread::sleep_for(2s);
+			s2.sendError(transaction_too_old());
+			return Void();
+		});
+
+		try {
+			int _ = waitNext(f2);
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_transaction_too_old);
+		}
+
+		wait(t2);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream_DestroyPromise") {
+	noUnseed = true;
+
+	{
+		std::cout << "ThreadReturnPromiseStream with future > 0, promise == 0, end_of_stream sent\n";
+		// After all references to PromiseStream are gone, FutureStream should still be able to get
+		// all the values if PromiseStream had reached end_of_stream.
+		state ThreadFutureStream<int> fs1 = ([]() {
+			ThreadReturnPromiseStream<int> p;
+			auto ret = p.getFuture();
+			for (int i = 0; i < 10; i++) {
+				p.send(i);
+			}
+			p.sendError(end_of_stream());
+			ASSERT(p.getFutureReferenceCount() == 1);
+			return ret;
+		})();
+
+		wait(delay(1));
+
+		state int recvd = 0;
+		try {
+			while (true) {
+				int _ = waitNext(fs1);
+				recvd += 1;
+			}
+		} catch (Error& err) {
+			if (err.code() == error_code_end_of_stream) {
+				ASSERT_EQ(recvd, 10);
+			} else {
+				ASSERT(false);
+			}
+		}
+	}
+
+	std::cout << "ThreadReturnPromiseStream with future > 0,  promise == 0, no end_of_stream\n";
+	{
+		// After all references to PromiseStream are gone, but the stream was not ended cleanly
+		// by sending end_of_stream, we should instead get broken_promise.
+		state ThreadFutureStream<int> fs2 = ([]() {
+			ThreadReturnPromiseStream<int> p;
+			auto ret = p.getFuture();
+			for (int i = 0; i < 10; i++) {
+				p.send(i);
+			}
+			ASSERT(p.getFutureReferenceCount() == 1);
+			return ret;
+		})();
+
+		wait(delay(1));
+
+		try {
+			while (true) {
+				choose {
+					when(int _ = waitNext(fs2)) {}
+					when(wait(delay(1))) {
+						ASSERT(false); // shouldn't hangup if end_of_stream is not sent.
+						break;
+					}
+				}
+			}
+		} catch (Error& err) {
+			ASSERT(err.code() == error_code_broken_promise);
+		}
 	}
 
 	return Void();

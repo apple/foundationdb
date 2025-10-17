@@ -20,7 +20,7 @@
 
 #include "flow/ApiVersion.h"
 #include "fmt/format.h"
-#include "fdbbackup/BackupTLSConfig.h"
+#include "fdbclient/BackupTLSConfig.h"
 #include "fdbbackup/Decode.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
@@ -194,9 +194,6 @@ enum {
 	OPT_DSTONLY,
 
 	OPT_TRACE_FORMAT,
-
-	// blob granules backup/restore
-	OPT_BLOB_MANIFEST_URL,
 };
 
 // Top level binary commands.
@@ -285,7 +282,6 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 	{ OPT_ENCRYPT_FILES, "--encrypt-files", SO_REQ_SEP },
-	{ OPT_BLOB_MANIFEST_URL, "--blob-manifest-url", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -296,6 +292,7 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 #endif
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -741,7 +738,6 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin-version", SO_REQ_SEP },
 	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent-snapshot-only", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
-	{ OPT_BLOB_MANIFEST_URL, "--blob-manifest-url", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1132,15 +1128,12 @@ static void printBackupUsage(bool devhelp) {
 	       "                 This option indicates to the backup agent that it will only need to record the log files, "
 	       "and ignore the range files.\n");
 	printf("  --encryption-key-file"
-	       "                 The AES-128-GCM key in the provided file is used for encrypting backup files.\n");
+	       "                 The AES-256-GCM key in the provided file is used for encrypting backup files.\n");
 	printf("  --encrypt-files 0/1"
 	       "                 If passed, this argument will allow the user to override the database encryption state to "
 	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
 	       "level encryption of snapshot backups while --encryption-key-file (above) refers to file level encryption. "
 	       "Generally, these two options should not be used together.\n");
-	printf("  --blob-manifest-url URL\n"
-	       "                 Perform blob manifest backup. Manifest files are stored to the destination URL.\n"
-	       "                 Blob granules should be enabled first for manifest backup.\n");
 
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
@@ -1216,9 +1209,7 @@ static void printRestoreUsage(bool devhelp) {
 	       "                 Indicates to the backup agent to only begin replaying log files from a certain version, "
 	       "instead of the entire set.\n");
 	printf("  --encryption-key-file"
-	       "                 The AES-128-GCM key in the provided file is used for decrypting backup files.\n");
-	printf("  --blob-manifest-url URL\n"
-	       "                 Restore from blob granules. Manifest files are stored to the destination URL.\n");
+	       "                 The AES-256-GCM key in the provided file is used for decrypting backup files.\n");
 	printf(TLS_HELP);
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
 	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in %s\n",
@@ -1825,14 +1816,25 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 
 	// Register the existence of this layer in the meta key space
 	loop {
+		tr->reset();
 		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->set(metaKey, rootKey);
-			wait(tr->commit());
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					tr->set(metaKey, rootKey);
+					wait(tr->commit());
+					break;
+				} catch (Error& e) {
+					TraceEvent(SevWarnAlways, "LayerStatusMetaKeyUpdateError").errorUnsuppressed(e);
+					wait(tr->onError(e)); // Non-retryable txns throws back the error.
+				}
+			}
 			break;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			// For non-retryable txns, do delay, reset txn and retry
+			TraceEvent(SevWarnAlways, "UnableToWriteLayerStatusMetaKey").errorUnsuppressed(e);
+			wait(delay(5.0));
 		}
 	}
 
@@ -1852,6 +1854,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 					wait(tr->commit());
 					break;
 				} catch (Error& e) {
+					TraceEvent(SevWarnAlways, "LayerBackupStatusUpdateError").errorUnsuppressed(e);
 					wait(tr->onError(e));
 				}
 			}
@@ -1865,7 +1868,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 			if (!pollRateUpdater.isValid())
 				pollRateUpdater = updateAgentPollRate(statusUpdateDest, rootKey, name, pollDelay);
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "UnableToWriteStatus").error(e);
+			TraceEvent(SevWarnAlways, "UnableToWriteBackupStatus").error(e);
 			wait(delay(10.0));
 		}
 	}
@@ -1981,7 +1984,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 StopWhenDone stopWhenDone,
                                 UsePartitionedLog usePartitionedLog,
                                 IncrementalBackupOnly incrementalBackupOnly,
-                                Optional<std::string> blobManifestUrl) {
+                                Optional<std::string> encryptionKeyFile) {
 	try {
 		state FileBackupAgent backupAgent;
 		ASSERT(!backupRanges.empty());
@@ -2035,8 +2038,7 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              stopWhenDone,
 			                              usePartitionedLog,
 			                              incrementalBackupOnly,
-			                              {},
-			                              blobManifestUrl));
+			                              encryptionKeyFile));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -2319,6 +2321,13 @@ Reference<IBackupContainer> openBackupContainer(const char* name,
 		throw backup_error();
 	}
 
+	if (destinationContainer.find("../") != std::string::npos) {
+		fprintf(
+		    stderr, "ERROR: Backup Container URL '%s' contains directory traversals\n", destinationContainer.c_str());
+		printHelpTeaser(name);
+		throw backup_invalid_url();
+	}
+
 	Reference<IBackupContainer> c;
 	try {
 		c = IBackupContainer::openContainer(destinationContainer, proxy, encryptionKeyFile);
@@ -2353,8 +2362,7 @@ ACTOR Future<Void> runRestore(Database db,
                               std::string removePrefix,
                               OnlyApplyMutationLogs onlyApplyMutationLogs,
                               InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                              Optional<std::string> encryptionKeyFile,
-                              Optional<std::string> blobManifestUrl) {
+                              Optional<std::string> encryptionKeyFile) {
 	ASSERT(!ranges.empty());
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
@@ -2398,9 +2406,6 @@ ACTOR Future<Void> runRestore(Database db,
 				    "No restore target version given, will use maximum restorable version from backup description.\n");
 
 			BackupDescription desc = wait(bc->describeBackup());
-			if (blobManifestUrl.present()) {
-				onlyApplyMutationLogs = OnlyApplyMutationLogs::True;
-			}
 
 			if (onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 				targetVersion = desc.contiguousLogEnd.get() - 1;
@@ -2433,8 +2438,7 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   onlyApplyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion,
-			                                                   encryptionKeyFile,
-			                                                   blobManifestUrl));
+			                                                   encryptionKeyFile));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -3257,10 +3261,6 @@ Version parseVersion(const char* str) {
 	return ver;
 }
 
-#ifdef ALLOC_INSTRUMENTATION
-extern uint8_t* g_extra_memory;
-#endif
-
 // Creates a connection to a cluster. Optionally prints an error if the connection fails.
 Optional<Database> connectToCluster(std::string const& clusterFile,
                                     LocalityData const& localities,
@@ -3304,9 +3304,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	try {
-#ifdef ALLOC_INSTRUMENTATION
-		g_extra_memory = new uint8_t[1000000];
-#endif
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error
@@ -3363,9 +3360,6 @@ int main(int argc, char* argv[]) {
 					    argc - 1, &argv[1], g_rgBackupDiscontinueOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::PAUSE:
-					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
-					break;
 				case BackupType::RESUME:
 					args = std::make_unique<CSimpleOpt>(
 					    argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
@@ -3438,9 +3432,6 @@ int main(int argc, char* argv[]) {
 					    argc - 1, &argv[1], g_rgDBAbortOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case DBType::PAUSE:
-					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgDBPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
-					break;
 				case DBType::RESUME:
 					args = std::make_unique<CSimpleOpt>(
 					    argc - 1, &argv[1], g_rgDBPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
@@ -3734,8 +3725,6 @@ int main(int argc, char* argv[]) {
 				restoreClusterFileOrig = args->OptionArg();
 				break;
 			case OPT_CLUSTERFILE:
-				clusterFile = args->OptionArg();
-				break;
 			case OPT_DEST_CLUSTER:
 				clusterFile = args->OptionArg();
 				break;
@@ -3991,10 +3980,6 @@ int main(int argc, char* argv[]) {
 			case OPT_JSON:
 				jsonOutput = true;
 				break;
-			case OPT_BLOB_MANIFEST_URL: {
-				blobManifestUrl = args->OptionArg();
-				break;
-			}
 			}
 		}
 
@@ -4250,7 +4235,7 @@ int main(int argc, char* argv[]) {
 				                           stopWhenDone,
 				                           usePartitionedLog,
 				                           incrementalBackupOnly,
-				                           blobManifestUrl));
+				                           encryptionKeyFile));
 				break;
 			}
 
@@ -4435,8 +4420,7 @@ int main(int argc, char* argv[]) {
 				                         removePrefix,
 				                         onlyApplyMutationLogs,
 				                         inconsistentSnapshotOnly,
-				                         encryptionKeyFile,
-				                         blobManifestUrl));
+				                         encryptionKeyFile));
 
 				break;
 			case RestoreType::WAIT:

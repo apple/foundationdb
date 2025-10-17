@@ -25,14 +25,15 @@
 #elif !defined(FDBCLIENT_BACKUP_AGENT_ACTOR_H)
 #define FDBCLIENT_BACKUP_AGENT_ACTOR_H
 
+#include <ctime>
+#include <climits>
+
 #include "flow/flow.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
 #include "flow/IAsyncFile.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include <ctime>
-#include <climits>
 #include "fdbclient/BackupContainer.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -45,6 +46,7 @@ FDB_BOOLEAN_PARAM(ForceAction);
 FDB_BOOLEAN_PARAM(Terminator);
 FDB_BOOLEAN_PARAM(IncrementalBackupOnly);
 FDB_BOOLEAN_PARAM(UsePartitionedLog);
+FDB_BOOLEAN_PARAM(TransformPartitionedLog);
 FDB_BOOLEAN_PARAM(OnlyApplyMutationLogs);
 FDB_BOOLEAN_PARAM(SnapshotBackupUseTenantCache);
 FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
@@ -203,9 +205,9 @@ public:
 	                        UnlockDB = UnlockDB::True,
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
-	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        Optional<std::string> blobManifestUrl = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 
+	// this method will construct range and version vectors and then call restore()
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
@@ -221,9 +223,9 @@ public:
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        Optional<std::string> blobManifestUrl = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 
+	// create a version vector of size ranges.size(), all elements are the same, i.e. beginVersion
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
@@ -240,8 +242,7 @@ public:
 	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        Optional<std::string> blobManifestUrl = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
@@ -281,8 +282,7 @@ public:
 	                          StopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {},
-	                          Optional<std::string> const& blobManifestUrl = {});
+	                          Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          Optional<std::string> proxy,
@@ -294,8 +294,7 @@ public:
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {},
-	                          Optional<std::string> const& blobManifestUrl = {}) {
+	                          Optional<std::string> const& encryptionKeyFileName = {}) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -308,15 +307,16 @@ public:
 			                    stopWhenDone,
 			                    partitionedLog,
 			                    incrementalBackupOnly,
-			                    encryptionKeyFileName,
-			                    blobManifestUrl);
+			                    encryptionKeyFileName) +
+			       checkAndDisableBackupWorkers(cx);
 		});
 	}
 
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> discontinueBackup(Database cx, Key tagName) {
 		return runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return discontinueBackup(tr, tagName); });
+		           cx, [=](Reference<ReadYourWritesTransaction> tr) { return discontinueBackup(tr, tagName); }) +
+		       checkAndDisableBackupWorkers(cx);
 	}
 
 	// Terminate an ongoing backup, without waiting for the backup to finish.
@@ -328,8 +328,14 @@ public:
 	//   logRangesRange and backupLogKeys will be cleared for this backup.
 	Future<Void> abortBackup(Reference<ReadYourWritesTransaction> tr, std::string tagName);
 	Future<Void> abortBackup(Database cx, std::string tagName) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return abortBackup(tr, tagName); });
+		// First abort the backup, then check and disable backup workers if needed.
+		return runRYWTransaction(cx,
+		                         [=](Reference<ReadYourWritesTransaction> tr) { return abortBackup(tr, tagName); }) +
+		       checkAndDisableBackupWorkers(cx);
 	}
+
+	// Disable backup workers if no active partitioned backup is running.
+	Future<Void> checkAndDisableBackupWorkers(Database cx);
 
 	Future<std::string> getStatus(Database cx, ShowErrors, std::string tagName);
 	Future<std::string> getStatusJSON(Database cx, std::string tagName);
@@ -526,12 +532,13 @@ public:
 
 using RangeResultWithVersion = std::pair<RangeResult, Version>;
 
+// RCGroup contains the backup mutations for a commit version, i.e., groupKey.
 struct RCGroup {
 	RangeResult items;
-	Version version;
-	uint64_t groupKey;
+	Version version; // this is read version for this group
+	Version groupKey; // this is the original commit version for this group
 
-	RCGroup() : version(-1), groupKey(ULLONG_MAX){};
+	RCGroup() : version(-1), groupKey(ULLONG_MAX) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -575,6 +582,8 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  Terminator terminator = Terminator::True,
                                  AccessSystemKeys systemAccess = AccessSystemKeys::False,
                                  LockAware lockAware = LockAware::False);
+
+// Applies the mutations between the beginVersion and endVersion to the database during a restore.
 ACTOR Future<Void> applyMutations(Database cx,
                                   Key uid,
                                   Key addPrefix,
@@ -682,6 +691,7 @@ public:
 	                    Reference<Task> task,
 	                    SetValidation setValidation = SetValidation::True) {
 		// Set the uid task parameter
+		// task's uid is set to my uid
 		TaskParams.uid().set(task, uid);
 
 		if (!setValidation) {
@@ -886,9 +896,6 @@ public:
 		return configSpace.pack(__FUNCTION__sr);
 	}
 
-	// Set to true if backup worker is enabled.
-	KeyBackedProperty<bool> backupWorkerEnabled() { return configSpace.pack(__FUNCTION__sr); }
-
 	// Set to true if partitioned log is enabled (only useful if backup worker is also enabled).
 	KeyBackedProperty<bool> partitionedLogEnabled() { return configSpace.pack(__FUNCTION__sr); }
 
@@ -920,18 +927,15 @@ public:
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		auto lastLog = latestLogEndVersion().get(tr);
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
-		auto workerEnabled = backupWorkerEnabled().get(tr);
 		auto plogEnabled = partitionedLogEnabled().get(tr);
 		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
 		auto incrementalBackup = incrementalBackupOnly().get(tr);
-		return map(success(lastLog) && success(firstSnapshot) && success(workerEnabled) && success(plogEnabled) &&
-		               success(workerVersion) && success(incrementalBackup),
+		return map(success(lastLog) && success(firstSnapshot) && success(plogEnabled) && success(workerVersion) &&
+		               success(incrementalBackup),
 		           [=](Void) -> Optional<Version> {
 			           // The latest log greater than the oldest snapshot is the restorable version
-			           Optional<Version> logVersion = workerEnabled.get().present() && workerEnabled.get().get() &&
-			                                                  plogEnabled.get().present() && plogEnabled.get().get()
-			                                              ? workerVersion.get()
-			                                              : lastLog.get();
+			           Optional<Version> logVersion =
+			               plogEnabled.get().present() && plogEnabled.get().get() ? workerVersion.get() : lastLog.get();
 			           if (logVersion.present() && firstSnapshot.get().present() &&
 			               logVersion.get() > firstSnapshot.get().get()) {
 				           return std::max(logVersion.get() - 1, firstSnapshot.get().get());

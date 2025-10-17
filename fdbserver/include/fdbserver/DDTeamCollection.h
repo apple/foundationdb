@@ -200,6 +200,7 @@ struct DDTeamCollectionInitParams {
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 	PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 };
 
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
@@ -282,6 +283,8 @@ protected:
 
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
+
+	Reference<BulkLoadTaskCollection> bulkLoadTaskCollection;
 
 	// team pivot values
 	struct {
@@ -483,6 +486,8 @@ protected:
 	Future<Void> storageServerFailureTracker(TCServerInfo* server, ServerStatus* status, Version addedVersion);
 
 	Future<Void> waitForAllDataRemoved(UID serverID, Version addedVersion) const;
+
+	bool allServersHaveMinAvailableSpace(double minAvailableSpaceRatio) const;
 
 	// calculate minLoadBytes / avgLoadBytes among servers. An unhealthy server's load is considered as 0. If the
 	// average load of each storage server is less than smallLoadThreshold, return 1 always.
