@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Test backup and restore from s3.
 #
@@ -36,7 +36,7 @@ function cleanup {
   
   # Clean up encryption key file
   if [[ -n "${ENCRYPTION_KEY_FILE:-}" ]] && [[ -f "${ENCRYPTION_KEY_FILE}" ]]; then
-    echo "Removing encryption key file: ${ENCRYPTION_KEY_FILE}"
+    log "Removing encryption key file: ${ENCRYPTION_KEY_FILE}"
     rm -f "${ENCRYPTION_KEY_FILE}"
   fi
 }

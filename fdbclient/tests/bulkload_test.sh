@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Test bulkload. Uses S3 or MockS3Server if not available.
 #

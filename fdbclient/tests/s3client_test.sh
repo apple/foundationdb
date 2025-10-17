@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Run s3client against s3 if available or else against MockS3Server.
 # MockS3Server starts instantly. Tests run for a few seconds after that.
