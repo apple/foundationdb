@@ -2405,7 +2405,8 @@ ACTOR Future<Void> runRestore(Database db,
 				printf(
 				    "No restore target version given, will use maximum restorable version from backup description.\n");
 
-			BackupDescription desc = wait(bc->describeBackup());
+			// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
+			BackupDescription desc = wait(bc->describeBackup(false, isBlobstoreUrl(container) ? invalidVersion : 0));
 
 			if (onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 				targetVersion = desc.contiguousLogEnd.get() - 1;
@@ -2501,7 +2502,10 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 		if (performRestore) {
 			if (dbVersion == invalidVersion) {
 				TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", "Largest restorable version");
-				BackupDescription desc = wait(IBackupContainer::openContainer(container, proxy, {})->describeBackup());
+				// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
+				BackupDescription desc =
+				    wait(IBackupContainer::openContainer(container, proxy, {})
+				             ->describeBackup(false, isBlobstoreUrl(container) ? invalidVersion : 0));
 				if (!desc.maxRestorableVersion.present()) {
 					fprintf(stderr, "The specified backup is not restorable to any version.\n");
 					throw restore_error();
@@ -2541,7 +2545,9 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 			restoreVersion = dbVersion;
 		} else {
 			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container, proxy, {});
-			state BackupDescription description = wait(bc->describeBackup());
+			// For blobstore:// URLs, use invalidVersion to allow describeBackup to write missing version properties
+			state BackupDescription description =
+			    wait(bc->describeBackup(false, isBlobstoreUrl(container) ? invalidVersion : 0));
 
 			if (dbVersion <= 0) {
 				wait(description.resolveVersionTimes(db));

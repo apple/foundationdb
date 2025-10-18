@@ -60,8 +60,11 @@ private:
 	std::atomic<bool> destructing;
 };
 
-// Start a mock S3 server listening on the specified address
+// Start a mock S3 server listening on the specified address (simulation mode)
 Future<Void> startMockS3Server(const NetworkAddress& listenAddress);
+
+// Start a mock S3 server in real HTTP mode for ctests
+Future<Void> startMockS3ServerReal(const NetworkAddress& listenAddress);
 
 // Clear all MockS3 global storage - called at the start of each simulation test
 // to prevent data accumulation across multiple tests
