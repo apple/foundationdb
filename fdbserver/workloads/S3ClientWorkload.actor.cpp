@@ -115,7 +115,8 @@ private:
 
 			// Get the current path
 			std::string currentPath = baseUrl.substr(hostEnd, queryStart - hostEnd);
-			if (!currentPath.empty() && currentPath.back() != '/') {
+			// Ensure there's always a path separator
+			if (currentPath.empty() || currentPath.back() != '/') {
 				currentPath += '/';
 			}
 
