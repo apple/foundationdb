@@ -2651,9 +2651,11 @@ ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string co
 		wait(delay(seconds));
 		while (true) {
 			double delaySeconds = disableConnectionFailures(context, ForceDisable::False);
-			if (delaySeconds > 0.001) {
+			if (delaySeconds > DISABLE_CONNECTION_FAILURE_MIN_INTERVAL) {
 				wait(delay(delaySeconds));
 			} else {
+				// disableConnectionFailures will always take effect if less than
+				// DISABLE_CONNECTION_FAILURE_MIN_INTERVAL is returned.
 				break;
 			}
 		}

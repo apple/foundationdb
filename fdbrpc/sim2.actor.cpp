@@ -2981,7 +2981,8 @@ void enableConnectionFailures(std::string const& context, double duration) {
 
 double disableConnectionFailures(std::string const& context, ForceDisable flag) {
 	if (g_network->isSimulated()) {
-		if (now() + 0.001 < g_simulator->connectionFailureDisableTime && flag == ForceDisable::False) {
+		if (now() + DISABLE_CONNECTION_FAILURE_MIN_INTERVAL < g_simulator->connectionFailureDisableTime &&
+		    flag == ForceDisable::False) {
 			TraceEvent(("DisableConnectionFailuresDelayed_" + context).c_str())
 			    .detail("Gap", g_simulator->connectionFailureDisableTime - now())
 			    .detail("Until", g_simulator->connectionFailureDisableTime);
