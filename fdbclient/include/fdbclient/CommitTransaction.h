@@ -37,6 +37,8 @@
 // The versioned message has wire format : -1, version, messages
 static const int32_t VERSION_HEADER = -1;
 
+extern Severity getBitFlipSeverityType();
+
 static const char* typeString[] = { "SetValue",
 	                                "ClearRange",
 	                                "AddValue",
@@ -200,7 +202,7 @@ struct MutationRef {
 	// This operation must be after removing the acs index if exists
 	void offloadChecksum() {
 		if (this->checksum.present()) {
-			TraceEvent(SevError, "MutationRefUnexpectedError")
+			TraceEvent(getBitFlipSeverityType(), "MutationRefUnexpectedError")
 			    .setMaxFieldLength(-1)
 			    .setMaxEventLength(-1)
 			    .detail("Reason", "Internal checksum has been set when offloading checksum")
@@ -306,7 +308,7 @@ struct MutationRef {
 	// Calculate crc based on type and param1 and param2 and compare the crc with this->checksum
 	bool validateChecksum() const {
 		if (this->corrupted) {
-			TraceEvent(SevError, "MutationRefUnexpectedError")
+			TraceEvent(getBitFlipSeverityType(), "MutationRefUnexpectedError")
 			    .setMaxFieldLength(-1)
 			    .setMaxEventLength(-1)
 			    .detail("Reason", "Mutation has been marked as corrupted")
@@ -320,7 +322,7 @@ struct MutationRef {
 		crc = crc32c_append(crc, this->param1.begin(), this->param1.size());
 		crc = crc32c_append(crc, this->param2.begin(), this->param2.size());
 		if (crc != static_cast<uint32_t>(this->checksum.get())) {
-			TraceEvent(SevError, "MutationRefUnexpectedError")
+			TraceEvent(getBitFlipSeverityType(), "MutationRefUnexpectedError")
 			    .setMaxFieldLength(-1)
 			    .setMaxEventLength(-1)
 			    .detail("Reason", "Mutation checksum mismatch")
@@ -394,7 +396,7 @@ struct MutationRef {
 				param1 = param2.substr(0, param2.size() - 1);
 			}
 			if (!validateChecksum()) {
-				TraceEvent(SevError, "MutationRefCorruptionDetected")
+				TraceEvent(getBitFlipSeverityType(), "MutationRefCorruptionDetected")
 				    .setMaxFieldLength(-1)
 				    .setMaxEventLength(-1)
 				    .detail("Mutation", this->toString());

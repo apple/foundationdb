@@ -30,6 +30,7 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/Knobs.h"
 #include "fdbrpc/TenantInfo.h"
+#include "fdbrpc/simulator.h"
 #include "flow/ApiVersion.h"
 #include "flow/Buggify.h"
 #include "flow/Platform.h"
@@ -9792,7 +9793,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							    .setMaxFieldLength(-1)
 							    .setMaxEventLength(-1)
 							    .detail("Mutation", msg);
-							ASSERT(false);
+							// ASSERT(false);
+							throw please_reboot();
 						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
