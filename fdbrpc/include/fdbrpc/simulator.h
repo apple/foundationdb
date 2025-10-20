@@ -59,6 +59,9 @@ struct MachineInfo;
 
 constexpr double DISABLE_CONNECTION_FAILURE_FOREVER = 1e6;
 
+// Minimum interval to disable connection failures. If less than this, connection failures are always disabled.
+constexpr double DISABLE_CONNECTION_FAILURE_MIN_INTERVAL = 1e-3;
+
 class ISimulator : public INetwork {
 
 public:
