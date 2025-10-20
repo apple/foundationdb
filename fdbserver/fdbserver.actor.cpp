@@ -73,6 +73,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
 #include "fdbserver/OnDemandStore.h"
+#include "fdbserver/MockS3Server.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
@@ -722,7 +723,7 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " Server role (valid options are fdbd, test, multitest,"
 		                 " simulation, networktestclient, networktestserver, restore"
 		                 " consistencycheck, consistencycheckurgent, kvfileintegritycheck, kvfilegeneratesums, "
-		                 "kvfiledump, unittests)."
+		                 "kvfiledump, mocks3server, unittests)."
 		                 " The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
@@ -1098,6 +1099,7 @@ enum class ServerRole {
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
 	KVFileDump,
+	MockS3Server,
 	MultiTester,
 	NetworkTestClient,
 	NetworkTestServer,
@@ -1182,8 +1184,27 @@ struct CLIOptions {
 	void buildNetwork(const char* name) {
 		try {
 			if (!publicAddressStrs.empty()) {
-				std::tie(publicAddresses, listenAddresses) =
-				    buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
+				// For roles without a cluster file, parse addresses directly
+				if (!connectionFile) {
+					// Parse addresses directly without needing connection record
+					listenAddressStrs.resize(publicAddressStrs.size(), "public");
+					for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
+						NetworkAddress pubAddr = NetworkAddress::parse(publicAddressStrs[ii]);
+						NetworkAddress listenAddr = (listenAddressStrs[ii] == "public")
+						                                ? pubAddr
+						                                : NetworkAddress::parse(listenAddressStrs[ii]);
+						if (ii == 0) {
+							publicAddresses.address = pubAddr;
+							listenAddresses.address = listenAddr;
+						} else {
+							publicAddresses.secondaryAddress = pubAddr;
+							listenAddresses.secondaryAddress = listenAddr;
+						}
+					}
+				} else {
+					std::tie(publicAddresses, listenAddresses) =
+					    buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
+				}
 			}
 		} catch (Error&) {
 			printHelpTeaser(name);
@@ -1390,6 +1411,8 @@ private:
 					role = ServerRole::FlowProcess;
 				else if (!strcmp(sRole, "changeclusterkey"))
 					role = ServerRole::ChangeClusterKey;
+				else if (!strcmp(sRole, "mocks3server"))
+					role = ServerRole::MockS3Server;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1904,7 +1927,7 @@ private:
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
 		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
-		     role != ServerRole::KVFileDump && role != ServerRole::UnitTests) ||
+		     role != ServerRole::KVFileDump && role != ServerRole::UnitTests && role != ServerRole::MockS3Server) ||
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
@@ -2175,8 +2198,9 @@ int main(int argc, char* argv[]) {
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
 
-			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||
-			                                   role == ServerRole::Restore || role == ServerRole::FlowProcess);
+			const bool expectsPublicAddress =
+			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore ||
+			     role == ServerRole::FlowProcess || role == ServerRole::MockS3Server);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public-address option is required\n");
@@ -2209,7 +2233,8 @@ int main(int argc, char* argv[]) {
 			if (FLOW_KNOBS->ALLOW_TOKENLESS_TENANT_ACCESS)
 				TraceEvent(SevWarnAlways, "AuthzTokenlessAccessEnabled");
 
-			if (expectsPublicAddress) {
+			// MockS3Server uses HTTP, not FlowTransport, so skip FlowTransport binding for it
+			if (expectsPublicAddress && role != ServerRole::MockS3Server) {
 				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
 					const NetworkAddress& publicAddress =
 					    ii == 0 ? opts.publicAddresses.address : opts.publicAddresses.secondaryAddress.get();
@@ -2611,6 +2636,10 @@ int main(int argc, char* argv[]) {
 			Key newClusterKey(opts.newClusterKey);
 			Key oldClusterKey = opts.connectionFile->getConnectionString().clusterKey();
 			f = stopAfter(coordChangeClusterKey(opts.dataFolder, newClusterKey, oldClusterKey));
+			g_network->run();
+		} else if (role == ServerRole::MockS3Server) {
+			printf("Starting MockS3Server on %s\n", opts.publicAddresses.address.toString().c_str());
+			f = stopAfter(startMockS3ServerReal(opts.publicAddresses.address));
 			g_network->run();
 		}
 
