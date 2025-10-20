@@ -388,22 +388,27 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		auto& stateTransactions = stateTransactionsPair.second;
 		int64_t stateMutations = 0;
 		int64_t stateBytes = 0;
-		std::unique_ptr<LogPushData> toCommit(nullptr); // For accumulating private mutations
-		std::unique_ptr<ResolverData> resolverData(nullptr);
+		const bool useResolverPrivateMutations = SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
+		const bool applyResolverPrivateMutations = useResolverPrivateMutations && !req.txnStateTransactions.empty();
+
+		std::unique_ptr<LogPushData> toCommit; // For accumulating private mutations
+		std::unique_ptr<ResolverData> resolverData;
 		bool isLocked = false;
-		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
-			auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
-			isLocked = lockedKey.present() && lockedKey.get().size();
+		if (useResolverPrivateMutations) {
 			toCommit.reset(new LogPushData(self->logSystem, self->localTLogCount));
-			resolverData.reset(new ResolverData(self->dbgid,
-			                                    self->logSystem,
-			                                    self->txnStateStore,
-			                                    &self->keyInfo,
-			                                    toCommit.get(),
-			                                    self->forceRecovery,
-			                                    req.version + 1,
-			                                    &self->storageCache,
-			                                    &self->tssMapping));
+			if (applyResolverPrivateMutations) {
+				auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
+				isLocked = lockedKey.present() && lockedKey.get().size();
+				resolverData.reset(new ResolverData(self->dbgid,
+				                                    self->logSystem,
+				                                    self->txnStateStore,
+				                                    &self->keyInfo,
+				                                    toCommit.get(),
+				                                    self->forceRecovery,
+				                                    req.version + 1,
+				                                    &self->storageCache,
+				                                    &self->tssMapping));
+			}
 		}
 		for (int t : req.txnStateTransactions) {
 			stateMutations += req.transactions[t].mutations.size();
@@ -420,7 +425,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			// Generate private mutations for metadata mutations
 			// The condition here must match CommitBatch::applyMetadataToCommittedTransactions()
 			if (reply.committed[t] == ConflictBatch::TransactionCommitted && !self->forceRecovery &&
-			    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && (!isLocked || req.transactions[t].lock_aware)) {
+			    applyResolverPrivateMutations && (!isLocked || req.transactions[t].lock_aware)) {
 				SpanContext spanContext =
 				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();
 
@@ -446,12 +451,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 		// If shardChanged at or before this commit version, the proxy may have computed
 		// the wrong set of groups. Then we need to broadcast to all groups below.
-		stateTransactionsPair.first = toCommit && toCommit->haveLogsChanged();
+		bool logsChanged = applyResolverPrivateMutations && toCommit->haveLogsChanged();
+		stateTransactionsPair.first = logsChanged;
 		bool shardChanged = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
-		    &reply, firstUnseenVersion, req.version, toCommit && toCommit->haveLogsChanged());
+		    &reply, firstUnseenVersion, req.version, logsChanged);
 
 		// Adds private mutation messages to the reply message.
-		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+		if (useResolverPrivateMutations) {
 			auto privateMutations = toCommit->getAllMessages();
 			for (const auto& mutations : privateMutations) {
 				reply.privateMutations.push_back(reply.arena, mutations);
@@ -459,7 +465,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			}
 			// merge mutation tags with sent client tags
 			toCommit->saveTags(reply.writtenTags);
-			reply.privateMutationCount = toCommit->getMutationCount();
+			reply.privateMutationCount = applyResolverPrivateMutations ? toCommit->getMutationCount() : 0;
 		}
 
 		//TraceEvent("ResolveBatch", self->dbgid).detail("PrevVersion", req.prevVersion).detail("Version", req.version).detail("StateTransactionVersions", self->recentStateTransactionsInfo.size()).detail("StateBytes", stateBytes).detail("FirstVersion", self->recentStateTransactionsInfo.empty() ? -1 : self->recentStateTransactionsInfo.firstVersion()).detail("StateMutationsIn", req.txnStateTransactions.size()).detail("StateMutationsOut", reply.stateMutations.size()).detail("From", proxyAddress);
@@ -512,7 +518,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 						self->lastShardMove = req.version;
 					}
 				} else {
-					toCommit->getLocations(reply.writtenTags, writtenTLogs);
+					if (useResolverPrivateMutations) {
+						toCommit->getLocations(reply.writtenTags, writtenTLogs);
+					}
 				}
 				if (self->tpcvVector[0] == invalidVersion) {
 					std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), req.prevVersion);
