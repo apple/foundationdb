@@ -441,6 +441,12 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("Tag", printable(tag))
 		    .detail("StopWhenDone", stopDifferentialDelay ? "False" : "True");
 
+		// Pre-enable backup workers to ensure they're available before submitBackup
+		// submitBackup automatically calls checkAndDisableBackupWorkers which can disable workers
+		// before the backup actually starts running
+		TraceEvent("BS3BCW_EnablingBackupWorkers", randomID).detail("Tag", printable(tag));
+		wait(enableBackupWorker(cx));
+
 		// S3-specific: Use configurable backup URL and snapshot intervals
 		state std::string backupContainer = self->backupURL;
 		state Future<Void> status = statusLoop(cx, tag.toString());

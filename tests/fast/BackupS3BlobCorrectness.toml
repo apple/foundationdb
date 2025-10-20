@@ -8,6 +8,7 @@ faultInjection = false
 testTitle = 'BackupS3BlobCorrectness'
 clearAfterTest = false
 simBackupAgents = 'BackupToFile'
+waitForQuiescenceBegin = false
 waitForQuiescenceEnd = false
 runConsistencyCheck = false
 
