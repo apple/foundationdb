@@ -442,6 +442,47 @@ private:
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 	}
 
+	void checkSetChangeFeedPrefix(MutationRef m) {
+		if (!m.param1.startsWith(changeFeedPrefix)) {
+			return;
+		}
+		if (toCommit && keyInfo) {
+			KeyRange r = std::get<0>(decodeChangeFeedValue(m.param2));
+			MutationRef privatized = m;
+			privatized.clearChecksumAndAccumulativeIndex();
+			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+			auto ranges = keyInfo->intersectingRanges(r);
+			auto firstRange = ranges.begin();
+			++firstRange;
+			if (firstRange == ranges.end()) {
+				ranges.begin().value().populateTags();
+				if (acsBuilder != nullptr) {
+					updateMutationWithAcsAndAddMutationToAcsBuilder(acsBuilder,
+					                                                privatized,
+					                                                ranges.begin().value().tags,
+					                                                accumulativeChecksumIndex,
+					                                                epoch.get(),
+					                                                version,
+					                                                dbgid);
+				}
+				toCommit->addTags(ranges.begin().value().tags);
+			} else {
+				std::set<Tag> allSources;
+				for (auto r : ranges) {
+					r.value().populateTags();
+					allSources.insert(r.value().tags.begin(), r.value().tags.end());
+				}
+				if (acsBuilder != nullptr) {
+					updateMutationWithAcsAndAddMutationToAcsBuilder(
+					    acsBuilder, privatized, allSources, accumulativeChecksumIndex, epoch.get(), version, dbgid);
+				}
+				toCommit->addTags(allSources);
+			}
+			TraceEvent(SevDebug, "SendingPrivatized_ChangeFeed", dbgid).detail("M", privatized);
+			writeMutation(privatized);
+		}
+	}
+
 	void checkSetServerListPrefix(MutationRef m) {
 		if (!m.param1.startsWith(serverListPrefix)) {
 			return;
@@ -1529,47 +1570,99 @@ public:
 			}
 
 			if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
-				checkSetRangeLockPrefix(m);
-				checkSetKeyServersPrefix(m);
-				checkSetServerKeysPrefix(m);
-				checkSetCheckpointKeys(m);
-				checkSetServerTagsPrefix(m);
-				checkSetStorageCachePrefix(m);
-				checkSetCacheKeysPrefix(m);
-				checkSetConfigKeys(m);
-				checkSetServerListPrefix(m);
-				checkSetTSSMappingKeys(m);
-				checkSetTSSQuarantineKeys(m);
-				checkSetApplyMutationsEndRange(m);
-				checkSetApplyMutationsKeyVersionMapRange(m);
-				checkSetLogRangesRange(m);
-				checkSetConstructKeys(m);
-				checkSetGlobalKeys(m);
+				// Second-byte dispatch optimization: Group check* functions by the second byte
+				// of the system key to reduce the number of prefix comparisons in the common case.
+				// Most system keys have second byte '/' (0x2F), some have '\x02', and a few have '\xff'.
+				ASSERT(m.param1.size() >= 1);
+				if (m.param1.size() >= 2) {
+					const uint8_t secondByte = m.param1[1];
+					switch (secondByte) {
+					case '/': // 0x2F - Most common: \xff/keyServers/, \xff/serverKeys/, \xff/conf/, etc.
+						checkSetRangeLockPrefix(m);
+						checkSetKeyServersPrefix(m);
+						checkSetServerKeysPrefix(m);
+						checkSetCheckpointKeys(m);
+						checkSetServerTagsPrefix(m);
+						checkSetStorageCachePrefix(m);
+						checkSetConfigKeys(m);
+						checkSetServerListPrefix(m);
+						checkSetTSSMappingKeys(m);
+						checkSetTSSQuarantineKeys(m);
+						checkSetApplyMutationsEndRange(m);
+						checkSetApplyMutationsKeyVersionMapRange(m);
+						checkSetLogRangesRange(m);
+						checkSetGlobalKeys(m);
+						checkSetConstructKeys(m);
+						checkSetTenantMapPrefix(m);
+						checkSetOtherKeys(m);
+						break;
+					case '\x02': // 0x02 - Less common: \xff\x02/feed/, \xff\x02/cacheKeys/
+						checkSetChangeFeedPrefix(m);
+						checkSetCacheKeysPrefix(m);
+						checkSetTenantMapPrefix(m);
+						checkSetOtherKeys(m);
+						break;
+					case '\xff': // 0xFF - Private keys: \xff\xff/cf/, \xff\xff/cc/, etc.
+						// These are typically internal/private system keys
+						checkSetOtherKeys(m);
+						break;
+					default:
+						// Fallback for any other second byte values - call checkSetOtherKeys
+						checkSetOtherKeys(m);
+						break;
+					}
+				} else {
+					// Single-byte system key - unlikely but handle it
+					checkSetOtherKeys(m);
+				}
+				// Always check these single-key exact matches (not prefix-based)
 				checkSetWriteRecoverKey(m);
 				checkSetMinRequiredCommitVersionKey(m);
 				checkSetVersionEpochKey(m);
-				checkSetTenantMapPrefix(m);
 				checkSetMetaclusterRegistration(m);
-				checkSetOtherKeys(m);
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
 				KeyRangeRef range(m.param1, m.param2);
 
-				checkClearRangeLockPrefix(range);
-				checkClearKeyServerKeys(range);
-				checkClearConfigKeys(m, range);
-				checkClearServerListKeys(range);
-				checkClearTagLocalityListKeys(range);
-				checkClearServerTagKeys(m, range);
-				checkClearServerTagHistoryKeys(range);
-				checkClearApplyMutationsEndRange(m, range);
-				checkClearApplyMutationKeyVersionMapRange(m, range);
-				checkClearLogRangesRange(range);
-				checkClearTssMappingKeys(m, range);
-				checkClearTssQuarantineKeys(m, range);
+				// Second-byte dispatch optimization for ClearRange, similar to SetValue above
+				ASSERT(m.param2.size() >= 1);
+				if (m.param2.size() >= 2) {
+					const uint8_t secondByte = m.param2[1];
+					switch (secondByte) {
+					case '/': // 0x2F - Most common system key prefixes
+						checkClearRangeLockPrefix(range);
+						checkClearKeyServerKeys(range);
+						checkClearConfigKeys(m, range);
+						checkClearServerListKeys(range);
+						checkClearTagLocalityListKeys(range);
+						checkClearServerTagKeys(m, range);
+						checkClearServerTagHistoryKeys(range);
+						checkClearApplyMutationsEndRange(m, range);
+						checkClearApplyMutationKeyVersionMapRange(m, range);
+						checkClearLogRangesRange(range);
+						checkClearTssMappingKeys(m, range);
+						checkClearTssQuarantineKeys(m, range);
+						checkClearTenantMapPrefix(range);
+						checkClearMiscRangeKeys(range);
+						break;
+					case '\x02': // 0x02 - Less common prefixes
+						checkClearTenantMapPrefix(range);
+						checkClearMiscRangeKeys(range);
+						break;
+					case '\xff': // 0xFF - Private keys
+						checkClearMiscRangeKeys(range);
+						break;
+					default:
+						// Fallback
+						checkClearMiscRangeKeys(range);
+						break;
+					}
+				} else {
+					// Single-byte system key
+					checkClearMiscRangeKeys(range);
+				}
+				// Always check single-key exact matches
 				checkClearVersionEpochKeys(m, range);
-				checkClearTenantMapPrefix(range);
 				checkClearMetaclusterRegistration(range);
-				checkClearMiscRangeKeys(range);
 			}
 		}
 
