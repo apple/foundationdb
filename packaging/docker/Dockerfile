@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM docker.io/rockylinux/rockylinux:9.6-minimal AS base
+FROM rockylinux/rockylinux:9.6-minimal AS base
 
 # Disable the faulty mirror list for RockyLinux for now. Since all the other images use the base image
 # as base we don't have to repeat this step.
@@ -60,7 +60,7 @@ RUN curl -Ls "https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TA
 
 WORKDIR /
 
-FROM docker.io/library/golang:1.24.9-bookworm AS go-build
+FROM golang:1.24.9-bookworm AS go-build
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go
