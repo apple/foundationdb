@@ -351,12 +351,10 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
 			// puts(statusJSON.c_str());
 
-			// S3-specific: Exit early when backup reaches completed state or snapshot closes
-			// This reduces unnecessary polling for S3 metadata that may be eventually consistent
-			if (statusText.find("\"Name\":\"Completed\"") != std::string::npos ||
-			    (statusJSON.find("\"StopAfterSnapshot\":true") != std::string::npos &&
-			     statusJSON.find("\"ExpectedProgress\":100") != std::string::npos)) {
-				TraceEvent("BS3BCW_StatusLoopExit").detail("Reason", "CompletedOrSnapshotClosed");
+			// Exit when backup reaches completed state
+			// Don't exit just because snapshot dispatch is complete - wait for tasks to finish
+			if (statusText.find("\"Name\":\"Completed\"") != std::string::npos) {
+				TraceEvent("BS3BCW_StatusLoopExit").detail("Reason", "BackupCompleted");
 				return Void();
 			}
 			wait(delay(2.0));
@@ -441,28 +439,28 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("Tag", printable(tag))
 		    .detail("StopWhenDone", stopDifferentialDelay ? "False" : "True");
 
-		// Pre-enable backup workers to ensure they're available before submitBackup
-		// submitBackup automatically calls checkAndDisableBackupWorkers which can disable workers
-		// before the backup actually starts running
-		TraceEvent("BS3BCW_EnablingBackupWorkers", randomID).detail("Tag", printable(tag));
-		wait(enableBackupWorker(cx));
-
 		// S3-specific: Use configurable backup URL and snapshot intervals
 		state std::string backupContainer = self->backupURL;
 		state Future<Void> status = statusLoop(cx, tag.toString());
+
+		// Use transaction-based submitBackup to avoid automatic checkAndDisableBackupWorkers()
+		// The Database version of submitBackup() automatically calls checkAndDisableBackupWorkers()
+		// which disables backup workers before they can start processing the backup task
 		try {
-			wait(backupAgent->submitBackup(cx,
-			                               StringRef(backupContainer),
-			                               {},
-			                               self->initSnapshotInterval,
-			                               self->snapshotInterval,
-			                               tag.toString(),
-			                               backupRanges,
-			                               true,
-			                               StopWhenDone{ !stopDifferentialDelay },
-			                               UsePartitionedLog::False,
-			                               IncrementalBackupOnly::False,
-			                               self->encryptionKeyFileName));
+			wait(runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+				return backupAgent->submitBackup(tr,
+				                                 StringRef(backupContainer),
+				                                 {},
+				                                 self->initSnapshotInterval,
+				                                 self->snapshotInterval,
+				                                 tag.toString(),
+				                                 backupRanges,
+				                                 true,
+				                                 StopWhenDone{ !stopDifferentialDelay },
+				                                 UsePartitionedLog::False,
+				                                 IncrementalBackupOnly::False,
+				                                 self->encryptionKeyFileName);
+			}));
 		} catch (Error& e) {
 			TraceEvent("BS3BCW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
