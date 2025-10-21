@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/Atomic.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
