@@ -480,7 +480,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 					                                   /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
 					                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 					                                   /* trace */ true,
-					                                   /* traceMsg */ "TLogFailed"));
+					                                   /* traceMsg */ "TLogFailed"_sr));
 				} else {
 					changes.push_back(t->onChange());
 				}
@@ -492,7 +492,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 					                                   /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
 					                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 					                                   /* trace */ true,
-					                                   /* traceMsg */ "LogRouterFailed"));
+					                                   /* traceMsg */ "LogRouterFailed"_sr));
 				} else {
 					changes.push_back(t->onChange());
 				}
@@ -504,7 +504,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 					                                         /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
 					                                             SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 					                                         /* trace */ true,
-					                                         /* traceMsg */ "BackupWorkerFailed"));
+					                                         /* traceMsg */ "BackupWorkerFailed"_sr));
 				} else {
 					changes.push_back(worker->onChange());
 				}
@@ -521,7 +521,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 							                                   /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
 							                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 							                                   /* trace */ true,
-							                                   /* traceMsg */ "OldLogRouterFailed"));
+							                                   /* traceMsg */ "OldLogRouterFailed"_sr));
 						} else {
 							changes.push_back(t->onChange());
 						}
@@ -536,7 +536,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 						                      /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
 						                          SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 						                      /* trace */ true,
-						                      /* traceMsg */ "OldBackupWorkerFailed"));
+						                      /* traceMsg */ "OldBackupWorkerFailed"_sr));
 					} else {
 						changes.push_back(worker->onChange());
 					}

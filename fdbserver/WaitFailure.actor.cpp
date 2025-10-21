@@ -42,7 +42,7 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
                                      double reactionTime,
                                      double reactionSlope,
                                      bool trace,
-                                     const char* traceMsg,
+                                     Optional<Standalone<StringRef>> traceMsg,
                                      TaskPriority taskID) {
 	loop {
 		try {
@@ -54,8 +54,8 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 					TraceEvent te("WaitFailureClient");
 					te.detail("FailedEndpoint", waitFailure.getEndpoint().getPrimaryAddress().toString())
 					    .detail("Token", waitFailure.getEndpoint().token);
-					if (traceMsg) {
-						te.detail("TraceMsg", traceMsg);
+					if (traceMsg.present()) {
+						te.detail("Context", traceMsg.get());
 					}
 				}
 				return Void();
@@ -80,7 +80,7 @@ ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> wai
 		                       /* reactionTime */ 0,
 		                       /* reactionSlope */ 0,
 		                       /* trace */ false,
-		                       /* traceMsg */ nullptr,
+		                       /* traceMsg */ Optional<Standalone<StringRef>>(),
 		                       taskID));
 		wait(delay(failureReactionTime, taskID) ||
 		     IFailureMonitor::failureMonitor().onStateEqual(waitFailure.getEndpoint(), FailureStatus(false)));
