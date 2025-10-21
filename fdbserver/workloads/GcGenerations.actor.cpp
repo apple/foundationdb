@@ -132,10 +132,15 @@ struct GcGenerationsWorkload : TestWorkload {
 	ACTOR Future<Void> generateMultipleTxnGenerations(GcGenerationsWorkload* self, Database cx) {
 		wait(self->clogRemoteDc(self, cx));
 		state int i = 0;
-		// state int generationCount = self->dbInfo->get().logSystemConfig.oldTLogs.size();
 		state int generationCount = 0;
-		// ASSERT(generationCount == 0);
 		for (; i < 6; ++i) {
+			// Sometimes Cycle Setup can take a long time, so we need to extend
+			// connection failures injection for clogRemoteDc() to work properly.
+			// We also want to make sure connection failures are still active when we
+			// are triggering recoveries within this actor, so the assertion below
+			// is true.
+			extendConnectionFailures("GcGenerations", FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS);
+
 			wait(delay(30));
 			TraceEvent("WaitingForDbAvailable")
 			    .detail("Index", i)
@@ -194,9 +199,6 @@ struct GcGenerationsWorkload : TestWorkload {
 		double startTime = now();
 		double workloadEnd = now() + self->testDuration;
 		TraceEvent("GcGenerations").detail("StartTime", startTime).detail("EndTime", workloadEnd);
-		// Sometimes Cycle Setup can take a long time, so we need to enable connection failures
-		// injection for clogRemoteDc() to work properly.
-		extendConnectionFailures("GcGenerations", FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS);
 
 		wait(self->generateMultipleTxnGenerations(self, cx));
 		self->unclogAll();
