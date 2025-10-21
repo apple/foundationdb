@@ -9,7 +9,7 @@ minimumReplication = 2
 # too slow for the LowLatency workload requirements.
 # To address this, we tune the cc_recovery_init_req_* knobs to make the reaction time much faster,
 # ensuring the system recovers quickly enough to meet the LowLatency workload expectations.
-cc_recovery_init_req_timeout = 5
+cc_recovery_init_req_timeout = 8
 cc_recovery_init_req_growth_factor = 1.01
 cc_recovery_init_req_max_timeout = 10
 
