@@ -82,8 +82,6 @@ public:
 	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
 	    encryptMode(encryptMode), confChange(confChange_), logSystem(logSystem_), version(version),
 	    popVersion(popVersion_), vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
-		// TODO(gglass): remove this for real if not needed
-	    // cacheInfo(&proxyCommitData_.cacheInfo),
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
@@ -151,8 +149,6 @@ private:
 	Version popVersion = 0;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
-	// TODO(gglass): is `cacheInfo` part of the storage cache feature?  Remove for real if so.
-	// KeyRangeMap<bool>* cacheInfo = nullptr;
 	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
 	PublicRequestStream<CommitTransactionRequest> commit = PublicRequestStream<CommitTransactionRequest>();
 	Database cx = Database();
@@ -184,12 +180,6 @@ private:
 
 private:
 	// The following variables are used internally
-
-#if 0	
-	// TODO(gglass): is this needed?  Is it part of the "storage cache" feature?  Can we remove it?
-	// Tentatively looks like it.
-	std::map<KeyRef, MutationRef> cachedRangeInfo;
-#endif	
 
 	// Testing Storage Server removal (clearing serverTagKey) needs to read tss server list value to determine it is a
 	// tss + find partner's tag to send the private mutation. Since the removeStorageServer transaction clears both the
@@ -376,53 +366,6 @@ private:
 			}
 		}
 	}
-
-#if 0
-	// TODO(gglass): remove permanently assuming this is not needed
-	void checkSetStorageCachePrefix(MutationRef m) {
-		if (!m.param1.startsWith(storageCachePrefix))
-			return;
-		if (cacheInfo || forResolver) {
-			KeyRef k = m.param1.removePrefix(storageCachePrefix);
-
-			// Create a private mutation for storage servers
-			// This is done to make the storage servers aware of the cached key-ranges
-			if (toCommit) {
-				MutationRef privatized = m;
-				privatized.clearChecksumAndAccumulativeIndex();
-				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-				//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
-				cachedRangeInfo[k] = privatized;
-			}
-			if (cacheInfo && k != allKeys.end) {
-				KeyRef end = cacheInfo->rangeContaining(k).end();
-				std::vector<uint16_t> serverIndices;
-				decodeStorageCacheValue(m.param2, serverIndices);
-				cacheInfo->insert(KeyRangeRef(k, end), serverIndices.size() > 0);
-			}
-		}
-		if (!initialCommit)
-			txnStateStore->set(KeyValueRef(m.param1, m.param2));
-	}
-
-	void checkSetCacheKeysPrefix(MutationRef m) {
-		if (!m.param1.startsWith(cacheKeysPrefix) || toCommit == nullptr) {
-			return;
-		}
-		// Create a private mutation for cache servers
-		// This is done to make the cache servers aware of the cached key-ranges
-		MutationRef privatized = m;
-		privatized.clearChecksumAndAccumulativeIndex();
-		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-		TraceEvent(SevDebug, "SendingPrivatized_CacheTag", dbgid).detail("M", privatized);
-		if (acsBuilder != nullptr) {
-			updateMutationWithAcsAndAddMutationToAcsBuilder(
-			    acsBuilder, privatized, cacheTag, accumulativeChecksumIndex, epoch.get(), version, dbgid);
-		}
-		toCommit->addTag(cacheTag);
-		writeMutation(privatized);
-	}
-#endif	
 
 	void checkSetConfigKeys(MutationRef m) {
 		if (!m.param1.startsWith(configKeysPrefix) && m.param1 != coordinatorsKey &&
@@ -1451,89 +1394,6 @@ private:
 		}
 	}
 
-#if 0
-	// TODO(gglass): remove permanently assuming this is not needed
-
-	// If we accumulated private mutations for cached key-ranges, we also need to
-	// tag them with the relevant storage servers. This is done to make the storage
-	// servers aware of the cached key-ranges
-	// NOTE: we are assuming non-colliding cached key-ranges
-
-	// TODO Note that, we are currently not handling the case when cached key-ranges move out
-	// to different storage servers. This would require some checking when keys in the keyServersPrefix change.
-	// For the first implementation, we could just send the entire map to every storage server. Revisit!
-	void tagStorageServersForCachedKeyRanges() {
-		if (cachedRangeInfo.size() == 0 || !toCommit) {
-			return;
-		}
-
-		std::map<KeyRef, MutationRef>::iterator itr;
-		KeyRef keyBegin, keyEnd;
-		std::vector<uint16_t> serverIndices;
-		MutationRef mutationBegin, mutationEnd;
-
-		for (itr = cachedRangeInfo.begin(); itr != cachedRangeInfo.end(); ++itr) {
-			// first figure out the begin and end keys for the cached-range,
-			// the begin and end mutations can be in any order
-			decodeStorageCacheValue(itr->second.param2, serverIndices);
-			// serverIndices count should be greater than zero for beginKey mutations
-			if (serverIndices.size() > 0) {
-				keyBegin = itr->first;
-				mutationBegin = itr->second;
-				++itr;
-				if (itr != cachedRangeInfo.end()) {
-					keyEnd = itr->first;
-					mutationEnd = itr->second;
-				} else {
-					//TraceEvent(SevDebug, "EndKeyNotFound", dbgid).detail("KeyBegin", keyBegin.toString());
-					break;
-				}
-			} else {
-				keyEnd = itr->first;
-				mutationEnd = itr->second;
-				++itr;
-				if (itr != cachedRangeInfo.end()) {
-					keyBegin = itr->first;
-					mutationBegin = itr->second;
-				} else {
-					//TraceEvent(SevDebug, "BeginKeyNotFound", dbgid).detail("KeyEnd", keyEnd.toString());
-					break;
-				}
-			}
-
-			// Now get all the storage server tags for the cached key-ranges
-			std::set<Tag> allTags;
-			auto ranges = keyInfo->intersectingRanges(KeyRangeRef(keyBegin, keyEnd));
-			for (auto it : ranges) {
-				auto& r = it.value();
-				for (auto info : r.src_info) {
-					allTags.insert(info->tag);
-				}
-				for (auto info : r.dest_info) {
-					allTags.insert(info->tag);
-				}
-			}
-
-			// Add the tags to both begin and end mutations
-			TraceEvent(SevDebug, "SendingPrivatized_CachedKeyRange", dbgid)
-			    .detail("MBegin", mutationBegin)
-			    .detail("MEnd", mutationEnd);
-			if (acsBuilder != nullptr) {
-				updateMutationWithAcsAndAddMutationToAcsBuilder(
-				    acsBuilder, mutationBegin, allTags, accumulativeChecksumIndex, epoch.get(), version, dbgid);
-			}
-			toCommit->addTags(allTags);
-			writeMutation(mutationBegin);
-			if (acsBuilder != nullptr) {
-				updateMutationWithAcsAndAddMutationToAcsBuilder(
-				    acsBuilder, mutationEnd, allTags, accumulativeChecksumIndex, epoch.get(), version, dbgid);
-			}
-			toCommit->addTags(allTags);
-			writeMutation(mutationEnd);
-		}
-	}
-#endif
-
 public:
 	void apply() {
 		for (auto const& m : mutations) {
@@ -1594,11 +1454,6 @@ public:
 			    decodeServerListValue(txnStateStore->readValue(serverListKeyFor(tssPair.second)).get().get());
 			(*tssMapping)[tssPair.first] = tssi;
 		}
-
-#if 0
-		// TODO(gglass): remove if not needed
-		tagStorageServersForCachedKeyRanges();
-#endif		
 	}
 };
 
@@ -1652,21 +1507,13 @@ void applyMetadataMutations(SpanContext const& spanContext,
 bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 	for (auto const& m : mutations) {
 		if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
-			if (m.param1.startsWith(globalKeysPrefix) ||
-				// TODO(gglass): remove for real
-				// (m.param1.startsWith(cacheKeysPrefix)) ||
-			    (m.param1.startsWith(configKeysPrefix)) || (m.param1.startsWith(serverListPrefix)) ||
-				// TODO(gglass): remove for real
-			    // (m.param1.startsWith(storageCachePrefix))
-				(m.param1.startsWith(serverTagPrefix)) ||
+			if (m.param1.startsWith(globalKeysPrefix) || (m.param1.startsWith(configKeysPrefix)) ||
+			    (m.param1.startsWith(serverListPrefix)) || (m.param1.startsWith(serverTagPrefix)) ||
 			    (m.param1.startsWith(tssMappingKeys.begin)) || (m.param1.startsWith(tssQuarantineKeys.begin)) ||
 			    (m.param1.startsWith(applyMutationsEndRange.begin)) ||
 			    (m.param1.startsWith(applyMutationsKeyVersionMapRange.begin)) ||
 			    (m.param1.startsWith(logRangesRange.begin)) || (m.param1.startsWith(serverKeysPrefix)) ||
-			    (m.param1.startsWith(keyServersPrefix)))
-				// TODO(gglass): remove for real.  Again.
-				// || (m.param1.startsWith(cacheKeysPrefix)))
-			{
+			    (m.param1.startsWith(keyServersPrefix))) {
 				return true;
 			}
 		} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {

@@ -448,55 +448,8 @@ DataMoveMetaData decodeDataMoveValue(const ValueRef& value) {
 	return dataMove;
 }
 
-#if 0
-// TODO(gglass): remove all this assuming it's not needed.
-// "\xff/cacheServer/[[UID]] := StorageServerInterface"
-const KeyRangeRef storageCacheServerKeys("\xff/cacheServer/"_sr, "\xff/cacheServer0"_sr);
-const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;
-const KeyRef storageCacheServersEnd = storageCacheServerKeys.end;
-
-const Key storageCacheServerKey(UID id) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(storageCacheServersPrefix);
-	wr << id;
-	return wr.toValue();
-}
-
-const Value storageCacheServerValue(const StorageServerInterface& ssi) {
-	auto protocolVersion = currentProtocolVersion();
-	protocolVersion.addObjectSerializerFlag();
-	return ObjectWriter::toValue(ssi, IncludeVersion(protocolVersion));
-}
-
-#endif
-
 const KeyRangeRef ddStatsRange =
     KeyRangeRef("\xff\xff/metrics/data_distribution_stats/"_sr, "\xff\xff/metrics/data_distribution_stats/\xff\xff"_sr);
-
-#if 0
-// TODO(gglass): remove this stuff
-//    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
-const KeyRangeRef storageCacheKeys("\xff/storageCache/"_sr, "\xff/storageCache0"_sr);
-const KeyRef storageCachePrefix = storageCacheKeys.begin;
-
-const Key storageCacheKey(const KeyRef& k) {
-	return k.withPrefix(storageCachePrefix);
-}
-
-const Value storageCacheValue(const std::vector<uint16_t>& serverIndices) {
-	BinaryWriter wr((IncludeVersion(ProtocolVersion::withStorageCacheValue())));
-	wr << serverIndices;
-	return wr.toValue();
-}
-
-void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serverIndices) {
-	serverIndices.clear();
-	if (value.size()) {
-		BinaryReader rd(value, IncludeVersion());
-		rd >> serverIndices;
-	}
-}
-#endif
 
 const Value logsValue(const std::vector<std::pair<UID, NetworkAddress>>& logs,
                       const std::vector<std::pair<UID, NetworkAddress>>& oldLogs) {

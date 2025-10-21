@@ -180,26 +180,6 @@ const Value dataMoveValue(const DataMoveMetaData& dataMove);
 UID decodeDataMoveKey(const KeyRef& key);
 DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
 
-#if 0
-// TODO(gglass): remove for real
-// "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
-// This will be added by the cache server on initialization and removed by DD
-// TODO[mpilman]: We will need a way to map uint16_t ids to UIDs in a future
-//                versions. For now caches simply cache everything so the ids
-//                are not yet meaningful.
-extern const KeyRangeRef storageCacheServerKeys;
-extern const KeyRef storageCacheServersPrefix, storageCacheServersEnd;
-const Key storageCacheServerKey(UID id);
-const Value storageCacheServerValue(const StorageServerInterface& ssi);
-
-//    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
-extern const KeyRangeRef storageCacheKeys;
-extern const KeyRef storageCachePrefix;
-const Key storageCacheKey(const KeyRef& k);
-const Value storageCacheValue(const std::vector<uint16_t>& serverIndices);
-void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serverIndices);
-#endif
-
 //    "\xff/serverKeys/[[serverID]]/[[begin]]" := "[[serverKeysTrue]]" |" [[serverKeysFalse]]"
 //	An internal mapping of what shards any given server currently has ownership of
 //	Using the serverID as a prefix, then followed by the beginning of the shard range
@@ -236,22 +216,6 @@ extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
 extern const KeyRangeRef writeConflictRangeKeysRange;
 extern const KeyRangeRef readConflictRangeKeysRange;
 extern const KeyRangeRef ddStatsRange;
-
-#if 0
-// TODO(gglass): remove for real
-extern const KeyRef cacheKeysPrefix;
-
-const Key cacheKeysKey(uint16_t idx, const KeyRef& key);
-const Key cacheKeysPrefixFor(uint16_t idx);
-uint16_t cacheKeysDecodeIndex(const KeyRef& key);
-KeyRef cacheKeysDecodeKey(const KeyRef& key);
-
-extern const KeyRef cacheChangeKey;
-extern const KeyRangeRef cacheChangeKeys;
-extern const KeyRef cacheChangePrefix;
-const Key cacheChangeKeyFor(uint16_t idx);
-uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
-#endif
 
 // "\xff/tss/[[serverId]]" := "[[tssId]]"
 extern const KeyRangeRef tssMappingKeys;

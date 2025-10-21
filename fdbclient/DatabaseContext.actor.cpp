@@ -983,146 +983,6 @@ Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
 	return makeReference<LocationInfo>(interfaces, true);
 }
 
-#if 0
-// TODO(gglass): remove for real if this is not needed
-
-// FIXME: describe what this is supposed to be doing.
-ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, StorageServerInterface>* cacheServers) {
-	state Transaction tr;
-	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
-	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
-	try {
-		loop {
-			// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do this because of
-			// the cyclic reference to self.
-			tr = Transaction();
-			wait(delay(0)); // Give ourselves the chance to get cancelled if self was destroyed
-			wait(brokenPromiseToNever(self->updateCache.onTrigger())); // brokenPromiseToNever because self might get
-			                                                           // destroyed elsewhere while we're waiting here.
-			tr = Transaction(Database(Reference<DatabaseContext>::addRef(self)));
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			try {
-				RangeResult range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!range.more);
-				std::vector<Reference<ReferencedInterface<StorageServerInterface>>> cacheInterfaces;
-				cacheInterfaces.reserve(cacheServers->size());
-				for (const auto& p : *cacheServers) {
-					cacheInterfaces.push_back(makeReference<ReferencedInterface<StorageServerInterface>>(p.second));
-				}
-				bool currCached = false;
-				KeyRef begin, end;
-				for (const auto& kv : range) {
-					// These booleans have to flip consistently
-					ASSERT(currCached == (kv.value == falseValue));
-					if (kv.value == trueValue) {
-						begin = kv.key.substr(storageCacheKeys.begin.size());
-						currCached = true;
-					} else {
-						currCached = false;
-						end = kv.key.substr(storageCacheKeys.begin.size());
-						KeyRangeRef cachedRange{ begin, end };
-						auto ranges = self->locationCache.containedRanges(cachedRange);
-						KeyRef containedRangesBegin, containedRangesEnd, prevKey;
-						if (!ranges.empty()) {
-							containedRangesBegin = ranges.begin().range().begin;
-						}
-						for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
-							containedRangesEnd = iter->range().end;
-							if (iter->value() && !iter->value()->hasCaches) {
-								iter->value() = addCaches(iter->value(), cacheInterfaces);
-							}
-						}
-						auto iter = self->locationCache.rangeContaining(begin);
-						if (iter->value() && !iter->value()->hasCaches) {
-							if (end >= iter->range().end) {
-								Key endCopy = iter->range().end; // Copy because insertion invalidates iterator
-								self->locationCache.insert(KeyRangeRef{ begin, endCopy },
-								                           addCaches(iter->value(), cacheInterfaces));
-							} else {
-								self->locationCache.insert(KeyRangeRef{ begin, end },
-								                           addCaches(iter->value(), cacheInterfaces));
-							}
-						}
-						iter = self->locationCache.rangeContainingKeyBefore(end);
-						if (iter->value() && !iter->value()->hasCaches) {
-							Key beginCopy = iter->range().begin; // Copy because insertion invalidates iterator
-							self->locationCache.insert(KeyRangeRef{ beginCopy, end },
-							                           addCaches(iter->value(), cacheInterfaces));
-						}
-					}
-				}
-				wait(delay(2.0)); // we want to wait at least some small amount of time before
-				// updating this list again
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	} catch (Error& e) {
-		TraceEvent(SevError, "UpdateCachedRangesFailed").error(e);
-		throw;
-	}
-}
-
-// FIXME: describe what this is supposed to be doing
-// The reason for getting a pointer to DatabaseContext instead of a reference counted object is because reference
-// counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
-// cyclic reference and hence this actor and Database object will not be destroyed at all.
-ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
-	state Transaction tr;
-	state std::map<UID, StorageServerInterface> cacheServerMap;
-	state Future<Void> updateRanges = updateCachedRanges(self, &cacheServerMap);
-	state Backoff backoff;
-	// if no caches are configured, we don't want to run this actor at all
-	// so we just wait for the first trigger from a storage server
-	wait(self->updateCache.onTrigger());
-	try {
-		loop {
-			// Need to make sure that we eventually destroy tr. We can't rely on getting cancelled to do this because of
-			// the cyclic reference to self.
-			wait(refreshTransaction(self, &tr));
-			try {
-				RangeResult cacheList = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!cacheList.more);
-				bool hasChanges = false;
-				std::map<UID, StorageServerInterface> allCacheServers;
-				for (auto kv : cacheList) {
-					auto ssi = BinaryReader::fromStringRef<StorageServerInterface>(kv.value, IncludeVersion());
-					allCacheServers.emplace(ssi.id(), ssi);
-				}
-				std::map<UID, StorageServerInterface> newCacheServers;
-				std::map<UID, StorageServerInterface> deletedCacheServers;
-				std::set_difference(allCacheServers.begin(),
-				                    allCacheServers.end(),
-				                    cacheServerMap.begin(),
-				                    cacheServerMap.end(),
-				                    std::insert_iterator<std::map<UID, StorageServerInterface>>(
-				                        newCacheServers, newCacheServers.begin()));
-				std::set_difference(cacheServerMap.begin(),
-				                    cacheServerMap.end(),
-				                    allCacheServers.begin(),
-				                    allCacheServers.end(),
-				                    std::insert_iterator<std::map<UID, StorageServerInterface>>(
-				                        deletedCacheServers, deletedCacheServers.begin()));
-				hasChanges = !(newCacheServers.empty() && deletedCacheServers.empty());
-				if (hasChanges) {
-					updateLocationCacheWithCaches(self, deletedCacheServers, newCacheServers);
-				}
-				cacheServerMap = std::move(allCacheServers);
-				wait(delay(5.0));
-				backoff = Backoff();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-				wait(backoff.onError());
-			}
-		}
-	} catch (Error& e) {
-		TraceEvent(SevError, "MonitorCacheListFailed").error(e);
-		throw;
-	}
-}
-#endif
-
 ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	state Reference<ReadYourWritesTransaction> tr;
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
@@ -1407,9 +1267,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	clientDBInfoMonitor = monitorClientDBInfoChange(this, clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
-
-	// TODO(gglass): remove for real if not needed
-	// cacheListMonitor = monitorCacheList(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
@@ -1714,8 +1571,6 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 }
 
 DatabaseContext::~DatabaseContext() {
-	// TODO(gglass): remove for real
-	// cacheListMonitor.cancel();
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();

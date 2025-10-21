@@ -1791,46 +1791,6 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 	}
 }
 
-#if 0
-ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
-                                                UID id,
-                                                LocalityData locality,
-                                                Reference<AsyncVar<ServerDBInfo> const> db) {
-	loop {
-		ErrorOr<Void> e = wait(errorOr(prevStorageCache));
-		if (!e.isError()) {
-			TraceEvent("StorageCacheRequestedReboot1", id).log();
-			return Void();
-		} else if (e.getError().code() != error_code_please_reboot &&
-		           e.getError().code() != error_code_worker_removed) {
-			TraceEvent("StorageCacheRequestedReboot2", id).detail("Code", e.getError().code());
-			throw e.getError();
-		}
-
-		TraceEvent("StorageCacheRequestedReboot", id).log();
-
-		StorageServerInterface recruited;
-		recruited.uniqueID = deterministicRandom()->randomUniqueID(); // id;
-		recruited.locality = locality;
-		recruited.initEndpoints();
-
-		DUMPTOKEN(recruited.getValue);
-		DUMPTOKEN(recruited.getKey);
-		DUMPTOKEN(recruited.getKeyValues);
-		DUMPTOKEN(recruited.getShardState);
-		DUMPTOKEN(recruited.waitMetrics);
-		DUMPTOKEN(recruited.splitMetrics);
-		DUMPTOKEN(recruited.getStorageMetrics);
-		DUMPTOKEN(recruited.waitFailure);
-		DUMPTOKEN(recruited.getQueuingMetrics);
-		DUMPTOKEN(recruited.getKeyValueStoreType);
-		DUMPTOKEN(recruited.watchValue);
-
-		prevStorageCache = storageCacheServer(recruited, 0, db);
-	}
-}
-#endif
-
 // FIXME:  This will not work correctly in simulation as all workers would share the same roles map
 std::set<std::pair<std::string, std::string>> g_roles;
 
@@ -2484,14 +2444,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
 			}
 		}
-		
+
 		std::map<std::string, std::string> details;
 		details["Locality"] = locality.toString();
 		details["DataFolder"] = folder;
 		details["StoresPresent"] = format("%d", stores.size());
 
-		// TODO(gglass): remove
-		// details["CachePresent"] = hasCache ? "true" : "false";
 		startRole(Role::WORKER, interf.id(), interf.id(), details);
 		errorForwarders.add(traceRole(Role::WORKER, interf.id()));
 
@@ -2901,10 +2859,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				// to read the system key space. But if recovery fails right after a `configure new ...`
 				// was run it won't be able to do so.
 				if (std::all_of(runningStorages.begin(),
-								runningStorages.end(),
-								[&req](const auto& p) { return p.second != req.storeType; }) ||
-					req.seedTag != invalidTag) {
-				    ASSERT(req.initialClusterVersion >= 0);
+				                runningStorages.end(),
+				                [&req](const auto& p) { return p.second != req.storeType; }) ||
+				    req.seedTag != invalidTag) {
+					ASSERT(req.initialClusterVersion >= 0);
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 
@@ -2986,8 +2944,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					        .getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
-					// TODO(gglass): remove
-					// storageCache.set(req.reqId, storageReady.getFuture());
 					Future<ErrorOr<Void>> storeError = errorOr(data->getError());
 					Future<Void> s = storageServer(data,
 					                               recruited,
