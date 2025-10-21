@@ -54,7 +54,7 @@ static const KeyRef invalidKey = "\xff\xff\xff\xff\xff\xff\xff\xff"_sr;
 
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0) or txsTag (id=1)
-	tagLocalitLogRouter = -2, // TODO(gglass): remove this legacy tag.
+	tagLocalityLogRouter = -2, // TODO(gglass): remove this legacy tag.
 	tagLocalityRemoteLog = -3, // tag created by log router for remote (aka. not in Primary DC) tLogs
 	tagLocalityUpgraded = -4, // tlogs with old log format (no longer applicable)
 	tagLocalitySatellite = -5,
