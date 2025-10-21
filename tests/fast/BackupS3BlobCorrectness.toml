@@ -3,6 +3,7 @@ testClass = "Backup"
 [configuration]
 buggify = false
 faultInjection = false
+simpleConfig = true
 
 [[test]]
 testTitle = 'BackupS3BlobCorrectness'
