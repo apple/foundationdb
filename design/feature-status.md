@@ -21,7 +21,7 @@
 |gRPC|under development|Adding gRPC endpoints for certain client/server communications, e.g., some fdbcli usage, file transfer to and from fdbserver processes.|Apple FDB Team|Supported|
 |Multitenancy|experimental|Multi-tenant support, contributed from the community.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
 |Metacluster|experimental|contributed from the community.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
-|Storage Cache|experimental|contributed from the community. Serve as memory cache for storage servers. This is probably never finished and another solution to read hot shard is using large storage teams.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
+|Storage Cache|experimental|contributed from the community. Serve as memory cache for storage servers. This is probably never finished and another solution to read hot shard is using large storage teams.|None|Development is incomplete and feature is unowned. NOTE: This feature has been deleted.|
 |Blob granule|experimental|contributed from the community. Related to backup.|None|Development is incomplete and feature is unowned. NOTE: This feature has been deleted.|
 |ChangeFeed|experimental|contributed from the community.|None|Development is incomplete and feature is unowned. NOTE: This feature has been deleted.|
 |Configuration Database|experimental|contributed from the community. Have data consistency issues, probably not finished.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
