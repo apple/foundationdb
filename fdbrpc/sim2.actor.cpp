@@ -371,6 +371,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		}
 
 		TraceEvent("Sim2Connection")
+		    .detail("From", process->address)
+		    .detail("To", peerProcess->address)
 		    .detail("SendBufSize", sendBufSize)
 		    .detail("Latency", latency)
 		    .detail("StableConnection", stableConnection);
@@ -3029,11 +3031,14 @@ void enableConnectionFailures(std::string const& context, double duration) {
 
 double disableConnectionFailures(std::string const& context, ForceDisable flag) {
 	if (g_network->isSimulated()) {
-		if (now() < g_simulator->connectionFailureDisableTime && flag == ForceDisable::False) {
+		if (now() + DISABLE_CONNECTION_FAILURE_MIN_INTERVAL < g_simulator->connectionFailureDisableTime &&
+		    flag == ForceDisable::False) {
 			TraceEvent(("DisableConnectionFailuresDelayed_" + context).c_str())
+			    .detail("Gap", g_simulator->connectionFailureDisableTime - now())
 			    .detail("Until", g_simulator->connectionFailureDisableTime);
-			return g_simulator->connectionFailureDisableTime - now();
+			return g_simulator->connectionFailureDisableTime - now(); // return remaining time (>0.001s)
 		} else {
+			// if remaining time is less than 0.001s, or forced to disable, disable now
 			g_simulator->connectionFailuresDisableDuration = DISABLE_CONNECTION_FAILURE_FOREVER;
 			g_simulator->speedUpSimulation = true;
 			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
