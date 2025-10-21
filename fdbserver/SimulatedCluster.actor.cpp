@@ -2581,10 +2581,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		int possible_ss = 0;
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount % dataCenters);
 
-		// FIXME: we hardcode some machines to specifically test storage cache and blob workers
-		// TODO: caching disabled for this merge
-		int storageCacheMachines = dc == 0 ? 1 : 0;
-		int blobWorkerMachines = 0;
 		int simHTTPMachines = 0;
 		if (testConfig.simHTTPServerEnabled) {
 			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
@@ -2592,8 +2588,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		}
 		int extraStorageMachineCount = testConfig.extraStorageMachineCountPerDC;
 
-		int totalMachines =
-		    machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines + extraStorageMachineCount;
+		int totalMachines = machines + simHTTPMachines + extraStorageMachineCount;
 
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators, %d other machines\n",
 		       dc,
@@ -2646,7 +2641,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				actualStatelessClasses++;
 			}
 
-			// FIXME: hack to add machines specifically to test storage cache and blob workers and http server
+			// FIXME: hack to add machines specifically to (some removed process types and) http server.
 			// `machines` here is the normal (non-temporary) machines that totalMachines comprises of
 			int processCount = processesPerMachine;
 			ProcessMode processMode = requiresExtraDBMachines ? BackupAgentOnly : FDBDAndBackupAgent;
@@ -2656,12 +2651,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					                            ProcessClass::CommandLineSource); // Storage
 					extraStorageMachineCount--;
 					possible_ss++;
-				} else if (storageCacheMachines > 0 && dc == 0) {
-					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
-					storageCacheMachines--;
-				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
-					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
-					blobWorkerMachines--;
 				} else if (simHTTPMachines > 0) {
 					processClass = ProcessClass(ProcessClass::SimHTTPServerClass, ProcessClass::CommandLineSource);
 					processCount = 1;

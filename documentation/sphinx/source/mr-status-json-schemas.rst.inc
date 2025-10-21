@@ -110,8 +110,7 @@
                   "commit_proxy",
                   "grv_proxy",
                   "master",
-                  "test",
-                  "storage_cache"
+                  "test"
                ]
             },
             "degraded":true,
@@ -152,7 +151,6 @@
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
-                        "storage_cache",
                         "router",
                         "coordinator"
                      ]

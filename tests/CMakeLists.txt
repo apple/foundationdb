@@ -154,12 +154,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
 
-  # TODO(gglass): assess the following TODO in light of changefeed removal
-  # TODO: test occasionally times out due to too many change feed shard parts
-  # Disable for now until the underlying issue is fixed.
-  add_fdb_test(TEST_FILES rare/BlobRestoreBasic.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobRestoreLarge.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobRestoreToVersion.toml IGNORE)
   # IGNORE below because we do not use tenant mode and it is likely to be
   # deprecated/removed. rdar://157717454, rdar://134522214.
   add_fdb_test(TEST_FILES rare/BlobRestoreTenantMode.toml IGNORE)
@@ -168,7 +162,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/BulkDumpingS3.toml)
   add_fdb_test(TEST_FILES fast/BulkLoading.toml)
   add_fdb_test(TEST_FILES slow/S3Client.toml)
-  add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
   add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/ConfigureLocked.toml)
