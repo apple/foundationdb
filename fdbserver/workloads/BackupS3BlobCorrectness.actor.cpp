@@ -345,18 +345,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		loop {
 			bool active = wait(agent.checkActive(cx));
 			TraceEvent("BS3BCW_AgentActivityCheck").detail("IsActive", active);
-			state std::string statusText = wait(agent.getStatus(cx, ShowErrors::True, tag));
+			std::string statusText = wait(agent.getStatus(cx, ShowErrors::True, tag));
 			// S3-specific: Suppress backup status output during testing to reduce noise
 			// puts(statusText.c_str());
 			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
 			// puts(statusJSON.c_str());
-
-			// Exit when backup reaches completed state
-			// Don't exit just because snapshot dispatch is complete - wait for tasks to finish
-			if (statusText.find("\"Name\":\"Completed\"") != std::string::npos) {
-				TraceEvent("BS3BCW_StatusLoopExit").detail("Reason", "BackupCompleted");
-				return Void();
-			}
 			wait(delay(2.0));
 		}
 	}
@@ -443,24 +436,25 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		state std::string backupContainer = self->backupURL;
 		state Future<Void> status = statusLoop(cx, tag.toString());
 
-		// Use transaction-based submitBackup to avoid automatic checkAndDisableBackupWorkers()
-		// The Database version of submitBackup() automatically calls checkAndDisableBackupWorkers()
-		// which disables backup workers before they can start processing the backup task
+		// Enable backup workers before submitting backup since partitioned logs require them
+		// The cluster may be configured with backup_worker_enabled:=0, so we need to enable them
+		TraceEvent("BS3BCW_EnablingBackupWorkers", randomID);
+		wait(enableBackupWorker(cx));
+		TraceEvent("BS3BCW_EnabledBackupWorkers", randomID);
+
 		try {
-			wait(runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
-				return backupAgent->submitBackup(tr,
-				                                 StringRef(backupContainer),
-				                                 {},
-				                                 self->initSnapshotInterval,
-				                                 self->snapshotInterval,
-				                                 tag.toString(),
-				                                 backupRanges,
-				                                 true,
-				                                 StopWhenDone{ !stopDifferentialDelay },
-				                                 UsePartitionedLog::False,
-				                                 IncrementalBackupOnly::False,
-				                                 self->encryptionKeyFileName);
-			}));
+			wait(backupAgent->submitBackup(cx,
+			                               StringRef(backupContainer),
+			                               {},
+			                               self->initSnapshotInterval,
+			                               self->snapshotInterval,
+			                               tag.toString(),
+			                               backupRanges,
+			                               true,
+			                               StopWhenDone{ !stopDifferentialDelay },
+			                               UsePartitionedLog::True,
+			                               IncrementalBackupOnly::False,
+			                               self->encryptionKeyFileName));
 		} catch (Error& e) {
 			TraceEvent("BS3BCW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -590,6 +584,48 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				state UID logUid = uidFlag.first;
 				state Reference<IBackupContainer> lastBackupContainer =
 				    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
+
+				// Wait for backup to become restorable if it's still in progress
+				// This handles cases where cluster recoveries delay snapshot completion
+				if (lastBackupContainer) {
+					state int restorabilityCheckAttempts = 0;
+					state bool isRestorable = false;
+					state int64_t lastSnapshotBytes = 0;
+					while (!isRestorable && restorabilityCheckAttempts < 30) {
+						BackupDescription desc = wait(lastBackupContainer->describeBackup());
+						isRestorable = desc.maxRestorableVersion.present();
+						lastSnapshotBytes = desc.snapshotBytes;
+						if (!isRestorable) {
+							TraceEvent("BS3BCW_WaitingForRestorable")
+							    .detail("Attempt", restorabilityCheckAttempts)
+							    .detail("SnapshotBytes", lastSnapshotBytes);
+							wait(delay(2.0));
+							restorabilityCheckAttempts++;
+						}
+					}
+
+					// Do one final check after the loop to catch snapshots that completed
+					// between the last check and now
+					if (!isRestorable) {
+						BackupDescription finalDesc = wait(lastBackupContainer->describeBackup());
+						isRestorable = finalDesc.maxRestorableVersion.present();
+						lastSnapshotBytes = finalDesc.snapshotBytes;
+						if (isRestorable) {
+							TraceEvent("BS3BCW_BackupRestorableOnFinalCheck")
+							    .detail("SnapshotBytes", lastSnapshotBytes);
+						}
+					}
+
+					if (!isRestorable) {
+						TraceEvent(SevError, "BS3BCW_BackupNotRestorableAfterWait")
+						    .detail("Attempts", restorabilityCheckAttempts)
+						    .detail("SnapshotBytes", lastSnapshotBytes);
+						throw restore_invalid_version();
+					}
+					TraceEvent("BS3BCW_BackupRestorable")
+					    .detail("AttemptsNeeded", restorabilityCheckAttempts)
+					    .detail("SnapshotBytes", lastSnapshotBytes);
+				}
 
 				if (lastBackupContainer) {
 					// Clear the backup ranges before restoring (unless skipDirtyRestore is true)
