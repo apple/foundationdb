@@ -297,15 +297,17 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			// really don't want to have to start over
 			loop choose {
 				when(wait(recoveryCore)) {}
-				when(wait(waitFailureClient(
-				              iMaster.waitFailure,
-				              db->masterRegistrationCount
-				                  ? SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME
-				                  : (now() - recoveryStart) * SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY,
-				              db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME /
-				                                                SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
-				                                          : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
-				          db->forceMasterFailure.onTrigger())) {
+				when(wait(
+				    traceAfter(waitFailureClient(
+				                   iMaster.waitFailure,
+				                   db->masterRegistrationCount
+				                       ? SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME
+				                       : (now() - recoveryStart) * SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY,
+				                   db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME /
+				                                                     SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
+				                                               : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY),
+				               "CCWDBMasterFailed") ||
+				    traceAfter(db->forceMasterFailure.onTrigger(), "CCWDBForceMasterFailureTriggered"))) {
 					break;
 				}
 				when(wait(db->serverInfo->onChange())) {}
