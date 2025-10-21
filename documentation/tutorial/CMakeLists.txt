@@ -22,3 +22,8 @@ target_link_libraries(dining_philosophers PUBLIC fdbclient)
 set(PLAY_SRC play.actor.cpp)
 add_flow_target(EXECUTABLE NAME play SRCS "${PLAY_SRC}")
 target_link_libraries(play PUBLIC fdbclient)
+
+# Playground to learn flow and its interaction over a network (client/server)
+set(PLAY_NETWORK_SRC play_network.actor.cpp)
+add_flow_target(EXECUTABLE NAME play_network SRCS "${PLAY_NETWORK_SRC}")
+target_link_libraries(play_network PUBLIC fdbclient)

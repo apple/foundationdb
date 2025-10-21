@@ -116,7 +116,7 @@ struct EchoServerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, echo, reverse, stream);
+		serializer(ar, getInterface, echo, reverse, stream);
 	}
 };
 
