@@ -2588,8 +2588,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		}
 		int extraStorageMachineCount = testConfig.extraStorageMachineCountPerDC;
 
-		int totalMachines =
-		    machines + simHTTPMachines + extraStorageMachineCount;
+		int totalMachines = machines + simHTTPMachines + extraStorageMachineCount;
 
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators, %d other machines\n",
 		       dc,

@@ -43,7 +43,7 @@ struct ProcessClass {
 		DataDistributorClass,
 		CoordinatorClass,
 		RatekeeperClass,
-		RemovedClassPlaceholder1,  // removing the name of removed functionality, but don't renumber subsequent entries.
+		RemovedClassPlaceholder1, // removing the name of removed functionality, but don't renumber subsequent entries.
 		BackupClass,
 		GrvProxyClass,
 		BlobManagerClass,
