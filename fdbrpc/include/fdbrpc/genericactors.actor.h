@@ -27,9 +27,12 @@
 #define RPCGENERICACTORS_ACTOR_H
 
 #include "flow/genericactors.actor.h"
+#include "flow/CodeProbe.h"
+#include "flow/Hostname.h"
+
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/WellKnownEndpoints.h"
-#include "flow/Hostname.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // To avoid directly access INetworkConnection::net()->removeCachedDNS(), which will require heavy include budget, put

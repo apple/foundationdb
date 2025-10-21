@@ -37,7 +37,6 @@
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
-#include "flow/FileIdentifier.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/NetworkAddress.h"
@@ -59,7 +58,6 @@
 #include "fdbserver/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/DataDistributorInterface.h"
-#include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/ConfigNode.h"
@@ -90,7 +88,6 @@
 #include "gperftools/heap-profiler.h"
 #endif
 #include <unistd.h>
-#include <thread>
 #include <execinfo.h>
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -3630,6 +3627,7 @@ TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
 		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
 		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
 		                                                           ProtocolVersion::withTSS())));
+		(void)f;
 	}
 
 	{

@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbclient/Atomic.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/TLogInterface.h"

@@ -22,6 +22,9 @@
 #define WAIT_FAILURE_SERVER_H
 #pragma once
 
+#include "flow/flow.h"
+#include "fdbrpc/fdbrpc.h"
+
 Future<Void> waitFailureServer(const FutureStream<ReplyPromise<Void>>& waitFailure);
 
 // talks to a wait failure server, returns Void on failure

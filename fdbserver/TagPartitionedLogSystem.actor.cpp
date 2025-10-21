@@ -19,10 +19,12 @@
  */
 
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
-#include <boost/dynamic_bitset.hpp>
-#include "flow/UnitTest.h"
 
+#include <boost/dynamic_bitset.hpp>
 #include <utility>
+
+#include "fdbrpc/ReplicationUtils.h"
+#include "fdbserver/WaitFailure.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

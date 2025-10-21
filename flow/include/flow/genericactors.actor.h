@@ -22,6 +22,7 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#include "flow/CodeProbe.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/TaskPriority.h"
