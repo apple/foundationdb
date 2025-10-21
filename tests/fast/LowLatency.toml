@@ -8,11 +8,8 @@ minimumReplication = 2
 # intentionally drop init requests from CC during recovery to test timeout behavior.
 # In such fault injection cases, recovery restarts but the reaction time can be
 # too slow for the LowLatency workload requirements.
-# To address this, we tune the cc_recovery_init_req_* knobs to make the reaction time much faster,
-# ensuring the system recovers quickly enough to meet the LowLatency workload expectations.
-cc_recovery_init_req_timeout = 5
-cc_recovery_init_req_growth_factor = 1.01
-cc_recovery_init_req_max_timeout = 10
+# To address this, we disable dropping init requests for this test.
+cc_recovery_init_req_allow_drop_in_sim = false
 
 [[test]]
 testTitle = 'Clogged'
