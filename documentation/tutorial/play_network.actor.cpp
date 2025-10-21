@@ -66,7 +66,7 @@ struct PlayServerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, play);
+		serializer(ar, getInterface, play);
 	}
 };
 
