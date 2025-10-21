@@ -950,14 +950,16 @@ public:
 		timeval timeout;
 		timeout.tv_sec = seconds;
 		timeout.tv_usec = 0;
-		if (!ssl_sock.next_layer().is_open()) {
+		int nativeSock = ssl_sock.next_layer().native_handle();
+		if (closed || !ssl_sock.next_layer().is_open() || nativeSock < 0) {
 			TraceEvent(SevWarn, "N2_SetSSLSocketTimeoutError", debugId)
 			    .detail("PeerAddr", peer_address)
 			    .detail("PeerAddress", peer_address)
+			    .detail("Closed", closed)
+			    .detail("NativeSock", nativeSock)
 			    .detail("Message", "Invalid native socket handle");
 			return;
 		}
-		int nativeSock = ssl_sock.next_layer().native_handle();
 		setsockopt(nativeSock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
 		setsockopt(nativeSock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
 	}
@@ -1261,6 +1263,7 @@ private:
 	NetworkAddress peer_address;
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
 	bool has_trusted_peer;
+	bool closed = false;
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -1276,6 +1279,7 @@ private:
 		socket.close(closeError);
 		boost::system::error_code shutdownError;
 		ssl_sock.shutdown(shutdownError);
+		closed = true;
 	}
 
 	void onReadError(const boost::system::error_code& error) {
