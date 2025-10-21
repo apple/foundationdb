@@ -31,10 +31,29 @@
 /// This file has code similar to play.actor.cpp, but for client/server actors talking over a network
 /// It's also similar to tutorial.actor.cpp but only has the minimal code needed for testing client/server actor
 /// interactions over the network.
-///  Use this file as means to play with flow code and test network behavior
-///  The goal is to give you a starting point with a boilerplate template
-///  Don't expect frequent changes to this file unless we want to change the base template
-///  The use-case would be for people to have ephemeral code (on top of this template) that never gets checked in
+/// Use this file as means to play with flow code and test network behavior
+/// The goal is to give you a starting point with a boilerplate template
+/// Don't expect frequent changes to this file unless we want to change the base template
+/// The use-case would be for people to have ephemeral code (on top of this template) that never gets checked in
+/// An example use-case is in the description of https://github.com/apple/foundationdb/pull/12484
+
+/// Usage below
+
+/// Start server:
+/// ~/c/bin $ ./play_network -s 6666 serverActor
+
+/// Then client:
+/// ~/c/bin $ ./play_network -c 127.0.0.1:6666 clientActor
+/// req msg: Hello World
+/// rsp msg: dlroW olleH
+
+/// Now server prints:
+/// ~/c/bin $ ./play_network -s 6666 serverActor
+/// got interface request from client
+/// sent interface back to client
+/// got play request with msg: Hello World
+/// sending this play response back: dlroW olleH
+/// sent this play response back: dlroW olleH
 
 NetworkAddress serverAddress;
 
