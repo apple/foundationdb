@@ -31,10 +31,10 @@
 /// This file has code similar to play.actor.cpp, but for client/server actors talking over a network
 /// It's also similar to tutorial.actor.cpp but only has the minimal code needed for testing client/server actor
 /// interactions over the network.
-//  Use this file as means to play with flow code and test network behavior
-//  The goal is to give you a starting point with a boilerplate template
-//  Don't expect frequent changes to this file unless we want to change the base template
-//  The use-case would be for people to have ephemeral code (on top of this template) that never gets checked in
+///  Use this file as means to play with flow code and test network behavior
+///  The goal is to give you a starting point with a boilerplate template
+///  Don't expect frequent changes to this file unless we want to change the base template
+///  The use-case would be for people to have ephemeral code (on top of this template) that never gets checked in
 
 NetworkAddress serverAddress;
 
@@ -73,7 +73,7 @@ struct PlayRequest {
 	}
 };
 
-ACTOR Future<Void> playServer() {
+ACTOR Future<Void> server() {
 	// Setup
 	state PlayServerInterface playServer;
 	playServer.getInterface.makeWellKnownEndpoint(WLTOKEN_PLAY_SERVER, TaskPriority::DefaultEndpoint);
@@ -104,7 +104,7 @@ ACTOR Future<Void> playServer() {
 	}
 }
 
-ACTOR Future<Void> playClient() {
+ACTOR Future<Void> client() {
 	// Setup
 	state PlayServerInterface server;
 	server.getInterface =
@@ -127,8 +127,8 @@ ACTOR Future<Void> playClient() {
 }
 
 std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
-	{ "playServer", &playServer }, // ./play_network -s 6666 playServer
-	{ "playClient", &playClient }, // ./play_network -c 127.0.0.1:6666 playClient
+	{ "serverActor", &server }, // ./play_network -s 6666 serverActor
+	{ "clientActor", &client }, // ./play_network -c 127.0.0.1:6666 clientActor
 };
 
 int main(int argc, char* argv[]) {
