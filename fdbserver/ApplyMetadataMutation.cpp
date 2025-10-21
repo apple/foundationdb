@@ -82,7 +82,8 @@ public:
 	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
 	    encryptMode(encryptMode), confChange(confChange_), logSystem(logSystem_), version(version),
 	    popVersion(popVersion_), vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
-	    cacheInfo(&proxyCommitData_.cacheInfo),
+		// TODO(gglass): remove this for real if not needed
+	    // cacheInfo(&proxyCommitData_.cacheInfo),
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
@@ -150,7 +151,8 @@ private:
 	Version popVersion = 0;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
-	KeyRangeMap<bool>* cacheInfo = nullptr;
+	// TODO(gglass): is `cacheInfo` part of the storage cache feature?  Remove for real if so.
+	// KeyRangeMap<bool>* cacheInfo = nullptr;
 	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
 	PublicRequestStream<CommitTransactionRequest> commit = PublicRequestStream<CommitTransactionRequest>();
 	Database cx = Database();
@@ -183,7 +185,11 @@ private:
 private:
 	// The following variables are used internally
 
+#if 0	
+	// TODO(gglass): is this needed?  Is it part of the "storage cache" feature?  Can we remove it?
+	// Tentatively looks like it.
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
+#endif	
 
 	// Testing Storage Server removal (clearing serverTagKey) needs to read tss server list value to determine it is a
 	// tss + find partner's tag to send the private mutation. Since the removeStorageServer transaction clears both the
@@ -371,6 +377,8 @@ private:
 		}
 	}
 
+#if 0
+	// TODO(gglass): remove permanently assuming this is not needed
 	void checkSetStorageCachePrefix(MutationRef m) {
 		if (!m.param1.startsWith(storageCachePrefix))
 			return;
@@ -414,6 +422,7 @@ private:
 		toCommit->addTag(cacheTag);
 		writeMutation(privatized);
 	}
+#endif	
 
 	void checkSetConfigKeys(MutationRef m) {
 		if (!m.param1.startsWith(configKeysPrefix) && m.param1 != coordinatorsKey &&
@@ -1442,6 +1451,9 @@ private:
 		}
 	}
 
+#if 0
+	// TODO(gglass): remove permanently assuming this is not needed
+
 	// If we accumulated private mutations for cached key-ranges, we also need to
 	// tag them with the relevant storage servers. This is done to make the storage
 	// servers aware of the cached key-ranges
@@ -1520,6 +1532,7 @@ private:
 			writeMutation(mutationEnd);
 		}
 	}
+#endif
 
 public:
 	void apply() {
@@ -1534,8 +1547,6 @@ public:
 				checkSetServerKeysPrefix(m);
 				checkSetCheckpointKeys(m);
 				checkSetServerTagsPrefix(m);
-				checkSetStorageCachePrefix(m);
-				checkSetCacheKeysPrefix(m);
 				checkSetConfigKeys(m);
 				checkSetServerListPrefix(m);
 				checkSetTSSMappingKeys(m);
@@ -1584,7 +1595,10 @@ public:
 			(*tssMapping)[tssPair.first] = tssi;
 		}
 
+#if 0
+		// TODO(gglass): remove if not needed
 		tagStorageServersForCachedKeyRanges();
+#endif		
 	}
 };
 
@@ -1633,4 +1647,42 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore) {
 	ApplyMetadataMutationsImpl(spanContext, dbgid, arena, mutations, txnStateStore).apply();
+}
+
+bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
+	for (auto const& m : mutations) {
+		if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
+			if (m.param1.startsWith(globalKeysPrefix) ||
+				// TODO(gglass): remove for real
+				// (m.param1.startsWith(cacheKeysPrefix)) ||
+			    (m.param1.startsWith(configKeysPrefix)) || (m.param1.startsWith(serverListPrefix)) ||
+				// TODO(gglass): remove for real
+			    // (m.param1.startsWith(storageCachePrefix))
+				(m.param1.startsWith(serverTagPrefix)) ||
+			    (m.param1.startsWith(tssMappingKeys.begin)) || (m.param1.startsWith(tssQuarantineKeys.begin)) ||
+			    (m.param1.startsWith(applyMutationsEndRange.begin)) ||
+			    (m.param1.startsWith(applyMutationsKeyVersionMapRange.begin)) ||
+			    (m.param1.startsWith(logRangesRange.begin)) || (m.param1.startsWith(serverKeysPrefix)) ||
+			    (m.param1.startsWith(keyServersPrefix)))
+				// TODO(gglass): remove for real.  Again.
+				// || (m.param1.startsWith(cacheKeysPrefix)))
+			{
+				return true;
+			}
+		} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
+			KeyRangeRef range(m.param1, m.param2);
+			if ((keyServersKeys.intersects(range)) || (configKeys.intersects(range)) ||
+			    (serverListKeys.intersects(range)) || (tagLocalityListKeys.intersects(range)) ||
+			    (serverTagKeys.intersects(range)) || (serverTagHistoryKeys.intersects(range)) ||
+			    (range.intersects(applyMutationsEndRange)) || (range.intersects(applyMutationsKeyVersionMapRange)) ||
+			    (range.intersects(logRangesRange)) || (tssMappingKeys.intersects(range)) ||
+			    (tssQuarantineKeys.intersects(range)) || (range.contains(previousCoordinatorsKey)) ||
+			    (range.contains(coordinatorsKey)) || (range.contains(databaseLockedKey)) ||
+			    (range.contains(metadataVersionKey)) || (range.contains(mustContainSystemMutationsKey)) ||
+			    (range.contains(writeRecoveryKey)) || (range.intersects(testOnlyTxnStateStorePrefixRange))) {
+				return true;
+			}
+		}
+	}
+	return false;
 }

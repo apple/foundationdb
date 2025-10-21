@@ -9208,9 +9208,12 @@ public:
 		}
 
 		if (m.param1.startsWith(systemKeys.end)) {
+#if 0			
 			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
 				applyPrivateCacheData(data, m);
-			} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
+			}
+#endif				
+			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
 				handleCheckpointPrivateMutation(data, m, ver);
 			} else {
 				applyPrivateData(data, ver, m);
@@ -9492,6 +9495,7 @@ private:
 		}
 	}
 
+#if 0	
 	void applyPrivateCacheData(StorageServer* data, MutationRef const& m) {
 		//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Mutation", m);
 
@@ -9524,6 +9528,7 @@ private:
 			ASSERT(false); // Unknown private mutation
 		}
 	}
+#endif	
 
 	// Handles checkpoint private mutations:
 	// 1. Registers a pending checkpoint request, it will be fulfilled when the desired version is durable.

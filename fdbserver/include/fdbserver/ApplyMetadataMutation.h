@@ -106,37 +106,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore);
 
-inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
-	for (auto const& m : mutations) {
-
-		if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
-			if (m.param1.startsWith(globalKeysPrefix) || (m.param1.startsWith(cacheKeysPrefix)) ||
-			    (m.param1.startsWith(configKeysPrefix)) || (m.param1.startsWith(serverListPrefix)) ||
-			    (m.param1.startsWith(storageCachePrefix)) || (m.param1.startsWith(serverTagPrefix)) ||
-			    (m.param1.startsWith(tssMappingKeys.begin)) || (m.param1.startsWith(tssQuarantineKeys.begin)) ||
-			    (m.param1.startsWith(applyMutationsEndRange.begin)) ||
-			    (m.param1.startsWith(applyMutationsKeyVersionMapRange.begin)) ||
-			    (m.param1.startsWith(logRangesRange.begin)) || (m.param1.startsWith(serverKeysPrefix)) ||
-			    (m.param1.startsWith(keyServersPrefix)) || (m.param1.startsWith(cacheKeysPrefix))) {
-				return true;
-			}
-		} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
-			KeyRangeRef range(m.param1, m.param2);
-			if ((keyServersKeys.intersects(range)) || (configKeys.intersects(range)) ||
-			    (serverListKeys.intersects(range)) || (tagLocalityListKeys.intersects(range)) ||
-			    (serverTagKeys.intersects(range)) || (serverTagHistoryKeys.intersects(range)) ||
-			    (range.intersects(applyMutationsEndRange)) || (range.intersects(applyMutationsKeyVersionMapRange)) ||
-			    (range.intersects(logRangesRange)) || (tssMappingKeys.intersects(range)) ||
-			    (tssQuarantineKeys.intersects(range)) || (range.contains(previousCoordinatorsKey)) ||
-			    (range.contains(coordinatorsKey)) || (range.contains(databaseLockedKey)) ||
-			    (range.contains(metadataVersionKey)) || (range.contains(mustContainSystemMutationsKey)) ||
-			    (range.contains(writeRecoveryKey)) || (range.intersects(testOnlyTxnStateStorePrefixRange))) {
-				return true;
-			}
-		}
-	}
-	return false;
-}
+bool containsMetadataMutation(const VectorRef<MutationRef>& mutations);
 
 // Resolver's version
 void applyMetadataMutations(SpanContext const& spanContext,

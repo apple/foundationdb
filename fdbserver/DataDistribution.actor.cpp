@@ -3336,6 +3336,8 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	return Void();
 }
 
+#if 0
+// TODO(gglass): remove for real
 ACTOR Future<Void> waitFailCacheServer(Database* db, StorageServerInterface ssi) {
 	state Transaction tr(*db);
 	state Key key = storageCacheServerKey(ssi.id());
@@ -3385,6 +3387,7 @@ ACTOR Future<Void> cacheServerWatcher(Database* db) {
 		}
 	}
 }
+#endif
 
 static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
 	std::nth_element(metricVec.begin(),
@@ -5037,7 +5040,8 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
 	if (!isMocked) {
 		cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultDelay, LockAware::True);
-		self->addActor.send(cacheServerWatcher(&cx));
+		// TODO(gglass): remove for real
+		// self->addActor.send(cacheServerWatcher(&cx));
 	}
 
 	state Future<Void> distributor = reportErrorsExcept(dataDistribution(self, getShardMetricsList, isMocked),

@@ -43,6 +43,9 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#if 0
+// TODO(gglass): remove this file
+
 // TODO storageCache server shares quite a bit of storageServer functionality, although simplified
 // Need to look into refactoring common code out for better code readability and to avoid duplication
 
@@ -2302,3 +2305,5 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 		}
 	}
 }
+
+#endif

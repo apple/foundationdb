@@ -140,6 +140,8 @@ bool isTenantModeModeConfigValid(DatabaseConfiguration oldConfiguration, Databas
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
 
+#if 0
+// TODO(gglass): remove for real
 ACTOR template <class DB>
 Future<Void> changeCachedRange(Reference<DB> db, KeyRangeRef range, bool add) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
@@ -210,6 +212,7 @@ template <class DB>
 Future<Void> removeCachedRange(Reference<DB> db, KeyRangeRef range) {
 	return changeCachedRange(db, range, false);
 }
+#endif
 
 ACTOR template <class Tr>
 Future<std::vector<ProcessData>> getWorkers(Reference<Tr> tr,

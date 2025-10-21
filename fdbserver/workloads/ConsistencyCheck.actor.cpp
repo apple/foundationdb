@@ -62,8 +62,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Whether or not we should perform checks that will only pass if the database is in a quiescent state
 	bool performQuiescentChecks;
 
+#if 0
+	// TODO(gglass): remove for real
 	// Whether or not perform consistency check between storage cache servers and storage servers
 	bool performCacheCheck;
+#endif
 
 	// Whether or not to perform consistency check between storage servers and pair TSS
 	bool performTSSCheck;
@@ -117,7 +120,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ConsistencyCheckWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), onTimeout(*this), onTimeoutEvent({ "Timeout"_sr, "TracedTooManyLines"_sr }, onTimeout) {
 		performQuiescentChecks = getOption(options, "performQuiescentChecks"_sr, false);
-		performCacheCheck = getOption(options, "performCacheCheck"_sr, false);
+		// TODO(gglass): remove for real
+		// performCacheCheck = getOption(options, "performCacheCheck"_sr, false);
 		performTSSCheck = getOption(options, "performTSSCheck"_sr, true);
 		quiescentWaitTimeout = getOption(options, "quiescentWaitTimeout"_sr, 600.0);
 		distributed = getOption(options, "distributed"_sr, true);
@@ -388,10 +392,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						                          CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,
 						                          &self->success));
 
-						// Cache consistency check
-						if (self->performCacheCheck) {
-							wait(self->checkCacheConsistency(cx, keyLocations, self));
-						}
+						// TODO(gglass): remove this
+						// // Cache consistency check
+						// if (self->performCacheCheck) {
+						// 							wait(self->checkCacheConsistency(cx, keyLocations, self));
+						// }
 					}
 				}
 			} catch (Error& e) {
@@ -413,6 +418,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return Void();
 	}
 
+#if 0
+	// TODO(gglass): remove this
+	
 	// Check the data consistency between storage cache servers and storage servers
 	// keyLocations: all key/value pairs persisted in the database, reused from previous consistency check on all
 	// storage servers
@@ -911,6 +919,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		resultPromise.send(result);
 		return true;
 	}
+#endif	
 
 	// Comparison function used to compare map elements by value
 	template <class K, class T>

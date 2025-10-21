@@ -226,7 +226,6 @@ def setclass(logger):
         "data_distributor",
         "coordinator",
         "ratekeeper",
-        "storage_cache",
         "backup",
     ]
     random_class_type = random.choice(class_types)
@@ -553,14 +552,6 @@ def knobmanagement(logger):
     assert "Committed" in output
     output = run_fdbcli_command("getknob", "min_trace_severity")
     assert r"`min_trace_severity' is not found" == output
-
-
-@enable_logging()
-def cache_range(logger):
-    # this command is currently experimental
-    # just test we can set and clear the cached range
-    run_fdbcli_command("cache_range", "set", "a", "b")
-    run_fdbcli_command("cache_range", "clear", "a", "b")
 
 
 @enable_logging()
@@ -1548,7 +1539,6 @@ if __name__ == "__main__":
     if args.process_number == 1:
         # TODO: disable for now, the change can cause the database unavailable
         # advanceversion()
-        cache_range()
         consistencycheck()
         datadistribution()
         kill()

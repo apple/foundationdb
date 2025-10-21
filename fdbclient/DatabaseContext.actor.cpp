@@ -983,6 +983,9 @@ Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
 	return makeReference<LocationInfo>(interfaces, true);
 }
 
+#if 0
+// TODO(gglass): remove for real if this is not needed
+
 // FIXME: describe what this is supposed to be doing.
 ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, StorageServerInterface>* cacheServers) {
 	state Transaction tr;
@@ -1118,6 +1121,7 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 		throw;
 	}
 }
+#endif
 
 ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	state Reference<ReadYourWritesTransaction> tr;
@@ -1403,7 +1407,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	clientDBInfoMonitor = monitorClientDBInfoChange(this, clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
-	cacheListMonitor = monitorCacheList(this);
+
+	// TODO(gglass): remove for real if not needed
+	// cacheListMonitor = monitorCacheList(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
@@ -1708,7 +1714,8 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 }
 
 DatabaseContext::~DatabaseContext() {
-	cacheListMonitor.cancel();
+	// TODO(gglass): remove for real
+	// cacheListMonitor.cancel();
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();

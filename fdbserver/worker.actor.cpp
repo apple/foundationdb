@@ -1791,6 +1791,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 	}
 }
 
+#if 0
 ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
                                                 UID id,
                                                 LocalityData locality,
@@ -1828,6 +1829,7 @@ ACTOR Future<Void> storageCacheRollbackRebooter(Future<Void> prevStorageCache,
 		prevStorageCache = storageCacheServer(recruited, 0, db);
 	}
 }
+#endif
 
 // FIXME:  This will not work correctly in simulation as all workers would share the same roles map
 std::set<std::pair<std::string, std::string>> g_roles;
@@ -2195,7 +2197,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Promise<Void> rebootKVSPromise2;
 	state ActorCollection filesClosed(true);
 	state Promise<Void> stopping;
-	state WorkerCache<InitializeStorageReply> storageCache;
 	state Future<Void> metricsLogger;
 	state Future<Void> chaosMetricsActor;
 	state Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
@@ -2483,42 +2484,14 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
 			}
 		}
-
-		bool hasCache = false;
-		//  start cache role if we have the right process class
-		if (initialClass.classType() == ProcessClass::StorageCacheClass) {
-			hasCache = true;
-			StorageServerInterface recruited;
-			recruited.locality = locality;
-			recruited.initEndpoints();
-
-			std::map<std::string, std::string> details;
-			startRole(Role::STORAGE_CACHE, recruited.id(), interf.id(), details);
-
-			// DUMPTOKEN(recruited.getVersion);
-			DUMPTOKEN(recruited.getValue);
-			DUMPTOKEN(recruited.getKey);
-			DUMPTOKEN(recruited.getKeyValues);
-			DUMPTOKEN(recruited.getMappedKeyValues);
-			DUMPTOKEN(recruited.getShardState);
-			DUMPTOKEN(recruited.waitMetrics);
-			DUMPTOKEN(recruited.splitMetrics);
-			DUMPTOKEN(recruited.getStorageMetrics);
-			DUMPTOKEN(recruited.waitFailure);
-			DUMPTOKEN(recruited.getQueuingMetrics);
-			DUMPTOKEN(recruited.getKeyValueStoreType);
-			DUMPTOKEN(recruited.watchValue);
-
-			auto f = storageCacheServer(recruited, 0, dbInfo);
-			f = storageCacheRollbackRebooter(f, recruited.id(), recruited.locality, dbInfo);
-			errorForwarders.add(forwardError(errors, Role::STORAGE_CACHE, recruited.id(), f));
-		}
-
+		
 		std::map<std::string, std::string> details;
 		details["Locality"] = locality.toString();
 		details["DataFolder"] = folder;
 		details["StoresPresent"] = format("%d", stores.size());
-		details["CachePresent"] = hasCache ? "true" : "false";
+
+		// TODO(gglass): remove
+		// details["CachePresent"] = hasCache ? "true" : "false";
 		startRole(Role::WORKER, interf.id(), interf.id(), details);
 		errorForwarders.add(traceRole(Role::WORKER, interf.id()));
 
@@ -2927,12 +2900,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				// The reason for this is that a storage will only remove itself if after it was able
 				// to read the system key space. But if recovery fails right after a `configure new ...`
 				// was run it won't be able to do so.
-				if (!storageCache.exists(req.reqId) &&
-				    (std::all_of(runningStorages.begin(),
-				                 runningStorages.end(),
-				                 [&req](const auto& p) { return p.second != req.storeType; }) ||
-				     req.seedTag != invalidTag)) {
-					ASSERT(req.initialClusterVersion >= 0);
+				if (std::all_of(runningStorages.begin(),
+								runningStorages.end(),
+								[&req](const auto& p) { return p.second != req.storeType; }) ||
+					req.seedTag != invalidTag) {
+				    ASSERT(req.initialClusterVersion >= 0);
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 
@@ -3014,7 +2986,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					        .getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
-					storageCache.set(req.reqId, storageReady.getFuture());
+					// TODO(gglass): remove
+					// storageCache.set(req.reqId, storageReady.getFuture());
 					Future<ErrorOr<Void>> storeError = errorOr(data->getError());
 					Future<Void> s = storageServer(data,
 					                               recruited,
@@ -3026,7 +2999,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               folder,
 					                               encryptionMonitor);
 					s = handleIOErrors(s, storeError, recruited.id(), kvClosed);
-					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
 					                                  &storageCleaners,
 					                                  s,
@@ -3044,8 +3016,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  &rebootKVSPromise2,
 					                                  encryptionMonitor);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
-				} else if (storageCache.exists(req.reqId)) {
-					forwardPromise(req.reply, storageCache.get(req.reqId));
 				} else {
 					TraceEvent("AttemptedDoubleRecruitment", interf.id()).detail("ForRole", "StorageServer");
 					errorForwarders.add(map(delay(0.5), [reply = req.reply](Void) {
