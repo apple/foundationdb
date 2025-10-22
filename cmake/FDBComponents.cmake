@@ -172,7 +172,7 @@ else()
       GIT_TAG        main
       SOURCE_DIR     ${CMAKE_SOURCE_DIR}/bindings/swift
     )
-    FetchContent_MakeAvailable(swift_bindings)
+    FetchContent_Populate(swift_bindings)
     message(STATUS "Swift bindings downloaded successfully to ${CMAKE_SOURCE_DIR}/bindings/swift")
   endif()
 
