@@ -305,9 +305,12 @@ def _generate_test_list(test_set: TestSet, api_languages: List[str] = API_LANGUA
         test_set.run_directory_test,
         test_set.run_directory_hca_test,
     ]
-    return [
-        lambda: test(api_language) for test in tests for api_language in api_languages
-    ]
+
+    result = []
+    for test in tests:
+        for api_language in api_languages:
+            result.append(lambda lang=api_language: test(lang))
+    return result
 
 
 async def run_binding_tests(
