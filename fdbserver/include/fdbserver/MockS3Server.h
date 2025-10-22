@@ -45,16 +45,8 @@ public:
 	                           Reference<HTTP::OutgoingResponse> response) override;
 	Reference<HTTP::IRequestHandler> clone() override;
 
-	void addref() override {
-		if (!destructing) {
-			ReferenceCounted<MockS3RequestHandler>::addref();
-		}
-	}
-	void delref() override {
-		if (!destructing) {
-			ReferenceCounted<MockS3RequestHandler>::delref();
-		}
-	}
+	void addref() override { ReferenceCounted<MockS3RequestHandler>::addref(); }
+	void delref() override { ReferenceCounted<MockS3RequestHandler>::delref(); }
 
 private:
 	std::atomic<bool> destructing;
