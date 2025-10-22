@@ -221,7 +221,6 @@ struct ProxyCommitData {
 	// only tracks normalKeys. This is used for tracking versions for systemKeys.
 	Deque<Version> systemKeyVersions;
 	KeyRangeMap<ServerCacheInfo> keyInfo; // keyrange -> all storage servers in all DCs for the keyrange
-	KeyRangeMap<bool> cacheInfo;
 	std::map<Key, ApplyMutationsData> uid_applyMutationsData;
 	bool firstProxy;
 	double lastCoalesceTime;
@@ -288,16 +287,6 @@ struct ProxyCommitData {
 			return r.tags;
 		}
 		return tags;
-	}
-
-	bool needsCacheTag(KeyRangeRef range) {
-		auto ranges = cacheInfo.intersectingRanges(range);
-		for (auto r : ranges) {
-			if (r.value()) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	TenantMode getTenantMode() const {

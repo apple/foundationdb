@@ -657,7 +657,6 @@ private:
 				allTags.insert(decodeServerTagValue(kv.value));
 			}
 		}
-		allTags.insert(cacheTag);
 
 		if (m.param1 == lastEpochEndKey) {
 			toCommit->addTags(allTags);

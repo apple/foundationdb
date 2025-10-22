@@ -106,7 +106,6 @@ public:
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
 	int64_t DISK_QUEUE_MAX_TRUNCATE_BYTES; // A truncate larger than this will cause the file to be replaced instead.
 	double TLOG_DEGRADED_DURATION;
-	int64_t MAX_CACHE_VERSIONS;
 	double TXS_POPPED_MAX_DELAY;
 	double TLOG_MAX_CREATE_DURATION;
 	int PEEK_LOGGING_AMOUNT;
