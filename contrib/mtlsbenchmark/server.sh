@@ -1,0 +1,15 @@
+taskset -c 0-10  /root/build_output/bin/fdbserver \
+    -r unittests \
+    -f :/network/p2ptest \
+    --test_listenerAddresses=0.0.0.0:4500:tls \
+    --test_targetDuration=0 \
+    --knob_tls_handshake_limit=1000 \
+    --knob_tls_server_handshake_threads=1 \
+    --knob_disable_mainthread_tls_handshake=true \
+    --knob_tls_handshake_flowlock_priority=7000 \
+    --knob_generic_metrics_report_interval=10 \
+    --knob_tls_handshake_timeout_seconds=5.0 \
+    --tls_ca_file keys/ca_file.crt \
+	--tls_certificate_file keys/certificate_file.crt  \
+	--tls_key_file keys/key_file.key  \
+    --tls_verify_peers "Root.CN=dummy-ca"
