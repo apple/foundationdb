@@ -73,8 +73,6 @@ S3BlobStoreEndpoint::Stats S3BlobStoreEndpoint::Stats::operator-(const Stats& rh
 }
 
 S3BlobStoreEndpoint::Stats S3BlobStoreEndpoint::s_stats;
-std::unique_ptr<S3BlobStoreEndpoint::BlobStats> S3BlobStoreEndpoint::blobStats;
-Future<Void> S3BlobStoreEndpoint::statsLogger = Never();
 
 std::unordered_map<BlobStoreConnectionPoolKey, Reference<S3BlobStoreEndpoint::ConnectionPoolData>>
     S3BlobStoreEndpoint::globalConnectionPool;
