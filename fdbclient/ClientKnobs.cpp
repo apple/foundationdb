@@ -23,16 +23,27 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "flow/IRandom.h"
+#include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
 
-#define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
-
-ClientKnobs::ClientKnobs(Randomize randomize) {
-	initialize(randomize);
+// Returns a deterministically random transaction timeout value for simulation testing.
+// More weight is given to the famous 5s timeout, but [1, 10] range is returned with lower weight.
+int randomTxnTimeoutSeconds() {
+	if (deterministicRandom()->truePercent(90)) {
+		return 5;
+	} else {
+		return deterministicRandom()->randomInt(1, 11); // [1, 10]
+	}
 }
 
-void ClientKnobs::initialize(Randomize randomize) {
+#define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
+
+ClientKnobs::ClientKnobs(Randomize randomize, IsSimulated isSimulated) {
+	initialize(randomize, isSimulated);
+}
+
+void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	// clang-format off
 
 	init( TOO_MANY,                            1000000 );
@@ -126,7 +137,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	// Versions -- knobs that control 5s timeout
 	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND
-	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND);  // Must be the same as SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS
+	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND);  if (isSimulated) MAX_WRITE_TRANSACTION_LIFE_VERSIONS = randomTxnTimeoutSeconds() * VERSIONS_PER_SECOND;
 
 	// Core
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
@@ -354,13 +365,13 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 TEST_CASE("/fdbclient/knobs/initialize") {
 	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
-	ClientKnobs clientKnobs(Randomize::False);
+	ClientKnobs clientKnobs(Randomize::False, IsSimulated::False);
 	int64_t initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
 	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
 	clientKnobs.setKnob("core_versionspersecond", initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions);
-	clientKnobs.initialize(Randomize::False);
+	clientKnobs.initialize(Randomize::False, IsSimulated::False);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions * 2);
 	return Void();
