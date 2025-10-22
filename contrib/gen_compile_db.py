@@ -19,7 +19,7 @@ def rreplace(s, old, new, occurrence=1):
 
 
 def actorCommand(cmd: str, build: str, src: str):
-    r1 = re.compile("-c (.+)(actor\.g\.cpp)")
+    r1 = re.compile(r"-c (.+)(actor\.g\.cpp)")
     m1 = r1.search(cmd)
     if m1 is None:
         return cmd
