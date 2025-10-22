@@ -324,7 +324,12 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// Only client 0 runs backup/restore operations
 		// Other clients just run the Cycle workload
 		if (clientId != 0) {
-			return Void();
+			// Calculate expected duration from TOML parameters to prevent flakey early test exit
+			// Backup starts at backupAfter, restore at restoreAfter, plus buffer for completion
+			// This ensures all clients finish around the same time instead of clients 1-7
+			// finishing at 30s while client 0 takes ~100s, which confuses the test harness
+			double expectedDuration = backupAfter + restoreAfter + 50.0; // 50s buffer for completion
+			return delay(expectedDuration);
 		}
 		return _start(cx, this);
 	}
@@ -345,22 +350,58 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		loop {
 			bool active = wait(agent.checkActive(cx));
 			TraceEvent("BS3BCW_AgentActivityCheck").detail("IsActive", active);
-			state std::string statusText = wait(agent.getStatus(cx, ShowErrors::True, tag));
+			std::string statusText = wait(agent.getStatus(cx, ShowErrors::True, tag));
 			// S3-specific: Suppress backup status output during testing to reduce noise
 			// puts(statusText.c_str());
 			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
 			// puts(statusJSON.c_str());
-
-			// S3-specific: Exit early when backup reaches completed state or snapshot closes
-			// This reduces unnecessary polling for S3 metadata that may be eventually consistent
-			if (statusText.find("\"Name\":\"Completed\"") != std::string::npos ||
-			    (statusJSON.find("\"StopAfterSnapshot\":true") != std::string::npos &&
-			     statusJSON.find("\"ExpectedProgress\":100") != std::string::npos)) {
-				TraceEvent("BS3BCW_StatusLoopExit").detail("Reason", "CompletedOrSnapshotClosed");
-				return Void();
-			}
 			wait(delay(2.0));
 		}
+	}
+
+	// Wait for a backup to become restorable, with retries
+	// This handles cases where cluster recoveries delay snapshot completion
+	ACTOR static Future<Void> waitForRestorable(Reference<IBackupContainer> backupContainer, int maxAttempts) {
+		state int restorabilityCheckAttempts = 0;
+		state bool isRestorable = false;
+		state int64_t lastSnapshotBytes = 0;
+
+		while (!isRestorable && restorabilityCheckAttempts < maxAttempts) {
+			BackupDescription desc = wait(backupContainer->describeBackup());
+			isRestorable = desc.maxRestorableVersion.present();
+			lastSnapshotBytes = desc.snapshotBytes;
+			if (!isRestorable) {
+				TraceEvent("BS3BCW_WaitingForRestorable")
+				    .detail("Attempt", restorabilityCheckAttempts)
+				    .detail("SnapshotBytes", lastSnapshotBytes);
+				wait(delay(2.0));
+				restorabilityCheckAttempts++;
+			}
+		}
+
+		// Do one final check after the loop to catch snapshots that completed
+		// between the last check and now
+		if (!isRestorable) {
+			BackupDescription finalDesc = wait(backupContainer->describeBackup());
+			isRestorable = finalDesc.maxRestorableVersion.present();
+			lastSnapshotBytes = finalDesc.snapshotBytes;
+			if (isRestorable) {
+				TraceEvent("BS3BCW_BackupRestorableOnFinalCheck").detail("SnapshotBytes", lastSnapshotBytes);
+			}
+		}
+
+		if (!isRestorable) {
+			TraceEvent(SevError, "BS3BCW_BackupNotRestorableAfterWait")
+			    .detail("Attempts", restorabilityCheckAttempts)
+			    .detail("SnapshotBytes", lastSnapshotBytes);
+			throw restore_invalid_version();
+		}
+
+		TraceEvent("BS3BCW_BackupRestorable")
+		    .detail("AttemptsNeeded", restorabilityCheckAttempts)
+		    .detail("SnapshotBytes", lastSnapshotBytes);
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> doBackup(BackupS3BlobCorrectnessWorkload* self,
@@ -444,6 +485,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// S3-specific: Use configurable backup URL and snapshot intervals
 		state std::string backupContainer = self->backupURL;
 		state Future<Void> status = statusLoop(cx, tag.toString());
+
+		// Testing v1 (non-partitioned) backup approach
+		// This does not require backup workers
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
@@ -587,7 +631,10 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				state Reference<IBackupContainer> lastBackupContainer =
 				    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
 
+				// Wait for backup to become restorable if it's still in progress
 				if (lastBackupContainer) {
+					wait(waitForRestorable(lastBackupContainer, 30));
+
 					// Clear the backup ranges before restoring (unless skipDirtyRestore is true)
 					if (!self->skipDirtyRestore) {
 						wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
