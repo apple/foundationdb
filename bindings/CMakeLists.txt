@@ -17,7 +17,10 @@ if(WITH_RUBY_BINDING)
 endif()
 
 if(WITH_SWIFT_BINDING)
-  add_subdirectory(swift)
+  # Only add subdirectory if it wasn't already added by FetchContent_MakeAvailable
+  if(NOT TARGET swift_bindings)
+    add_subdirectory(swift)
+  endif()
 endif()
 
 if(NOT WIN32 AND NOT OPEN_FOR_IDE)

@@ -182,8 +182,7 @@ else()
       GIT_TAG        main
       SOURCE_DIR     ${CMAKE_SOURCE_DIR}/bindings/swift
     )
-    # Download the repository (don't add to build yet - bindings/CMakeLists.txt will do that)
-    FetchContent_Populate(swift_bindings)
+    FetchContent_MakeAvailable(swift_bindings)
     message(STATUS "Swift bindings downloaded successfully to ${CMAKE_SOURCE_DIR}/bindings/swift")
   endif()
 
