@@ -19,11 +19,11 @@
 |[Bulk Loading & Dumping](https://apple.github.io/foundationdb/bulkdump.html)|experimental|Since 7.4. Dumping an idle cluster to S3 and loading data from S3 into an empty cluster.|Apple FDB Team|Will evolve into any keyrange dumping and loading with support to work with live clusters.|
 |Version Vector|experimental|An attempt to scale the transaction system so that proxy commits data no longer broadcasts to all tlogs.|Apple FDB Team|TBD|
 |gRPC|under development|Adding gRPC endpoints for certain client/server communications, e.g., some fdbcli usage, file transfer to and from fdbserver processes.|Apple FDB Team|Supported|
-|Multitenancy|experimental|Multi-tenant support, contributed from the community.|None|Development is incomplete and feature is unowned. NOTE: Deletion in progress.|
-|Metacluster|experimental|contributed from the community.|None|Development is incomplete and feature is unowned. NOTE: Deletion in progress.|
-|Storage Cache|experimental|contributed from the community. Serve as memory cache for storage servers. This is probably never finished and another solution to read hot shard is using large storage teams.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
-|Blob granule|experimental|contributed from the community. Related to backup.|None|Development is incomplete and feature is unowned. NOTE: This feature has been deleted.|
-|ChangeFeed|experimental|contributed from the community.|None|Development is incomplete and feature is unowned. NOTE: This feature has been deleted.|
+|Multitenancy|experimental|Multi-tenant support, contributed from the community.|None|This feature has been deleted.|
+|Metacluster|experimental|contributed from the community.|None|This feature has been deleted.|
+|Storage Cache|experimental|contributed from the community. Serve as memory cache for storage servers. This is probably never finished and another solution to read hot shard is using large storage teams.|None|This feature has been deleted.|
+|Blob granule|experimental|contributed from the community. Related to backup.|None|This feature has been deleted.|
+|ChangeFeed|experimental|contributed from the community.|None|This feature has been deleted.|
 |Configuration Database|experimental|contributed from the community. Have data consistency issues, probably not finished.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
 |OpenTelemetry|experimental|contributed from the community. Probably not finished.|None|Need a new owner.|
 |Dynamic knobs|experimental|Allows changing fdbserver process knob values without requiring a process restart|None|Need a new owner or become deprecated.|

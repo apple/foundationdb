@@ -1049,8 +1049,6 @@ struct Role {
 			return DATA_DISTRIBUTOR;
 		case ProcessClass::Ratekeeper:
 			return RATEKEEPER;
-		case ProcessClass::StorageCache:
-			return STORAGE_CACHE;
 		case ProcessClass::Backup:
 			return BACKUP;
 		case ProcessClass::EncryptKeyProxy:

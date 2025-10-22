@@ -24,10 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/MutationList.h"
-#include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/TimedRequest.h"
-#include <iterator>
 
 struct TLogInterface {
 	constexpr static FileIdentifier file_identifier = 16308510;

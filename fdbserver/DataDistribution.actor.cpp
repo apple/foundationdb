@@ -3336,56 +3336,6 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	return Void();
 }
 
-ACTOR Future<Void> waitFailCacheServer(Database* db, StorageServerInterface ssi) {
-	state Transaction tr(*db);
-	state Key key = storageCacheServerKey(ssi.id());
-	wait(waitFailureClient(ssi.waitFailure));
-	loop {
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		try {
-			tr.addReadConflictRange(storageCacheServerKeys);
-			tr.clear(key);
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
-}
-
-ACTOR Future<Void> cacheServerWatcher(Database* db) {
-	state Transaction tr(*db);
-	state ActorCollection actors(false);
-	state std::set<UID> knownCaches;
-	loop {
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		try {
-			RangeResult range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(!range.more);
-			std::set<UID> caches;
-			for (auto& kv : range) {
-				UID id;
-				BinaryReader reader{ kv.key.removePrefix(storageCacheServersPrefix), Unversioned() };
-				reader >> id;
-				caches.insert(id);
-				if (knownCaches.find(id) == knownCaches.end()) {
-					StorageServerInterface ssi;
-					BinaryReader reader{ kv.value, IncludeVersion() };
-					reader >> ssi;
-					actors.add(waitFailCacheServer(db, ssi));
-				}
-			}
-			knownCaches = std::move(caches);
-			tr.reset();
-			wait(delay(5.0) || actors.getResult());
-			ASSERT(!actors.getResult().isReady());
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
 	std::nth_element(metricVec.begin(),
 	                 metricVec.begin() + metricVec.size() / 2,
@@ -5037,7 +4987,6 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
 	if (!isMocked) {
 		cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultDelay, LockAware::True);
-		self->addActor.send(cacheServerWatcher(&cx));
 	}
 
 	state Future<Void> distributor = reportErrorsExcept(dataDistribution(self, getShardMetricsList, isMocked),

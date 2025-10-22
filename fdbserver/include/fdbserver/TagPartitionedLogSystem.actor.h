@@ -26,16 +26,9 @@
 
 #pragma once
 
-#include "fdbclient/SystemData.h"
 #include "fdbrpc/Replication.h"
-#include "fdbrpc/ReplicationUtils.h"
-#include "fdbrpc/simulator.h"
 #include "fdbserver/DBCoreState.h"
-#include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/RecoveryState.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.

@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Test backup and restore from s3.
 #
 # In the below we start a small FDB cluster, populate it with
-# some data and then start up a seaweedfs instance or use S3
+# some data and then start up MockS3Server or use S3
 # if it is available. We then run a backup to 'S3' and then
 # a restore. We verify the restore is the same as the original.
 #
@@ -27,13 +27,16 @@ function cleanup {
   if type shutdown_fdb_cluster &> /dev/null; then
     shutdown_fdb_cluster
   fi
-  if type shutdown_weed &> /dev/null; then
-    shutdown_weed "${TEST_SCRATCH_DIR}"
+  if type shutdown_mocks3 &> /dev/null; then
+    shutdown_mocks3
   fi
   if type shutdown_aws &> /dev/null; then
     shutdown_aws "${TEST_SCRATCH_DIR}"
   fi
+  
+  # Clean up encryption key file
   if [[ -n "${ENCRYPTION_KEY_FILE:-}" ]] && [[ -f "${ENCRYPTION_KEY_FILE}" ]]; then
+    log "Removing encryption key file: ${ENCRYPTION_KEY_FILE}"
     rm -f "${ENCRYPTION_KEY_FILE}"
   fi
 }
@@ -71,9 +74,6 @@ function backup {
   local local_credentials="${4}"
   local local_encryption_key_file="${5:-}"
   
-  # Backup to s3. Without the -k argument in the below, the backup gets
-  # 'No restore target version given, will use maximum restorable version from backup description.'
-  # TODO: Why is -k needed?
   local cmd_args=(
     "-C" "${local_scratch_dir}/loopback_cluster/fdb.cluster"
     "-t" "${TAG}" "-w"
@@ -113,7 +113,7 @@ function restore {
   local cmd_args=(
     "--dest-cluster-file" "${local_scratch_dir}/loopback_cluster/fdb.cluster"
     "-t" "${TAG}" "-w"
-    "-r" "${url}"
+    "-r" "${local_url}"
     "--log" "--logdir=${local_scratch_dir}"
     "--blob-credentials" "${local_credentials}"
   )
@@ -145,17 +145,12 @@ function test_s3_backup_and_restore {
   local local_build_dir="${4}"
   local local_encryption_key_file="${5:-}"
   
-  log "Load data"
-  if ! load_data "${local_build_dir}" "${local_scratch_dir}"; then
-    err "Failed loading data into fdb"
-    return 1
-  fi
   # Edit the url. Backup adds 'data' to the path. Need this url for
   # cleanup of test data.
   local edited_url=$(echo "${local_url}" | sed -e "s/ctest/data\/ctest/" )
   readonly edited_url
   if [[ "${USE_S3}" == "true" ]]; then
-    # Run this rm only if s3. In seaweed, it would fail because
+    # Run this rm only if s3. In MockS3Server, it would fail because
     # bucket doesn't exist yet (they are lazily created).
     local preclear_cmd=("${local_build_dir}/bin/s3client")
     preclear_cmd+=("${KNOBS[@]}")
@@ -168,6 +163,11 @@ function test_s3_backup_and_restore {
       err "Failed pre-cleanup rm of ${edited_url}"
       return 1
     fi
+  fi
+  log "Load data"
+  if ! load_data "${local_build_dir}" "${local_scratch_dir}"; then
+    err "Failed loading data into fdb"
+    return 1
   fi
   log "Run s3 backup"
   if ! backup "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${credentials}" "${local_encryption_key_file}"; then
@@ -197,7 +197,7 @@ function test_s3_backup_and_restore {
   local cleanup_cmd=("${local_build_dir}/bin/s3client")
   cleanup_cmd+=("${KNOBS[@]}")
   
-  # Only add TLS CA file for real S3, not SeaweedFS
+  # Only add TLS CA file for real S3, not MockS3Server
   if [[ "${USE_S3}" == "true" ]]; then
     cleanup_cmd+=("--tls-ca-file" "${TLS_CA_FILE}")
   fi
@@ -369,7 +369,9 @@ while (( "$#" )); do
 done
 
 # Set positional arguments in their proper place
-set -- "${PARAMS[@]}"
+if [ ${#PARAMS[@]} -ne 0 ]; then
+  set -- "${PARAMS[@]}"
+fi
 
 # Globals
 # TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
@@ -382,17 +384,17 @@ readonly TAG="test_backup"
 # internal apple dev environments where S3 is available).
 readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
 
-# Set KNOBS based on whether we're using real S3 or SeaweedFS
+# Set KNOBS based on whether we're using real S3 or MockS3Server
 if [[ "${USE_S3}" == "true" ]]; then
   # Use AWS KMS encryption for real S3
   KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
 else
-  # No encryption for SeaweedFS
+  # No encryption for MockS3Server
   KNOBS=("--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
 fi
 readonly KNOBS
 
-# Set TLS_CA_FILE only when using real S3, not for SeaweedFS
+# Set TLS_CA_FILE only when using real S3, not for MockS3Server
 if [[ "${USE_S3}" == "true" ]]; then
   # Try to find a valid TLS CA file if not explicitly set
   if [[ -z "${TLS_CA_FILE:-}" ]]; then
@@ -406,7 +408,7 @@ if [[ "${USE_S3}" == "true" ]]; then
   fi
   TLS_CA_FILE="${TLS_CA_FILE:-}"
 else
-  # For SeaweedFS, don't use TLS
+  # For MockS3Server, don't use TLS
   TLS_CA_FILE=""
 fi
 readonly TLS_CA_FILE
@@ -471,7 +473,7 @@ else
 fi
 readonly ENCRYPTION_KEY_FILE
 
-# Set host, bucket, and blob_credentials_file whether seaweed or s3.
+# Set host, bucket, and blob_credentials_file whether MockS3Server or s3.
 readonly path_prefix="ctests"
 host=
 query_str=
@@ -502,30 +504,31 @@ if [[ "${USE_S3}" == "true" ]]; then
   export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
   export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
 else
-  log "Testing against seaweedfs"
-  # Now source in the seaweedfs fixture so we can use its methods in the below.
+  log "Testing against MockS3Server"
+  # Now source in the mocks3 fixture so we can use its methods in the below.
   # shellcheck source=/dev/null
-  if ! source "${cwd}/../../fdbclient/tests/seaweedfs_fixture.sh"; then
-    err "Failed to source seaweedfs_fixture.sh"
+  if ! source "${cwd}/../../fdbclient/tests/mocks3_fixture.sh"; then
+    err "Failed to source mocks3_fixture.sh"
     exit 1
   fi
-  if ! TEST_SCRATCH_DIR=$(create_weed_dir "${scratch_dir}"); then
-    err "Failed create of the weed dir." >&2
-    return 1
+  if ! TEST_SCRATCH_DIR=$(mktemp -d "${scratch_dir}/mocks3_backup_test.XXXXXX"); then
+    err "Failed create of the mocks3 test dir." >&2
+    exit 1
   fi
   readonly TEST_SCRATCH_DIR
-  if ! host=$( run_weed "${scratch_dir}" "${TEST_SCRATCH_DIR}"); then
-    err "Failed to run seaweed"
-    return 1
+  if ! start_mocks3 "${build_dir}"; then
+    err "Failed to start MockS3Server"
+    exit 1
   fi
-  readonly host
-  readonly bucket="${SEAWEED_BUCKET}"
-  readonly region="all_regions"
-  # Reference a non-existent blob file (its ignored by seaweed)
+  readonly host="${MOCKS3_HOST}:${MOCKS3_PORT}"
+  readonly bucket="test-bucket"
+  readonly region="us-east-1"
+  # Create an empty blob credentials file (MockS3Server uses simple auth)
   readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
-  # Let the connection to seaweed be insecure -- not-TLS -- because just awkward to set up.
+  echo '{}' > "${blob_credentials_file}"
+  # Let the connection to MockS3Server be insecure -- not-TLS
   query_str="bucket=${bucket}&region=${region}&secure_connection=0"
-  # Set environment variables for SeaweedFS too
+  # Set environment variables for MockS3Server
   export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
 fi
 

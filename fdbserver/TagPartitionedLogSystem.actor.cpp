@@ -19,10 +19,12 @@
  */
 
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
-#include <boost/dynamic_bitset.hpp>
-#include "flow/UnitTest.h"
 
+#include <boost/dynamic_bitset.hpp>
 #include <utility>
+
+#include "fdbrpc/ReplicationUtils.h"
+#include "fdbserver/WaitFailure.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -728,7 +730,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 		}
 		if (log->isLocal && log->logServers.size() &&
 		    (log->locality == tagLocalitySpecial || log->locality == tag.locality || tag.locality == tagLocalityTxs ||
-		     tag.locality == tagLocalityLogRouter || (tag == cacheTag && log->locality != tagLocalitySatellite))) {
+		     tag.locality == tagLocalityLogRouter)) {
 			lastBegin = std::max(lastBegin, log->startVersion);
 			localSets.push_back(log);
 			if (log->locality != tagLocalitySatellite) {
@@ -780,7 +782,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 		}
 		for (int i = 0; begin < lastBegin; i++) {
 			if (i == oldLogData.size()) {
-				if (tag.locality == tagLocalityTxs || tag == cacheTag) {
+				if (tag.locality == tagLocalityTxs) {
 					break;
 				}
 				TraceEvent("TLogPeekAllDead", dbgid)
@@ -803,8 +805,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 				}
 				if (log->isLocal && log->logServers.size() &&
 				    (log->locality == tagLocalitySpecial || log->locality == tag.locality ||
-				     tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter ||
-				     (tag == cacheTag && log->locality != tagLocalitySatellite))) {
+				     tag.locality == tagLocalityTxs || tag.locality == tagLocalityLogRouter)) {
 					thisBegin = std::max(thisBegin, log->startVersion);
 					localOldSets.push_back(log);
 					if (log->locality != tagLocalitySatellite) {

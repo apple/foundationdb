@@ -9208,9 +9208,7 @@ public:
 		}
 
 		if (m.param1.startsWith(systemKeys.end)) {
-			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
-				applyPrivateCacheData(data, m);
-			} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
+			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
 				handleCheckpointPrivateMutation(data, m, ver);
 			} else {
 				applyPrivateData(data, ver, m);
@@ -9487,39 +9485,6 @@ private:
 					                accumulativeChecksumValue(stateToPersist.get())));
 				}
 			}
-		} else {
-			ASSERT(false); // Unknown private mutation
-		}
-	}
-
-	void applyPrivateCacheData(StorageServer* data, MutationRef const& m) {
-		//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Mutation", m);
-
-		if (processedCacheStartKey) {
-			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
-			ASSERT((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix));
-			KeyRangeRef keys(cacheStartKey.removePrefix(systemKeys.begin).removePrefix(storageCachePrefix),
-			                 m.param1.removePrefix(systemKeys.begin).removePrefix(storageCachePrefix));
-			data->cachedRangeMap.insert(keys, true);
-
-			// Figure out the affected shard ranges and maintain the cached key-range information in the in-memory
-			// map
-			// TODO revisit- we are not splitting the cached ranges based on shards as of now.
-			if (0) {
-				auto cachedRanges = data->shards.intersectingRanges(keys);
-				for (auto shard = cachedRanges.begin(); shard != cachedRanges.end(); ++shard) {
-					KeyRangeRef intersectingRange = shard.range() & keys;
-					TraceEvent(SevDebug, "SSPrivateCacheMutationInsertUnexpected", data->thisServerID)
-					    .detail("Begin", intersectingRange.begin)
-					    .detail("End", intersectingRange.end);
-					data->cachedRangeMap.insert(intersectingRange, true);
-				}
-			}
-			processedStartKey = false;
-		} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
-			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
-			cacheStartKey = m.param1;
-			processedCacheStartKey = true;
 		} else {
 			ASSERT(false); // Unknown private mutation
 		}

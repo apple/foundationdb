@@ -831,7 +831,6 @@ inline bool shouldBackup(MutationRef const& m) {
 // determined. In version vector, this means the batch should be sent to all logs.
 std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 	std::set<Tag> transactionTags;
-	std::vector<Tag> cacheVector = { cacheTag };
 	lastShardMove = pProxyCommitData->lastShardMove;
 	if (pProxyCommitData->txnStateStore->getReplaceContent()) {
 		return std::set<Tag>();
@@ -855,9 +854,6 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
 				transactionTags.insert(tags.begin(), tags.end());
-				if (pProxyCommitData->cacheInfo[m.param1]) {
-					transactionTags.insert(cacheTag);
-				}
 			} else if (m.type == MutationRef::ClearRange) {
 				auto range = pProxyCommitData->keyInfo.rangeContaining(m.param1);
 				if (range.end() >= m.param2) {
@@ -873,9 +869,6 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 					}
 				}
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
-				if (pProxyCommitData->needsCacheTag(clearRange)) {
-					transactionTags.insert(cacheTag);
-				}
 			} else {
 				UNREACHABLE();
 			}
@@ -2178,9 +2171,6 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid).detail("To", tags);
 				self->toCommit.addTags(tags);
-				if (pProxyCommitData->cacheInfo[m.param1]) {
-					self->toCommit.addTag(cacheTag);
-				}
 				if (encryptedMutation.present()) {
 					ASSERT(encryptedMutation.get().isEncrypted());
 				}
@@ -2277,9 +2267,6 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				}
 
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
-				if (pProxyCommitData->needsCacheTag(clearRange)) {
-					self->toCommit.addTag(cacheTag);
-				}
 				WriteMutationRefVar var =
 				    wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena, &curEncryptionTime));
 				totalEncryptionTime += curEncryptionTime;

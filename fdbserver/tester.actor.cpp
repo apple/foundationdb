@@ -1396,7 +1396,6 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 ACTOR Future<Void> checkConsistency(Database cx,
                                     std::vector<TesterInterface> testers,
                                     bool doQuiescentCheck,
-                                    bool doCacheCheck,
                                     bool doTSSCheck,
                                     double quiescentWaitTimeout,
                                     double softTimeLimit,
@@ -1414,14 +1413,10 @@ ACTOR Future<Void> checkConsistency(Database cx,
 
 	Standalone<VectorRef<KeyValueRef>> options;
 	StringRef performQuiescent = "false"_sr;
-	StringRef performCacheCheck = "false"_sr;
 	StringRef performTSSCheck = "false"_sr;
 	if (doQuiescentCheck) {
 		performQuiescent = "true"_sr;
 		spec.restorePerpetualWiggleSetting = false;
-	}
-	if (doCacheCheck) {
-		performCacheCheck = "true"_sr;
 	}
 	if (doTSSCheck) {
 		performTSSCheck = "true"_sr;
@@ -1432,7 +1427,6 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	spec.timeout = 32000;
 	options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "ConsistencyCheck"_sr));
 	options.push_back_deep(options.arena(), KeyValueRef("performQuiescentChecks"_sr, performQuiescent));
-	options.push_back_deep(options.arena(), KeyValueRef("performCacheCheck"_sr, performCacheCheck));
 	options.push_back_deep(options.arena(), KeyValueRef("performTSSCheck"_sr, performTSSCheck));
 	options.push_back_deep(
 	    options.arena(),
@@ -2053,7 +2047,6 @@ ACTOR Future<bool> runTest(Database cx,
 				wait(timeoutError(checkConsistency(cx,
 				                                   testers,
 				                                   quiescent,
-				                                   spec.runConsistencyCheckOnCache,
 				                                   spec.runConsistencyCheckOnTSS,
 				                                   10000.0,
 				                                   5000,
@@ -2218,11 +2211,6 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      spec->runConsistencyCheck = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheck", spec->runConsistencyCheck);
-	  } },
-	{ "runConsistencyCheckOnCache",
-	  [](const std::string& value, TestSpec* spec) {
-	      spec->runConsistencyCheckOnCache = (value == "true");
-	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnCache", spec->runConsistencyCheckOnCache);
 	  } },
 	{ "runConsistencyCheckOnTSS",
 	  [](const std::string& value, TestSpec* spec) {
@@ -2651,9 +2639,11 @@ ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string co
 		wait(delay(seconds));
 		while (true) {
 			double delaySeconds = disableConnectionFailures(context, ForceDisable::False);
-			if (delaySeconds > 0.001) {
+			if (delaySeconds > DISABLE_CONNECTION_FAILURE_MIN_INTERVAL) {
 				wait(delay(delaySeconds));
 			} else {
+				// disableConnectionFailures will always take effect if less than
+				// DISABLE_CONNECTION_FAILURE_MIN_INTERVAL is returned.
 				break;
 			}
 		}

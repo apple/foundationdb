@@ -132,7 +132,6 @@ struct ProcessInfo : NonCopyable {
 		case ProcessClass::RatekeeperClass:
 		case ProcessClass::ConsistencyScanClass:
 		case ProcessClass::BlobManagerClass:
-		case ProcessClass::StorageCacheClass:
 		case ProcessClass::BackupClass:
 		case ProcessClass::EncryptKeyProxyClass:
 		default:

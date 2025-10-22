@@ -18,13 +18,10 @@
  * limitations under the License.
  */
 
-#include <cinttypes>
-#include <memory>
 #include <string>
 #include <utility>
 
 #include "flow/MkCert.h"
-#include "fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Arena.h"
 #ifndef BOOST_SYSTEM_NO_LIB
@@ -39,10 +36,9 @@
 #include "fdbrpc/SimExternalConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
-#include "flow/IThreadPool.h"
+#include "flow/CodeProbe.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
-#include "flow/WriteOnlySet.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
@@ -53,7 +49,6 @@
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/flow.h"
 #include "flow/swift.h"
-#include "flow/swift_concurrency_hooks.h"
 #include "flow/swift/ABI/Task.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
@@ -63,10 +58,12 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.actor.h"
 #include "fdbrpc/genericactors.actor.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/FaultInjection.h"
 #include "flow/TaskQueue.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ISimulator* g_simulator = nullptr;
@@ -371,6 +368,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		}
 
 		TraceEvent("Sim2Connection")
+		    .detail("From", process->address)
+		    .detail("To", peerProcess->address)
 		    .detail("SendBufSize", sendBufSize)
 		    .detail("Latency", latency)
 		    .detail("StableConnection", stableConnection);
@@ -2979,11 +2978,14 @@ void enableConnectionFailures(std::string const& context, double duration) {
 
 double disableConnectionFailures(std::string const& context, ForceDisable flag) {
 	if (g_network->isSimulated()) {
-		if (now() < g_simulator->connectionFailureDisableTime && flag == ForceDisable::False) {
+		if (now() + DISABLE_CONNECTION_FAILURE_MIN_INTERVAL < g_simulator->connectionFailureDisableTime &&
+		    flag == ForceDisable::False) {
 			TraceEvent(("DisableConnectionFailuresDelayed_" + context).c_str())
+			    .detail("Gap", g_simulator->connectionFailureDisableTime - now())
 			    .detail("Until", g_simulator->connectionFailureDisableTime);
-			return g_simulator->connectionFailureDisableTime - now();
+			return g_simulator->connectionFailureDisableTime - now(); // return remaining time (>0.001s)
 		} else {
+			// if remaining time is less than 0.001s, or forced to disable, disable now
 			g_simulator->connectionFailuresDisableDuration = DISABLE_CONNECTION_FAILURE_FOREVER;
 			g_simulator->speedUpSimulation = true;
 			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());

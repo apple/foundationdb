@@ -92,7 +92,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "grv_proxy",
                   "master",
                   "test",
-                  "storage_cache",
                   "blob_worker"
                ]
             },
@@ -138,7 +137,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                         "blob_worker",
                         "encrypt_key_proxy",
                         "consistency_scan",
-                        "storage_cache",
                         "router",
                         "coordinator"
                      ]
