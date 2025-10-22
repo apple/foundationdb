@@ -1273,9 +1273,6 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 
 	RangeResult rawTags = wait(self->txnStateStore->readRange(serverTagKeys));
 	self->allTags.clear();
-	if (self->lastEpochEnd > 0) {
-		self->allTags.push_back(cacheTag);
-	}
 
 	if (self->forceRecovery) {
 		self->safeLocality = oldLogSystem->getLogSystemConfig().tLogs[0].locality;
