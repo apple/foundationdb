@@ -272,6 +272,7 @@ API_LANGUAGES = [
     "java_async",
     "go",
     "flow",
+    "swift",
 ]
 
 
