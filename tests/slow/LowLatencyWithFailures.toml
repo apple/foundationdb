@@ -1,6 +1,15 @@
 [configuration]
 minimumReplication = 2
 
+[[knobs]]
+# The LowLatency workload expects quick recoveries, otherwise it throws a SevError of Type=LatencyTooLarge.
+# This conflicts with fault injection testing for cc_recovery_init_req_* knobs, where we
+# intentionally drop init requests from CC during recovery to test timeout behavior.
+# In such fault injection cases, recovery restarts but the reaction time can be
+# too slow for the LowLatency workload requirements.
+# To address this, we disable dropping init requests for this test.
+cc_recovery_init_req_allow_drop_in_sim = false
+
 [[test]]
 testTitle = 'Clogged'
 connectionFailuresDisableDuration = 60
