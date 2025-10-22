@@ -156,22 +156,34 @@ option(BUILD_SWIFT_BINDING "build swift binding" ON)
 if(BUILD_SWIFT_BINDING AND NOT WITH_C_BINDING)
   message(WARNING "Swift binding depends on C binding, but C binding is not enabled")
 endif()
+
 if(NOT BUILD_SWIFT_BINDING OR NOT BUILD_C_BINDING)
   set(WITH_SWIFT_BINDING OFF)
 else()
   if(NOT EXISTS "${CMAKE_SOURCE_DIR}/bindings/swift")
-    message(STATUS "Swift bindings directory not found at ${CMAKE_SOURCE_DIR}/bindings/swift, disabling Swift binding")
-    set(WITH_SWIFT_BINDING OFF)
+    message(STATUS "Swift bindings directory not found at ${CMAKE_SOURCE_DIR}/bindings/swift")
+    message(STATUS "Downloading Swift bindings from GitHub...")
+
+    # TODO: Make it download a release version if we are on release branch?
+    include(FetchContent)
+    FetchContent_Declare(
+      swift_bindings
+      GIT_REPOSITORY https://github.com/FoundationDB/fdb-swift-bindings.git
+      GIT_TAG        main
+      SOURCE_DIR     ${CMAKE_SOURCE_DIR}/bindings/swift
+    )
+    FetchContent_MakeAvailable(swift_bindings)
+    message(STATUS "Swift bindings downloaded successfully to ${CMAKE_SOURCE_DIR}/bindings/swift")
+  endif()
+
+  find_program(SWIFT_EXECUTABLE swift)
+  if(SWIFT_EXECUTABLE AND CMAKE_Swift_COMPILER)
+    set(WITH_SWIFT_BINDING ON)
   else()
-    find_program(SWIFT_EXECUTABLE swift)
-    if(SWIFT_EXECUTABLE AND CMAKE_Swift_COMPILER)
-      set(WITH_SWIFT_BINDING ON)
-    else()
-      set(WITH_SWIFT_BINDING OFF)
-    endif()
-    if (USE_SANITIZER)
-      set(WITH_SWIFT_BINDING OFF)
-    endif()
+    set(WITH_SWIFT_BINDING OFF)
+  endif()
+  if (USE_SANITIZER)
+    set(WITH_SWIFT_BINDING OFF)
   endif()
 endif()
 
