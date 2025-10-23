@@ -30,7 +30,7 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
-const API_VERSION int = 740
+const API_VERSION int = 800
 
 type EmptyQueueError struct{}
 

@@ -9,7 +9,7 @@ This package requires:
 - FoundationDB client package (can be installed from the [release](https://github.com/apple/foundationdb/releases)). It's recommended to install the matching client package for the FDB version you want to use.
 
 Use of this package requires the selection of a FoundationDB API version at runtime.
-This package currently supports FoundationDB API versions 200-740.
+This package currently supports FoundationDB API versions 200-800.
 
 Documentation
 -------------

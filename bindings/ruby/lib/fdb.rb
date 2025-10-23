@@ -36,7 +36,7 @@ module FDB
     end
   end
   def self.api_version(version)
-    header_version = 740
+    header_version = 800
     if self.is_api_version_selected?()
       if @@chosen_version != version
         raise "FDB API already loaded at version #{@@chosen_version}."
