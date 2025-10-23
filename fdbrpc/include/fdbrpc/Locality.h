@@ -420,7 +420,15 @@ struct ProcessData {
 	// considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, locality, processClass, address, grpcAddress);
+		serializer(ar, locality, processClass, address);
+
+		if constexpr (!is_fb_function<Ar>) {
+			if (ar.protocolVersion().hasGrpcEndpoint()) {
+				serializer(ar, grpcAddress);
+			}
+		} else {
+			serializer(ar, grpcAddress);
+		}
 	}
 
 	struct sort_by_address {
