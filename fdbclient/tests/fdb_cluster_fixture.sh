@@ -13,32 +13,36 @@ FDB_PIDS=()
 function shutdown_fdb_cluster {
   # Kill all running fdb processes from tracked PIDs
   if [[ ${#FDB_PIDS[@]} -gt 0 ]]; then
-    # First pass: kill -9 all tracked PIDs
+    # First pass: Try graceful shutdown (SIGTERM)
     for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
       if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
+        kill -15 "${FDB_PIDS[i]}" 2>/dev/null || true
+      fi
+    done
+    
+    # Give processes a brief moment to shut down gracefully
+    sleep 0.5
+    
+    # Second pass: Force kill any survivors with SIGKILL
+    local still_running=0
+    for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
+      if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
+        # Process didn't respond to SIGTERM - force kill it
         kill -9 "${FDB_PIDS[i]}" 2>/dev/null || true
       fi
     done
     
-    # Give processes a moment to die after kill -9
-    sleep 0.5
+    # Give SIGKILL a moment to take effect
+    sleep 0.3
     
-    # Second pass: verify all processes died, retry any survivors
-    local still_running=0
+    # Third pass: Check for unkillable processes
     for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
       if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
-        # Process survived the kill -9 from first pass - try again
-        echo "WARNING: Process ${FDB_PIDS[i]} survived first kill -9, trying again" >&2
-        # Try SIGTERM first (may help if process is in certain states)
-        kill -15 "${FDB_PIDS[i]}" 2>/dev/null || true
-        sleep 0.2
-        # Then SIGKILL again
-        kill -9 "${FDB_PIDS[i]}" 2>/dev/null || true
-        sleep 0.3
-        if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
-          echo "ERROR: Process ${FDB_PIDS[i]} is unkillable (zombie or kernel issue)" >&2
-          still_running=$((still_running + 1))
-        fi
+        # Get process info for debugging
+        local proc_info=$(ps -p "${FDB_PIDS[i]}" -o pid,ppid,stat,comm 2>/dev/null || echo "PID not in process table")
+        echo "ERROR: Process ${FDB_PIDS[i]} is unkillable (zombie or kernel issue)" >&2
+        echo "       Process info: ${proc_info}" >&2
+        still_running=$((still_running + 1))
       fi
     done
     

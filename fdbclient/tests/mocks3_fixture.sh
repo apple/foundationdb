@@ -147,7 +147,7 @@ start_mocks3() {
 shutdown_mocks3() {
     if [ -n "$MOCKS3_PID" ]; then
         echo "Shutting down MockS3Server (PID: $MOCKS3_PID)"
-        # Try graceful shutdown first
+        # Try graceful shutdown first (SIGTERM)
         if kill -0 $MOCKS3_PID 2>/dev/null; then
             kill $MOCKS3_PID 2>/dev/null || true
             # Wait up to 5 seconds for graceful shutdown
@@ -157,28 +157,23 @@ shutdown_mocks3() {
                 fi
                 sleep 1
             done
-            # Force kill if still running
+            # Force kill if still running (SIGKILL)
             if kill -0 $MOCKS3_PID 2>/dev/null; then
                 echo "Force killing MockS3Server (PID: $MOCKS3_PID)"
                 kill -9 $MOCKS3_PID 2>/dev/null || true
-                # After kill -9, give it a moment to die
+                # Give SIGKILL a moment to take effect
                 sleep 0.5
-                # Check if it survived kill -9
+                # Check if it survived kill -9 (should be impossible)
                 if kill -0 $MOCKS3_PID 2>/dev/null; then
-                    echo "WARNING: MockS3Server (PID: $MOCKS3_PID) survived first kill -9, trying again" >&2
-                    # Try SIGTERM then SIGKILL again
-                    kill -15 $MOCKS3_PID 2>/dev/null || true
-                    sleep 0.2
-                    kill -9 $MOCKS3_PID 2>/dev/null || true
-                    sleep 0.3
-                    # Final check
-                    if kill -0 $MOCKS3_PID 2>/dev/null; then
-                        echo "ERROR: MockS3Server (PID: $MOCKS3_PID) is unkillable (zombie or kernel issue)" >&2
-                        # Don't use pkill - it would kill MockS3 instances from other concurrent tests
-                    fi
+                    # Get process info for debugging
+                    proc_info=$(ps -p $MOCKS3_PID -o pid,ppid,stat,comm 2>/dev/null || echo "PID not in process table")
+                    echo "ERROR: MockS3Server (PID: $MOCKS3_PID) is unkillable (zombie or kernel issue)" >&2
+                    echo "       Process info: ${proc_info}" >&2
+                    # Don't try SIGTERM again - if SIGKILL didn't work, nothing will
+                    # Don't use pkill - it would kill MockS3 instances from other concurrent tests
                 fi
             fi
-            # Don't wait - the process should be dead after kill -9, and wait can hang
+            # Don't wait() - the process should be dead after kill -9, and wait can hang
             # if the PID was already reaped or is a child of a different shell
         fi
     fi
