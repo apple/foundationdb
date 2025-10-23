@@ -192,6 +192,8 @@ Reference<IThreadPool> initTestPool() {
 // See the comments within ThreadPool::stop() for more details.
 
 TEST_CASE("/flow/IThreadPool/ExplicitStop") {
+	noUnseed = true;
+
 	state Reference<IThreadPool> pool = initTestPool();
 	auto task = new MockTask();
 	auto future = task->promise.getFuture();
@@ -202,6 +204,8 @@ TEST_CASE("/flow/IThreadPool/ExplicitStop") {
 }
 
 TEST_CASE("/flow/IThreadPool/ImplicitStop") {
+	noUnseed = true;
+
 	state Reference<IThreadPool> pool = initTestPool();
 	auto task = new MockTask();
 	auto future = task->promise.getFuture();

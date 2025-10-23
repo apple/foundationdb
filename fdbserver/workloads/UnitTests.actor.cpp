@@ -205,7 +205,8 @@ struct UnitTestWorkload : TestWorkload {
 			TraceEvent(SevInfo, "RunningUnitTest")
 			    .detail("Name", test->name)
 			    .detail("File", test->file)
-			    .detail("Line", test->line);
+			    .detail("Line", test->line)
+			    .detail("Rand", deterministicRandom()->randomInt(0, 100001));
 
 			state Error result = success();
 			state double start_now = now();
