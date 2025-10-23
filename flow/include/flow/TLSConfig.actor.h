@@ -212,6 +212,8 @@ public:
 
 	bool getDisablePlainTextConnection() const;
 
+	bool isInsecure() const { return tlsCertPath.empty() && tlsCertBytes.empty(); }
+
 #ifndef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 private:
 #endif
