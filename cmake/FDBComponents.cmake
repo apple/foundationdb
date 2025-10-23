@@ -157,7 +157,7 @@ if(BUILD_SWIFT_BINDING AND NOT WITH_C_BINDING)
   message(WARNING "Swift binding depends on C binding, but C binding is not enabled")
 endif()
 
-if(NOT BUILD_SWIFT_BINDING OR NOT BUILD_C_BINDING)
+if(NOT BUILD_SWIFT_BINDING OR NOT BUILD_C_BINDING OR OPEN_FOR_IDE)
   set(WITH_SWIFT_BINDING OFF)
 else()
   find_program(SWIFT_EXECUTABLE swift)
