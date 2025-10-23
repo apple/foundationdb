@@ -407,16 +407,28 @@ struct ProcessData {
 	LocalityData locality;
 	ProcessClass processClass;
 	NetworkAddress address;
+	Optional<NetworkAddress> grpcAddress;
 
 	ProcessData() {}
-	ProcessData(LocalityData locality, ProcessClass processClass, NetworkAddress address)
-	  : locality(locality), processClass(processClass), address(address) {}
+	ProcessData(LocalityData locality,
+	            ProcessClass processClass,
+	            NetworkAddress address,
+	            Optional<NetworkAddress> grpcAddress)
+	  : locality(locality), processClass(processClass), address(address), grpcAddress(grpcAddress) {}
 
 	// To change this serialization, ProtocolVersion::WorkerListValue must be updated, and downgrades need to be
 	// considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, locality, processClass, address);
+
+		if constexpr (!is_fb_function<Ar>) {
+			if (ar.protocolVersion().hasGrpcEndpoint()) {
+				serializer(ar, grpcAddress);
+			}
+		} else {
+			serializer(ar, grpcAddress);
+		}
 	}
 
 	struct sort_by_address {
