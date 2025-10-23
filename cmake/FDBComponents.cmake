@@ -176,6 +176,12 @@ else()
     set(WITH_SWIFT_BINDING OFF)
   endif()
 
+  # Swift bindings on Linux require libc++ (Swift uses libc++ standard library)
+  if(WITH_SWIFT_BINDING AND NOT APPLE AND NOT USE_LIBCXX)
+    message(STATUS "Swift bindings on Linux require USE_LIBCXX=ON (Swift requires libc++ standard library)")
+    set(WITH_SWIFT_BINDING OFF)
+  endif()
+
   if(NOT EXISTS "${CMAKE_SOURCE_DIR}/bindings/swift" AND WITH_SWIFT_BINDING)
     message(STATUS "Swift bindings directory not found at ${CMAKE_SOURCE_DIR}/bindings/swift")
     message(STATUS "Downloading Swift bindings from GitHub...")
