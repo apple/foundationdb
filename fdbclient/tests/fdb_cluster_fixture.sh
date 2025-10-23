@@ -12,9 +12,46 @@ FDB_PIDS=()
 # Shutdown all processes.
 function shutdown_fdb_cluster {
   # Kill all running fdb processes from tracked PIDs
-  for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
-    kill -9 "${FDB_PIDS[i]}" 2>/dev/null || true
-  done
+  if [[ ${#FDB_PIDS[@]} -gt 0 ]]; then
+    # First pass: Try graceful shutdown (SIGTERM)
+    for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
+      if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
+        kill -15 "${FDB_PIDS[i]}" 2>/dev/null || true
+      fi
+    done
+    
+    # Give processes a brief moment to shut down gracefully
+    sleep 0.5
+    
+    # Second pass: Force kill any survivors with SIGKILL
+    local still_running=0
+    for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
+      if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
+        # Process didn't respond to SIGTERM - force kill it
+        kill -9 "${FDB_PIDS[i]}" 2>/dev/null || true
+      fi
+    done
+    
+    # Give SIGKILL a moment to take effect
+    sleep 0.3
+    
+    # Third pass: Check for unkillable processes
+    for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
+      if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
+        # Get process info for debugging
+        local proc_info=$(ps -p "${FDB_PIDS[i]}" -o pid,ppid,stat,comm 2>/dev/null || echo "PID not in process table")
+        echo "ERROR: Process ${FDB_PIDS[i]} is unkillable (zombie or kernel issue)" >&2
+        echo "       Process info: ${proc_info}" >&2
+        still_running=$((still_running + 1))
+      fi
+    done
+    
+    if [[ ${still_running} -gt 0 ]]; then
+      echo "ERROR: ${still_running} FDB processes remain unkillable - this may cause port conflicts in subsequent tests" >&2
+      # Don't use pkill - it would kill processes from other concurrent tests
+      # Instead, just report the problem and let the test infrastructure handle it
+    fi
+  fi
 }
 
 # Start an fdb cluster. If port clashes, try again with new ports.

@@ -861,6 +861,14 @@ public:
 	bool CC_GRAY_FAILURE_STATUS_JSON; // When enabled, returns gray failure information in machine readable status json.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
+	bool
+	    CC_RECOVERY_INIT_REQ_ALLOW_DROP_IN_SIM; // This knob only affects simulation i.e. knob is ignored if isSimulated
+	                                            // is false.
+	                                            // If CC_RECOVERY_INIT_REQ_ALLOW_DROP_IN_SIM is true, we allow init
+	                                            // requests to be dropped in simulation (as means to fault inject) for
+	                                            // testing purposes.
+	                                            // If CC_RECOVERY_INIT_REQ_ALLOW_DROP_IN_SIM is false,
+	                                            // we do not allow init requests to be dropped in simulation.
 	double CC_RECOVERY_INIT_REQ_TIMEOUT; // Base timeout (seconds) for transaction system initialization during
 	                                     // recovery. Only applies to initializing_transaction_servers phase.
 	double CC_RECOVERY_INIT_REQ_GROWTH_FACTOR; // Base of the exponential backoff calculation. The timeout is calculated

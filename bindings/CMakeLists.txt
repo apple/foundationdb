@@ -17,7 +17,11 @@ if(WITH_RUBY_BINDING)
 endif()
 
 if(WITH_SWIFT_BINDING)
-  add_subdirectory(swift)
+  if(EXISTS "${CMAKE_SOURCE_DIR}/bindings/swift")
+    add_subdirectory(swift)
+  else()
+    message(STATUS "Swift bindings enabled but sources not found in bindings directory")
+  endif()
 endif()
 
 if(NOT WIN32 AND NOT OPEN_FOR_IDE)

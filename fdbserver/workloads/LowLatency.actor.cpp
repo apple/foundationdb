@@ -78,14 +78,18 @@ struct LowLatencyWorkload : TestWorkload {
 				++self->operations;
 				loop {
 					try {
-						TraceEvent("StartLowLatencyTransaction").log();
+						TraceEvent("LowLatencyTransactionStart").detail("Retries", self->retries.getValue());
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						if (doCommit) {
+							TraceEvent("LowLatencyTransactionCommitStart");
 							tr.set(self->testKey, ""_sr);
 							wait(tr.commit());
+							TraceEvent("LowLatencyTransactionCommitFinish");
 						} else {
+							TraceEvent("LowLatencyTransactionGRVStart");
 							wait(success(tr.getReadVersion()));
+							TraceEvent("LowLatencyTransactionGRVFinish");
 						}
 						break;
 					} catch (Error& e) {
