@@ -75,6 +75,7 @@ API_VERSIONS = [
     720,
     730,
     740,
+    800,
 ]
 
 assert (
