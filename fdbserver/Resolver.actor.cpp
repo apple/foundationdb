@@ -457,7 +457,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		    &reply, firstUnseenVersion, req.version, logsChanged);
 
 		// Adds private mutation messages to the reply message.
-		if (applyResolverPrivateMutations) {
+		if (useResolverPrivateMutations) {
 			auto privateMutations = toCommit->getAllMessages();
 			for (const auto& mutations : privateMutations) {
 				reply.privateMutations.push_back(reply.arena, mutations);
@@ -465,7 +465,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			}
 			// merge mutation tags with sent client tags
 			toCommit->saveTags(reply.writtenTags);
-			reply.privateMutationCount = toCommit->getMutationCount();
+			reply.privateMutationCount = applyResolverPrivateMutations ? toCommit->getMutationCount() : 0;
 		}
 
 		//TraceEvent("ResolveBatch", self->dbgid).detail("PrevVersion", req.prevVersion).detail("Version", req.version).detail("StateTransactionVersions", self->recentStateTransactionsInfo.size()).detail("StateBytes", stateBytes).detail("FirstVersion", self->recentStateTransactionsInfo.empty() ? -1 : self->recentStateTransactionsInfo.firstVersion()).detail("StateMutationsIn", req.txnStateTransactions.size()).detail("StateMutationsOut", reply.stateMutations.size()).detail("From", proxyAddress);
@@ -518,7 +518,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 						self->lastShardMove = req.version;
 					}
 				} else {
-					toCommit->getLocations(reply.writtenTags, writtenTLogs);
+					if (useResolverPrivateMutations) {
+						toCommit->getLocations(reply.writtenTags, writtenTLogs);
+					}
 				}
 				if (self->tpcvVector[0] == invalidVersion) {
 					std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), req.prevVersion);
