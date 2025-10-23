@@ -518,9 +518,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 						self->lastShardMove = req.version;
 					}
 				} else {
-					if (useResolverPrivateMutations) {
-						toCommit->getLocations(reply.writtenTags, writtenTLogs);
-					}
+					toCommit->getLocations(reply.writtenTags, writtenTLogs);
 				}
 				if (self->tpcvVector[0] == invalidVersion) {
 					std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), req.prevVersion);
