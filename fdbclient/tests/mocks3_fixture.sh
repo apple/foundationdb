@@ -161,8 +161,15 @@ shutdown_mocks3() {
             if kill -0 $MOCKS3_PID 2>/dev/null; then
                 echo "Force killing MockS3Server (PID: $MOCKS3_PID)"
                 kill -9 $MOCKS3_PID 2>/dev/null || true
+                # After kill -9, give it a moment to die
+                sleep 0.5
+                # Final check
+                if kill -0 $MOCKS3_PID 2>/dev/null; then
+                    echo "WARNING: MockS3Server (PID: $MOCKS3_PID) still running after kill -9" >&2
+                fi
             fi
-            wait $MOCKS3_PID 2>/dev/null || true
+            # Don't wait - the process should be dead after kill -9, and wait can hang
+            # if the PID was already reaped or is a child of a different shell
         fi
     fi
 

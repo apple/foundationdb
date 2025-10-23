@@ -12,9 +12,29 @@ FDB_PIDS=()
 # Shutdown all processes.
 function shutdown_fdb_cluster {
   # Kill all running fdb processes from tracked PIDs
-  for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
-    kill -9 "${FDB_PIDS[i]}" 2>/dev/null || true
-  done
+  if [[ ${#FDB_PIDS[@]} -gt 0 ]]; then
+    for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
+      if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
+        kill -9 "${FDB_PIDS[i]}" 2>/dev/null || true
+      fi
+    done
+    
+    # Give processes a moment to die after kill -9
+    sleep 0.5
+    
+    # Verify all processes are dead
+    local still_running=0
+    for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
+      if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
+        echo "WARNING: Process ${FDB_PIDS[i]} still running after kill -9" >&2
+        still_running=$((still_running + 1))
+      fi
+    done
+    
+    if [[ ${still_running} -gt 0 ]]; then
+      echo "WARNING: ${still_running} FDB processes failed to shut down cleanly" >&2
+    fi
+  fi
 }
 
 # Start an fdb cluster. If port clashes, try again with new ports.
