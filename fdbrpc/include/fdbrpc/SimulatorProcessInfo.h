@@ -146,10 +146,7 @@ struct ProcessInfo : NonCopyable {
 	}
 
 	inline flowGlobalType global(int id) const {
-		// Add null check to prevent crash during process destruction
-		if (id < 0 || globals.empty()) {
-			return nullptr;
-		}
+		ASSERT(id >= 0);
 		return (globals.size() > id) ? globals[id] : nullptr;
 	};
 	inline void setGlobal(size_t id, flowGlobalType v) {

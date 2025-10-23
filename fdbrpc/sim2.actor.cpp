@@ -162,6 +162,9 @@ bool ISimulator::checkInjectedCorruption() {
 flowGlobalType ISimulator::global(int id) const {
 	const ProcessInfo* proc = getCurrentProcess();
 	if (!proc) {
+		// currentProcess can be nullptr during process destruction when currentProcess
+		// is cleared in destroyProcess() or before any process is created (initialization).
+		// Return nullptr if either of above.
 		return nullptr;
 	}
 	return proc->global(id);
@@ -170,7 +173,9 @@ flowGlobalType ISimulator::global(int id) const {
 void ISimulator::setGlobal(size_t id, flowGlobalType v) {
 	ProcessInfo* proc = getCurrentProcess();
 	if (!proc) {
-		return; // Can't set global if no current process
+		// currentProcess can be nullptr during process destruction or initialization.
+		// if nullptr, cannot set process-specific globals.
+		return;
 	}
 	proc->setGlobal(id, v);
 };
