@@ -170,6 +170,12 @@ else()
     set(WITH_SWIFT_BINDING OFF)
   endif()
 
+  # Swift bindings require Clang compiler
+  if(WITH_SWIFT_BINDING AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(STATUS "Swift bindings are not supported in non-Clang environment (current compiler: ${CMAKE_CXX_COMPILER_ID})")
+    set(WITH_SWIFT_BINDING OFF)
+  endif()
+
   if(NOT EXISTS "${CMAKE_SOURCE_DIR}/bindings/swift" AND WITH_SWIFT_BINDING)
     message(STATUS "Swift bindings directory not found at ${CMAKE_SOURCE_DIR}/bindings/swift")
     message(STATUS "Downloading Swift bindings from GitHub...")
