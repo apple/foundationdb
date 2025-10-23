@@ -114,7 +114,14 @@ public:
 	~GrpcServer();
 
 	// Returns the singleton instance.
-	static std::shared_ptr<GrpcServer> instance() { return FlowGrpc::instance()->server(); }
+	static std::shared_ptr<GrpcServer> instance() {
+		auto p = FlowGrpc::instance();
+		if (p == nullptr) {
+			return nullptr;
+		}
+
+		return p->server();
+	}
 
 	// Returns the gRPC server address. Currently, we only listen on single port globally.
 	NetworkAddress getAddress() const { return address_; }
