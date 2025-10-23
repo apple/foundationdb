@@ -17,9 +17,10 @@ if(WITH_RUBY_BINDING)
 endif()
 
 if(WITH_SWIFT_BINDING)
-  # Only add subdirectory if it wasn't already added by FetchContent_MakeAvailable
-  if(NOT TARGET swift_bindings)
+  if(EXISTS "${CMAKE_SOURCE_DIR}/bindings/swift")
     add_subdirectory(swift)
+  else()
+    message(STATUS "Swift bindings enabled but sources not found in bindings directory")
   endif()
 endif()
 

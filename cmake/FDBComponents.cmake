@@ -181,7 +181,10 @@ else()
       GIT_REPOSITORY https://github.com/FoundationDB/fdb-swift-bindings.git
       GIT_TAG        main
       SOURCE_DIR     ${CMAKE_SOURCE_DIR}/bindings/swift
+      # Prevent automatic add_subdirectory by pointing to non-existent CMakeLists.txt location
+      SOURCE_SUBDIR  ".__none__"
     )
+    # This will download but won't add to build due to SOURCE_SUBDIR trick
     FetchContent_MakeAvailable(swift_bindings)
     message(STATUS "Swift bindings downloaded successfully to ${CMAKE_SOURCE_DIR}/bindings/swift")
   endif()
