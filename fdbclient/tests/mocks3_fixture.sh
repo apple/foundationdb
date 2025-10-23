@@ -163,9 +163,19 @@ shutdown_mocks3() {
                 kill -9 $MOCKS3_PID 2>/dev/null || true
                 # After kill -9, give it a moment to die
                 sleep 0.5
-                # Final check
+                # Check if it survived kill -9
                 if kill -0 $MOCKS3_PID 2>/dev/null; then
-                    echo "WARNING: MockS3Server (PID: $MOCKS3_PID) still running after kill -9" >&2
+                    echo "WARNING: MockS3Server (PID: $MOCKS3_PID) survived first kill -9, trying again" >&2
+                    # Try SIGTERM then SIGKILL again
+                    kill -15 $MOCKS3_PID 2>/dev/null || true
+                    sleep 0.2
+                    kill -9 $MOCKS3_PID 2>/dev/null || true
+                    sleep 0.3
+                    # Final check
+                    if kill -0 $MOCKS3_PID 2>/dev/null; then
+                        echo "ERROR: MockS3Server (PID: $MOCKS3_PID) is unkillable (zombie or kernel issue)" >&2
+                        # Don't use pkill - it would kill MockS3 instances from other concurrent tests
+                    fi
                 fi
             fi
             # Don't wait - the process should be dead after kill -9, and wait can hang

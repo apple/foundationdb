@@ -13,6 +13,7 @@ FDB_PIDS=()
 function shutdown_fdb_cluster {
   # Kill all running fdb processes from tracked PIDs
   if [[ ${#FDB_PIDS[@]} -gt 0 ]]; then
+    # First pass: kill -9 all tracked PIDs
     for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
       if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
         kill -9 "${FDB_PIDS[i]}" 2>/dev/null || true
@@ -22,17 +23,29 @@ function shutdown_fdb_cluster {
     # Give processes a moment to die after kill -9
     sleep 0.5
     
-    # Verify all processes are dead
+    # Second pass: verify all processes died, retry any survivors
     local still_running=0
     for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
       if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
-        echo "WARNING: Process ${FDB_PIDS[i]} still running after kill -9" >&2
-        still_running=$((still_running + 1))
+        # Process survived the kill -9 from first pass - try again
+        echo "WARNING: Process ${FDB_PIDS[i]} survived first kill -9, trying again" >&2
+        # Try SIGTERM first (may help if process is in certain states)
+        kill -15 "${FDB_PIDS[i]}" 2>/dev/null || true
+        sleep 0.2
+        # Then SIGKILL again
+        kill -9 "${FDB_PIDS[i]}" 2>/dev/null || true
+        sleep 0.3
+        if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
+          echo "ERROR: Process ${FDB_PIDS[i]} is unkillable (zombie or kernel issue)" >&2
+          still_running=$((still_running + 1))
+        fi
       fi
     done
     
     if [[ ${still_running} -gt 0 ]]; then
-      echo "WARNING: ${still_running} FDB processes failed to shut down cleanly" >&2
+      echo "ERROR: ${still_running} FDB processes remain unkillable - this may cause port conflicts in subsequent tests" >&2
+      # Don't use pkill - it would kill processes from other concurrent tests
+      # Instead, just report the problem and let the test infrastructure handle it
     fi
   fi
 }
