@@ -972,6 +972,47 @@ void updateLocationCacheWithCaches(DatabaseContext* self,
 	}
 }
 
+ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
+	// Only run cleanup if TTL is enabled
+	if (CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL == 0.0) {
+		return Void();
+	}
+
+	loop {
+		wait(delay(CLIENT_KNOBS->LOCATION_CACHE_EVICTION_INTERVAL));
+
+		double currentTime = now();
+		std::vector<KeyRangeRef> toRemove;
+		int totalCount = 0;
+
+		// Scan locationCache for expired entries
+		auto iter = cx->locationCache.randomRange();
+		for (; iter != cx->locationCache.end(); ++iter) {
+			if (iter->value() && iter->value()->hasCaches) {
+				// Check the expireTime of the first cache entry as a representative
+				// All entries in a range typically have similar expiration times
+				if (iter->value()->locations()->expireTime > 0.0 &&
+				    iter->value()->locations()->expireTime <= currentTime) {
+					toRemove.push_back(iter->range());
+				}
+			}
+			totalCount++;
+			if (totalCount > 1000 || toRemove.size() > 100) {
+				break; // Avoid long blocking scans
+			}
+		}
+
+		// Remove expired entries
+		for (const auto& range : toRemove) {
+			cx->locationCache.insert(range, Reference<LocationInfo>());
+		}
+
+		if (!toRemove.empty()) {
+			TraceEvent("LocationCacheCleanup").detail("RemovedRanges", toRemove.size());
+		}
+	}
+}
+
 ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	state Reference<ReadYourWritesTransaction> tr;
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
@@ -1255,6 +1296,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	clientDBInfoMonitor = monitorClientDBInfoChange(this, clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
+	locationCacheCleanup = cleanupLocationCache(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
