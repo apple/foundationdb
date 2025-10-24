@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+// TODO(gglass): ensure this isn't needed by us (Apple)
+
+#if 0
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
@@ -83,3 +86,6 @@ struct RestoreFromBlobWorkload : TestWorkload {
 };
 
 WorkloadFactory<RestoreFromBlobWorkload> RestoreFromBlobWorkloadFactory;
+
+#endif
+

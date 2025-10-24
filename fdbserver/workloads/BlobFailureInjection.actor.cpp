@@ -18,6 +18,11 @@
  * limitations under the License.
  */
 
+// TODO(gglass): confirm this isn't needed.  BlobFailureInjectionWorkload doesn't appear
+// in any files (including *.toml) other than this file so I guess it seems unused.
+
+#if 0
+
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/FaultInjection.h"
@@ -175,3 +180,5 @@ struct BlobFailureInjectionWorkload : FailureInjectionWorkload {
 WorkloadFactory<BlobFailureInjectionWorkload> BlobFailureInjectionWorkloadFactory;
 // TODO enable once bugs fixed!
 // FailureInjectorFactory<BlobFailureInjectionWorkload> BlobFailureInjectionFailureWorkloadFactory;
+
+#endif

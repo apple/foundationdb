@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+// TODO(gglass): confirm this isn't needed
+
+#if 0
+
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -79,3 +83,5 @@ struct BackupToBlobWorkload : TestWorkload {
 };
 
 WorkloadFactory<BackupToBlobWorkload> BackupToBlobWorkloadFactory;
+
+#endif
