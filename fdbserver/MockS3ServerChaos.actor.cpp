@@ -28,8 +28,17 @@
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h"
 
-// Global registry to prevent duplicate server registrations
-static std::map<std::string, bool> registeredChaosServers;
+// Clear the chaos server registry (for testing/debugging only)
+// NOTE: In production simulation tests, the registry should NOT be cleared between tests,
+// as it must stay in sync with the simulator's persistent httpHandlers map to prevent
+// duplicate registration attempts that would trigger assertions.
+void clearMockS3ChaosRegistry() {
+	if (g_network && g_simulator) {
+		size_t previousSize = g_simulator->registeredMockS3ChaosServers.size();
+		g_simulator->registeredMockS3ChaosServers.clear();
+		TraceEvent("MockS3ChaosRegistryCleared").detail("PreviousSize", previousSize);
+	}
+}
 
 // Helper function to classify S3 operations
 S3Operation classifyS3Operation(const std::string& method, const std::string& resource) {
@@ -280,9 +289,10 @@ Reference<HTTP::IRequestHandler> MockS3ChaosRequestHandler::clone() {
 	return makeReference<MockS3ChaosRequestHandler>();
 }
 
-// Safe server registration that prevents conflicts
+// Safe server registration that prevents conflicts using truly simulator-global registry
 ACTOR Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 	state std::string serverKey = ip + ":" + port;
+	ASSERT(g_simulator);
 
 	TraceEvent("MockS3ChaosServerRegistration")
 	    .detail("Phase", "Start")
@@ -290,22 +300,22 @@ ACTOR Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 	    .detail("Port", port)
 	    .detail("ServerKey", serverKey)
 	    .detail("IsSimulated", g_network->isSimulated())
-	    .detail("AlreadyRegistered", registeredChaosServers.count(serverKey) > 0);
+	    .detail("AlreadyRegistered", g_simulator->registeredMockS3ChaosServers.count(serverKey) > 0);
 
-	// Check if server is already registered
-	if (registeredChaosServers.count(serverKey)) {
+	// Check if server is already registered using truly simulator-global registry
+	if (g_simulator->registeredMockS3ChaosServers.count(serverKey)) {
 		TraceEvent(SevWarn, "MockS3ChaosServerAlreadyRegistered").detail("Address", serverKey);
 		return Void();
 	}
 
 	try {
 		wait(g_simulator->registerSimHTTPServer(ip, port, makeReference<MockS3ChaosRequestHandler>()));
-		registeredChaosServers[serverKey] = true;
+		g_simulator->registeredMockS3ChaosServers.insert(serverKey);
 
 		TraceEvent("MockS3ChaosServerRegistered")
 		    .detail("Address", serverKey)
 		    .detail("Success", true)
-		    .detail("TotalRegistered", registeredChaosServers.size());
+		    .detail("TotalRegistered", g_simulator->registeredMockS3ChaosServers.size());
 
 	} catch (Error& e) {
 		TraceEvent(SevError, "MockS3ChaosServerRegistrationFailed")
