@@ -77,6 +77,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ApiVersion.h"
+#include "fdbctl/ControlService.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -2145,7 +2146,6 @@ ACTOR Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnecti
 
 	auto db = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION);
 	Reference<IDatabase> idb = wait(safeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(db)));
-
 	auto services = GrpcServer::ServiceList{};
 	GrpcServer::instance()->registerRoleServices(UID(), services);
 	TraceEvent("WorkerGrpcServerStart").detail("Address", GrpcServer::instance()->getAddress());
