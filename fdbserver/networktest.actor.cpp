@@ -366,6 +366,7 @@ struct P2PNetworkTest {
 	int connectErrors;
 	int acceptErrors;
 	int sessionErrors;
+	bool oneshot = false;
 
 	Standalone<StringRef> msgBuffer;
 
@@ -403,10 +404,11 @@ struct P2PNetworkTest {
 	               RandomIntRange idleMilliseconds,
 	               RandomIntRange waitReadMilliseconds,
 	               RandomIntRange waitWriteMilliseconds,
-	               double targetDuration)
+	               double targetDuration,
+	               bool oneshot)
 	  : connectionsOut(connectionsOut), requestBytes(sendMsgBytes), replyBytes(recvMsgBytes), requests(requests),
 	    idleMilliseconds(idleMilliseconds), waitReadMilliseconds(waitReadMilliseconds),
-	    waitWriteMilliseconds(waitWriteMilliseconds), targetDuration(targetDuration) {
+	    waitWriteMilliseconds(waitWriteMilliseconds), targetDuration(targetDuration), oneshot(oneshot) {
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -586,6 +588,47 @@ struct P2PNetworkTest {
 		}
 	}
 
+	ACTOR static Future<Void> run_oneshot(P2PNetworkTest* self) {
+		state ActorCollection actors(false);
+
+		self->startTime = now();
+
+		fmt::print("{0} listeners, {1} remotes, {2} outgoing connections\n",
+		           self->listeners.size(),
+		           self->remotes.size(),
+		           self->connectionsOut);
+
+		for (auto n : self->remotes) {
+			printf("Remote: %s\n", n.toString().c_str());
+		}
+
+		for (auto el : self->listeners) {
+			printf("Listener: %s\n", el->getListenAddress().toString().c_str());
+		}
+
+		if (!self->listeners.empty()) {
+			state Reference<IConnection> conn1 = wait(self->listeners[0]->accept());
+			printf("Server: connected from %s\n", conn1->getPeerAddress().toString().c_str());
+			try {
+				wait(conn1->acceptHandshake());
+				printf("Server: connected from %s, handshake done\n", conn1->getPeerAddress().toString().c_str());
+			} catch (Error& e) {
+				printf("Server: handshake error %s\n", e.what());
+			}
+			threadSleep(11.0);
+			return Void();
+		}
+
+		if (!self->remotes.empty()) {
+			state Reference<IConnection> conn2 = wait(INetworkConnections::net()->connect(self->remotes[0]));
+			printf("Client: connected to %s\n", self->remotes[0].toString().c_str());
+			wait(conn2->connectHandshake());
+			printf("Client: connected to %s, handshake done\n", self->remotes[0].toString().c_str());
+		}
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> run_impl(P2PNetworkTest* self) {
 		state ActorCollection actors(false);
 
@@ -635,7 +678,13 @@ struct P2PNetworkTest {
 		return Void();
 	}
 
-	Future<Void> run() { return run_impl(this); }
+	Future<Void> run() {
+		if (oneshot) {
+			return run_oneshot(this);
+		} else {
+			return run_impl(this);
+		}
+	}
 };
 
 // Peer-to-Peer network test.
@@ -662,7 +711,25 @@ TEST_CASE(":/network/p2ptest") {
 	                         params.get("idleMilliseconds").orDefault("0"),
 	                         params.get("waitReadMilliseconds").orDefault("0"),
 	                         params.get("waitWriteMilliseconds").orDefault("0"),
-	                         params.getDouble("targetDuration").orDefault(0.0));
+	                         params.getDouble("targetDuration").orDefault(0.0),
+	                         false);
+
+	wait(p2p.run());
+	return Void();
+}
+
+TEST_CASE(":/network/p2poneshottest") {
+	state P2PNetworkTest p2p(params.get("listenerAddresses").orDefault(""),
+	                         params.get("remoteAddresses").orDefault(""),
+	                         params.getInt("connectionsOut").orDefault(1),
+	                         params.get("requestBytes").orDefault("50:100"),
+	                         params.get("replyBytes").orDefault("500:1000"),
+	                         params.get("requests").orDefault("10:10000"),
+	                         params.get("idleMilliseconds").orDefault("0"),
+	                         params.get("waitReadMilliseconds").orDefault("0"),
+	                         params.get("waitWriteMilliseconds").orDefault("0"),
+	                         params.getDouble("targetDuration").orDefault(0.0),
+	                         true);
 
 	wait(p2p.run());
 	return Void();
