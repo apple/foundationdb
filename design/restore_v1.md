@@ -6,11 +6,11 @@ This document explains internal mechanism of restoring backup files. The backup 
 
 To trigger FDB full restore, we have a fdbrestore command line tool which takes following as inputs:
 
-- A backup cluster identifier (-r), a URL used to target the data source of restoring. Must provide. In the below example, the URL is blobstore://@s3XXXamazonaws.com:XXX?bucket=XXX
+- A backup cluster identifier (-r), a URL used to target the data source of restoring. Must provide. In the below example, the URL is `blobstore://@s3XXXamazonaws.com:XXX?bucket=XXX`
 
-- A list of key ranges (-k): If provided, only restore the database within the key ranges. Otherwise, restore the entire user key space ("" ~ \xff). By providing the key ranges to restore, the restore time can be decently reduced because fewer mutations are needed to apply to the database. However, the restore process still has to download many unnecessary backup data files because different key ranges mutations are mixed up in the same mutation log files.
+- A list of key ranges (`-k`): If provided, only restore the database within the key ranges. Otherwise, restore the entire user key space (`"" ~ \xff`). By providing the key ranges to restore, the restore time can be decently reduced because fewer mutations are needed to apply to the database. However, the restore process still has to download many unnecessary backup data files because different key ranges mutations are mixed up in the same mutation log files.
 
-- A target version (-v). Restore the database to the target version. If not provided, then setting the target version as the maximum restorable version. When CK team wants to do restore, they often provide a timestamp to us and we use this timestamp to get the right version as the target version setting to the restore workflow. Additionally, "fdbbackup describe ..." can be used to check whether a version is restorable.
+- A target version (`-v`). Restore the database to the target version. If not provided, then setting the target version as the maximum restorable version. When CK team wants to do restore, they often provide a timestamp to us and we use this timestamp to get the right version as the target version setting to the restore workflow. Additionally, "`fdbbackup describe ...`" can be used to check whether a version is restorable.
 
 For more details, please check the fdbrestore documentation.
 
@@ -24,28 +24,30 @@ Note that there are existing two versions of restore: (1) Naive one; (2) Restori
 
 ## Related doc
 
-- Backup Design V1 Illustrations of how backup works using snapshot/range files and mutations logs.
-- Backup data format For v1 (current/7.4) version of our backups. For v1 layout example, see Backup v1 Layout
+- Backup Design V1 Illustrations of how backup works using snapshot/range files and mutations logs: https://github.com/apple/foundationdb/blob/main/design/backup.md
+
+- Backup data format For v1 (current/7.4) version of our backups. For v1 layout example, see Backup v1 Layout: https://github.com/apple/foundationdb/blob/main/design/backup-dataFormat.md
+
 - Backup V2 (range partitioned): https://github.com/apple/foundationdb/blob/main/design/backup_v2_partitioned_logs.md
 
 ## Core components
 
 Following core components are involved in restore. We've mentioned some already but below we go into more detail:
 
-- FDB Restore Command Line: The command line to start a restore job or track the progress of restoring, which is distinguished by an input option (i.e. fdbrestore start [options...] or fdbrestore status [options...]). Once the job is submitted, the job is executed by the FDB cluster and the tool process exits immediately. 
+- FDB Restore Command Line: The command line to start a restore job or track the progress of restoring, which is distinguished by an input option (i.e. `fdbrestore start [options...]` or `fdbrestore status [options...]`). Once the job is submitted, the job is executed by the FDB cluster and the tool process exits immediately. 
 
 - Task Bucket: A distributed framework that organizes and executes restore tasks. When the restore tool submits a restore job, the job spawns the first task in the task bucket, which will spawn a series of children tasks to complete the restore. Users should also run a set of agents to execute the restore. Multiple agents execute the tasks in the bucket. Some tasks are restoring snapshots and some tasks are restoring mutations. Snapshots are applied to DB directly using transactions while mutations are applied to DB by writing to aLog at first.
 
-- aLog (apply mutation log): A key range of system key space \xff\x02/alog/ to stage mutations before applying them. Using task bucket allows to restore mutation log files in parallel. However, mutations must be applied in a strict order --- version by version. To achieve this, before mutations are applied, restored mutations are staged in aLog with a key prefix, ordered by increasing versions so that later a getRange request can retrieve mutations in order.
+- aLog (apply mutation log): A key range of system key space `\xff\x02/alog/` to stage mutations before applying them. Using task bucket allows to restore mutation log files in parallel. However, mutations must be applied in a strict order --- version by version. To achieve this, before mutations are applied, restored mutations are staged in aLog with a key prefix, ordered by increasing versions so that later a getRange request can retrieve mutations in order.
 
 - Commit proxy takes to-restore mutations from aLog and then applies mutations to database version by version. More specially, the commit proxy passively listens on the "set" operation mutation to the system key --- applyEndVersion (will introduce later), when the commit proxy receives the mutation, the commit proxy starts restoring the mutations from aLog.
 
-- RestoreConfig:All configuration and metadata are stored in a key range of the system key space: \xff\x02/restore-agent/.
+- RestoreConfig:All configuration and metadata are stored in a key range of the system key space: `\xff\x02/restore-agent/`.
 
 ## Global Shared State (i.e. RestoreConfig)
 RestoreConfig stores metadata to system key space which helps to organize metadata with key-value pairs with organized prefix in the system key space. The RestoreConfig includes following:
 
-- Restore state: ERestoreState tracks states of restore progress:: QUEUED → STARTING/ABORT → RUNNING/ABORT → COMPLETED
+- Restore state: ERestoreState tracks states of restore progress: QUEUED → STARTING/ABORT → RUNNING/ABORT → COMPLETED
 
 - Configuration: such as backup URL, restore range, beginVersion, restoreVersion
 
@@ -61,7 +63,7 @@ The restore process is achieved by the collaboration of multiple distributed res
 
 ### Task Bucket
 
-Task bucket is a framework of executing distributed tasks with online expansion. Tasks are generated online and executed by a distributed set of workers. Each task has a task-local state and a task can be executed by one worker at a time (because the task reservation mechanism, introduced in the following red text). To achieve this, each task (inherited from TaskFuncBase) must implement ::execute() and ::finish(). Each task will do execute at first() and then do finish() upon success. If a task (say A) spawns a new task (say B), we call A the parent task and B the child task. Typically, in the taskA::execute(), it does some user defined operations. Then, in the taskA::finish(), it spawns taskB by calling taskB::addTask(). User can define operations and task spawn logic by implementing the execute() and the finish() method of each user's task.
+Task bucket is a framework of executing distributed tasks with online expansion. Tasks are generated online and executed by a distributed set of workers. Each task has a task-local state and a task can be executed by one worker at a time (because the task reservation mechanism, introduced in the following red text). To achieve this, each task (inherited from TaskFuncBase) must implement `::execute()` and `::finish()`. Each task will do execute() at first and then do finish() upon success. If a task (say A) spawns a new task (say B), we call A the parent task and B the child task. Typically, in the `taskA::execute()`, it does some user defined operations. Then, in the `taskA::finish()`, it spawns taskB by calling taskB::addTask(). User can define operations and task spawn logic by implementing the execute() and the finish() method of each user's task.
 
 Specifically, A Task is a set of key=value parameters that constitute a unit of work for a TaskFunc to perform.
 The parameter keys are specific to the TaskFunc that the Task is for, except for a set of reserved
@@ -74,11 +76,11 @@ Task Life Cycle:
 
 2. An executor (see TaskBucket class) will reserve an begin executing the task
 
-3. Task's _execute() function is run.  This is non-transactional, and can run indefinitely.
+3. Task's `_execute()` function is run.  This is non-transactional, and can run indefinitely.
 
-4. If the executor loses contact with FDB, another executor may begin at step 2.  The first Task execution can detect this by checking the result of keepRunning() periodically.
+4. If the executor loses contact with FDB, another executor may begin at step 2.  The first Task execution can detect this by checking the result of `keepRunning()` periodically.
 
-5. Once a Task execution's _execute() call returns, the _finish() step is called. _finish() is transactional and is guaranteed to never be called more than once for the same Task.
+5. Once a Task execution's `_execute()` call returns, the `_finish()` step is called. `_finish()` is transactional and is guaranteed to never be called more than once for the same Task.
 
 ### Restore
 
@@ -86,9 +88,9 @@ In the restore mechanism, we define five core tasks:
 
 1. StartFullRestoreTaskFunc:
 
-    - execute: Setting up a global restore configuration on system metadata (called RestoreConfig), including: beginVersion, targetVersion, setting ERestoreState::STARTING, gathering the snapshot file list and the mutation log file list to restore.
+    - execute: Setting up a global restore configuration on system metadata (called `RestoreConfig`), including: `beginVersion`, `targetVersion`, setting `ERestoreState::STARTING`, gathering the snapshot file list and the mutation log file list to restore.
     
-    - finish: UpdatingERestoreState::RUNNING, initialized ApplyBeginVersion and ApplyEndVersion (core to the restore process, introduced later). Spawning the first task for dispatching (called dispatch task). Whether the restore is running at V1 or V2 is decided by the first task (RestoreDispatchTaskFunc is for V1 and RestoreDispatchPartitionedTaskFunc is for V2).
+    - finish: `UpdatingERestoreState::RUNNING`, initialized `ApplyBeginVersion` and `ApplyEndVersion` (core to the restore process, introduced later). Spawning the first task for dispatching (called dispatch task). Whether the restore is running at V1 or V2 is decided by the first task (`RestoreDispatchTaskFunc` is for V1 and `RestoreDispatchPartitionedTaskFunc` is for V2).
 
 2. RestoreDispatchTaskFunc (aka. dispatch task):
 
@@ -98,15 +100,15 @@ In the restore mechanism, we define five core tasks:
 
     - finish: Getting a batch of files to restore from beginVersion and beginFile; Spawning tasks for each file. If a file is a snapshot file, spawn a snapshot restore task, if a file is a mutation log file, spawn a mutation log restore task.Spawn a new dispatch task after the current one complete. The new dispatch task will start processing the file which is right after the processed files by the old task.
 
-    - Related concept: task batch is a set of tasks that can be handled in parallel at a time by distributed agents. A new batch is spawned only when the existing batch completes. When adding tasks to a batch, only queue up to RESTORE_DISPATCH_ADDTASK_SIZE=150 files to restore and target RESTORE_DISPATCH_BATCH_SIZE=30000 total per batch but a batch must end on a complete version boundary so exceed the limit if necessary to reach the end of a version of files.
+    - Related concept: task batch is a set of tasks that can be handled in parallel at a time by distributed agents. A new batch is spawned only when the existing batch completes. When adding tasks to a batch, only queue up to `RESTORE_DISPATCH_ADDTASK_SIZE=150` files to restore and target `RESTORE_DISPATCH_BATCH_SIZE=30000` total per batch but a batch must end on a complete version boundary so exceed the limit if necessary to reach the end of a version of files.
 
-        1. RESTORE_DISPATCH_BATCH_SIZE specifies how many file blocks are downloaded before applying the mutations from aLog to the database. We want to choose the value not too small to leverage parallelism of download files. We want to choose the value not too large to avoid doing too much downloading work in advance.
+        1. `RESTORE_DISPATCH_BATCH_SIZE` specifies how many file blocks are downloaded before applying the mutations from aLog to the database. We want to choose the value not too small to leverage parallelism of download files. We want to choose the value not too large to avoid doing too much downloading work in advance.
 
-        2. RESTORE_DISPATCH_ADDTASK_SIZE specifies how many works are dispatched by a single transaction, where we do not want this value too large to make the transaction too large to commit successfully. We do not want this value too small to have too much overhead of transactions to dispatch tasks.
+        2. `RESTORE_DISPATCH_ADDTASK_SIZE` specifies how many works are dispatched by a single transaction, where we do not want this value too large to make the transaction too large to commit successfully. We do not want this value too small to have too much overhead of transactions to dispatch tasks.
 
-    - When usePartitionedLog is set, the StartFullRestoreTaskFunc spawns RestoreDispatchPartitionedTaskFunc instead, as the core of Restore V2. We omit it here since we focus on the Restore V1.
+    - When `usePartitionedLog` is set, the `StartFullRestoreTaskFunc` spawns `RestoreDispatchPartitionedTaskFunc` instead, as the core of Restore V2. We omit it here since we focus on the Restore V1.
 
-3. RestoreRangeTaskFunc (aka. snapshot restore task)
+3. `RestoreRangeTaskFunc` (aka. snapshot restore task)
 
     - Param: file, data offset
 
@@ -114,7 +116,7 @@ In the restore mechanism, we define five core tasks:
 
     - finish: update applyMutationsMap (core to the restore process, introduced later).
 
-4. RestoreLogDataTaskFunc (aka. mutation log restore task)
+4. `RestoreLogDataTaskFunc` (aka. mutation log restore task)
 
     - Param: file, data offset
 
@@ -122,7 +124,7 @@ In the restore mechanism, we define five core tasks:
 
     - finish: update counters for progress monitoring
 
-5. RestoreCompleteTaskFunc
+5. `RestoreCompleteTaskFunc`
 
     execute: Not implemented
 
@@ -142,9 +144,9 @@ In general, data is restored version by version. The process is controlled by a 
 
 - applyEndVersion is the version can be applied up to.
 
-- The restore mechanism enforces that snapshots and mutation logs are applied version by version. Initially, applyBeginVersion and applyEndVersion are set to the BeginVersion of restore by StartFullRestoreTaskFunc. Then, a series of RestoreDispatchTaskFunc spawned to operate restore. When RestoreDispatchTaskFunc::finish(), applyEndVersion is updated using a transaction. Then the transaction arrives at a commit proxy and triggers applyMutations(applyBeginVersion, applyEndVersion). The applyMutations take mutations from aLog and send mutations to commit proxy mutation apply routine, then the applyBeginVersion is updated to the applied version + 1.
+- The restore mechanism enforces that snapshots and mutation logs are applied version by version. Initially, applyBeginVersion and applyEndVersion are set to the BeginVersion of restore by StartFullRestoreTaskFunc. Then, a series of RestoreDispatchTaskFunc spawned to operate restore. When `RestoreDispatchTaskFunc::finish()`, applyEndVersion is updated using a transaction. Then the transaction arrives at a commit proxy and triggers `applyMutations(applyBeginVersion, applyEndVersion)`. The applyMutations take mutations from aLog and send mutations to commit proxy mutation apply routine, then the applyBeginVersion is updated to the applied version + 1.
 
-- applyMutationsMap is used to make sure the version of applied mutations on a range is larger than the snapshot range. The map locates at a system key space (\xff/applyMutationsKeyVersionMap). The key represents ranges of restored snapshot files, and the value represents the snapshot version. The map starts with empty and gradually gets filled when a snapshot is applied to the database. Initially, all ranges’ version is set to invalidVersion. When a range is restored by RestoreRangeTaskFunc, the range's version is set to the snapshot version. The commit proxy uses keyVersion keeps track of updates of the snapshot versions by range. When the commit proxy applying mutations, it only applies mutations on a range which snapshot has been set and the snapshot version is smaller than the mutation version.
+- applyMutationsMap is used to make sure the version of applied mutations on a range is larger than the snapshot range. The map locates at a system key space (`\xff/applyMutationsKeyVersionMap`). The key represents ranges of restored snapshot files, and the value represents the snapshot version. The map starts with empty and gradually gets filled when a snapshot is applied to the database. Initially, all ranges' version is set to invalidVersion. When a range is restored by RestoreRangeTaskFunc, the range's version is set to the snapshot version. The commit proxy uses keyVersion keeps track of updates of the snapshot versions by range. When the commit proxy applying mutations, it only applies mutations on a range which snapshot has been set and the snapshot version is smaller than the mutation version.
 
 ## Applying mutations in order by using aLog metadata
 
