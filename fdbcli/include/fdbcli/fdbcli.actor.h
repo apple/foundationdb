@@ -46,7 +46,6 @@ constexpr char msgClusterTypeKey[] = "cluster_type";
 constexpr char msgDataClustersKey[] = "data_clusters";
 constexpr char msgCapacityKey[] = "capacity";
 constexpr char msgAllocatedKey[] = "allocated";
-constexpr char msgTenantIdPrefixKey[] = "tenant_id_prefix";
 constexpr char msgErrorKey[] = "error";
 
 struct CommandHelp {
@@ -100,6 +99,12 @@ struct CommandFactory {
 };
 
 // Special keys used by fdbcli commands
+
+// The comments below are the dumbest bunch of comments I have ever
+// seen.  Please stop cargo-culting useless comments.  Please write
+// comments about things that are important and non-obvious, not about
+// things that are trivial and obvious.
+	
 // advanceversion
 extern const KeyRef advanceVersionSpecialKey;
 // consistencycheck
@@ -258,12 +263,6 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                        Reference<ITransaction> tr,
                                        std::vector<StringRef> tokens,
                                        std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
-// tenant command
-Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
-// tenant command compatibility layer
-Future<bool> tenantCommandForwarder(Reference<IDatabase> db, std::vector<StringRef> tokens);
-// tenantgroup command
-Future<bool> tenantGroupCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command

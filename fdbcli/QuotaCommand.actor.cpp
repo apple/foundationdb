@@ -18,6 +18,11 @@
  * limitations under the License.
  */
 
+// TODO(gglass): confirm this is used only for tenant support, and if so, delete it.
+// If not, preserve what we (Apple) need.
+
+#if 0
+
 #include "fdbcli/fdbcli.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -198,3 +203,5 @@ ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<String
 }
 
 } // namespace fdb_cli
+
+#endif
