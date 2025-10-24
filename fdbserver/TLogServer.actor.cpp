@@ -575,7 +575,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Counter nonEmptyPeeks;
 	Counter persistentDataUpdateBatches;
 	Counter dirtyTagsProcessed;
-	Counter unknownCommittedVersionCount;
 	std::map<Tag, LatencySample> blockingPeekLatencies;
 	std::map<Tag, LatencySample> peekVersionCounts;
 
@@ -670,13 +669,12 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    blockingPeeks("BlockingPeeks", cc), blockingPeekTimeouts("BlockingPeekTimeouts", cc),
 	    emptyPeeks("EmptyPeeks", cc), nonEmptyPeeks("NonEmptyPeeks", cc),
 	    persistentDataUpdateBatches("PersistentDataUpdateBatches", cc), dirtyTagsProcessed("DirtyTagsProcessed", cc),
-	    unknownCommittedVersionCount("UnknownCommittedVersionCount", cc), logId(interf.id()),
-	    protocolVersion(protocolVersion), newPersistentDataVersion(invalidVersion), tLogData(tLogData),
-	    unrecoveredBefore(1), recoveredAt(1), recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<ILogSystem>>()),
-	    remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0),
-	    logRouterPopToVersion(0), locality(tagLocalityInvalid), recruitmentID(recruitmentID),
-	    logSpillType(logSpillType), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
-	    execOpCommitInProgress(false), txsTags(txsTags) {
+	    logId(interf.id()), protocolVersion(protocolVersion), newPersistentDataVersion(invalidVersion),
+	    tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1), recoveryTxnVersion(1),
+	    logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
+	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
+	    recruitmentID(recruitmentID), logSpillType(logSpillType), allTags(tags.begin(), tags.end()),
+	    terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false), txsTags(txsTags) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -709,6 +707,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "PeekMemoryRequestsStalled", [tLogData]() { return tLogData->peekMemoryLimiter.waiters(); });
 		specialCounter(cc, "Generation", [this]() { return this->recoveryCount; });
 		specialCounter(cc, "ActivePeekStreams", [tLogData]() { return tLogData->activePeekStreams; });
+		specialCounter(cc, "UnknownCommittedVersionCount", [this]() { return this->unknownCommittedVersions.size(); });
 	}
 
 	~LogData() {
