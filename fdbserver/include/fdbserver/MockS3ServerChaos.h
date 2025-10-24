@@ -106,3 +106,9 @@ private:
 
 // Public interface
 Future<Void> startMockS3ServerChaos(const NetworkAddress& listenAddress);
+
+// Clear the chaos server registry (for testing/debugging only)
+// NOTE: In production simulation tests, the registry should NOT be cleared between tests,
+// as it must stay in sync with the simulator's persistent httpHandlers map to prevent
+// duplicate registration attempts that would trigger assertions.
+void clearMockS3ChaosRegistry();

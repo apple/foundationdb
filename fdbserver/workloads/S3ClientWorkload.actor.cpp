@@ -319,12 +319,22 @@ private:
 			                 self->s3Url.find("mock-s3-server") != std::string::npos;
 
 			if (useMockS3 && g_network->isSimulated()) {
-				if (self->enableChaos) {
+				// Check if 127.0.0.1:8080 is already registered in simulator's httpHandlers
+				std::string serverKey = "127.0.0.1:8080";
+				bool alreadyRegistered = g_simulator->httpHandlers.count(serverKey) > 0;
+
+				if (alreadyRegistered) {
+					TraceEvent("S3ClientWorkload")
+					    .detail("Phase", "MockS3Server Already Registered")
+					    .detail("Address", serverKey)
+					    .detail("ChaosRequested", self->enableChaos)
+					    .detail("Reason", "Reusing existing HTTP handler from previous test");
+				} else if (self->enableChaos) {
 					TraceEvent("S3ClientWorkload")
 					    .detail("Phase", "Starting MockS3ServerChaos")
 					    .detail("URL", self->s3Url);
 
-					// Start MockS3ServerChaos - has internal duplicate detection via registeredChaosServers
+					// Start MockS3ServerChaos - has internal duplicate detection
 					NetworkAddress listenAddress(IPAddress(0x7f000001), 8080);
 					wait(startMockS3ServerChaos(listenAddress));
 
@@ -336,7 +346,7 @@ private:
 					    .detail("Phase", "Registering MockS3Server")
 					    .detail("URL", self->s3Url);
 
-					// Register regular MockS3Server - simulator has internal duplicate detection
+					// Register regular MockS3Server
 					wait(
 					    g_simulator->registerSimHTTPServer("127.0.0.1", "8080", makeReference<MockS3RequestHandler>()));
 

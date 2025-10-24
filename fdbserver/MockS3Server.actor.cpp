@@ -1595,6 +1595,8 @@ ACTOR Future<Void> startMockS3Server(NetworkAddress listenAddress) {
 // Clear all MockS3 global storage - called at the start of each simulation test
 void clearMockS3Storage() {
 	getGlobalStorage().clearStorage();
+	// Note: Do NOT clear chaos server registry here - it must persist across tests
+	// like the simulator's httpHandlers map, to prevent duplicate registration attempts
 }
 
 // Enable persistence for MockS3 storage
