@@ -31,11 +31,11 @@ private:
 	enum OpType { OP_CANCEL_GET, OP_CANCEL_AFTER_FIRST_GET, OP_LAST = OP_CANCEL_AFTER_FIRST_GET };
 
 	// Start multiple concurrent gets and cancel the transaction
-	void randomCancelGetTx(TTaskFct cont, std::optional<int> tenantId) {
+	void randomCancelGetTx(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 		auto keys = std::make_shared<std::vector<fdb::Key>>();
 		for (int i = 0; i < numKeys; i++) {
-			keys->push_back(randomKey(readExistingKeysRatio, tenantId));
+			keys->push_back(randomKey(readExistingKeysRatio));
 		}
 		execTransaction(
 		    [keys](auto ctx) {
@@ -45,26 +45,25 @@ private:
 			    }
 			    ctx->done();
 		    },
-		    [this, cont]() { schedule(cont); },
-		    getTenant(tenantId));
+		    [this, cont]() { schedule(cont); });
 	}
 
 	// Start multiple concurrent gets and cancel the transaction after the first get returns
-	void randomCancelAfterFirstResTx(TTaskFct cont, std::optional<int> tenantId) {
+	void randomCancelAfterFirstResTx(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 		auto keys = std::make_shared<std::vector<fdb::Key>>();
 		for (int i = 0; i < numKeys; i++) {
-			keys->push_back(randomKey(readExistingKeysRatio, tenantId));
+			keys->push_back(randomKey(readExistingKeysRatio));
 		}
 		execTransaction(
-		    [this, keys, tenantId](auto ctx) {
+		    [this, keys](auto ctx) {
 			    std::vector<fdb::Future> futures;
 			    for (const auto& key : *keys) {
 				    futures.push_back(ctx->tx().get(key, false).eraseType());
 			    }
 			    for (int i = 0; i < keys->size(); i++) {
 				    fdb::Future f = futures[i];
-				    auto expectedVal = stores[tenantId].get((*keys)[i]);
+				    auto expectedVal = store.get((*keys)[i]);
 				    ctx->continueAfter(f, [expectedVal, f, this, ctx]() {
 					    auto val = f.get<fdb::future_var::ValueRef>();
 					    if (expectedVal != val) {
@@ -76,20 +75,18 @@ private:
 				    });
 			    }
 		    },
-		    [this, cont]() { schedule(cont); },
-		    getTenant(tenantId));
+		    [this, cont]() { schedule(cont); });
 	}
 
 	void randomOperation(TTaskFct cont) override {
-		std::optional<int> tenantId = randomTenant();
 		OpType txType = (OpType)Random::get().randomInt(0, OP_LAST);
 
 		switch (txType) {
 		case OP_CANCEL_GET:
-			randomCancelGetTx(cont, tenantId);
+			randomCancelGetTx(cont);
 			break;
 		case OP_CANCEL_AFTER_FIRST_GET:
-			randomCancelAfterFirstResTx(cont, tenantId);
+			randomCancelAfterFirstResTx(cont);
 			break;
 		}
 	}

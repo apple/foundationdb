@@ -186,9 +186,11 @@ typedef struct keyrange {
 } FDBKeyRange;
 
 /*
- * TODO: delete this at some point.
- * FIXME: define the procedure for deleting stuff.  What are the timing considerations,
- * like how many releases or whatever does this stuff need to sit in the code base for?
+ * TODO: delete the following "blob granule" and "tenant" related data types
+ * when we are sure it's safe to do so.
+ *
+ * These features were always experimental and have now been removed, so probably
+ * the data structures can be done away with also for the FDB 8.0.0 release.
  */
 typedef struct granulesummary {
 	FDBKeyRange key_range;
@@ -285,6 +287,11 @@ typedef struct bgfiledescription {
 
 #pragma pack(pop)
 
+/*
+ * TODO: end of section of blob granule and tenant related
+ * data types that can probably be removed.
+ */
+
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
 
 DLLEXPORT void fdb_future_release_memory(FDBFuture* f);
@@ -366,11 +373,6 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_set_option(FDBDatabase* d,
                                                                  uint8_t const* value,
                                                                  int value_length);
 
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_open_tenant(FDBDatabase* d,
-                                                                  uint8_t const* tenant_name,
-                                                                  int tenant_name_length,
-                                                                  FDBTenant** out_tenant);
-
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
                                                                          FDBTransaction** out_transaction);
 
@@ -394,14 +396,7 @@ DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDat
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version);
 
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
-                                                                       FDBTransaction** out_transaction);
-
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_client_status(FDBDatabase* db);
-
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_get_id(FDBTenant* tenant);
-
-DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant);
 
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
 

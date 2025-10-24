@@ -82,9 +82,6 @@ struct WorkloadConfig {
 	// Total number of clients
 	int numClients;
 
-	// Number of Tenants
-	int numTenants;
-
 	// Selected FDB API version
 	int apiVersion;
 
@@ -121,13 +118,11 @@ protected:
 	// Execute a transaction within the workload
 	void execTransaction(TOpStartFct startFct,
 	                     TTaskFct cont,
-	                     std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
 	                     bool failOnError = true);
 
 	// Execute a non-transactional database operation within the workload
 	void execOperation(TOpStartFct startFct,
 	                   TTaskFct cont,
-	                   std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
 	                   bool failOnError = true);
 
 	// Log an error message, increase error counter
@@ -144,7 +139,6 @@ private:
 
 	void doExecute(TOpStartFct startFct,
 	               TTaskFct cont,
-	               std::optional<fdb::BytesRef> tenant,
 	               bool failOnError,
 	               bool transactional);
 

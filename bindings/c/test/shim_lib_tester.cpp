@@ -206,15 +206,6 @@ void testBasicApi(const TesterOptions& options) {
 	}
 }
 
-void test710Api(const TesterOptions& options) {
-	fdb::Database db(options.clusterFile);
-	try {
-		db.openTenant(fdb::toBytesRef("not_existing_tenant"sv));
-	} catch (const fdb::Error& err) {
-		fdb_check(err, "Tenant not found expected", error_code_tenant_not_found);
-	}
-}
-
 } // namespace
 
 int main(int argc, char** argv) {
@@ -239,10 +230,6 @@ int main(int argc, char** argv) {
 		// Try calling some basic functionality that is available
 		// in all recent API versions
 		testBasicApi(options);
-
-		// Try calling 710-specific API. This enables testing what
-		// happens if a library is missing a function
-		test710Api(options);
 
 		fdb_check(fdb::network::stop(), "Stop network failed");
 		network_thread.join();

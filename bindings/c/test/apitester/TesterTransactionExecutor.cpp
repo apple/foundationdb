@@ -77,11 +77,10 @@ public:
 	                       IScheduler* scheduler,
 	                       int retryLimit,
 	                       std::string bgBasePath,
-	                       std::optional<fdb::BytesRef> tenantName,
 	                       bool transactional,
 	                       bool restartOnTimeout)
 	  : executor(executor), startFct(startFct), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
-	    txState(TxState::IN_PROGRESS), commitCalled(false), tenantName(tenantName), transactional(transactional),
+	    txState(TxState::IN_PROGRESS), commitCalled(false), transactional(transactional),
 	    restartOnTimeout(restartOnTimeout), selfConflictingKey(Random::get().randomByteStringLowerCase(8, 8)) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
@@ -91,12 +90,7 @@ public:
 			fdbDb = executor->selectDatabase();
 		}
 
-		if (tenantName) {
-			fdbTenant = fdbDb.openTenant(*tenantName);
-			fdbDbOps = std::make_shared<fdb::Tenant>(fdbTenant);
-		} else {
-			fdbDbOps = std::make_shared<fdb::Database>(fdbDb);
-		}
+		fdbDbOps = std::make_shared<fdb::Database>(fdbDb);
 
 		if (transactional) {
 			fdbTx = fdbDbOps->createTransaction();
@@ -110,8 +104,6 @@ public:
 	enum class TxState { IN_PROGRESS, ON_ERROR, DONE };
 
 	fdb::Database db() override { return fdbDb.atomic_load(); }
-
-	fdb::Tenant tenant() override { return fdbTenant.atomic_load(); }
 
 	std::shared_ptr<fdb::IDatabaseOps> dbOps() override { return std::atomic_load(&fdbDbOps); }
 
@@ -275,15 +267,8 @@ protected:
 		scheduler->schedule([thisRef]() {
 			fdb::Database db = thisRef->executor->selectDatabase();
 			thisRef->fdbDb.atomic_store(db);
-			if (thisRef->tenantName) {
-				fdb::Tenant tenant = db.openTenant(*thisRef->tenantName);
-				thisRef->fdbTenant.atomic_store(tenant);
-				std::atomic_store(&thisRef->fdbDbOps,
-				                  std::dynamic_pointer_cast<fdb::IDatabaseOps>(std::make_shared<fdb::Tenant>(tenant)));
-			} else {
-				std::atomic_store(&thisRef->fdbDbOps,
-				                  std::dynamic_pointer_cast<fdb::IDatabaseOps>(std::make_shared<fdb::Database>(db)));
-			}
+			std::atomic_store(&thisRef->fdbDbOps,
+							  std::dynamic_pointer_cast<fdb::IDatabaseOps>(std::make_shared<fdb::Database>(db)));
 			if (thisRef->transactional) {
 				thisRef->fdbTx.atomic_store(thisRef->fdbDbOps->createTransaction());
 			}
@@ -324,12 +309,8 @@ protected:
 	// Provides a thread safe interface by itself (no need for mutex)
 	fdb::Database fdbDb;
 
-	// FDB tenant
-	// Provides a thread safe interface by itself (no need for mutex)
-	fdb::Tenant fdbTenant;
-
-	// FDB IDatabaseOps to hide database/tenant accordingly.
-	// Provides a shared pointer to database functions based on if db or tenant.
+	// FDB IDatabaseOps to hide database.
+	// Provides a shared pointer to database functions based on db.
 	std::shared_ptr<fdb::IDatabaseOps> fdbDbOps;
 
 	// FDB transaction
@@ -389,9 +370,6 @@ protected:
 	// Restart the transaction automatically on timeout errors
 	const bool restartOnTimeout;
 
-	// The tenant that we will run this transaction in
-	const std::optional<fdb::BytesRef> tenantName;
-
 	// Specifies whether the operation is transactional
 	const bool transactional;
 
@@ -410,7 +388,6 @@ public:
 	                           IScheduler* scheduler,
 	                           int retryLimit,
 	                           std::string bgBasePath,
-	                           std::optional<fdb::BytesRef> tenantName,
 	                           bool transactional,
 	                           bool restartOnTimeout)
 	  : TransactionContextBase(executor,
@@ -419,7 +396,6 @@ public:
 	                           scheduler,
 	                           retryLimit,
 	                           bgBasePath,
-	                           tenantName,
 	                           transactional,
 	                           restartOnTimeout) {}
 
@@ -496,7 +472,6 @@ public:
 	                        IScheduler* scheduler,
 	                        int retryLimit,
 	                        std::string bgBasePath,
-	                        std::optional<fdb::BytesRef> tenantName,
 	                        bool transactional,
 	                        bool restartOnTimeout)
 	  : TransactionContextBase(executor,
@@ -505,7 +480,6 @@ public:
 	                           scheduler,
 	                           retryLimit,
 	                           bgBasePath,
-	                           tenantName,
 	                           transactional,
 	                           restartOnTimeout) {}
 
@@ -721,7 +695,6 @@ public:
 
 	void execute(TOpStartFct startFct,
 	             TOpContFct cont,
-	             std::optional<fdb::BytesRef> tenantName,
 	             bool transactional,
 	             bool restartOnTimeout) override {
 		try {
@@ -733,7 +706,6 @@ public:
 				                                                   scheduler,
 				                                                   options.transactionRetryLimit,
 				                                                   bgBasePath,
-				                                                   tenantName,
 				                                                   transactional,
 				                                                   restartOnTimeout);
 			} else {
@@ -743,7 +715,6 @@ public:
 				                                                scheduler,
 				                                                options.transactionRetryLimit,
 				                                                bgBasePath,
-				                                                tenantName,
 				                                                transactional,
 				                                                restartOnTimeout);
 			}

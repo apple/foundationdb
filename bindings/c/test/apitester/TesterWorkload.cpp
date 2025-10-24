@@ -111,22 +111,19 @@ void WorkloadBase::schedule(TTaskFct task) {
 
 void WorkloadBase::execTransaction(TOpStartFct startFct,
                                    TTaskFct cont,
-                                   std::optional<fdb::BytesRef> tenant,
                                    bool failOnError) {
-	doExecute(startFct, cont, tenant, failOnError, true);
+	doExecute(startFct, cont, failOnError, true);
 }
 
 // Execute a non-transactional database operation within the workload
 void WorkloadBase::execOperation(TOpStartFct startFct,
                                  TTaskFct cont,
-                                 std::optional<fdb::BytesRef> tenant,
                                  bool failOnError) {
-	doExecute(startFct, cont, tenant, failOnError, false);
+	doExecute(startFct, cont, failOnError, false);
 }
 
 void WorkloadBase::doExecute(TOpStartFct startFct,
                              TTaskFct cont,
-                             std::optional<fdb::BytesRef> tenant,
                              bool failOnError,
                              bool transactional) {
 	ASSERT(inProgress);
@@ -159,7 +156,6 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 		    }
 		    scheduledTaskDone();
 	    },
-	    tenant,
 	    transactional,
 	    maxTxTimeoutMs > 0);
 }
