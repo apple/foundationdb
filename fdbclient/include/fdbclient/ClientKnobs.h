@@ -100,6 +100,9 @@ public:
 	// If > 0, extend the expireTime by this many seconds when a cached entry is used (cache hit).
 	// Only has effect when LOCATION_CACHE_ENTRY_TTL > 0.
 	double LOCATION_CACHE_ENTRY_REFRESH_TIME;
+	// How often to run the background actor that removes expired location cache entries.
+	// Only has effect when LOCATION_CACHE_ENTRY_TTL > 0. Default 60 seconds.
+	double LOCATION_CACHE_EVICTION_INTERVAL;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
