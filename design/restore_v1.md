@@ -1,6 +1,6 @@
-** FoundationDB Full Restore V1 Internals **
+# FoundationDB Full Restore V1 Internals
 
-# Background
+## Background
 
 This document explains internal mechanism of restoring backup files. The backup mechanism generates two types of files: (1) snapshot files (i.e. range files) and (2) mutation log files. The backup mechanism uploads the files to a blob store (e.g. S3). The snapshot files describes the complete set of key-value pairs within the range taken at a single version. Different snapshot files do not have any overlapping range and they are very likely at different versions. The mutation log file contains a set of mutations taken between a begin version and an end version. Note that two mutation log files may have overlapping key range and overlapping version range. For details, please check the backup data format document.
 
@@ -22,13 +22,13 @@ The restore command triggers the FDB cluster to download snapshot files and muta
 
 Note that there are existing two versions of restore: (1) Naive one; (2) Restoring the partitioned log. We focus on the restore V1 (restore V1 and restore V2 share the common framework). 
 
-# Related doc
+## Related doc
 
 - Backup Design V1 Illustrations of how backup works using snapshot/range files and mutations logs.
 - Backup data format For v1 (current/7.4) version of our backups. For v1 layout example, see Backup v1 Layout
 - Backup V2 (range partitioned): https://github.com/apple/foundationdb/blob/main/design/backup_v2_partitioned_logs.md
 
-# Core components
+## Core components
 
 Following core components are involved in restore. We've mentioned some already but below we go into more detail:
 
@@ -42,7 +42,7 @@ Following core components are involved in restore. We've mentioned some already 
 
 - RestoreConfig:All configuration and metadata are stored in a key range of the system key space: \xff\x02/restore-agent/.
 
-# Global Shared State (i.e. RestoreConfig)
+## Global Shared State (i.e. RestoreConfig)
 RestoreConfig stores metadata to system key space which helps to organize metadata with key-value pairs with organized prefix in the system key space. The RestoreConfig includes following:
 
 - Restore state: ERestoreState tracks states of restore progress:: QUEUED → STARTING/ABORT → RUNNING/ABORT → COMPLETED
@@ -55,11 +55,11 @@ RestoreConfig stores metadata to system key space which helps to organize metada
 
 - Mutation applying control: ApplyBeginVersion, ApplyEndVersion
 
-# Restore execution framework
+## Restore execution framework
 
 The restore process is achieved by the collaboration of multiple distributed restore agents. This is achieved by a persistent distributed task execution tool, called task bucket. Since the restore process heavily relies on the task bucket, we explain the task bucket and restore tasks before delving into the restore process.
 
-## Task Bucket
+### Task Bucket
 
 Task bucket is a framework of executing distributed tasks with online expansion. Tasks are generated online and executed by a distributed set of workers. Each task has a task-local state and a task can be executed by one worker at a time (because the task reservation mechanism, introduced in the following red text). To achieve this, each task (inherited from TaskFuncBase) must implement ::execute() and ::finish(). Each task will do execute at first() and then do finish() upon success. If a task (say A) spawns a new task (say B), we call A the parent task and B the child task. Typically, in the taskA::execute(), it does some user defined operations. Then, in the taskA::finish(), it spawns taskB by calling taskB::addTask(). User can define operations and task spawn logic by implementing the execute() and the finish() method of each user's task.
 
@@ -80,7 +80,7 @@ Task Life Cycle:
 
 5. Once a Task execution's _execute() call returns, the _finish() step is called. _finish() is transactional and is guaranteed to never be called more than once for the same Task.
 
-## Restore
+### Restore
 
 In the restore mechanism, we define five core tasks:
 
@@ -128,13 +128,13 @@ In the restore mechanism, we define five core tasks:
 
     finish: set ERestoreState::COMPLETED, cleanup
 
-## Worker pool and parallel execution with task bucket
+### Worker pool and parallel execution with task bucket
 
 Each worker continuously tries to get tasks using transactions guaranteeing atomic reservation. See getOne method. There is a task timeout mechanism and a task error handling mechanism. All worker contribute to completing a batch. Load balancing is achieved by each worker dynamically popping from a global task queue. 
 
 All workers march through snapshot files and mutation logs applying as we go. These two operations can go in tandem because the mutation logs are not written into the database directly but via aLog. Note that no task in task bucket is for moving mutations from aLog into the database. Instead, the mutation log task triggers a system key mutation to commit proxy and commit proxy moves mutations from aLog to the database. This topic is covered in details by the next section. 
 
-# Restore process management
+## Restore process management
 
 In general, data is restored version by version. The process is controlled by a sliding window. The "window" is the range `[applyBeginVersion, applyEndVersion)`. applyBeginVersion and applyEndVersion are stored in the system key space.
 
@@ -146,7 +146,7 @@ In general, data is restored version by version. The process is controlled by a 
 
 - applyMutationsMap is used to make sure the version of applied mutations on a range is larger than the snapshot range. The map locates at a system key space (\xff/applyMutationsKeyVersionMap). The key represents ranges of restored snapshot files, and the value represents the snapshot version. The map starts with empty and gradually gets filled when a snapshot is applied to the database. Initially, all ranges’ version is set to invalidVersion. When a range is restored by RestoreRangeTaskFunc, the range's version is set to the snapshot version. The commit proxy uses keyVersion keeps track of updates of the snapshot versions by range. When the commit proxy applying mutations, it only applies mutations on a range which snapshot has been set and the snapshot version is smaller than the mutation version.
 
-# Applying mutations in order by using aLog metadata
+## Applying mutations in order by using aLog metadata
 
 aLog is a system metadata for staging mutations to restore. Note that the task bucket framework allow us to restore mutation log files on multiple workers in parallel. It is critical to make sure the mutations are applied in a strict order --- version by version. ALog is used for staging mutations extracted from the mutation files by multiple workers in parallel. Then, commit proxyapplies the mutationsversion by version with a single threaded process.
 
@@ -168,7 +168,7 @@ Value:
 
 The commit proxydecodes the value and applies the mutation in the order.
 
-# Backup v1 Layout Example
+## Backup v1 Layout Example
 
 Backup layout taken from 7.4 fdbback/tests/dir_backup_test.sh ctest:
 
