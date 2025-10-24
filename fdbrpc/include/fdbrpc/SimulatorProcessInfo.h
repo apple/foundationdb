@@ -145,7 +145,10 @@ struct ProcessInfo : NonCopyable {
 		return listener->second;
 	}
 
-	inline flowGlobalType global(int id) const { return (globals.size() > id) ? globals[id] : nullptr; };
+	inline flowGlobalType global(int id) const {
+		ASSERT(id >= 0);
+		return (globals.size() > id) ? globals[id] : nullptr;
+	};
 	inline void setGlobal(size_t id, flowGlobalType v) {
 		globals.resize(std::max(globals.size(), id + 1));
 		globals[id] = v;

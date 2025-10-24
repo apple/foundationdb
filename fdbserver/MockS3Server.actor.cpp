@@ -345,7 +345,7 @@ public:
 		response->code = 200;
 		response->data.headers["ETag"] = etag;
 		response->data.contentLen = 0;
-		response->data.content = new UnsentPacketQueue(); // Required for HTTP header transmission
+		response->data.content->discardAll(); // Clear existing content
 
 		TraceEvent("MockS3PartUploaded")
 		    .detail("UploadId", uploadId)
@@ -442,7 +442,7 @@ public:
 
 		response->code = 204; // No Content
 		response->data.contentLen = 0;
-		response->data.content = new UnsentPacketQueue(); // Required for HTTP header transmission
+		response->data.content->discardAll(); // Clear existing content
 
 		TraceEvent("MockS3MultipartAborted").detail("UploadId", uploadId);
 
@@ -479,7 +479,7 @@ public:
 
 		response->code = 200;
 		response->data.contentLen = 0;
-		response->data.content = new UnsentPacketQueue(); // Required for HTTP header transmission
+		response->data.content->discardAll(); // Clear existing content
 
 		TraceEvent("MockS3ObjectTagsSet")
 		    .detail("Bucket", bucket)
@@ -631,7 +631,7 @@ public:
 		// Write content to response
 		response->data.contentLen = responseContent.size();
 		response->data.headers["Content-Length"] = std::to_string(responseContent.size());
-		response->data.content = new UnsentPacketQueue();
+		response->data.content->discardAll(); // Clear existing content
 
 		if (!responseContent.empty()) {
 			// Use the correct approach: getWriteBuffer from the UnsentPacketQueue
@@ -659,7 +659,7 @@ public:
 
 		response->code = 204; // No Content
 		response->data.contentLen = 0;
-		response->data.content = new UnsentPacketQueue(); // Required for HTTP header transmission
+		response->data.content->discardAll(); // Clear existing content
 
 		TraceEvent("MockS3ObjectDeleted").detail("Bucket", bucket).detail("Object", object);
 
@@ -851,7 +851,7 @@ public:
 		response->code = 200;
 		response->data.headers["Content-Type"] = "application/xml";
 		response->data.contentLen = 0;
-		response->data.content = new UnsentPacketQueue(); // Required for HTTP header transmission
+		response->data.content->discardAll(); // Clear existing content
 
 		TraceEvent("MockS3BucketHead").detail("Bucket", bucket);
 
@@ -873,7 +873,7 @@ public:
 		response->code = 200;
 		response->data.headers["Content-Type"] = "application/xml";
 		response->data.contentLen = 0;
-		response->data.content = new UnsentPacketQueue(); // Required for HTTP header transmission
+		response->data.content->discardAll(); // Clear existing content
 
 		TraceEvent("MockS3BucketCreated").detail("Bucket", bucket);
 
@@ -916,13 +916,13 @@ public:
 			response->data.contentLen = 0;
 			TraceEvent("MockS3SendXMLResponse_Empty").detail("ResponseCode", response->code);
 		} else {
-			// Use PacketWriter to properly populate the content
-			// The previous approach created an empty UnsentPacketQueue, causing memory corruption
+			// Use the existing content queue instead of creating a new one
+			// This prevents memory management issues and potential canBeSet() failures
 			size_t contentSize = xml.size();
-
-			response->data.content = new UnsentPacketQueue();
 			response->data.contentLen = contentSize;
 
+			// Clear any existing content and write the XML
+			response->data.content->discardAll();
 			PacketBuffer* buffer = response->data.content->getWriteBuffer(contentSize);
 			PacketWriter pw(buffer, nullptr, Unversioned());
 			pw.serializeBytes(xml);
@@ -986,11 +986,6 @@ Future<Void> MockS3RequestHandler::handleRequest(Reference<HTTP::IncomingRequest
 }
 
 Reference<HTTP::IRequestHandler> MockS3RequestHandler::clone() {
-	// Prevent cloning during destruction to avoid "Pure virtual function called!" errors
-	if (destructing) {
-		TraceEvent(SevWarn, "MockS3RequestHandlerCloneDuringDestruction");
-		return Reference<HTTP::IRequestHandler>();
-	}
 	return makeReference<MockS3RequestHandler>();
 }
 

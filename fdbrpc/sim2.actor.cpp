@@ -160,11 +160,24 @@ bool ISimulator::checkInjectedCorruption() {
 }
 
 flowGlobalType ISimulator::global(int id) const {
-	return getCurrentProcess()->global(id);
+	const ProcessInfo* proc = getCurrentProcess();
+	if (!proc) {
+		// currentProcess can be nullptr during process destruction when currentProcess
+		// is cleared in destroyProcess() or before any process is created (initialization).
+		// Return nullptr if either of above.
+		return nullptr;
+	}
+	return proc->global(id);
 };
 
 void ISimulator::setGlobal(size_t id, flowGlobalType v) {
-	getCurrentProcess()->setGlobal(id, v);
+	ProcessInfo* proc = getCurrentProcess();
+	if (!proc) {
+		// currentProcess can be nullptr during process destruction or initialization.
+		// if nullptr, cannot set process-specific globals.
+		return;
+	}
+	proc->setGlobal(id, v);
 };
 
 void ISimulator::displayWorkers() const {
@@ -1821,6 +1834,13 @@ public:
 			std::swap(*it, processes.back());
 		}
 		processes.pop_back();
+
+		// Clear currentProcess if it points to the process being destroyed
+		// This prevents trace events during destruction from accessing a dangling pointer
+		if (currentProcess == p) {
+			currentProcess = nullptr;
+		}
+
 		killProcess_internal(p, KillType::KillInstantly);
 	}
 	void killProcess_internal(ProcessInfo* machine, KillType kt) {
