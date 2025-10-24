@@ -987,12 +987,11 @@ ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
 
 		// Scan locationCache for expired entries
 		auto iter = cx->locationCache.randomRange();
-		for (; iter != cx->locationCache.end(); ++iter) {
+		for (; iter != cx->locationCache.lastItem(); ++iter) {
 			if (iter->value() && iter->value()->hasCaches) {
 				// Check the expireTime of the first cache entry as a representative
 				// All entries in a range typically have similar expiration times
-				if (iter->value()->locations()->expireTime > 0.0 &&
-				    iter->value()->locations()->expireTime <= currentTime) {
+				if (iter->value()->expireTime > 0.0 && iter->value()->expireTime <= currentTime) {
 					toRemove.push_back(iter->range());
 				}
 			}
@@ -1008,6 +1007,7 @@ ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
 		}
 
 		if (!toRemove.empty()) {
+			CODE_PROBE(true, "LocationCacheCleanup removed some entries");
 			TraceEvent("LocationCacheCleanup").detail("RemovedRanges", toRemove.size());
 		}
 	}
