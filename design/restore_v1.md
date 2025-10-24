@@ -6,7 +6,7 @@ This document explains internal mechanism of restoring backup files. The backup 
 
 To trigger FDB full restore, we have a fdbrestore command line tool which takes following as inputs:
 
-- A backup cluster identifier (-r), a URL used to target the data source of restoring. Must provide. In the below example, the URL is `blobstore://@s3XXXamazonaws.com:XXX?bucket=XXX`
+- A backup cluster identifier (`-r`), a URL used to target the data source of restoring. Must provide. In the below example, the URL is `blobstore://@s3XXXamazonaws.com:XXX?bucket=XXX`
 
 - A list of key ranges (`-k`): If provided, only restore the database within the key ranges. Otherwise, restore the entire user key space (`"" ~ \xff`). By providing the key ranges to restore, the restore time can be decently reduced because fewer mutations are needed to apply to the database. However, the restore process still has to download many unnecessary backup data files because different key ranges mutations are mixed up in the same mutation log files.
 
