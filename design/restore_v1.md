@@ -63,7 +63,7 @@ The restore process is achieved by the collaboration of multiple distributed res
 
 ### Task Bucket
 
-Task bucket is a framework of executing distributed tasks with online expansion. Tasks are generated online and executed by a distributed set of workers. Each task has a task-local state and a task can be executed by one worker at a time (because the task reservation mechanism, introduced in the following red text). To achieve this, each task (inherited from TaskFuncBase) must implement `::execute()` and `::finish()`. Each task will do execute() at first and then do finish() upon success. If a task (say A) spawns a new task (say B), we call A the parent task and B the child task. Typically, in the `taskA::execute()`, it does some user defined operations. Then, in the `taskA::finish()`, it spawns taskB by calling taskB::addTask(). User can define operations and task spawn logic by implementing the execute() and the finish() method of each user's task.
+Task bucket is a framework of executing distributed tasks with online expansion. Tasks are generated online and executed by a distributed set of workers. Each task has a task-local state and a task can be executed by one worker at a time (because the task reservation mechanism, introduced in the following red text). To achieve this, each task (inherited from TaskFuncBase) must implement `::execute()` and `::finish()`. Each task will do execute() at first and then do finish() upon success. If a task (say A) spawns a new task (say B), we call A the parent task and B the child task. Typically, in the `taskA::execute()`, it does some user defined operations. Then, in the `taskA::finish()`, it spawns taskB by calling `taskB::addTask()`. User can define operations and task spawn logic by implementing the execute() and the finish() method of each user's task.
 
 Specifically, A Task is a set of key=value parameters that constitute a unit of work for a TaskFunc to perform.
 The parameter keys are specific to the TaskFunc that the Task is for, except for a set of reserved
@@ -86,13 +86,13 @@ Task Life Cycle:
 
 In the restore mechanism, we define five core tasks:
 
-1. StartFullRestoreTaskFunc:
+1. `StartFullRestoreTaskFunc`
 
     - execute: Setting up a global restore configuration on system metadata (called `RestoreConfig`), including: `beginVersion`, `targetVersion`, setting `ERestoreState::STARTING`, gathering the snapshot file list and the mutation log file list to restore.
     
     - finish: `UpdatingERestoreState::RUNNING`, initialized `ApplyBeginVersion` and `ApplyEndVersion` (core to the restore process, introduced later). Spawning the first task for dispatching (called dispatch task). Whether the restore is running at V1 or V2 is decided by the first task (`RestoreDispatchTaskFunc` is for V1 and `RestoreDispatchPartitionedTaskFunc` is for V2).
 
-2. RestoreDispatchTaskFunc (aka. dispatch task):
+2. `RestoreDispatchTaskFunc` (aka. dispatch task)
 
     - Param: beginVersion (determines which version's files to start with)
 
