@@ -1223,7 +1223,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(reqF, requestTimeout));
-			if (g_network->isSimulated() && BUGGIFY && deterministicRandom()->random01() < 0.1) {
+			// Don't simulate token errors for multipart complete operations (POST with uploadId but no partNumber)
+			// because changing a successful 200 to 400 after the server has already completed and removed
+			// the upload causes the client to infinitely retry with a phantom upload ID. This seems too much of
+			// an artifical manufacture.
+			bool isMultipartComplete = verb == "POST" && resource.find("uploadId=") != std::string::npos &&
+			                           resource.find("partNumber=") == std::string::npos;
+			if (g_network->isSimulated() && BUGGIFY && deterministicRandom()->random01() < 0.1 &&
+			    !isMultipartComplete) {
 				// simulate an error from s3
 				_r->code = badRequestCode;
 				simulateS3TokenError = true;
