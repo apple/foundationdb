@@ -32,6 +32,7 @@ Future<Void> waitFailureClient(const RequestStream<ReplyPromise<Void>>& waitFail
                                double const& failureReactionTime = 0,
                                double const& failureReactionSlope = 0,
                                bool const& trace = false,
+                               Optional<Standalone<StringRef>> const& traceMsg = Optional<Standalone<StringRef>>(),
                                TaskPriority const& taskID = TaskPriority::DefaultEndpoint);
 
 // talks to a wait failure server, returns Void on failure, reaction time is always waited
