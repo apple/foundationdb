@@ -707,6 +707,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "PeekMemoryRequestsStalled", [tLogData]() { return tLogData->peekMemoryLimiter.waiters(); });
 		specialCounter(cc, "Generation", [this]() { return this->recoveryCount; });
 		specialCounter(cc, "ActivePeekStreams", [tLogData]() { return tLogData->activePeekStreams; });
+		specialCounter(cc, "UnknownCommittedVersionCount", [this]() { return this->unknownCommittedVersions.size(); });
 	}
 
 	~LogData() {
