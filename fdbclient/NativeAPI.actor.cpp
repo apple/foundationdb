@@ -168,8 +168,13 @@ Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const TenantIn
 
 	auto range =
 	    isBackward ? locationCache.rangeContainingKeyBefore(resolvedKey) : locationCache.rangeContaining(resolvedKey);
-	if (range->value()) {
-		return KeyRangeLocationInfo(toPrefixRelativeRange(range->range(), tenant.prefix), range->value());
+	auto& loc = range->value();
+	if (loc) {
+		// Cache hit: extend expiration time if refresh knob is set
+		if (CLIENT_KNOBS->LOCATION_CACHE_ENTRY_REFRESH_TIME > 0.0 && loc->expireTime > 0.0) {
+			loc->expireTime = now() + CLIENT_KNOBS->LOCATION_CACHE_ENTRY_REFRESH_TIME;
+		}
+		return KeyRangeLocationInfo(toPrefixRelativeRange(range->range(), tenant.prefix), loc);
 	}
 
 	return Optional<KeyRangeLocationInfo>();
@@ -200,6 +205,10 @@ bool DatabaseContext::getCachedLocations(const TenantInfo& tenant,
 			result.clear();
 			return false;
 		}
+		// Cache hit: extend expiration time if refresh knob is set
+		if (CLIENT_KNOBS->LOCATION_CACHE_ENTRY_REFRESH_TIME > 0.0 && r->value()->expireTime > 0.0) {
+			r->value()->expireTime = now() + CLIENT_KNOBS->LOCATION_CACHE_ENTRY_REFRESH_TIME;
+		}
 		result.emplace_back(toPrefixRelativeRange(r->range() & resolvedRange, tenant.prefix), r->value());
 		if (result.size() == limit || begin == end) {
 			break;
@@ -224,6 +233,7 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation(const KeyRangeRef& ab
 
 	int maxEvictionAttempts = 100, attempts = 0;
 	auto loc = makeReference<LocationInfo>(serverRefs);
+	// TODO: ideally remove based on TTL expiration times, instead of random
 	while (locationCache.size() > locationCacheSize && attempts < maxEvictionAttempts) {
 		CODE_PROBE(true, "NativeAPI storage server locationCache entry evicted");
 		attempts++;

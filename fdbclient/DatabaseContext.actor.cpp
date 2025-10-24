@@ -972,17 +972,6 @@ void updateLocationCacheWithCaches(DatabaseContext* self,
 	}
 }
 
-Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
-                                  const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& other) {
-	std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
-	interfaces.reserve(loc->size() + other.size());
-	for (int i = 0; i < loc->size(); ++i) {
-		interfaces.emplace_back((*loc)[i]);
-	}
-	interfaces.insert(interfaces.end(), other.begin(), other.end());
-	return makeReference<LocationInfo>(interfaces, true);
-}
-
 ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	state Reference<ReadYourWritesTransaction> tr;
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
