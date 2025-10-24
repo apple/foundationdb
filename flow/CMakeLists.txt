@@ -135,7 +135,7 @@ foreach(ft flow flow_sampling flowlinktest)
         target_link_libraries(${ft} PUBLIC Valgrind)
     endif()
 
-    target_link_libraries(${ft} PUBLIC OpenSSL::SSL)
+    target_link_libraries(${ft} PUBLIC OpenSSL::SSL OpenSSL::Crypto)
     target_link_libraries(${ft} PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
     target_link_libraries(${ft} PUBLIC boost_target)
 
