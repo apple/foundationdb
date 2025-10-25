@@ -1,0 +1,25 @@
+[configuration]
+extraMachineCountDC = 2
+allowDefaultTenant = false
+tenantModes = ['disabled']
+
+[[test]]
+testTitle = 'CloggedConfigureDatabaseTest'
+runSetup=false
+waitForQuiescenceBegin=false
+
+    [[test.workload]]
+    testName = 'ConfigureDatabase'
+    testDuration = 300.0
+    waitStoreTypeCheck = true
+    storageMigrationCompatibleConf = true
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 300.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 300.0
+    scale = 0.1
+    clogginess = 2.0

@@ -109,7 +109,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(740)
+    fdb.api_version(800)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
