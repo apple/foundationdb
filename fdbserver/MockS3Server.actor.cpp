@@ -57,10 +57,12 @@
  *
  * CORRECT:
  *   ACTOR Future<Void> someActor(...) {
- *       state std::string data;                // Triggers member init list in generated code
+ *       state std::string data;                // Triggers member init list (requires default ctor)
  *       if (earlyExitCondition) return Void(); // Safe - Promise is initialized
- *       data = computeValue();                 // Can initialize later if needed
+ *       data = computeValue();                 // Can initialize later
  *   }
+ *
+ *   // Or if no default constructor: state MyType x(params); and initialize at declaration
  *
  * WRONG (canBeSet() crash):
  *   ACTOR Future<Void> someActor(...) {
