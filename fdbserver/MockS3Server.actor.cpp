@@ -232,14 +232,11 @@ ACTOR static Future<std::string> readFileContent(std::string path) {
 }
 
 // ACTOR: Delete file using simulation filesystem
+// Wraps deleteFile with trace events and error handling for MockS3 persistence cleanup
 ACTOR static Future<Void> deletePersistedFile(std::string path) {
-	state bool exists = fileExists(path); // Declare state before try block
-
 	try {
-		if (exists) {
-			wait(IAsyncFileSystem::filesystem()->deleteFile(path, true)); // Durable delete
-			TraceEvent("MockS3PersistenceDelete").detail("Path", path);
-		}
+		wait(IAsyncFileSystem::filesystem()->deleteFile(path, true)); // Durable delete
+		TraceEvent("MockS3PersistenceDelete").detail("Path", path);
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3PersistenceDeleteException").error(e).detail("Path", path);
 	}
