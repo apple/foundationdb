@@ -536,9 +536,8 @@ struct BulkDumping : TestWorkload {
 				    .detail("JobRoot", self->jobRoot);
 
 				// Register MockS3Server with IP address - simulation environment doesn't support hostname resolution
-				// See in HTTPServer.actor.cpp how the MockS3RequestHandler is implemented. Client connects to
-				// connect("127.0.0.1", "8080") and then simulation network routes it to MockS3Server.
-				wait(g_simulator->registerSimHTTPServer("127.0.0.1", "8080", makeReference<MockS3RequestHandler>()));
+				// Persistence is automatically enabled in registerMockS3Server()
+				wait(registerMockS3Server("127.0.0.1", "8080"));
 
 				TraceEvent("BulkDumpingWorkload")
 				    .detail("Phase", "MockS3Server Registered")

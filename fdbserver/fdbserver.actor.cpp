@@ -138,7 +138,8 @@ enum {
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
-	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE,
+	OPT_MOCKS3_PERSISTENCE_DIR
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -223,6 +224,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_TRACE_FORMAT,          "--trace-format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist-binpath",         SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIALS,      "--blob-credentials",          SO_REQ_SEP },
+	{ OPT_MOCKS3_PERSISTENCE_DIR, "--mocks3-persistence-dir",   SO_REQ_SEP },
 	{ OPT_PROXY,                 "--proxy",                     SO_REQ_SEP },
 	{ OPT_CONFIG_PATH,           "--config-path",               SO_REQ_SEP },
 	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
@@ -1161,6 +1163,7 @@ struct CLIOptions {
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
+	std::string mocks3PersistenceDir; // Directory for MockS3 persistence files
 	ConfigDBType configDBType{ ConfigDBType::PAXOS };
 
 	Reference<IClusterConnectionRecord> connectionFile;
@@ -1733,6 +1736,9 @@ private:
 			case OPT_BLOB_CREDENTIALS:
 				// Add blob credential following backup agent example
 				blobCredentials.push_back(args.OptionArg());
+				break;
+			case OPT_MOCKS3_PERSISTENCE_DIR:
+				mocks3PersistenceDir = args.OptionArg();
 				break;
 			case OPT_PROXY:
 				proxy = args.OptionArg();
@@ -2327,9 +2333,10 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			const std::set<std::string> allowedDirectories = { ".",       "..",       "backups", "unittests",
-				                                               "fdbblob", "bulkdump", "bulkload" };
+			const std::set<std::string> allowedDirectories = { ".",       "..",       "backups",  "unittests",
+				                                               "fdbblob", "bulkdump", "bulkload", "mocks3" };
 			// bulkdump and bulkload folders are used by bulkloading and bulkdumping simulation tests
+			// mocks3 folder is used by MockS3 persistence for post-test analysis
 
 			for (const auto& dir : directories) {
 				if (dir.size() != 32 && !allowedDirectories.contains(dir) && dir.find("snap") == std::string::npos) {
@@ -2639,7 +2646,7 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::MockS3Server) {
 			printf("Starting MockS3Server on %s\n", opts.publicAddresses.address.toString().c_str());
-			f = stopAfter(startMockS3ServerReal(opts.publicAddresses.address));
+			f = stopAfter(startMockS3ServerReal(opts.publicAddresses.address, opts.mocks3PersistenceDir));
 			g_network->run();
 		}
 

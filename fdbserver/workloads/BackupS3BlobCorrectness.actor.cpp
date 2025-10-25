@@ -240,12 +240,13 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 		// S3-specific: Register MockS3Server only for blobstore URLs in simulation
 		// Only client 0 registers the MockS3Server to avoid duplicates
+		// Persistence is automatically enabled in registerMockS3Server()
 		if (self->clientId == 0 && self->backupURL.rfind("blobstore://", 0) == 0 &&
 		    (self->backupURL.find("127.0.0.1") != std::string::npos ||
 		     self->backupURL.find("localhost") != std::string::npos) &&
 		    g_network->isSimulated()) {
 			TraceEvent("BS3BCW_RegisterMockS3").detail("URL", self->backupURL).detail("ClientId", self->clientId);
-			wait(g_simulator->registerSimHTTPServer("127.0.0.1", "8080", makeReference<MockS3RequestHandler>()));
+			wait(registerMockS3Server("127.0.0.1", "8080"));
 			TraceEvent("BS3BCW_RegisteredMockS3")
 			    .detail("Address", "127.0.0.1:8080")
 			    .detail("ClientId", self->clientId);
