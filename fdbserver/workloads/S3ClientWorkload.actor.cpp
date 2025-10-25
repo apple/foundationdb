@@ -113,7 +113,8 @@ private:
 	}
 
 	// Add the basename of a file to the URL path
-	// Uses S3BlobStoreEndpoint::fromString() for robust URL parsing (similar to BlobMetadataUtils::getBlobMetadataPartitionedURL)
+	// Uses S3BlobStoreEndpoint::fromString() for robust URL parsing (similar to
+	// BlobMetadataUtils::getBlobMetadataPartitionedURL)
 	static std::string addFileToUrl(std::string filePath, std::string baseUrl) {
 		std::string basename = ::basename(const_cast<char*>(filePath.c_str()));
 
@@ -125,9 +126,7 @@ private:
 			    S3BlobStoreEndpoint::fromString(baseUrl, {}, &resource, &error, &parameters);
 
 			if (!error.empty() || !endpoint) {
-				TraceEvent(SevError, "S3ClientWorkloadURLParseError")
-				    .detail("URL", baseUrl)
-				    .detail("Error", error);
+				TraceEvent(SevError, "S3ClientWorkloadURLParseError").detail("URL", baseUrl).detail("Error", error);
 				throw backup_invalid_url();
 			}
 
@@ -280,9 +279,7 @@ private:
 				TraceEvent(SevDebug, "S3ClientWorkloadDeletedCredentials").detail("File", self->credentials);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "S3ClientWorkloadCredentialsCleanupFailed")
-			    .error(e)
-			    .detail("File", self->credentials);
+			TraceEvent(SevWarn, "S3ClientWorkloadCredentialsCleanupFailed").error(e).detail("File", self->credentials);
 		}
 
 		// Delete download file
