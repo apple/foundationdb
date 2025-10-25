@@ -288,10 +288,32 @@ public:
 
 		TraceEvent("MockS3MultipartStart").detail("Bucket", bucket).detail("Object", object);
 
-		// Create multipart upload
-		MultipartUpload upload(bucket, object);
-		std::string uploadId = upload.uploadId;
-		getGlobalStorage().multipartUploads[uploadId] = std::move(upload);
+		// Check if there's already an in-progress upload for this bucket/object
+		// This makes multipart initiation idempotent - retries return the same upload ID
+		// This matches real S3 behavior where you can have multiple concurrent uploads for the same object
+		std::string existingUploadId;
+		for (const auto& pair : getGlobalStorage().multipartUploads) {
+			if (pair.second.bucket == bucket && pair.second.object == object) {
+				// Found existing upload - return it for idempotency
+				existingUploadId = pair.first;
+				TraceEvent("MockS3MultipartStartIdempotent")
+				    .detail("Bucket", bucket)
+				    .detail("Object", object)
+				    .detail("ExistingUploadId", existingUploadId);
+				break;
+			}
+		}
+
+		std::string uploadId;
+		if (!existingUploadId.empty()) {
+			// Return existing upload ID
+			uploadId = existingUploadId;
+		} else {
+			MultipartUpload upload(bucket, object);
+			uploadId = upload.uploadId;
+			getGlobalStorage().multipartUploads[uploadId] = std::move(upload);
+			TraceEvent("MockS3MultipartStarted").detail("UploadId", uploadId);
+		}
 
 		// Generate XML response
 		std::string xml = format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -305,8 +327,6 @@ public:
 		                         uploadId.c_str());
 
 		self->sendXMLResponse(response, 200, xml);
-
-		TraceEvent("MockS3MultipartStarted").detail("UploadId", uploadId);
 
 		return Void();
 	}
@@ -976,13 +996,16 @@ static void clearSingletonState() {
 	TraceEvent("MockS3ServerImpl_StateCleared");
 }
 
+// Process a Mock S3 request directly (for wrapping/chaos injection)
+Future<Void> processMockS3Request(Reference<HTTP::IncomingRequest> req, Reference<HTTP::OutgoingResponse> response) {
+	static MockS3ServerImpl serverInstance;
+	return MockS3ServerImpl::handleRequest(&serverInstance, req, response);
+}
+
 // Request Handler Implementation - Each handler instance works with global storage
 Future<Void> MockS3RequestHandler::handleRequest(Reference<HTTP::IncomingRequest> req,
                                                  Reference<HTTP::OutgoingResponse> response) {
-	// Create a temporary instance just to use its static handleRequest method
-	// All actual storage is in g_mockS3Storage which is truly global
-	static MockS3ServerImpl serverInstance;
-	return MockS3ServerImpl::handleRequest(&serverInstance, req, response);
+	return processMockS3Request(req, response);
 }
 
 Reference<HTTP::IRequestHandler> MockS3RequestHandler::clone() {
@@ -1061,6 +1084,8 @@ ACTOR Future<Void> startMockS3Server(NetworkAddress listenAddress) {
 // Clear all MockS3 global storage - called at the start of each simulation test
 void clearMockS3Storage() {
 	getGlobalStorage().clearStorage();
+	// Note: Do NOT clear chaos server registry here - it must persist across tests
+	// like the simulator's httpHandlers map, to prevent duplicate registration attempts
 }
 
 // Unit Tests for MockS3Server

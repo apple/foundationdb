@@ -418,6 +418,10 @@ public:
 	int nextHTTPPort = 5000;
 	bool httpProtected = false;
 
+	// Truly simulator-global registry for MockS3ServerChaos to prevent duplicate registrations
+	// across all simulated processes (must stay in sync with httpHandlers)
+	std::set<std::string> registeredMockS3ChaosServers;
+
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;
 

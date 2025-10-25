@@ -61,3 +61,7 @@ Future<Void> startMockS3ServerReal(const NetworkAddress& listenAddress);
 // Clear all MockS3 global storage - called at the start of each simulation test
 // to prevent data accumulation across multiple tests
 void clearMockS3Storage();
+
+// Process a Mock S3 request directly (for wrapping/chaos injection)
+// This is the low-level request processor used by MockS3RequestHandler
+Future<Void> processMockS3Request(Reference<HTTP::IncomingRequest> req, Reference<HTTP::OutgoingResponse> response);

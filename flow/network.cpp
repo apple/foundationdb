@@ -37,7 +37,10 @@ void ChaosMetrics::clear() {
 }
 
 void ChaosMetrics::getFields(TraceEvent* e) {
-	std::pair<const char*, unsigned int> metrics[] = { { "DiskDelays", diskDelays }, { "BitFlips", bitFlips } };
+	std::pair<const char*, unsigned int> metrics[] = {
+		{ "DiskDelays", diskDelays },   { "BitFlips", bitFlips }, { "S3Errors", s3Errors },
+		{ "S3Throttles", s3Throttles }, { "S3Delays", s3Delays }, { "S3Corruptions", s3Corruptions }
+	};
 	if (e != nullptr) {
 		for (auto& m : metrics) {
 			char c = m.first[0];
@@ -105,6 +108,15 @@ BitFlipper* BitFlipper::flipper() {
 		g_network->setGlobal(INetwork::enBitFlipper, res);
 	}
 	return static_cast<BitFlipper*>(res);
+}
+
+S3FaultInjector* S3FaultInjector::injector() {
+	auto res = g_network->global(INetwork::enS3FaultInjector);
+	if (!res) {
+		res = new S3FaultInjector();
+		g_network->setGlobal(INetwork::enS3FaultInjector, res);
+	}
+	return static_cast<S3FaultInjector*>(res);
 }
 
 bool IPAddress::operator==(const IPAddress& rhs) const {
