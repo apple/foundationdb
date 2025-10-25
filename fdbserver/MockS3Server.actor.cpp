@@ -514,6 +514,7 @@ ACTOR static Future<Void> deletePersistedMultipart(std::string uploadId) {
 		wait(deletePersistedFile(statePath));
 
 		// Delete all part files (try all possible part numbers)
+		// Yield periodically to prevent blocking other MockS3 requests
 		partNum = 1;
 		while (partNum <= maxPart + 10) {
 			partPath = persistenceDir + "/multipart/" + uploadId + ".part." + std::to_string(partNum);
@@ -521,6 +522,11 @@ ACTOR static Future<Void> deletePersistedMultipart(std::string uploadId) {
 			wait(deletePersistedFile(partPath));
 			wait(deletePersistedFile(partMetaPath));
 			partNum++;
+			
+			// Yield every 10 parts to allow other actors to run
+			if (partNum % 10 == 0) {
+				wait(delay(0));
+			}
 		}
 
 		TraceEvent("MockS3MultipartDeleted").detail("UploadId", uploadId);
