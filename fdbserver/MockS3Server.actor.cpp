@@ -64,6 +64,16 @@
  * are declared at the beginning of the ACTOR, before any early returns or exception-throwing code.
  */
 
+// MockS3 persistence file extensions
+namespace {
+constexpr const char* OBJECT_DATA_SUFFIX = ".data";
+constexpr const char* OBJECT_META_SUFFIX = ".meta.json";
+constexpr const char* MULTIPART_STATE_SUFFIX = ".state.json";
+constexpr size_t OBJECT_DATA_SUFFIX_LEN = 5;  // strlen(".data")
+constexpr size_t OBJECT_META_SUFFIX_LEN = 10; // strlen(".meta.json")
+constexpr size_t MULTIPART_STATE_SUFFIX_LEN = 11; // strlen(".state.json")
+} // namespace
+
 // Global storage for MockS3 (shared across all simulated processes)
 struct MockS3GlobalStorage {
 	struct ObjectData {
@@ -132,15 +142,15 @@ struct MockS3GlobalStorage {
 	// Get paths for persistence files
 	// Note: Object names with slashes map directly to filesystem directory structure
 	std::string getObjectDataPath(const std::string& bucket, const std::string& object) const {
-		return persistenceDir + "/objects/" + bucket + "/" + object + ".data";
+		return persistenceDir + "/objects/" + bucket + "/" + object + OBJECT_DATA_SUFFIX;
 	}
 
 	std::string getObjectMetaPath(const std::string& bucket, const std::string& object) const {
-		return persistenceDir + "/objects/" + bucket + "/" + object + ".meta.json";
+		return persistenceDir + "/objects/" + bucket + "/" + object + OBJECT_META_SUFFIX;
 	}
 
 	std::string getMultipartStatePath(const std::string& uploadId) const {
-		return persistenceDir + "/multipart/" + uploadId + ".state.json";
+		return persistenceDir + "/multipart/" + uploadId + MULTIPART_STATE_SUFFIX;
 	}
 
 	std::string getMultipartPartPath(const std::string& uploadId, int partNum) const {
@@ -148,7 +158,7 @@ struct MockS3GlobalStorage {
 	}
 
 	std::string getMultipartPartMetaPath(const std::string& uploadId, int partNum) const {
-		return persistenceDir + "/multipart/" + uploadId + ".part." + std::to_string(partNum) + ".meta.json";
+		return persistenceDir + "/multipart/" + uploadId + ".part." + std::to_string(partNum) + OBJECT_META_SUFFIX;
 	}
 };
 
@@ -1577,11 +1587,12 @@ ACTOR static Future<Void> loadPersistedObjects(std::string persistenceDir) {
 			for (fileIdx = 0; fileIdx < files.size(); fileIdx++) {
 				state std::string fileName = files[fileIdx];
 
-				// Look for .meta.json files to identify objects
-				if (fileName.size() > 10 && fileName.substr(fileName.size() - 10) == ".meta.json") {
-					// Extract object name by removing .meta.json suffix
-					state std::string objectName = fileName.substr(0, fileName.size() - 10);
-					state std::string dataPath = bucketDir + "/" + objectName + ".data";
+			// Look for .meta.json files to identify objects
+			if (fileName.size() > OBJECT_META_SUFFIX_LEN &&
+			    fileName.substr(fileName.size() - OBJECT_META_SUFFIX_LEN) == OBJECT_META_SUFFIX) {
+				// Extract object name by removing .meta.json suffix
+				state std::string objectName = fileName.substr(0, fileName.size() - OBJECT_META_SUFFIX_LEN);
+				state std::string dataPath = bucketDir + "/" + objectName + OBJECT_DATA_SUFFIX;
 					state std::string metaPath = bucketDir + "/" + fileName;
 
 					if (!fileExists(dataPath)) {
@@ -1635,9 +1646,10 @@ ACTOR static Future<Void> loadPersistedMultipartUploads(std::string persistenceD
 		for (fileIdx = 0; fileIdx < files.size(); fileIdx++) {
 			state std::string fileName = files[fileIdx];
 
-			// Look for .state.json files
-			if (fileName.size() > 11 && fileName.substr(fileName.size() - 11) == ".state.json") {
-				state std::string uploadId = fileName.substr(0, fileName.size() - 11);
+		// Look for .state.json files
+		if (fileName.size() > MULTIPART_STATE_SUFFIX_LEN &&
+		    fileName.substr(fileName.size() - MULTIPART_STATE_SUFFIX_LEN) == MULTIPART_STATE_SUFFIX) {
+			state std::string uploadId = fileName.substr(0, fileName.size() - MULTIPART_STATE_SUFFIX_LEN);
 				state std::string statePath = multipartDir + "/" + fileName;
 
 				// Read state file
