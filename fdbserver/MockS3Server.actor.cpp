@@ -69,7 +69,7 @@ namespace {
 constexpr const char* OBJECT_DATA_SUFFIX = ".data";
 constexpr const char* OBJECT_META_SUFFIX = ".meta.json";
 constexpr const char* MULTIPART_STATE_SUFFIX = ".state.json";
-constexpr size_t OBJECT_DATA_SUFFIX_LEN = 5;  // strlen(".data")
+constexpr size_t OBJECT_DATA_SUFFIX_LEN = 5; // strlen(".data")
 constexpr size_t OBJECT_META_SUFFIX_LEN = 10; // strlen(".meta.json")
 constexpr size_t MULTIPART_STATE_SUFFIX_LEN = 11; // strlen(".state.json")
 } // namespace
@@ -1587,12 +1587,12 @@ ACTOR static Future<Void> loadPersistedObjects(std::string persistenceDir) {
 			for (fileIdx = 0; fileIdx < files.size(); fileIdx++) {
 				state std::string fileName = files[fileIdx];
 
-			// Look for .meta.json files to identify objects
-			if (fileName.size() > OBJECT_META_SUFFIX_LEN &&
-			    fileName.substr(fileName.size() - OBJECT_META_SUFFIX_LEN) == OBJECT_META_SUFFIX) {
-				// Extract object name by removing .meta.json suffix
-				state std::string objectName = fileName.substr(0, fileName.size() - OBJECT_META_SUFFIX_LEN);
-				state std::string dataPath = bucketDir + "/" + objectName + OBJECT_DATA_SUFFIX;
+				// Look for .meta.json files to identify objects
+				if (fileName.size() > OBJECT_META_SUFFIX_LEN &&
+				    fileName.substr(fileName.size() - OBJECT_META_SUFFIX_LEN) == OBJECT_META_SUFFIX) {
+					// Extract object name by removing .meta.json suffix
+					state std::string objectName = fileName.substr(0, fileName.size() - OBJECT_META_SUFFIX_LEN);
+					state std::string dataPath = bucketDir + "/" + objectName + OBJECT_DATA_SUFFIX;
 					state std::string metaPath = bucketDir + "/" + fileName;
 
 					if (!fileExists(dataPath)) {
@@ -1646,10 +1646,10 @@ ACTOR static Future<Void> loadPersistedMultipartUploads(std::string persistenceD
 		for (fileIdx = 0; fileIdx < files.size(); fileIdx++) {
 			state std::string fileName = files[fileIdx];
 
-		// Look for .state.json files
-		if (fileName.size() > MULTIPART_STATE_SUFFIX_LEN &&
-		    fileName.substr(fileName.size() - MULTIPART_STATE_SUFFIX_LEN) == MULTIPART_STATE_SUFFIX) {
-			state std::string uploadId = fileName.substr(0, fileName.size() - MULTIPART_STATE_SUFFIX_LEN);
+			// Look for .state.json files
+			if (fileName.size() > MULTIPART_STATE_SUFFIX_LEN &&
+			    fileName.substr(fileName.size() - MULTIPART_STATE_SUFFIX_LEN) == MULTIPART_STATE_SUFFIX) {
+				state std::string uploadId = fileName.substr(0, fileName.size() - MULTIPART_STATE_SUFFIX_LEN);
 				state std::string statePath = multipartDir + "/" + fileName;
 
 				// Read state file
