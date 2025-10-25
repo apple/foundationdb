@@ -44,6 +44,23 @@ function should_preserve_test_data {
   return 1
 }
 
+# Common cleanup handler for tests that checks preserve flag and shuts down servers
+# Returns 0 if data is being preserved (caller should return immediately)
+# Returns 1 if normal cleanup should continue
+function cleanup_with_preserve_check {
+  if should_preserve_test_data; then
+    # Shutdown servers but don't delete data
+    if type shutdown_fdb_cluster &> /dev/null; then
+      shutdown_fdb_cluster
+    fi
+    if type shutdown_mocks3 &> /dev/null; then
+      shutdown_mocks3
+    fi
+    return 0
+  fi
+  return 1
+}
+
 # Make a key for fdb.
 # $1 an index to use in the key name.
 # $2 prefix for the key

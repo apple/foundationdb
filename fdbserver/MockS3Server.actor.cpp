@@ -522,7 +522,7 @@ ACTOR static Future<Void> deletePersistedMultipart(std::string uploadId) {
 			wait(deletePersistedFile(partPath));
 			wait(deletePersistedFile(partMetaPath));
 			partNum++;
-			
+
 			// Yield every 2 parts with 20ms delay to allow HTTP requests to be processed
 			// For 110 parts: ~55 yields = ~1.1s total delay time
 			if (partNum % 2 == 0) {

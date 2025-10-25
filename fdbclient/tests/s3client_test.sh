@@ -15,12 +15,8 @@ trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
 function cleanup {
-  # Check if test data should be preserved (from tests_common.sh)
-  if should_preserve_test_data; then
-    # Shutdown servers but don't delete data
-    if type shutdown_mocks3 &> /dev/null; then
-      shutdown_mocks3
-    fi
+  # Check if test data should be preserved (common function from tests_common.sh)
+  if cleanup_with_preserve_check; then
     return 0
   fi
   
