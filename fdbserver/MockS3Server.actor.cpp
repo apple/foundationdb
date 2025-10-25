@@ -47,34 +47,26 @@
 /*
  * ACTOR STATE VARIABLE INITIALIZATION REQUIREMENT
  *
- * THE ISSUE:
- * ACTORs with early returns (before any wait()) will crash with canBeSet() assertion if no
- * state variable is declared before the return. The actor compiler generates Promise<T>
- * initialization code only when it sees state variables.
+ * ACTORs with early returns (before any wait()) crash with canBeSet() assertion if no state
+ * variable is declared before the return. The actor compiler generates a member initialization
+ * list (": member(value)") in the state class constructor only when it sees state variables.
+ * This initialization list ensures the Actor<T> base class and its internal Promise are fully
+ * initialized before any code runs. Without it, early returns try to use an uninitialized Promise.
  *
- * THE FIX:
- * Declare at least one state variable BEFORE any early return or exception-throwing code.
- * Declaration alone is sufficient - initialization can happen later.
+ * FIX: Declare at least one state variable BEFORE any early return. Declaration alone is enough.
  *
  * CORRECT:
  *   ACTOR Future<Void> someActor(...) {
- *       state std::string data;                    // Declaration triggers Promise init
- *       if (earlyExitCondition) return Void();     // Safe
- *       data = computeValue();                     // Initialize later
- *       wait(someAsyncOp(data));
+ *       state std::string data;                // Triggers member init list in generated code
+ *       if (earlyExitCondition) return Void(); // Safe - Promise is initialized
+ *       data = computeValue();                 // Can initialize later if needed
  *   }
  *
  * WRONG (canBeSet() crash):
  *   ACTOR Future<Void> someActor(...) {
- *       if (earlyExitCondition) return Void();     // CRASH - no state var declared yet!
- *       state std::string data;
- *       wait(someAsyncOp(data));
+ *       if (earlyExitCondition) return Void(); // CRASH - no member init list generated yet
+ *       state std::string data;                // Too late - compiler didn't see it early enough
  *   }
- *
- * NOTE: If the type has no default constructor, either initialize at declaration
- * (state MyType x(params);) or use Optional<MyType> / Reference<MyType>.
- *
- * This file follows the correct pattern throughout.
  */
 
 // MockS3 persistence file extensions
