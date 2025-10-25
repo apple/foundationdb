@@ -54,11 +54,13 @@
  *
  * THE FIX:
  * Declare at least one state variable BEFORE any early return or exception-throwing code.
+ * Declaration alone is sufficient - initialization can happen later.
  *
  * CORRECT:
  *   ACTOR Future<Void> someActor(...) {
- *       state std::string data = computeValue();  // Or just "state std::string data;"
+ *       state std::string data;                    // Declaration triggers Promise init
  *       if (earlyExitCondition) return Void();     // Safe
+ *       data = computeValue();                     // Initialize later
  *       wait(someAsyncOp(data));
  *   }
  *
@@ -68,6 +70,9 @@
  *       state std::string data;
  *       wait(someAsyncOp(data));
  *   }
+ *
+ * NOTE: If the type has no default constructor, either initialize at declaration
+ * (state MyType x(params);) or use Optional<MyType> / Reference<MyType>.
  *
  * This file follows the correct pattern throughout.
  */
