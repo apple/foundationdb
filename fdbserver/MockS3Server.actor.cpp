@@ -69,7 +69,6 @@ namespace {
 constexpr const char* OBJECT_DATA_SUFFIX = ".data";
 constexpr const char* OBJECT_META_SUFFIX = ".meta.json";
 constexpr const char* MULTIPART_STATE_SUFFIX = ".state.json";
-constexpr size_t OBJECT_DATA_SUFFIX_LEN = 5; // strlen(".data")
 constexpr size_t OBJECT_META_SUFFIX_LEN = 10; // strlen(".meta.json")
 constexpr size_t MULTIPART_STATE_SUFFIX_LEN = 11; // strlen(".state.json")
 } // namespace
