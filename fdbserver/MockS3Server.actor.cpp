@@ -160,15 +160,12 @@ static MockS3GlobalStorage& getGlobalStorage() {
 }
 
 // Helper: Create all parent directories for a file path
+// Uses platform::createDirectory which handles recursive creation and EEXIST errors
 static void createParentDirectories(const std::string& filePath) {
-	size_t pos = 0;
-	while ((pos = filePath.find('/', pos + 1)) != std::string::npos) {
-		std::string dir = filePath.substr(0, pos);
-		try {
-			platform::createDirectory(dir);
-		} catch (...) {
-			// Directory might already exist, ignore
-		}
+	size_t lastSlash = filePath.find_last_of('/');
+	if (lastSlash != std::string::npos && lastSlash > 0) {
+		std::string parentDir = filePath.substr(0, lastSlash);
+		platform::createDirectory(parentDir); // Handles recursive creation and EEXIST
 	}
 }
 
