@@ -20,9 +20,6 @@
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/TenantEntryCache.actor.h"
-#include "fdbclient/TenantManagement.actor.h"
-#include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/simulator.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
@@ -45,7 +42,6 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TaskBucket.h"
-#include "fdbclient/Tenant.h"
 #include "flow/network.h"
 #include "flow/Trace.h"
 
@@ -1256,10 +1252,9 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	EncryptedRangeFileWriter(Database cx,
 	                         Arena* arena,
 	                         EncryptionAtRestMode encryptMode,
-	                         Optional<Reference<TenantEntryCache<Void>>> tenantCache,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0)
-	  : cx(cx), arena(arena), file(file), encryptMode(encryptMode), tenantCache(tenantCache), blockSize(blockSize),
+	  : cx(cx), arena(arena), file(file), encryptMode(encryptMode), blockSize(blockSize),
 	    blockEnd(0), fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
@@ -1338,8 +1333,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self,
-	                                                  KeyRef key,
-	                                                  SnapshotBackupUseTenantCache checkTenantCache) {
+	                                                  KeyRef key) {
 		state EncryptCipherDomainId curDomainId =
 		    wait(getEncryptionDomainDetails(key, self->encryptMode, self->tenantCache, checkTenantCache));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;

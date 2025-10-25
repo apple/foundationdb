@@ -55,7 +55,6 @@ void DatabaseConfiguration::resetInternal() {
 	perpetualStorageWiggleSpeed = 0;
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
-	tenantMode = TenantMode::DISABLED;
 	encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
 }
 
@@ -241,7 +240,6 @@ bool DatabaseConfiguration::isValid() const {
 	      LOG_TEST((perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1)) &&
 	      LOG_TEST(isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality)) &&
 	      LOG_TEST(storageMigrationType != StorageMigrationType::UNSET) &&
-	      LOG_TEST(tenantMode >= TenantMode::DISABLED) && LOG_TEST(tenantMode < TenantMode::END) &&
 	      LOG_TEST(encryptionAtRestMode >= EncryptionAtRestMode::DISABLED) &&
 	      LOG_TEST(encryptionAtRestMode < EncryptionAtRestMode::END))) {
 		return false;
@@ -405,7 +403,6 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["perpetual_storage_wiggle_engine"] = perpetualStoreType.toString();
 	}
 	result["storage_migration_type"] = storageMigrationType.toString();
-	result["tenant_mode"] = tenantMode.toString();
 	result["encryption_at_rest_mode"] = encryptionAtRestMode.toString();
 	return result;
 }
@@ -430,7 +427,7 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 			// For string values, some properties can set with a "<name>=<value>" syntax in "configure"
 			// Such properties are listed here:
 			static std::set<std::string> directSet = {
-				"storage_migration_type", "tenant_mode", "encryption_at_rest_mode",
+				"storage_migration_type", "encryption_at_rest_mode",
 				"storage_engine",         "log_engine",  "perpetual_storage_wiggle_engine"
 			};
 
@@ -691,8 +688,6 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == "storage_migration_type"_sr) {
 		parse((&type), value);
 		storageMigrationType = (StorageMigrationType::MigrationType)type;
-	} else if (ck == "tenant_mode"_sr) {
-		tenantMode = TenantMode::fromValue(value);
 	} else if (ck == "proxies"_sr) {
 		overwriteProxiesCount();
 	} else if (ck == "encryption_at_rest_mode"_sr) {

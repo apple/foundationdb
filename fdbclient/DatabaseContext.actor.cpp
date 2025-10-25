@@ -43,7 +43,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
-#include "fdbrpc/TenantInfo.h"
 
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/AnnotateActor.h"
@@ -69,8 +68,6 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/Tenant.h"
-#include "fdbclient/TenantSpecialKeys.actor.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
 #include "fdbrpc/WellKnownEndpoints.h"
@@ -112,6 +109,8 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// TODO(gglass): confirm if this is needed.  Remove tenant bits if needed. Delete outright if not.
+#if 0
 Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {
 	const auto it = watchMap.find(std::make_pair(tenantId, key));
 	if (it == watchMap.end())
@@ -169,6 +168,8 @@ void DatabaseContext::deleteWatchMetadata(int64_t tenantId, KeyRef key, bool rem
 		watchCounterMap.erase(mapKey);
 	}
 }
+
+#endif
 
 void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi) {
 	auto result = tssMapping.find(ssi.id());
@@ -1069,19 +1070,12 @@ struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	}
 
 	SingleSpecialKeyImpl(KeyRef k,
-	                     const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f,
-	                     bool supportsTenants = false)
-	  : SpecialKeyRangeReadImpl(singleKeyRange(k)), k(k), f(f), tenantSupport(supportsTenants) {}
-
-	bool supportsTenants() const override {
-		CODE_PROBE(tenantSupport, "Single special key in tenant");
-		return tenantSupport;
-	};
+	                     const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f) 
+		: SpecialKeyRangeReadImpl(singleKeyRange(k)), k(k), f(f) {}
 
 private:
 	Key k;
 	std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)> f;
-	bool tenantSupport;
 };
 
 class HealthMetricsRangeImpl : public SpecialKeyRangeAsyncImpl {
@@ -1198,11 +1192,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
                                  LockAware lockAware,
                                  IsInternal internal,
                                  int _apiVersion,
-                                 IsSwitchable switchable,
-                                 Optional<TenantName> defaultTenant)
+                                 IsSwitchable switchable)
   : dbId(deterministicRandom()->randomUniqueID()), lockAware(lockAware), switchable(switchable),
     connectionRecord(connectionRecord), proxyProvisional(false), clientLocality(clientLocality),
-    enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant), internal(internal),
+    enableLocalityLoadBalance(enableLocalityLoadBalance), internal(internal),
     cc("TransactionMetrics", dbId.toString()), transactionReadVersions("ReadVersions", cc),
     transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
@@ -1227,8 +1220,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
-    transactionStatusRequests("StatusRequests", cc), transactionTenantLookupRequests("TenantLookupRequests", cc),
-    transactionTenantLookupRequestsCompleted("TenantLookupRequestsCompleted", cc), transactionsTooOld("TooOld", cc),
+    transactionStatusRequests("StatusRequests", cc),
+	transactionsTooOld("TooOld", cc),
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
     transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
@@ -1492,11 +1485,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 			                            return Optional<Value>();
 		                            },
 		                            true));
-
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::MANAGEMENT,
-		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TenantRangeImpl>(SpecialKeySpace::getManagementApiCommandRange("tenant")));
 	}
 	throttleExpirer = recurring([this]() { expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 
@@ -1532,8 +1520,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
-    transactionStatusRequests("StatusRequests", cc), transactionTenantLookupRequests("TenantLookupRequests", cc),
-    transactionTenantLookupRequestsCompleted("TenantLookupRequestsCompleted", cc), transactionsTooOld("TooOld", cc),
+    transactionStatusRequests("StatusRequests", cc),
+	transactionsTooOld("TooOld", cc),
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
     transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
