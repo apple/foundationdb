@@ -47,72 +47,29 @@
 /*
  * ACTOR STATE VARIABLE INITIALIZATION REQUIREMENT
  *
- * BACKGROUND:
- * The actor compiler transforms ACTOR functions into state machines. When an ACTOR returns
- * a Future<T>, the compiler creates a Promise<T> internally that will be fulfilled when the
- * actor completes. This Promise must be "sendable" (have canBeSet() return true) before the
- * actor can complete.
- *
  * THE ISSUE:
- * The Promise's sendability is initialized by the actor's state machine setup code, which is
- * generated when the compiler sees state variables. If an ACTOR has an early return (before
- * any wait() or state variable declaration), the Promise initialization code is not generated,
- * causing a canBeSet() assertion failure when the actor tries to fulfill the Promise.
+ * ACTORs with early returns (before any wait()) will crash with canBeSet() assertion if no
+ * state variable is declared before the return. The actor compiler generates Promise<T>
+ * initialization code only when it sees state variables.
  *
  * THE FIX:
  * Declare at least one state variable BEFORE any early return or exception-throwing code.
- * This forces the compiler to generate the Promise initialization code at the start of the
- * actor's state machine.
  *
- * CORRECT PATTERNS:
- *
- *   // Pattern 1: Declare early, initialize later (useful for conditional initialization)
+ * CORRECT:
  *   ACTOR Future<Void> someActor(...) {
- *       state std::string data;         // Default constructor, forces Promise init
- *       if (earlyExitCondition)
- *           return Void();              // Safe - Promise is sendable
- *       data = computeValue();          // Initialize later
+ *       state std::string data = computeValue();  // Or just "state std::string data;"
+ *       if (earlyExitCondition) return Void();     // Safe
  *       wait(someAsyncOp(data));
  *   }
  *
- *   // Pattern 2: Declare and initialize together (simpler when possible)
+ * WRONG (canBeSet() crash):
  *   ACTOR Future<Void> someActor(...) {
- *       state std::string data = computeValue();  // Combined declaration/init
- *       if (earlyExitCondition)
- *           return Void();              // Safe - Promise is sendable
+ *       if (earlyExitCondition) return Void();     // CRASH - no state var declared yet!
+ *       state std::string data;
  *       wait(someAsyncOp(data));
  *   }
  *
- *   // Pattern 3: Dummy variable when real state vars come later
- *   ACTOR Future<Void> someActor(...) {
- *       state bool initialized = true;  // Dummy to force Promise init
- *       if (earlyExitCondition)
- *           return Void();              // Safe - Promise is sendable
- *       state std::string data;         // Real state var declared after early return
- *       wait(someAsyncOp());
- *       data = result;
- *   }
- *
- * CHOOSING A PATTERN:
- * - Pattern 1: Use when initialization is conditional or may throw exceptions
- * - Pattern 2: Simplest and preferred when initialization is always needed and safe
- * - Pattern 3: Use when all real state vars require non-default constructors or
- *              when initialization must happen after early return checks
- *
- * NOTE: Declaring without initialization (Pattern 1, 3) requires the type to have
- * a default constructor. If your type requires constructor parameters, you must either
- * initialize immediately (Pattern 2) or use Optional<T>/pointer types.
- *
- * WRONG PATTERN (will crash with canBeSet() assertion):
- *   ACTOR Future<Void> someActor(...) {
- *       if (earlyExitCondition)
- *           return Void();              // CRASH - Promise not initialized yet!
- *       state std::string data;         // Too late - early return already happened
- *       wait(someAsyncOp());
- *   }
- *
- * This file follows the correct pattern - all ACTORs declare their state variables at the
- * beginning, before any early returns, exception throws, or wait() calls.
+ * This file follows the correct pattern throughout.
  */
 
 // MockS3 persistence file extensions
