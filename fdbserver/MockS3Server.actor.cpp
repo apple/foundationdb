@@ -64,15 +64,44 @@
  * This forces the compiler to generate the Promise initialization code at the start of the
  * actor's state machine.
  *
- * CORRECT PATTERN:
+ * CORRECT PATTERNS:
+ *
+ *   // Pattern 1: Declare early, initialize later (useful for conditional initialization)
  *   ACTOR Future<Void> someActor(...) {
- *       state bool initialized = true;  // Forces Promise initialization
+ *       state std::string data;         // Default constructor, forces Promise init
  *       if (earlyExitCondition)
- *           return Void();              // Now safe - Promise is sendable
- *       state std::string data;         // Other state vars for later use
+ *           return Void();              // Safe - Promise is sendable
+ *       data = computeValue();          // Initialize later
+ *       wait(someAsyncOp(data));
+ *   }
+ *
+ *   // Pattern 2: Declare and initialize together (simpler when possible)
+ *   ACTOR Future<Void> someActor(...) {
+ *       state std::string data = computeValue();  // Combined declaration/init
+ *       if (earlyExitCondition)
+ *           return Void();              // Safe - Promise is sendable
+ *       wait(someAsyncOp(data));
+ *   }
+ *
+ *   // Pattern 3: Dummy variable when real state vars come later
+ *   ACTOR Future<Void> someActor(...) {
+ *       state bool initialized = true;  // Dummy to force Promise init
+ *       if (earlyExitCondition)
+ *           return Void();              // Safe - Promise is sendable
+ *       state std::string data;         // Real state var declared after early return
  *       wait(someAsyncOp());
  *       data = result;
  *   }
+ *
+ * CHOOSING A PATTERN:
+ * - Pattern 1: Use when initialization is conditional or may throw exceptions
+ * - Pattern 2: Simplest and preferred when initialization is always needed and safe
+ * - Pattern 3: Use when all real state vars require non-default constructors or
+ *              when initialization must happen after early return checks
+ *
+ * NOTE: Declaring without initialization (Pattern 1, 3) requires the type to have
+ * a default constructor. If your type requires constructor parameters, you must either
+ * initialize immediately (Pattern 2) or use Optional<T>/pointer types.
  *
  * WRONG PATTERN (will crash with canBeSet() assertion):
  *   ACTOR Future<Void> someActor(...) {
