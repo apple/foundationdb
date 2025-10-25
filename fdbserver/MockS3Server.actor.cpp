@@ -45,23 +45,45 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 /*
- * ACTOR STATE VARIABLE INITIALIZATION
+ * ACTOR STATE VARIABLE INITIALIZATION REQUIREMENT
  *
- * The FoundationDB actor compiler requires that ACTORs with early returns (before any wait())
- * must declare at least one state variable BEFORE the early return to properly initialize
- * the actor's Promise object.
+ * BACKGROUND:
+ * The actor compiler transforms ACTOR functions into state machines. When an ACTOR returns
+ * a Future<T>, the compiler creates a Promise<T> internally that will be fulfilled when the
+ * actor completes. This Promise must be "sendable" (have canBeSet() return true) before the
+ * actor can complete.
  *
- * PATTERN:
+ * THE ISSUE:
+ * The Promise's sendability is initialized by the actor's state machine setup code, which is
+ * generated when the compiler sees state variables. If an ACTOR has an early return (before
+ * any wait() or state variable declaration), the Promise initialization code is not generated,
+ * causing a canBeSet() assertion failure when the actor tries to fulfill the Promise.
+ *
+ * THE FIX:
+ * Declare at least one state variable BEFORE any early return or exception-throwing code.
+ * This forces the compiler to generate the Promise initialization code at the start of the
+ * actor's state machine.
+ *
+ * CORRECT PATTERN:
  *   ACTOR Future<Void> someActor(...) {
- *       state SomeType variable; // Declare state BEFORE any early returns
+ *       state bool initialized = true;  // Forces Promise initialization
  *       if (earlyExitCondition)
- *           return Void();       // Now safe
- *       variable = computeValue();
- *       wait(someAsyncOp(variable));
+ *           return Void();              // Now safe - Promise is sendable
+ *       state std::string data;         // Other state vars for later use
+ *       wait(someAsyncOp());
+ *       data = result;
  *   }
  *
- * This file follows this pattern - all state variables that will be used after wait() calls
- * are declared at the beginning of the ACTOR, before any early returns or exception-throwing code.
+ * WRONG PATTERN (will crash with canBeSet() assertion):
+ *   ACTOR Future<Void> someActor(...) {
+ *       if (earlyExitCondition)
+ *           return Void();              // CRASH - Promise not initialized yet!
+ *       state std::string data;         // Too late - early return already happened
+ *       wait(someAsyncOp());
+ *   }
+ *
+ * This file follows the correct pattern - all ACTORs declare their state variables at the
+ * beginning, before any early returns, exception throws, or wait() calls.
  */
 
 // MockS3 persistence file extensions
