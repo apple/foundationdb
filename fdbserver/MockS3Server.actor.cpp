@@ -212,11 +212,6 @@ ACTOR static Future<std::string> readFileContent(std::string path) {
 		    path, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0644));
 		state int64_t fileSize = wait(file->size());
 
-		if (fileSize > 100 * 1024 * 1024) { // Max 100MB
-			TraceEvent(SevWarn, "MockS3PersistenceFileTooLarge").detail("Path", path).detail("Size", fileSize);
-			return std::string();
-		}
-
 		state std::string content;
 		content.resize(fileSize);
 		int bytesRead = wait(file->read((uint8_t*)content.data(), fileSize, 0));
