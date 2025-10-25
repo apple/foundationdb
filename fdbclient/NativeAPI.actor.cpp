@@ -172,6 +172,7 @@ Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const TenantIn
 	if (loc) {
 		// Cache hit: extend expiration time if refresh knob is set
 		if (CLIENT_KNOBS->LOCATION_CACHE_ENTRY_REFRESH_TIME > 0.0 && loc->expireTime > 0.0) {
+			CODE_PROBE(true, "Location cache hit - refresh expire time");
 			loc->expireTime = now() + CLIENT_KNOBS->LOCATION_CACHE_ENTRY_REFRESH_TIME;
 		}
 		return KeyRangeLocationInfo(toPrefixRelativeRange(range->range(), tenant.prefix), loc);
@@ -207,6 +208,7 @@ bool DatabaseContext::getCachedLocations(const TenantInfo& tenant,
 		}
 		// Cache hit: extend expiration time if refresh knob is set
 		if (CLIENT_KNOBS->LOCATION_CACHE_ENTRY_REFRESH_TIME > 0.0 && r->value()->expireTime > 0.0) {
+			CODE_PROBE(true, "Location cache hit2 - refresh expire time");
 			r->value()->expireTime = now() + CLIENT_KNOBS->LOCATION_CACHE_ENTRY_REFRESH_TIME;
 		}
 		result.emplace_back(toPrefixRelativeRange(r->range() & resolvedRange, tenant.prefix), r->value());
