@@ -7,9 +7,10 @@
 #   1. Source this script:
 #      source fdbclient/tests/mocks3_fixture.sh
 #
-#   2. Start the server (optionally specify build directory):
-#      start_mocks3 [/path/to/build_output]
-#      # If no path provided, searches for build_output automatically
+#   2. Start the server (optionally specify build directory and persistence directory):
+#      start_mocks3 [/path/to/build_output] [/path/to/persistence/dir]
+#      # If build path not provided, searches for build_output automatically
+#      # If persistence dir not provided, defaults to "simfdb/mocks3"
 #
 #   3. Get the blobstore URL:
 #      URL=$(get_mocks3_url)
@@ -25,7 +26,7 @@
 #
 # Example standalone usage:
 #   $ source fdbclient/tests/mocks3_fixture.sh
-#   $ start_mocks3 ~/build_output
+#   $ start_mocks3 ~/build_output /tmp/test_scratch/mocks3_data
 #   Starting MockS3Server on 127.0.0.1:8080 (attempt 1/10)
 #   MockS3Server ready on port 8080
 #   $ URL=$(get_mocks3_url)
@@ -44,6 +45,7 @@ MOCKS3_LOG_FILE=""
 
 start_mocks3() {
     local build_dir_param="${1:-}"
+    local persistence_dir_param="${2:-}"
     local max_attempts=10
     local attempt
 
@@ -81,11 +83,17 @@ start_mocks3() {
         # Start MockS3Server using fdbserver with the new role
         # Redirect stderr to log file to detect bind failures
         # Use >| to force overwrite even if noclobber is set
-        "$BUILD_DIR/bin/fdbserver" \
+        local cmd=("$BUILD_DIR/bin/fdbserver" \
             --role mocks3server \
             --public-address "${MOCKS3_HOST}:${MOCKS3_PORT}" \
-            --listen-address "${MOCKS3_HOST}:${MOCKS3_PORT}" \
-            2>|"$MOCKS3_LOG_FILE" &
+            --listen-address "${MOCKS3_HOST}:${MOCKS3_PORT}")
+        
+        # Add persistence directory if provided
+        if [ -n "$persistence_dir_param" ]; then
+            cmd+=(--mocks3-persistence-dir "$persistence_dir_param")
+        fi
+        
+        "${cmd[@]}" 2>|"$MOCKS3_LOG_FILE" &
         MOCKS3_PID=$!
 
         # Wait briefly for server to start or fail

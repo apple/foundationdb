@@ -22,6 +22,45 @@ function err {
   echo "$(date -Iseconds) ERROR: ${*}" >&2
 }
 
+# Check if test data should be preserved (PRESERVE_TEST_DATA=1)
+# If yes, prints preservation message and returns 0 (should skip cleanup)
+# If no, returns 1 (should continue with normal cleanup)
+# Usage in test cleanup functions:
+#   if should_preserve_test_data; then
+#     shutdown_servers_only  # Shutdown but don't delete
+#     return 0
+#   fi
+function should_preserve_test_data {
+  if [[ "${PRESERVE_TEST_DATA:-0}" == "1" ]]; then
+    echo "======================================================================"
+    echo "PRESERVING TEST DATA (PRESERVE_TEST_DATA=1):"
+    echo "  Scratch dir: ${TEST_SCRATCH_DIR:-none}"
+    if [[ -n "${TEST_SCRATCH_DIR:-}" ]] && [[ -d "${TEST_SCRATCH_DIR}/mocks3_data" ]]; then
+      echo "  MockS3 data: ${TEST_SCRATCH_DIR}/mocks3_data"
+    fi
+    echo "======================================================================"
+    return 0
+  fi
+  return 1
+}
+
+# Common cleanup handler for tests that checks preserve flag and shuts down servers
+# Returns 0 if data is being preserved (caller should return immediately)
+# Returns 1 if normal cleanup should continue
+function cleanup_with_preserve_check {
+  if should_preserve_test_data; then
+    # Shutdown servers but don't delete data
+    if type shutdown_fdb_cluster &> /dev/null; then
+      shutdown_fdb_cluster
+    fi
+    if type shutdown_mocks3 &> /dev/null; then
+      shutdown_mocks3
+    fi
+    return 0
+  fi
+  return 1
+}
+
 # Make a key for fdb.
 # $1 an index to use in the key name.
 # $2 prefix for the key
