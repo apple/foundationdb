@@ -390,30 +390,6 @@ ThreadFuture<VersionVector> DLTransaction::getVersionVector() {
 	return VersionVector(); // not implemented
 }
 
-// DLTenant
-Reference<ITransaction> DLTenant::createTransaction() {
-	ASSERT(api->tenantCreateTransaction != nullptr);
-
-	FdbCApi::FDBTransaction* tr;
-	api->tenantCreateTransaction(tenant, &tr);
-	return Reference<ITransaction>(new DLTransaction(api, tr));
-}
-
-ThreadFuture<int64_t> DLTenant::getId() {
-	if (!api->tenantGetId) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->tenantGetId(tenant);
-
-	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		int64_t res = 0;
-		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
-		ASSERT(!error);
-		return res;
-	});
-}
-
 // DLDatabase
 DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
 	addref();
@@ -431,16 +407,6 @@ DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase
 
 ThreadFuture<Void> DLDatabase::onReady() {
 	return ready;
-}
-
-Reference<ITenant> DLDatabase::openTenant(TenantNameRef tenantName) {
-	if (!api->databaseOpenTenant) {
-		throw unsupported_operation();
-	}
-
-	FdbCApi::FDBTenant* tenant;
-	throwIfError(api->databaseOpenTenant(db, tenantName.begin(), tenantName.size(), &tenant));
-	return makeReference<DLTenant>(api, tenant);
 }
 
 Reference<ITransaction> DLDatabase::createTransaction() {
@@ -609,7 +575,6 @@ void DLApi::init() {
 	                   "fdb_create_database_from_connection_string",
 	                   headerVersion >= ApiVersion::withCreateDBFromConnString().version());
 
-	loadClientFunction(&api->databaseOpenTenant, lib, fdbCPath, "fdb_database_open_tenant", headerVersion >= 710);
 	loadClientFunction(
 	    &api->databaseCreateSharedState, lib, fdbCPath, "fdb_database_create_shared_state", headerVersion >= 710);
 	loadClientFunction(
@@ -638,14 +603,6 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_get_client_status",
 	                   headerVersion >= ApiVersion::withGetClientStatus().version());
-	loadClientFunction(
-	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
-	loadClientFunction(&api->tenantGetId,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_tenant_get_id",
-	                   headerVersion >= ApiVersion::withTenantGetId().version());
-	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
 	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy", headerVersion >= 0);
@@ -874,9 +831,8 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParame
 
 // MultiVersionTransaction
 MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db,
-                                                 Optional<Reference<MultiVersionTenant>> tenant,
                                                  UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions)
-  : db(db), tenant(tenant), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
+  : db(db), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
 	setDefaultOptions(defaultOptions);
 	updateTransaction(false);
 }
@@ -888,20 +844,11 @@ void MultiVersionTransaction::setDefaultOptions(UniqueOrderedOptionList<FDBTrans
 
 void MultiVersionTransaction::updateTransaction(bool setPersistentOptions) {
 	TransactionInfo newTr;
-	if (tenant.present()) {
-		ASSERT(tenant.get());
-		auto currentTenant = tenant.get()->tenantState->tenantVar->get();
-		if (currentTenant.value) {
-			newTr.transaction = currentTenant.value->createTransaction();
-		}
-		newTr.onChange = currentTenant.onChange;
-	} else {
-		auto currentDb = db->dbState->dbVar->get();
-		if (currentDb.value) {
-			newTr.transaction = currentDb.value->createTransaction();
-		}
-		newTr.onChange = currentDb.onChange;
+	auto currentDb = db->dbState->dbVar->get();
+	if (currentDb.value) {
+		newTr.transaction = currentDb.value->createTransaction();
 	}
+	newTr.onChange = currentDb.onChange;
 
 	// When called from the constructor or from reset(), all persistent options are database options and therefore
 	// already set on newTr.transaction if it got created successfully. If newTr.transaction could not be created (i.e.,
@@ -1214,14 +1161,6 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 	}
 }
 
-Optional<TenantName> MultiVersionTransaction::getTenant() {
-	if (tenant.present()) {
-		return tenant.get()->tenantState->tenantName;
-	} else {
-		return Optional<TenantName>();
-	}
-}
-
 // Waits for the specified duration and signals the assignment variable with a timed out error
 // This will be canceled if a new timeout is set, in which case the tsav will not be signaled.
 ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double duration) {
@@ -1384,84 +1323,6 @@ void MultiVersionTransaction::debugPrint(std::string const& message) {
 	tr.transaction->debugPrint(message);
 }
 
-// MultiVersionTenant
-MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, TenantNameRef tenantName)
-  : tenantState(makeReference<TenantState>(db, tenantName)) {}
-
-MultiVersionTenant::~MultiVersionTenant() {
-	tenantState->close();
-}
-
-Reference<ITransaction> MultiVersionTenant::createTransaction() {
-	return Reference<ITransaction>(new MultiVersionTransaction(tenantState->db,
-	                                                           Reference<MultiVersionTenant>::addRef(this),
-	                                                           tenantState->db->dbState->transactionDefaultOptions));
-}
-
-template <class T, class... Args>
-ThreadFuture<T> MultiVersionTenant::executeOperation(ThreadFuture<T> (ITenant::*func)(Args...), Args&&... args) {
-	auto tenantDb = tenantState->tenantVar->get();
-	if (tenantDb.value) {
-		auto f = (tenantDb.value.getPtr()->*func)(std::forward<Args>(args)...);
-		return abortableFuture(f, tenantDb.onChange);
-	}
-
-	// If database initialization failed, return the initialization error
-	auto dbError = tenantState->db->dbState->getInitializationError();
-	if (dbError.isError()) {
-		return ThreadFuture<T>(dbError.getError());
-	}
-
-	// Wait for the database to be initialized
-	return abortableFuture(ThreadFuture<T>(Never()), tenantDb.onChange);
-}
-
-ThreadFuture<int64_t> MultiVersionTenant::getId() {
-	return executeOperation(&ITenant::getId);
-}
-
-MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db, TenantNameRef tenantName)
-  : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db),
-    closed(false) {
-	updateTenant();
-}
-
-// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
-// to open transactions via an AsyncVar.
-void MultiVersionTenant::TenantState::updateTenant() {
-	Reference<ITenant> tenant;
-	auto currentDb = db->dbState->dbVar->get();
-	if (currentDb.value) {
-		tenant = currentDb.value->openTenant(tenantName);
-	} else {
-		tenant = Reference<ITenant>(nullptr);
-	}
-
-	tenantVar->set(tenant, /* triggerIfSame */ !tenant.isValid());
-
-	Reference<TenantState> self = Reference<TenantState>::addRef(this);
-
-	MutexHolder holder(tenantLock);
-	if (closed) {
-		return;
-	}
-
-	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [self](ErrorOr<Void> result) {
-		if (!result.isError()) {
-			self->updateTenant();
-		}
-		return result;
-	});
-}
-
-void MultiVersionTenant::TenantState::close() {
-	MutexHolder holder(tenantLock);
-	closed = true;
-	if (tenantUpdater.isValid()) {
-		tenantUpdater.cancel();
-	}
-}
-
 // MultiVersionDatabase
 MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
                                            int threadIdx,
@@ -1518,13 +1379,8 @@ Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Refer
 	    MultiVersionApi::api, 0, ClusterConnectionRecord::fromConnectionString(""), db, db, false));
 }
 
-Reference<ITenant> MultiVersionDatabase::openTenant(TenantNameRef tenantName) {
-	return makeReference<MultiVersionTenant>(Reference<MultiVersionDatabase>::addRef(this), tenantName);
-}
-
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
 	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this),
-	                                                           Optional<Reference<MultiVersionTenant>>(),
 	                                                           dbState->transactionDefaultOptions));
 }
 

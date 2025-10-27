@@ -62,7 +62,6 @@ struct CommitProxyInterface {
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
-	PublicRequestStream<struct GetTenantIdRequest> getTenantId;
 	RequestStream<struct SetThrottledShardRequest> setThrottledShard;
 
 	UID id() const { return commit.getEndpoint().token; }
@@ -92,7 +91,6 @@ struct CommitProxyInterface {
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
 			expireIdempotencyId =
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
-			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 			setThrottledShard =
 			    RequestStream<struct SetThrottledShardRequest>(commit.getEndpoint().getAdjustedEndpoint(13));
 		}
@@ -112,7 +110,6 @@ struct CommitProxyInterface {
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
 		streams.push_back(expireIdempotencyId.getReceiver());
-		streams.push_back(getTenantId.getReceiver());
 		streams.push_back(setThrottledShard.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
@@ -130,9 +127,7 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
-	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
-	TenantMode tenantMode;
 	ClusterType clusterType = ClusterType::STANDALONE;
 
 	ClientDBInfo() {}
@@ -151,8 +146,6 @@ struct ClientDBInfo {
 		           id,
 		           forward,
 		           history,
-		           tenantMode,
-		           encryptKeyProxy,
 		           clusterId,
 		           clusterType);
 	}
@@ -163,21 +156,22 @@ struct ClientDBInfo {
 extern template class ReplyPromise<struct ClientDBInfo>;
 extern template class ReplyPromise<class CachedSerialization<struct ClientDBInfo>>;
 
+// TODO(gglass): is this needed in a world without multi-tenant?
 struct ExpireIdempotencyIdRequest {
 	constexpr static FileIdentifier file_identifier = 1900933;
 	Version commitVersion = invalidVersion;
 	uint8_t batchIndexHighByte = 0;
-	TenantInfo tenant;
 
 	ExpireIdempotencyIdRequest() {}
-	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte, TenantInfo tenant)
-	  : commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte), tenant(tenant) {}
+	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte)
+		: commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte) {}
 
-	bool verify() const { return tenant.isAuthorized(); }
+	// TODO(gglass): remove if unneded.  Used to have tenant logic.
+	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, commitVersion, batchIndexHighByte, tenant);
+		serializer(ar, commitVersion, batchIndexHighByte);
 	}
 };
 
@@ -220,12 +214,8 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<TagSet> tagSet;
 	IdempotencyIdRef idempotencyId;
 
-	TenantInfo tenantInfo;
-
 	CommitTransactionRequest() : CommitTransactionRequest(SpanContext()) {}
 	CommitTransactionRequest(SpanContext const& context) : spanContext(context), flags(0) {}
-
-	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -237,7 +227,6 @@ struct CommitTransactionRequest : TimedRequest {
 		           commitCostEstimation,
 		           tagSet,
 		           spanContext,
-		           tenantInfo,
 		           idempotencyId,
 		           arena);
 	}
@@ -371,6 +360,8 @@ struct GetReadVersionRequest : TimedRequest {
 	}
 };
 
+// TODO(gglass): remove this for real
+#if 0
 struct GetTenantIdReply {
 	constexpr static FileIdentifier file_identifier = 11441284;
 	int64_t tenantId = TenantInfo::INVALID_TENANT;
@@ -468,6 +459,8 @@ struct GetKeyServerLocationsRequest {
 		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, minTenantVersion, arena);
 	}
 };
+
+#endif
 
 struct SWIFT_CXX_IMPORT_OWNED GetRawCommittedVersionReply {
 	constexpr static FileIdentifier file_identifier = 1314732;

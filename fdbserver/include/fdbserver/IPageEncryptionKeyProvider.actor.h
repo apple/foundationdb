@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+// TODO(gglass): confirm if this is necessary.  For now it looks like it's not.  Delete for real, or preserve needed
+// (non-tenant) bits.
+#if 0
+
 #include "fdbclient/Knobs.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/TenantInfo.h"
@@ -388,4 +392,6 @@ private:
 };
 
 #include "flow/unactorcompiler.h"
+#endif
+
 #endif

@@ -58,7 +58,6 @@ public:
 	                                 // mostly wrong (e.g. dumping the database after a test)
 	double FUTURE_VERSION_RETRY_DELAY;
 	double GRV_ERROR_RETRY_DELAY;
-	double UNKNOWN_TENANT_RETRY_DELAY;
 	int REPLY_BYTE_LIMIT;
 	double DEFAULT_BACKOFF;
 	double DEFAULT_MAX_BACKOFF;
@@ -332,7 +331,8 @@ public:
 	double CHANGE_QUORUM_BAD_STATE_RETRY_DELAY;
 
 	// Tenants and Metacluster
-	// TODO(gglass): delete this stuff
+	// TODO(gglass): delete this stuff for real.
+#if 0	
 	int MAX_TENANTS_PER_CLUSTER;
 	int TENANT_TOMBSTONE_CLEANUP_INTERVAL;
 	int MAX_DATA_CLUSTERS;
@@ -365,6 +365,7 @@ public:
 	bool ENABLE_ACCUMULATIVE_CHECKSUM;
 	// Enable to logging verbose trace events related to the accumulative checksum
 	bool ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING;
+#endif	
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

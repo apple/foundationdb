@@ -67,7 +67,6 @@ struct WorkloadRequest {
 	int64_t sharedRandomNumber;
 	bool useDatabase;
 	bool runFailureWorkloads = true;
-	Optional<TenantNameRef> defaultTenant;
 
 	// The vector of option lists are to construct compound workloads.  If there
 	//  is only one workload to be run...pass just one list of options!
@@ -101,7 +100,6 @@ struct WorkloadRequest {
 		           clientId,
 		           clientCount,
 		           reply,
-		           defaultTenant,
 		           runFailureWorkloads,
 		           disabledFailureInjectionWorkloads,
 		           rangesToCheck,
@@ -144,8 +142,6 @@ ACTOR Future<Void> runTests(
     StringRef startingConfiguration = StringRef(),
     LocalityData locality = LocalityData(),
     UnitTestParameters testOptions = UnitTestParameters(),
-    Optional<TenantName> defaultTenant = Optional<TenantName>(),
-    Standalone<VectorRef<TenantNameRef>> tenantsToCreate = Standalone<VectorRef<TenantNameRef>>(),
     bool restartingTest = false);
 
 #include "flow/unactorcompiler.h"

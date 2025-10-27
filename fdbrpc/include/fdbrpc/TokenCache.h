@@ -20,6 +20,10 @@
 
 #ifndef TOKENCACHE_H_
 #define TOKENCACHE_H_
+
+// TODO(gglass): is this stuff needed?  If so keep it.  If not delete it for real.
+
+#if 0
 #include "fdbrpc/TenantName.h"
 #include "fdbrpc/TokenSpec.h"
 #include "flow/Arena.h"
@@ -35,4 +39,5 @@ public:
 	bool validate(authz::TenantId tenant, StringRef token);
 };
 
+#endif
 #endif // TOKENCACHE_H_

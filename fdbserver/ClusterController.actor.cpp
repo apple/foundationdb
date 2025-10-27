@@ -38,7 +38,6 @@
 #include "flow/ActorCollection.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
@@ -70,8 +69,6 @@
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
-
-#include "metacluster/MetaclusterMetrics.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -262,10 +259,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
 			dbInfo.client.encryptKeyProxy = db->serverInfo->get().client.encryptKeyProxy;
-			dbInfo.client.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
 			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 			dbInfo.client.clusterType = db->clusterType;
-			dbInfo.client.metaclusterName = db->metaclusterName;
 
 			TraceEvent("CCWDB", cluster->id)
 			    .detail("NewMaster", dbInfo.master.id().toString())
@@ -969,10 +964,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	// Construct the client information
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies ||
-	    db->clientInfo->get().tenantMode != db->config.tenantMode ||
 	    db->clientInfo->get().clusterId != db->serverInfo->get().client.clusterId ||
-	    db->clientInfo->get().clusterType != db->clusterType ||
-	    db->clientInfo->get().metaclusterName != db->metaclusterName) {
+	    db->clientInfo->get().clusterType != db->clusterType) {
 		TraceEvent("PublishNewClientInfo", self->id)
 		    .detail("Master", dbInfo.master.id())
 		    .detail("GrvProxies", db->clientInfo->get().grvProxies)
@@ -980,14 +973,10 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		    .detail("CommitProxies", db->clientInfo->get().commitProxies)
 		    .detail("GlobalConfigHistorySize", db->clientInfo->get().history.size())
 		    .detail("ReqCPs", req.commitProxies)
-		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
-		    .detail("ReqTenantMode", db->config.tenantMode.toString())
 		    .detail("ClusterId", db->serverInfo->get().client.clusterId)
 		    .detail("ClientClusterId", db->clientInfo->get().clusterId)
 		    .detail("ClusterType", db->clientInfo->get().clusterType)
-		    .detail("ReqClusterType", db->clusterType)
-		    .detail("MetaclusterName", db->clientInfo->get().metaclusterName)
-		    .detail("ReqMetaclusterName", db->metaclusterName);
+		    .detail("ReqClusterType", db->clusterType);
 		isChanged = true;
 		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
@@ -996,10 +985,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.history = db->clientInfo->get().history;
-		clientInfo.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
 		clientInfo.clusterId = db->serverInfo->get().client.clusterId;
 		clientInfo.clusterType = db->clusterType;
-		clientInfo.metaclusterName = db->metaclusterName;
 		db->clientInfo->set(clientInfo);
 		dbInfo.client = db->clientInfo->get();
 	}
@@ -1435,8 +1422,6 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                  self->dcLogServerVersionDifference,
 			                                                                  self->dcStorageServerVersionDifference,
 			                                                                  configBroadcaster,
-			                                                                  self->db.metaclusterRegistration,
-			                                                                  self->db.metaclusterMetrics,
 			                                                                  self->excludedDegradedServers)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
@@ -2677,30 +2662,6 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
-	state Future<Void> updaterDelay = Void();
-	loop {
-		choose {
-			when(wait(self->db.serverInfo->onChange())) {
-				updaterDelay = Void();
-			}
-			when(wait(self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT ? updaterDelay : Never())) {
-				try {
-					wait(store(self->db.metaclusterMetrics,
-					           metacluster::MetaclusterMetrics::getMetaclusterMetrics(self->cx)));
-				} catch (Error& e) {
-					// Ignore errors about the cluster changing type
-					if (e.code() != error_code_invalid_metacluster_operation) {
-						throw;
-					}
-				}
-
-				updaterDelay = delay(60.0);
-			}
-		}
-	}
-}
-
 // Update the DBInfo state with this processes cluster ID. If this process does
 // not have a cluster ID and one does not exist in the database, generate one.
 ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
@@ -2800,7 +2761,6 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorRatekeeper(&self));
 
 	self.addActor.send(monitorConsistencyScan(&self));
-	self.addActor.send(metaclusterMetricsUpdater(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(updateClusterId(&self));
 	self.addActor.send(handleGetEncryptionAtRestMode(&self, interf));

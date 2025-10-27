@@ -345,6 +345,9 @@ public:
 	int DD_STORAGE_WIGGLE_STUCK_THRESHOLD; // How many times bestTeamStuck accumulate will pause storage wiggle
 	int64_t
 	    DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC; // Minimal age of a correct-configured server before it's chosen to be wiggled
+
+	// TODO(gglass): delete this for real
+#if 0	
 	bool DD_TENANT_AWARENESS_ENABLED;
 	bool STORAGE_QUOTA_ENABLED; // Whether storage quota enforcement for tenant groups and all the relevant storage
 	                            // usage / quota monitors are enabled.
@@ -357,6 +360,8 @@ public:
 	                                               // storage bytes used by a tenant group
 	int CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL; // How often the commit proxies send requests to the data
 	                                                  // distributor to fetch the list of tenants over storage quota
+#dnfi	
+
 	bool ENABLE_STORAGE_QUEUE_AWARE_TEAM_SELECTION; // Experimental! Enable to avoid moving data to a team which has a
 	                                                // long storage queue
 	double DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE; // p% amount teams which have longer queues (team queue size
@@ -370,6 +375,7 @@ public:
 	int64_t REBALANCE_STORAGE_QUEUE_SHARD_PER_KSEC_MIN;
 	bool DD_ENABLE_REBALANCE_STORAGE_QUEUE_WITH_LIGHT_WRITE_SHARD; // Enable to allow storage queue rebalancer to move
 	                                                               // light-traffic shards out of the overloading server
+
 	double DD_WAIT_TSS_DATA_MOVE_DELAY;
 	bool DD_VALIDATE_SERVER_TEAM_COUNT_AFTER_BUILD_TEAM; // Enable to validate server team count per server after build
 	                                                     // team
@@ -684,7 +690,12 @@ public:
 	double TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET;
 	int START_TRANSACTION_MAX_QUEUE_SIZE;
 	int KEY_LOCATION_MAX_QUEUE_SIZE;
+
+	// TODO(gglass): delete for real
+#if 0	
 	int TENANT_ID_REQUEST_MAX_QUEUE_SIZE;
+#endif	
+
 	double COMMIT_PROXY_LIVENESS_TIMEOUT;
 	double COMMIT_PROXY_MAX_LIVENESS_TIMEOUT;
 

@@ -147,7 +147,10 @@ public:
 
 	void getSplitPoints(SplitRangeRequest const& req) override;
 
+	// TODO(gglass): is this needed for a non-tenant world?  Delete for real
+#if 0	
 	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override;
+#endif
 
 	void getStorageMetrics(const GetStorageMetricsRequest& req) override;
 
@@ -325,16 +328,14 @@ public:
 	                                                          const StorageMetrics& estimated,
 	                                                          const Optional<int>& minSplitBytes);
 
-	Future<KeyRangeLocationInfo> getKeyLocation(TenantInfo tenant,
-	                                            Key key,
+	Future<KeyRangeLocationInfo> getKeyLocation(Key key,
 	                                            SpanContext spanContext,
 	                                            Optional<UID> debugID,
 	                                            UseProvisionalProxies useProvisionalProxies,
 	                                            Reverse isBackward,
 	                                            Version version) override;
 
-	Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(TenantInfo tenant,
-	                                                               KeyRange keys,
+	Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(KeyRange keys,
 	                                                               int limit,
 	                                                               Reverse reverse,
 	                                                               SpanContext spanContext,

@@ -30,7 +30,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/Tenant.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -336,9 +335,6 @@ extern const KeyRef triggerDDTeamInfoPrintKey;
 
 // Encryption data at-rest config key
 extern const KeyRef encryptionAtRestModeConfKey;
-
-// Tenant mode config key
-extern const KeyRef tenantModeConfKey;
 
 //	The differences between excluded and failed can be found in "command-line-interface.rst"
 //	and in the help message of the fdbcli command "exclude".

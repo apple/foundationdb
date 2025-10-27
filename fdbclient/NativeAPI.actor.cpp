@@ -155,43 +155,29 @@ ACTOR Future<Void> refreshTransaction(DatabaseContext* self, Transaction* tr) {
 // FIXME: get a prototype in a header file, ugh.
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 
-Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const TenantInfo& tenant,
-                                                                  const KeyRef& key,
+Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const KeyRef& key,
                                                                   Reverse isBackward) {
 	Arena arena;
-	KeyRef resolvedKey = key;
-
-	if (tenant.hasTenant()) {
-		CODE_PROBE(true, "Database context get cached location with tenant");
-		resolvedKey = resolvedKey.withPrefix(tenant.prefix.get(), arena);
-	}
 
 	auto range =
-	    isBackward ? locationCache.rangeContainingKeyBefore(resolvedKey) : locationCache.rangeContaining(resolvedKey);
+	    isBackward ? locationCache.rangeContainingKeyBefore(key) : locationCache.rangeContaining(key);
 	if (range->value()) {
-		return KeyRangeLocationInfo(toPrefixRelativeRange(range->range(), tenant.prefix), range->value());
+		return KeyRangeLocationInfo(toPrefixRelativeRange(range->range()), range->value());
 	}
 
 	return Optional<KeyRangeLocationInfo>();
 }
 
-bool DatabaseContext::getCachedLocations(const TenantInfo& tenant,
-                                         const KeyRangeRef& range,
+bool DatabaseContext::getCachedLocations(const KeyRangeRef& range,
                                          std::vector<KeyRangeLocationInfo>& result,
                                          int limit,
                                          Reverse reverse) {
 	result.clear();
 
 	Arena arena;
-	KeyRangeRef resolvedRange = range;
 
-	if (tenant.hasTenant()) {
-		CODE_PROBE(true, "Database context get cached locations with tenant");
-		resolvedRange = resolvedRange.withPrefix(tenant.prefix.get(), arena);
-	}
-
-	auto begin = locationCache.rangeContaining(resolvedRange.begin);
-	auto end = locationCache.rangeContainingKeyBefore(resolvedRange.end);
+	auto begin = locationCache.rangeContaining(range.begin);
+	auto end = locationCache.rangeContainingKeyBefore(range.end);
 
 	loop {
 		auto r = reverse ? end : begin;
@@ -200,7 +186,7 @@ bool DatabaseContext::getCachedLocations(const TenantInfo& tenant,
 			result.clear();
 			return false;
 		}
-		result.emplace_back(toPrefixRelativeRange(r->range() & resolvedRange, tenant.prefix), r->value());
+		result.emplace_back(toPrefixRelativeRange(r->range() & range), r->value());
 		if (result.size() == limit || begin == end) {
 			break;
 		}

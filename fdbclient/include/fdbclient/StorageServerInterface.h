@@ -33,11 +33,9 @@
 #include "fdbrpc/LoadBalance.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
-#include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
-#include "fdbclient/Tenant.h"
 #include "fdbclient/Tracing.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/VersionVector.h"
@@ -285,7 +283,6 @@ struct GetValueReply : public LoadBalancedReply {
 struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
 	SpanContext spanContext;
-	TenantInfo tenantInfo;
 	Key key;
 	Version version;
 	Optional<TagSet> tags;
@@ -296,21 +293,18 @@ struct GetValueRequest : TimedRequest {
 	                                      // serve the given key
 	GetValueRequest() {}
 
-	bool verify() const { return tenantInfo.isAuthorized(); }
-
 	GetValueRequest(SpanContext spanContext,
-	                const TenantInfo& tenantInfo,
 	                const Key& key,
 	                Version ver,
 	                Optional<TagSet> tags,
 	                Optional<ReadOptions> options,
 	                VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), options(options),
+	  : spanContext(spanContext), key(key), version(ver), tags(tags), options(options),
 	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, tags, reply, spanContext, tenantInfo, options, ssLatestCommitVersions);
+		serializer(ar, key, version, tags, reply, spanContext, options, ssLatestCommitVersions);
 	}
 };
 
@@ -331,7 +325,6 @@ struct WatchValueReply {
 struct WatchValueRequest {
 	constexpr static FileIdentifier file_identifier = 14747733;
 	SpanContext spanContext;
-	TenantInfo tenantInfo;
 	Key key;
 	Optional<Value> value;
 	Version version;
@@ -342,20 +335,17 @@ struct WatchValueRequest {
 	WatchValueRequest() {}
 
 	WatchValueRequest(SpanContext spanContext,
-	                  TenantInfo tenantInfo,
 	                  const Key& key,
 	                  Optional<Value> value,
 	                  Version ver,
 	                  Optional<TagSet> tags,
 	                  Optional<UID> debugID)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), value(value), version(ver), tags(tags),
+	  : spanContext(spanContext), key(key), value(value), version(ver), tags(tags),
 	    debugID(debugID) {}
-
-	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, value, version, tags, debugID, reply, spanContext, tenantInfo);
+		serializer(ar, key, value, version, tags, debugID, reply, spanContext);
 	}
 };
 
@@ -379,7 +369,6 @@ struct GetKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanContext spanContext;
 	Arena arena;
-	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	// This is a dummy field there has never been used.
 	// TODO: Get rid of this by constexpr or other template magic in getRange
@@ -396,8 +385,6 @@ struct GetKeyValuesRequest : TimedRequest {
 
 	GetKeyValuesRequest() {}
 
-	bool verify() const { return tenantInfo.isAuthorized(); }
-
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -409,7 +396,6 @@ struct GetKeyValuesRequest : TimedRequest {
 		           tags,
 		           reply,
 		           spanContext,
-		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
 		           taskID,
@@ -439,7 +425,6 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795747;
 	SpanContext spanContext;
 	Arena arena;
-	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	KeyRef mapper;
 	Version version; // or latestVersion
@@ -454,8 +439,6 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 
 	GetMappedKeyValuesRequest() {}
 
-	bool verify() const { return tenantInfo.isAuthorized(); }
-
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -468,7 +451,6 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           tags,
 		           reply,
 		           spanContext,
-		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
 		           taskID,
@@ -507,7 +489,6 @@ struct GetKeyValuesStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanContext spanContext;
 	Arena arena;
-	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	Version version; // or latestVersion
 	int limit, limitBytes;
@@ -520,8 +501,6 @@ struct GetKeyValuesStreamRequest {
 
 	GetKeyValuesStreamRequest() {}
 
-	bool verify() const { return tenantInfo.isAuthorized(); }
-
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -533,7 +512,6 @@ struct GetKeyValuesStreamRequest {
 		           tags,
 		           reply,
 		           spanContext,
-		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
 		           arena);
@@ -558,7 +536,6 @@ struct GetKeyRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 10457870;
 	SpanContext spanContext;
 	Arena arena;
-	TenantInfo tenantInfo;
 	KeySelectorRef sel;
 	Version version; // or latestVersion
 	Optional<TagSet> tags;
@@ -570,21 +547,18 @@ struct GetKeyRequest : TimedRequest {
 
 	GetKeyRequest() {}
 
-	bool verify() const { return tenantInfo.isAuthorized(); }
-
 	GetKeyRequest(SpanContext spanContext,
-	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
 	              Optional<TagSet> tags,
 	              Optional<ReadOptions> options,
 	              VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), tags(tags), options(options),
+	  : spanContext(spanContext), sel(sel), version(version), tags(tags), options(options),
 	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, tags, reply, spanContext, tenantInfo, options, ssLatestCommitVersions, arena);
+		serializer(ar, sel, version, tags, reply, spanContext, options, ssLatestCommitVersions, arena);
 	}
 };
 
@@ -718,27 +692,20 @@ struct WaitMetricsRequest {
 	// Send a reversed range for min, max to receive an immediate report
 	constexpr static FileIdentifier file_identifier = 1795961;
 	Arena arena;
-	// Setting the tenantInfo makes the request tenant-aware.
-	TenantInfo tenantInfo;
-	// Set `minVersion` to a version where the tenant info was read. Not needed for non-tenant-aware request.
-	Version minVersion = 0;
 	KeyRangeRef keys;
 	StorageMetrics min, max;
 	ReplyPromise<StorageMetrics> reply;
 
-	bool verify() const { return tenantInfo.isAuthorized(); }
-
 	WaitMetricsRequest() {}
-	WaitMetricsRequest(TenantInfo tenantInfo,
-	                   Version minVersion,
+	WaitMetricsRequest(           
 	                   KeyRangeRef const& keys,
 	                   StorageMetrics const& min,
 	                   StorageMetrics const& max)
-	  : tenantInfo(tenantInfo), minVersion(minVersion), keys(arena, keys), min(min), max(max) {}
+		: keys(arena, keys), min(min), max(max) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, min, max, reply, tenantInfo, minVersion, arena);
+		serializer(ar, keys, min, max, reply, arena);
 	}
 };
 
@@ -863,18 +830,17 @@ struct SplitRangeReply {
 struct SplitRangeRequest {
 	constexpr static FileIdentifier file_identifier = 10725174;
 	Arena arena;
-	TenantInfo tenantInfo;
 	KeyRangeRef keys;
 	int64_t chunkSize;
 	ReplyPromise<SplitRangeReply> reply;
 
 	SplitRangeRequest() {}
-	SplitRangeRequest(TenantInfo tenantInfo, KeyRangeRef const& keys, int64_t chunkSize)
-	  : tenantInfo(tenantInfo), keys(arena, keys), chunkSize(chunkSize) {}
+	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize)
+	  : keys(arena, keys), chunkSize(chunkSize) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, chunkSize, reply, tenantInfo, arena);
+		serializer(ar, keys, chunkSize, reply, arena);
 	}
 };
 

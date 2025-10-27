@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+// TODO(gglass): is the code in this file needed?  If so EXPLAIN WHY.  If not, delete it for real.
+
+#if 0
 #include "fdbrpc/TokenSign.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
@@ -712,3 +715,5 @@ TEST_CASE("/fdbrpc/TokenSign/bench") {
 	}
 	return Void();
 }
+
+#endif

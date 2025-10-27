@@ -100,8 +100,7 @@ public:
 	                               IsInternal internal = IsInternal::True,
 	                               LocalityData const& clientLocality = LocalityData());
 
-	static Database createSimulatedExtraDatabase(std::string connectionString,
-	                                             Optional<TenantName> defaultTenant = Optional<TenantName>());
+	static Database createSimulatedExtraDatabase(std::string connectionString);
 
 	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator=(Database const& rhs) { db = rhs.db; }
@@ -247,35 +246,6 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
-class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, NonCopyable {
-public:
-	Tenant(Database cx, TenantName name);
-	explicit Tenant(int64_t id);
-	Tenant(Future<int64_t> id, Optional<TenantName> name);
-
-	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
-
-	Future<Void> ready() const { return success(idFuture); }
-	int64_t id() const;
-	Future<int64_t> getIdFuture() const;
-	KeyRef prefix() const;
-	std::string description() const;
-
-	Optional<TenantName> name;
-
-private:
-	mutable int64_t bigEndianId = -1;
-	Future<int64_t> idFuture;
-};
-
-template <>
-struct Traceable<Tenant> : std::true_type {
-	static std::string toString(const Tenant& tenant) { return printable(tenant.description()); }
-};
-
-FDB_BOOLEAN_PARAM(AllowInvalidTenantID);
-FDB_BOOLEAN_PARAM(ResolveDefaultTenant);
-
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
 	Future<Version> readVersionFuture;
@@ -295,13 +265,6 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	double proxyTagThrottledDuration = 0.0;
 
-	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
-	// when a dummy, internal transaction gets committed. The sole purpose of commitDummyTransaction() is to
-	// resolve the state of earlier transaction that returned commit_unknown_result or request_maybe_delivered.
-	// Therefore, the dummy transaction can simply reuse one conflict range of the earlier commit, if it already has
-	// been prefixed.
-	bool skipApplyTenantPrefix = false;
-
 	int numErrors = 0;
 	double startTime = 0;
 	Promise<Standalone<StringRef>> versionstampPromise;
@@ -319,11 +282,10 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
 	TransactionState(TaskPriority taskID, SpanContext spanContext)
-	  : taskID(taskID), spanContext(spanContext), tenantSet(false) {}
+		: taskID(taskID), spanContext(spanContext) {}
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
-	                 Optional<Reference<Tenant>> tenant,
 	                 TaskPriority taskID,
 	                 SpanContext spanContext,
 	                 Reference<TransactionLogInfo> trLogInfo);
@@ -335,25 +297,15 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 		return readVersionFuture.get();
 	}
 
-	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidTenantId = AllowInvalidTenantID::False);
-
-	Optional<Reference<Tenant>> const& tenant();
-	bool hasTenant(ResolveDefaultTenant ResolveDefaultTenant = ResolveDefaultTenant::True);
-	int64_t tenantId() const { return tenant_.present() ? tenant_.get()->id() : TenantInfo::INVALID_TENANT; }
-
 	void addClearCost();
 
 	Future<Void> startTransaction(uint32_t readVersionFlags = 0);
 	Future<Version> getReadVersion(uint32_t flags);
-
-private:
-	Optional<Reference<Tenant>> tenant_;
-	bool tenantSet;
 };
 
 class Transaction : NonCopyable {
 public:
-	explicit Transaction(Database const& cx, Optional<Reference<Tenant>> const& tenant = Optional<Reference<Tenant>>());
+	explicit Transaction(Database const& cx);
 	~Transaction();
 
 	void setVersion(Version v);
@@ -540,8 +492,6 @@ public:
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
 
-	Optional<Reference<Tenant>> getTenant() { return trState->tenant(); }
-
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
 	TagSet const& getTags() const;
@@ -674,8 +624,7 @@ int64_t getMaxClearKeySize(KeyRef const& key);
 struct KeyRangeLocationInfo;
 // Return the aggregated StorageMetrics of range keys to the caller. The locations tell which interface should
 // serve the request. The final result is within (min-permittedError/2, max + permittedError/2) if valid.
-ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo tenantInfo,
-                                                                      Version version,
+ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(Version version,
                                                                       KeyRange keys,
                                                                       std::vector<KeyRangeLocationInfo> locations,
                                                                       StorageMetrics min,
@@ -697,7 +646,6 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
     Transaction* tr);
 }
 ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
-                                                           TenantInfo tenant,
                                                            Key key,
                                                            SpanContext spanContext,
                                                            Optional<UID> debugID,

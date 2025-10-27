@@ -21,7 +21,6 @@
 #pragma once
 
 #include "fdbclient/SystemData.h"
-#include "fdbclient/Tenant.h"
 #include "fdbrpc/ReplicationTypes.h"
 #include "fdbserver/DataDistributionTeam.h"
 #include "fdbserver/DDTxnProcessor.h"
@@ -29,7 +28,6 @@
 #include "flow/FastRef.h"
 
 class TCTeamInfo;
-class TCTenantInfo;
 class TCMachineInfo;
 class TCMachineTeamInfo;
 class DDTeamCollection;
@@ -186,7 +184,6 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	friend class TCTeamInfoImpl;
 	std::vector<Reference<TCServerInfo>> servers;
 	std::vector<UID> serverIDs;
-	Optional<Reference<TCTenantInfo>> tenant;
 	bool healthy;
 	bool wrongConfiguration; // True if any of the servers in the team have the wrong configuration
 	int priority;
@@ -198,9 +195,7 @@ public:
 	Reference<TCMachineTeamInfo> machineTeam;
 	Future<Void> tracker;
 
-	explicit TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers, Optional<Reference<TCTenantInfo>> tenant);
-
-	Optional<Reference<TCTenantInfo>>& getTenant() { return tenant; }
+	explicit TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers);
 
 	static std::string serversToString(std::vector<UID> servers);
 
@@ -275,24 +270,4 @@ private:
 	int64_t getLoadAverage() const;
 
 	bool allServersHaveHealthyAvailableSpace() const;
-};
-
-class TCTenantInfo : public ReferenceCounted<TCTenantInfo> {
-private:
-	TenantInfo m_tenantInfo;
-	std::vector<Reference<TCTeamInfo>> m_tenantTeams;
-	int64_t m_cacheGeneration;
-
-public:
-	TCTenantInfo() {}
-	TCTenantInfo(TenantInfo tinfo) : m_tenantInfo(tinfo) {}
-	std::vector<Reference<TCTeamInfo>>& teams() { return m_tenantTeams; }
-
-	std::string prefixDesc() const { return m_tenantInfo.prefix.get().printable(); }
-	int64_t id() const { return m_tenantInfo.tenantId; }
-
-	void addTeam(TCTeamInfo team);
-	void removeTeam(TCTeamInfo team);
-	void updateCacheGeneration(int64_t generation) { m_cacheGeneration = generation; }
-	int64_t cacheGeneration() const { return m_cacheGeneration; }
 };

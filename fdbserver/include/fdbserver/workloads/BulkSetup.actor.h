@@ -62,10 +62,9 @@ ACTOR template <class T>
 Future<bool> checkRangeSimpleValueSize(Database cx,
                                        T* workload,
                                        uint64_t begin,
-                                       uint64_t end,
-                                       Optional<Reference<Tenant>> tenant) {
+                                       uint64_t end) {
 	loop {
-		state Transaction tr(cx, tenant);
+		state Transaction tr(cx);
 		setAuthToken(*workload, tr);
 		try {
 			state Standalone<KeyValueRef> firstKV = (*workload)(begin);
@@ -86,15 +85,10 @@ ACTOR template <class T>
 Future<uint64_t> setupRange(Database cx,
                             T* workload,
                             uint64_t begin,
-                            uint64_t end,
-                            std::vector<Reference<Tenant>> tenants) {
+                            uint64_t end) {
 	state uint64_t bytesInserted = 0;
 	loop {
-		Optional<Reference<Tenant>> tenant;
-		if (tenants.size() > 0) {
-			tenant = deterministicRandom()->randomChoice(tenants);
-		}
-		state Transaction tr(cx, tenant);
+		state Transaction tr(cx);
 		setAuthToken(*workload, tr);
 		try {
 			if (deterministicRandom()->random01() < 0.001)
@@ -145,8 +139,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
                                   std::vector<std::pair<uint64_t, uint64_t>>* jobs,
                                   double maxKeyInsertRate,
                                   int keySaveIncrement,
-                                  int actorId,
-                                  std::vector<Reference<Tenant>> tenants) {
+                                  int actorId) {
 	state double nextStart;
 	state uint64_t loadedRanges = 0;
 	state int lastStoredKeysLoaded = 0;
@@ -156,20 +149,16 @@ Future<uint64_t> setupRangeWorker(Database cx,
 		state std::pair<uint64_t, uint64_t> job = jobs->back();
 		jobs->pop_back();
 		nextStart = now() + (job.second - job.first) / maxKeyInsertRate;
-		uint64_t numBytes = wait(setupRange(cx, workload, job.first, job.second, tenants));
+		uint64_t numBytes = wait(setupRange(cx, workload, job.first, job.second));
 		if (numBytes > 0)
 			loadedRanges++;
 
-		Optional<Reference<Tenant>> tenant;
-		if (tenants.size() > 0) {
-			tenant = deterministicRandom()->randomChoice(tenants);
-		}
 		if (keySaveIncrement > 0) {
 			keysLoaded += job.second - job.first;
 			bytesStored += numBytes;
 
 			if (keysLoaded - lastStoredKeysLoaded >= keySaveIncrement || jobs->size() == 0) {
-				state Transaction tr(cx, tenant);
+				state Transaction tr(cx);
 				setAuthToken(*workload, tr);
 				try {
 					std::string countKey = format("keycount|%d|%d", workload->clientId, actorId);
@@ -247,8 +236,7 @@ Future<Void> bulkSetup(Database cx,
                        int keySaveIncrement = 0,
                        double keyCheckInterval = 0.1,
                        uint64_t startNodeIdx = 0,
-                       uint64_t endNodeIdx = 0,
-                       std::vector<Reference<Tenant>> tenants = std::vector<Reference<Tenant>>()) {
+                       uint64_t endNodeIdx = 0) {
 
 	state std::vector<std::pair<uint64_t, uint64_t>> jobs;
 	state uint64_t startNode = startNodeIdx ? startNodeIdx : (nodeCount * workload->clientId) / workload->clientCount;
@@ -260,17 +248,12 @@ Future<Void> bulkSetup(Database cx,
 	    .detail("NodeCount", nodeCount)
 	    .detail("ValuesInconsequential", valuesInconsequential)
 	    .detail("PostSetupWarming", postSetupWarming)
-	    .detail("MaxKeyInsertRate", maxKeyInsertRate)
-	    .detail("NumTenants", tenants.size());
+	    .detail("MaxKeyInsertRate", maxKeyInsertRate);
 
 	// For bulk data schemes where the value of the key is not critical to operation, check to
 	//  see if the database has already been set up.
 	if (valuesInconsequential) {
-		Optional<Reference<Tenant>> tenant;
-		if (tenants.size() > 0) {
-			tenant = deterministicRandom()->randomChoice(tenants);
-		}
-		bool present = wait(checkRangeSimpleValueSize(cx, workload, startNode, endNode, tenant));
+		bool present = wait(checkRangeSimpleValueSize(cx, workload, startNode, endNode));
 		if (present) {
 			TraceEvent("BulkSetupRangeAlreadyPresent")
 			    .detail("Begin", startNode)
@@ -333,7 +316,7 @@ Future<Void> bulkSetup(Database cx,
 		keySaveIncrement = 0;
 
 	for (int j = 0; j < BULK_SETUP_WORKERS; j++)
-		fs.push_back(setupRangeWorker(cx, workload, &jobs, maxWorkerInsertRate, keySaveIncrement, j, tenants));
+		fs.push_back(setupRangeWorker(cx, workload, &jobs, maxWorkerInsertRate, keySaveIncrement, j));
 	try {
 		wait(success(insertionTimes) && waitForAll(fs));
 	} catch (Error& e) {

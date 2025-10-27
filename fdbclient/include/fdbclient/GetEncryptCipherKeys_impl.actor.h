@@ -237,6 +237,9 @@ Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<A
 			TraceEvent(SevWarn, "GetEncryptCipherKeysRequestFailed").error(reply.error.get());
 			throw reply.error.get();
 		}
+
+		// TODO(gglass): delete for real
+#if 0		
 		// The code below is used only during simulation to test backup/restore ability to handle encryption keys
 		// not being found for deleted tenants
 		if (g_network && g_network->isSimulated() && usageType == BlobCipherMetrics::RESTORE) {
@@ -255,6 +258,8 @@ Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<A
 				}
 			}
 		}
+#endif
+
 		return reply;
 	} catch (Error& e) {
 		TraceEvent("GetEncryptCipherKeysCaughtError").error(e);

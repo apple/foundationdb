@@ -22,6 +22,9 @@
 #define FDBSERVER_KMSCONNECTORINTERFACE_H
 #pragma once
 
+// TODO(gglass): see if this is needed.  If not, delete it for real.
+#if 0
+
 #include "fdbrpc/fdbrpc.h"
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
@@ -250,5 +253,7 @@ struct KmsConnGetKMSStateReq {
 		serializer(ar, reply);
 	}
 };
+
+#endif
 
 #endif

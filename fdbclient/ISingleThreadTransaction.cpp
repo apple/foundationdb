@@ -58,8 +58,7 @@ Reference<ISingleThreadTransaction> ISingleThreadTransaction::create(Type type, 
 }
 
 Reference<ISingleThreadTransaction> ISingleThreadTransaction::create(Type type,
-                                                                     Database const& cx,
-                                                                     Reference<Tenant> const& tenant) {
+                                                                     Database const& cx) {
 	Reference<ISingleThreadTransaction> result;
 	if (type == Type::RYW) {
 		result = makeReference<ReadYourWritesTransaction>();
@@ -68,6 +67,6 @@ Reference<ISingleThreadTransaction> ISingleThreadTransaction::create(Type type,
 	} else {
 		result = makeReference<PaxosConfigTransaction>();
 	}
-	result->construct(cx, tenant);
+	result->construct(cx);
 	return result;
 }

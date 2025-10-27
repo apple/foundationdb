@@ -285,7 +285,7 @@ struct ApiWorkload : TestWorkload {
 		useExtraDB = g_network->isSimulated() && !g_simulator->extraDatabases.empty();
 		if (useExtraDB) {
 			ASSERT(g_simulator->extraDatabases.size() == 1);
-			extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
+			extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 		}
 	}
 

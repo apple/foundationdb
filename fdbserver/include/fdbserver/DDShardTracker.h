@@ -48,7 +48,6 @@ struct DataDistributionTrackerInitParams {
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	bool* trackerCancelled = nullptr;
-	Optional<Reference<TenantCache>> ddTenantCache;
 	int32_t usableRegions = -1;
 };
 
@@ -114,8 +113,6 @@ public:
 			return &tracker;
 		}
 	};
-
-	Optional<Reference<TenantCache>> ddTenantCache;
 
 	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 

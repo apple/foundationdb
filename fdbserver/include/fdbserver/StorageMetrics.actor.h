@@ -235,6 +235,7 @@ public:
 
 	virtual void getSplitPoints(SplitRangeRequest const& req) = 0;
 
+	// TODO(gglass): is this needed?
 	virtual Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) = 0;
 
 	virtual void getStorageMetrics(const GetStorageMetricsRequest& req) = 0;
@@ -255,6 +256,7 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 	state Future<Void> doPollMetrics = Void();
 	loop {
 		choose {
+			// TODO(gglass): this doesn't seem to do anything if !hasTenant().  Can we delete it?
 			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
 				if (!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) {
 					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
@@ -277,6 +279,8 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
 				self->getHotRangeMetrics(req);
 			}
+			// TODO(gglass): is this needed in general?  Should we delete the tenant-related conditions here
+			// or should we delete this interface generally?
 			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
 				if ((!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) ||
 				    (req.tenantInfo.hasTenant() &&

@@ -41,8 +41,8 @@ enum class TransactionPriorityType : int { PRIORITY_DEFAULT = 0, PRIORITY_BATCH 
 static_assert(sizeof(TransactionPriorityType) == 4, "transaction_profiling_analyzer.py assumes this field has size 4");
 
 struct Event {
-	Event(EventType t, double ts, const Optional<Standalone<StringRef>>& dc, const Optional<TenantName>& tenant)
-	  : type(t), startTs(ts), tenant(tenant) {
+	Event(EventType t, double ts, const Optional<Standalone<StringRef>>& dc)
+		: type(t), startTs(ts) {
 		if (dc.present())
 			dcId = dc.get();
 	}
@@ -50,17 +50,14 @@ struct Event {
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
-		ASSERT_WE_THINK(ar.protocolVersion().hasTenants());
-		return serializer(ar, type, startTs, dcId, tenant);
+		return serializer(ar, type, startTs, dcId);
 	}
 
 	EventType type{ EventType::UNSET };
 	double startTs{ 0 };
 	Key dcId{};
-	Optional<TenantName> tenant{};
 
 	void logEvent(std::string id, int maxFieldLength) const {}
-	void augmentTraceEvent(TraceEvent& event) const { event.detail("Tenant", tenant); }
 };
 
 struct EventGetVersion : public Event {
@@ -111,9 +108,8 @@ struct EventGetVersion_V3 : public Event {
 	                   const Optional<Standalone<StringRef>>& dcId,
 	                   double lat,
 	                   TransactionPriority priority,
-	                   Version version,
-	                   const Optional<TenantName>& tenant)
-	  : Event(EventType::GET_VERSION_LATENCY, ts, dcId, tenant), latency(lat), readVersion(version) {
+	                   Version version)
+	  : Event(EventType::GET_VERSION_LATENCY, ts, dcId), latency(lat), readVersion(version) {
 		switch (priority) {
 		// Unfortunately, the enum serialized here disagrees with the enum used elsewhere for the values used by each
 		// priority
@@ -159,9 +155,8 @@ struct EventGet : public Event {
 	         const Optional<Standalone<StringRef>>& dcId,
 	         double lat,
 	         int size,
-	         const KeyRef& in_key,
-	         const Optional<TenantName>& tenant)
-	  : Event(EventType::GET_LATENCY, ts, dcId, tenant), latency(lat), valueSize(size), key(in_key) {}
+	         const KeyRef& in_key)
+	  : Event(EventType::GET_LATENCY, ts, dcId), latency(lat), valueSize(size), key(in_key) {}
 	EventGet() {}
 
 	template <typename Ar>
@@ -194,9 +189,8 @@ struct EventGetRange : public Event {
 	              double lat,
 	              int size,
 	              const KeyRef& start_key,
-	              const KeyRef& end_key,
-	              const Optional<TenantName>& tenant)
-	  : Event(EventType::GET_RANGE_LATENCY, ts, dcId, tenant), latency(lat), rangeSize(size), startKey(start_key),
+	              const KeyRef& end_key)
+		: Event(EventType::GET_RANGE_LATENCY, ts, dcId), latency(lat), rangeSize(size), startKey(start_key),
 	    endKey(end_key) {}
 	EventGetRange() {}
 
@@ -290,9 +284,8 @@ struct EventCommit_V2 : public Event {
 	               int mut,
 	               int bytes,
 	               Version version,
-	               const CommitTransactionRequest& commit_req,
-	               const Optional<TenantName>& tenant)
-	  : Event(EventType::COMMIT_LATENCY, ts, dcId, tenant), latency(lat), numMutations(mut), commitBytes(bytes),
+	               const CommitTransactionRequest& commit_req)
+	: Event(EventType::COMMIT_LATENCY, ts, dcId), latency(lat), numMutations(mut), commitBytes(bytes),
 	    commitVersion(version), req(commit_req) {}
 	EventCommit_V2() {}
 
@@ -356,9 +349,8 @@ struct EventGetError : public Event {
 	EventGetError(double ts,
 	              const Optional<Standalone<StringRef>>& dcId,
 	              int err_code,
-	              const KeyRef& in_key,
-	              const Optional<TenantName>& tenant)
-	  : Event(EventType::ERROR_GET, ts, dcId, tenant), errCode(err_code), key(in_key) {}
+	              const KeyRef& in_key)
+	  : Event(EventType::ERROR_GET, ts, dcId), errCode(err_code), key(in_key) {}
 	EventGetError() {}
 
 	template <typename Ar>
@@ -388,9 +380,8 @@ struct EventGetRangeError : public Event {
 	                   const Optional<Standalone<StringRef>>& dcId,
 	                   int err_code,
 	                   const KeyRef& start_key,
-	                   const KeyRef& end_key,
-	                   const Optional<TenantName>& tenant)
-	  : Event(EventType::ERROR_GET_RANGE, ts, dcId, tenant), errCode(err_code), startKey(start_key), endKey(end_key) {}
+	                   const KeyRef& end_key)
+	  : Event(EventType::ERROR_GET_RANGE, ts, dcId), errCode(err_code), startKey(start_key), endKey(end_key) {}
 	EventGetRangeError() {}
 
 	template <typename Ar>
@@ -421,9 +412,8 @@ struct EventCommitError : public Event {
 	EventCommitError(double ts,
 	                 const Optional<Standalone<StringRef>>& dcId,
 	                 int err_code,
-	                 const CommitTransactionRequest& commit_req,
-	                 const Optional<TenantName>& tenant)
-	  : Event(EventType::ERROR_COMMIT, ts, dcId, tenant), errCode(err_code), req(commit_req) {}
+	                 const CommitTransactionRequest& commit_req)
+		: Event(EventType::ERROR_COMMIT, ts, dcId), errCode(err_code), req(commit_req) {}
 	EventCommitError() {}
 
 	template <typename Ar>

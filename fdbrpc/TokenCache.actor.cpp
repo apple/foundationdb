@@ -1,3 +1,7 @@
+// TODO(gglass): is this stuff needed?  If not, delete it for real.  If so, EXPLAIN WHY IT'S NEEDED.
+
+#if 0
+
 #include "fdbrpc/Base64Encode.h"
 #include "fdbrpc/Base64Decode.h"
 #include "fdbrpc/FlowTransport.h"
@@ -494,3 +498,5 @@ TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	fmt::print("TEST OK\n");
 	return Void();
 }
+
+#endif
