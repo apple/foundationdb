@@ -2,7 +2,7 @@
 
 ## Background
 
-This document explains internal mechanism of restoring backup files. The backup mechanism generates two types of files: (1) snapshot files (i.e. range files) and (2) mutation log files. The backup mechanism uploads the files to a blob store (e.g. S3). The snapshot files describes the complete set of key-value pairs within the range taken at a single version. Different snapshot files do not have any overlapping range and they are very likely at different versions. The mutation log file contains a set of mutations taken between a begin version and an end version. Note that two mutation log files may have overlapping key range and overlapping version range. For details, please check the backup data format document.
+This document explains internal mechanism of restoring backup files. The backup mechanism generates two types of files: (1) snapshot files (i.e. range files) and (2) mutation log files. The backup mechanism uploads the files to a blob store (e.g. S3). The snapshot files describes the complete set of key-value pairs within the range taken at a single version. Different snapshot files do not have any overlapping range and they are very likely at different versions. The mutation log file contains a set of mutations taken between a begin version and an end version. Note that two mutation log files may have overlapping key range. For details, please check the backup data format document.
 
 To trigger FDB full restore, we have a fdbrestore command line tool which takes following as inputs:
 
@@ -10,7 +10,7 @@ To trigger FDB full restore, we have a fdbrestore command line tool which takes 
 
 - A list of key ranges (`-k`): If provided, only restore the database within the key ranges. Otherwise, restore the entire user key space (`"" ~ \xff`). By providing the key ranges to restore, the restore time can be decently reduced because fewer mutations are needed to apply to the database. However, the restore process still has to download many unnecessary backup data files because different key ranges mutations are mixed up in the same mutation log files.
 
-- A target version (`-v`). Restore the database to the target version. If not provided, then setting the target version as the maximum restorable version. When CK team wants to do restore, they often provide a timestamp to us and we use this timestamp to get the right version as the target version setting to the restore workflow. Additionally, "`fdbbackup describe ...`" can be used to check whether a version is restorable.
+- A target version (`-v`). Restore the database to the target version. If not provided, then setting the target version as the maximum restorable version. When a user wants to do restore, they often provide a timestamp to be used and convert the timestamp to the target version (the tool is https://github.com/apple/foundationdb/blob/main/contrib/convert.py) setting to the restore workflow. Additionally, "`fdbbackup describe ...`" can be used to check whether a version is restorable.
 
 For more details, please check the fdbrestore documentation.
 
@@ -42,7 +42,7 @@ Following core components are involved in restore. We've mentioned some already 
 
 - Commit proxy takes to-restore mutations from aLog and then applies mutations to database version by version. More specially, the commit proxy passively listens on the "set" operation mutation to the system key --- applyEndVersion (will introduce later), when the commit proxy receives the mutation, the commit proxy starts restoring the mutations from aLog.
 
-- RestoreConfig:All configuration and metadata are stored in a key range of the system key space: `\xff\x02/restore-agent/`.
+- RestoreConfig: all configuration and metadata are stored in a key range of the system key space: `\xff\x02/restore-agent/`.
 
 ## Global Shared State (i.e. RestoreConfig)
 RestoreConfig stores metadata to system key space which helps to organize metadata with key-value pairs with organized prefix in the system key space. The RestoreConfig includes following:
