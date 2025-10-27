@@ -1,16 +1,8 @@
 [configuration]
 extraMachineCountDC = 2
-maxTLogVersion=6
+maxTLogVersion=7
 disableHostname=true
-storageEngineExcludeTypes=[3]
 tenantModes=['disabled']
-encryptModes=['disabled']
-simHTTPServerEnabled=false
-
-[[knobs]]
-# Mutation checksum and accumulative checksum is not compatible with release-7.1.x
-enable_mutation_checksum = false
-enable_accumulative_checksum = false
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'
@@ -22,7 +14,6 @@ clearAfterTest = false
     allowTestStorageMigration = true
     allowDescriptorChange = false
     downgradeTest1 = true
-    storageEngineExcludeTypes = 3
 
     [[test.workload]]
     testName = 'RandomClogging'
