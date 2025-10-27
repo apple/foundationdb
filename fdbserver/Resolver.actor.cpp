@@ -501,6 +501,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		}
 
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			// Unicast requires resolver private mutations to be enabled.
+			ASSERT(useResolverPrivateMutations);
 			if (!self->numLogs) {
 				reply.tpcvMap.clear();
 			} else {
