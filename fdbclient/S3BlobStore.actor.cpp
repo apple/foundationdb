@@ -499,6 +499,8 @@ ACTOR Future<bool> bucketExists_impl(Reference<S3BlobStoreEndpoint> b, std::stri
 		    wait(doRequest_impl(b, "HEAD", resource, headers, nullptr, 0, { 200, 404 }));
 		return r->code == 200;
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
 		TraceEvent(SevError, "S3ClientBucketExistsError")
 		    .detail("Bucket", bucket)
 		    .detail("Host", b->host)
@@ -722,7 +724,7 @@ static S3BlobStoreEndpoint::Credentials getSecretSdk() {
 
 	return fdbCreds;
 #else
-	TraceEvent(SevError, "S3BlobStoreNoSDK");
+	TraceEvent(SevError, "S3BlobStoreNoSDK").log();
 	throw backup_auth_missing();
 #endif
 }
@@ -1200,7 +1202,11 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 				}
 			} catch (Error& e) {
 				// retry with GET failed, but continue to do original request anyway
-				TraceEvent(SevError, "ErrorDuringRetryS3TokenIssue").errorUnsuppressed(e);
+				if (e.code() != error_code_actor_cancelled) {
+					TraceEvent(SevError, "ErrorDuringRetryS3TokenIssue").errorUnsuppressed(e);
+				} else {
+					throw;
+				}
 			}
 			setHeaders(bstore, req);
 			req->resource = getCanonicalURI(bstore, req);
