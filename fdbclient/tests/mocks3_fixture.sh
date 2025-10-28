@@ -87,10 +87,15 @@ start_mocks3() {
             --role mocks3server \
             --public-address "${MOCKS3_HOST}:${MOCKS3_PORT}" \
             --listen-address "${MOCKS3_HOST}:${MOCKS3_PORT}")
-        
-        # Add persistence directory if provided
+
+        # Add persistence directory and logdir if provided
         if [ -n "$persistence_dir_param" ]; then
             cmd+=(--mocks3-persistence-dir "$persistence_dir_param")
+            
+            # Put fdbserver trace logs alongside persistence data for easy access
+            local logdir="$(dirname "$persistence_dir_param")/logs"
+            mkdir -p "$logdir"
+            cmd+=(--logdir "$logdir")
         fi
         
         "${cmd[@]}" 2>|"$MOCKS3_LOG_FILE" &
