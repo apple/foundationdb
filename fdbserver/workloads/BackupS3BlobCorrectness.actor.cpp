@@ -329,7 +329,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			// Backup starts at backupAfter, restore at restoreAfter, plus buffer for completion
 			// This ensures all clients finish around the same time instead of clients 1-7
 			// finishing at 30s while client 0 takes ~100s, which confuses the test harness
-			double expectedDuration = backupAfter + restoreAfter + 50.0; // 50s buffer for completion
+			// Reduced buffer from 50s to 30s to avoid simulator hang around 243 seconds
+			double expectedDuration = backupAfter + restoreAfter + 30.0;
 			return delay(expectedDuration);
 		}
 		return _start(cx, this);
