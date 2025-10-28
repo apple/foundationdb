@@ -29,7 +29,6 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -76,7 +75,6 @@ struct ExceptionContract {
 			evt.error(e)
 			    .detail("Thrown", true)
 			    .detail("Expected", i->second == Possible ? "possible" : "always")
-			    .detail("Tenant", tr->getTenant())
 			    .backtrace();
 			if (augment)
 				augment(evt);
@@ -84,7 +82,7 @@ struct ExceptionContract {
 		}
 
 		TraceEvent evt(SevError, func.c_str());
-		evt.error(e).detail("Thrown", true).detail("Expected", "never").detail("Tenant", tr->getTenant()).backtrace();
+		evt.error(e).detail("Thrown", true).detail("Expected", "never").backtrace();
 		if (augment)
 			augment(evt);
 		throw e;
@@ -98,7 +96,6 @@ struct ExceptionContract {
 				evt.error(Error::fromUnvalidatedCode(i.first))
 				    .detail("Thrown", false)
 				    .detail("Expected", "always")
-				    .detail("Tenant", tr->getTenant())
 				    .backtrace();
 				if (augment)
 					augment(evt);
@@ -133,16 +130,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	Reference<IDatabase> db;
 
-	std::vector<Reference<ITenant>> tenants;
-	std::set<TenantName> createdTenants;
-	int numTenants;
-	int numTenantGroups;
-	int minTenantNum = -1;
-
-	bool illegalTenantAccess = false;
-
-	// Map from tenant number to key prefix
-	std::map<int, std::string> keyPrefixes;
+	string keyPrefix;
 
 	FuzzApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), operationId(0), success(true) {
 		std::call_once(onceFlag, [&]() { addTestCases(); });
@@ -159,12 +147,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		specialKeysRelaxed = deterministicRandom()->coinflip();
 		// Only enable special keys writes when allowed to access system keys
 		specialKeysWritesEnabled = useSystemKeys && deterministicRandom()->coinflip();
-
-		int maxTenants = getOption(options, "numTenants"_sr, 4);
-		numTenants = deterministicRandom()->randomInt(0, maxTenants + 1);
-
-		int maxTenantGroups = getOption(options, "numTenantGroups"_sr, numTenants);
-		numTenantGroups = deterministicRandom()->randomInt(0, maxTenantGroups + 1);
 
 		// See https://github.com/apple/foundationdb/issues/2424
 		if (BUGGIFY) {
@@ -184,7 +166,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		nodes = newNodes;
 
 		if (useSystemKeys && deterministicRandom()->coinflip()) {
-			keyPrefixes[-1] = "\xff\x01";
+			keyPrefix = "\xff\x01";
 			writeSystemKeys = true;
 		}
 
@@ -192,7 +174,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		conflictRange = KeyRangeRef("\xfe"_sr, "\xfe\x00"_sr);
 		TraceEvent("FuzzApiCorrectnessConfiguration")
 		    .detail("Nodes", nodes)
-		    .detail("NumTenants", numTenants)
 		    .detail("InitialKeyDensity", initialKeyDensity)
 		    .detail("AdjacentKeys", adjacentKeys)
 		    .detail("ValueSizeMin", valueSizeRange.first)
@@ -216,19 +197,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		    .detail("NewSeverity", SevInfo);
 	}
 
-	static TenantName getTenant(int num) { return TenantNameRef(format("tenant_%d", num)); }
-	Optional<TenantGroupName> getTenantGroup(int num) {
-		int groupNum = num % (numTenantGroups + 1);
-		if (groupNum == numTenantGroups - 1) {
-			return Optional<TenantGroupName>();
-		} else {
-			return TenantGroupNameRef(format("tenantgroup_%d", groupNum));
-		}
-	}
-	bool canUseTenant(Optional<TenantName> tenant) {
-		return !tenant.present() || createdTenants.contains(tenant.get());
-	}
-
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			return _setup(cx, this);
@@ -241,30 +209,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Reference<IDatabase> db = wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 		self->db = db;
 
-		std::vector<Future<Void>> tenantFutures;
-		// The last tenant will not be created
-		for (int i = 0; i < self->numTenants; ++i) {
-			TenantName tenantName = getTenant(i);
-			TenantMapEntry entry;
-			entry.tenantGroup = self->getTenantGroup(i);
-			tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
-			self->createdTenants.insert(tenantName);
-		}
-		wait(waitForAll(tenantFutures));
-
-		// Open one extra tenant to test the failure of using a tenant that doesn't exist
-		for (int i = 0; i < self->numTenants + 1; ++i) {
-			TenantName tenantName = getTenant(i);
-			self->tenants.push_back(self->db->openTenant(tenantName));
-		}
-
-		// When domain-aware encryption is enabled, writing random keys without specifying tenant may cause Redwood to
-		// create too many pages.
-		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		if (config.encryptionAtRestMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
-			self->minTenantNum = 0;
-		}
-
 		return Void();
 	}
 
@@ -276,23 +220,25 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override {
+		// TODO(gglass): figure out what this is doing any why it returns a tenant-specific error status
+		// and what to do with this in a post-tenant world
 		if (!writeSystemKeys) { // there must be illegal access during data load
 			return illegalTenantAccess;
 		}
 		return success;
 	}
 
-	Key getKeyForIndex(int tenantNum, int idx) {
+	Key getKeyForIndex(int idx) {
 		idx += minNode;
 		if (adjacentKeys) {
-			return Key(keyPrefixes[tenantNum] + std::string(idx, '\x00'));
+			return Key(keyPrefix + std::string(idx, '\x00'));
 		} else {
-			return Key(keyPrefixes[tenantNum] + format("%010d", idx));
+			return Key(keyPrefix + format("%010d", idx));
 		}
 	}
 
 	KeyRef getMaxKey(Reference<ITransaction> tr) const {
-		if (useSystemKeys && !tr->getTenant().present()) {
+		if (useSystemKeys) {
 			return systemKeys.end;
 		} else {
 			return normalKeys.end;
@@ -330,7 +276,16 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> loadAndRun(FuzzApiCorrectnessWorkload* self, Database cx) {
 		state double startTime = now();
-		state int nodesPerTenant = std::max<int>(1, self->nodes / (self->numTenants + 1));
+
+		// state int nodesPerTenant = std::max<int>(1, self->nodes / (self->numTenants + 1));
+		// numTenants set as
+
+		// int maxTenants = getOption(options, "numTenants"_sr, 4);
+		// numTenants = deterministicRandom()->randomInt(0, maxTenants + 1);
+
+		//
+		// So basically nodesPerTenant is 0 or 1
+		
 		state int keysPerBatch =
 		    std::min<int64_t>(1000,
 		                      1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 /
