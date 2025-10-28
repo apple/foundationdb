@@ -109,30 +109,28 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// TODO(gglass): confirm if this is needed.  Remove tenant bits if needed. Delete outright if not.
-#if 0
-Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {
-	const auto it = watchMap.find(std::make_pair(tenantId, key));
+Reference<WatchMetadata> DatabaseContext::getWatchMetadata(KeyRef key) const {
+	const auto it = watchMap.find(WatchMapKey(key));
 	if (it == watchMap.end())
 		return Reference<WatchMetadata>();
 	return it->second;
 }
 
 void DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
-	const WatchMapKey key(metadata->parameters->tenant.tenantId, metadata->parameters->key);
+	const WatchMapKey key(metadata->parameters->key);
 	watchMap[key] = metadata;
 	// NOTE Here we do *NOT* update/reset the reference count for the key, see the source code in getWatchFuture.
 	// Basically the reference count could be increased, or the same watch is refreshed, or the watch might be cancelled
 }
 
-int32_t DatabaseContext::increaseWatchRefCount(const int64_t tenantID, KeyRef key, const Version& version) {
-	const WatchMapKey mapKey(tenantID, key);
+int32_t DatabaseContext::increaseWatchRefCount(KeyRef key, const Version& version) {
+	const WatchMapKey mapKey(key);
 	watchCounterMap[mapKey].insert(version);
 	return watchCounterMap[mapKey].size();
 }
 
-int32_t DatabaseContext::decreaseWatchRefCount(const int64_t tenantID, KeyRef key, const Version& version) {
-	const WatchMapKey mapKey(tenantID, key);
+int32_t DatabaseContext::decreaseWatchRefCount(KeyRef key, const Version& version) {
+	const WatchMapKey mapKey(key);
 	auto mapKeyIter = watchCounterMap.find(mapKey);
 	if (mapKeyIter == std::end(watchCounterMap)) {
 		// Key does not exist. The metadata might be removed by deleteWatchMetadata already.
@@ -150,26 +148,24 @@ int32_t DatabaseContext::decreaseWatchRefCount(const int64_t tenantID, KeyRef ke
 
 	const auto count = versionSet.size();
 	// The metadata might be deleted somewhere else, before calling this decreaseWatchRefCount
-	if (auto metadata = getWatchMetadata(tenantID, key); metadata.isValid() && versionSet.size() == 0) {
+	if (auto metadata = getWatchMetadata(key); metadata.isValid() && versionSet.size() == 0) {
 		// It is a *must* to cancel the watchFutureSS manually. watchFutureSS waits for watchStorageServerResp, which
 		// holds a reference to the metadata. If the ACTOR is not cancelled, it indirectly holds a Future waiting for
 		// itself.
 		metadata->watchFutureSS.cancel();
-		deleteWatchMetadata(tenantID, key);
+		deleteWatchMetadata(key);
 	}
 
 	return count;
 }
 
-void DatabaseContext::deleteWatchMetadata(int64_t tenantId, KeyRef key, bool removeReferenceCount) {
-	const WatchMapKey mapKey(tenantId, key);
+void DatabaseContext::deleteWatchMetadata(KeyRef key, bool removeReferenceCount) {
+	const WatchMapKey mapKey(key);
 	watchMap.erase(mapKey);
 	if (removeReferenceCount) {
 		watchCounterMap.erase(mapKey);
 	}
 }
-
-#endif
 
 void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi) {
 	auto result = tssMapping.find(ssi.id());

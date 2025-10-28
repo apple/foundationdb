@@ -122,9 +122,6 @@ public:
 	double throttleDuration() const;
 };
 
-// TODO(gglass): is this needed?
-// the following has been removed:  const TenantInfo tenant;
-
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const Key key;
 	const Optional<Value> value;
@@ -288,26 +285,23 @@ public:
 
 	// watch map operations
 
-	// TODO(gglass): is this only used for tenant stuff?  delete outright if so.
-#if 0	
-	// Gets the watch metadata per tenant id and key
-	Reference<WatchMetadata> getWatchMetadata(int64_t tenantId, KeyRef key) const;
+	// Gets the watch metadata
+	Reference<WatchMetadata> getWatchMetadata(KeyRef key) const;
 
-	// Refreshes the watch metadata. If the same watch is used (this is determined by the tenant id and the key), the
+	// Refreshes the watch metadata. If the same watch is used, the
 	// metadata will be updated.
 	void setWatchMetadata(Reference<WatchMetadata> metadata);
 
 	// Removes the watch metadata
 	// If removeReferenceCount is set to be true, the corresponding WatchRefCount record is removed, too.
-	void deleteWatchMetadata(int64_t tenant, KeyRef key, bool removeReferenceCount = false);
+	void deleteWatchMetadata(KeyRef key, bool removeReferenceCount = false);
 
 	// Increases reference count to the given watch. Returns the number of references to the watch.
-	int32_t increaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
+	int32_t increaseWatchRefCount(KeyRef key, const Version& version);
 
 	// Decreases reference count to the given watch. If the reference count is dropped to 0, the watch metadata will be
 	// removed. Returns the number of references to the watch.
-	int32_t decreaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
-#endif	
+	int32_t decreaseWatchRefCount(KeyRef key, const Version& version);
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
@@ -654,7 +648,7 @@ public:
 	void updateBackoff(const Error& err);
 
 private:
-	using WatchMapKey = std::pair<int64_t, Key>;
+	using WatchMapKey = Key;
 	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
 	using WatchMapValue = Reference<WatchMetadata>;
 	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
