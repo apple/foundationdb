@@ -14,7 +14,7 @@ To trigger FDB full restore, we have a fdbrestore command line tool which takes 
 
 For more details, please check the fdbrestore documentation (https://apple.github.io/foundationdb/backups.html#fdbrestore-command-line-tool).
 
-The restore command triggers the FDB cluster to download snapshot files and mutation log files from the blob store and those files are applied to the database (snapshot/range files and mutation logs are explained in Backup Design V1). When restoring a snapshot file, a set of key-value pairs are read from the snapshot file and they are set to database directly using transactions. When restoring a mutation log file, a set of mutations are read from the mutation log file, and they are "applied" to the database through the commit proxy. Collectively these two sets of files contain the entire contents of the restored database. This document explains mechanisms to manage and execute the process in a distributed fashion, mainly focusing on answering two questions:
+The restore command triggers the FDB cluster to download snapshot files and mutation log files from the blob store and those files are applied to the database (snapshot/range files and mutation logs are explained in Backup Design V1 https://github.com/apple/foundationdb/blob/main/design/backup.md). When restoring a snapshot file, a set of key-value pairs are read from the snapshot file and they are set to database directly using transactions. When restoring a mutation log file, a set of mutations are read from the mutation log file, and they are "applied" to the database through the commit proxy. Collectively these two sets of files contain the entire contents of the restored database. This document explains mechanisms to manage and execute the process in a distributed fashion, mainly focusing on answering two questions:
 
 1. Since we want to restore the full database to a target version, the restoring process should include both snapshot restore and mutation log restore. How to organize the two types of file restore is an important question.
 
@@ -126,9 +126,9 @@ In the restore mechanism, we define five core tasks:
 
 5. `RestoreCompleteTaskFunc`
 
-    execute: Not implemented
+    - execute: Not implemented
 
-    finish: set ERestoreState::COMPLETED, cleanup
+    - finish: set ERestoreState::COMPLETED, cleanup
 
 ### Worker pool and parallel execution with task bucket
 
