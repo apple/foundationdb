@@ -772,7 +772,7 @@ public:
 			}
 		}
 
-		std::string uploadId;
+		state std::string uploadId;
 		if (!existingUploadId.empty()) {
 			uploadId = existingUploadId;
 		} else {
