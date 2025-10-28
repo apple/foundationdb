@@ -162,7 +162,29 @@ if(NOT BUILD_SWIFT_BINDING OR NOT BUILD_C_BINDING OR OPEN_FOR_IDE)
 else()
   find_program(SWIFT_EXECUTABLE swift)
   if(SWIFT_EXECUTABLE AND CMAKE_Swift_COMPILER)
-    set(WITH_SWIFT_BINDING ON)
+    # Check Swift version - require 6.1 or higher
+    execute_process(
+      COMMAND ${SWIFT_EXECUTABLE} --version
+      OUTPUT_VARIABLE SWIFT_VERSION_OUTPUT
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    string(REGEX MATCH "Swift version ([0-9]+)\\.([0-9]+)" SWIFT_VERSION_MATCH "${SWIFT_VERSION_OUTPUT}")
+    if(SWIFT_VERSION_MATCH)
+      set(SWIFT_VERSION_MAJOR ${CMAKE_MATCH_1})
+      set(SWIFT_VERSION_MINOR ${CMAKE_MATCH_2})
+      set(SWIFT_VERSION "${SWIFT_VERSION_MAJOR}.${SWIFT_VERSION_MINOR}")
+      message(STATUS "Found Swift version ${SWIFT_VERSION}")
+
+      if(SWIFT_VERSION_MAJOR LESS 6 OR (SWIFT_VERSION_MAJOR EQUAL 6 AND SWIFT_VERSION_MINOR LESS 1))
+        message(STATUS "Swift bindings require Swift 6.1 or higher (found ${SWIFT_VERSION})")
+        set(WITH_SWIFT_BINDING OFF)
+      else()
+        set(WITH_SWIFT_BINDING ON)
+      endif()
+    else()
+      message(STATUS "Could not determine Swift version")
+      set(WITH_SWIFT_BINDING OFF)
+    endif()
   else()
     set(WITH_SWIFT_BINDING OFF)
   endif()

@@ -3,6 +3,11 @@
 # Run s3client against s3 if available or else against MockS3Server.
 # MockS3Server starts instantly. Tests run for a few seconds after that.
 #
+# Debugging:
+#   - Preserve test data: PRESERVE_TEST_DATA=1 ./s3client_test.sh ...
+#     This will leave all test data including MockS3 persistence files
+#     in the test scratch directory for analysis after the test completes.
+#
 
 # Make sure cleanup on script exit.
 trap "exit 1" HUP INT PIPE QUIT TERM
@@ -10,6 +15,11 @@ trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
 function cleanup {
+  # Check if test data should be preserved (common function from tests_common.sh)
+  if cleanup_with_preserve_check; then
+    return 0
+  fi
+  
   if type shutdown_mocks3 &> /dev/null; then
     shutdown_mocks3
   fi
@@ -745,7 +755,8 @@ else
     exit 1
   fi
   readonly TEST_SCRATCH_DIR
-  if ! start_mocks3 "${build_dir}"; then
+  # Pass test scratch dir as persistence directory so files are cleaned up with test
+  if ! start_mocks3 "${build_dir}" "${TEST_SCRATCH_DIR}/mocks3_data"; then
     err "Failed to start MockS3Server"
     exit 1
   fi

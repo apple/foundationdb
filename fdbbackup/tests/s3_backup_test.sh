@@ -7,10 +7,11 @@
 # if it is available. We then run a backup to 'S3' and then
 # a restore. We verify the restore is the same as the original.
 #
-# Debugging, run this script w/ the -x flag: e.g. bash -x s3_backup_test.sh...
-# You can also disable the cleanup. This will leave processes up
-# so you can manually rerun commands or peruse logs and data
-# under SCRATCH_DIR.
+# Debugging:
+#   - Run with -x flag: bash -x s3_backup_test.sh...
+#   - Preserve test data: PRESERVE_TEST_DATA=1 ./s3_backup_test.sh ...
+#     This will leave all test data including MockS3 persistence files
+#     in the test scratch directory for analysis after the test completes.
 #
 # Usage:
 #   s3_backup_unified.sh <source_dir> <build_dir> [scratch_dir] [--encrypt]
@@ -24,6 +25,11 @@ trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
 function cleanup {
+  # Check if test data should be preserved (common function from tests_common.sh)
+  if cleanup_with_preserve_check; then
+    return 0
+  fi
+  
   if type shutdown_fdb_cluster &> /dev/null; then
     shutdown_fdb_cluster
   fi
@@ -193,6 +199,7 @@ function test_s3_backup_and_restore {
     err "Failed verification of data in fdb"
     return 1
   fi
+  
   # Cleanup test data.
   local cleanup_cmd=("${local_build_dir}/bin/s3client")
   cleanup_cmd+=("${KNOBS[@]}")
@@ -516,7 +523,8 @@ else
     exit 1
   fi
   readonly TEST_SCRATCH_DIR
-  if ! start_mocks3 "${build_dir}"; then
+  # Pass test scratch dir as persistence directory so files are cleaned up with test
+  if ! start_mocks3 "${build_dir}" "${TEST_SCRATCH_DIR}/mocks3_data"; then
     err "Failed to start MockS3Server"
     exit 1
   fi

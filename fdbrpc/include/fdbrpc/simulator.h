@@ -89,6 +89,10 @@ public:
 	};
 
 	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
+
+	// Returns currently executing process in simulation.
+	// Can return nullptr when currentProcess is cleared in destroyProcess(); returning nullptr prevents trace
+	// events during destruction from accessing a dangling pointer. Can also be null before any process created.
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
 	ProcessInfo const* getCurrentProcess() const { return currentProcess; }
 
