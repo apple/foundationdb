@@ -10,7 +10,7 @@ To trigger FDB full restore, we have a fdbrestore command line tool which takes 
 
 - A list of key ranges (`-k`): If provided, only restore the database within the key ranges. Otherwise, restore the entire user key space (`"" ~ \xff`). By providing the key ranges to restore, the restore time can be decently reduced because fewer mutations are needed to apply to the database. However, the restore process still has to download many unnecessary backup data files because different key ranges mutations are mixed up in the same mutation log files.
 
-- A target version (`-v`). Restore the database to the target version. If not provided, then setting the target version as the maximum restorable version. When users want to do restore, they often provides a timestamp to be used and convert the timestamp to the target version (the tool is https://github.com/apple/foundationdb/blob/main/contrib/convert.py) setting to the restore workflow. Additionally, "`fdbbackup describe ...`" can be used to check whether a version is restorable.
+- A target version (`-v`). Restore the database to the target version. If not provided, then setting the target version as the maximum restorable version. When users want to do restore, they often provide a timestamp to be used and convert the timestamp to the target version (the tool is https://github.com/apple/foundationdb/blob/main/contrib/convert.py) setting to the restore workflow. Additionally, "`fdbbackup describe ...`" can be used to check whether a version is restorable.
 
 For more details, please check the fdbrestore documentation (https://apple.github.io/foundationdb/backups.html#fdbrestore-command-line-tool).
 
