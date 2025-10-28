@@ -168,7 +168,7 @@ Value:
 
 `[protocolVersion:uint64_t][val_length:uint32_t][mutation_1][mutation_2]...[mutation_k]`
 
-The commit proxydecodes the value and applies the mutation in the order.
+The commit proxy decodes the value and applies the mutation in the order.
 
 ## Backup v1 Layout Example
 
