@@ -230,8 +230,6 @@ function(stage_correctness_package)
                             ${STAGE_OUT_DIR}/bin/coverage.fdbclient.xml
                             ${STAGE_OUT_DIR}/bin/coverage.fdbrpc.xml
                             ${STAGE_OUT_DIR}/bin/coverage.flow.xml
-                            # ${STAGE_OUT_DIR}/bin/TestHarness.exe
-                            # ${STAGE_OUT_DIR}/bin/TraceLogHelper.dll
                             ${STAGE_OUT_DIR}/CMakeCache.txt
     )
 
@@ -243,16 +241,12 @@ function(stage_correctness_package)
             ${CMAKE_BINARY_DIR}/lib/coverage.fdbclient.xml
             ${CMAKE_BINARY_DIR}/lib/coverage.fdbrpc.xml
             ${CMAKE_BINARY_DIR}/lib/coverage.flow.xml
-            # ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
-            # ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/CMakeCache.txt ${STAGE_OUT_DIR}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
                                      ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
                                      ${CMAKE_BINARY_DIR}/lib/coverage.fdbclient.xml
                                      ${CMAKE_BINARY_DIR}/lib/coverage.fdbrpc.xml
                                      ${CMAKE_BINARY_DIR}/lib/coverage.flow.xml
-                                     # ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
-                                     # ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
                                      ${STAGE_OUT_DIR}/bin
     COMMENT "Copying files for ${STAGE_CONTEXT} package"
     )
@@ -305,7 +299,6 @@ function(create_correctness_package)
     COMMENT "Package correctness archive"
     )
   add_custom_target(package_tests ALL DEPENDS ${tar_file})
-  add_dependencies(package_tests strip_only_fdbserver TestHarness)
   set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/correctness.tar.gz")
   add_custom_command(
     OUTPUT "${unversioned_tar_file}"
@@ -339,7 +332,6 @@ function(create_long_running_correctness_package)
     COMMENT "Package long running correctness archive"
     )
   add_custom_target(package_long_running_tests ALL DEPENDS ${tar_file})
-  add_dependencies(package_long_running_tests strip_only_fdbserver TestHarness)
   set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/long_running_correctness.tar.gz")
   add_custom_command(
     OUTPUT "${unversioned_tar_file}"
@@ -374,7 +366,6 @@ function(create_valgrind_correctness_package)
       COMMENT "Package valgrind correctness archive"
       )
     add_custom_target(package_valgrind_tests ALL DEPENDS ${tar_file})
-    add_dependencies(package_valgrind_tests strip_only_fdbserver TestHarness)
     set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/valgrind.tar.gz")
     add_custom_command(
       OUTPUT "${unversioned_tar_file}"
