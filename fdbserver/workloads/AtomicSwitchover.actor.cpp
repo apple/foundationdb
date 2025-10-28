@@ -41,7 +41,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		addDefaultBackupRanges(backupRanges);
 
 		ASSERT(g_simulator->extraDatabases.size() == 1);
-		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 	}
 
 	Future<Void> setup(Database const& cx) override {

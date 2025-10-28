@@ -20,9 +20,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/TenantInfo.h"
 #include "fdbserver/QuietDatabase.h"
 
 #include "fdbserver/MutationTracking.h"

@@ -73,7 +73,6 @@ struct ResolverBugWorkload : TestWorkload {
 		wcx.dbInfo = dbInfo;
 		wcx.options = cycleOptions;
 		wcx.sharedRandomNumber = sharedRandomNumber;
-		wcx.defaultTenant = defaultTenant.castTo<TenantName>();
 		return IWorkloadFactory::create("Cycle", wcx);
 	}
 

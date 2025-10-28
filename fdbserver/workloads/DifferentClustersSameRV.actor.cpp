@@ -18,10 +18,11 @@
  * limitations under the License.
  */
 
+// TODO: explain the purpose of this workload.  Hint: NOT WHAT IT DOES.  EXPLAIN WHY IT EXISTS.
+
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ApiVersion.h"
@@ -34,7 +35,6 @@ void traceError(const char* filename, int line, Error const& e) {
 
 #define TRACE_ERROR(e) traceError(__FILE__, __LINE__, e)
 
-// A workload attempts to read from two different clusters with the same read version.
 struct DifferentClustersSameRVWorkload : TestWorkload {
 	static constexpr auto NAME = "DifferentClustersSameRV";
 	Database originalDB;
@@ -47,7 +47,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		ASSERT(g_simulator->extraDatabases.size() == 1);
-		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 		testDuration = getOption(options, "testDuration"_sr, 100.0);
 		switchAfter = getOption(options, "switchAfter"_sr, 50.0);
 		keyToRead = getOption(options, "keyToRead"_sr, "someKey"_sr);
@@ -67,18 +67,10 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		state Version newClusterVersion;
 		state Transaction tr1(cx);
 		state Transaction tr2(self->extraDB);
-		TraceEvent("DifferentClustersSameRVWorkload")
-		    .detail("Tenant1", cx->defaultTenant)
-		    .detail("Tenant2", self->extraDB->defaultTenant);
-
-		if (self->extraDB->defaultTenant.present()) {
-			wait(success(TenantAPI::createTenant(self->extraDB.getReference(), self->extraDB->defaultTenant.get())));
-			TraceEvent("DifferentClustersSameRVWorkload_TenantCreated").log();
-		}
+		TraceEvent("DifferentClustersSameRVWorkload");
 
 		// we want to advance the read version of both clusters so that they are roughly the same. This makes the test
-		// more effective (since it's more likely that we can read from both clusters with the same version) and it
-		// also makes sure that both tenants exist for all legal read versions when the test starts.
+		// more effective (since it's more likely that we can read from both clusters with the same version).
 		loop {
 			try {
 				wait(store(rv1, tr1.getReadVersion()) && store(rv2, tr2.getReadVersion()));
@@ -98,7 +90,6 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			return Void();
 		}
 		auto switchConnFileDb = Database::createDatabase(cx->getConnectionRecord(), -1);
-		switchConnFileDb->defaultTenant = cx->defaultTenant;
 		originalDB = cx;
 		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this),
 			                                  doSwitch(switchConnFileDb, this),

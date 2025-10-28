@@ -36,22 +36,17 @@
  *    - Original uses random encryption (50% chance)
  *    - Tests can still explicitly enable encryption via TOML config
  *
- * 3. Tenant Cleanup Handling:
- *    - Gracefully handles tenant_not_found errors during setup
- *    - Returns early if tenant was deleted during test cleanup
- *    - Original would fail the test on tenant_not_found
- *
- * 4. Status Loop Behavior:
+ * 3. Status Loop Behavior:
  *    - Exits early when backup reaches "Completed" state or snapshot closes
  *    - Reduces unnecessary polling for S3 metadata that may be eventually consistent
  *    - Original polls continuously until external termination
  *
- * 5. Configurable Snapshot Intervals:
+ * 4. Configurable Snapshot Intervals:
  *    - Accepts initSnapshotInterval and snapshotInterval parameters
  *    - Allows tests to control S3 backup timing characteristics
  *    - Original uses hardcoded random values
  *
- * 6. Configurable Backup URL:
+ * 5. Configurable Backup URL:
  *    - Accepts backupURL parameter (defaults to file://simfdb/backups/)
  *    - Enables testing with blobstore:// URLs
  *    - Original hardcodes file:// URLs
@@ -90,7 +85,6 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -226,8 +220,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		// Only client 0 performs setup operations (MockS3 registration, tenant adjustment)
-		// Other clients just run the Cycle workload
 		if (clientId != 0) {
 			return Void();
 		}
@@ -235,9 +227,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup(Database cx, BackupS3BlobCorrectnessWorkload* self) {
-		state bool adjusted = false;
-		state TenantMapEntry entry;
-
 		// S3-specific: Register MockS3Server only for blobstore URLs in simulation
 		// Only client 0 registers the MockS3Server to avoid duplicates
 		// Persistence is automatically enabled in registerMockS3Server()
@@ -252,71 +241,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			    .detail("ClientId", self->clientId);
 		}
 
-		if (!self->defaultBackup && (cx->defaultTenant.present() || BUGGIFY)) {
-			if (cx->defaultTenant.present()) {
-				try {
-					wait(store(entry, TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get())));
-				} catch (Error& e) {
-					// S3-specific: Handle tenant cleanup gracefully - if tenant is deleted during test cleanup,
-					// skip backup operations
-					if (e.code() == error_code_tenant_not_found) {
-						TraceEvent(SevInfo, "BS3BCW_TenantCleanedUp")
-						    .detail("Reason", "Tenant was cleaned up during test, skipping backup operations")
-						    .detail("TenantName", cx->defaultTenant.get())
-						    .detail("ErrorCode", e.code())
-						    .detail("ErrorDescription", e.what());
-						return Void(); // Skip backup operations for deleted tenant
-					}
-					throw; // Re-throw other errors
-				}
-
-				// If we are specifying sub-ranges (or randomly, if backing up normal keys), adjust them to be relative
-				// to the tenant
-				if (self->backupRangesCount > 0 || deterministicRandom()->coinflip()) {
-					Standalone<VectorRef<KeyRangeRef>> adjustedBackupRanges;
-					for (auto& range : self->backupRanges) {
-						adjustedBackupRanges.push_back_deep(
-						    adjustedBackupRanges.arena(), range.withPrefix(entry.prefix, adjustedBackupRanges.arena()));
-					}
-					self->backupRanges = adjustedBackupRanges;
-
-					Standalone<VectorRef<KeyRangeRef>> adjustedRestoreRanges;
-					for (auto& range : self->restoreRanges) {
-						adjustedRestoreRanges.push_back_deep(
-						    adjustedRestoreRanges.arena(),
-						    range.withPrefix(entry.prefix, adjustedRestoreRanges.arena()));
-					}
-					self->restoreRanges = adjustedRestoreRanges;
-
-					std::vector<KeyRange> adjustedSkippedRestoreRanges;
-					for (auto& range : self->skippedRestoreRanges) {
-						adjustedSkippedRestoreRanges.push_back(range.withPrefix(entry.prefix));
-					}
-					self->skippedRestoreRanges = adjustedSkippedRestoreRanges;
-
-					TraceEvent("BS3BCW_AdjustedRanges");
-
-					adjusted = true;
-				}
-			} else {
-				try {
-					Optional<TenantMapEntry> entry_ = wait(TenantAPI::createTenant(cx.getReference(), "BARWTenant"_sr));
-					entry = entry_.get();
-				} catch (Error& e) {
-					if (e.code() == error_code_tenant_already_exists) {
-						wait(store(entry, TenantAPI::getTenant(cx.getReference(), "BARWTenant"_sr)));
-					} else {
-						throw e;
-					}
-				}
-			}
-		}
-
-		if (!adjusted) {
-			// Backup everything
-			self->backupRanges.push_back_deep(self->backupRanges.arena(), normalKeys);
-			self->restoreRanges.push_back_deep(self->restoreRanges.arena(), normalKeys);
-		}
+		// Backup everything
+		self->backupRanges.push_back_deep(self->backupRanges.arena(), normalKeys);
+		self->restoreRanges.push_back_deep(self->restoreRanges.arena(), normalKeys);
 
 		return Void();
 	}

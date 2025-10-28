@@ -29,7 +29,9 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// A workload which test the correctness of backup and restore process
+// TODO: explain the purpose of this workload and how it different from the
+// 20+ (literally) other backup/restore workloads.
+
 struct AtomicRestoreWorkload : TestWorkload {
 	static constexpr auto NAME = "AtomicRestore";
 	double startAfter, restoreAfter;

@@ -185,7 +185,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
 
-  add_fdb_test(TEST_FILES fast/GetEstimatedRangeSize.toml)
   add_fdb_test(TEST_FILES fast/GetMappedRange.toml)
 
   add_fdb_test(TEST_FILES fast/PerpetualWiggleStats.toml)

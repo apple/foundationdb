@@ -31,6 +31,9 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// TODO: explain the purpose of this workload and how it different from the
+// 20+ (literally) other backup/restore workloads.
+
 struct RestoreBackupWorkload : TestWorkload {
 
 	FileBackupAgent backupAgent;
@@ -127,61 +130,22 @@ struct RestoreBackupWorkload : TestWorkload {
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
 
-		if (config.tenantMode == TenantMode::REQUIRED) {
-			// restore system keys
-			wait(success(self->backupAgent.restore(cx,
-			                                       cx,
-			                                       "system_restore"_sr,
-			                                       Key(self->backupContainer->getURL()),
-			                                       self->backupContainer->getProxy(),
-			                                       getSystemBackupRanges(),
-			                                       WaitForComplete::True,
-			                                       ::invalidVersion,
-			                                       Verbose::True,
-			                                       Key(),
-			                                       Key(),
-			                                       LockDB::True,
-			                                       UnlockDB::True,
-			                                       OnlyApplyMutationLogs::False,
-			                                       InconsistentSnapshotOnly::False,
-			                                       ::invalidVersion,
-			                                       self->encryptionKeyFileName)));
-			// restore user data
-			wait(success(self->backupAgent.restore(cx,
-			                                       cx,
-			                                       self->tag,
-			                                       Key(self->backupContainer->getURL()),
-			                                       self->backupContainer->getProxy(),
-			                                       WaitForComplete::True,
-			                                       ::invalidVersion,
-			                                       Verbose::True,
-			                                       normalKeys,
-			                                       Key(),
-			                                       Key(),
-			                                       LockDB::True,
-			                                       OnlyApplyMutationLogs::False,
-			                                       InconsistentSnapshotOnly::False,
-			                                       ::invalidVersion,
-			                                       self->encryptionKeyFileName)));
-		} else {
-			wait(success(self->backupAgent.restore(cx,
-			                                       cx,
-			                                       self->tag,
-			                                       Key(self->backupContainer->getURL()),
-			                                       self->backupContainer->getProxy(),
-			                                       WaitForComplete::True,
-			                                       ::invalidVersion,
-			                                       Verbose::True,
-			                                       KeyRange(),
-			                                       Key(),
-			                                       Key(),
-			                                       LockDB::True,
-			                                       OnlyApplyMutationLogs::False,
-			                                       InconsistentSnapshotOnly::False,
-			                                       ::invalidVersion,
-			                                       self->encryptionKeyFileName)));
-		}
-
+		wait(success(self->backupAgent.restore(cx,
+											   cx,
+											   self->tag,
+											   Key(self->backupContainer->getURL()),
+											   self->backupContainer->getProxy(),
+											   WaitForComplete::True,
+											   ::invalidVersion,
+											   Verbose::True,
+											   KeyRange(),
+											   Key(),
+											   Key(),
+											   LockDB::True,
+											   OnlyApplyMutationLogs::False,
+											   InconsistentSnapshotOnly::False,
+											   ::invalidVersion,
+											   self->encryptionKeyFileName)));
 		return Void();
 	}
 

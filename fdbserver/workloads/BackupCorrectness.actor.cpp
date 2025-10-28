@@ -25,12 +25,14 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// TODO: explain the purpose of this workload and how it different from the
+// 20+ (literally) other backup/restore workloads.
 
 // A workload which test the correctness of backup and restore process
 struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
@@ -186,42 +188,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> _setup(Database cx, BackupAndRestoreCorrectnessWorkload* self) {
 		state bool adjusted = false;
-		state TenantMapEntry entry;
 
-		if (!self->defaultBackup && (cx->defaultTenant.present() || BUGGIFY)) {
-			if (cx->defaultTenant.present()) {
-				wait(store(entry, TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get())));
-
-				// If we are specifying sub-ranges (or randomly, if backing up normal keys), adjust them to be relative
-				// to the tenant
-				if (self->backupRanges.size() != 1 || self->backupRanges[0] != normalKeys ||
-				    deterministicRandom()->coinflip()) {
-					adjusted = true;
-					Standalone<VectorRef<KeyRangeRef>> modifiedBackupRanges;
-					for (int i = 0; i < self->backupRanges.size(); ++i) {
-						modifiedBackupRanges.push_back_deep(
-						    modifiedBackupRanges.arena(),
-						    self->backupRanges[i].withPrefix(entry.prefix, self->backupRanges.arena()));
-					}
-					self->backupRanges = modifiedBackupRanges;
-				}
-			}
+		if (BUGGIFY) {
 			for (auto r : getSystemBackupRanges()) {
 				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);
-			}
-
-			if (adjusted) {
-				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
-				for (int i = 0; i < self->restoreRanges.size(); ++i) {
-					modifiedRestoreRanges.push_back_deep(
-					    modifiedRestoreRanges.arena(),
-					    self->restoreRanges[i].withPrefix(entry.prefix, self->restoreRanges.arena()));
-				}
-				self->restoreRanges = modifiedRestoreRanges;
-
-				for (int i = 0; i < self->skippedRestoreRanges.size(); ++i) {
-					self->skippedRestoreRanges[i] = self->skippedRestoreRanges[i].withPrefix(entry.prefix);
-				}
 			}
 			for (auto r : getSystemBackupRanges()) {
 				self->restoreRanges.push_back_deep(self->restoreRanges.arena(), r);
@@ -715,8 +685,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
 				Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges;
 				for (int i = 0; i < self->restoreRanges.size(); ++i) {
-					if (config.tenantMode != TenantMode::REQUIRED ||
-					    !self->restoreRanges[i].intersects(getSystemBackupRanges())) {
+					if (!self->restoreRanges[i].intersects(getSystemBackupRanges())) {
 						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
 					} else {
 						KeyRangeRef normalKeyRange = self->restoreRanges[i] & normalKeys;

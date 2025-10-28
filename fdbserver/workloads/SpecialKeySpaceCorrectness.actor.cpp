@@ -28,7 +28,6 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRandom.h"
@@ -316,85 +315,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		state Database cx = cx_->clone();
-		state int64_t tenantId;
-		try {
-			Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), TenantName("foo"_sr)));
-			ASSERT(entry.present());
-			tenantId = entry.get().id;
-		} catch (Error& e) {
-			ASSERT(e.code() == error_code_tenant_already_exists || e.code() == error_code_actor_cancelled);
-		}
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
-		state Reference<ReadYourWritesTransaction> tenantTx =
-		    makeReference<ReadYourWritesTransaction>(cx, makeReference<Tenant>(tenantId));
-		// Use new transactions that may use default tenant rather than re-use tx
-		// This is because tx will reject raw access for later tests if default tenant is set
+		state bool disableRyw = deterministicRandom()->coinflip();
+
+		// These exist for legacy reasons
 		state Reference<ReadYourWritesTransaction> defaultTx1 = makeReference<ReadYourWritesTransaction>(cx);
 		state Reference<ReadYourWritesTransaction> defaultTx2 = makeReference<ReadYourWritesTransaction>(cx);
-		state bool disableRyw = deterministicRandom()->coinflip();
-		// tenant transaction accessing modules that do not support tenants
-		// tenant getRange
-		try {
-			wait(success(tenantTx->getRange(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT),
-			                                CLIENT_KNOBS->TOO_MANY)));
-			ASSERT(false);
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
-				throw;
-			ASSERT(e.code() == error_code_illegal_tenant_access);
-			tenantTx->reset();
-		}
-		// tenant set + commit
-		try {
-			tenantTx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tenantTx->set(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"), ValueRef());
-			wait(tenantTx->commit());
-			ASSERT(false);
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
-				throw;
-			ASSERT(e.code() == error_code_illegal_tenant_access);
-			tenantTx->reset();
-		}
-		// tenant clear
-		try {
-			tenantTx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tenantTx->clear(SpecialKeySpace::getManagementApiCommandRange("exclude"));
-			ASSERT(false);
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
-				throw;
-			ASSERT(e.code() == error_code_illegal_tenant_access);
-			tenantTx->reset();
-		}
-		// tenant check that conflict ranges stay the same after commit
-		// and depending on if RYW is disabled
-		{
-			state RangeResult readresult1;
-			state RangeResult readresult2;
-			state RangeResult writeResult1;
-			state RangeResult writeResult2;
-			try {
-				if (disableRyw) {
-					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-				}
-				defaultTx1->addReadConflictRange(singleKeyRange("testKeylll"_sr));
-				defaultTx1->addWriteConflictRange(singleKeyRange("testKeylll"_sr));
-				wait(store(readresult1, defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
-				wait(store(writeResult1, defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
-				wait(defaultTx1->commit());
-				CODE_PROBE(true, "conflict range tenant commit succeeded");
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled)
-					throw;
-				CODE_PROBE(true, "conflict range tenant commit error thrown");
-			}
-			wait(store(readresult2, defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
-			wait(store(writeResult2, defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
-			ASSERT(readresult1 == readresult2);
-			ASSERT(writeResult1 == writeResult2);
-			defaultTx1->reset();
-		}
+
+		// NOTE: a lot of tenant related code removed.  Obviously this function should be split up
+		// into N functions, each one to test independent stuff separately.  Who cares if it costs
+		// N times transaction creation.  That stuff is cheap anyway.
+
 		// proper conflict ranges
 		loop {
 			try {
@@ -420,7 +351,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						wait(defaultTx2->onError(err));
 						continue;
 					}
-					// Read conflict ranges of defaultTx1 and check for "foo" with no tenant prefix
 					state RangeResult readConflictRange =
 					    wait(defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
 					state RangeResult writeConflictRange =

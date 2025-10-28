@@ -75,10 +75,6 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
 		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
-		ini.SetValue("META", "tenantMode", config.tenantMode.toString().c_str());
-		if (cx->defaultTenant.present()) {
-			ini.SetValue("META", "defaultTenant", cx->defaultTenant.get().toString().c_str());
-		}
 		ini.SetBoolValue("META", "enableShardEncodeLocationMetadata", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 		ini.SetBoolValue("META", "encryptHeaderAuthTokenEnabled", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);
 		ini.SetLongValue("META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO);
