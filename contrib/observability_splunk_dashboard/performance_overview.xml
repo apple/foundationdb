@@ -1,4 +1,4 @@
-<form theme="dark">
+<form version="1.1" theme="dark">
   <label>FoundationDB - Performance Overview (Dev WiP)</label>
   <fieldset submitButton="false" autoRun="true">
     <input type="text" token="Index" searchWhenChanged="true">
@@ -41,6 +41,7 @@
           <latest>$TimeSpan.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -61,6 +62,7 @@
         </search>
         <option name="charting.axisY.scale">linear</option>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -86,6 +88,7 @@
         <option name="charting.axisY.abbreviation">none</option>
         <option name="charting.axisY.scale">linear</option>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="charting.layout.splitSeries">0</option>
         <option name="refresh.display">progressbar</option>
@@ -103,6 +106,7 @@
           <latest>$TimeSpan.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -120,6 +124,7 @@
           <latest>$TimeSpan.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="charting.legend.placement">bottom</option>
         <option name="refresh.display">progressbar</option>
@@ -136,6 +141,7 @@
           <latest>$TimeSpan.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="charting.legend.placement">bottom</option>
         <option name="refresh.display">progressbar</option>
@@ -152,6 +158,7 @@
           <latest>$TimeSpan.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="charting.legend.placement">bottom</option>
         <option name="refresh.display">progressbar</option>
@@ -173,6 +180,7 @@
         </search>
         <option name="charting.axisY.scale">log</option>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="height">251</option>
         <option name="refresh.display">progressbar</option>
@@ -193,6 +201,7 @@
         <option name="charting.axisY.abbreviation">none</option>
         <option name="charting.axisY.scale">linear</option>
         <option name="charting.chart">area</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="charting.legend.mode">standard</option>
         <option name="height">249</option>
@@ -233,6 +242,7 @@
         </search>
         <option name="charting.axisY.maximumNumber">10</option>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="charting.legend.placement">bottom</option>
       </chart>
@@ -249,6 +259,7 @@ Roles=*DD* host=* Machine=*  Type=DDTrackerStats TrackLatestType=Original
           <latest>$TimeSpan.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="charting.legend.placement">bottom</option>
         <option name="refresh.display">progressbar</option>
@@ -267,6 +278,7 @@ Roles=*DD* host=* Machine=*  Type=DDTrackerStats TrackLatestType=Original
           <latest>$TimeSpan.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="charting.legend.placement">bottom</option>
         <option name="refresh.display">progressbar</option>
@@ -315,6 +327,7 @@ Roles=*DD* host=* Machine=*  Type=DDTrackerStats TrackLatestType=Original
           <latest>$TimeSpan.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>

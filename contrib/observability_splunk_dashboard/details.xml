@@ -1,4 +1,4 @@
-<form theme="light">
+<form version="1.1" theme="light">
   <label>FoundationDB - Details</label>
   <description>Details for FoundationDB Cluster</description>
   <fieldset submitButton="false">
@@ -62,6 +62,7 @@
           <latest>$TimeRange.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -75,6 +76,7 @@
           <latest>$TimeRange.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -88,6 +90,7 @@
           <latest>$TimeRange.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -104,6 +107,7 @@
         </search>
         <option name="charting.axisY.maximumNumber">2</option>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -118,6 +122,7 @@
         </search>
         <option name="charting.axisY.maximumNumber">2</option>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -131,6 +136,7 @@
           <latest>$TimeRange.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -146,6 +152,7 @@
           <latest>$TimeRange.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -159,6 +166,7 @@
           <latest>$TimeRange.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -172,6 +180,7 @@
           <latest>$TimeRange.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -196,19 +205,19 @@
       <chart>
         <title>Pairwise Connection Timeouts Between Datacenters</title>
         <search>
-          <query>index=$Index$ LogGroup=$LogGroup$ (Type=ConnectionTimeout OR Type=ConnectionTimedOut)  host=* Machine=* NOT TrackLatestType=Rolled 
-| eval WithAddr=if(Type=="ConnectionTimedOut", PeerAddr, WithAddr) 
-| rex field=host "(?&lt;Datacenter&gt;..).*" 
-| eval Datacenter=if(isnotnull(pie_work_unit), pie_work_unit, Datacenter) 
-| rex field=WithAddr "(?&lt;OtherIP&gt;[^:]*):.*" 
-| join OtherIP 
-    [search index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics NOT TrackLatestType=Rolled 
-    | rex field=Machine "(?&lt;OtherIP&gt;[^:]*):.*" 
+          <query>index=$Index$ LogGroup=$LogGroup$ (Type=ConnectionTimeout OR Type=ConnectionTimedOut)  host=* Machine=* NOT TrackLatestType=Rolled
+| eval WithAddr=if(Type=="ConnectionTimedOut", PeerAddr, WithAddr)
+| rex field=host "(?&lt;Datacenter&gt;..).*"
+| eval Datacenter=if(isnotnull(pie_work_unit), pie_work_unit, Datacenter)
+| rex field=WithAddr "(?&lt;OtherIP&gt;[^:]*):.*"
+| join OtherIP
+    [search index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics NOT TrackLatestType=Rolled
+    | rex field=Machine "(?&lt;OtherIP&gt;[^:]*):.*"
     | rex field=host "(?&lt;OtherDatacenter&gt;..).*"
     | eval OtherDatacenter=if(isnotnull(pie_work_unit), pie_work_unit, OtherDatacenter)]
-| eval DC1=if(Datacenter&gt;OtherDatacenter, Datacenter, OtherDatacenter), DC2=if(Datacenter&gt;OtherDatacenter, OtherDatacenter, Datacenter) 
-| eval Connection=DC1+" &lt;-&gt; " + DC2 
-| eval Count=1+SuppressedEventCount 
+| eval DC1=if(Datacenter&gt;OtherDatacenter, Datacenter, OtherDatacenter), DC2=if(Datacenter&gt;OtherDatacenter, OtherDatacenter, Datacenter)
+| eval Connection=DC1+" &lt;-&gt; " + DC2
+| eval Count=1+SuppressedEventCount
 | timechart count by Connection</query>
           <earliest>$TimeRange.earliest$</earliest>
           <latest>$TimeRange.latest$</latest>
@@ -242,6 +251,7 @@
           <latest>$TimeRange.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -255,6 +265,7 @@
           <latest>$TimeRange.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -269,6 +280,7 @@
         </search>
         <option name="charting.axisY.scale">log</option>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -350,6 +362,7 @@
         </search>
         <option name="charting.axisY.maximumNumber">1</option>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -396,6 +409,7 @@
         </search>
         <option name="charting.axisY.scale">log</option>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
@@ -409,6 +423,7 @@
           <latest>$TimeRange.latest$</latest>
         </search>
         <option name="charting.chart">line</option>
+        <option name="charting.chart.nullValueMode">connect</option>
         <option name="charting.drilldown">none</option>
         <option name="refresh.display">progressbar</option>
       </chart>
