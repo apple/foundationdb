@@ -309,6 +309,19 @@ ACTOR Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 	}
 
 	try {
+		// Enable persistence BEFORE registering the server to prevent race conditions
+		// where requests arrive before persistence is configured
+		if (!isMockS3PersistenceEnabled()) {
+			std::string persistenceDir = "simfdb/mocks3";
+			enableMockS3Persistence(persistenceDir);
+			TraceEvent("MockS3ChaosServerPersistenceEnabled")
+			    .detail("Address", serverKey)
+			    .detail("PersistenceDir", persistenceDir);
+
+			// Load any previously persisted state (for crash recovery in simulation)
+			wait(loadMockS3PersistedStateFuture());
+		}
+
 		wait(g_simulator->registerSimHTTPServer(ip, port, makeReference<MockS3ChaosRequestHandler>()));
 		g_simulator->registeredMockS3ChaosServers.insert(serverKey);
 

@@ -1097,6 +1097,21 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		state std::string canonicalURI = resource;
 		// Set the resource on each loop so we don't double-encode when we set it to `getCanonicalURI` below.
 		req->resource = resource;
+
+		// Reset headers to initial state for this retry attempt to prevent header accumulation
+		// across retries and potential map corruption
+		req->data.headers = headers;
+		req->data.headers["Host"] = bstore->host;
+		req->data.headers["Accept"] = "application/xml";
+		// Re-merge extraHeaders
+		for (const auto& [k, v] : bstore->extraHeaders) {
+			std::string& fieldValue = req->data.headers[k];
+			if (!fieldValue.empty()) {
+				fieldValue.append(",");
+			}
+			fieldValue.append(v);
+		}
+
 		state UID connID = UID();
 		state double reqStartTimer;
 		state double connectStartTimer = g_network->timer();

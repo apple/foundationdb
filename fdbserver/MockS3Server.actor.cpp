@@ -782,7 +782,9 @@ public:
 			TraceEvent("MockS3MultipartStarted").detail("UploadId", uploadId);
 		}
 
-		wait(persistMultipartState(uploadId));
+		if (getGlobalStorage().persistenceEnabled) {
+			wait(persistMultipartState(uploadId));
+		}
 
 		// Generate XML response
 		std::string xml = format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -831,7 +833,9 @@ public:
 		uploadIter->second.parts[partNumber] = { etag, req->data.content };
 
 		// Persist multipart state (includes all parts)
-		wait(persistMultipartState(uploadId));
+		if (getGlobalStorage().persistenceEnabled) {
+			wait(persistMultipartState(uploadId));
+		}
 
 		// Return ETag in response
 		response->code = 200;
@@ -892,11 +896,15 @@ public:
 		                : "EMPTY");
 
 		// Persist final object
-		wait(persistObject(bucket, object));
+		if (getGlobalStorage().persistenceEnabled) {
+			wait(persistObject(bucket, object));
+		}
 
 		// Clean up multipart upload (in-memory and persisted)
 		getGlobalStorage().multipartUploads.erase(uploadId);
-		wait(deletePersistedMultipart(uploadId));
+		if (getGlobalStorage().persistenceEnabled) {
+			wait(deletePersistedMultipart(uploadId));
+		}
 
 		// Generate completion XML response
 		std::string xml = format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -935,7 +943,9 @@ public:
 
 		// Remove multipart upload (in-memory and persisted)
 		getGlobalStorage().multipartUploads.erase(uploadId);
-		wait(deletePersistedMultipart(uploadId));
+		if (getGlobalStorage().persistenceEnabled) {
+			wait(deletePersistedMultipart(uploadId));
+		}
 
 		response->code = 204; // No Content
 		response->data.contentLen = 0;
@@ -1043,7 +1053,9 @@ public:
 		    .detail("StoredSize", getGlobalStorage().buckets[bucket][object].content.size());
 
 		// Persist object to disk
-		wait(persistObject(bucket, object));
+		if (getGlobalStorage().persistenceEnabled) {
+			wait(persistObject(bucket, object));
+		}
 
 		response->code = 200;
 		response->data.headers["ETag"] = etag;
@@ -1158,7 +1170,9 @@ public:
 		}
 
 		// Delete persisted object
-		wait(deletePersistedObject(bucket, object));
+		if (getGlobalStorage().persistenceEnabled) {
+			wait(deletePersistedObject(bucket, object));
+		}
 
 		response->code = 204; // No Content
 		response->data.contentLen = 0;
@@ -1529,15 +1543,8 @@ ACTOR Future<Void> registerMockS3Server_impl(std::string ip, std::string port) {
 	}
 
 	try {
-		TraceEvent("MockS3ServerDiagnostic")
-		    .detail("Phase", "Calling registerSimHTTPServer")
-		    .detail("Address", serverKey);
-
-		wait(g_simulator->registerSimHTTPServer(ip, port, makeReference<MockS3RequestHandler>()));
-		registeredServers[serverKey] = true;
-
-		// Enable persistence automatically for all MockS3 instances
-		// This ensures all tests using MockS3 get persistence enabled
+		// Enable persistence BEFORE registering the server to prevent race conditions
+		// where requests arrive before persistence is configured
 		if (!getGlobalStorage().persistenceEnabled) {
 			std::string persistenceDir = "simfdb/mocks3";
 			enableMockS3Persistence(persistenceDir);
@@ -1548,6 +1555,13 @@ ACTOR Future<Void> registerMockS3Server_impl(std::string ip, std::string port) {
 			// Load any previously persisted state (for crash recovery in simulation)
 			wait(loadMockS3PersistedStateFuture());
 		}
+
+		TraceEvent("MockS3ServerDiagnostic")
+		    .detail("Phase", "Calling registerSimHTTPServer")
+		    .detail("Address", serverKey);
+
+		wait(g_simulator->registerSimHTTPServer(ip, port, makeReference<MockS3RequestHandler>()));
+		registeredServers[serverKey] = true;
 
 		TraceEvent("MockS3ServerRegistered").detail("Address", serverKey).detail("Success", true);
 
@@ -1603,6 +1617,11 @@ void clearMockS3Storage() {
 void enableMockS3Persistence(const std::string& persistenceDir) {
 	getGlobalStorage().enablePersistence(persistenceDir);
 	TraceEvent("MockS3PersistenceConfigured").detail("Directory", persistenceDir);
+}
+
+// Check if MockS3 persistence is currently enabled
+bool isMockS3PersistenceEnabled() {
+	return getGlobalStorage().persistenceEnabled;
 }
 
 // ACTOR: Load persisted objects from disk

@@ -343,9 +343,9 @@ private:
 					    .detail("Phase", "Registering MockS3Server")
 					    .detail("URL", self->s3Url);
 
-					// Register regular MockS3Server
-					wait(
-					    g_simulator->registerSimHTTPServer("127.0.0.1", "8080", makeReference<MockS3RequestHandler>()));
+					// Register regular MockS3Server using the proper registration function
+					// which automatically enables persistence
+					wait(registerMockS3Server("127.0.0.1", "8080"));
 
 					TraceEvent("S3ClientWorkload")
 					    .detail("Phase", "MockS3Server Registered")
