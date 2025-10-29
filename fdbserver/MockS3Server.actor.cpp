@@ -189,8 +189,6 @@ static void createParentDirectories(const std::string& filePath) {
 // Chaos-free because AsyncFileChaos only affects files with "storage-" in the name
 // (see AsyncFileChaos.h:40). OPEN_NO_AIO controls AsyncFileNonDurable behavior.
 ACTOR static Future<Void> atomicWriteFile(std::string path, std::string content) {
-	state bool initialized = true; // Ensure Promise initialization before try block
-
 	try {
 		// Create all parent directories
 		createParentDirectories(path);
@@ -394,6 +392,16 @@ ACTOR static Future<Void> persistObject(std::string bucket, std::string object) 
 		state std::string dataPath = storage.getObjectDataPath(bucket, object);
 		state std::string metaPath = storage.getObjectMetaPath(bucket, object);
 
+		// Skip if already persisted (race condition: multiple processes may try to persist same object)
+		// Check both final file and .part file to close race window
+		if (fileExists(dataPath) || fileExists(dataPath + ".part")) {
+			TraceEvent("MockS3ObjectAlreadyPersisted")
+			    .detail("Bucket", bucket)
+			    .detail("Object", object)
+			    .detail("DataPath", dataPath);
+			return Void();
+		}
+
 		TraceEvent("MockS3PersistingObject")
 		    .detail("Bucket", bucket)
 		    .detail("Object", object)
@@ -438,6 +446,14 @@ ACTOR static Future<Void> persistMultipartState(std::string uploadId) {
 
 		// Persist multipart state
 		std::string statePath = persistenceDir + "/multipart/" + uploadId + ".state.json";
+
+		// Skip if already persisted (race condition: multiple processes may try to persist same upload)
+		// Check both final file and .part file to close race window
+		if (fileExists(statePath) || fileExists(statePath + ".part")) {
+			TraceEvent("MockS3MultipartAlreadyPersisted").detail("UploadId", uploadId).detail("StatePath", statePath);
+			return Void();
+		}
+
 		std::string stateJson = serializeMultipartState(upload);
 		wait(atomicWriteFile(statePath, stateJson));
 

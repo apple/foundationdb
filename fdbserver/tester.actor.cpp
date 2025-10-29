@@ -2882,10 +2882,17 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 
-	enableConnectionFailures("Tester", FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS);
-	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
+	// Use the first test's connectionFailuresDisableDuration if set, otherwise use the default
+	state double connectionFailuresDisableDuration = FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS;
+	if (!tests.empty() && tests[0].simConnectionFailuresDisableDuration > 0) {
+		connectionFailuresDisableDuration = tests[0].simConnectionFailuresDisableDuration;
+	}
+
+	enableConnectionFailures("Tester", connectionFailuresDisableDuration);
+	state Future<Void> disabler = disableConnectionFailuresAfter(connectionFailuresDisableDuration, "Tester");
 	state Future<Void> repairDataCenter;
 	if (useDB) {
+		// Keep datacenter repair at the default duration regardless of connection failures setting
 		Future<Void> reconfigure = reconfigureAfter(cx, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, dbInfo, "Tester");
 		repairDataCenter = reconfigure;
 	}
