@@ -26,6 +26,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/MockS3Server.h"
+#include "fdbserver/MockS3ServerChaos.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
@@ -42,6 +43,14 @@ struct BulkDumping : TestWorkload {
 	int maxCancelTimes = 0;
 	int bulkLoadTransportMethod = 1; // Default to CP method
 	std::string jobRoot = "";
+
+	// Chaos injection options
+	bool enableChaos = false;
+	double errorRate = 0.1;
+	double throttleRate = 0.05;
+	double delayRate = 0.1;
+	double corruptionRate = 0.01;
+	double maxDelay = 2.0;
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -64,6 +73,14 @@ struct BulkDumping : TestWorkload {
 	    bulkLoadTransportMethod(getOption(options, "bulkLoadTransportMethod"_sr, 1)),
 	    jobRoot(getOption(options, "jobRoot"_sr, ""_sr).toString()) {
 		maxCancelTimes = 0; // TODO(BulkLoad): allow to cancel job when job ID randomly generated.
+
+		// Initialize chaos options
+		enableChaos = getOption(options, "enableChaos"_sr, false);
+		errorRate = getOption(options, "errorRate"_sr, 0.1);
+		throttleRate = getOption(options, "throttleRate"_sr, 0.05);
+		delayRate = getOption(options, "delayRate"_sr, 0.1);
+		corruptionRate = getOption(options, "corruptionRate"_sr, 0.01);
+		maxDelay = getOption(options, "maxDelay"_sr, 2.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
@@ -531,19 +548,62 @@ struct BulkDumping : TestWorkload {
 			                 self->jobRoot.find("mock-s3-server") != std::string::npos;
 
 			if (useMockS3 && g_network->isSimulated()) {
-				TraceEvent("BulkDumpingWorkload")
-				    .detail("Phase", "Registering MockS3Server")
-				    .detail("JobRoot", self->jobRoot);
+				// Check if 127.0.0.1:8080 is already registered in simulator's httpHandlers
+				std::string serverKey = "127.0.0.1:8080";
+				bool alreadyRegistered = g_simulator->httpHandlers.count(serverKey) > 0;
 
-				// Register MockS3Server with IP address - simulation environment doesn't support hostname resolution
-				// Persistence is automatically enabled in registerMockS3Server()
-				wait(registerMockS3Server("127.0.0.1", "8080"));
+				if (alreadyRegistered) {
+					TraceEvent("BulkDumpingWorkload")
+					    .detail("Phase", "MockS3Server Already Registered")
+					    .detail("Address", serverKey)
+					    .detail("ChaosRequested", self->enableChaos)
+					    .detail("Reason", "Reusing existing HTTP handler from previous test");
+				} else if (self->enableChaos) {
+					TraceEvent("BulkDumpingWorkload")
+					    .detail("Phase", "Starting MockS3ServerChaos")
+					    .detail("JobRoot", self->jobRoot);
 
-				TraceEvent("BulkDumpingWorkload")
-				    .detail("Phase", "MockS3Server Registered")
-				    .detail("Address", "127.0.0.1:8080");
+					// Start MockS3ServerChaos - has internal duplicate detection
+					NetworkAddress listenAddress(IPAddress(0x7f000001), 8080);
+					wait(startMockS3ServerChaos(listenAddress));
+
+					TraceEvent("BulkDumpingWorkload")
+					    .detail("Phase", "MockS3ServerChaos Started")
+					    .detail("Address", "127.0.0.1:8080");
+				} else {
+					TraceEvent("BulkDumpingWorkload")
+					    .detail("Phase", "Registering MockS3Server")
+					    .detail("JobRoot", self->jobRoot);
+
+					// Register MockS3Server with persistence enabled
+					wait(registerMockS3Server("127.0.0.1", "8080"));
+
+					TraceEvent("BulkDumpingWorkload")
+					    .detail("Phase", "MockS3Server Registered")
+					    .detail("Address", "127.0.0.1:8080");
+				}
 			}
 		}
+
+		// Configure chaos rates for all clients if chaos is enabled
+		// This allows each test to have different chaos rates
+		if (self->enableChaos && g_network->isSimulated()) {
+			auto injector = S3FaultInjector::injector();
+			injector->setErrorRate(self->errorRate);
+			injector->setThrottleRate(self->throttleRate);
+			injector->setDelayRate(self->delayRate);
+			injector->setCorruptionRate(self->corruptionRate);
+			injector->setMaxDelay(self->maxDelay);
+
+			TraceEvent("BulkDumpingWorkload")
+			    .detail("Phase", "Chaos Configured")
+			    .detail("ClientID", self->clientId)
+			    .detail("ErrorRate", self->errorRate)
+			    .detail("ThrottleRate", self->throttleRate)
+			    .detail("DelayRate", self->delayRate)
+			    .detail("CorruptionRate", self->corruptionRate);
+		}
+
 		return Void();
 	}
 };
