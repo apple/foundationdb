@@ -1,4 +1,4 @@
-<form theme="dark">
+<form version="1.1" theme="dark">
   <label>FoundationDB - Tracing GRV and Commit Long Latency of CC Transactions (6.3 and 7.0+) (DEV)</label>
   <description>Design for ClusterController issued transactions.</description>
   <fieldset submitButton="false" autoRun="true">
