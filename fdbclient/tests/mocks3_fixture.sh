@@ -135,6 +135,16 @@ start_mocks3() {
 
         # Clean up the log file if we're retrying
         rm -f "$MOCKS3_LOG_FILE"
+        
+        # Clean up trace logs from failed bind attempt
+        # These contain Severity=40 errors that would cause false test failures
+        if [ -n "$persistence_dir_param" ]; then
+            local logdir="$(dirname "$persistence_dir_param")/logs"
+            if [ -d "$logdir" ]; then
+                # Remove trace files for the port that failed to bind
+                rm -f "$logdir/trace.${MOCKS3_HOST}.${MOCKS3_PORT}."* 2>/dev/null || true
+            fi
+        fi
 
         # If we get here, the server failed to start
         # Kill any remaining process and try next port
