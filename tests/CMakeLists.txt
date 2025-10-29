@@ -423,35 +423,17 @@ if(WITH_PYTHON)
       TEST_FILES restarting/from_7.3.0/StorefrontTestRestart-1.toml
       restarting/from_7.3.0/StorefrontTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
+      TEST_FILES restarting/to_7.4.5/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/to_7.4.5/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_7.1.0_until_7.2.0/CycleTestRestart-1.toml
-      restarting/to_7.1.0_until_7.2.0/CycleTestRestart-2.toml IGNORE)
+      TEST_FILES restarting/to_7.4.5/CycleTestRestart-1.toml
+      restarting/to_7.4.5/CycleTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
+      TEST_FILES restarting/to_8.0.0/ConfigureStorageMigrationTestRestart-1.toml
+      restarting/to_8.0.0/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_7.2.0_until_7.3.0/CycleTestRestart-1.toml
-      restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml IGNORE)
-    add_fdb_test(
-      TEST_FILES restarting/to_7.3.0_until_7.3.51/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/to_7.3.0_until_7.3.51/ConfigureStorageMigrationTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/to_7.3.0_until_7.3.51/CycleTestRestart-1.toml
-      restarting/to_7.3.0_until_7.3.51/CycleTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/to_7.3.51_until_7.4.0/CycleTestRestart-1.toml
-      restarting/to_7.3.51_until_7.4.0/CycleTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/to_7.4.0/CycleTestRestart-1.toml
-      restarting/to_7.4.0/CycleTestRestart-2.toml)
+      TEST_FILES restarting/to_8.0.0/CycleTestRestart-1.toml
+      restarting/to_8.0.0/CycleTestRestart-2.toml)
   endif()
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
