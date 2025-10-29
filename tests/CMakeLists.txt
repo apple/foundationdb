@@ -141,17 +141,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
-  add_fdb_test(TEST_FILES fast/BlobCipherUnitTest.toml)
-  add_fdb_test(TEST_FILES fast/BlobGranuleVerifyAtomicOps.toml)
-  add_fdb_test(TEST_FILES fast/BlobGranuleVerifyCycle.toml)
-  add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmall.toml)
-  add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmallClean.toml)
 
   # TODO: test occasionally times out due to too many change feed shard parts
-  add_fdb_test(TEST_FILES fast/BlobGranuleMoveVerifyCycle.toml IGNORE)
-  add_fdb_test(TEST_FILES fast/BlobRestoreBasic.toml)
-  add_fdb_test(TEST_FILES fast/BlobRestoreLarge.toml)
-  add_fdb_test(TEST_FILES fast/BlobRestoreToVersion.toml IGNORE)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
   add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml IGNORE)
@@ -249,9 +240,6 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES rare/PerpetualWiggleStorageMigration.toml IGNORE)
   endif()
 
-  add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleRangesChangeLog.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleMergeBoundaries.toml)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogTlog.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
@@ -390,29 +378,17 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.3.49_until_7.3.50/ClientMetricRestart-1.toml
     restarting/from_7.3.49_until_7.3.50/ClientMetricRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/ConfigureTestRestart-1.toml
-    restarting/from_7.3.50/ConfigureTestRestart-2.toml)
+    TEST_FILES restarting/from_7.3.50_until_7.4.0/ConfigureTestRestart-1.toml
+    restarting/from_7.3.50_until_7.4.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/from_7.3.50/ConfigureStorageMigrationTestRestart-2.toml)
+    TEST_FILES restarting/from_7.3.50_until_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/from_7.3.50_until_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/DrUpgradeRestart-1.toml
-    restarting/from_7.3.50/DrUpgradeRestart-2.toml)
+    TEST_FILES restarting/from_7.3.50_until_7.4.0/DrUpgradeRestart-1.toml
+    restarting/from_7.3.50_until_7.4.0/DrUpgradeRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/UpgradeAndBackupRestore-1.toml
-    restarting/from_7.3.50/UpgradeAndBackupRestore-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/VersionVectorDisableRestart-1.toml
-    restarting/from_7.3.50/VersionVectorDisableRestart-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/VersionVectorEnableRestart-1.toml
-    restarting/from_7.3.50/VersionVectorEnableRestart-2.toml IGNORE)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/BlobGranuleRestartCycle-1.toml
-    restarting/from_7.3.50/BlobGranuleRestartCycle-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/BlobGranuleRestartLarge-1.toml
-    restarting/from_7.3.50/BlobGranuleRestartLarge-2.toml)
+    TEST_FILES restarting/from_7.3.50_until_7.4.0/UpgradeAndBackupRestore-1.toml
+    restarting/from_7.3.50_until_7.4.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.50_until_7.4.0/SnapCycleRestart-1.toml
     restarting/from_7.3.50_until_7.4.0/SnapCycleRestart-2.toml)
@@ -429,14 +405,14 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.3.50_until_7.4.0/ClientTransactionProfilingCorrectness-1.toml
     restarting/from_7.3.50_until_7.4.0/ClientTransactionProfilingCorrectness-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/CycleTestRestart-1.toml
-    restarting/from_7.3.50/CycleTestRestart-2.toml)
+    TEST_FILES restarting/from_7.3.50_until_7.4.0/CycleTestRestart-1.toml
+    restarting/from_7.3.50_until_7.4.0/CycleTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.50_until_7.4.0/StorefrontTestRestart-1.toml
     restarting/from_7.3.50_until_7.4.0/StorefrontTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.3.50/ClientMetricRestart-1.toml
-    restarting/from_7.3.50/ClientMetricRestart-2.toml)
+    TEST_FILES restarting/from_7.3.50_until_7.4.0/ClientMetricRestart-1.toml
+    restarting/from_7.3.50_until_7.4.0/ClientMetricRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_7.1.33_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_7.1.33_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
@@ -450,21 +426,15 @@ if(WITH_PYTHON)
     TEST_FILES restarting/to_7.2.0_until_7.3.0/CycleTestRestart-1.toml
     restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/to_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+    TEST_FILES restarting/to_7.3.0_until_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/to_7.3.0_until_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_7.3.0/CycleTestRestart-1.toml
-    restarting/to_7.3.0/CycleTestRestart-2.toml)
+    TEST_FILES restarting/to_7.3.0_until_7.4.0/CycleTestRestart-1.toml
+    restarting/to_7.3.0_until_7.4.0/CycleTestRestart-2.toml)
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)
-  add_fdb_test(TEST_FILES slow/BlobGranuleVerifyLarge.toml IGNORE)
-  add_fdb_test(TEST_FILES slow/BlobGranuleVerifyLargeClean.toml IGNORE)
-  add_fdb_test(TEST_FILES slow/BlobGranuleVerifyBalance.toml)
-  add_fdb_test(TEST_FILES slow/BlobGranuleVerifyBalanceClean.toml)
-  add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessClean.toml)
-  add_fdb_test(TEST_FILES slow/BlobGranuleCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES slow/ClogWithRollbacks.toml)
   add_fdb_test(TEST_FILES slow/CloggedCycleTest.toml)
   add_fdb_test(TEST_FILES slow/CloggedStorefront.toml)
