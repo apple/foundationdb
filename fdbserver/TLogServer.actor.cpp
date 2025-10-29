@@ -986,7 +986,7 @@ ACTOR Future<Void> popDiskQueue(TLogData* self, Reference<LogData> logData) {
 	// If version vector is enabled then we need to preserve all versions from "knownCommittedVersion"
 	// onwards (for recovery purpose). Adjust the iterator position accordingly.
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
-	    logData->knownCommittedVersion < logData->persistentDataVersion) {
+	    logData->knownCommittedVersion <= logData->persistentDataVersion) {
 		locationIter = logData->versionLocation.lastLessOrEqual(logData->knownCommittedVersion);
 	}
 	if (locationIter != logData->versionLocation.end()) {
