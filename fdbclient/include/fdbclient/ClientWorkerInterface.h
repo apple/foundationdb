@@ -45,10 +45,12 @@ struct ClientWorkerInterface {
 
 	void initEndpoints() {
 		reboot.getEndpoint(TaskPriority::ReadSocket);
+#ifdef FLOW_GRPC_ENABLED
 		auto grpcInstance = FlowGrpc::instance();
 		if (grpcInstance) {
 			grpcAddress = grpcInstance->server()->getAddress();
 		}
+#endif
 	}
 
 	template <class Ar>

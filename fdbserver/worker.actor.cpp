@@ -2137,6 +2137,7 @@ bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
 	return skip;
 }
 
+#ifdef FLOW_GRPC_ENABLED
 ACTOR Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr) {
 	if (GrpcServer::instance() == nullptr) {
 		return Never();
@@ -2150,6 +2151,11 @@ ACTOR Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnecti
 	TraceEvent("WorkerGrpcServerStart").detail("Address", GrpcServer::instance()->getAddress());
 	return Never();
 }
+#else
+ACTOR Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr) {
+	return Never();
+}
+#endif
 
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
