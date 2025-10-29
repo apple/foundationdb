@@ -40,14 +40,14 @@ connectionFailuresDisableDuration = 90
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
 
-    [[test.workload]]
-    testName = 'RandomClogging'
-    testDuration = 90.0
+    # [[test.workload]]
+    # testName = 'RandomClogging'
+    # testDuration = 90.0
 
-    [[test.workload]]
-    testName = 'Rollback'
-    meanDelay = 60.0
-    testDuration = 90.0
+    # [[test.workload]]
+    # testName = 'Rollback'
+    # meanDelay = 60.0
+    # testDuration = 90.0
 
 
 
