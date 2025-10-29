@@ -407,24 +407,8 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "simHTTPServerEnabled") {
 				simHTTPServerEnabled = strcmp(value.c_str(), "true") == 0;
 			}
-			if (attrib == "allowDefaultTenant") {
-				allowDefaultTenant = strcmp(value.c_str(), "true") == 0;
-			}
-			if (attrib == "allowCreatingTenants") {
-				allowCreatingTenants = strcmp(value.c_str(), "true") == 0;
-			}
 			if (attrib == "injectSSTargetedRestart") {
 				injectTargetedSSRestart = strcmp(value.c_str(), "true") == 0;
-			}
-			if (attrib == "tenantModes") {
-				std::stringstream ss(value);
-				std::string token;
-				while (std::getline(ss, token, ',')) {
-					tenantModes.push_back(token);
-				}
-			}
-			if (attrib == "defaultTenant") {
-				defaultTenant = value;
 			}
 			if (attrib == "longRunningTest") {
 				longRunningTest = strcmp(value.c_str(), "true") == 0;
@@ -459,7 +443,8 @@ public:
 	bool disableHostname = false;
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
-	// By default, encryption mode is set randomly (based on the tenant mode)
+	// TODO(gglass): see about removing `encryptModes`
+	// By default, encryption mode is set randomly (based on the ten-ant mode)
 	// If provided, set using EncryptionAtRestMode::fromString
 	std::vector<std::string> encryptModes;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
@@ -485,15 +470,8 @@ public:
 	bool randomlyRenameZoneId = false;
 	bool simHTTPServerEnabled = true;
 
-	bool allowDefaultTenant = true;
-	bool allowCreatingTenants = true;
 	bool injectTargetedSSRestart = false;
 	bool injectSSDelay = false;
-	// By default, tenant mode is set randomly
-	// If provided, set using TenantMode::fromString
-	// Ensure no '_experimental` suffix in the mode name
-	std::vector<std::string> tenantModes;
-	Optional<std::string> defaultTenant;
 	std::string testClass; // unused -- used in TestHarness
 	float testPriority; // unused -- used in TestHarness
 
@@ -570,13 +548,9 @@ public:
 		    .add("extraMachineCountDC", &extraMachineCountDC)
 		    .add("extraStorageMachineCountPerDC", &extraStorageMachineCountPerDC)
 		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
-		    .add("allowDefaultTenant", &allowDefaultTenant)
-		    .add("allowCreatingTenants", &allowCreatingTenants)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
 		    .add("injectSSDelay", &injectSSDelay)
-		    .add("tenantModes", &tenantModes)
-		    .add("defaultTenant", &defaultTenant)
 		    .add("longRunningTest", &longRunningTest)
 		    .add("simulationNormalRunTestsTimeoutSeconds", &simulationNormalRunTestsTimeoutSeconds)
 		    .add("simulationBuggifyRunTestsTimeoutSeconds", &simulationBuggifyRunTestsTimeoutSeconds)
@@ -1381,16 +1355,6 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
 		auto tssModeStr = ini.GetValue("META", "tssMode");
-		auto tenantMode = ini.GetValue("META", "tenantMode");
-		if (tenantMode != nullptr) {
-			CODE_PROBE(true, "Restarting test with tenant mode set");
-			testConfig->tenantModes.push_back(tenantMode);
-		}
-		std::string defaultTenant = ini.GetValue("META", "defaultTenant", "");
-		if (!defaultTenant.empty()) {
-			CODE_PROBE(true, "Restarting test with default tenant set");
-			testConfig->defaultTenant = defaultTenant;
-		}
 		if (tssModeStr != nullptr) {
 			g_simulator->tssMode = (ISimulator::TSSMode)atoi(tssModeStr);
 		}
@@ -1573,7 +1537,6 @@ private:
 	void setSimpleConfig();
 	void setSpecificConfig(const TestConfig& testConfig);
 	void setDatacenters(const TestConfig& testConfig);
-	void setTenantMode(const TestConfig& testConfig);
 	void setEncryptionAtRestMode(const TestConfig& testConfig);
 	void setStorageEngine(const TestConfig& testConfig);
 	void setRegions(const TestConfig& testConfig);
@@ -1691,18 +1654,7 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 	}
 }
 
-void SimulationConfig::setTenantMode(const TestConfig& testConfig) {
-	TenantMode tenantMode = TenantMode::DISABLED;
-	if (testConfig.tenantModes.size() > 0) {
-		tenantMode = TenantMode::fromString(deterministicRandom()->randomChoice(testConfig.tenantModes));
-	} else if (testConfig.allowDefaultTenant && deterministicRandom()->coinflip()) {
-		tenantMode = deterministicRandom()->random01() < 0.9 ? TenantMode::REQUIRED : TenantMode::OPTIONAL_TENANT;
-	} else if (deterministicRandom()->coinflip()) {
-		tenantMode = TenantMode::OPTIONAL_TENANT;
-	}
-	set_config("tenant_mode=" + tenantMode.toString());
-}
-
+// TODO(gglass): consider removing this.
 void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 	// Non-DISABLED encryption at rest values are experimental and are being removed.
 	EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
@@ -2275,7 +2227,6 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		setSimpleConfig();
 	}
 	setSpecificConfig(testConfig);
-	setTenantMode(testConfig);
 	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
@@ -2309,12 +2260,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           Standalone<StringRef>* pStartingConfiguration,
                           std::string whitelistBinPaths,
                           TestConfig testConfig,
-                          ProtocolVersion protocolVersion,
-                          Optional<TenantMode>* tenantMode) {
+                          ProtocolVersion protocolVersion) {
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
-	*tenantMode = simconfig.db.tenantMode;
 
 	if (testConfig.testClass == MOCK_DD_TEST_CLASS) {
 		MockGlobalState::g_mockState()->initializeClusterLayout(simconfig);
@@ -2847,8 +2796,6 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	// Build simulator allow list
 	allowList.addTrustedSubnet("0.0.0.0/2"sv);
 	allowList.addTrustedSubnet("abcd::/16"sv);
-	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
-	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
 	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
 	    // NOTE: PhysicalShardMove and BulkLoading and Bulkdumping are required to have SHARDED_ROCKSDB storage engine
@@ -2891,10 +2838,6 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT, &allowList);
 	CODE_PROBE(true, "Simulation start");
 
-	state Optional<TenantName> defaultTenant;
-	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
-	state Optional<TenantMode> tenantMode;
-
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
@@ -2920,49 +2863,15 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 			                     &startingConfiguration,
 			                     whitelistBinPaths,
 			                     testConfig,
-			                     protocolVersion,
-			                     &tenantMode);
+			                     protocolVersion);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
-		}
-
-		// restartSimulatedSystem can adjust some testConfig params related to tenants
-		// so set/overwrite those options if necessary here
-		if (rebooting) {
-			if (testConfig.tenantModes.size()) {
-				tenantMode = TenantMode::fromString(testConfig.tenantModes[0]);
-			} else {
-				tenantMode = TenantMode::DISABLED;
-			}
-		}
-		// setupSimulatedSystem/restartSimulatedSystem should fill tenantMode with valid value.
-		ASSERT(tenantMode.present());
-		if (tenantMode != TenantMode::DISABLED && allowDefaultTenant) {
-			// Default tenant set by testConfig or restarting data in restartInfo.ini
-			if (testConfig.defaultTenant.present()) {
-				defaultTenant = testConfig.defaultTenant.get();
-			} else if (!rebooting && (tenantMode == TenantMode::REQUIRED || deterministicRandom()->coinflip())) {
-				defaultTenant = "SimulatedDefaultTenant"_sr;
-			}
-		}
-		if (!rebooting) {
-			if (defaultTenant.present() && allowDefaultTenant) {
-				tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
-			}
-			if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->coinflip()) {
-				int numTenants = deterministicRandom()->randomInt(1, 6);
-				for (int i = 0; i < numTenants; ++i) {
-					tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
-					                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
-				}
-			}
+			// Yeah right, I agree, Whyyyyy?  Since it's 1s, should we poll some condition?  Is there a risk
+			// 1s is not enough and random weird shit happens after this?  That's the problem with
+			// UNDOCUMENTED MAGIC SHIT
 		}
 
 		wait(HTTP::registerAlwaysFailHTTPHandler());
 
-		TraceEvent("SimulatedClusterTenantMode")
-		    .detail("UsingTenant", defaultTenant)
-		    .detail("TenantMode", tenantMode.get().toString())
-		    .detail("TotalTenants", tenantsToCreate.size());
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
@@ -2992,8 +2901,6 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		                                  startingConfiguration,
 		                                  LocalityData(),
 		                                  UnitTestParameters(),
-		                                  defaultTenant,
-		                                  tenantsToCreate,
 		                                  rebooting);
 		wait(testConfig.longRunningTest
 		         ? runTestsF
