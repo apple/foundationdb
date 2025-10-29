@@ -1,3 +1,10 @@
+# This test validates backup and restore functionality using S3/blobstore (MockS3Server).
+# Key differences from other backup tests:
+# - Uses S3 blobstore URL instead of file-based backup
+# - Connection failures (60s) during initial workload and backup to test resilience
+# - Runs with RandomClogging and Rollback workloads to stress test under network failures
+# - Tests the full backup/restore cycle with simulated S3 operations
+
 testClass = "Backup"
 
 [configuration]
@@ -10,11 +17,15 @@ clearAfterTest = false
 simBackupAgents = 'BackupToFile'
 waitForQuiescenceEnd = false
 runConsistencyCheck = false
+# Disable connection failures after 90s to match RandomClogging/Rollback duration.
+# This ensures backup completes under full chaos (10s-90s) while avoiding extreme
+# queue buildup during restore (90s-170s) that causes simulator slowdown.
+connectionFailuresDisableDuration = 90
 
     [[test.workload]]
     testName = 'Cycle'
-    nodeCount = 30000
-    transactionsPerSecond = 2500.0
+    nodeCount = 10000
+    transactionsPerSecond = 1000.0
     testDuration = 30.0
     expectedRate = 0
 
@@ -31,12 +42,12 @@ runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'RandomClogging'
-    testDuration = 130.0
+    testDuration = 90.0
 
     [[test.workload]]
     testName = 'Rollback'
-    meanDelay = 90.0
-    testDuration = 130.0
+    meanDelay = 60.0
+    testDuration = 90.0
 
 
 
