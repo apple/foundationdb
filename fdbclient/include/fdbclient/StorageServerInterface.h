@@ -390,6 +390,8 @@ struct GetKeyValuesRequest : TimedRequest {
 
 	GetKeyValuesRequest() {}
 
+	bool verify() const { return true; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -443,6 +445,8 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	Optional<TaskPriority> taskID; // includes the information about read purpose
 
 	GetMappedKeyValuesRequest() {}
+
+	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -506,6 +510,8 @@ struct GetKeyValuesStreamRequest {
 
 	GetKeyValuesStreamRequest() {}
 
+	bool verify() const { return true; }		
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -551,6 +557,8 @@ struct GetKeyRequest : TimedRequest {
 	                                      // serve the given key
 
 	GetKeyRequest() {}
+
+	bool verify() const { return true; }
 
 	GetKeyRequest(SpanContext spanContext,
 	              KeySelectorRef const& sel,
