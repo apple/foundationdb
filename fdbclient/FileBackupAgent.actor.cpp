@@ -1354,7 +1354,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	// TODO(gglass): this has been simplified for ten-ant removal.  Maybe it can be
 	// simplified further.
-	ACTOR static Future<EncryptCipherDomainId> getEncryptionDomainDetails(
+	static Future<EncryptCipherDomainId> getEncryptionDomainDetails(
 	    KeyRef key,
 	    EncryptionAtRestMode encryptMode) {
 		if (isSystemKey(key)) {
@@ -1515,8 +1515,6 @@ private:
 	SnapshotFileBackupEncryptionKeys cipherKeys;
 };
 
-#endif
-	
 // File Format handlers.
 // Both Range and Log formats are designed to be readable starting at any BACKUP_RANGEFILE_BLOCK_SIZE boundary
 // so they can be read in parallel.
@@ -1640,11 +1638,11 @@ private:
 	Key lastValue;
 };
 
-ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
-                                        Standalone<VectorRef<KeyValueRef>>* results,
-                                        bool encryptedBlock,
-                                        EncryptionAtRestMode encryptMode,
-                                        Optional<int64_t> blockDomainId) {
+static Future<Void> decodeKVPairs(StringRefReader* reader,
+								  Standalone<VectorRef<KeyValueRef>>* results,
+								  bool encryptedBlock,
+								  EncryptionAtRestMode encryptMode,
+								  Optional<int64_t> blockDomainId) {
 	// Read begin key, if this fails then block was invalid.
 	state uint32_t kLen = reader->consumeNetworkUInt32();
 	state const uint8_t* k = reader->consume(kLen);

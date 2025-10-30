@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+// TODO(gglass): can we get rid of this
+
+#if 0
 #include "fdbrpc/TokenSign.h"
 #include "fdbrpc/TokenSignStdTypes.h"
 #include "flow/PKey.h"
@@ -117,3 +120,5 @@ std::string signToken(const TokenSpec& tokenSpec, const std::string& privateKeyP
 }
 
 } // namespace authz::jwt::stdtypes
+
+#endif

@@ -238,28 +238,6 @@ Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<A
 			throw reply.error.get();
 		}
 
-		// TODO(gglass): delete for real
-#if 0		
-		// The code below is used only during simulation to test backup/restore ability to handle encryption keys
-		// not being found for deleted tenants
-		if (g_network && g_network->isSimulated() && usageType == BlobCipherMetrics::RESTORE) {
-			std::unordered_set<int64_t> tenantIdsToDrop =
-			    parseStringToUnorderedSet<int64_t>(CLIENT_KNOBS->SIMULATION_EKP_TENANT_IDS_TO_DROP, ',');
-			if (!tenantIdsToDrop.count(TenantInfo::INVALID_TENANT)) {
-				for (auto& baseCipherInfo : request.baseCipherInfos) {
-					if (tenantIdsToDrop.count(baseCipherInfo.domainId)) {
-						TraceEvent("GetEncryptCipherKeysSimulatedError").detail("DomainId", baseCipherInfo.domainId);
-						if (deterministicRandom()->coinflip()) {
-							throw encrypt_keys_fetch_failed();
-						} else {
-							throw encrypt_key_not_found();
-						}
-					}
-				}
-			}
-		}
-#endif
-
 		return reply;
 	} catch (Error& e) {
 		TraceEvent("GetEncryptCipherKeysCaughtError").error(e);

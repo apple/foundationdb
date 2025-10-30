@@ -18,9 +18,6 @@
  * limitations under the License.
  */
 
-// TODO(gglass): confirm none of the functionality in here is needed
-
-#if 0
 #include "fdbclient/BlobCipher.h"
 
 #include "fdbclient/FDBTypes.h"
@@ -3248,5 +3245,3 @@ TEST_CASE("/blobCipher") {
 
 	return Void();
 }
-
-#endif

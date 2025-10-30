@@ -216,6 +216,8 @@ void ISimulator::displayWorkers() const {
 	return;
 }
 
+// TODO(gglass): remove for real
+#if 0
 WipedString ISimulator::makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow) {
 	ASSERT_GT(authKeys.size(), 0);
 	auto tokenSpec = authz::jwt::TokenRef{};
@@ -234,6 +236,7 @@ WipedString ISimulator::makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow) 
 	Arena arena;
 	return WipedString(authz::jwt::signToken(arena, tokenSpec, key));
 }
+#endif
 
 int openFileCount = 0;
 

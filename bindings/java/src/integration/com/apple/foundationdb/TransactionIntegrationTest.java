@@ -46,21 +46,6 @@ public class TransactionIntegrationTest {
         }
     }
 
-    @Test
-    public void testOperationsAfterCommitInTenant() throws Exception {
-        try (Database db = fdb.open()) {
-            byte[] tenantName = "testOperationsAfterCommitInTenant".getBytes();
-            TenantManagement.createTenant(db, tenantName).join();
-            try (Tenant tenant = db.openTenant(tenantName)) {
-                for (int i = 0; i < 10; i++) {
-                    try (Transaction tr = tenant.createTransaction()) {
-                        doTestOperationsAfterCommit(tr);
-                    }
-                }
-            }
-        }
-    }
-
     private void doTestOperationsAfterCommit(Transaction tr) {
         tr.set("key1".getBytes(), "val1".getBytes());
         CompletableFuture<Void> commitFuture = tr.commit();

@@ -76,7 +76,6 @@ struct EventGetVersion : public Event {
 	void logEvent(std::string id, int maxFieldLength) const {
 		TraceEvent event("TransactionTrace_GetVersion");
 		event.detail("TransactionID", id).detail("Latency", latency);
-		augmentTraceEvent(event);
 	}
 };
 
@@ -98,7 +97,6 @@ struct EventGetVersion_V2 : public Event {
 	void logEvent(std::string id, int maxFieldLength) const {
 		TraceEvent event("TransactionTrace_GetVersion");
 		event.detail("TransactionID", id).detail("Latency", latency).detail("PriorityType", priorityType);
-		augmentTraceEvent(event);
 	}
 };
 
@@ -146,7 +144,6 @@ struct EventGetVersion_V3 : public Event {
 		    .detail("Latency", latency)
 		    .detail("PriorityType", priorityType)
 		    .detail("ReadVersion", readVersion);
-		augmentTraceEvent(event);
 	}
 };
 
@@ -179,7 +176,6 @@ struct EventGet : public Event {
 		    .detail("ValueSizeBytes", valueSize)
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("Key", key);
-		augmentTraceEvent(event);
 	}
 };
 
@@ -216,7 +212,6 @@ struct EventGetRange : public Event {
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("StartKey", startKey)
 		    .detail("EndKey", endKey);
-		augmentTraceEvent(event);
 	}
 };
 
@@ -245,7 +240,6 @@ struct EventCommit : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", read_range.begin)
 			    .detail("End", read_range.end);
-			augmentTraceEvent(ev1);
 		}
 
 		for (auto& write_range : req.transaction.write_conflict_ranges) {
@@ -255,7 +249,6 @@ struct EventCommit : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", write_range.begin)
 			    .detail("End", write_range.end);
-			augmentTraceEvent(ev2);
 		}
 
 		for (auto& mutation : req.transaction.mutations) {
@@ -264,7 +257,6 @@ struct EventCommit : public Event {
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Mutation", mutation);
-			augmentTraceEvent(ev3);
 		}
 
 		TraceEvent ev4("TransactionTrace_Commit");
@@ -272,7 +264,6 @@ struct EventCommit : public Event {
 		    .detail("Latency", latency)
 		    .detail("NumMutations", numMutations)
 		    .detail("CommitSizeBytes", commitBytes);
-		augmentTraceEvent(ev4);
 	}
 };
 
@@ -313,7 +304,6 @@ struct EventCommit_V2 : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", read_range.begin)
 			    .detail("End", read_range.end);
-			augmentTraceEvent(ev1);
 		}
 
 		for (auto& write_range : req.transaction.write_conflict_ranges) {
@@ -323,7 +313,6 @@ struct EventCommit_V2 : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", write_range.begin)
 			    .detail("End", write_range.end);
-			augmentTraceEvent(ev2);
 		}
 
 		for (auto& mutation : req.transaction.mutations) {
@@ -332,7 +321,6 @@ struct EventCommit_V2 : public Event {
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Mutation", mutation);
-			augmentTraceEvent(ev3);
 		}
 
 		TraceEvent ev4("TransactionTrace_Commit");
@@ -341,7 +329,6 @@ struct EventCommit_V2 : public Event {
 		    .detail("Latency", latency)
 		    .detail("NumMutations", numMutations)
 		    .detail("CommitSizeBytes", commitBytes);
-		augmentTraceEvent(ev4);
 	}
 };
 
@@ -371,7 +358,6 @@ struct EventGetError : public Event {
 		    .detail("ErrCode", errCode)
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("Key", key);
-		augmentTraceEvent(event);
 	}
 };
 
@@ -404,7 +390,6 @@ struct EventGetRangeError : public Event {
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("StartKey", startKey)
 		    .detail("EndKey", endKey);
-		augmentTraceEvent(event);
 	}
 };
 
@@ -436,7 +421,6 @@ struct EventCommitError : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", read_range.begin)
 			    .detail("End", read_range.end);
-			augmentTraceEvent(ev1);
 		}
 
 		for (auto& write_range : req.transaction.write_conflict_ranges) {
@@ -446,7 +430,6 @@ struct EventCommitError : public Event {
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", write_range.begin)
 			    .detail("End", write_range.end);
-			augmentTraceEvent(ev2);
 		}
 
 		for (auto& mutation : req.transaction.mutations) {
@@ -455,12 +438,10 @@ struct EventCommitError : public Event {
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Mutation", mutation);
-			augmentTraceEvent(ev3);
 		}
 
 		TraceEvent ev4("TransactionTrace_CommitError");
 		ev4.detail("TransactionID", id).detail("ErrCode", errCode);
-		augmentTraceEvent(ev4);
 	}
 };
 } // namespace FdbClientLogEvents

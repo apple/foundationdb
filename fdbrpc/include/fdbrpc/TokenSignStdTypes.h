@@ -17,9 +17,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
 #ifndef FDBRPC_TOKEN_SIGN_STD_TYPES_H
 #define FDBRPC_TOKEN_SIGN_STD_TYPES_H
+
+// TODO(gglass): can we delete this for real
+#if 0
+
 #include "fdbrpc/TokenSpec.h"
 #include <string>
 #include <vector>
@@ -50,5 +55,7 @@ std::string makeEcP256PrivateKeyPem();
 std::string signToken(const TokenSpec& tokenSpec, const std::string& privateKeyPem);
 
 } // namespace authz::jwt::stdtypes
+
+#endif
 
 #endif // FDBRPC_TOKEN_SIGN_STD_TYPES_H

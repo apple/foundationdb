@@ -22,6 +22,10 @@
 #define FDBRPC_TOKEN_SIGN_H
 #pragma once
 
+// TODO(gglass): can we get rid of this
+
+#if 0
+
 #include "flow/network.h"
 #include "flow/Arena.h"
 #include "flow/FileIdentifier.h"
@@ -92,5 +96,7 @@ std::pair<bool, Optional<StringRef>> verifyToken(StringRef signInput, const Toke
 std::pair<bool, Optional<StringRef>> verifyToken(StringRef signedToken, PublicKey publicKey);
 
 } // namespace authz::jwt
+
+#endif
 
 #endif // FDBRPC_TOKEN_SIGN_H

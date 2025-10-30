@@ -343,7 +343,8 @@ public:
 	int METACLUSTER_RESTORE_BATCH_SIZE;
 	int TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantEntryCache is refreshed
 	bool CLIENT_ENABLE_USING_CLUSTER_ID_KEY;
-
+#endif
+	
 	// Encryption-at-rest
 	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
 	// This Knob will be a comma-delimited string (i.e 0,1,2,3) that specifies which tenants the the EKP should throw
@@ -365,7 +366,6 @@ public:
 	bool ENABLE_ACCUMULATIVE_CHECKSUM;
 	// Enable to logging verbose trace events related to the accumulative checksum
 	bool ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING;
-#endif	
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

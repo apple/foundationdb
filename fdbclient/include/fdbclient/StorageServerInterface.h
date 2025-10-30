@@ -27,6 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/StorageServerShard.h"
+#include "fdbclient/VersionedMap.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -293,6 +294,8 @@ struct GetValueRequest : TimedRequest {
 	                                      // serve the given key
 	GetValueRequest() {}
 
+	bool verify() const { return true; }
+
 	GetValueRequest(SpanContext spanContext,
 	                const Key& key,
 	                Version ver,
@@ -333,6 +336,8 @@ struct WatchValueRequest {
 	ReplyPromise<WatchValueReply> reply;
 
 	WatchValueRequest() {}
+
+	bool verify() const { return true; }
 
 	WatchValueRequest(SpanContext spanContext,
 	                  const Key& key,

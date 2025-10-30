@@ -1423,8 +1423,7 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
-// TODO(gglass): delete this along with tenant, maybe.
-#if 0
+// TODO(gglass): come back and see if more of this can be removed.  We only use DISABLED.
 struct EncryptionAtRestMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
@@ -1511,7 +1510,6 @@ template <>
 struct Traceable<EncryptionAtRestMode> : std::true_type {
 	static std::string toString(const EncryptionAtRestMode& mode) { return mode.toString(); }
 };
-#endif
 
 typedef StringRef ClusterNameRef;
 typedef Standalone<ClusterNameRef> ClusterName;
