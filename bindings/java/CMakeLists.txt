@@ -32,7 +32,6 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/DirectBufferPool.java
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
-  src/main/com/apple/foundationdb/FDBTenant.java
   src/main/com/apple/foundationdb/FDBTransaction.java
   src/main/com/apple/foundationdb/FutureBool.java
   src/main/com/apple/foundationdb/FutureInt64.java
@@ -68,8 +67,6 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/ReadTransactionContext.java
   src/main/com/apple/foundationdb/subspace/package-info.java
   src/main/com/apple/foundationdb/subspace/Subspace.java
-  src/main/com/apple/foundationdb/Tenant.java
-  src/main/com/apple/foundationdb/TenantManagement.java
   src/main/com/apple/foundationdb/Transaction.java
   src/main/com/apple/foundationdb/TransactionContext.java
   src/main/com/apple/foundationdb/EventKeeper.java

@@ -1618,7 +1618,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 
 	loop {
 		state KeyRangeLocationInfo locationInfo =
-			wait(getKeyLocation(trState, key, &StorageServerInterface::getValue, Reverse::False);
+			wait(getKeyLocation(trState, key, &StorageServerInterface::getValue, Reverse::False));
 
 		state Optional<UID> getValueID = Optional<UID>();
 		state uint64_t startTime;

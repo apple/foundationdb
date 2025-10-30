@@ -5,7 +5,6 @@ set(SRCS
   fdb/impl.py
   fdb/locality.py
   fdb/subspace_impl.py
-  fdb/tenant_management.py
   fdb/tuple.py
 
   fdb/apiversion.py.cmake

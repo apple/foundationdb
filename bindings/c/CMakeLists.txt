@@ -116,8 +116,6 @@ if(NOT WIN32)
     test/mako/process.hpp
     test/mako/shm.hpp
     test/mako/stats.hpp
-    test/mako/tenant.cpp
-    test/mako/tenant.hpp
     test/mako/time.hpp
     test/mako/utils.cpp
     test/mako/utils.hpp)
@@ -292,7 +290,7 @@ if(NOT WIN32)
     set(PATTERNS_TO_SKIP "XXXX")
     if (USE_ASAN)
       set(PATTERNS_TO_SKIP
-        ".*Tenant.*"       # skip Tenant tests because we don't use
+        ".*ExampleDontUsePattern.*"       # skip ExampleDontUsePattern tests because we don't use those files
       )
     endif()
     foreach(test_file ${API_TEST_FILES})
