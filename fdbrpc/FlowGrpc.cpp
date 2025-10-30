@@ -82,7 +82,7 @@ Future<Void> GrpcServer::run() {
 Future<Void> GrpcServer::runInternal() {
 	ASSERT(state_ == State::Stopped);
 	ASSERT(server_ == nullptr);
-	// ASSERT(g_network->isOnMainThread());
+	// ASSERT(g_network->isOnMainThread()); // Unit-tests are not on main-thread?
 
 	Future<Void> next = Void();
 	loop {
