@@ -197,7 +197,7 @@
       <chart>
         <title>CommitProxy to TLog</title>
         <search>
-          <query>index=iffdb LogGroup=playstation_perffdbserver_s01 Type=Histogram  host=* Machine=* Group="ToTlog_*" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="ToTlog_*" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
           <earliest>$TimeSpan.earliest$</earliest>
           <latest>$TimeSpan.latest$</latest>
         </search>
