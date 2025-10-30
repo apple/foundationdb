@@ -103,14 +103,13 @@ class Stack:
 
 class Instruction:
     def __init__(
-        self, tr, stack, op, index, isDatabase=False, isTenant=False, isSnapshot=False
+        self, tr, stack, op, index, isDatabase=False, isSnapshot=False
     ):
         self.tr = tr
         self.stack = stack
         self.op = op
         self.index = index
         self.isDatabase = isDatabase
-        self.isTenant = isTenant
         self.isSnapshot = isSnapshot
 
     def pop(self, count=None, with_idx=False):
@@ -126,7 +125,6 @@ class Tester:
 
     def __init__(self, db, prefix):
         self.db = db
-        self.tenant = None
 
         self.instructions = self.db[fdb.tuple.range((prefix,))]
 
@@ -167,7 +165,7 @@ class Tester:
 
     def new_transaction(self):
         with Tester.tr_map_lock:
-            tr_source = self.tenant if self.tenant is not None else self.db
+            tr_source = self.db
             Tester.tr_map[self.tr_name] = tr_source.create_transaction()
 
     def switch_transaction(self, name):
@@ -186,15 +184,11 @@ class Tester:
             #     print("%d. Instruction is %s" % (idx, op))
 
             isDatabase = op.endswith("_DATABASE")
-            isTenant = op.endswith("_TENANT")
             isSnapshot = op.endswith("_SNAPSHOT")
 
             if isDatabase:
                 op = op[:-9]
                 obj = self.db
-            elif isTenant:
-                op = op[:-7]
-                obj = self.tenant if self.tenant else self.db
             elif isSnapshot:
                 op = op[:-9]
                 obj = self.current_transaction().snapshot
@@ -202,7 +196,7 @@ class Tester:
                 obj = self.current_transaction()
 
             inst = Instruction(
-                obj, self.stack, op, idx, isDatabase, isTenant, isSnapshot
+                obj, self.stack, op, idx, isDatabase, isSnapshot
             )
 
             try:
@@ -314,7 +308,7 @@ class Tester:
                     else:
                         obj.set(key, value)
 
-                    if isDatabase or isTenant:
+                    if isDatabase
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == "LOG_STACK":
                     prefix = inst.pop()
@@ -331,7 +325,7 @@ class Tester:
                     opType, key, value = inst.pop(3)
                     getattr(obj, opType.lower())(key, value)
 
-                    if isDatabase or isTenant:
+                    if isDatabase
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == "SET_READ_VERSION":
                     inst.tr.set_read_version(self.last_version)
@@ -341,7 +335,7 @@ class Tester:
                     else:
                         obj.clear(inst.pop())
 
-                    if isDatabase or isTenant:
+                    if isDatabase
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == "CLEAR_RANGE":
                     begin, end = inst.pop(2)
@@ -353,11 +347,11 @@ class Tester:
                     else:
                         obj.__delitem__(slice(begin, end))
 
-                    if isDatabase or isTenant:
+                    if isDatabase
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == "CLEAR_RANGE_STARTS_WITH":
                     obj.clear_range_startswith(inst.pop())
-                    if isDatabase or isTenant:
+                    if isDatabase
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == "READ_CONFLICT_RANGE":
                     inst.tr.add_read_conflict_range(inst.pop(), inst.pop())
@@ -460,42 +454,6 @@ class Tester:
                     prefix = inst.pop()
                     Tester.wait_empty(self.db, prefix)
                     inst.push(b"WAITED_FOR_EMPTY")
-                elif inst.op == "TENANT_CREATE":
-                    name = inst.pop()
-                    fdb.tenant_management.create_tenant(self.db, name)
-                    inst.push(b"RESULT_NOT_PRESENT")
-                elif inst.op == "TENANT_DELETE":
-                    name = inst.pop()
-                    fdb.tenant_management.delete_tenant(self.db, name)
-                    inst.push(b"RESULT_NOT_PRESENT")
-                elif inst.op == "TENANT_SET_ACTIVE":
-                    name = inst.pop()
-                    self.tenant = self.db.open_tenant(name)
-                    self.tenant.get_id().wait()
-                    inst.push(b"SET_ACTIVE_TENANT")
-                elif inst.op == "TENANT_CLEAR_ACTIVE":
-                    self.tenant = None
-                elif inst.op == "TENANT_LIST":
-                    begin, end, limit = inst.pop(3)
-                    tenant_list = fdb.tenant_management.list_tenants(
-                        self.db, begin, end, limit
-                    )
-                    result = []
-                    for tenant in tenant_list:
-                        result += [tenant.key]
-                        try:
-                            metadata = json.loads(tenant.value)
-                            _ = metadata["id"]
-                            _ = metadata["prefix"]
-                        except (json.decoder.JSONDecodeError, KeyError):
-                            assert False, "Invalid Tenant Metadata"
-                    inst.push(fdb.tuple.pack(tuple(result)))
-                elif inst.op == "TENANT_GET_ID":
-                    if self.tenant != None:
-                        self.tenant.get_id().wait()
-                        inst.push(b"GOT_TENANT_ID")
-                    else:
-                        inst.push(b"NO_ACTIVE_TENANT")
                 elif inst.op == "UNIT_TESTS":
                     run_unit_tests(db)
                 elif inst.op.startswith("DIRECTORY_"):

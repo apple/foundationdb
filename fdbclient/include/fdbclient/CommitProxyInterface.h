@@ -156,7 +156,7 @@ struct ClientDBInfo {
 extern template class ReplyPromise<struct ClientDBInfo>;
 extern template class ReplyPromise<class CachedSerialization<struct ClientDBInfo>>;
 
-// TODO(gglass): is this needed in a world without multi-tenant?
+// TODO(gglass): is this needed in a world without ten-ant
 struct ExpireIdempotencyIdRequest {
 	constexpr static FileIdentifier file_identifier = 1900933;
 	Version commitVersion = invalidVersion;
@@ -166,7 +166,7 @@ struct ExpireIdempotencyIdRequest {
 	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte)
 		: commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte) {}
 
-	// TODO(gglass): remove if unneded.  Used to have tenant logic.
+	// TODO(gglass): remove if unneded.  Used to have ten-ant logic.
 	bool verify() const { return true; }
 
 	template <class Ar>

@@ -229,14 +229,14 @@ public:
 	// penalty used by loadBalance() to balance requests among service instances
 	virtual double getPenalty() const { return 1; }
 
-	virtual bool isReadable(KeyRangeRef const& keys) const { return true; }
-
 	virtual void addActor(Future<Void> future) = 0;
 
 	virtual void getSplitPoints(SplitRangeRequest const& req) = 0;
 
-	// TODO(gglass): is this needed?
-	virtual Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) = 0;
+	// The following method name suffix of `ForReal` replaces something
+	// that used to reference the now-deleted ten-ant feature.  We need
+	// *some suffix* to refer to the method that does the work.
+	virtual Future<Void> waitMetricsForReal(const WaitMetricsRequest& req) = 0;
 
 	virtual void getStorageMetrics(const GetStorageMetricsRequest& req) = 0;
 
@@ -256,22 +256,11 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 	state Future<Void> doPollMetrics = Void();
 	loop {
 		choose {
-			// TODO(gglass): this doesn't seem to do anything if !hasTenant().  Can we delete it?
 			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-				if (!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) {
-					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->addActor(self->waitMetricsTenantAware(req));
-				}
+				self->addActor(self->waitMetricsForReal(req));
 			}
 			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "splitMetrics immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->getSplitMetrics(req);
-				}
+				self->getSplitMetrics(req);
 			}
 			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
 				self->getStorageMetrics(req);
@@ -279,17 +268,8 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
 				self->getHotRangeMetrics(req);
 			}
-			// TODO(gglass): is this needed in general?  Should we delete the tenant-related conditions here
-			// or should we delete this interface generally?
 			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-				if ((!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) ||
-				    (req.tenantInfo.hasTenant() &&
-				     !self->isReadable(req.keys.withPrefix(req.tenantInfo.prefix.get())))) {
-					CODE_PROBE(true, "getSplitPoints immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->getSplitPoints(req);
-				}
+				self->getSplitPoints(req);
 			}
 			when(wait(doPollMetrics)) {
 				self->metrics.poll();

@@ -37,7 +37,6 @@ import com.apple.foundationdb.FDBException;
 import com.apple.foundationdb.KeySelector;
 import com.apple.foundationdb.Range;
 import com.apple.foundationdb.StreamingMode;
-import com.apple.foundationdb.Tenant;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
@@ -45,7 +44,6 @@ import com.apple.foundationdb.tuple.Tuple;
 abstract class Context implements Runnable, AutoCloseable {
 	final Stack stack = new Stack();
 	final Database db;
-	Optional<Tenant> tenant = Optional.empty();
 	final String preStr;
 	int instructionIndex = 0;
 	KeySelector nextKey, endKey;
@@ -53,11 +51,9 @@ abstract class Context implements Runnable, AutoCloseable {
 
 	private static class TransactionState {
 		public Transaction transaction;
-		public Optional<Tenant> tenant;
 
-		public TransactionState(Transaction transaction, Optional<Tenant> tenant) {
-			this.transaction = transaction;
-			this.tenant = tenant;
+	        public TransactionState(Transaction transaction) {
+		    this.transaction = transaction;
 		}
 	}
 
@@ -65,7 +61,6 @@ abstract class Context implements Runnable, AutoCloseable {
 	private List<Thread> children = new LinkedList<>();
 	private static Map<String, TransactionState> transactionMap = new HashMap<>();
 	private static Map<Transaction, AtomicInteger> transactionRefCounts = new HashMap<>();
-	private static Map<byte[], Tenant> tenantMap = new ConcurrentHashMap<>();
 
 	Context(Database db, byte[] prefix) {
 		this.db = db;
@@ -101,17 +96,6 @@ abstract class Context implements Runnable, AutoCloseable {
 		}
 	}
 
-	public synchronized CompletableFuture<Long> setTenant(Optional<byte[]> tenantName) {
-		if (tenantName.isPresent()) {
-			tenant = Optional.of(tenantMap.computeIfAbsent(tenantName.get(), tn -> db.openTenant(tenantName.get())));
-			return tenant.get().getId();
-		}
-		else {
-			tenant = Optional.empty();
-			return CompletableFuture.completedFuture(-1L);
-		}
-	}
-
 	public static synchronized void addTransactionReference(Transaction tr) {
 		transactionRefCounts.computeIfAbsent(tr, x -> new AtomicInteger(0)).incrementAndGet();
 	}
@@ -137,16 +121,11 @@ abstract class Context implements Runnable, AutoCloseable {
 		}
 	}
 
-	private static Transaction createTransaction(Database db, Optional<Tenant> creatingTenant) {
-		if (creatingTenant.isPresent()) {
-			return creatingTenant.get().createTransaction();
-		}
-		else {
-			return db.createTransaction();
-		}
+        private static Transaction createTransaction(Database db) {
+	    return db.createTransaction();
 	}
 
-	private static synchronized boolean newTransaction(Database db, Optional<Tenant> tenant, String trName, boolean allowReplace) {
+	private static synchronized boolean newTransaction(Database db, String trName, boolean allowReplace) {
 		TransactionState oldState = transactionMap.get(trName);
 		if (oldState != null) {
 			if (allowReplace) {
@@ -156,7 +135,7 @@ abstract class Context implements Runnable, AutoCloseable {
 			}
 		}
 
-		TransactionState newState = new TransactionState(createTransaction(db, tenant), tenant);
+		TransactionState newState = new TransactionState(createTransaction(db));
 
 		transactionMap.put(trName, newState);
 		addTransactionReference(newState.transaction);
@@ -170,7 +149,7 @@ abstract class Context implements Runnable, AutoCloseable {
 
 		if(oldTr == null || trState.transaction == oldTr) {
 			if(newTr == null) {
-				newTr = createTransaction(db, trState.tenant);
+			    newTr = createTransaction(db);
 			}
 			releaseTransaction(trState.transaction);
 			addTransactionReference(newTr);
@@ -182,7 +161,7 @@ abstract class Context implements Runnable, AutoCloseable {
 	}
 
 	public void newTransaction() {
-		newTransaction(db, tenant, trName, true);
+		newTransaction(db, trName, true);
 	}
 
 	public void replaceTransaction(Transaction tr) {
@@ -203,7 +182,7 @@ abstract class Context implements Runnable, AutoCloseable {
 
 	public void switchTransaction(byte[] rawTrName) {
 		trName = ByteArrayUtil.printable(rawTrName);
-		newTransaction(db, tenant, trName, false);
+		newTransaction(db, trName, false);
 	}
 
 	abstract void executeOperations() throws Throwable;
@@ -272,10 +251,6 @@ abstract class Context implements Runnable, AutoCloseable {
 	public void close() {
 		for(TransactionState tr : transactionMap.values()) {
 			tr.transaction.close();
-		}
-
-		for(Tenant tenant : tenantMap.values()) {
-			tenant.close();
 		}
 	}
 }

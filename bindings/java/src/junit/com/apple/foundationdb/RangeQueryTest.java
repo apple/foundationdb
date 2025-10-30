@@ -82,31 +82,6 @@ class RangeQueryTest {
 			}
 
 			@Override
-			public Tenant openTenant(Tuple tenantName) {
-				throw new UnsupportedOperationException("Unimplemented method 'openTenant'");
-			}
-
-			@Override
-			public Tenant openTenant(byte[] tenantName, Executor e) {
-				throw new UnsupportedOperationException("Unimplemented method 'openTenant'");
-			}
-
-			@Override
-			public Tenant openTenant(Tuple tenantName, Executor e) {
-				throw new UnsupportedOperationException("Unimplemented method 'openTenant'");
-			}
-
-			@Override
-			public Tenant openTenant(byte[] tenantName, Executor e, EventKeeper eventKeeper) {
-				throw new UnsupportedOperationException("Unimplemented method 'openTenant'");
-			}
-
-			@Override
-			public Tenant openTenant(Tuple tenantName, Executor e, EventKeeper eventKeeper) {
-				throw new UnsupportedOperationException("Unimplemented method 'openTenant'");
-			}
-
-			@Override
 			public Transaction createTransaction(Executor e) {
 				throw new UnsupportedOperationException("Unimplemented method 'createTransaction'");
 			}

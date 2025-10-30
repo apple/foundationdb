@@ -43,7 +43,6 @@ import com.apple.foundationdb.KeyArrayResult;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
 import com.apple.foundationdb.StreamingMode;
-import com.apple.foundationdb.TenantManagement;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
@@ -472,60 +471,6 @@ public class AsyncStackTester {
 				inst.push(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
 			}, FDB.DEFAULT_EXECUTOR);
 		}
-		else if (op == StackOperation.TENANT_CREATE) {
-			return inst.popParam().thenAcceptAsync(param -> {
-				byte[] tenantName = (byte[])param;
-				inst.push(TenantManagement.createTenant(inst.context.db, tenantName));
-			}, FDB.DEFAULT_EXECUTOR);
-		}
-		else if (op == StackOperation.TENANT_DELETE) {
-			return inst.popParam().thenAcceptAsync(param -> {
-				byte[] tenantName = (byte[])param;
-				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
-			}, FDB.DEFAULT_EXECUTOR);
-		}
-		else if (op == StackOperation.TENANT_LIST) {
-			return inst.popParams(3).thenAcceptAsync(params -> {
-				byte[] begin = (byte[])params.get(0);
-				byte[] end = (byte[])params.get(1);
-				int limit = StackUtils.getInt(params.get(2));
-				CloseableAsyncIterator<KeyValue> tenantIter = TenantManagement.listTenants(inst.context.db, begin, end, limit);
-				List<byte[]> result = new ArrayList();
-				try {
-					while (tenantIter.hasNext()) {
-						KeyValue next = tenantIter.next();
-						String metadata = new String(next.getValue());
-						assert StackUtils.validTenantMetadata(metadata) : "Invalid Tenant Metadata";
-						result.add(next.getKey());
-					}
-				} finally {
-					tenantIter.close();
-				}
-				inst.push(Tuple.fromItems(result).pack());
-			}, FDB.DEFAULT_EXECUTOR);
-		}
-		else if (op == StackOperation.TENANT_SET_ACTIVE) {
-			return inst.popParam().thenComposeAsync(param -> {
-				byte[] tenantName = (byte[])param;
-				return inst.context.setTenant(Optional.of(tenantName)).thenAcceptAsync(id -> {
-					inst.push("SET_ACTIVE_TENANT".getBytes());
-				}, FDB.DEFAULT_EXECUTOR);
-			}, FDB.DEFAULT_EXECUTOR);
-		}
-		else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {
-			inst.context.setTenant(Optional.empty());
-			return AsyncUtil.DONE;
-		}
-		else if (op == StackOperation.TENANT_GET_ID) {
-			if (inst.context.tenant.isPresent()) {
-				return inst.context.tenant.get().getId().thenAcceptAsync(id -> {
-					inst.push("GOT_TENANT_ID".getBytes());
-				}, FDB.DEFAULT_EXECUTOR);
-			} else {
-				inst.push("NO_ACTIVE_TENANT".getBytes());
-				return AsyncUtil.DONE;
-			}
-		}
 		else if (op == StackOperation.UNIT_TESTS) {
 			inst.context.db.options().setLocationCacheSize(100001);
 			return inst.context.db.runAsync(tr -> {
@@ -616,7 +561,7 @@ public class AsyncStackTester {
 	private static CompletableFuture<Void> executeMutation(final Instruction inst, Function<Transaction, CompletableFuture<Void>> r) {
 		// run this with a retry loop
 		return inst.tcx.runAsync(r).thenRunAsync(() -> {
-			if(inst.isDatabase || inst.isTenant)
+			if(inst.isDatabase)
 				inst.push("RESULT_NOT_PRESENT".getBytes());
 		}, FDB.DEFAULT_EXECUTOR);
 	}
