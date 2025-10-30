@@ -31,13 +31,13 @@
 #define BOOST_REGEX_NO_LIB
 #endif
 #include "boost/asio.hpp"
-
 #include "fdbclient/CoordinationInterface.h"
+#include "flow/actorcompiler.h"
 
 IPAddress ClusterConnectionString::determineLocalSourceIP() const {
 	int size = coords.size() + hostnames.size();
 	int index = 0;
-	while (true) {
+	loop {
 		try {
 			using namespace boost::asio;
 
