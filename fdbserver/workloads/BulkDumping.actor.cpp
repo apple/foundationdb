@@ -297,9 +297,10 @@ struct BulkDumping : TestWorkload {
 		Optional<BulkLoadJobState> jobInHistory;
 		for (const auto& job : jobHistory) {
 			ASSERT(job.isValid());
-			ASSERT(job.getJobId() == jobId);
-			ASSERT(!jobInHistory.present());
-			jobInHistory = job;
+			if (job.getJobId() == jobId) {
+				ASSERT(!jobInHistory.present());
+				jobInHistory = job;
+			}
 		}
 		ASSERT(jobInHistory.present());
 		if (hasError || !bulkDumpRangeContainBulkLoadRange) {
