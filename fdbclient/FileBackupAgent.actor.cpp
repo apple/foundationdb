@@ -1224,30 +1224,7 @@ struct SnapshotFileBackupEncryptionKeys {
 //
 // EncryptedRangeFileWriter will insert the required padding, header, and extra
 // end/begin keys around the 1MB boundaries as needed.
-//
-// Example:
-//   The range a-z is queries and returns c-j which covers 3 blocks across 2 tenants.
-//   The client code writes keys in this sequence:
-//             t1a t1c t1d t1e t1f t1g t2h t2i t2j t2z
-//
-//   H = header   P = padding   a...z = keys  v = value | = block boundary
-//
-//   Encoded file:  H t1a t1cv t1dv t1ev P | H t1e t1ev t1fv t1gv t2 P | H t2 t2hv t2iv t2jv t2z
-//   Decoded in blocks yields:
-//           Block 1: range [t1a, t1e) with kv pairs t1cv, t1dv
-//           Block 2: range [t1e, t2) with kv pairs t1ev, t1fv, t1gv
-//           Block 3: range [t2, t2z) with kv pairs t2hv, t2iv, t2jv
-//
-//   NOTE: All blocks except for the final block will have one last
-//   value which will not be used.  This isn't actually a waste since
-//   if the next KV pair wouldn't fit within the block after the value
-//   then the space after the final key to the next 1MB boundary would
-//   just be padding anyway.
-//
-//   NOTE: For the EncryptedRangeFileWriter blocks will be split either on the BACKUP_RANGEFILE_BLOCK_SIZE boundary or
-//   when a new tenant id is encountered. If a block is split for crossing tenant boundaries then the last key will be
-//   truncated to just the tenant prefix and the value will be empty (to avoid having sensitive data of one tenant be
-//   encrypted with a key for a different tenant)
+	
 struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	EncryptedRangeFileWriter(Database cx,
 	                         Arena* arena,
@@ -1335,7 +1312,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self,
 	                                                  KeyRef key) {
 		state EncryptCipherDomainId curDomainId =
-		    wait(getEncryptionDomainDetails(key, self->encryptMode, self->tenantCache, checkTenantCache));
+		    wait(getEncryptionDomainDetails(key, self->encryptMode));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
@@ -1375,30 +1352,15 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		copyToBuffer(self, s->begin(), s->size());
 	}
 
+	// TODO(gglass): this has been simplified for ten-ant removal.  Maybe it can be
+	// simplified further.
 	ACTOR static Future<EncryptCipherDomainId> getEncryptionDomainDetails(
 	    KeyRef key,
-	    EncryptionAtRestMode encryptMode,
-	    Optional<Reference<TenantEntryCache<Void>>> tenantCache,
-	    SnapshotBackupUseTenantCache checkTenantCache) {
+	    EncryptionAtRestMode encryptMode) {
 		if (isSystemKey(key)) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
-		if (key.size() < TenantAPI::PREFIX_SIZE || encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
-			return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
-		}
-		// dealing with domain aware encryption so all keys should belong to a tenant
-		KeyRef tenantPrefix = KeyRef(key.begin(), TenantAPI::PREFIX_SIZE);
-		state int64_t tenantId = TenantAPI::prefixToId(tenantPrefix);
-		// It's possible for the first and last key in a block (when writeKey is called) to not have a valid tenant
-		// prefix, since they mark the start and end of a range, in that case we denote them as having a default encrypt
-		// domain for the purpose of encrypting the block
-		if (checkTenantCache && tenantCache.present()) {
-			Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(tenantId));
-			if (!payload.present()) {
-				return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
-			}
-		}
-		return tenantId;
+		return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -1488,62 +1450,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	ACTOR static Future<Void> handleTenantBondary(EncryptedRangeFileWriter* self,
-	                                              Key k,
-	                                              Value v,
-	                                              bool writeValue,
-	                                              EncryptCipherDomainId curKeyDomainId,
-	                                              SnapshotBackupUseTenantCache checkTenantCache) {
-		state KeyRef endKey = k;
-		// If we are crossing a boundary with a key that has a tenant prefix then truncate it
-		if (curKeyDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curKeyDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-			endKey = StringRef(k.begin(), TenantAPI::PREFIX_SIZE);
-		}
-
-		state ValueRef newValue = StringRef();
-		self->lastKey = k;
-		self->lastValue = v;
-		appendStringRefWithLenToBuffer(self, &endKey);
-		appendStringRefWithLenToBuffer(self, &newValue);
-		wait(newBlock(self, 0, endKey, writeValue));
-		wait(updateEncryptionKeysCtx(self, self->lastKey, checkTenantCache));
-		return Void();
-	}
-
-	ACTOR static Future<bool> finishCurTenantBlockStartNewIfNeeded(EncryptedRangeFileWriter* self,
-	                                                               Key k,
-	                                                               Value v,
-	                                                               bool writeValue,
-	                                                               SnapshotBackupUseTenantCache checkTenantCache) {
-		// Don't want to start a new block if the current key or previous key is empty
-		if (self->lastKey.size() == 0 || k.size() == 0) {
-			return false;
-		}
-		state EncryptCipherDomainId curKeyDomainId =
-		    wait(getEncryptionDomainDetails(k, self->encryptMode, self->tenantCache, checkTenantCache));
-		state EncryptCipherDomainId prevKeyDomainId =
-		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode, self->tenantCache, checkTenantCache));
-		if (curKeyDomainId != prevKeyDomainId) {
-			CODE_PROBE(true, "crossed tenant boundaries");
-			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId, checkTenantCache));
-			return true;
-		}
-		return false;
-	}
-
 	// Start a new block if needed, then write the key and value
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
 		if (!self->cipherKeys.headerCipherKey.present() || !self->cipherKeys.headerCipherKey.get().isValid() ||
 		    !self->cipherKeys.textCipherKey.isValid()) {
-			wait(updateEncryptionKeysCtx(self, k, SnapshotBackupUseTenantCache::False));
+			wait(updateEncryptionKeysCtx(self, k));
 		}
 		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
 		wait(newBlockIfNeeded(self, toWrite));
-		bool createdNewBlock =
-		    wait(finishCurTenantBlockStartNewIfNeeded(self, k, v, true, SnapshotBackupUseTenantCache::False));
-		if (createdNewBlock) {
-			return Void();
-		}
 		appendStringRefWithLenToBuffer(self, &k);
 		appendStringRefWithLenToBuffer(self, &v);
 		self->lastKey = k;
@@ -1559,18 +1473,12 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (k.size() > 0 &&
 		    (!self->cipherKeys.headerCipherKey.present() || !self->cipherKeys.headerCipherKey.get().isValid() ||
 		     !self->cipherKeys.textCipherKey.isValid())) {
-			wait(updateEncryptionKeysCtx(self, k, SnapshotBackupUseTenantCache::True));
+			wait(updateEncryptionKeysCtx(self, k));
 		}
-		// Need to account for extra "empty" value being written in the case of crossing tenant boundaries
-		int toWrite = sizeof(uint32_t) + k.size() + sizeof(uint32_t);
+		// The following calculation reflects the internal logic of
+		// appendStringRefWithLenToBuffer().
+		int toWrite = sizeof(uint32_t) + k.size();
 		wait(newBlockIfNeeded(self, toWrite));
-		// We want to check the tenant cache here since the first/last key for a block may not be a valid KV pair (in
-		// which case we use the default domain)
-		bool createdNewBlock =
-		    wait(finishCurTenantBlockStartNewIfNeeded(self, k, StringRef(), false, SnapshotBackupUseTenantCache::True));
-		if (createdNewBlock) {
-			return Void();
-		}
 		appendStringRefWithLenToBuffer(self, &k);
 		self->lastKey = k;
 		return Void();
@@ -1593,7 +1501,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	Arena* arena;
 	EncryptionAtRestMode encryptMode;
 	Reference<IBackupFile> file;
-	Optional<Reference<TenantEntryCache<Void>>> tenantCache;
 	int blockSize;
 
 private:
@@ -1608,6 +1515,8 @@ private:
 	SnapshotFileBackupEncryptionKeys cipherKeys;
 };
 
+#endif
+	
 // File Format handlers.
 // Both Range and Log formats are designed to be readable starting at any BACKUP_RANGEFILE_BLOCK_SIZE boundary
 // so they can be read in parallel.
@@ -1735,8 +1644,7 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
                                         Standalone<VectorRef<KeyValueRef>>* results,
                                         bool encryptedBlock,
                                         EncryptionAtRestMode encryptMode,
-                                        Optional<int64_t> blockDomainId,
-                                        Optional<Reference<TenantEntryCache<Void>>> tenantCache) {
+                                        Optional<int64_t> blockDomainId) {
 	// Read begin key, if this fails then block was invalid.
 	state uint32_t kLen = reader->consumeNetworkUInt32();
 	state const uint8_t* k = reader->consume(kLen);
@@ -1750,37 +1658,6 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		kLen = reader->consumeNetworkUInt32();
 		k = reader->consume(kLen);
 
-		// make sure that all keys in a block belong to exactly one tenant,
-		// unless its the last key in which case it can be a truncated (different) tenant prefix
-		if (encryptedBlock && g_network && g_network->isSimulated()) {
-			ASSERT(blockDomainId.present());
-			state KeyRef curKey = KeyRef(k, kLen);
-			if (!prevDomainId.present()) {
-				EncryptCipherDomainId domainId = wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(
-				    prevKey, encryptMode, tenantCache, SnapshotBackupUseTenantCache::False));
-				prevDomainId = domainId;
-			}
-			state EncryptCipherDomainId curDomainId = wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(
-			    curKey, encryptMode, tenantCache, SnapshotBackupUseTenantCache::False));
-			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
-				ASSERT(!done);
-				// Make sure that all tenant specific keys in a block have the correct prefix size
-				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID &&
-				    curKey.size() != TenantAPI::PREFIX_SIZE) {
-					ASSERT(tenantCache.present());
-					Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(curDomainId));
-					ASSERT(!payload.present());
-				}
-				done = true;
-			}
-			// make sure that all keys (except the last key) in a block are encrypted using the correct key.;
-			if (blockDomainId.get() != FDB_DEFAULT_ENCRYPT_DOMAIN_ID && !prevKey.empty()) {
-				ASSERT_EQ(prevDomainId.get(), blockDomainId.get());
-			}
-			prevKey = curKey;
-			prevDomainId = curDomainId;
-		}
-
 		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
 		if (reader->eof() || *reader->rptr == 0xFF) {
 			results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
@@ -1790,20 +1667,8 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		// Read a value, which must exist or the block is invalid
 		state uint32_t vLen = reader->consumeNetworkUInt32();
 		state const uint8_t* v = reader->consume(vLen);
-		if (tenantCache.present() && !isSystemKey(KeyRef(k, kLen))) {
-			state int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(StringRef(k, kLen));
-			Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(tenantId));
-			// The first and last KV pairs are not restored so if the tenant is not found for the last key then it's ok
-			// to include it in the restore set
-			if (!payload.present() && !(reader->eof() || *reader->rptr == 0xFF)) {
-				TraceEvent(SevWarnAlways, "SnapshotRestoreTenantNotFound").detail("TenantId", tenantId);
-				CODE_PROBE(true, "Snapshot restore tenant not found");
-			} else {
-				results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-			}
-		} else {
-			results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-		}
+
+		results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
 
 		// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
 		if (reader->eof() || *reader->rptr == 0xFF)
@@ -1883,13 +1748,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 	state StringRefReader reader(buf, restore_corrupted_data());
 	state Arena arena;
 	state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-	state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
-	if (config.tenantMode == TenantMode::REQUIRED) {
-		tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
-		wait(tenantCache.get()->init());
-	}
 	state EncryptionAtRestMode encryptMode = config.encryptionAtRestMode;
-	state int64_t blockDomainId = TenantInfo::INVALID_TENANT;
+	state int64_t blockDomainId = -1; // Ten-antInfo::INVALID_TEN-ANT;
 
 	try {
 		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION or
@@ -1897,7 +1757,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		int32_t file_version = reader.consume<int32_t>();
 		ASSERT(!encryptMode.isEncryptionEnabled() || file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION);
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			wait(decodeKVPairs(&reader, &results, false, encryptMode, Optional<int64_t>(), tenantCache));
+			wait(decodeKVPairs(&reader, &results, false, encryptMode, Optional<int64_t>()));
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block", probe::decoration::rare);
 			// read header size
@@ -1910,13 +1770,6 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			encryptHeader = BlobCipherEncryptHeaderRef::fromStringRef(headerS);
 			blockDomainId = encryptHeader.getCipherDetails().textCipherDetails.encryptDomainId;
 
-			if (config.tenantMode == TenantMode::REQUIRED && !isReservedEncryptDomain(blockDomainId)) {
-				ASSERT(tenantCache.present());
-				Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(blockDomainId));
-				if (!payload.present()) {
-					throw tenant_not_found();
-				}
-			}
 			const uint8_t* dataPayloadStart = headerStart + headerLen;
 			// calculate the total bytes read up to (and including) the header
 			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + headerLen;
@@ -1925,7 +1778,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			StringRef decryptedData =
 			    wait(EncryptedRangeFileWriter::decrypt(cx, encryptHeader, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			wait(decodeKVPairs(&reader, &results, true, encryptMode, blockDomainId, tenantCache));
+			wait(decodeKVPairs(&reader, &results, true, encryptMode, blockDomainId));
 		} else {
 			throw restore_unsupported_file_version();
 		}
@@ -1933,12 +1786,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 	} catch (Error& e) {
 		if (e.code() == error_code_encrypt_keys_fetch_failed || e.code() == error_code_encrypt_key_not_found) {
 			ASSERT(!isReservedEncryptDomain(blockDomainId));
-			TraceEvent(SevWarnAlways, "SnapshotRestoreEncryptKeyFetchFailed").detail("TenantId", blockDomainId);
+			TraceEvent(SevWarnAlways, "SnapshotRestoreEncryptKeyFetchFailed");
 			CODE_PROBE(true, "Snapshot restore encrypt keys not found", probe::decoration::rare);
-		} else if (e.code() == error_code_tenant_not_found) {
-			ASSERT(!isReservedEncryptDomain(blockDomainId));
-			TraceEvent(SevWarnAlways, "EncryptedSnapshotRestoreTenantNotFound").detail("TenantId", blockDomainId);
-			CODE_PROBE(true, "Encrypted Snapshot restore tenant not found", probe::decoration::rare);
 		}
 		TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
 		    .error(e)
@@ -2524,11 +2373,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		state EncryptionAtRestMode encryptMode = config.encryptionAtRestMode;
-		state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
-		if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
-			tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
-			wait(tenantCache.get()->init());
-		}
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
 		// if bc is false then clearly the backup is no longer in progress
@@ -2626,7 +2470,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				if (encryptMode.mode != EncryptionAtRestMode::DISABLED) {
 					CODE_PROBE(true, "using encrypted snapshot file writer", probe::decoration::rare);
 					rangeFile = std::make_unique<EncryptedRangeFileWriter>(
-					    cx, &arena, encryptMode, tenantCache, outFile, blockSize);
+					    cx, &arena, encryptMode, outFile, blockSize);
 				} else {
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}
@@ -4358,16 +4202,6 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		return returnStr;
 	}
 
-	ACTOR static Future<Void> _validTenantAccess(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache) {
-		if (isSystemKey(key)) {
-			return Void();
-		}
-		state int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(key);
-		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
-		ASSERT(payload.present());
-		return Void();
-	}
-
 	ACTOR static Future<Void> _execute(Database cx,
 	                                   Reference<TaskBucket> taskBucket,
 	                                   Reference<FutureBucket> futureBucket,
@@ -4423,21 +4257,14 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			Standalone<VectorRef<KeyValueRef>> data = wait(decodeRangeFileBlock(inFile, readOffset, readLen, cx));
 			blockData = data;
 		} catch (Error& e) {
-			// It's possible a tenant was deleted and the encrypt key fetch failed
-			if (e.code() == error_code_encrypt_keys_fetch_failed || e.code() == error_code_tenant_not_found ||
+			if (e.code() == error_code_encrypt_keys_fetch_failed ||
 			    e.code() == error_code_encrypt_key_not_found) {
 				return Void();
 			}
 			throw;
 		}
-		state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
-		state std::vector<Future<Void>> validTenantCheckFutures;
 		state Arena arena;
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		if (config.tenantMode == TenantMode::REQUIRED && g_network && g_network->isSimulated()) {
-			tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
-			wait(tenantCache.get()->init());
-		}
 
 		// First and last key are the range for this file
 		state KeyRange fileRange;
@@ -4517,12 +4344,6 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 					for (; i < iend; ++i) {
 						tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-						if (tenantCache.present()) {
-							validTenantCheckFutures.push_back(_validTenantAccess(
-							    StringRef(arena,
-							              data[i].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get())),
-							    tenantCache.get()));
-						}
 						tr->set(data[i].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),
 						        data[i].value);
 					}
@@ -4537,11 +4358,6 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					wait(checkLock);
 
 					wait(tr->commit());
-
-					if (!validTenantCheckFutures.empty()) {
-						waitForAll(validTenantCheckFutures);
-						validTenantCheckFutures.clear();
-					}
 
 					TraceEvent("FileRestoreCommittedRange")
 					    .suppressFor(60)
@@ -7835,19 +7651,10 @@ public:
 			TraceEvent("AS_StartRestore").log();
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
+			// TODO(gglass): the following loop has been simplified with ten-ant removal.
+			// Possible bug area.  Remove this comment when confirmed it's OK.
 			for (auto r : ranges) {
-				if (config.tenantMode != TenantMode::REQUIRED || !r.intersects(getSystemBackupRanges())) {
-					restoreRange.push_back_deep(restoreRange.arena(), r);
-				} else {
-					KeyRangeRef normalKeyRange = r & normalKeys;
-					KeyRangeRef systemKeyRange = r & systemKeys;
-					if (!normalKeyRange.empty()) {
-						restoreRange.push_back_deep(restoreRange.arena(), normalKeyRange);
-					}
-					if (!systemKeyRange.empty()) {
-						systemRestoreRange.push_back_deep(systemRestoreRange.arena(), systemKeyRange);
-					}
-				}
+				restoreRange.push_back_deep(restoreRange.arena(), r);
 			}
 			if (!systemRestoreRange.empty()) {
 				// restore system keys
