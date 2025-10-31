@@ -341,7 +341,14 @@ def _decode(v, pos):
                 ret.append(val)
         return tuple(ret), end_pos + 1
     else:
-        raise ValueError("Unknown data type in DB: " + repr(v))
+        # Enhanced error reporting for debugging upgrade issues
+        error_context = {
+            'unknown_code': hex(code) if code < 256 else 'invalid',
+            'position': pos,
+            'data_length': len(v),
+            'surrounding_bytes': v[max(0, pos-5):pos+10].hex() if pos < len(v) else 'N/A'
+        }
+        raise ValueError(f"Unknown data type in DB at position {pos}: code={hex(code)} context={error_context} data={repr(v)}")
 
 
 def _reduce_children(child_values):
