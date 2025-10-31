@@ -247,7 +247,7 @@ struct Process : public TopologyObject {
 };
 } // namespace mock
 
-class MockGlobalState {
+class MockGlobalState : public IKeyLocationService {
 	friend struct MockGlobalStateTester;
 	friend class MockGlobalStateImpl;
 

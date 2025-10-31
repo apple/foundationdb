@@ -143,9 +143,6 @@ public:
 		Future<Void> clientCounter;
 		int clientCount;
 		ClusterType clusterType = ClusterType::STANDALONE;
-		Optional<ClusterName> metaclusterName;
-		Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration;
-		metacluster::MetaclusterMetrics metaclusterMetrics;
 		Reference<ClusterRecoveryData> recoveryData;
 
 		DBInfo()

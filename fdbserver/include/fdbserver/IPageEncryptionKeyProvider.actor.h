@@ -18,13 +18,7 @@
  * limitations under the License.
  */
 
-// TODO(gglass): confirm if this is necessary.  For now it looks like it's not.  Delete for real, or preserve needed
-// (non-tenant) bits.
-#if 0
-
 #include "fdbclient/Knobs.h"
-#include "fdbclient/TenantManagement.actor.h"
-#include "fdbrpc/TenantInfo.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H)
 #define FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H
 #include "fdbserver/IPageEncryptionKeyProvider.actor.g.h"
@@ -34,7 +28,6 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/Tenant.h"
 
 #include "fdbserver/IPager.h"
 #include "fdbserver/Knobs.h"
@@ -296,6 +289,7 @@ private:
 	Reference<BlobCipherKey> cipherKeys[NUM_CIPHER];
 };
 
+
 // Key provider which extract tenant id from range key prefixes, and fetch tenant specific encryption keys from
 // EncryptKeyProxy.
 template <EncodingType encodingType,
@@ -392,6 +386,5 @@ private:
 };
 
 #include "flow/unactorcompiler.h"
-#endif
 
 #endif

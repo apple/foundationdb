@@ -39,6 +39,9 @@
 
 #define DEBUG_GET_CIPHER false
 
+// TODO(gglass): delete for real
+
+#if 0
 namespace {
 ACTOR template <class T>
 Future<T> monitorGetEncryptCipherKeys(GetEncryptCipherKeysMonitor* self, Future<T> actor) {
@@ -61,21 +64,9 @@ template <class T>
 Future<T> GetEncryptCipherKeysMonitor::monitor(Future<T> actor) {
 	return monitorGetEncryptCipherKeys(this, actor);
 }
+#endif
 
-template <class T>
-Optional<EncryptKeyProxyInterface> _getEncryptKeyProxyInterface(const Reference<AsyncVar<T> const>& db) {
-	if constexpr (std::is_same_v<T, ClientDBInfo>) {
-		return db->get().encryptKeyProxy;
-	} else {
-		return db->get().client.encryptKeyProxy;
-	}
-}
-
-template <class T>
-Optional<UID> getEncryptKeyProxyId(const Reference<AsyncVar<T> const>& db) {
-	return _getEncryptKeyProxyInterface(db).map(&EncryptKeyProxyInterface::id);
-}
-
+#if 0
 ACTOR template <class T>
 Future<Void> _onEncryptKeyProxyChange(Reference<AsyncVar<T> const> db) {
 	state Optional<UID> previousProxyId = getEncryptKeyProxyId(db);
@@ -453,6 +444,8 @@ Future<TextAndHeaderCipherKeys> GetEncryptCipherKeys<T>::getEncryptCipherKeys(
     Reference<GetEncryptCipherKeysMonitor> monitor) {
 	return _getEncryptCipherKeys(db, header, usageType, monitor);
 }
+
+#endif
 
 #include "flow/unactorcompiler.h"
 #endif

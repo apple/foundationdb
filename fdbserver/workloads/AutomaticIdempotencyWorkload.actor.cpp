@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"

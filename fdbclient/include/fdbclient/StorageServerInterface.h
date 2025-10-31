@@ -708,20 +708,22 @@ struct WaitMetricsRequest {
 	KeyRangeRef keys;
 	StorageMetrics min, max;
 	ReplyPromise<StorageMetrics> reply;
+	// TODO(gglass): this was ten-ant related.  Probably can be removed.
+	Version legacyVersion;
 
 	WaitMetricsRequest() {}
 
 	bool verify() const { return true; }
 
-	WaitMetricsRequest(           
+	WaitMetricsRequest(Version version,
 	                   KeyRangeRef const& keys,
 	                   StorageMetrics const& min,
 	                   StorageMetrics const& max)
-		: keys(arena, keys), min(min), max(max) {}
+		: keys(arena, keys), min(min), max(max), legacyVersion(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, min, max, reply, arena);
+		serializer(ar, keys, min, max, reply, legacyVersion, arena);
 	}
 };
 

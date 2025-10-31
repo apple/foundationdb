@@ -127,6 +127,7 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
+	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
 	ClusterType clusterType = ClusterType::STANDALONE;
 
@@ -146,6 +147,7 @@ struct ClientDBInfo {
 		           id,
 		           forward,
 		           history,
+				   encryptKeyProxy,
 		           clusterId,
 		           clusterType);
 	}

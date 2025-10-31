@@ -4641,7 +4641,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			    e.code() != error_code_grv_proxy_memory_limit_exceeded &&
 			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
-			    e.code() != error_code_proxy_tag_throttled && e.code() != error_code_storage_quota_exceeded &&
+			    e.code() != error_code_proxy_tag_throttled &&
 				e.code() != error_code_transaction_throttled_hot_shard &&
 			    e.code() != error_code_transaction_rejected_range_locked) {
 				TraceEvent(SevError, "TryCommitError").error(e);
@@ -5712,7 +5712,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
                                                  Reference<LocationInfo> locationInfo,
                                                  Optional<Reference<TransactionState>> trState) {
 	try {
-		WaitMetricsRequest req(version, keys, StorageMetrics(), StorageMetrics());
+		WaitMetricsRequest req(/* version, */ keys, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;
 		StorageMetrics m = wait(loadBalance(
