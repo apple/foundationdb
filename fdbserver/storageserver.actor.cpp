@@ -890,7 +890,7 @@ private:
 	VersionedData versionedData;
 	std::map<Version, Standalone<VerUpdateRef>> mutationLog; // versions (durableVersion, version]
 
-	using WatchMapKey = std::pair<int64_t, Key>;
+	using WatchMapKey = Key;
 	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
 	using WatchMapValue = Reference<ServerWatchMetadata>;
 	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
@@ -1754,7 +1754,7 @@ public:
 
 	void getSplitPoints(SplitRangeRequest const& req) override {
 		try {
-			metrics.getSplitPoints(req);
+			metrics.getSplitPoints(req, {});
 		} catch (Error& e) {
 			req.reply.sendError(e);
 		}
@@ -1874,7 +1874,8 @@ void StorageServer::byteSampleApplyMutation(MutationRef const& m, Version ver) {
 
 // watchMap Operations
 Reference<ServerWatchMetadata> StorageServer::getWatchMetadata(KeyRef key) const {
-	const auto it = watchMap.find(key);
+	const WatchMapKey mapKey(key);
+	const auto it = watchMap.find(mapKey);
 	if (it == watchMap.end())
 		return Reference<ServerWatchMetadata>();
 	return it->second;
@@ -3332,8 +3333,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	              (distance + skipEqualKey) * sign,
 	              &maxBytes,
 	              span.context,
-	              options,
-	              {}));
+	              options));
 	state bool more = rep.more && rep.data.size() != distance + skipEqualKey;
 
 	// If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in
@@ -3342,7 +3342,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 		CODE_PROBE(true, "Reverse key selector returned only one result in range read");
 		maxBytes = std::numeric_limits<int>::max();
 		GetKeyValuesReply rep2 = wait(readRange(
-		    data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context, options, {}));
+						data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context, options));
 		rep = rep2;
 		more = rep.more && rep.data.size() != distance + skipEqualKey;
 		ASSERT(rep.data.size() == 2 || !more);
@@ -6618,7 +6618,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage
 		// server we must refresh the cache manually.
-		data->cx->invalidateCache(Key(), keys);
+		data->cx->invalidateCache(keys);
 
 		loop {
 			state Transaction tr(data->cx);
@@ -11264,7 +11264,7 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 #pragma region Core
 #endif
 
-ACTOR Future<Void> waitMetricsDeprecatedTerm1_internal(StorageServer* self, WaitMetricsRequest req) {
+ACTOR Future<Void> waitMetricsForReal_internal(StorageServer* self, WaitMetricsRequest req) {
 	if (!self->isReadable(req.keys)) {
 		self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 	} else {
@@ -11273,8 +11273,8 @@ ACTOR Future<Void> waitMetricsDeprecatedTerm1_internal(StorageServer* self, Wait
 	return Void();
 }
 
-Future<Void> StorageServer::waitMetricsFooAware(const WaitMetricsRequest& req) {
-	return waitMetricsFooAware_internal(this, req);
+Future<Void> StorageServer::waitMetricsForReal(const WaitMetricsRequest& req) {
+	return waitMetricsForReal_internal(this, req);
 }
 
 ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {

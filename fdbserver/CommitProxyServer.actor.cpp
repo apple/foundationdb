@@ -1551,9 +1551,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				}
 
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
-				WriteMutationRefVar var =
-				    wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena, &curEncryptionTime));
-				totalEncryptionTime += curEncryptionTime;
+				WriteMutationRefVar var = wait(writeMutation(self, &m));
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
@@ -1718,8 +1716,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		for (i = 0; i < pProxyCommitData->idempotencyClears.size(); i++) {
 			auto& tags = pProxyCommitData->tagsForKey(pProxyCommitData->idempotencyClears[i].param1);
 			self->toCommit.addTags(tags);
-			// We already have an arena with an appropriate lifetime handy
-			Arena& arena = pProxyCommitData->idempotencyClears.arena();
 			if (pProxyCommitData->acsBuilder != nullptr) {
 				updateMutationWithAcsAndAddMutationToAcsBuilder(
 				    pProxyCommitData->acsBuilder,
@@ -1730,8 +1726,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 				    self->commitVersion,
 				    pProxyCommitData->dbgid);
 			}
-			WriteMutationRefVar var = wait(writeMutation(
-			    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));
+			WriteMutationRefVar var = wait(writeMutation(self, &pProxyCommitData->idempotencyClears[i]));
 			ASSERT(std::holds_alternative<MutationRef>(var));
 		}
 		pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
