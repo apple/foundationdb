@@ -365,8 +365,8 @@ public:
 	// Enable to logging verbose trace events related to the accumulative checksum
 	bool ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING;
 
-	ClientKnobs(Randomize randomize);
-	void initialize(Randomize randomize);
+	ClientKnobs(Randomize randomize, IsSimulated isSimulated);
+	void initialize(Randomize randomize, IsSimulated isSimulated);
 };
 
 #endif
