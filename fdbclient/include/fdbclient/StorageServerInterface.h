@@ -710,6 +710,9 @@ struct WaitMetricsRequest {
 	ReplyPromise<StorageMetrics> reply;
 
 	WaitMetricsRequest() {}
+
+	bool verify() const { return true; }
+
 	WaitMetricsRequest(           
 	                   KeyRangeRef const& keys,
 	                   StorageMetrics const& min,
@@ -745,6 +748,8 @@ struct SplitMetricsRequest {
 	ReplyPromise<SplitMetricsReply> reply;
 	Optional<int> minSplitBytes;
 
+	bool verify() const { return true; }
+	
 	SplitMetricsRequest() {}
 	SplitMetricsRequest(KeyRangeRef const& keys,
 	                    StorageMetrics const& limits,
