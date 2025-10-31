@@ -388,15 +388,15 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		auto& stateTransactions = stateTransactionsPair.second;
 		int64_t stateMutations = 0;
 		int64_t stateBytes = 0;
-		const bool useResolverPrivateMutations = SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
-		const bool applyResolverPrivateMutations = useResolverPrivateMutations && !req.txnStateTransactions.empty();
+		const bool shouldApplyResolverPrivateMutations =
+		    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && !req.txnStateTransactions.empty();
 
 		std::unique_ptr<LogPushData> toCommit; // For accumulating private mutations
 		std::unique_ptr<ResolverData> resolverData;
 		bool isLocked = false;
-		if (useResolverPrivateMutations) {
+		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 			toCommit.reset(new LogPushData(self->logSystem, self->localTLogCount));
-			if (applyResolverPrivateMutations) {
+			if (shouldApplyResolverPrivateMutations) {
 				auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
 				isLocked = lockedKey.present() && lockedKey.get().size();
 				resolverData.reset(new ResolverData(self->dbgid,
@@ -425,7 +425,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			// Generate private mutations for metadata mutations
 			// The condition here must match CommitBatch::applyMetadataToCommittedTransactions()
 			if (reply.committed[t] == ConflictBatch::TransactionCommitted && !self->forceRecovery &&
-			    applyResolverPrivateMutations && (!isLocked || req.transactions[t].lock_aware)) {
+			    shouldApplyResolverPrivateMutations && (!isLocked || req.transactions[t].lock_aware)) {
 				SpanContext spanContext =
 				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();
 
@@ -451,13 +451,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 		// If shardChanged at or before this commit version, the proxy may have computed
 		// the wrong set of groups. Then we need to broadcast to all groups below.
-		bool logsChanged = applyResolverPrivateMutations && toCommit->haveLogsChanged();
+		bool logsChanged = shouldApplyResolverPrivateMutations && toCommit->haveLogsChanged();
 		stateTransactionsPair.first = logsChanged;
 		bool shardChanged = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
 		    &reply, firstUnseenVersion, req.version, logsChanged);
 
 		// Adds private mutation messages to the reply message.
-		if (useResolverPrivateMutations) {
+		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 			auto privateMutations = toCommit->getAllMessages();
 			for (const auto& mutations : privateMutations) {
 				reply.privateMutations.push_back(reply.arena, mutations);
@@ -465,7 +465,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			}
 			// merge mutation tags with sent client tags
 			toCommit->saveTags(reply.writtenTags);
-			reply.privateMutationCount = applyResolverPrivateMutations ? toCommit->getMutationCount() : 0;
+			reply.privateMutationCount = shouldApplyResolverPrivateMutations ? toCommit->getMutationCount() : 0;
 		}
 
 		//TraceEvent("ResolveBatch", self->dbgid).detail("PrevVersion", req.prevVersion).detail("Version", req.version).detail("StateTransactionVersions", self->recentStateTransactionsInfo.size()).detail("StateBytes", stateBytes).detail("FirstVersion", self->recentStateTransactionsInfo.empty() ? -1 : self->recentStateTransactionsInfo.firstVersion()).detail("StateMutationsIn", req.txnStateTransactions.size()).detail("StateMutationsOut", reply.stateMutations.size()).detail("From", proxyAddress);
@@ -501,11 +501,12 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		}
 
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			// Unicast requires resolver private mutations to be enabled.
-			ASSERT(useResolverPrivateMutations);
 			if (!self->numLogs) {
 				reply.tpcvMap.clear();
 			} else {
+				// The resolver allocates toCommit whenever PROXY_USE_RESOLVER_PRIVATE_MUTATIONS is enabled, so toCommit
+				// is non-null here.
+				ASSERT(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
 				std::set<uint16_t> writtenTLogs;
 				// Does the given request correspond to an empty commit message? If so, broadcast it to all tLogs.
 				// NOTE: Ignore log router tags (in "req.writtenTags") while doing this check, because log router
