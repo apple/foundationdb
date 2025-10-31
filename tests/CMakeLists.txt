@@ -168,6 +168,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
   # EncryptionUnitTests is only a convenience file to run the different types of encryption tests at once. Do not enable in general ensembles
   add_fdb_test(TEST_FILES fast/EncryptionUnitTests.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/HTTPKeyValueStore.toml)

@@ -1754,7 +1754,7 @@ public:
 
 	void getSplitPoints(SplitRangeRequest const& req) override {
 		try {
-			metrics.getSplitPoints(req);
+			metrics.getSplitPoints(req, {});
 		} catch (Error& e) {
 			req.reply.sendError(e);
 		}
@@ -1782,7 +1782,7 @@ public:
 		return false;
 	}
 
-	Future<Void> waitMetricsDeprecatedTerm1(const WaitMetricsRequest& req) override;
+	Future<Void> waitMetricsForReal(const WaitMetricsRequest& req) override;
 
 	void addActor(Future<Void> future) override { actors.add(future); }
 

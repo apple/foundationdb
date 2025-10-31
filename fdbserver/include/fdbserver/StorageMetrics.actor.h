@@ -229,9 +229,11 @@ public:
 	// penalty used by loadBalance() to balance requests among service instances
 	virtual double getPenalty() const { return 1; }
 
+	virtual bool isReadable(KeyRangeRef const& keys) const { return true; }
+
 	virtual void addActor(Future<Void> future) = 0;
 
-	virtual void getSplitPoints(SplitRangeRequest const& req) = 0;
+	virtual void getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) = 0;
 
 	// The following method name suffix of `ForReal` replaces something
 	// that used to reference the now-deleted ten-ant feature.  We need
