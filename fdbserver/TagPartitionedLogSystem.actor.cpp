@@ -613,6 +613,9 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 			if (!it->isLocal) {
 				continue;
 			}
+			if (it->logServers.size() == 0) {
+				continue;
+			}
 			for (size_t loc = 0; loc < it->logServers.size(); loc++) {
 				if (tpcvMapRef.contains(location)) {
 					tLogCount[logGroupLocal]++;

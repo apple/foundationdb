@@ -399,27 +399,34 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/RandomVersionsParti
 	LocalityData locality;
 	TLogInterface tlogA(locality);
 	TLogInterface tlogB(locality);
-	std::vector<Reference<LogSet>> logServers{ makeSingleLogSet({ tlogA, tlogB }) };
+	TLogInterface tlogC(locality);
+	TLogInterface tlogD(locality);
+	std::vector<Reference<LogSet>> logServers{ makeSingleLogSet({ tlogA, tlogB, tlogC, tlogD }) };
 
 	// Setup: maxKCV=100, potential versions 110, 112, 115, 118, 120, 125
-	// Version 110: received by both (full delivery)
-	// Version 112: NOT REPORTED at all (missing from UCVs)
+	// Version 110: received by tlogA and tlogB (full delivery)
+	// Version 112: sent to tlogC and tlogD, but NOT REPORTED at all (missing from UCVs)
 	// Version 115: only received by tlogA (partial delivery - indicated by tLogLocIds={0})
-	// Version 118: NOT REPORTED at all (missing from UCVs)
-	// Version 120: received by both (full delivery)
+	// Version 118: sent to tlogC and tlogD, but NOT REPORTED at all (missing from UCVs)
+	// Version 120: received by tlogA and tlogB (full delivery)
 	// Version 125: only received by tlogA (partial delivery - indicated by tLogLocIds={0})
 
 	UnknownCommittedVersions ucv110(110, 100, std::vector<uint16_t>{ 0, 1 });
 	// Version 112 is missing - not in any UCV list
-	UnknownCommittedVersions ucv115(115, 110, std::vector<uint16_t>{ 0 }); // Only tlogA (loc 0)
+	UnknownCommittedVersions ucv115(115, 112, std::vector<uint16_t>{ 0 }); // Only tlogA (loc 0)
 	// Version 118 is missing - not in any UCV list
-	UnknownCommittedVersions ucv120(120, 115, std::vector<uint16_t>{ 0, 1 });
+	UnknownCommittedVersions ucv120(120, 118, std::vector<uint16_t>{ 0, 1 });
 	UnknownCommittedVersions ucv125(125, 120, std::vector<uint16_t>{ 0 }); // Only tlogA (loc 0)
 
 	// tlogA reports versions 110, 115, 120, 125
 	// tlogB only reports versions 110, 120 (missing 115, 125)
-	auto logGroupResults = makeLogGroupResults(
-	    2, { { ucv110, ucv115, ucv120, ucv125 }, { ucv110, ucv120 } }, { tlogA, tlogB }, true, { 100, 100 });
+	// tlogC doesn't report any versions
+	// tlogD doesn't report any versions
+	auto logGroupResults = makeLogGroupResults(2,
+	                                           { { ucv110, ucv115, ucv120, ucv125 }, { ucv110, ucv120 }, {}, {} },
+	                                           { tlogA, tlogB, tlogC, tlogD },
+	                                           true,
+	                                           { 100, 100, 100, 100 });
 
 	Version minDV = 90;
 	Optional<std::tuple<Version, Version>> result = getRecoverVersionUnicast(logServers, logGroupResults, minDV);
@@ -435,16 +442,17 @@ TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/RandomVersionsParti
 	ASSERT(maxKCV == 100);
 
 	// Recovery should stop at 110 because:
-	// - 110 was received by both tLogs (satisfies RF=2)
+	// - 110 was received by tlogA and tlogB (satisfies RF=2)
+	// - 112 was not received by tlogC and tlogD
 	// - 115 was only received by tlogA (tLogLocIds={0}, doesn't satisfy RF=2)
-	// Even though 120 was received by both, the prevVersion chain requires 115 first
+	// Even though 120 was received by both tlogA and tlogB, the prevVersion chain requires 112, 115, and 118
 	if (recoverVersion != 110) {
 		TraceEvent(SevError, "RandomVersionsPartialDeliveryTestRecoverVersionFailed")
 		    .detail("Expected", 110)
 		    .detail("Got", recoverVersion)
 		    .detail("Reason",
-		            "Version 115 received by only tlogA (subset), breaks recovery before 120. "
-		            "Missing versions (112, 118) also demonstrate gaps in the range.");
+		            "Missing versions 112 and 118, break recovery before 120. "
+		            "Version 115 received by only tlogA (subset), also breaks recovery before 120. ");
 	}
 	ASSERT(recoverVersion == 110);
 	return Void();
