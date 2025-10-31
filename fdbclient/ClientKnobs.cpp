@@ -321,6 +321,21 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
 
+	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,        true );
+	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
+	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
+	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );
+	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );
+	init( ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION, 1 );
+	init( ENCRYPT_GET_CIPHER_KEY_LONG_REQUEST_THRESHOLD, 6.0);
+
+	init( REST_KMS_ALLOW_NOT_SECURE_CONNECTION,     false ); if ( randomize && BUGGIFY ) REST_KMS_ALLOW_NOT_SECURE_CONNECTION = !REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
+	init( SIM_KMS_VAULT_MAX_KEYS,                    4096 );
+
+	init( ENABLE_MUTATION_CHECKSUM,                 false ); if ( randomize && BUGGIFY ) ENABLE_MUTATION_CHECKSUM = deterministicRandom()->coinflip();
+	init( ENABLE_ACCUMULATIVE_CHECKSUM,             false ); if ( randomize && BUGGIFY ) ENABLE_ACCUMULATIVE_CHECKSUM = deterministicRandom()->coinflip();
+	init( ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING,     false );
+
 	// clang-format on
 }
 
