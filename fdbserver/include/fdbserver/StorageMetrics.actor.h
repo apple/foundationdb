@@ -233,7 +233,7 @@ public:
 
 	virtual void addActor(Future<Void> future) = 0;
 
-	virtual void getSplitPoints(SplitRangeRequest req) = 0;
+	virtual void getSplitPoints(const SplitRangeRequest& req) = 0;
 
 	// The following method name suffix of `ForReal` replaces something
 	// that used to reference the now-deleted ten-ant feature.  We need
