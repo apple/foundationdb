@@ -5712,7 +5712,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
                                                  Reference<LocationInfo> locationInfo,
                                                  Optional<Reference<TransactionState>> trState) {
 	try {
-		WaitMetricsRequest req(/* version, */ keys, StorageMetrics(), StorageMetrics());
+		WaitMetricsRequest req(version, keys, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;
 		StorageMetrics m = wait(loadBalance(
@@ -5903,7 +5903,7 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 				TraceEvent(SevError, "GetReadHotSubRangesError").error(e);
 				throw;
 			}
-			cx->invalidateCache({}, keys);
+			cx->invalidateCache(keys);
 			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 		}
 	}
@@ -6255,7 +6255,7 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 				resultStream.sendError(e);
 				throw;
 			}
-			cx->invalidateCache({}, keys);
+			cx->invalidateCache(keys);
 			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 		}
 	}
@@ -6355,7 +6355,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 		// solution to this.
 		if (locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT) {
 			wait(delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
-			cx->invalidateCache({}, keys);
+			cx->invalidateCache(keys);
 			continue;
 		}
 
@@ -6366,7 +6366,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 			return results.get();
 		}
 
-		cx->invalidateCache({}, keys);
+		cx->invalidateCache(keys);
 		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 	}
 }
@@ -6600,7 +6600,7 @@ ACTOR static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getChe
 
 			choose {
 				when(wait(cx->connectionFileChanged())) {
-					cx->invalidateCache({}, range);
+					cx->invalidateCache(range);
 				}
 				when(wait(waitForAll(futures))) {
 					break;
@@ -6613,7 +6613,7 @@ ACTOR static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getChe
 			TraceEvent(SevWarn, "GetCheckpointError").errorUnsuppressed(e).detail("Range", range);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise) {
-				cx->invalidateCache({}, range);
+				cx->invalidateCache(range);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {
 				throw;
@@ -6887,8 +6887,7 @@ int64_t getMaxReadKeySize(KeyRef const& key) {
 }
 
 int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess) {
-	return key.startsWith(systemKeys.begin) ? ( CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-												: CLIENT_KNOBS->KEY_SIZE_LIMIT );
+	return key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT;
 }
 
 int64_t getMaxClearKeySize(KeyRef const& key) {

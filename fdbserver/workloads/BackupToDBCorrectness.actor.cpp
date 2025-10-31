@@ -163,7 +163,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup(Database cx, BackupToDBCorrectnessWorkload* self) {
-		if (BUFFIFY) {
+		if (BUGGIFY) {
 			for (auto r : getSystemBackupRanges()) {
 				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);
 			}

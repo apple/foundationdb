@@ -1066,7 +1066,7 @@ struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	}
 
 	SingleSpecialKeyImpl(KeyRef k,
-	                     const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f) 
+	                     const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f)
 		: SpecialKeyRangeReadImpl(singleKeyRange(k)), k(k), f(f) {}
 
 private:
@@ -1462,8 +1462,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 				        return e;
 			        }
 			        return Optional<Value>();
-		        },
-		        true));
+				}));
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::CLUSTERID,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<SingleSpecialKeyImpl>(
@@ -1479,8 +1478,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 				                            return e;
 			                            }
 			                            return Optional<Value>();
-		                            },
-		                            true));
+		                            }));
 	}
 	throttleExpirer = recurring([this]() { expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 

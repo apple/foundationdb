@@ -2923,8 +2923,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
     Version dcLogServerVersionDifference,
     Version dcStorageServerVersionDifference,
     ConfigBroadcaster const* configBroadcaster,
-    Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration,
-    metacluster::MetaclusterMetrics metaclusterMetrics,
     std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
 
 	state double tStart = timer();
