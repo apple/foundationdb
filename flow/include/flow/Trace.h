@@ -37,8 +37,17 @@
 #include "flow/ITrace.h"
 #include "flow/Traceable.h"
 
-#define TRACE_DEFAULT_ROLL_SIZE (10 << 20)
-#define TRACE_DEFAULT_MAX_LOGS_SIZE (10 * TRACE_DEFAULT_ROLL_SIZE)
+// Note: this default only applies to non-simulation fdbserver process invocations
+//       i.e. when -r is not set to simulation
+#define TRACE_DEFAULT_ROLL_SIZE (10ULL << 20)
+
+// Same as above, but default for when -r is set to simulation
+// Having a higher default (1GiB) is useful because you don't have to
+// grep multiple trace files when debugging.
+#define TRACE_DEFAULT_ROLL_SIZE_SIM (1ULL << 30)
+
+#define TRACE_DEFAULT_MAX_LOGS_SIZE (10ULL * TRACE_DEFAULT_ROLL_SIZE)
+#define TRACE_DEFAULT_MAX_LOGS_SIZE_SIM (10ULL * TRACE_DEFAULT_ROLL_SIZE_SIM)
 
 FDB_BOOLEAN_PARAM(InitializeTraceMetrics);
 

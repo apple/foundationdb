@@ -667,7 +667,7 @@ static void printUsage(const char* name, bool devhelp) {
 	printOptionUsage("-L PATH, --logdir PATH", " Store log files in the given folder (default is `.').");
 	printOptionUsage("--logsize SIZE",
 	                 "Roll over to a new log file after the current log file"
-	                 " exceeds SIZE bytes. The default value is 10MiB.");
+	                 " exceeds SIZE bytes. The default value is 10MiB (1GiB in simulation).");
 	printOptionUsage("--maxlogs SIZE, --maxlogssize SIZE",
 	                 " Delete the oldest log file when the total size of all log"
 	                 " files exceeds SIZE bytes. If set to 0, old log files will not"
@@ -1119,6 +1119,7 @@ struct CLIOptions {
 	    logFolder = ".", metricsConnFile, metricsPrefix, newClusterKey, authzPublicKeyFile;
 	std::string logGroup = "default";
 	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
+	bool rollsizeSet = false;
 	uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
 	bool maxLogsSizeSet = false;
 	int maxLogs = 0;
@@ -1518,6 +1519,7 @@ private:
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				rollsize = ti.get();
+				rollsizeSet = true;
 				break;
 			}
 			case OPT_MAXLOGSSIZE: {
@@ -1872,6 +1874,16 @@ private:
 			}
 			}
 		}
+
+		if (role == ServerRole::Simulation) {
+			if (!rollsizeSet) {
+				rollsize = TRACE_DEFAULT_ROLL_SIZE_SIM;
+			}
+			if (!maxLogsSizeSet) {
+				maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE_SIM;
+			}
+		}
+
 		// Sets up blob credentials, including one from the environment FDB_BLOB_CREDENTIALS.
 		// Below is top-half of BackupTLSConfig::setupBlobCredentials().
 		const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
