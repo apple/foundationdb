@@ -566,16 +566,6 @@ void initHelp() {
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
 
-#if 0
-	// TODO(gglass): confirm this is used only for tenant
-	helpMap["quota"] = CommandHelp("quota",
-	                               "quota [get <tag> [reserved_throughput|total_throughput|storage] | "
-	                               "set <tag> [reserved_throughput|total_throughput|storage] <value> | "
-	                               "clear <tag>]",
-	                               "Get, modify, or clear the reserved/total throughput quota (in bytes/s) or "
-	                               "storage quota (in bytes) for the specified tag.");
-#endif
-
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
@@ -1512,14 +1502,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						options = &globalOptions;
 					}
 
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "quota")) {
-					bool _result = wait(makeInterruptable(quotaCommandActor(db, tokens)));
-					if (!_result) {
-						is_error = true;
-					}
 					continue;
 				}
 

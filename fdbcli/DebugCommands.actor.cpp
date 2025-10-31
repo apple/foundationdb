@@ -76,7 +76,7 @@ ACTOR Future<bool> getKeyServers(
 		keyServerLocationFuture =
 		    commitProxyInfo->get(0, &CommitProxyInterface::getKeyServersLocations)
 		        .getReplyUnlessFailedFor(
-		            GetKeyServerLocationsRequest({}, {}, begin, end, limitKeyServers, false, latestVersion, Arena()),
+		            GetKeyServerLocationsRequest({}, begin, end, limitKeyServers, false, latestVersion, Arena()),
 		            2,
 		            0);
 
@@ -155,7 +155,7 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 	}
 
 	KeyRangeLocationInfo loc = wait(getKeyLocation_internal(
-	    cx, {}, tokens[1], SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, version));
+	    cx, tokens[1], SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, version));
 
 	if (loc.locations) {
 		fmt::println("version is {}", version);
@@ -163,7 +163,7 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 		state Reference<LocationInfo::Locations> locations = loc.locations->locations();
 		state std::vector<Future<GetValueReply>> replies;
 		for (int i = 0; locations && i < locations->size(); i++) {
-			GetValueRequest req({}, {}, tokens[1], version, {}, {}, {});
+			GetValueRequest req(/*spanContext=*/{}, tokens[1], version, {}, {}, {});
 			replies.push_back(locations->get(i, &StorageServerInterface::getValue).getReply(req));
 		}
 		wait(waitForAll(replies));

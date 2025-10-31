@@ -290,8 +290,10 @@ private:
 };
 
 
-// Key provider which extract tenant id from range key prefixes, and fetch tenant specific encryption keys from
-// EncryptKeyProxy.
+// Key provider which was originally intended to extract ten-ant id from range key prefixes,
+// and to fetch ten-ant specific encryption keys from EncryptKeyProxy.  This has been
+// left in place in the interest of getting the code to compile as part of ten-ant removal.
+// TODO(gglass): consider removing this code.  Although possibly people are using it in production.
 template <EncodingType encodingType,
           typename std::enable_if<encodingType == AESEncryption || encodingType == AESEncryptionWithAuth, bool>::type =
               true>
@@ -360,19 +362,8 @@ public:
 		if (key.startsWith(systemKeysPrefix)) {
 			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, systemKeysPrefix.size() };
 		}
-		// Cluster-aware encryption.
-		if (encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE) {
-			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
-		}
-		// Key smaller than tenant prefix in size belongs to the default domain.
-		if (key.size() < TenantAPI::PREFIX_SIZE) {
-			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
-		}
-		int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(key);
-		if (tenantId == TenantInfo::INVALID_TENANT) {
-			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
-		}
-		return { tenantId, TenantAPI::PREFIX_SIZE };
+		// ten-ant stuff removed.
+		return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 	}
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
