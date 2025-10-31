@@ -22,6 +22,7 @@
 #define FDBCLIENT_MONITORLEADER_H
 #pragma once
 
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"

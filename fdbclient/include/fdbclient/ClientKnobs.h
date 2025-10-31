@@ -330,27 +330,9 @@ public:
 	int CHANGE_QUORUM_BAD_STATE_RETRY_TIMES;
 	double CHANGE_QUORUM_BAD_STATE_RETRY_DELAY;
 
-	// Tenants and Metacluster
-	// TODO(gglass): delete this stuff for real.
-#if 0	
-	int MAX_TENANTS_PER_CLUSTER;
-	int TENANT_TOMBSTONE_CLEANUP_INTERVAL;
-	int MAX_DATA_CLUSTERS;
-	int REMOVE_CLUSTER_TENANT_BATCH_SIZE;
-	int METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK;
-	double METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY;
-	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
-	int METACLUSTER_RESTORE_BATCH_SIZE;
-	int TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantEntryCache is refreshed
-	bool CLIENT_ENABLE_USING_CLUSTER_ID_KEY;
-#endif
-	
 	// Encryption-at-rest
+	// TODO(gglass): circle back and see if this stuff can be removed.
 	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
-	// This Knob will be a comma-delimited string (i.e 0,1,2,3) that specifies which tenants the the EKP should throw
-	// key_not_found errors for. If TenantInfo::INVALID_TENANT is contained within the list then no tenants will be
-	// dropped. This Knob should ONLY be used in simulation for testing purposes
-	std::string SIMULATION_EKP_TENANT_IDS_TO_DROP;
 	int ENCRYPT_HEADER_FLAGS_VERSION;
 	int ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
 	int ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;

@@ -107,7 +107,7 @@ void AdminServer::start() {
 		try {
 			auto req = receiveObject<Request>(pipe_to_server);
 			boost::apply_visitor(
-			    [this, &databases, &setup_error, &stop](auto&& request) -> void {
+			    [this, &setup_error, &stop](auto&& request) -> void {
 				    using ReqType = std::decay_t<decltype(request)>;
 				    if (setup_error) {
 					    sendResponse<ReqType>(pipe_to_client, ReqType::ResponseType::makeError(*setup_error));

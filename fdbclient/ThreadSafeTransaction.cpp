@@ -52,7 +52,7 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 	auto type = isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, nullptr));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db, type));
 }
 
 void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -170,8 +170,8 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 }
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
-                                             ISingleThreadTransaction::Type type) {
-  : initialized(std::make_shared<std::atomic_bool>(false)) {
+                                             ISingleThreadTransaction::Type type)
+	: initialized(std::make_shared<std::atomic_bool>(false)) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 

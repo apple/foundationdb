@@ -22,7 +22,6 @@
 #include <utility>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"

@@ -2493,21 +2493,6 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 	// The cluster ID will be the connection record string (either a filename or the connection string itself)
 	// in versions before we could read the cluster ID.
 	state std::string clusterId = connectionRecord.toString();
-	if (CLIENT_KNOBS->CLIENT_ENABLE_USING_CLUSTER_ID_KEY && dbProtocolVersion.hasClusterIdSpecialKey()) {
-		state Reference<ITransaction> tr = db->createTransaction();
-		loop {
-			try {
-				state ThreadFuture<Optional<Value>> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
-				Optional<Value> clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
-				ASSERT(clusterIdVal.present());
-				clusterId = clusterIdVal.get().toString();
-				ASSERT(UID::fromString(clusterId).isValid());
-				break;
-			} catch (Error& e) {
-				wait(safeThreadFutureToFuture(tr->onError(e)));
-			}
-		}
-	}
 
 	if (self->clusterSharedStateMap.find(clusterId) == self->clusterSharedStateMap.end()) {
 		TraceEvent("CreatingClusterSharedState")

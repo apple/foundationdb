@@ -156,7 +156,7 @@ Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const KeyRef& 
 	auto range =
 	    isBackward ? locationCache.rangeContainingKeyBefore(key) : locationCache.rangeContaining(key);
 	if (range->value()) {
-		return KeyRangeLocationInfo(toPrefixRelativeRange(range->range()), range->value());
+		return KeyRangeLocationInfo(range->range(), range->value());
 	}
 
 	return Optional<KeyRangeLocationInfo>();
@@ -180,7 +180,7 @@ bool DatabaseContext::getCachedLocations(const KeyRangeRef& range,
 			result.clear();
 			return false;
 		}
-		result.emplace_back(toPrefixRelativeRange(r->range() & range), r->value());
+		result.emplace_back((r->range() & range), r->value());
 		if (result.size() == limit || begin == end) {
 			break;
 		}
@@ -401,7 +401,7 @@ ACTOR static Future<Void> switchConnectionRecordImpl(Reference<IClusterConnectio
 	self->commitProxies.clear();
 	self->grvProxies.clear();
 	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
-	self->invalidateCache({}, allKeys);
+	self->invalidateCache(allKeys);
 
 	self->ssVersionVectorCache.clear();
 
@@ -1204,7 +1204,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 				         cx->getCommitProxies(useProvisionalProxies),
 				         &CommitProxyInterface::getKeyServersLocations,
 				         GetKeyServerLocationsRequest(
-				             span.context, key, Optional<KeyRef>(), 100, isBackward, version, key.arena()),
+								  span.context, key, Optional<KeyRef>(), /*limit=*/100, isBackward, version, key.arena()),
 				         TaskPriority::DefaultPromiseEndpoint))) {
 					++cx->transactionKeyServerLocationRequestsCompleted;
 					if (debugID.present())

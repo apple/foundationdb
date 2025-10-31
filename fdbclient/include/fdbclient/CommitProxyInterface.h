@@ -213,6 +213,8 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<TagSet> tagSet;
 	IdempotencyIdRef idempotencyId;
 
+	bool verify() const { return true; }
+
 	CommitTransactionRequest() : CommitTransactionRequest(SpanContext()) {}
 	CommitTransactionRequest(SpanContext const& context) : spanContext(context), flags(0) {}
 
@@ -388,35 +390,30 @@ struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
 	SpanContext spanContext;
-	TenantInfo tenant;
 	KeyRef begin;
 	Optional<KeyRef> end;
 	int limit;
 	bool reverse;
 	ReplyPromise<GetKeyServerLocationsReply> reply;
 
-	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
-	// a tenant is not present. If the metadata version is lower, the proxy must wait in case the tenant gets
-	// created. If latestVersion is specified, then the proxy will wait until it is sure that it has received
-	// updates from other proxies before answering.
-	Version minTenantVersion;
+	// TODO(gglass): this may be unused in a post-ten-ant world.
+	Version legacyVersion;
 
-	GetKeyServerLocationsRequest() : limit(0), reverse(false), minTenantVersion(latestVersion) {}
+	GetKeyServerLocationsRequest() : limit(0), reverse(false), legacyVersion(latestVersion) {}
 	GetKeyServerLocationsRequest(SpanContext spanContext,
 	                             KeyRef const& begin,
 	                             Optional<KeyRef> const& end,
 	                             int limit,
 	                             bool reverse,
-	                             Version minTenantVersion,
+								 Version version,
 	                             Arena const& arena)
-	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
-	    minTenantVersion(minTenantVersion) {}
+		: arena(arena), spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse), legacyVersion(version) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, minTenantVersion, arena);
+		serializer(ar, begin, end, limit, reverse, reply, spanContext, legacyVersion, arena);
 	}
 };
 

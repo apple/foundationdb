@@ -1638,7 +1638,7 @@ private:
 	Key lastValue;
 };
 
-static Future<Void> decodeKVPairs(StringRefReader* reader,
+ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 								  Standalone<VectorRef<KeyValueRef>>* results,
 								  bool encryptedBlock,
 								  EncryptionAtRestMode encryptMode,

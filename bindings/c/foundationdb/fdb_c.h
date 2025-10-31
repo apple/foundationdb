@@ -551,12 +551,98 @@ DLLEXPORT const char* fdb_get_client_version(void);
 /* LEGACY API VERSIONS */
 
 /*
- * NOTE: we remove methods in APIs below FDB versions that are documented as supported
+ * NOTE: in theory we should be able to remove this stuff since these API versions
+ * are (far) before the documented to be supported FDB versions listed here:
  * here: https://github.com/apple/foundationdb/blob/main/README.md
  *
- * Currently this means only FDB 7.1 and newer.
+ * However this also requires removing a bunch of unit testing on the deprecated 
+ * old API versions so circle back and remove all of this stuff.
+ *
+ * TODO(gglass): address above.
  */
 
+#if FDB_API_VERSION < 610 || defined FDB_INCLUDE_LEGACY_TYPES
+typedef struct FDB_cluster FDBCluster;
+
+typedef enum {
+       /* This option is only a placeholder for C compatibility and should not be used */
+       FDB_CLUSTER_OPTION_DUMMY_DO_NOT_USE = -1
+} FDBClusterOption;
+#endif
+
+#if FDB_API_VERSION < 610
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_cluster(FDBFuture* f, FDBCluster** out_cluster);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_database(FDBFuture* f, FDBDatabase** out_database);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_create_cluster(const char* cluster_file_path);
+
+DLLEXPORT void fdb_cluster_destroy(FDBCluster* c);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_cluster_set_option(FDBCluster* c,
+                                                                FDBClusterOption option,
+                                                                uint8_t const* value,
+                                                                int value_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_cluster_create_database(FDBCluster* c,
+                                                                    uint8_t const* db_name,
+                                                                    int db_name_length);
+#else
+#define fdb_future_get_cluster(f, oc) FDB_REMOVED_FUNCTION
+#define fdb_future_get_database(f, od) FDB_REMOVED_FUNCTION
+#define fdb_create_cluster(cfp) FDB_REMOVED_FUNCTION
+#define fdb_cluster_destroy(c) FDB_REMOVED_FUNCTION
+#define fdb_cluster_set_option(c, o, v, vl) FDB_REMOVED_FUNCTION
+#define fdb_cluster_create_database(c, dn, dnl) FDB_REMOVED_FUNCTION
+#endif
+
+#if FDB_API_VERSION < 23
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_error(FDBFuture* f, const char** out_description /* = NULL */);
+
+DLLEXPORT fdb_bool_t fdb_future_is_error(FDBFuture* f);
+#else
+#define fdb_future_is_error(x) FDB_REMOVED_FUNCTION
+#endif
+
+#if FDB_API_VERSION < 14
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyvalue_array(FDBFuture* f,
+                                                                       FDBKeyValue const** out_kv,
+                                                                       int* out_count);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get(FDBTransaction* tr,
+                                                            uint8_t const* key_name,
+                                                            int key_name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_key(FDBTransaction* tr,
+                                                                uint8_t const* key_name,
+                                                                int key_name_length,
+                                                                fdb_bool_t or_equal,
+                                                                int offset);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_setup_network(const char* local_address);
+
+DLLEXPORT void fdb_transaction_set_option(FDBTransaction* tr, FDBTransactionOption option);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range(FDBTransaction* tr,
+                                                                  uint8_t const* begin_key_name,
+                                                                  int begin_key_name_length,
+                                                                  uint8_t const* end_key_name,
+                                                                  int end_key_name_length,
+                                                                  int limit);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_selector(FDBTransaction* tr,
+                                                                           uint8_t const* begin_key_name,
+                                                                           int begin_key_name_length,
+                                                                           fdb_bool_t begin_or_equal,
+                                                                           int begin_offset,
+                                                                           uint8_t const* end_key_name,
+                                                                           int end_key_name_length,
+                                                                           fdb_bool_t end_or_equal,
+                                                                           int end_offset,
+                                                                           int limit);
+#else
+#define fdb_transaction_get_range_selector(tr, bkn, bknl, boe, bo, ekn, eknl, eoe, eo, lim) FDB_REMOVED_FUNCTION
+#endif
 
 #ifdef __cplusplus
 }
