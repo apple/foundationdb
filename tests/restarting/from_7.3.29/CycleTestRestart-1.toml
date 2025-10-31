@@ -1,6 +1,5 @@
 [configuration]
 storageEngineExcludeTypes=[3]
-tenantModes = ['disabled']
 
 [[test]]
 testTitle="Clogged"

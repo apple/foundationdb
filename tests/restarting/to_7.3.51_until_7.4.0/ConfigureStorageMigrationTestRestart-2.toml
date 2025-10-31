@@ -1,7 +1,5 @@
 [configuration]
 extraMachineCountDC = 2
-allowDefaultTenant = false
-tenantModes = ['disabled']
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'

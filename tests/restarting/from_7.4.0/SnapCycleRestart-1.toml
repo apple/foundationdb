@@ -1,7 +1,6 @@
 [configuration]
 storageEngineExcludeTypes=[4,5]
 logAntiQuorum=0
-tenantModes=['disabled']
 
 [[knobs]]
 enable_read_lock_on_range = false 

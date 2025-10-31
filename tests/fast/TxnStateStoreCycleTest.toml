@@ -1,5 +1,4 @@
 [configuration]
-allowDefaultTenant = false
 
 [[test]]
 testTitle = 'PreLoad'

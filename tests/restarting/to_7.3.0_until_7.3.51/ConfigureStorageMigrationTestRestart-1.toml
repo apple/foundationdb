@@ -4,7 +4,6 @@ extraStorageMachineCountPerDC = 2 # adding more SS to avoid remote DC perpetual 
 
 maxTLogVersion=7
 disableHostname=true
-tenantModes = ['disabled']
 storageEngineExcludeTypes = [5] # ShardedRocks is not supported with shard_encode_location_metadata = false
 
 [[knobs]]

@@ -1,5 +1,4 @@
 [configuration]
-tenantModes = ['disabled']
 
 [[knobs]]
 enable_version_vector = false
