@@ -71,7 +71,13 @@ void KnobProtectiveGroup::assignKnobs(const KnobKeyValuePairs& overrideKnobs) {
 
 	for (const auto& [name, value] : overrideKnobs.getKnobs()) {
 		Standalone<KnobValueRef> valueRef = KnobValueRef::create(value);
-		ASSERT(mutableServerKnobs.trySetKnob(name, valueRef));
+		bool success = mutableServerKnobs.trySetKnob(name, valueRef);
+		if (!success) {
+			TraceEvent(SevError, "FailedToAssignKnob")
+			    .detail("KnobName", name)
+			    .detail("KnobValue", valueRef.toString());
+		}
+		ASSERT(success);
 		TraceEvent(SevInfo, "AssignKnobValue").detail("KnobName", name).detail("KnobValue", valueRef.toString());
 	}
 }

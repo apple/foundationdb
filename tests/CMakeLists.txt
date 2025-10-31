@@ -160,6 +160,7 @@ if(WITH_PYTHON)
 
   add_fdb_test(TEST_FILES fast/BulkDumping.toml)
   add_fdb_test(TEST_FILES slow/BulkDumpingS3.toml)
+  add_fdb_test(TEST_FILES slow/BulkDumpingS3WithChaos.toml)
   add_fdb_test(TEST_FILES fast/BulkLoading.toml)
   add_fdb_test(TEST_FILES slow/S3Client.toml)
   add_fdb_test(TEST_FILES slow/S3ClientWorkloadWithChaos.toml)

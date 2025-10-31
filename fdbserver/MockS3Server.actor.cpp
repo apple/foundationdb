@@ -775,15 +775,17 @@ public:
 		state std::string uploadId;
 		if (!existingUploadId.empty()) {
 			uploadId = existingUploadId;
+			// No need to persist - already exists and was persisted on first creation
 		} else {
 			MultipartUpload upload(bucket, object);
 			uploadId = upload.uploadId;
 			getGlobalStorage().multipartUploads[uploadId] = std::move(upload);
 			TraceEvent("MockS3MultipartStarted").detail("UploadId", uploadId);
-		}
 
-		if (getGlobalStorage().persistenceEnabled) {
-			wait(persistMultipartState(uploadId));
+			// Persist only the newly created upload
+			if (getGlobalStorage().persistenceEnabled) {
+				wait(persistMultipartState(uploadId));
+			}
 		}
 
 		// Generate XML response
