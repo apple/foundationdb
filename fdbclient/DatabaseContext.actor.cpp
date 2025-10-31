@@ -972,15 +972,45 @@ void updateLocationCacheWithCaches(DatabaseContext* self,
 	}
 }
 
-Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
-                                  const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& other) {
-	std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
-	interfaces.reserve(loc->size() + other.size());
-	for (int i = 0; i < loc->size(); ++i) {
-		interfaces.emplace_back((*loc)[i]);
+ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
+	// Only run cleanup if TTL is enabled
+	if (CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL == 0.0) {
+		return Void();
 	}
-	interfaces.insert(interfaces.end(), other.begin(), other.end());
-	return makeReference<LocationInfo>(interfaces, true);
+
+	loop {
+		wait(delay(CLIENT_KNOBS->LOCATION_CACHE_EVICTION_INTERVAL));
+
+		double currentTime = now();
+		std::vector<KeyRangeRef> toRemove;
+		int totalCount = 0;
+
+		// Scan locationCache for expired entries
+		auto iter = cx->locationCache.randomRange();
+		for (; iter != cx->locationCache.lastItem(); ++iter) {
+			if (iter->value() && iter->value()->hasCaches) {
+				// Check the expireTime of the first cache entry as a representative
+				// All entries in a range typically have similar expiration times
+				if (iter->value()->expireTime > 0.0 && iter->value()->expireTime <= currentTime) {
+					toRemove.push_back(iter->range());
+				}
+			}
+			totalCount++;
+			if (totalCount > 1000 || toRemove.size() > 100) {
+				break; // Avoid long blocking scans
+			}
+		}
+
+		// Remove expired entries
+		for (const auto& range : toRemove) {
+			cx->locationCache.insert(range, Reference<LocationInfo>());
+		}
+
+		if (!toRemove.empty()) {
+			CODE_PROBE(true, "LocationCacheCleanup removed some entries");
+			TraceEvent("LocationCacheCleanup").detail("RemovedRanges", toRemove.size());
+		}
+	}
 }
 
 ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
@@ -1266,6 +1296,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	clientDBInfoMonitor = monitorClientDBInfoChange(this, clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
+	locationCacheCleanup = cleanupLocationCache(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
