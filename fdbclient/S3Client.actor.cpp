@@ -929,14 +929,14 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 				}
 			}
 
-		file = Reference<IAsyncFile>(); // Close file
+			file = Reference<IAsyncFile>(); // Close file
 
-		TraceEvent(s3VerboseEventSev(), "S3ClientCopyDownFileEnd")
-		    .detail("Bucket", bucket)
-		    .detail("ObjectName", objectName)
-		    .detail("FileSize", fileSize)
-		    .detail("Checksum", expectedChecksum)
-		    .detail("Parts", parts.size());
+			TraceEvent(s3VerboseEventSev(), "S3ClientCopyDownFileEnd")
+			    .detail("Bucket", bucket)
+			    .detail("ObjectName", objectName)
+			    .detail("FileSize", fileSize)
+			    .detail("Checksum", expectedChecksum)
+			    .detail("Parts", parts.size());
 
 			break; // Success
 		} catch (Error& e) {
