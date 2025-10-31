@@ -819,7 +819,6 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
                                        std::string objectName,
                                        std::string filepath,
                                        PartConfig config = PartConfig()) {
-	state double startTime = now();
 	state Reference<IAsyncFile> file;
 	state std::vector<PartState> parts;
 	state int64_t fileSize = 0;
@@ -840,7 +839,14 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 			    .detail("FilePath", filepath)
 			    .detail("Attempt", retries);
 
+			TraceEvent(SevDebug, "S3ClientCopyDownFileBeforeObjectSize")
+			    .detail("Bucket", bucket)
+			    .detail("Object", objectName);
 			int64_t s = wait(endpoint->objectSize(bucket, objectName));
+			TraceEvent(SevDebug, "S3ClientCopyDownFileAfterObjectSize")
+			    .detail("Bucket", bucket)
+			    .detail("Object", objectName)
+			    .detail("Size", s);
 			if (s <= 0) {
 				TraceEvent(SevWarnAlways, "S3ClientCopyDownFileEmptyFile")
 				    .detail("Bucket", bucket)
@@ -994,10 +1000,17 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 }
 
 ACTOR Future<Void> copyDownFile(std::string s3url, std::string filepath) {
+	TraceEvent(SevDebug, "S3ClientCopyDownFileWrapperStart").detail("S3URL", s3url).detail("FilePath", filepath);
 	std::string resource;
 	S3BlobStoreEndpoint::ParametersT parameters;
+	TraceEvent(SevDebug, "S3ClientCopyDownFileBeforeGetEndpoint").detail("S3URL", s3url);
 	Reference<S3BlobStoreEndpoint> endpoint = getEndpoint(s3url, resource, parameters);
+	TraceEvent(SevDebug, "S3ClientCopyDownFileAfterGetEndpoint")
+	    .detail("S3URL", s3url)
+	    .detail("Resource", resource)
+	    .detail("Bucket", parameters["bucket"]);
 	wait(copyDownFile(endpoint, parameters["bucket"], resource, filepath));
+	TraceEvent(SevDebug, "S3ClientCopyDownFileWrapperEnd").detail("S3URL", s3url).detail("FilePath", filepath);
 	return Void();
 }
 

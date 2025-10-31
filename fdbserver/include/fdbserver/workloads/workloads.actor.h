@@ -79,7 +79,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
 	}
-	virtual ~TestWorkload() {};
+	virtual ~TestWorkload(){};
 	virtual Future<Void> initialized() { return Void(); }
 	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
 	// the workload factory. Instead, provide a static member variable called name.
@@ -336,6 +336,7 @@ public:
 	Standalone<VectorRef<VectorRef<KeyValueRef>>> options;
 	int timeout;
 	double databasePingDelay;
+	double quiescentWaitTimeout = 0; // Timeout for consistency check quiescence wait (0 = use default)
 	bool runConsistencyCheck;
 	bool runConsistencyCheckOnCache;
 	bool runConsistencyCheckOnTSS;
@@ -385,7 +386,8 @@ Future<Void> quietDatabase(Database const& cx,
                            int64_t maxStorageServerQueueGate = 5e6,
                            int64_t maxDataDistributionQueueSize = 0,
                            int64_t maxPoppedVersionLag = 30e6,
-                           int64_t maxVersionOffset = 1e6);
+                           int64_t maxVersionOffset = 1e6,
+                           double quiescentWaitTimeout = 0);
 
 /**
  * A utility function for testing error situations. It succeeds if the given test

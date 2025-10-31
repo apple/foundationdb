@@ -2048,7 +2048,7 @@ ACTOR Future<bool> runTest(Database cx,
 				                                   testers,
 				                                   quiescent,
 				                                   spec.runConsistencyCheckOnTSS,
-				                                   10000.0,
+				                                   spec.quiescentWaitTimeout > 0 ? spec.quiescentWaitTimeout : 10000.0,
 				                                   5000,
 				                                   spec.databasePingDelay,
 				                                   dbInfo),
@@ -2216,6 +2216,12 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      spec->runConsistencyCheckOnTSS = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnTSS", spec->runConsistencyCheckOnTSS);
+	  } },
+	{ "quiescentWaitTimeout",
+	  [](const std::string& value, TestSpec* spec) {
+	      sscanf(value.c_str(), "%lf", &(spec->quiescentWaitTimeout));
+	      ASSERT(spec->quiescentWaitTimeout >= 0);
+	      TraceEvent("TestParserTest").detail("ParsedQuiescentWaitTimeout", spec->quiescentWaitTimeout);
 	  } },
 	{ "waitForQuiescence",
 	  [](const std::string& value, TestSpec* spec) {
