@@ -1,0 +1,58 @@
+# S3ClientWorkload with Chaos Injection Tests
+# Tests the original S3ClientWorkload against MockS3ServerChaos
+
+[[test]]
+# S3ClientWorkload with stable MockS3Server (chaos server with 0% injection)
+testTitle = "S3ClientWorkloadStable"
+
+[[test.workload]]
+testName = "S3ClientWorkload"
+enableChaos = true
+s3Url = 'blobstore://testkey:testsecret:testtoken@127.0.0.1:8080/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=0&global_connection_pool=0'
+errorRate = 0.0
+throttleRate = 0.0
+delayRate = 0.0
+corruptionRate = 0.0
+maxDelay = 0.0
+
+[[test]]
+# S3ClientWorkload with light chaos injection
+testTitle = "S3ClientWorkloadLightChaos"
+
+[[test.workload]]
+testName = "S3ClientWorkload"
+enableChaos = true
+s3Url = 'blobstore://testkey:testsecret:testtoken@127.0.0.1:8080/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=0&global_connection_pool=0'
+errorRate = 0.05
+throttleRate = 0.02
+delayRate = 0.1
+corruptionRate = 0.01
+maxDelay = 1.0
+
+[[test]]
+# S3ClientWorkload with medium chaos injection
+testTitle = "S3ClientWorkloadMediumChaos"
+
+[[test.workload]]
+testName = "S3ClientWorkload"
+enableChaos = true
+s3Url = 'blobstore://testkey:testsecret:testtoken@127.0.0.1:8080/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=0&global_connection_pool=0'
+errorRate = 0.15
+throttleRate = 0.08
+delayRate = 0.2
+corruptionRate = 0.03
+maxDelay = 2.0
+
+[[test]]
+# S3ClientWorkload with heavy chaos injection
+testTitle = "S3ClientWorkloadHeavyChaos"
+
+[[test.workload]]
+testName = "S3ClientWorkload"
+enableChaos = true
+s3Url = 'blobstore://testkey:testsecret:testtoken@127.0.0.1:8080/?bucket=s3clientworkload&region=us-east-1&secure_connection=0&bypass_simulation=0&global_connection_pool=0'
+errorRate = 0.3
+throttleRate = 0.15
+delayRate = 0.4
+corruptionRate = 0.05
+maxDelay = 3.0
