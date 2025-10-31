@@ -32,9 +32,15 @@ set(OPENSSL_USE_STATIC_LIBS TRUE)
 if (WIN32)
   set(OPENSSL_MSVC_STATIC_RT ON)
 endif()
-# SSL requires ZLIB
+
 find_package(ZLIB REQUIRED)
-find_package(OpenSSL REQUIRED)
+if(APPLE)
+  find_package(OpenSSL 3.0 REQUIRED)
+else()
+  find_package(OpenSSL REQUIRED)
+endif()
+
+message(STATUS "Using OpenSSL ${OPENSSL_VERSION}")
 add_compile_options(-DHAVE_OPENSSL)
 
 ################################################################################
