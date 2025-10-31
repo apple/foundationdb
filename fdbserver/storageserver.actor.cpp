@@ -1754,7 +1754,7 @@ public:
 
 	void getSplitPoints(SplitRangeRequest const& req) override {
 		try {
-			metrics.getSplitPoints(req, {});
+			metrics.getSplitPoints(req);
 		} catch (Error& e) {
 			req.reply.sendError(e);
 		}

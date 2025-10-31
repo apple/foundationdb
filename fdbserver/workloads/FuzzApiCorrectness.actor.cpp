@@ -130,7 +130,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	Reference<IDatabase> db;
 
-	string keyPrefix;
+	std::string keyPrefix;
 
 	FuzzApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), operationId(0), success(true) {
 		std::call_once(onceFlag, [&]() { addTestCases(); });
@@ -161,7 +161,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		int newNodes =
-		    std::min<int>(nodes, maximumTotalData / (getKeyForIndex(-1, nodes).size() + valueSizeRange.second));
+		    std::min<int>(nodes, maximumTotalData / (getKeyForIndex(-1).size() + valueSizeRange.second));
 		minNode = std::max(minNode, nodes - newNodes);
 		nodes = newNodes;
 
@@ -290,7 +290,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		state int keysPerBatch =
 		    std::min<int64_t>(1000,
 		                      1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 /
-		                              (self->getKeyForIndex(-1).size() + self->valueSizeRange.second));
+							  (self->getKeyForIndex(-1).size() + self->valueSizeRange.second));
 		try {
 			loop {
 				state int groupNum = 0;

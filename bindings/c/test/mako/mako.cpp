@@ -841,12 +841,12 @@ int Arguments::setGlobalOptions() const {
 		logr.error("network::setOption(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER): {}", err.what());
 	}
 
-	if (tls_certificate_file.has_value() && (logr.isFor(ProcKind::ADMIN) || !isAuthorizationEnabled())) {
+	if (tls_certificate_file.has_value()) {
 		logr.debug("TLS certificate file: {}", tls_certificate_file.value());
 		network::setOption(FDB_NET_OPTION_TLS_CERT_PATH, tls_certificate_file.value());
 	}
 
-	if (tls_key_file.has_value() && (logr.isFor(ProcKind::ADMIN) || !isAuthorizationEnabled())) {
+	if (tls_key_file.has_value()) {
 		logr.debug("TLS key file: {}", tls_key_file.value());
 		network::setOption(FDB_NET_OPTION_TLS_KEY_PATH, tls_key_file.value());
 	}

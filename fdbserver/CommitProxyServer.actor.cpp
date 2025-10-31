@@ -1277,7 +1277,8 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 }
 
 void pushToBackupMutations(CommitBatchContext* self,
-						   ProxyCommitData* const pProxyCommitData) {
+						   ProxyCommitData* const pProxyCommitData,
+						   MutationRef const& m) {
 	KeyRangeRef mutationRange(m.param1, m.param2);
 	KeyRangeRef intersectionRange;
 
@@ -1577,7 +1578,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				continue;
 			}
 
-			pushToBackupMutations(self, pProxyCommitData);
+			pushToBackupMutations(self, pProxyCommitData, m);
 		}
 
 		if (checkSample) {

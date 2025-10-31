@@ -121,17 +121,7 @@ public:
 
 class MockStorageServerImpl {
 public:
-	ACTOR static Future<Void> waitMetricsTenantAware(MockStorageServer* self, WaitMetricsRequest req) {
-		// TODO(gglass): delete this block for real, assuming this function is OK without the commented-out code
-		// if (req.tenantInfo.hasTenant()) {
-		// // TODO(xwang) add support for tenant test, search for tenant entry
-		// Optional<TenantMapEntry> entry;
-		// Optional<Key> tenantPrefix = entry.map(&TenantMapEntry::prefix);
-		// if (tenantPrefix.present()) {
-		// UNREACHABLE();
-		// // req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
-		// }
-
+	ACTOR static Future<Void> waitMetricsForReal(MockStorageServer* self, WaitMetricsRequest req) {
 		if (!self->isReadable(req.keys)) {
 			self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 		} else {
@@ -371,8 +361,8 @@ void MockStorageServer::addActor(Future<Void> future) {
 
 void MockStorageServer::getSplitPoints(const SplitRangeRequest& req) {}
 
-Future<Void> MockStorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req) {
-	return MockStorageServerImpl::waitMetricsTenantAware(this, req);
+Future<Void> MockStorageServer::waitMetricsForReal(const WaitMetricsRequest& req) {
+	return MockStorageServerImpl::waitMetricsForReal(this, req);
 }
 
 void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {
@@ -765,7 +755,7 @@ Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(
 	ASSERT_EQ(srcTeam.size(), 1);
 	rep.results.emplace_back(single, extractStorageServerInterfaces(srcTeam.front().servers));
 
-	return KeyRangeLocationInfo(KeyRange(toPrefixRelativeRange(rep.results[0].first), rep.arena),
+	return KeyRangeLocationInfo(KeyRange(rep.results[0].first),
 	                            buildLocationInfo(rep.results[0].second));
 }
 
@@ -797,7 +787,7 @@ Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
 
 	std::vector<KeyRangeLocationInfo> results;
 	for (int shard = 0; shard < rep.results.size(); shard++) {
-		results.emplace_back((toPrefixRelativeRange(rep.results[shard].first) & keys),
+		results.emplace_back((rep.results[shard].first & keys),
 		                     buildLocationInfo(rep.results[shard].second));
 	}
 	return results;

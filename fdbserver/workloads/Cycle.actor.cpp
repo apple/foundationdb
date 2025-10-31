@@ -66,7 +66,7 @@ struct CycleWorkload : TestWorkload, Arena {
 		if (skipSetup) {
 			return Void();
 		}
-		// TODO: clean up this bit.  Leftover complexity from tenant induced templates, since removed.
+		// TODO: clean up this bit.  Leftover complexity from ten-ant induced templates, since removed.
 		Future<Void> prepare = Void();
 		return runAfter(prepare, [this, cx](Void) { return bulkSetup(cx, this, nodeCount, Promise<double>()); });
 	}
@@ -115,15 +115,6 @@ struct CycleWorkload : TestWorkload, Arena {
 		    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken);
 	}
 
-	template <bool B = MultiTenancy>
-	std::enable_if_t<B> setAuthToken(Transaction& tr) const {
-		if (this->useToken)
-			tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, this->signedToken);
-	}
-
-	template <bool B = MultiTenancy>
-	std::enable_if_t<!B> setAuthToken(Transaction& tr) const {}
-
 	ACTOR Future<Void> cycleClient(Database cx, CycleWorkload* self, double delay) {
 		state double lastTime = now();
 		TraceEvent("CycleClientStart").log();
@@ -142,7 +133,6 @@ struct CycleWorkload : TestWorkload, Arena {
 				}
 				while (true) {
 					try {
-						self->setAuthToken(tr);
 						// Reverse next and next^2 node
 						Optional<Value> v = wait(tr.get(self->key(r)));
 						if (!v.present()) {
@@ -293,7 +283,6 @@ struct CycleWorkload : TestWorkload, Arena {
 			state int retryCount = 0;
 			loop {
 				try {
-					self->setAuthToken(tr);
 					state Version v = wait(tr.getReadVersion());
 					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
 					                                    firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),

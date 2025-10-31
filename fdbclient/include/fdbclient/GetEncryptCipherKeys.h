@@ -35,8 +35,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-// TODO(gglass): is this file needed?
-
 using BaseCipherIndex = std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>;
 
 struct TextAndHeaderCipherKeys {

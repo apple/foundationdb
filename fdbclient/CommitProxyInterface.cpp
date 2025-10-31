@@ -10,12 +10,9 @@ template class GetEncryptCipherKeys<ClientDBInfo>;
 // Instantiate OpenDatabaseCoordRequest related templates
 template struct NetNotifiedQueue<OpenDatabaseCoordRequest, true>;
 
-// TODO(gglass): remove this probably
-#if 0
 // Instantiate GetKeyServerLocationsReply related templates
 template class ReplyPromise<GetKeyServerLocationsReply>;
 template struct NetSAV<GetKeyServerLocationsReply>;
-#endif
 
 Standalone<StringRef> getBackupKey(BinaryWriter& wr, uint32_t** partBuffer, int part) {
 	// Write the last part of the mutation to the serialization, if the buffer is not defined

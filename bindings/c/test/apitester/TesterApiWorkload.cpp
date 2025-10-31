@@ -120,7 +120,7 @@ fdb::Value ApiWorkload::randomValue() {
 fdb::Key ApiWorkload::randomNotExistingKey() {
 	while (true) {
 		fdb::Key key = randomKeyName();
-		if (!stores.exists(key)) {
+		if (!store.exists(key)) {
 			return key;
 		}
 	}
