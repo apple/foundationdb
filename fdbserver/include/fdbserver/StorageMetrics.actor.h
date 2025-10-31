@@ -145,7 +145,7 @@ struct StorageServerMetrics {
 
 	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<KeyRef> prefixToRemove) const;
 
-	void getSplitPoints(SplitRangeRequest req) const;
+	void getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const;
 
 	[[maybe_unused]] std::vector<ReadHotRangeWithMetrics> _getReadHotRanges(
 	    KeyRangeRef shard,
@@ -233,7 +233,7 @@ public:
 
 	virtual void addActor(Future<Void> future) = 0;
 
-	virtual void getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) = 0;
+	virtual void getSplitPoints(SplitRangeRequest req) = 0;
 
 	// The following method name suffix of `ForReal` replaces something
 	// that used to reference the now-deleted ten-ant feature.  We need
