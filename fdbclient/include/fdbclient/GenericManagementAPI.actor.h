@@ -131,13 +131,10 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
-// TODO(gglass): delete for real
-#if 0
+// TODO(gglass): consider removing
 bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
                                        std::map<std::string, std::string> newConfig,
                                        bool creating);
-bool isTenantModeModeConfigValid(DatabaseConfiguration oldConfiguration, DatabaseConfiguration newConfiguration);
-#endif
 
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {

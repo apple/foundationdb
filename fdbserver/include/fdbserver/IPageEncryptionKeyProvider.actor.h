@@ -293,7 +293,8 @@ private:
 // Key provider which was originally intended to extract ten-ant id from range key prefixes,
 // and to fetch ten-ant specific encryption keys from EncryptKeyProxy.  This has been
 // left in place in the interest of getting the code to compile as part of ten-ant removal.
-// TODO(gglass): consider removing this code.  Although possibly people are using it in production.
+// TODO(gglass): consider removing this code.  Although possibly people are using it in production,
+// so check into that.
 template <EncodingType encodingType,
           typename std::enable_if<encodingType == AESEncryption || encodingType == AESEncryptionWithAuth, bool>::type =
               true>

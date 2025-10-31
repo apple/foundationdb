@@ -23,7 +23,6 @@
 #pragma once
 
 // TODO(gglass): can we get rid of this
-
 #if 0
 
 #include "flow/network.h"

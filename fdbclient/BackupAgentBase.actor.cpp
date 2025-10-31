@@ -1353,13 +1353,6 @@ void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys) {
 
 VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 	static Standalone<VectorRef<KeyRangeRef>> systemBackupRanges;
-#if 0
-	// TODO(gglass): confirm this can be deleted as part of tenant deletion.
-	if (systemBackupRanges.empty()) {
-		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), prefixRange(TenantMetadata::subspace()));
-	}
-#endif
-
 	return systemBackupRanges;
 }
 

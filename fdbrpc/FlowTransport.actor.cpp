@@ -2176,10 +2176,6 @@ void FlowTransport::createInstance(bool isClient,
                                    uint64_t transportId,
                                    int maxWellKnownEndpoints,
                                    IPAllowList const* allowList) {
-	// TODO(gglass): remove for real assuming it's not needed.
-#if 0	
-	TokenCache::createInstance();
-#endif	
 	g_network->setGlobal(INetwork::enFlowTransport,
 	                     (flowGlobalType) new FlowTransport(transportId, maxWellKnownEndpoints, allowList));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType)&FlowTransport::getGlobalLocalAddress);

@@ -20,7 +20,6 @@
 
 // TODO(gglass): confirm this is used only for tenant support, and if so, delete it.
 // If not, preserve what we (Apple) need.
-
 #if 0
 
 #include "fdbcli/fdbcli.actor.h"

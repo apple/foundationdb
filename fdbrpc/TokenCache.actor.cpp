@@ -1,5 +1,4 @@
 // TODO(gglass): is this stuff needed?  If not, delete it for real.  If so, EXPLAIN WHY IT'S NEEDED.
-
 #if 0
 
 #include "fdbrpc/Base64Encode.h"

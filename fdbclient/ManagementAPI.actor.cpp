@@ -184,6 +184,21 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			out[p + key] = format("%d", type);
 		}
 
+		if (key == "encryption_at_rest_mode") {
+			EncryptionAtRestMode mode;
+			if (value == "disabled") {
+				mode = EncryptionAtRestMode::DISABLED;
+			} else if (value == "domain_aware") {
+				mode = EncryptionAtRestMode::DOMAIN_AWARE;
+			} else if (value == "cluster_aware") {
+				mode = EncryptionAtRestMode::CLUSTER_AWARE;
+			} else {
+				printf("Error: Only disabled|domain_aware|cluster_aware are valid for encryption_at_rest_mode.\n");
+				return out;
+			}
+			out[p + key] = format("%d", mode);
+		}
+
 		if (key == "exclude") {
 			int p = 0;
 			while (p < value.size()) {

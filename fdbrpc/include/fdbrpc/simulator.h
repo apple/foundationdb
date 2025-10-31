@@ -425,12 +425,6 @@ public:
 
 	double checkDisabled(const std::string& desc) const;
 
-	// TODO(gglass): remove for real if possible
-#if 0	
-	// generate authz token for use in simulation environment
-	WipedString makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
-#endif
-
 	// FIXME: simulation is generally discussed as being deterministic and single-threaded. So
 	// explain why we need thread_local variables here and a mutex just below.
 	static thread_local ProcessInfo* currentProcess;
