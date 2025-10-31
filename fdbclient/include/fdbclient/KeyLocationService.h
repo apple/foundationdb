@@ -23,8 +23,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h"
 
-// TODO(gglass): see if this is needed and delete it for real if not.
-#if 0
 class IKeyLocationService {
 
 	// If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key).
@@ -46,7 +44,5 @@ class IKeyLocationService {
 	                                                                       UseProvisionalProxies useProvisionalProxies,
 	                                                                       Version version) = 0;
 };
-
-#endif
 
 #endif // FOUNDATIONDB_KEYLOCATIONSERVICE_H

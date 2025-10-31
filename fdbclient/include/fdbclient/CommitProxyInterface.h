@@ -166,7 +166,6 @@ struct ExpireIdempotencyIdRequest {
 	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte)
 		: commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte) {}
 
-	// TODO(gglass): remove if unneded.  Used to have ten-ant logic.
 	bool verify() const { return true; }
 
 	template <class Ar>
@@ -360,44 +359,6 @@ struct GetReadVersionRequest : TimedRequest {
 	}
 };
 
-// TODO(gglass): remove this for real
-#if 0
-struct GetTenantIdReply {
-	constexpr static FileIdentifier file_identifier = 11441284;
-	int64_t tenantId = TenantInfo::INVALID_TENANT;
-
-	GetTenantIdReply() {}
-	GetTenantIdReply(int64_t tenantId) : tenantId(tenantId) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, tenantId);
-	}
-};
-
-struct GetTenantIdRequest {
-	constexpr static FileIdentifier file_identifier = 11299717;
-	TenantName tenantName;
-	ReplyPromise<GetTenantIdReply> reply;
-
-	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
-	// a tenant is not present. If the metadata version is lower, the proxy must wait in case the tenant gets
-	// created. If latestVersion is specified, then the proxy will wait until it is sure that it has received
-	// updates from other proxies before answering.
-	Version minTenantVersion;
-
-	GetTenantIdRequest() : minTenantVersion(latestVersion) {}
-	GetTenantIdRequest(TenantNameRef const& tenantName, Version minTenantVersion)
-	  : tenantName(tenantName), minTenantVersion(minTenantVersion) {}
-
-	bool verify() const { return true; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply, tenantName, minTenantVersion);
-	}
-};
-
 struct GetKeyServerLocationsReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
@@ -442,7 +403,6 @@ struct GetKeyServerLocationsRequest {
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false), minTenantVersion(latestVersion) {}
 	GetKeyServerLocationsRequest(SpanContext spanContext,
-	                             TenantInfo const& tenant,
 	                             KeyRef const& begin,
 	                             Optional<KeyRef> const& end,
 	                             int limit,
@@ -452,15 +412,13 @@ struct GetKeyServerLocationsRequest {
 	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
 	    minTenantVersion(minTenantVersion) {}
 
-	bool verify() const { return tenant.isAuthorized(); }
+	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, minTenantVersion, arena);
 	}
 };
-
-#endif
 
 struct SWIFT_CXX_IMPORT_OWNED GetRawCommittedVersionReply {
 	constexpr static FileIdentifier file_identifier = 1314732;

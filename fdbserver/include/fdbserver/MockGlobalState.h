@@ -147,10 +147,7 @@ public:
 
 	void getSplitPoints(SplitRangeRequest const& req) override;
 
-	// TODO(gglass): is this needed for a non-tenant world?  Delete for real
-#if 0	
-	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override;
-#endif
+	Future<Void> waitMetricsForReal(const WaitMetricsRequest& req) override;
 
 	void getStorageMetrics(const GetStorageMetricsRequest& req) override;
 
@@ -250,7 +247,7 @@ struct Process : public TopologyObject {
 };
 } // namespace mock
 
-class MockGlobalState : public IKeyLocationService {
+class MockGlobalState {
 	friend struct MockGlobalStateTester;
 	friend class MockGlobalStateImpl;
 
