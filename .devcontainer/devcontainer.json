@@ -1,6 +1,6 @@
 {
   "name": "FoundationDB remote dev env",
-  "image": "foundationdb/devel:centos7-latest",
+  "image": "docker.io/foundationdb/build:rockylinux9-latest",
   "features": {},
   "capAdd": [
     "SYS_PTRACE"
