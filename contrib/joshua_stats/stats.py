@@ -126,10 +126,10 @@ def draw_realtime(times, do_y_log_scale, label):
 	plt.xticks(fontsize=FONT_SIZE, rotation=45, ha='right')
 	plt.yticks(fontsize=FONT_SIZE)
 	ax = plt.gca()
-	ax.tick_params(axis='x', which='major', length=10, width=2)  # X轴主要刻度更大更粗
-	ax.tick_params(axis='y', which='major', length=10, width=2)  # Y轴主要刻度更大更粗
-	ax.tick_params(axis='x', which='minor', length=5, width=1)   # X轴次刻度
-	ax.tick_params(axis='y', which='minor', length=5, width=1)   # Y轴次刻度
+	ax.tick_params(axis='x', which='major', length=10, width=2)
+	ax.tick_params(axis='y', which='major', length=10, width=2)
+	ax.tick_params(axis='x', which='minor', length=5, width=1)
+	ax.tick_params(axis='y', which='minor', length=5, width=1)
 	plt.savefig(label + "realtime.png", bbox_inches='tight', dpi=300)
 	plt.close()
 
@@ -148,10 +148,10 @@ def draw_simtime(times, do_y_log_scale, label):
 	plt.xticks(fontsize=FONT_SIZE, rotation=45, ha='right')
 	plt.yticks(fontsize=FONT_SIZE)
 	ax = plt.gca()
-	ax.tick_params(axis='x', which='major', length=10, width=2)  # X轴主要刻度更大更粗
-	ax.tick_params(axis='y', which='major', length=10, width=2)  # Y轴主要刻度更大更粗
-	ax.tick_params(axis='x', which='minor', length=5, width=1)   # X轴次刻度
-	ax.tick_params(axis='y', which='minor', length=5, width=1)   # Y轴次刻度
+	ax.tick_params(axis='x', which='major', length=10, width=2)
+	ax.tick_params(axis='y', which='major', length=10, width=2)
+	ax.tick_params(axis='x', which='minor', length=5, width=1)
+	ax.tick_params(axis='y', which='minor', length=5, width=1)
 	plt.savefig(label + "_simtime.png", bbox_inches='tight', dpi=300)
 	plt.close()
 
@@ -170,10 +170,10 @@ def draw_memory(mems, do_y_log_scale, label):
 	plt.xticks(fontsize=FONT_SIZE, rotation=45, ha='right')
 	plt.yticks(fontsize=FONT_SIZE)
 	ax = plt.gca()
-	ax.tick_params(axis='x', which='major', length=10, width=2)  # X轴主要刻度更大更粗
-	ax.tick_params(axis='y', which='major', length=10, width=2)  # Y轴主要刻度更大更粗
-	ax.tick_params(axis='x', which='minor', length=5, width=1)   # X轴次刻度
-	ax.tick_params(axis='y', which='minor', length=5, width=1)   # Y轴次刻度
+	ax.tick_params(axis='x', which='major', length=10, width=2)
+	ax.tick_params(axis='y', which='major', length=10, width=2)
+	ax.tick_params(axis='x', which='minor', length=5, width=1)
+	ax.tick_params(axis='y', which='minor', length=5, width=1)
 	plt.savefig(label + "_memory.png", bbox_inches='tight', dpi=300)
 	plt.close()
 
