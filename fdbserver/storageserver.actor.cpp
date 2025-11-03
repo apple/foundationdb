@@ -6882,14 +6882,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	//  This allows adding->start() to be called inline with CSK.
 	try {
 		if (conductBulkLoad) {
-			TraceEvent(SevDebug, "BulkLoadFetchKeysBeforeCoreStarted", data->thisServerID)
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeCoreStarted", data->thisServerID)
 			    .detail("FKID", fetchKeysID)
 			    .detail("DataMoveId", dataMoveId)
 			    .detail("Elapsed", now() - startTime);
 		}
 		wait(data->coreStarted.getFuture() && delay(0));
 		if (conductBulkLoad) {
-			TraceEvent(SevDebug, "BulkLoadFetchKeysAfterCoreStarted", data->thisServerID)
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterCoreStarted", data->thisServerID)
 			    .detail("FKID", fetchKeysID)
 			    .detail("DataMoveId", dataMoveId)
 			    .detail("Elapsed", now() - startTime);
@@ -6900,7 +6900,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// increase by one if this fetchKeys was initiated by a changeServerKeys from restoreDurableState
 		if (data->version.get() == data->durableVersion.get()) {
 			if (conductBulkLoad) {
-				TraceEvent(SevDebug, "BulkLoadFetchKeysBeforeVersionAdvance", data->thisServerID)
+				TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeVersionAdvance", data->thisServerID)
 				    .detail("FKID", fetchKeysID)
 				    .detail("DataMoveId", dataMoveId)
 				    .detail("CurrentVersion", data->version.get())
@@ -6909,7 +6909,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			wait(data->version.whenAtLeast(data->version.get() + 1));
 			wait(delay(0));
 			if (conductBulkLoad) {
-				TraceEvent(SevDebug, "BulkLoadFetchKeysAfterVersionAdvance", data->thisServerID)
+				TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterVersionAdvance", data->thisServerID)
 				    .detail("FKID", fetchKeysID)
 				    .detail("DataMoveId", dataMoveId)
 				    .detail("CurrentVersion", data->version.get())
@@ -6948,7 +6948,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		if (lastAvailable != invalidVersion && lastAvailable >= data->durableVersion.get()) {
 			CODE_PROBE(true, "FetchKeys waits for previous available version to be durable");
 			if (conductBulkLoad) {
-				TraceEvent(SevDebug, "BulkLoadFetchKeysBeforeDurableVersionWait", data->thisServerID)
+				TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeDurableVersionWait", data->thisServerID)
 				    .detail("FKID", fetchKeysID)
 				    .detail("DataMoveId", dataMoveId)
 				    .detail("LastAvailable", lastAvailable)
@@ -6957,7 +6957,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			}
 			wait(data->durableVersion.whenAtLeast(lastAvailable + 1));
 			if (conductBulkLoad) {
-				TraceEvent(SevDebug, "BulkLoadFetchKeysAfterDurableVersionWait", data->thisServerID)
+				TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterDurableVersionWait", data->thisServerID)
 				    .detail("FKID", fetchKeysID)
 				    .detail("DataMoveId", dataMoveId)
 				    .detail("DurableVersion", data->durableVersion.get())
@@ -6971,7 +6971,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("ConductBulkLoad", conductBulkLoad);
 
 		if (conductBulkLoad) {
-			TraceEvent(SevDebug, "BulkLoadFetchKeysBeforeParallelismLock", data->thisServerID)
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeParallelismLock", data->thisServerID)
 			    .detail("FKID", fetchKeysID)
 			    .detail("DataMoveId", dataMoveId)
 			    .detail("Elapsed", now() - startTime);
@@ -6979,7 +6979,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 		state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 		if (conductBulkLoad) {
-			TraceEvent(SevDebug, "BulkLoadFetchKeysAfterParallelismLock", data->thisServerID)
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterParallelismLock", data->thisServerID)
 			    .detail("FKID", fetchKeysID)
 			    .detail("DataMoveId", dataMoveId)
 			    .detail("Elapsed", now() - startTime);
@@ -6994,14 +6994,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// data->version is greater than the version of the mutation which caused the fetch to be initiated.
 
 		if (conductBulkLoad) {
-			TraceEvent(SevDebug, "BulkLoadFetchKeysBeforeDurableVersionLock", data->thisServerID)
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeDurableVersionLock", data->thisServerID)
 			    .detail("FKID", fetchKeysID)
 			    .detail("DataMoveId", dataMoveId)
 			    .detail("Elapsed", now() - startTime);
 		}
 		wait(data->durableVersionLock.take());
 		if (conductBulkLoad) {
-			TraceEvent(SevDebug, "BulkLoadFetchKeysAfterDurableVersionLock", data->thisServerID)
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterDurableVersionLock", data->thisServerID)
 			    .detail("FKID", fetchKeysID)
 			    .detail("DataMoveId", dataMoveId)
 			    .detail("Elapsed", now() - startTime);

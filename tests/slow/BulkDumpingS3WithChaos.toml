@@ -104,8 +104,8 @@ connectionFailuresDisableDuration = 1000000
 runFailureWorkloads = false
 # Increase timeout for chaos tests - 10 retries * 5s delay = 50s per failed op
 timeout = 7200
-# Increase quiescence timeout for consistency check - DD queue takes longer to drain with chaos
-quiescentWaitTimeout = 2400
+# Increase max DD run time for consistency check - DD queue takes longer to drain with chaos
+maxDDRunTime = 2400
 
     [[test.workload]]
     testName = 'BulkDumpingWorkload'
@@ -129,8 +129,8 @@ connectionFailuresDisableDuration = 1000000
 runFailureWorkloads = false
 # Increase timeout for chaos tests - 10 retries * 5s delay = 50s per failed op
 timeout = 10800
-# Increase quiescence timeout for consistency check - DD queue takes longer to drain with chaos
-quiescentWaitTimeout = 3600
+# Increase max DD run time for consistency check - DD queue takes longer to drain with chaos
+maxDDRunTime = 3600
 
     [[test.workload]]
     testName = 'BulkDumpingWorkload'
@@ -154,8 +154,8 @@ connectionFailuresDisableDuration = 1000000
 runFailureWorkloads = false
 # Increase timeout for chaos tests - 10 retries * 5s delay = 50s per failed op
 timeout = 14400
-# Increase quiescence timeout for consistency check - DD queue takes longer to drain with heavy chaos
-quiescentWaitTimeout = 5400
+# Increase max DD run time for consistency check - DD queue takes longer to drain with heavy chaos
+maxDDRunTime = 5400
 
     [[test.workload]]
     testName = 'BulkDumpingWorkload'

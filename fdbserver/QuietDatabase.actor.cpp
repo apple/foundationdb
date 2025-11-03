@@ -967,10 +967,9 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxDataDistributionQueueSize = 0,
                                         int64_t maxPoppedVersionLag = 30e6,
                                         int64_t maxVersionOffset = 1e6,
-                                        double quiescentWaitTimeout = 0) {
-	// Use provided timeout, or fallback to default (1500s or 4000s with buggify)
-	state QuietDatabaseChecker checker(quiescentWaitTimeout > 0 ? quiescentWaitTimeout
-	                                                            : (isGeneralBuggifyEnabled() ? 4000.0 : 1500.0));
+                                        double maxDDRunTime = 0) {
+	// Use provided maxDDRunTime, or fallback to default (1500s or 4000s with buggify)
+	state QuietDatabaseChecker checker(maxDDRunTime > 0 ? maxDDRunTime : (isGeneralBuggifyEnabled() ? 4000.0 : 1500.0));
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;
@@ -1128,7 +1127,7 @@ Future<Void> quietDatabase(Database const& cx,
                            int64_t maxDataDistributionQueueSize,
                            int64_t maxPoppedVersionLag,
                            int64_t maxVersionOffset,
-                           double quiescentWaitTimeout) {
+                           double maxDDRunTime) {
 	return waitForQuietDatabase(cx,
 	                            dbInfo,
 	                            phase,
@@ -1138,5 +1137,5 @@ Future<Void> quietDatabase(Database const& cx,
 	                            maxDataDistributionQueueSize,
 	                            maxPoppedVersionLag,
 	                            maxVersionOffset,
-	                            quiescentWaitTimeout);
+	                            maxDDRunTime);
 }
