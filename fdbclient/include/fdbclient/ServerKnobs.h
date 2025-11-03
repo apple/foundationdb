@@ -20,10 +20,8 @@
 
 #pragma once
 
-#include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
 #include "flow/swift_support.h"
-#include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/ClientKnobs.h"
 

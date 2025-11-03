@@ -29,6 +29,11 @@
 FDB_BOOLEAN_PARAM(Randomize);
 FDB_BOOLEAN_PARAM(IsSimulated);
 
+// Returns a deterministically random transaction timeout value for simulation testing.
+// More weight is given to the famous 5s timeout, but [1, 10] range is returned with lower weight.
+// This is only be used in simulation.
+int getSimulatedTxnTimeoutSeconds();
+
 class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE ClientKnobs : public KnobsImpl<ClientKnobs> {
 public:
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically

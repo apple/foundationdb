@@ -19,17 +19,12 @@
  */
 
 #include "fdbclient/Knobs.h"
-#include "fdbclient/FDBTypes.h"
-#include "fdbclient/SystemData.h"
-#include "fdbclient/Tenant.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
 
-// Returns a deterministically random transaction timeout value for simulation testing.
-// More weight is given to the famous 5s timeout, but [1, 10] range is returned with lower weight.
-int randomTxnTimeoutSeconds() {
+int getSimulatedTxnTimeoutSeconds() {
 	if (deterministicRandom()->truePercent(90)) {
 		return 5;
 	} else {
@@ -137,7 +132,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	// Versions -- knobs that control 5s timeout
 	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND
-	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND);  if (isSimulated) MAX_WRITE_TRANSACTION_LIFE_VERSIONS = randomTxnTimeoutSeconds() * VERSIONS_PER_SECOND;
+	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND);  if (isSimulated) MAX_WRITE_TRANSACTION_LIFE_VERSIONS = getSimulatedTxnTimeoutSeconds() * VERSIONS_PER_SECOND;
 
 	// Core
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
