@@ -105,11 +105,11 @@ def print_stats(data):
 	p90 = np.percentile(data, 90)   # 90th percentile
 	p50 = np.percentile(data, 50)   # median
 	avg = np.mean(data)             # average
-	print("P90 physical seconds:", p90)
-	print("P50 physical seconds:", p50)
-	print("Average physical seconds::", avg)
-	print("Count", len(data))
-	print("Total physical seconds:", len(data) * avg)
+	print("P90:", p90)
+	print("P50:", p50)
+	print("Average:", avg)
+	print("Data point count:", len(data))
+	print("Total:", len(data) * avg)
 
 def draw_realtime(times, do_y_log_scale, label):
 	plt.figure(figsize=FIG_SIZE)
