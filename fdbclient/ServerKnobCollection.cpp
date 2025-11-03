@@ -51,8 +51,8 @@ bool ServerKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef 
 	// Do not short circuit by directly returning:
 	//     clientKnobCollection.trySetKnob(knobName, knobValue) || knobValue.visitSetKnob(knobName, serverKnobs)
 	// This is because some knobs have the same name in client and server e.g. MAX_WRITE_TRANSACTION_LIFE_VERSIONS
-	// When setting such knobs, we want both client and server knob to have its value updated
-	// Short circuiting would mean that server knob FOO won't be updated if client knob FOO was updated
+	// When setting such knobs, we want both client and server knob to have their value updated
+	// Short circuiting would mean that server knob named FOO won't be updated if client knob FOO was updated
 	// Instead, we attempt setting client and server knobs in separate statements, and return true
 	// if at least one of the set attempts was succesful.
 	const bool setClientKnob = clientKnobCollection.trySetKnob(knobName, knobValue);
