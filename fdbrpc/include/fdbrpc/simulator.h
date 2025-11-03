@@ -477,7 +477,9 @@ FDB_BOOLEAN_PARAM(ForceDisable);
 // if the disabling time has been extended. The caller should retry after
 // the specified time has elapsed. If flag is true, don't extend the time
 // and disable the connection failures immediately.
-double disableConnectionFailures(std::string const& context, ForceDisable flag = ForceDisable::True);
+double disableConnectionFailures(std::string const& context,
+                                 ForceDisable flag = ForceDisable::True,
+                                 double duration = DISABLE_CONNECTION_FAILURE_FOREVER);
 
 // Extend connection failures in simulation
 void extendConnectionFailures(std::string const& context, double duration);
