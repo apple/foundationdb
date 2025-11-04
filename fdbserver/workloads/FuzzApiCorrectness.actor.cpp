@@ -283,13 +283,15 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		// the implementation was pre-tenant and consider reverting to
 		// that.  Or just think through what it should be.
 		// For now it is a rough translation of what the recent code was.
-		state int numGroups = deterministicRandom()->randomInt(0, 5);
+		state int numGroups = deterministicRandom()->randomInt(1, 5);
 		state int nodesPerGroup = std::max<int>(1, self->nodes / numGroups);
 
+		int64_t denom = self->getKeyForIndex(0).size() + self->valueSizeRange.second;
+		ASSERT(denom > 0);
 		state int keysPerBatch =
 		    std::min<int64_t>(1000,
-		                      1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 /
-							  (self->getKeyForIndex(0).size() + self->valueSizeRange.second));
+		                      1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 / denom);
+
 		try {
 			loop {
 				state int groupNum = 0;
