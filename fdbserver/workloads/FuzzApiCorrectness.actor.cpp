@@ -114,6 +114,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	double testDuration;
 	int numOps;
 	bool rarelyCommit, adjacentKeys;
+	// TODO: explain what a node is.
 	int minNode, nodes;
 	std::pair<int, int> valueSizeRange;
 	int maxClearSize;
@@ -139,7 +140,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		numOps = getOption(options, "numOps"_sr, 21);
 		rarelyCommit = getOption(options, "rarelyCommit"_sr, false);
 		maximumTotalData = getOption(options, "maximumTotalData"_sr, 15e6);
-		minNode = getOption(options, "minNode"_sr, 0);
+		minNode = getOption(options, "minNode"_sr, 1);
 		adjacentKeys = deterministicRandom()->coinflip();
 		useSystemKeys = deterministicRandom()->coinflip();
 		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first
@@ -161,7 +162,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		int newNodes =
-		    std::min<int>(nodes, maximumTotalData / (getKeyForIndex(-1).size() + valueSizeRange.second));
+		    std::min<int>(nodes, maximumTotalData / (getKeyForIndex(0).size() + valueSizeRange.second));
 		minNode = std::max(minNode, nodes - newNodes);
 		nodes = newNodes;
 
@@ -220,17 +221,13 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override {
-		// TODO(gglass): this used to have some ten-ant specific logic and used to
-		// return a code called illegalTen-antAccess.  This has been removed.
-		// Possibly bug hot-spot.  Remove this comment when it's clear that this logic works.
-		// TODO(gglass): can this method be removed outright?  `success` is set to true in the
-		// constructor and I don't see anything setting it to false anywhere.
-		ASSERT(writeSystemKeys);
 		return success;
 	}
 
 	Key getKeyForIndex(int idx) {
 		idx += minNode;
+		// A negative idx might result in a really, really large string.
+		ASSERT(idx >= 0);
 		if (adjacentKeys) {
 			return Key(keyPrefix + std::string(idx, '\x00'));
 		} else {
@@ -278,19 +275,21 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> loadAndRun(FuzzApiCorrectnessWorkload* self, Database cx) {
 		state double startTime = now();
 
-		// Some of the following uses the term 'group' in lieu of the old term
-		// for ten-ant, which we are deleting from the code base in its normal
-		// spelling.
-		// TODO(gglass): revisit this and remove artificial tenant-related grouping.
-		// See what the implementation was pre-tenant and consider reverting to that.
-		// Or just think through what it should be.
+		// Some of the following uses the term 'group' in lieu of the
+		// old term for ten-ant, which we are deleting from the code
+		// base (in its normal spelling).
+		// TODO(gglass): possibly revisit this and possibly remove
+		// artificial grouping or generally simplify this.  See what
+		// the implementation was pre-tenant and consider reverting to
+		// that.  Or just think through what it should be.
+		// For now it is a rough translation of what the recent code was.
 		state int numGroups = deterministicRandom()->randomInt(0, 5);
 		state int nodesPerGroup = std::max<int>(1, self->nodes / numGroups);
 
 		state int keysPerBatch =
 		    std::min<int64_t>(1000,
 		                      1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 /
-							  (self->getKeyForIndex(-1).size() + self->valueSizeRange.second));
+							  (self->getKeyForIndex(0).size() + self->valueSizeRange.second));
 		try {
 			loop {
 				state int groupNum = 0;
