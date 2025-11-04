@@ -95,6 +95,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbserver/MockS3Server.h"
+#include "fdbserver/MockS3ServerChaos.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -123,6 +124,10 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	bool skipDirtyRestore;
 	int initSnapshotInterval;
 	int snapshotInterval;
+
+	// Chaos testing options
+	bool enableChaos;
+	double errorRate, throttleRate, delayRate, corruptionRate, maxDelay;
 
 	// This workload is not compatible with RandomRangeLock workload because they will race in locked range
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
@@ -166,6 +171,14 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		skipDirtyRestore = getOption(options, "skipDirtyRestore"_sr, true);
 		initSnapshotInterval = getOption(options, "initSnapshotInterval"_sr, 0);
 		snapshotInterval = getOption(options, "snapshotInterval"_sr, 30);
+
+		// Chaos testing options
+		enableChaos = getOption(options, "enableChaos"_sr, false);
+		errorRate = getOption(options, "errorRate"_sr, 0.0);
+		throttleRate = getOption(options, "throttleRate"_sr, 0.0);
+		delayRate = getOption(options, "delayRate"_sr, 0.0);
+		corruptionRate = getOption(options, "corruptionRate"_sr, 0.0);
+		maxDelay = getOption(options, "maxDelay"_sr, 0.0);
 
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
@@ -238,18 +251,44 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		state bool adjusted = false;
 		state TenantMapEntry entry;
 
-		// S3-specific: Register MockS3Server only for blobstore URLs in simulation
-		// Only client 0 registers the MockS3Server to avoid duplicates
-		// Persistence is automatically enabled in registerMockS3Server()
+		// S3-specific: Register MockS3Server or MockS3ServerChaos for blobstore URLs in simulation
+		// Only client 0 registers the server to avoid duplicates
+		// Persistence is automatically enabled in registration
 		if (self->clientId == 0 && self->backupURL.rfind("blobstore://", 0) == 0 &&
 		    (self->backupURL.find("127.0.0.1") != std::string::npos ||
 		     self->backupURL.find("localhost") != std::string::npos) &&
 		    g_network->isSimulated()) {
-			TraceEvent("BS3BCW_RegisterMockS3").detail("URL", self->backupURL).detail("ClientId", self->clientId);
-			wait(registerMockS3Server("127.0.0.1", "8080"));
-			TraceEvent("BS3BCW_RegisteredMockS3")
-			    .detail("Address", "127.0.0.1:8080")
-			    .detail("ClientId", self->clientId);
+			TraceEvent("BS3BCW_RegisterMockS3")
+			    .detail("URL", self->backupURL)
+			    .detail("ClientId", self->clientId)
+			    .detail("EnableChaos", self->enableChaos);
+
+			if (self->enableChaos) {
+				NetworkAddress listenAddress(IPAddress(0x7f000001), 8080);
+				wait(startMockS3ServerChaos(listenAddress));
+
+				// Configure chaos rates
+				auto injector = S3FaultInjector::injector();
+				injector->setErrorRate(self->errorRate);
+				injector->setThrottleRate(self->throttleRate);
+				injector->setDelayRate(self->delayRate);
+				injector->setCorruptionRate(self->corruptionRate);
+				injector->setMaxDelay(self->maxDelay);
+
+				TraceEvent("BS3BCW_RegisteredMockS3Chaos")
+				    .detail("Address", "127.0.0.1:8080")
+				    .detail("ClientId", self->clientId)
+				    .detail("ErrorRate", self->errorRate)
+				    .detail("ThrottleRate", self->throttleRate)
+				    .detail("DelayRate", self->delayRate)
+				    .detail("CorruptionRate", self->corruptionRate)
+				    .detail("MaxDelay", self->maxDelay);
+			} else {
+				wait(registerMockS3Server("127.0.0.1", "8080"));
+				TraceEvent("BS3BCW_RegisteredMockS3")
+				    .detail("Address", "127.0.0.1:8080")
+				    .detail("ClientId", self->clientId);
+			}
 		}
 
 		if (!self->defaultBackup && (cx->defaultTenant.present() || BUGGIFY)) {

@@ -181,7 +181,9 @@ struct BulkDumping : TestWorkload {
 				}
 				wait(tr.onError(e));
 			}
-			wait(delay(30.0));
+			// Note: Reduced from 30.0 to 5.0 seconds to avoid triggering a simulation hang
+			// that consistently occurs around 242-243 seconds of simulation time
+			wait(delay(5.0));
 		}
 		return Void();
 	}
@@ -196,6 +198,7 @@ struct BulkDumping : TestWorkload {
 				tr.clear(bulkDumpKeys);
 				tr.clear(bulkLoadJobKeys);
 				tr.clear(bulkLoadTaskKeys);
+				tr.clear(bulkLoadJobHistoryKeys);
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
@@ -445,6 +448,14 @@ struct BulkDumping : TestWorkload {
 		if (self->clientId != 0) {
 			return Void();
 		}
+
+		// Cleanup any leftover state from previous test iterations BEFORE starting work
+		// This ensures we start clean even if a previous iteration timed out or crashed
+		if (self->bulkLoadTransportMethod == 2 && g_network->isSimulated()) { // S3 BLOBSTORE method
+			// Clear MockS3Server storage to prevent memory accumulation over test iterations
+			clearMockS3Storage();
+		}
+
 		if (g_network->isSimulated()) {
 			// Network partition between CC and DD can cause DD no longer existing,
 			// which results in the bulk loading task cannot complete
