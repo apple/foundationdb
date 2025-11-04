@@ -170,8 +170,6 @@ void printStatus(StatusObjectReader statusObj,
 // All below actors return true if the command is executed successfully
 // advanceversion command
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
-// cache_range command
-ACTOR Future<bool> cacheRangeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // configure command
 ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
                                          Database localDb,
