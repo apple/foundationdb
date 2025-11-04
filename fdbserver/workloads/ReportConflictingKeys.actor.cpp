@@ -206,8 +206,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					tr2 = makeReference<ReadYourWritesTransaction>(cx);
 
 					const RangeResult conflictingKeyRanges = conflictingKeyRangesFuture.get();
-					ASSERT(conflictingKeyRanges.size() &&
-					       (conflictingKeyRanges.size() <= readConflictRanges.size() * 2));
+					ASSERT(conflictingKeyRanges.size() > 0);
+					ASSERT(conflictingKeyRanges.size() <= readConflictRanges.size() * 2);
 					ASSERT(conflictingKeyRanges.size() % 2 == 0);
 					ASSERT(!conflictingKeyRanges.more);
 					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
