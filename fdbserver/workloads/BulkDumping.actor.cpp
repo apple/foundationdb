@@ -181,9 +181,7 @@ struct BulkDumping : TestWorkload {
 				}
 				wait(tr.onError(e));
 			}
-			// Note: Reduced from 30.0 to 5.0 seconds to avoid triggering a simulation hang
-			// that consistently occurs around 242-243 seconds of simulation time
-			wait(delay(5.0));
+			wait(delay(30.0));
 		}
 		return Void();
 	}
