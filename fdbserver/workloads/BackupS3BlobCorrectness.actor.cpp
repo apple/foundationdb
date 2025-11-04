@@ -614,11 +614,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		// Clear MockS3 storage from previous test runs
-		if (g_network->isSimulated()) {
-			clearMockS3Storage();
-			TraceEvent("BS3BCW_ClearedMockS3Storage");
-		}
+		// Note: Do NOT clear MockS3 storage here! It would wipe out the persisted backup container
+		// metadata that was just initialized when the server was registered. The persistence system
+		// handles cleanup properly on its own.
 
 		if (self->agentRequest) {
 			state Promise<Void> submitted;

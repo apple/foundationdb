@@ -325,6 +325,9 @@ ACTOR Future<Void> registerMockS3ChaosServer(std::string ip, std::string port) {
 		wait(g_simulator->registerSimHTTPServer(ip, port, makeReference<MockS3ChaosRequestHandler>()));
 		g_simulator->registeredMockS3ChaosServers.insert(serverKey);
 
+		// Enable persistence automatically for all MockS3 instances (including chaos)
+		wait(initializeMockS3Persistence(serverKey));
+
 		TraceEvent("MockS3ChaosServerRegistered")
 		    .detail("Address", serverKey)
 		    .detail("Success", true)
