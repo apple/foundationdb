@@ -4573,11 +4573,10 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 						                                        conflictingKRIndices.end());
 						for (auto const& rCRIndex : mergedIds) {
 							const KeyRangeRef kr = req.transaction.read_conflict_ranges[rCRIndex];
-							// TODO(gglass): possibly subtle logic involving ten-ant prefixes removed from here.
-							// TODO(gglass): note that I am misspelling ten-ant to avoid grep hits while removing
-							// ten-ant related bits in code.
-							// Anyway, I am just saying that this is a possible risk area for bugs.
-							trState->conflictingKeys->insert(kr, conflictingKeysTrue);
+							const KeyRange krWithPrefix =
+								KeyRangeRef(kr.begin.withPrefix(conflictingKeysRange.begin),
+											kr.end.withPrefix(conflictingKeysRange.begin));
+							trState->conflictingKeys->insert(krWithPrefix, conflictingKeysTrue);
 						}
 					}
 
