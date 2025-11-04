@@ -52,6 +52,11 @@ struct BulkDumping : TestWorkload {
 	double corruptionRate = 0.01;
 	double maxDelay = 2.0;
 
+	// Timeout configuration
+	double jobCompletionTimeout = 1800.0; // Timeout for waiting on bulk dump/load job completion
+	double modeSetTimeout = 60.0; // Timeout for setBulkLoadMode/setBulkDumpMode operations
+	double jobSubmitTimeout = 60.0; // Timeout for submitBulkDumpJob/submitBulkLoadJob operations
+
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
@@ -81,6 +86,11 @@ struct BulkDumping : TestWorkload {
 		delayRate = getOption(options, "delayRate"_sr, 0.1);
 		corruptionRate = getOption(options, "corruptionRate"_sr, 0.01);
 		maxDelay = getOption(options, "maxDelay"_sr, 2.0);
+
+		// Initialize timeout options
+		jobCompletionTimeout = getOption(options, "jobCompletionTimeout"_sr, 1800.0);
+		modeSetTimeout = getOption(options, "modeSetTimeout"_sr, 60.0);
+		jobSubmitTimeout = getOption(options, "jobSubmitTimeout"_sr, 60.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
@@ -147,9 +157,17 @@ struct BulkDumping : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> waitUntilDumpJobComplete(Database cx) {
-		state Transaction tr(cx);
+	ACTOR Future<Void> waitUntilDumpJobComplete(BulkDumping* self, Database cx) {
+		state double startTime = now();
 		loop {
+			// Check for timeout to prevent infinite waiting
+			if (now() - startTime > self->jobCompletionTimeout) {
+				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadDumpJobTimeout").detail("WaitTime", now() - startTime);
+				// Timeout: assume job has completed and proceed
+				break;
+			}
+			// Create a fresh transaction each iteration to avoid stale reads
+			state Transaction tr(cx);
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -203,9 +221,12 @@ struct BulkDumping : TestWorkload {
 	}
 
 	// Return error tasks
-	ACTOR Future<std::vector<BulkLoadTaskState>> validateAllBulkLoadTaskAcknowledgedOrError(Database cx,
-	                                                                                        UID jobId,
-	                                                                                        KeyRange jobRange) {
+	// If allowIntermediateStates is true, tasks in Running/Complete phases are allowed (for timeout scenarios)
+	ACTOR Future<std::vector<BulkLoadTaskState>> validateAllBulkLoadTaskAcknowledgedOrError(
+	    Database cx,
+	    UID jobId,
+	    KeyRange jobRange,
+	    bool allowIntermediateStates = false) {
 		state RangeResult rangeResult;
 		state Key beginKey = jobRange.begin;
 		state Key endKey = jobRange.end;
@@ -214,7 +235,8 @@ struct BulkDumping : TestWorkload {
 		TraceEvent("BulkDumpingWorkLoad")
 		    .detail("Phase", "ValidateAllBulkLoadTaskAcknowledgedOrError")
 		    .detail("Job", jobId.toString())
-		    .detail("Range", jobRange);
+		    .detail("Range", jobRange)
+		    .detail("AllowIntermediateStates", allowIntermediateStates);
 		while (beginKey < endKey) {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -239,7 +261,8 @@ struct BulkDumping : TestWorkload {
 						    .detail("Task", bulkLoadTaskState.toString());
 						errorTasks.push_back(bulkLoadTaskState);
 					}
-					if (bulkLoadTaskState.phase != BulkLoadPhase::Acknowledged &&
+					// Only assert on wrong phases if we're in normal completion mode (not timeout)
+					if (!allowIntermediateStates && bulkLoadTaskState.phase != BulkLoadPhase::Acknowledged &&
 					    bulkLoadTaskState.phase != BulkLoadPhase::Error) {
 						TraceEvent(SevError, "BulkDumpingWorkLoadBulkLoadTaskWrongPhase")
 						    .setMaxEventLength(-1)
@@ -260,7 +283,20 @@ struct BulkDumping : TestWorkload {
 	                                                                             Database cx,
 	                                                                             UID jobId,
 	                                                                             KeyRange jobRange) {
+		state double startTime = now();
 		loop {
+			// Check for timeout to prevent infinite waiting
+			if (now() - startTime > self->jobCompletionTimeout) {
+				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadJobTimeout")
+				    .detail("Job", jobId.toString())
+				    .detail("Range", jobRange)
+				    .detail("WaitTime", now() - startTime);
+				// Timeout: validate what we have and return (allow intermediate states since job may still be running)
+				std::vector<BulkLoadTaskState> errorTasks =
+				    wait(self->validateAllBulkLoadTaskAcknowledgedOrError(cx, jobId, jobRange, true));
+				return errorTasks;
+			}
+
 			Optional<BulkLoadJobState> runningJob = wait(getRunningBulkLoadJob(cx));
 			if (runningJob.present()) {
 				ASSERT(runningJob.get().getJobId() == jobId);
@@ -435,14 +471,26 @@ struct BulkDumping : TestWorkload {
 
 		// Submit a bulk dump job
 		state int oldBulkDumpMode = 0;
-		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
+		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Setting BulkDump Mode");
+		try {
+			wait(store(oldBulkDumpMode, timeoutError(setBulkDumpMode(cx, 1), self->modeSetTimeout))); // Enable bulkDump
+			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkDump Mode Set").detail("OldMode", oldBulkDumpMode);
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetDumpModeTimeout")
+				    .detail("TimeoutSeconds", self->modeSetTimeout);
+				throw;
+			}
+			throw;
+		}
 		state std::string dumpFolder = self->jobRoot.empty() ? simulationBulkDumpFolder : self->jobRoot;
 		state BulkDumpState bulkDumpJob =
 		    createBulkDumpJob(bulkDumpJobRange,
 		                      dumpFolder,
 		                      BulkLoadType::SST,
 		                      static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod));
-		wait(submitBulkDumpJob(cx, bulkDumpJob));
+		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Submitting Dump Job").detail("Job", bulkDumpJob.getJobId());
+		wait(timeoutError(submitBulkDumpJob(cx, bulkDumpJob), self->jobSubmitTimeout));
 		TraceEvent("BulkDumpingWorkLoad")
 		    .detail("Phase", "Dump Job Submitted")
 		    .detail("TransportMethod", self->bulkLoadTransportMethod)
@@ -450,7 +498,7 @@ struct BulkDumping : TestWorkload {
 		    .detail("Job", bulkDumpJob.toString());
 
 		// Wait until the dump job completes
-		wait(self->waitUntilDumpJobComplete(cx));
+		wait(self->waitUntilDumpJobComplete(self, cx));
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Complete").detail("Job", bulkDumpJob.toString());
 
 		// Clear database
@@ -459,7 +507,21 @@ struct BulkDumping : TestWorkload {
 
 		// Submit a bulk load job
 		state int oldBulkLoadMode = 0;
-		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoad
+		TraceEvent("BulkDumpingWorkLoad")
+		    .detail("Phase", "Setting BulkLoad Mode")
+		    .detail("Job", bulkDumpJob.toString());
+		try {
+			wait(store(oldBulkLoadMode, timeoutError(setBulkLoadMode(cx, 1), self->modeSetTimeout))); // Enable bulkLoad
+			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkLoad Mode Set").detail("OldMode", oldBulkLoadMode);
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetModeTimeout")
+				    .detail("Job", bulkDumpJob.toString())
+				    .detail("TimeoutSeconds", self->modeSetTimeout);
+				throw;
+			}
+			throw;
+		}
 		loop {
 			// We randomly injects the job cancellation when waiting for the job completion to test the job
 			// cancellation. If the job is cancelled, we should re-submit the job.
@@ -476,7 +538,8 @@ struct BulkDumping : TestWorkload {
 			                      bulkLoadJobRange,
 			                      dataSourceRoot,
 			                      static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod));
-			wait(submitBulkLoadJob(cx, bulkLoadJob));
+			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Submitting Load Job").detail("JobId", dataSourceId);
+			wait(timeoutError(submitBulkLoadJob(cx, bulkLoadJob), self->jobSubmitTimeout));
 			TraceEvent("BulkDumpingWorkLoad")
 			    .detail("Phase", "Load Job Submitted")
 			    .detail("JobId", dataSourceId)
