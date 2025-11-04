@@ -2867,6 +2867,32 @@ THREAD_HANDLE startThread(void (*func)(void*), void* arg, int stackSize, const c
 	return (void*)_beginthread(func, stackSize, arg);
 }
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+
+// We don't run arbitrary user-supplied functions via pthread_create.
+// The reason is that if they have bugs, then those threads die without any
+// information. Instead run them via this wrapper.
+
+struct ThreadCreateArgs {
+	void* (*func)(void* arg);
+	void* arg;
+	ThreadCreateArgs(void* (*f)(void*), void* a) : func(f), arg(a) {}
+};
+
+void* runFunc(void* a) {
+	ThreadCreateArgs* args = (ThreadCreateArgs*)a;
+	try {
+		(void)args->func(args->arg);
+	} catch (std::exception& e) {
+		fprintf(stderr,
+		        "A side thread raised std::exception [%s]; backtrace: %s\n",
+		        e.what(),
+		        platform::get_backtrace().c_str());
+		_exit(1);
+	}
+	delete args;
+	return nullptr;
+}
+
 THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const char* name) {
 	pthread_t t;
 	pthread_attr_t attr;
@@ -2883,7 +2909,8 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 		};
 	}
 
-	pthread_create(&t, &attr, func, arg);
+	ThreadCreateArgs* args = new ThreadCreateArgs(func, arg);
+	pthread_create(&t, &attr, &runFunc, args);
 	pthread_attr_destroy(&attr);
 
 #if defined(__linux__)
@@ -3498,7 +3525,20 @@ std::string format_backtrace(void** addresses, int numAddresses) {
 #else
 	addr2linePath = "/usr/bin/addr2line";
 #endif
-	s = format("%s -e %s -p -C -f -i", addr2linePath.c_str(), imageInfo.symbolFileName.c_str());
+	std::string binaryName = imageInfo.symbolFileName;
+	std::string binaryNameCommandText;
+	// If it's a bare command name, probably `fdbserver`, then the user is
+	// probably running it out of their path, and help them avoid unnecessary
+	// manual labor to get a usable command by invoking `which` for them.
+	// Convserely if there is a '/' present then assuming it's a full path
+	// and just use it. People who type non-absolute paths with directory
+	// separators on on their own.
+	if (binaryName.find('/') == std::string::npos) {
+		binaryNameCommandText = "`which " + binaryName + "`";
+	} else {
+		binaryNameCommandText = binaryName;
+	}
+	s = format("%s -e %s -p -C -f -i", addr2linePath.c_str(), binaryNameCommandText.c_str());
 	for (int i = 1; i < numAddresses; i++) {
 		s += format(" %p", (char*)addresses[i] - (char*)imageInfo.offset);
 	}
