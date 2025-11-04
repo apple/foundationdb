@@ -315,18 +315,41 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		state Database cx = cx_->clone();
+		// TODO: explaining the purpose of and difference between `tx`, `defaultTx1`, and `defaultTx2`.
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
-		state bool disableRyw = deterministicRandom()->coinflip();
-
-		// These exist for legacy reasons
 		state Reference<ReadYourWritesTransaction> defaultTx1 = makeReference<ReadYourWritesTransaction>(cx);
 		state Reference<ReadYourWritesTransaction> defaultTx2 = makeReference<ReadYourWritesTransaction>(cx);
+		state bool disableRyw = deterministicRandom()->coinflip();
 
-		// NOTE: a lot of tenant related code removed.  Obviously this function should be split up
-		// into N functions, each one to test independent stuff separately.  Who cares if it costs
-		// N times transaction creation.  That stuff is cheap anyway.
+		// Formerly ten-ant check that conflict ranges stay the same after commit
+		// and depending on if RYW is disabled
+		{
+			state RangeResult readresult1;
+			state RangeResult readresult2;
+			state RangeResult writeResult1;
+			state RangeResult writeResult2;
+			try {
+				if (disableRyw) {
+					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				}
+				defaultTx1->addReadConflictRange(singleKeyRange("testKeylll"_sr));
+				defaultTx1->addWriteConflictRange(singleKeyRange("testKeylll"_sr));
+				wait(store(readresult1, defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+				wait(store(writeResult1, defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+				wait(defaultTx1->commit());
+				CODE_PROBE(true, "conflict range commit succeeded");
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				CODE_PROBE(true, "conflict range commit error thrown");
+			}
+			wait(store(readresult2, defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+			wait(store(writeResult2, defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(readresult1 == readresult2);
+			ASSERT(writeResult1 == writeResult2);
+			defaultTx1->reset();
+		}
 
-		// proper conflict ranges
 		loop {
 			try {
 				if (disableRyw) {
