@@ -57,7 +57,7 @@ GrpcServer::~GrpcServer() {
 	if (!server_)
 		return;
 
-	stopServerSync();
+	stopServerSyncInternal();
 	run_actor_.cancel();
 	server_ = nullptr;
 	state_ = State::Shutdown;
@@ -146,7 +146,7 @@ Future<Void> GrpcServer::stopServer() {
 
 	state_ = State::Stopping;
 	co_await pool_.post([&]() {
-		stopServerSync();
+		stopServerSyncInternal();
 		return Void();
 	});
 
@@ -159,6 +159,25 @@ Future<Void> GrpcServer::stopServer() {
 }
 
 void GrpcServer::stopServerSync() {
+	ASSERT(g_network->isOnMainThread());
+
+	if (server_ == nullptr) {
+		ASSERT(state_ == State::Stopped || state_ == State::Shutdown);
+		return;
+	}
+
+	state_ = State::Stopping;
+	stopServerSyncInternal();
+
+	if (state_ == State::Shutdown) {
+		return;
+	}
+
+	server_ = nullptr;
+	state_ = State::Stopped;
+}
+
+void GrpcServer::stopServerSyncInternal() {
 	if (server_ != nullptr) {
 		return;
 	}
@@ -184,6 +203,13 @@ void GrpcServer::registerRoleServices(const UID& owner_id, const ServiceList& se
 Future<Void> GrpcServer::deregisterRoleServices(const UID& owner_id) {
 	ASSERT(g_network->isOnMainThread());
 	co_await stopServer();
+	registered_services_.erase(owner_id);
+	on_services_changed_.trigger();
+}
+
+void GrpcServer::deregisterRoleServicesSync(const UID& owner_id) {
+	ASSERT(g_network->isOnMainThread());
+	stopServerSyncInternal();
 	registered_services_.erase(owner_id);
 	on_services_changed_.trigger();
 }

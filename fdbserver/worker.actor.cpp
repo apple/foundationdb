@@ -289,7 +289,12 @@ Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future
 Future<Void> deregisterGrpcService(const UID& id) {
 #ifdef FLOW_GRPC_ENABLED
 	if (GrpcServer::instance() != nullptr) {
-		return GrpcServer::instance()->deregisterRoleServices(id);
+		if (g_network->isSimulated()) {
+			GrpcServer::instance()->deregisterRoleServicesSync(id);
+			return Void();
+		} else {
+			return GrpcServer::instance()->deregisterRoleServices(id);
+		}
 	}
 #endif
 	return Void();
