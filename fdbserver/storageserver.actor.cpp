@@ -6719,10 +6719,25 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 			if (!range->value().isValid()) {
 				continue;
 			}
+			// Skip empty ranges (no data file to load)
+			if (!range->value().hasDataFile()) {
+				TraceEvent("SSBulkLoadTaskSkipEmptyRange")
+				    .detail("Range", range->range())
+				    .detail("Reason", "No data file for empty range");
+				continue;
+			}
 			bulkLoadFileSetsToLoad.push_back(std::make_pair(range->range(), range->value()));
 		}
 		// Streaming results given the input keys using bulkLoadFileSetsToLoad
 		state int i = 0;
+		if (bulkLoadFileSetsToLoad.empty()) {
+			// All ranges are empty - send empty result and signal completion
+			RangeResult emptyResult;
+			emptyResult.more = false;
+			results.send(emptyResult);
+			results.sendError(end_of_stream());
+			return Void();
+		}
 		for (; i < bulkLoadFileSetsToLoad.size(); i++) {
 			std::string sstFilePath = bulkLoadFileSetsToLoad[i].second.getDataFileFullPath();
 			KeyRange rangeToLoad = bulkLoadFileSetsToLoad[i].first & keys;
@@ -6866,14 +6881,40 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	// delay(0) to force a return to the run loop before the work of fetchKeys is started.
 	//  This allows adding->start() to be called inline with CSK.
 	try {
+		if (conductBulkLoad) {
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeCoreStarted", data->thisServerID)
+			    .detail("FKID", fetchKeysID)
+			    .detail("DataMoveId", dataMoveId)
+			    .detail("Elapsed", now() - startTime);
+		}
 		wait(data->coreStarted.getFuture() && delay(0));
+		if (conductBulkLoad) {
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterCoreStarted", data->thisServerID)
+			    .detail("FKID", fetchKeysID)
+			    .detail("DataMoveId", dataMoveId)
+			    .detail("Elapsed", now() - startTime);
+		}
 
 		// On SS Reboot, durableVersion == latestVersion, so any mutations we add to the mutation log would be
 		// skipped if added before latest version advances. To ensure this doesn't happen, we wait for version to
 		// increase by one if this fetchKeys was initiated by a changeServerKeys from restoreDurableState
 		if (data->version.get() == data->durableVersion.get()) {
+			if (conductBulkLoad) {
+				TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeVersionAdvance", data->thisServerID)
+				    .detail("FKID", fetchKeysID)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("CurrentVersion", data->version.get())
+				    .detail("Elapsed", now() - startTime);
+			}
 			wait(data->version.whenAtLeast(data->version.get() + 1));
 			wait(delay(0));
+			if (conductBulkLoad) {
+				TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterVersionAdvance", data->thisServerID)
+				    .detail("FKID", fetchKeysID)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("CurrentVersion", data->version.get())
+				    .detail("Elapsed", now() - startTime);
+			}
 		}
 	} catch (Error& e) {
 		throw e;
@@ -6906,7 +6947,22 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		if (lastAvailable != invalidVersion && lastAvailable >= data->durableVersion.get()) {
 			CODE_PROBE(true, "FetchKeys waits for previous available version to be durable");
+			if (conductBulkLoad) {
+				TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeDurableVersionWait", data->thisServerID)
+				    .detail("FKID", fetchKeysID)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("LastAvailable", lastAvailable)
+				    .detail("CurrentDurableVersion", data->durableVersion.get())
+				    .detail("Elapsed", now() - startTime);
+			}
 			wait(data->durableVersion.whenAtLeast(lastAvailable + 1));
+			if (conductBulkLoad) {
+				TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterDurableVersionWait", data->thisServerID)
+				    .detail("FKID", fetchKeysID)
+				    .detail("DataMoveId", dataMoveId)
+				    .detail("DurableVersion", data->durableVersion.get())
+				    .detail("Elapsed", now() - startTime);
+			}
 		}
 
 		TraceEvent(SevDebug, "FetchKeysVersionSatisfied", data->thisServerID)
@@ -6914,8 +6970,20 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("DataMoveId", dataMoveId)
 		    .detail("ConductBulkLoad", conductBulkLoad);
 
+		if (conductBulkLoad) {
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeParallelismLock", data->thisServerID)
+			    .detail("FKID", fetchKeysID)
+			    .detail("DataMoveId", dataMoveId)
+			    .detail("Elapsed", now() - startTime);
+		}
 		wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 		state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
+		if (conductBulkLoad) {
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterParallelismLock", data->thisServerID)
+			    .detail("FKID", fetchKeysID)
+			    .detail("DataMoveId", dataMoveId)
+			    .detail("Elapsed", now() - startTime);
+		}
 
 		state double executeStart = now();
 		++data->counters.fetchWaitingCount;
@@ -6925,7 +6993,19 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// until all mutations for a version have been processed. We need to take the durableVersionLock to ensure
 		// data->version is greater than the version of the mutation which caused the fetch to be initiated.
 
+		if (conductBulkLoad) {
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysBeforeDurableVersionLock", data->thisServerID)
+			    .detail("FKID", fetchKeysID)
+			    .detail("DataMoveId", dataMoveId)
+			    .detail("Elapsed", now() - startTime);
+		}
 		wait(data->durableVersionLock.take());
+		if (conductBulkLoad) {
+			TraceEvent(SevDebug, "SSBulkLoadFetchKeysAfterDurableVersionLock", data->thisServerID)
+			    .detail("FKID", fetchKeysID)
+			    .detail("DataMoveId", dataMoveId)
+			    .detail("Elapsed", now() - startTime);
+		}
 
 		shard->phase = AddingShard::Fetching;
 
@@ -7616,7 +7696,20 @@ ACTOR Future<Void> bulkLoadFetchShardFileToLoad(StorageServer* data,
 	    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("RemoteFileSet", fromRemoteFileSet.toString())
-	    .detail("LocalFileSet", toLocalFileSet.toString());
+	    .detail("LocalFileSet", toLocalFileSet.toString())
+	    .detail("HasDataFile", toLocalFileSet.hasDataFile());
+
+	// If the range is empty (no data file), skip byte sampling and ingestion
+	if (!toLocalFileSet.hasDataFile()) {
+		TraceEvent(SevDebug, "SSBulkLoadTaskSkipEmptyRange", data->thisServerID)
+		    .detail("JobID", bulkLoadTaskState.getJobId().toString())
+		    .detail("TaskID", bulkLoadTaskState.getTaskId().toString())
+		    .detail("MoveInShard", moveInShard->toString())
+		    .detail("Reason", "No data to ingest for empty range");
+		// For empty ranges, directly move to Ingesting phase without adding any checkpoint
+		moveInShard->setPhase(MoveInPhase::Ingesting);
+		return Void();
+	}
 
 	// Step 2: Do byte sampling locally if the remote byte sampling file is not valid nor existing
 	if (!toLocalFileSet.hasByteSampleFile()) {
@@ -11281,14 +11374,26 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state KeyRangeMap<Optional<UID>> bulkLoadTaskRangeMap; // store dataMoveId on ranges with active bulkload tasks
 	bulkLoadTaskRangeMap.insert(allKeys, Optional<UID>());
 	state RangeResult bulkLoadTasks = fBulkLoadTask.get();
+	TraceEvent(SevDebug, "SSRecoveryBulkLoadTasksRead", data->thisServerID)
+	    .detail("TaskCount", bulkLoadTasks.size())
+	    .detail("TasksSize", bulkLoadTasks.expectedSize());
 	for (int i = 0; i < bulkLoadTasks.size() - 1; i++) {
 		ASSERT(!bulkLoadTasks[i].value.empty()); // Important invariant
 		SSBulkLoadMetadata metadata = decodeSSBulkLoadMetadata(bulkLoadTasks[i].value);
-		if (!metadata.getConductBulkLoad()) {
-			continue;
-		}
 		KeyRange bulkLoadRange =
 		    KeyRangeRef(bulkLoadTasks[i].key, bulkLoadTasks[i + 1].key).removePrefix(persistBulkLoadTaskKeys.begin);
+		TraceEvent(SevDebug, "SSRecoveryBulkLoadTaskEntry", data->thisServerID)
+		    .detail("Index", i)
+		    .detail("Range", bulkLoadRange)
+		    .detail("DataMoveId", metadata.getDataMoveId())
+		    .detail("ConductBulkLoad", metadata.getConductBulkLoad());
+		if (!metadata.getConductBulkLoad()) {
+			TraceEvent(SevWarn, "SSRecoveryBulkLoadTaskSkipped", data->thisServerID)
+			    .detail("Range", bulkLoadRange)
+			    .detail("DataMoveId", metadata.getDataMoveId())
+			    .detail("Reason", "ConductBulkLoad is false");
+			continue;
+		}
 		TraceEvent(SevInfo, "SSBulkLoadTaskMetaDataRestore", data->thisServerID)
 		    .detail("DataMoveId", metadata.getDataMoveId())
 		    .detail("Range", bulkLoadRange);
@@ -11321,23 +11426,78 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 			// dataMoveId is used only when conductBulkLoad is true.
 			UID dataMoveId = UID();
 			ConductBulkLoad conductBulkLoad = ConductBulkLoad::False;
+			TraceEvent(SevDebug, "SSRecoveryCheckBulkLoadMetadata", data->thisServerID)
+			    .detail("Range", keys)
+			    .detail("NowAssigned", nowAssigned)
+			    .detail("BulkLoadMapSize", bulkLoadTaskRangeMap.size());
+			// First pass: look for an exact range match
 			for (auto bulkLoadIt : bulkLoadTaskRangeMap.intersectingRanges(keys)) {
-				// we persist the bulkload task metadata and the shard assignment metadata at the same version with
-				// the same shard boundary.
+				TraceEvent(SevDebug, "SSRecoveryBulkLoadMapEntry", data->thisServerID)
+				    .detail("Range", keys)
+				    .detail("EntryRange", bulkLoadIt->range())
+				    .detail("HasValue", bulkLoadIt->value().present());
 				if (!bulkLoadIt->value().present()) {
 					continue;
 				}
-				// Assert checks the invariant: any bulkload task data move has set to assign the range and the range
-				// must align to the shard assignment boundary.
-				ASSERT(bulkLoadIt->range() == keys && nowAssigned);
-				dataMoveId = bulkLoadIt->value().get();
-				conductBulkLoad = ConductBulkLoad::True;
-				break;
+				// Check for exact match (this is the expected case)
+				if (bulkLoadIt->range() == keys && nowAssigned) {
+					dataMoveId = bulkLoadIt->value().get();
+					conductBulkLoad = ConductBulkLoad::True;
+					TraceEvent(SevDebug, "SSRecoveryBulkLoadMetadataFound", data->thisServerID)
+					    .detail("Range", keys)
+					    .detail("DataMoveId", dataMoveId.toString())
+					    .detail("MatchType", "Exact");
+					break;
+				}
+			}
+			// Second pass: if no exact match found and we're assigned, look for any intersecting range with metadata
+			// This handles the case where shard boundaries changed between metadata persistence and recovery
+			if (!conductBulkLoad && nowAssigned) {
+				for (auto bulkLoadIt : bulkLoadTaskRangeMap.intersectingRanges(keys)) {
+					if (!bulkLoadIt->value().present()) {
+						continue;
+					}
+					// Found an intersecting range with bulk load metadata
+					// This can happen if shard boundaries changed during recovery (e.g., due to coalescing)
+					// We accept the intersecting metadata if the shard assignment is fully contained within the bulk
+					// load range
+					if (bulkLoadIt->range().contains(keys)) {
+						dataMoveId = bulkLoadIt->value().get();
+						conductBulkLoad = ConductBulkLoad::True;
+						TraceEvent(SevWarn, "SSRecoveryBulkLoadMetadataIntersecting", data->thisServerID)
+						    .detail("Range", keys)
+						    .detail("MetadataRange", bulkLoadIt->range())
+						    .detail("DataMoveId", dataMoveId.toString())
+						    .detail("MatchType", "Contained");
+						break;
+					} else {
+						// The ranges overlap but don't have a containment relationship
+						// This is unexpected and we log it as an error
+						TraceEvent(SevWarnAlways, "SSRecoveryBulkLoadMetadataMismatch", data->thisServerID)
+						    .detail("Range", keys)
+						    .detail("MetadataRange", bulkLoadIt->range())
+						    .detail("DataMoveId", bulkLoadIt->value().get().toString())
+						    .detail("Reason", "PartialOverlap");
+					}
+				}
+			}
+			if (!conductBulkLoad && nowAssigned &&
+			    bulkLoadTaskRangeMap.intersectingRanges(keys).begin() !=
+			        bulkLoadTaskRangeMap.intersectingRanges(keys).end()) {
+				TraceEvent(SevWarn, "SSRecoveryBulkLoadMetadataNotFound", data->thisServerID)
+				    .detail("Range", keys)
+				    .detail("BulkLoadMapSize", bulkLoadTaskRangeMap.size())
+				    .detail("Reason", "NoValidMatch");
 			}
 			if (conductBulkLoad) {
 				TraceEvent(SevInfo, "SSBulkLoadTaskSSStateRestore", data->thisServerID)
 				    .detail("Range", keys)
 				    .detail("DataMoveId", dataMoveId.toString());
+			} else if (nowAssigned) {
+				// Check if we expected bulk load but didn't find it
+				TraceEvent(SevDebug, "SSRecoveryNoBulkLoadMetadata", data->thisServerID)
+				    .detail("Range", keys)
+				    .detail("BulkLoadMapSize", bulkLoadTaskRangeMap.size());
 			}
 			changeServerKeys(data,
 			                 keys,

@@ -336,6 +336,7 @@ public:
 	Standalone<VectorRef<VectorRef<KeyValueRef>>> options;
 	int timeout;
 	double databasePingDelay;
+	double maxDDRunTime = 0; // Maximum Data Distributor run time before considered stuck (0 = use default)
 	bool runConsistencyCheck;
 	bool runConsistencyCheckOnCache;
 	bool runConsistencyCheckOnTSS;
@@ -385,7 +386,8 @@ Future<Void> quietDatabase(Database const& cx,
                            int64_t maxStorageServerQueueGate = 5e6,
                            int64_t maxDataDistributionQueueSize = 0,
                            int64_t maxPoppedVersionLag = 30e6,
-                           int64_t maxVersionOffset = 1e6);
+                           int64_t maxVersionOffset = 1e6,
+                           double maxDDRunTime = 0);
 
 /**
  * A utility function for testing error situations. It succeeds if the given test

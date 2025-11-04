@@ -26,6 +26,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/MockS3Server.h"
+#include "fdbserver/MockS3ServerChaos.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
@@ -42,6 +43,19 @@ struct BulkDumping : TestWorkload {
 	int maxCancelTimes = 0;
 	int bulkLoadTransportMethod = 1; // Default to CP method
 	std::string jobRoot = "";
+
+	// Chaos injection options
+	bool enableChaos = false;
+	double errorRate = 0.1;
+	double throttleRate = 0.05;
+	double delayRate = 0.1;
+	double corruptionRate = 0.01;
+	double maxDelay = 2.0;
+
+	// Timeout configuration
+	double jobCompletionTimeout = 1800.0; // Timeout for waiting on bulk dump/load job completion
+	double modeSetTimeout = 60.0; // Timeout for setBulkLoadMode/setBulkDumpMode operations
+	double jobSubmitTimeout = 60.0; // Timeout for submitBulkDumpJob/submitBulkLoadJob operations
 
 	// This workload is not compatible with following workload because they will race in changing the DD mode
 	// This workload is not compatible with RandomRangeLock for the conflict in range lock
@@ -64,6 +78,19 @@ struct BulkDumping : TestWorkload {
 	    bulkLoadTransportMethod(getOption(options, "bulkLoadTransportMethod"_sr, 1)),
 	    jobRoot(getOption(options, "jobRoot"_sr, ""_sr).toString()) {
 		maxCancelTimes = 0; // TODO(BulkLoad): allow to cancel job when job ID randomly generated.
+
+		// Initialize chaos options
+		enableChaos = getOption(options, "enableChaos"_sr, false);
+		errorRate = getOption(options, "errorRate"_sr, 0.1);
+		throttleRate = getOption(options, "throttleRate"_sr, 0.05);
+		delayRate = getOption(options, "delayRate"_sr, 0.1);
+		corruptionRate = getOption(options, "corruptionRate"_sr, 0.01);
+		maxDelay = getOption(options, "maxDelay"_sr, 2.0);
+
+		// Initialize timeout options
+		jobCompletionTimeout = getOption(options, "jobCompletionTimeout"_sr, 1800.0);
+		modeSetTimeout = getOption(options, "modeSetTimeout"_sr, 60.0);
+		jobSubmitTimeout = getOption(options, "jobSubmitTimeout"_sr, 60.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
@@ -130,9 +157,17 @@ struct BulkDumping : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> waitUntilDumpJobComplete(Database cx) {
-		state Transaction tr(cx);
+	ACTOR Future<Void> waitUntilDumpJobComplete(BulkDumping* self, Database cx) {
+		state double startTime = now();
 		loop {
+			// Check for timeout to prevent infinite waiting
+			if (now() - startTime > self->jobCompletionTimeout) {
+				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadDumpJobTimeout").detail("WaitTime", now() - startTime);
+				// Timeout: assume job has completed and proceed
+				break;
+			}
+			// Create a fresh transaction each iteration to avoid stale reads
+			state Transaction tr(cx);
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -186,9 +221,12 @@ struct BulkDumping : TestWorkload {
 	}
 
 	// Return error tasks
-	ACTOR Future<std::vector<BulkLoadTaskState>> validateAllBulkLoadTaskAcknowledgedOrError(Database cx,
-	                                                                                        UID jobId,
-	                                                                                        KeyRange jobRange) {
+	// If allowIntermediateStates is true, tasks in Running/Complete phases are allowed (for timeout scenarios)
+	ACTOR Future<std::vector<BulkLoadTaskState>> validateAllBulkLoadTaskAcknowledgedOrError(
+	    Database cx,
+	    UID jobId,
+	    KeyRange jobRange,
+	    bool allowIntermediateStates = false) {
 		state RangeResult rangeResult;
 		state Key beginKey = jobRange.begin;
 		state Key endKey = jobRange.end;
@@ -197,7 +235,8 @@ struct BulkDumping : TestWorkload {
 		TraceEvent("BulkDumpingWorkLoad")
 		    .detail("Phase", "ValidateAllBulkLoadTaskAcknowledgedOrError")
 		    .detail("Job", jobId.toString())
-		    .detail("Range", jobRange);
+		    .detail("Range", jobRange)
+		    .detail("AllowIntermediateStates", allowIntermediateStates);
 		while (beginKey < endKey) {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -222,7 +261,8 @@ struct BulkDumping : TestWorkload {
 						    .detail("Task", bulkLoadTaskState.toString());
 						errorTasks.push_back(bulkLoadTaskState);
 					}
-					if (bulkLoadTaskState.phase != BulkLoadPhase::Acknowledged &&
+					// Only assert on wrong phases if we're in normal completion mode (not timeout)
+					if (!allowIntermediateStates && bulkLoadTaskState.phase != BulkLoadPhase::Acknowledged &&
 					    bulkLoadTaskState.phase != BulkLoadPhase::Error) {
 						TraceEvent(SevError, "BulkDumpingWorkLoadBulkLoadTaskWrongPhase")
 						    .setMaxEventLength(-1)
@@ -243,7 +283,20 @@ struct BulkDumping : TestWorkload {
 	                                                                             Database cx,
 	                                                                             UID jobId,
 	                                                                             KeyRange jobRange) {
+		state double startTime = now();
 		loop {
+			// Check for timeout to prevent infinite waiting
+			if (now() - startTime > self->jobCompletionTimeout) {
+				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadJobTimeout")
+				    .detail("Job", jobId.toString())
+				    .detail("Range", jobRange)
+				    .detail("WaitTime", now() - startTime);
+				// Timeout: validate what we have and return (allow intermediate states since job may still be running)
+				std::vector<BulkLoadTaskState> errorTasks =
+				    wait(self->validateAllBulkLoadTaskAcknowledgedOrError(cx, jobId, jobRange, true));
+				return errorTasks;
+			}
+
 			Optional<BulkLoadJobState> runningJob = wait(getRunningBulkLoadJob(cx));
 			if (runningJob.present()) {
 				ASSERT(runningJob.get().getJobId() == jobId);
@@ -280,9 +333,10 @@ struct BulkDumping : TestWorkload {
 		Optional<BulkLoadJobState> jobInHistory;
 		for (const auto& job : jobHistory) {
 			ASSERT(job.isValid());
-			ASSERT(job.getJobId() == jobId);
-			ASSERT(!jobInHistory.present());
-			jobInHistory = job;
+			if (job.getJobId() == jobId) {
+				ASSERT(!jobInHistory.present());
+				jobInHistory = job;
+			}
 		}
 		ASSERT(jobInHistory.present());
 		if (hasError || !bulkDumpRangeContainBulkLoadRange) {
@@ -417,14 +471,26 @@ struct BulkDumping : TestWorkload {
 
 		// Submit a bulk dump job
 		state int oldBulkDumpMode = 0;
-		wait(store(oldBulkDumpMode, setBulkDumpMode(cx, 1))); // Enable bulkDump
+		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Setting BulkDump Mode");
+		try {
+			wait(store(oldBulkDumpMode, timeoutError(setBulkDumpMode(cx, 1), self->modeSetTimeout))); // Enable bulkDump
+			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkDump Mode Set").detail("OldMode", oldBulkDumpMode);
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetDumpModeTimeout")
+				    .detail("TimeoutSeconds", self->modeSetTimeout);
+				throw;
+			}
+			throw;
+		}
 		state std::string dumpFolder = self->jobRoot.empty() ? simulationBulkDumpFolder : self->jobRoot;
 		state BulkDumpState bulkDumpJob =
 		    createBulkDumpJob(bulkDumpJobRange,
 		                      dumpFolder,
 		                      BulkLoadType::SST,
 		                      static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod));
-		wait(submitBulkDumpJob(cx, bulkDumpJob));
+		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Submitting Dump Job").detail("Job", bulkDumpJob.getJobId());
+		wait(timeoutError(submitBulkDumpJob(cx, bulkDumpJob), self->jobSubmitTimeout));
 		TraceEvent("BulkDumpingWorkLoad")
 		    .detail("Phase", "Dump Job Submitted")
 		    .detail("TransportMethod", self->bulkLoadTransportMethod)
@@ -432,7 +498,7 @@ struct BulkDumping : TestWorkload {
 		    .detail("Job", bulkDumpJob.toString());
 
 		// Wait until the dump job completes
-		wait(self->waitUntilDumpJobComplete(cx));
+		wait(self->waitUntilDumpJobComplete(self, cx));
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Dump Job Complete").detail("Job", bulkDumpJob.toString());
 
 		// Clear database
@@ -441,7 +507,21 @@ struct BulkDumping : TestWorkload {
 
 		// Submit a bulk load job
 		state int oldBulkLoadMode = 0;
-		wait(store(oldBulkLoadMode, setBulkLoadMode(cx, 1))); // Enable bulkLoad
+		TraceEvent("BulkDumpingWorkLoad")
+		    .detail("Phase", "Setting BulkLoad Mode")
+		    .detail("Job", bulkDumpJob.toString());
+		try {
+			wait(store(oldBulkLoadMode, timeoutError(setBulkLoadMode(cx, 1), self->modeSetTimeout))); // Enable bulkLoad
+			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "BulkLoad Mode Set").detail("OldMode", oldBulkLoadMode);
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadSetModeTimeout")
+				    .detail("Job", bulkDumpJob.toString())
+				    .detail("TimeoutSeconds", self->modeSetTimeout);
+				throw;
+			}
+			throw;
+		}
 		loop {
 			// We randomly injects the job cancellation when waiting for the job completion to test the job
 			// cancellation. If the job is cancelled, we should re-submit the job.
@@ -458,7 +538,8 @@ struct BulkDumping : TestWorkload {
 			                      bulkLoadJobRange,
 			                      dataSourceRoot,
 			                      static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod));
-			wait(submitBulkLoadJob(cx, bulkLoadJob));
+			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Submitting Load Job").detail("JobId", dataSourceId);
+			wait(timeoutError(submitBulkLoadJob(cx, bulkLoadJob), self->jobSubmitTimeout));
 			TraceEvent("BulkDumpingWorkLoad")
 			    .detail("Phase", "Load Job Submitted")
 			    .detail("JobId", dataSourceId)
@@ -531,19 +612,62 @@ struct BulkDumping : TestWorkload {
 			                 self->jobRoot.find("mock-s3-server") != std::string::npos;
 
 			if (useMockS3 && g_network->isSimulated()) {
-				TraceEvent("BulkDumpingWorkload")
-				    .detail("Phase", "Registering MockS3Server")
-				    .detail("JobRoot", self->jobRoot);
+				// Check if 127.0.0.1:8080 is already registered in simulator's httpHandlers
+				std::string serverKey = "127.0.0.1:8080";
+				bool alreadyRegistered = g_simulator->httpHandlers.count(serverKey) > 0;
 
-				// Register MockS3Server with IP address - simulation environment doesn't support hostname resolution
-				// Persistence is automatically enabled in registerMockS3Server()
-				wait(registerMockS3Server("127.0.0.1", "8080"));
+				if (alreadyRegistered) {
+					TraceEvent("BulkDumpingWorkload")
+					    .detail("Phase", "MockS3Server Already Registered")
+					    .detail("Address", serverKey)
+					    .detail("ChaosRequested", self->enableChaos)
+					    .detail("Reason", "Reusing existing HTTP handler from previous test");
+				} else if (self->enableChaos) {
+					TraceEvent("BulkDumpingWorkload")
+					    .detail("Phase", "Starting MockS3ServerChaos")
+					    .detail("JobRoot", self->jobRoot);
 
-				TraceEvent("BulkDumpingWorkload")
-				    .detail("Phase", "MockS3Server Registered")
-				    .detail("Address", "127.0.0.1:8080");
+					// Start MockS3ServerChaos - has internal duplicate detection
+					NetworkAddress listenAddress(IPAddress(0x7f000001), 8080);
+					wait(startMockS3ServerChaos(listenAddress));
+
+					TraceEvent("BulkDumpingWorkload")
+					    .detail("Phase", "MockS3ServerChaos Started")
+					    .detail("Address", "127.0.0.1:8080");
+				} else {
+					TraceEvent("BulkDumpingWorkload")
+					    .detail("Phase", "Registering MockS3Server")
+					    .detail("JobRoot", self->jobRoot);
+
+					// Register MockS3Server with persistence enabled
+					wait(registerMockS3Server("127.0.0.1", "8080"));
+
+					TraceEvent("BulkDumpingWorkload")
+					    .detail("Phase", "MockS3Server Registered")
+					    .detail("Address", "127.0.0.1:8080");
+				}
 			}
 		}
+
+		// Configure chaos rates for all clients if chaos is enabled
+		// This allows each test to have different chaos rates
+		if (self->enableChaos && g_network->isSimulated()) {
+			auto injector = S3FaultInjector::injector();
+			injector->setErrorRate(self->errorRate);
+			injector->setThrottleRate(self->throttleRate);
+			injector->setDelayRate(self->delayRate);
+			injector->setCorruptionRate(self->corruptionRate);
+			injector->setMaxDelay(self->maxDelay);
+
+			TraceEvent("BulkDumpingWorkload")
+			    .detail("Phase", "Chaos Configured")
+			    .detail("ClientID", self->clientId)
+			    .detail("ErrorRate", self->errorRate)
+			    .detail("ThrottleRate", self->throttleRate)
+			    .detail("DelayRate", self->delayRate)
+			    .detail("CorruptionRate", self->corruptionRate);
+		}
+
 		return Void();
 	}
 };

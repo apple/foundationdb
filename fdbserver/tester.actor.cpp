@@ -1397,7 +1397,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
                                     std::vector<TesterInterface> testers,
                                     bool doQuiescentCheck,
                                     bool doTSSCheck,
-                                    double quiescentWaitTimeout,
+                                    double maxDDRunTime,
                                     double softTimeLimit,
                                     double databasePingDelay,
                                     Reference<AsyncVar<ServerDBInfo>> dbInfo) {
@@ -1428,9 +1428,8 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "ConsistencyCheck"_sr));
 	options.push_back_deep(options.arena(), KeyValueRef("performQuiescentChecks"_sr, performQuiescent));
 	options.push_back_deep(options.arena(), KeyValueRef("performTSSCheck"_sr, performTSSCheck));
-	options.push_back_deep(
-	    options.arena(),
-	    KeyValueRef("quiescentWaitTimeout"_sr, ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
+	options.push_back_deep(options.arena(),
+	                       KeyValueRef("maxDDRunTime"_sr, ValueRef(options.arena(), format("%f", maxDDRunTime))));
 	options.push_back_deep(options.arena(), KeyValueRef("distributed"_sr, "false"_sr));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
@@ -2048,7 +2047,7 @@ ACTOR Future<bool> runTest(Database cx,
 				                                   testers,
 				                                   quiescent,
 				                                   spec.runConsistencyCheckOnTSS,
-				                                   10000.0,
+				                                   spec.maxDDRunTime > 0 ? spec.maxDDRunTime : 10000.0,
 				                                   5000,
 				                                   spec.databasePingDelay,
 				                                   dbInfo),
@@ -2216,6 +2215,12 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      spec->runConsistencyCheckOnTSS = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnTSS", spec->runConsistencyCheckOnTSS);
+	  } },
+	{ "maxDDRunTime",
+	  [](const std::string& value, TestSpec* spec) {
+	      sscanf(value.c_str(), "%lf", &(spec->maxDDRunTime));
+	      ASSERT(spec->maxDDRunTime >= 0);
+	      TraceEvent("TestParserTest").detail("ParsedMaxDDRunTime", spec->maxDDRunTime);
 	  } },
 	{ "waitForQuiescence",
 	  [](const std::string& value, TestSpec* spec) {
