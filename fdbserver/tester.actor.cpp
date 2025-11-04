@@ -2889,7 +2889,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	if (connectionFailuresDisableDuration > 0) {
-		// Disable connection failures forever, irrespective of the actual value
+		// Disable connection failures with specified duration
 		disableConnectionFailures("Tester", ForceDisable::True, connectionFailuresDisableDuration);
 	} else {
 		enableConnectionFailures("Tester", FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS);
