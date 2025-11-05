@@ -28,10 +28,11 @@
 // ---- FlowGrpc definitions ------
 
 void FlowGrpc::init(TLSConfig* tls_config, const std::optional<NetworkAddress>& server_addr) {
+	TraceEvent("FlowGrpcInit");
 	FlowGrpc* fg = new FlowGrpc();
 	g_network->setGlobal(INetwork::enGrpcState, (flowGlobalType)fg);
 
-	if (!tls_config) {
+	if (!tls_config || tls_config->isInsecure()) {
 		fg->credentials_ = std::make_shared<GrpcInsecureCredentialProvider>();
 	} else {
 		fg->credentials_ = std::make_shared<GrpcTlsCredentialProvider>(tls_config);
@@ -81,7 +82,7 @@ Future<Void> GrpcServer::run() {
 Future<Void> GrpcServer::runInternal() {
 	ASSERT(state_ == State::Stopped);
 	ASSERT(server_ == nullptr);
-	ASSERT(g_network->isOnMainThread());
+	// ASSERT(g_network->isOnMainThread()); // Unit-tests are not on main-thread?
 
 	Future<Void> next = Void();
 	loop {

@@ -3,6 +3,7 @@ set -euo pipefail
 
 SERVER_COUNT=1
 readonly PORT_PREFIX="${PORT_PREFIX:-1500}"
+readonly GPORT_PREFIX="${GPORT_PREFIX:-2500}"
 
 # default cluster settings, override with options
 STATELESS_COUNT=4
@@ -51,12 +52,13 @@ function start_servers {
       exit 1
     fi
     local port=$(( PORT_PREFIX + SERVER_COUNT ))
+    local gport=$(( GPORT_PREFIX + SERVER_COUNT ))
     local zone="${4}-Z-$(( j % REPLICATION_COUNT ))"
     # There may be more than one knob in KNOBS separated by spaces. Bash will quote
     # it all with single-quotes because the string has a space in it. We don't want
     # that behavior; fdbserver won't be able to parse the quoted knobs. To get around
     # this native bash behavior, we printf the KNOBS string.
-    ${2} "${FDB}" -p auto:"${port}" ${KNOBS:+$(printf "%s" "${KNOBS}")} -c "${3}" \
+    ${2} "${FDB}" -p auto:"${port}" -p 127.0.0.1:"${gport}":grpc ${KNOBS:+$(printf "%s" "${KNOBS}")} -c "${3}" \
       -d "${datadir}" -L "${logdir}" -C "${CLUSTER}" \
       --datacenter_id="${4}" \
       --locality-zoneid "${zone}" \

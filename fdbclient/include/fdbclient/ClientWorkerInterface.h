@@ -22,6 +22,7 @@
 #define FDBCLIENT_CLIENTWORKERINTERFACE_H
 #pragma once
 
+#include "fdbrpc/FlowGrpc.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/Status.h"
@@ -35,17 +36,26 @@ struct ClientWorkerInterface {
 	RequestStream<struct RebootRequest> reboot;
 	RequestStream<struct ProfilerRequest> profiler;
 	RequestStream<struct SetFailureInjection> setFailureInjection;
+	Optional<NetworkAddress> grpcAddress;
 
 	bool operator==(ClientWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClientWorkerInterface const& r) const { return id() != r.id(); }
 	UID id() const { return reboot.getEndpoint().token; }
 	NetworkAddress address() const { return reboot.getEndpoint().getPrimaryAddress(); }
 
-	void initEndpoints() { reboot.getEndpoint(TaskPriority::ReadSocket); }
+	void initEndpoints() {
+		reboot.getEndpoint(TaskPriority::ReadSocket);
+#ifdef FLOW_GRPC_ENABLED
+		auto grpcInstance = FlowGrpc::instance();
+		if (grpcInstance) {
+			grpcAddress = grpcInstance->server()->getAddress();
+		}
+#endif
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reboot, profiler, setFailureInjection);
+		serializer(ar, reboot, profiler, setFailureInjection, grpcAddress);
 	}
 };
 

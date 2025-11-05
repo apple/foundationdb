@@ -418,6 +418,10 @@ public:
 	int nextHTTPPort = 5000;
 	bool httpProtected = false;
 
+	// Truly simulator-global registry for MockS3ServerChaos to prevent duplicate registrations
+	// across all simulated processes (must stay in sync with httpHandlers)
+	std::set<std::string> registeredMockS3ChaosServers;
+
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;
 
@@ -474,7 +478,9 @@ FDB_BOOLEAN_PARAM(ForceDisable);
 // if the disabling time has been extended. The caller should retry after
 // the specified time has elapsed. If flag is true, don't extend the time
 // and disable the connection failures immediately.
-double disableConnectionFailures(std::string const& context, ForceDisable flag = ForceDisable::True);
+double disableConnectionFailures(std::string const& context,
+                                 ForceDisable flag = ForceDisable::True,
+                                 double duration = DISABLE_CONNECTION_FAILURE_FOREVER);
 
 // Extend connection failures in simulation
 void extendConnectionFailures(std::string const& context, double duration);

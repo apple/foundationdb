@@ -1,6 +1,11 @@
 [configuration]
-maxTLogVersion = 6
+maxTLogVersion = 7
 disableTss = true
+
+[[knobs]]
+# testing that restart with writing recover at version to CSTATE.
+record_recover_at_in_cstate = true
+track_tlog_recovery = true
 
 [[test]]
 testTitle = 'Clogged'
@@ -9,6 +14,7 @@ runSetup = false
     [[test.workload]]
     testName = 'Cycle'
     transactionsPerSecond = 2500.0
+    skipSetup = true
     nodeCount = 2500
     testDuration = 10.0
     expectedRate = 0

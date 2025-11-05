@@ -250,14 +250,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		// Only client 0 runs backup/restore operations
-		// Other clients just run the Cycle workload
+		// Other clients do nothing - the test harness waits for all clients to complete
 		if (clientId != 0) {
-			// Calculate expected duration from TOML parameters to prevent flakey early test exit
-			// Backup starts at backupAfter, restore at restoreAfter, plus buffer for completion
-			// This ensures all clients finish around the same time instead of clients 1-7
-			// finishing at 30s while client 0 takes ~100s, which confuses the test harness
-			double expectedDuration = backupAfter + restoreAfter + 50.0; // 50s buffer for completion
-			return delay(expectedDuration);
+			return Void();
 		}
 		return _start(cx, this);
 	}

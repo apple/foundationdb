@@ -2977,7 +2977,7 @@ void enableConnectionFailures(std::string const& context, double duration) {
 	}
 }
 
-double disableConnectionFailures(std::string const& context, ForceDisable flag) {
+double disableConnectionFailures(std::string const& context, ForceDisable flag, double duration) {
 	if (g_network->isSimulated()) {
 		if (now() + DISABLE_CONNECTION_FAILURE_MIN_INTERVAL < g_simulator->connectionFailureDisableTime &&
 		    flag == ForceDisable::False) {
@@ -2987,7 +2987,7 @@ double disableConnectionFailures(std::string const& context, ForceDisable flag) 
 			return g_simulator->connectionFailureDisableTime - now(); // return remaining time (>0.001s)
 		} else {
 			// if remaining time is less than 0.001s, or forced to disable, disable now
-			g_simulator->connectionFailuresDisableDuration = DISABLE_CONNECTION_FAILURE_FOREVER;
+			g_simulator->connectionFailuresDisableDuration = duration;
 			g_simulator->speedUpSimulation = true;
 			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
 			return 0;

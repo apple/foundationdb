@@ -1,4 +1,4 @@
-<form theme="dark">
+<form version="1.1" theme="dark">
   <label>FoundationDB - Long Recovery (Dev)</label>
   <fieldset submitButton="false" autoRun="false"></fieldset>
   <row>

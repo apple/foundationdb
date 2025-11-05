@@ -383,6 +383,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	
 	// BulkLoading
 	init( BULKLOAD_FILE_BYTES_MAX,                  1*1024*1024*1024 ); // 1GB
+	init( BULKLOAD_DOWNLOAD_RETRY_DELAY,                         2.0 ); // Retry delay for bulk load file downloads - reasonable for both S3 and simulation
+	init( BULKLOAD_DOWNLOAD_MAX_RETRIES,                          20 ); // Maximum retries for bulk load downloads - 20 retries × 2s = 40s total
 	init( BULKLOAD_BYTE_SAMPLE_BATCH_KEY_COUNT,                10000 ); if( randomize && BUGGIFY ) BULKLOAD_BYTE_SAMPLE_BATCH_KEY_COUNT = deterministicRandom()->randomInt(2, 1000);
 	init( DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC,          60.0 ); if( randomize && BUGGIFY ) DD_BULKLOAD_SHARD_BOUNDARY_CHANGE_DELAY_SEC = deterministicRandom()->random01() * 10 + 1;
 	init( DD_BULKLOAD_TASK_METADATA_READ_SIZE,                   100 ); if( randomize && BUGGIFY ) DD_BULKLOAD_TASK_METADATA_READ_SIZE = deterministicRandom()->randomInt(2, 100);

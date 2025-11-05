@@ -475,33 +475,36 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		for (auto& it : self->tLogs) {
 			for (auto& t : it->logServers) {
 				if (t->get().present()) {
-					failed.push_back(
-					    waitFailureClient(t->get().interf().waitFailure,
-					                      SERVER_KNOBS->TLOG_TIMEOUT,
-					                      -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-					                      /*trace=*/true));
+					failed.push_back(waitFailureClient(t->get().interf().waitFailure,
+					                                   /* failureReactionTime */ SERVER_KNOBS->TLOG_TIMEOUT,
+					                                   /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
+					                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+					                                   /* trace */ true,
+					                                   /* traceMsg */ "TLogFailed"_sr));
 				} else {
 					changes.push_back(t->onChange());
 				}
 			}
 			for (auto& t : it->logRouters) {
 				if (t->get().present()) {
-					failed.push_back(
-					    waitFailureClient(t->get().interf().waitFailure,
-					                      SERVER_KNOBS->TLOG_TIMEOUT,
-					                      -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-					                      /*trace=*/true));
+					failed.push_back(waitFailureClient(t->get().interf().waitFailure,
+					                                   /* failureReactionTime */ SERVER_KNOBS->TLOG_TIMEOUT,
+					                                   /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
+					                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+					                                   /* trace */ true,
+					                                   /* traceMsg */ "LogRouterFailed"_sr));
 				} else {
 					changes.push_back(t->onChange());
 				}
 			}
 			for (const auto& worker : it->backupWorkers) {
 				if (worker->get().present()) {
-					backupFailed.push_back(
-					    waitFailureClient(worker->get().interf().waitFailure,
-					                      SERVER_KNOBS->BACKUP_TIMEOUT,
-					                      -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-					                      /*trace=*/true));
+					backupFailed.push_back(waitFailureClient(worker->get().interf().waitFailure,
+					                                         /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
+					                                         /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
+					                                             SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+					                                         /* trace */ true,
+					                                         /* traceMsg */ "BackupWorkerFailed"_sr));
 				} else {
 					changes.push_back(worker->onChange());
 				}
@@ -514,10 +517,11 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 					for (auto& t : it->logRouters) {
 						if (t->get().present()) {
 							failed.push_back(waitFailureClient(t->get().interf().waitFailure,
-							                                   SERVER_KNOBS->TLOG_TIMEOUT,
-							                                   -SERVER_KNOBS->TLOG_TIMEOUT /
+							                                   /* failureReactionTime */ SERVER_KNOBS->TLOG_TIMEOUT,
+							                                   /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
 							                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-							                                   /*trace=*/true));
+							                                   /* trace */ true,
+							                                   /* traceMsg */ "OldLogRouterFailed"_sr));
 						} else {
 							changes.push_back(t->onChange());
 						}
@@ -526,11 +530,13 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 				// Monitor changes of backup workers for old epochs.
 				for (const auto& worker : old.tLogs[0]->backupWorkers) {
 					if (worker->get().present()) {
-						backupFailed.push_back(waitFailureClient(worker->get().interf().waitFailure,
-						                                         SERVER_KNOBS->BACKUP_TIMEOUT,
-						                                         -SERVER_KNOBS->BACKUP_TIMEOUT /
-						                                             SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-						                                         /*trace=*/true));
+						backupFailed.push_back(
+						    waitFailureClient(worker->get().interf().waitFailure,
+						                      /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
+						                      /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
+						                          SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+						                      /* trace */ true,
+						                      /* traceMsg */ "OldBackupWorkerFailed"_sr));
 					} else {
 						changes.push_back(worker->onChange());
 					}
@@ -546,8 +552,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		changes.push_back(self->backupWorkerChanged.onTrigger());
 
 		ASSERT(failed.size() >= 1);
-		wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), tlog_failed()) ||
-		     tagError<Void>(quorum(backupFailed, 1), backup_worker_failed()));
+		wait(quorum(changes, 1) ||
+		     tagError<Void>(traceAfter(quorum(failed, 1), "TPLSOnErrorLogSystemFailed"), tlog_failed()) ||
+		     tagError<Void>(traceAfter(quorum(backupFailed, 1), "TPLSOnErrorBackupFailed"), backup_worker_failed()));
 	}
 }
 
@@ -604,6 +611,9 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 		const auto& tpcvMapRef = tpcvMap.get();
 		for (const auto& it : tLogs) {
 			if (!it->isLocal) {
+				continue;
+			}
+			if (it->logServers.size() == 0) {
 				continue;
 			}
 			for (size_t loc = 0; loc < it->logServers.size(); loc++) {

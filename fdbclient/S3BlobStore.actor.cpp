@@ -1097,6 +1097,21 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		state std::string canonicalURI = resource;
 		// Set the resource on each loop so we don't double-encode when we set it to `getCanonicalURI` below.
 		req->resource = resource;
+
+		// Reset headers to initial state for this retry attempt to prevent header accumulation
+		// across retries and potential map corruption
+		req->data.headers = headers;
+		req->data.headers["Host"] = bstore->host;
+		req->data.headers["Accept"] = "application/xml";
+		// Re-merge extraHeaders
+		for (const auto& [k, v] : bstore->extraHeaders) {
+			std::string& fieldValue = req->data.headers[k];
+			if (!fieldValue.empty()) {
+				fieldValue.append(",");
+			}
+			fieldValue.append(v);
+		}
+
 		state UID connID = UID();
 		state double reqStartTimer;
 		state double connectStartTimer = g_network->timer();
@@ -1223,7 +1238,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 			}
 
 			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(reqF, requestTimeout));
-			if (g_network->isSimulated() && BUGGIFY && deterministicRandom()->random01() < 0.1) {
+			// Don't simulate token errors for multipart complete operations (POST with uploadId but no partNumber)
+			// because changing a successful 200 to 400 after the server has already completed and removed
+			// the upload causes the client to infinitely retry with a phantom upload ID. This seems too much of
+			// an artifical manufacture.
+			bool isMultipartComplete = verb == "POST" && resource.find("uploadId=") != std::string::npos &&
+			                           resource.find("partNumber=") == std::string::npos;
+			if (g_network->isSimulated() && BUGGIFY && deterministicRandom()->random01() < 0.1 &&
+			    !isMultipartComplete) {
 				// simulate an error from s3
 				_r->code = badRequestCode;
 				simulateS3TokenError = true;

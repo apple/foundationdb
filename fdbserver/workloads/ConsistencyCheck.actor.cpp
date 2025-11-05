@@ -65,8 +65,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Whether or not to perform consistency check between storage servers and pair TSS
 	bool performTSSCheck;
 
-	// How long to wait for the database to go quiet before failing (if doing quiescent checks)
-	double quiescentWaitTimeout;
+	// Maximum time Data Distributor can run before being considered stuck (for quiescent checks)
+	double maxDDRunTime;
 
 	// If true, then perform all checks on this client.  The first client is the only one to perform all of the fast
 	// checks All other clients will perform slow checks if this test is distributed
@@ -115,7 +115,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	  : TestWorkload(wcx), onTimeout(*this), onTimeoutEvent({ "Timeout"_sr, "TracedTooManyLines"_sr }, onTimeout) {
 		performQuiescentChecks = getOption(options, "performQuiescentChecks"_sr, false);
 		performTSSCheck = getOption(options, "performTSSCheck"_sr, true);
-		quiescentWaitTimeout = getOption(options, "quiescentWaitTimeout"_sr, 600.0);
+		maxDDRunTime = getOption(options, "maxDDRunTime"_sr, 600.0);
 		distributed = getOption(options, "distributed"_sr, true);
 		shardSampleFactor = std::max(getOption(options, "shardSampleFactor"_sr, 1), 1);
 		failureIsError = getOption(options, "failureIsError"_sr, false);
@@ -142,8 +142,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 
 			try {
-				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0),
-				                  self->quiescentWaitTimeout)); // FIXME: should be zero?
+				wait(timeoutError(
+				    quietDatabase(
+				        cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0, 30e6, 1e6, self->maxDDRunTime),
+				    self->maxDDRunTime)); // FIXME: should be zero?
 				if (g_network->isSimulated()) {
 					g_simulator->quiesced = true;
 					TraceEvent("ConsistencyCheckQuiesced").detail("Quiesced", g_simulator->quiesced);

@@ -292,15 +292,17 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			// really don't want to have to start over
 			loop choose {
 				when(wait(recoveryCore)) {}
-				when(wait(waitFailureClient(
-				              iMaster.waitFailure,
-				              db->masterRegistrationCount
-				                  ? SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME
-				                  : (now() - recoveryStart) * SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY,
-				              db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME /
-				                                                SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
-				                                          : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY) ||
-				          db->forceMasterFailure.onTrigger())) {
+				when(wait(
+				    traceAfter(waitFailureClient(
+				                   iMaster.waitFailure,
+				                   db->masterRegistrationCount
+				                       ? SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME
+				                       : (now() - recoveryStart) * SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY,
+				                   db->masterRegistrationCount ? -SERVER_KNOBS->MASTER_FAILURE_REACTION_TIME /
+				                                                     SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY
+				                                               : SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY),
+				               "CCWDBMasterFailed") ||
+				    traceAfter(db->forceMasterFailure.onTrigger(), "CCWDBForceMasterFailureTriggered"))) {
 					break;
 				}
 				when(wait(db->serverInfo->onChange())) {}
@@ -795,8 +797,9 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 	state Future<Void> failed = (worker.address() == g_network->getLocalAddress())
 	                                ? Never()
 	                                : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
-	cluster->updateWorkerList.set(worker.locality.processId(),
-	                              ProcessData(worker.locality, startingClass, worker.stableAddress()));
+	cluster->updateWorkerList.set(
+	    worker.locality.processId(),
+	    ProcessData(worker.locality, startingClass, worker.stableAddress(), worker.grpcAddress()));
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch
 	// fails for the worker.
 	wait(delay(0));

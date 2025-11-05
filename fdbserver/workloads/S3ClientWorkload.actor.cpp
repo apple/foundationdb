@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/MockS3Server.h"
+#include "fdbserver/MockS3ServerChaos.h"
 
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/simulator.h"
@@ -49,6 +50,14 @@ struct S3ClientWorkload : TestWorkload {
 	std::string credentials;
 	std::string simfdbDir;
 
+	// Chaos injection options
+	bool enableChaos;
+	double errorRate;
+	double throttleRate;
+	double delayRate;
+	double corruptionRate;
+	double maxDelay;
+
 	S3ClientWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(true), pass(true) {
 		s3Url = getOption(options, "s3Url"_sr, ""_sr).toString();
 		if (s3Url.empty()) {
@@ -58,6 +67,14 @@ struct S3ClientWorkload : TestWorkload {
 		simfdbDir = getOption(options, "simfdb"_sr, "simfdb"_sr).toString();
 		// Place credentials file in the simulation root, NOT inside the server's data dir (simfdbDir)
 		credentials = "S3ClientWorkload.blob-credentials.json";
+
+		// Initialize chaos options
+		enableChaos = getOption(options, "enableChaos"_sr, false);
+		errorRate = getOption(options, "errorRate"_sr, 0.1);
+		throttleRate = getOption(options, "throttleRate"_sr, 0.05);
+		delayRate = getOption(options, "delayRate"_sr, 0.1);
+		corruptionRate = getOption(options, "corruptionRate"_sr, 0.01);
+		maxDelay = getOption(options, "maxDelay"_sr, 2.0);
 	}
 	~S3ClientWorkload() {
 		if (pass) {
@@ -96,32 +113,41 @@ private:
 	}
 
 	// Add the basename of a file to the URL path
+	// Uses S3BlobStoreEndpoint::fromString() for robust URL parsing (similar to
+	// BlobMetadataUtils::getBlobMetadataPartitionedURL)
 	static std::string addFileToUrl(std::string filePath, std::string baseUrl) {
 		std::string basename = ::basename(const_cast<char*>(filePath.c_str()));
 
-		// Parse the URL and append the basename to the path
 		try {
-			// Find the position after the host:port part
-			size_t hostEnd = baseUrl.find('/', baseUrl.find("://") + 3);
-			if (hostEnd == std::string::npos) {
-				hostEnd = baseUrl.length();
+			std::string resource;
+			std::string error;
+			S3BlobStoreEndpoint::ParametersT parameters;
+			Reference<S3BlobStoreEndpoint> endpoint =
+			    S3BlobStoreEndpoint::fromString(baseUrl, {}, &resource, &error, &parameters);
+
+			if (!error.empty() || !endpoint) {
+				TraceEvent(SevError, "S3ClientWorkloadURLParseError").detail("URL", baseUrl).detail("Error", error);
+				throw backup_invalid_url();
 			}
 
-			// Find the query string start
-			size_t queryStart = baseUrl.find('?', hostEnd);
-			if (queryStart == std::string::npos) {
-				queryStart = baseUrl.length();
+			// If there's an existing resource in the URL, find it and append the basename after it
+			if (!resource.empty()) {
+				size_t resourceStart = baseUrl.find(resource);
+				if (resourceStart == std::string::npos) {
+					throw backup_invalid_url();
+				}
+				// Insert "/basename" after the existing resource
+				std::string separator = (resource.back() == '/') ? "" : "/";
+				return baseUrl.insert(resourceStart + resource.size(), separator + basename);
+			} else {
+				// No resource in URL, need to insert before query string
+				size_t queryStart = baseUrl.find('?');
+				if (queryStart != std::string::npos) {
+					return baseUrl.insert(queryStart, "/" + basename);
+				} else {
+					return baseUrl + "/" + basename;
+				}
 			}
-
-			// Get the current path
-			std::string currentPath = baseUrl.substr(hostEnd, queryStart - hostEnd);
-			// Ensure there's always a path separator
-			if (currentPath.empty() || currentPath.back() != '/') {
-				currentPath += '/';
-			}
-
-			// Construct the new URL
-			return baseUrl.substr(0, hostEnd) + currentPath + basename + baseUrl.substr(queryStart);
 		} catch (Error& e) {
 			TraceEvent(SevError, "S3ClientWorkloadURLParseError")
 			    .error(e)
@@ -165,10 +191,12 @@ private:
 		// --- END PRE-TEST CLEANUP ---
 
 		// --- BEGIN PER-RUN ISOLATION & CLEANUP ---
-		// Create a unique directory for this workload instance
+		// Create a unique directory for this workload instance inside simfdb
+		// This keeps test artifacts in the simulation directory like other workloads
 		// Use deterministic directory name instead of random UID to ensure deterministic behavior
 		state std::string uniqueRunDir =
-		    format("s3_workload_run_%08x_%08x", self->clientId, deterministicRandom()->randomInt(0, 1000000));
+		    joinPath(self->simfdbDir,
+		             format("s3_workload_run_%08x_%08x", self->clientId, deterministicRandom()->randomInt(0, 1000000)));
 		try {
 			platform::createDirectory(uniqueRunDir);
 			TraceEvent(SevDebug, "S3ClientWorkloadCreatedRunDir").detail("Dir", uniqueRunDir);
@@ -243,26 +271,44 @@ private:
 			throw file_not_found();
 		}
 
-		// Cleanup local files (now inside uniqueRunDir)
+		// Cleanup local files - each operation handles its own errors non-fatally
+		// Delete credentials file
 		try {
-			deleteFile(self->credentials);
-			deleteFile(download);
-			TraceEvent(SevDebug, "S3ClientWorkloadCleanedLocalFiles")
-			    .detail("CredentialsFile", self->credentials)
-			    .detail("DownloadFile", download);
-			// Attempt to cleanup the unique run directory itself
-			platform::eraseDirectoryRecursive(uniqueRunDir);
-			TraceEvent(SevDebug, "S3ClientWorkloadCleanedRunDir").detail("Dir", uniqueRunDir);
+			if (fileExists(self->credentials)) {
+				deleteFile(self->credentials);
+				TraceEvent(SevDebug, "S3ClientWorkloadDeletedCredentials").detail("File", self->credentials);
+			}
 		} catch (Error& e) {
-			// Log if cleanup fails, but don't fail the test just for this
-			TraceEvent(SevWarn, "S3ClientWorkloadCleanupError").errorUnsuppressed(e);
+			TraceEvent(SevWarn, "S3ClientWorkloadCredentialsCleanupFailed").error(e).detail("File", self->credentials);
+		}
+
+		// Delete download file
+		try {
+			if (fileExists(download)) {
+				deleteFile(download);
+				TraceEvent(SevDebug, "S3ClientWorkloadDeletedDownload").detail("File", download);
+			}
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "S3ClientWorkloadDownloadCleanupFailed").error(e).detail("File", download);
+		}
+
+		// Delete run directory - may fail in simulation due to timing/locking
+		try {
+			platform::eraseDirectoryRecursive(uniqueRunDir);
+			TraceEvent(SevInfo, "S3ClientWorkloadCleanedRunDir").detail("Dir", uniqueRunDir);
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "S3ClientWorkloadRunDirCleanupFailed")
+			    .error(e)
+			    .detail("Dir", uniqueRunDir)
+			    .detail("Reason", "Non-fatal in simulation");
 		}
 
 		return Void();
 	}
 
 	ACTOR Future<Void> _setup(S3ClientWorkload* self, Database cx) {
-		// Only client 0 registers the MockS3Server to avoid duplicates
+		// Only client 0 registers the MockS3Server to avoid unnecessary duplicate trace events
+		// Note: Both startMockS3ServerChaos() and registerSimHTTPServer() have internal duplicate detection
 		if (self->clientId == 0) {
 			// Check if we're using a local mock server URL pattern
 			bool useMockS3 = self->s3Url.find("127.0.0.1") != std::string::npos ||
@@ -270,17 +316,63 @@ private:
 			                 self->s3Url.find("mock-s3-server") != std::string::npos;
 
 			if (useMockS3 && g_network->isSimulated()) {
-				TraceEvent("S3ClientWorkload").detail("Phase", "Registering MockS3Server").detail("URL", self->s3Url);
+				// Check if 127.0.0.1:8080 is already registered in simulator's httpHandlers
+				std::string serverKey = "127.0.0.1:8080";
+				bool alreadyRegistered = g_simulator->httpHandlers.count(serverKey) > 0;
 
-				// Register MockS3Server with IP address - simulation environment doesn't support hostname resolution.
-				// Persistence is automatically enabled in registerMockS3Server()
-				wait(registerMockS3Server("127.0.0.1", "8080"));
+				if (alreadyRegistered) {
+					TraceEvent("S3ClientWorkload")
+					    .detail("Phase", "MockS3Server Already Registered")
+					    .detail("Address", serverKey)
+					    .detail("ChaosRequested", self->enableChaos)
+					    .detail("Reason", "Reusing existing HTTP handler from previous test");
+				} else if (self->enableChaos) {
+					TraceEvent("S3ClientWorkload")
+					    .detail("Phase", "Starting MockS3ServerChaos")
+					    .detail("URL", self->s3Url);
 
-				TraceEvent("S3ClientWorkload")
-				    .detail("Phase", "MockS3Server Registered")
-				    .detail("Address", "127.0.0.1:8080");
+					// Start MockS3ServerChaos - has internal duplicate detection
+					NetworkAddress listenAddress(IPAddress(0x7f000001), 8080);
+					wait(startMockS3ServerChaos(listenAddress));
+
+					TraceEvent("S3ClientWorkload")
+					    .detail("Phase", "MockS3ServerChaos Started")
+					    .detail("Address", "127.0.0.1:8080");
+				} else {
+					TraceEvent("S3ClientWorkload")
+					    .detail("Phase", "Registering MockS3Server")
+					    .detail("URL", self->s3Url);
+
+					// Register regular MockS3Server using the proper registration function
+					// which automatically enables persistence
+					wait(registerMockS3Server("127.0.0.1", "8080"));
+
+					TraceEvent("S3ClientWorkload")
+					    .detail("Phase", "MockS3Server Registered")
+					    .detail("Address", "127.0.0.1:8080");
+				}
 			}
 		}
+
+		// Configure chaos rates for all clients if chaos is enabled
+		// This allows each test to have different chaos rates
+		if (self->enableChaos && g_network->isSimulated()) {
+			auto injector = S3FaultInjector::injector();
+			injector->setErrorRate(self->errorRate);
+			injector->setThrottleRate(self->throttleRate);
+			injector->setDelayRate(self->delayRate);
+			injector->setCorruptionRate(self->corruptionRate);
+			injector->setMaxDelay(self->maxDelay);
+
+			TraceEvent("S3ClientWorkload")
+			    .detail("Phase", "Chaos Configured")
+			    .detail("ClientID", self->clientId)
+			    .detail("ErrorRate", self->errorRate)
+			    .detail("ThrottleRate", self->throttleRate)
+			    .detail("DelayRate", self->delayRate)
+			    .detail("CorruptionRate", self->corruptionRate);
+		}
+
 		return Void();
 	}
 };

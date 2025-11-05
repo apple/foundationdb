@@ -251,7 +251,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_MAX_SEND_BYTES_PER_SECOND,      1e9 );
 	init( BLOBSTORE_MAX_RECV_BYTES_PER_SECOND,      1e9 );
 
-	init( BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR,      60  );
+	init( BLOBSTORE_MAX_DELAY_RETRYABLE_ERROR,      20  ); // Align with AWS SDK best practices (was 60s)
 	init( BLOBSTORE_MAX_DELAY_CONNECTION_FAILED,    10  );
 	init (BLOBSTORE_ENABLE_OBJECT_INTEGRITY_CHECK,true );
 

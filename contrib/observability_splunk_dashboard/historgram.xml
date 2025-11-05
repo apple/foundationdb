@@ -1,0 +1,213 @@
+<form version="1.1" theme="dark">
+  <label>FoundationDB - Histograms</label>
+  <description>CommitProxy and TLog histograms of FoundationDB transactions.</description>
+  <fieldset submitButton="false" autoRun="false">
+    <input type="text" token="Index">
+      <label>Index</label>
+      <default>iffdb</default>
+    </input>
+    <input type="text" token="LogGroup" searchWhenChanged="true">
+      <label>LogGroup</label>
+    </input>
+    <input type="time" token="TimeSpan" searchWhenChanged="true">
+      <label>TimeSpan</label>
+      <default>
+        <earliest>-60m@m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Commit Latency measured on all Proxies</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$  Type=CommitLatencyMetrics AND TrackLatestType="Original"
+| timechart span=1m avg(Max) as maxLatency, avg(Mean) as meanLatency, avg(P99) as P99Latency, avg(P99.9) as P999Latency, avg(P95) as P95Latency</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>CommitProxy Histogram - CommitBatchQueuing</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="CommitProxy" Op="CommitBatchQueuing" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>CommitProxy Histogram - GetCommitVersion</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="CommitProxy" Op="GetCommitVersion" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>CommitProxy Histogram - Resolution</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="CommitProxy" Op="Resolution" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>CommitProxy Histogram - PostResolutionQueuing</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="CommitProxy" Op="PostResolutionQueuing" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>CommitProxy Histogram - ProcessingMutation</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="CommitProxy" Op="ProcessingMutation" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>CommitProxy Histogram - ReplyCommit</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="CommitProxy" Op="ReplyCommit" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>CommitProxy Histogram - TlogLogging</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="CommitProxy" Op="TlogLogging" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>TLog Histogram - QueueWait</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="tLog" Op="QueueWait" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>TLog Histogram - TimeUntilDurable</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="tLog" Op="TimeUntilDurable" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>TLog Histogram - commit</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="tLog" Op="commit" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>CommitProxy Histogram - ToTLog</title>
+      <chart>
+        <title>CommitProxy to TLog</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Histogram  host=* Machine=* Group="ToTlog_*" | foreach LessThan* [eval newfield=&lt;&lt;FIELD&gt;&gt;] | timechart avg(LessThan*) as LessThan*</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="height">245</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+</form>

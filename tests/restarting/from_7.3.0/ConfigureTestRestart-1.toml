@@ -1,5 +1,6 @@
 [configuration]
-tenantModes=['disabled']
+storageEngineExcludeTypes=[5]
+tenantModes = ['disabled']
 encryptModes=['disabled']
 
 [[test]]
