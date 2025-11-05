@@ -1,4 +1,6 @@
 [configuration]
+encryptModes=['disabled']
+tenantModes=['disabled']
 
 [[test]]
 testTitle='ClientMetricRestartTest'

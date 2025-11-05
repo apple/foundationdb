@@ -1,4 +1,6 @@
 [configuration]
+encryptModes=['disabled']
+tenantModes=['disabled']
 
 [[knobs]]
 enable_version_vector = false
