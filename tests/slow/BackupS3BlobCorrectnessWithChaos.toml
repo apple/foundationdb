@@ -48,12 +48,12 @@ runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'RandomClogging'
-    testDuration = 130.0
+    testDuration = 300.0
 
     [[test.workload]]
     testName = 'Rollback'
     meanDelay = 90.0
-    testDuration = 130.0
+    testDuration = 300.0
 
 [[test]]
 testTitle = 'BackupS3BlobCorrectnessLightChaos'
@@ -89,12 +89,12 @@ runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'RandomClogging'
-    testDuration = 130.0
+    testDuration = 300.0
 
     [[test.workload]]
     testName = 'Rollback'
     meanDelay = 90.0
-    testDuration = 130.0
+    testDuration = 300.0
 
 [[test]]
 testTitle = 'BackupS3BlobCorrectnessMediumChaos'
@@ -130,12 +130,12 @@ runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'RandomClogging'
-    testDuration = 130.0
+    testDuration = 300.0
 
     [[test.workload]]
     testName = 'Rollback'
     meanDelay = 90.0
-    testDuration = 130.0
+    testDuration = 300.0
 
 [[test]]
 testTitle = 'BackupS3BlobCorrectnessHeavyChaos'
@@ -171,10 +171,10 @@ runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'RandomClogging'
-    testDuration = 130.0
+    testDuration = 300.0
 
     [[test.workload]]
     testName = 'Rollback'
     meanDelay = 90.0
-    testDuration = 130.0
+    testDuration = 300.0
 
