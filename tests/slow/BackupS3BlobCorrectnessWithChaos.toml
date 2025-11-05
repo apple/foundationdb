@@ -30,8 +30,8 @@ runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'BackupS3BlobCorrectness'
-    backupAfter = 10.0
-    restoreAfter = 80.0
+    backupAfter = 35.0
+    restoreAfter = 250.0
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
     performRestore = true
@@ -71,8 +71,8 @@ runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'BackupS3BlobCorrectness'
-    backupAfter = 10.0
-    restoreAfter = 80.0
+    backupAfter = 35.0
+    restoreAfter = 250.0
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
     performRestore = true
@@ -112,8 +112,8 @@ runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'BackupS3BlobCorrectness'
-    backupAfter = 10.0
-    restoreAfter = 80.0
+    backupAfter = 35.0
+    restoreAfter = 250.0
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
     performRestore = true
@@ -153,8 +153,8 @@ runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'BackupS3BlobCorrectness'
-    backupAfter = 10.0
-    restoreAfter = 80.0
+    backupAfter = 35.0
+    restoreAfter = 250.0
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
     performRestore = true
