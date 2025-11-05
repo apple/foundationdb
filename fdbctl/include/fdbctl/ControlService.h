@@ -39,6 +39,8 @@ public:
 	ControlServiceImpl(Reference<IDatabase> db);
 
 private:
+	// Bridges flow with gRPC handlers. The RPC handlers are defined using `DEFINE_GRPC_HANDLER`
+	// which uses this method to invoke the actual handler written in Flow and runs it on the main thread.
 	template <class Handler, class Request, class Reply>
 	grpc::Status handleRequestOnMainThread(Handler* h, const Request* req, Reply* rep, grpc::ServerContext* context);
 

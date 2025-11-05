@@ -288,13 +288,12 @@ Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future
 
 Future<Void> deregisterGrpcService(const UID& id) {
 #ifdef FLOW_GRPC_ENABLED
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+
 	if (GrpcServer::instance() != nullptr) {
-		if (g_network->isSimulated()) {
-			GrpcServer::instance()->deregisterRoleServicesSync(id);
-			return Void();
-		} else {
-			return GrpcServer::instance()->deregisterRoleServices(id);
-		}
+		return GrpcServer::instance()->deregisterRoleServices(id);
 	}
 #endif
 	return Void();
@@ -2146,6 +2145,8 @@ bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
 #ifdef FLOW_GRPC_ENABLED
 ACTOR Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr) {
 	if (GrpcServer::instance() == nullptr) {
+		return Never();
+	} else if (g_network->isSimulated()) {
 		return Never();
 	}
 
