@@ -142,6 +142,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			backupAfter = deterministicRandom()->random01() * (backupAfter - minBackupAfter) + minBackupAfter;
 		}
 		restoreAfter = getOption(options, "restoreAfter"_sr, 35.0);
+		restoreStartAfterBackupFinished = getOption(options, "restoreStartAfterBackupFinished"_sr, 10.0);
 		performRestore = getOption(options, "performRestore"_sr, true);
 		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
 		backupRangesCount = getOption(options, "backupRangesCount"_sr, 5);
@@ -594,6 +595,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		TraceEvent("BS3BCW_Arguments")
 		    .detail("BackupAfter", self->backupAfter)
 		    .detail("RestoreAfter", self->restoreAfter)
+		    .detail("RestoreStartAfterBackupFinished", self->restoreStartAfterBackupFinished)
 		    .detail("AbortAndRestartAfter", self->abortAndRestartAfter)
 		    .detail("DifferentialAfter", self->stopDifferentialAfter);
 
@@ -654,8 +656,20 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			}
 
 			if (self->performRestore) {
-				wait(delay(self->restoreAfter));
-				TraceEvent("BS3BCW_RestoreAfter").detail("RestoreAfter", self->restoreAfter);
+				// Adaptive timing: Wait for backup to complete, then wait additional time
+				// This ensures the backup metadata is written before restore starts
+				TraceEvent("BS3BCW_WaitingForBackupCompletion").detail("WaitingForBackup", true);
+				wait(b);
+				TraceEvent("BS3BCW_BackupCompleted").detail("BackupFinished", true);
+
+				// Wait additional time after backup completes for metadata to be written
+				if (self->restoreStartAfterBackupFinished > 0) {
+					TraceEvent("BS3BCW_WaitingAfterBackupComplete")
+					    .detail("DelaySeconds", self->restoreStartAfterBackupFinished);
+					wait(delay(self->restoreStartAfterBackupFinished));
+				}
+
+				TraceEvent("BS3BCW_StartingRestore").detail("RestoreStarting", true);
 
 				// Get the backup container to restore from
 				state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
@@ -665,8 +679,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
 
 				// Wait for backup to become restorable if it's still in progress
+				// Increased timeout for complex multi-region configs
 				if (lastBackupContainer) {
-					wait(waitForRestorable(lastBackupContainer, 30));
+					wait(waitForRestorable(lastBackupContainer, 150));
 
 					// Clear the backup ranges before restoring (unless skipDirtyRestore is true)
 					if (!self->skipDirtyRestore) {
