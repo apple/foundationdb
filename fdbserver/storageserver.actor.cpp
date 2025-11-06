@@ -6728,6 +6728,17 @@ ACTOR Future<Void> tryGetRangeForBulkLoad(PromiseStream<RangeResult> results,
 			}
 			bulkLoadFileSetsToLoad.push_back(std::make_pair(range->range(), range->value()));
 		}
+
+		// Handle the case where no files match the requested key range
+		if (bulkLoadFileSetsToLoad.empty()) {
+			// No files to load - send empty result and end the stream
+			RangeResult emptyResult;
+			emptyResult.more = false;
+			results.send(emptyResult);
+			results.sendError(end_of_stream());
+			return Void();
+		}
+
 		// Streaming results given the input keys using bulkLoadFileSetsToLoad
 		state int i = 0;
 		if (bulkLoadFileSetsToLoad.empty()) {

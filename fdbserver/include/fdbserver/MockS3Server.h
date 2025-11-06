@@ -79,6 +79,11 @@ bool isMockS3PersistenceEnabled();
 // Load any previously persisted MockS3 state from disk
 Future<Void> loadMockS3PersistedStateFuture();
 
+// Initialize MockS3 persistence for a specific server (simulation)
+// This combines enabling persistence and loading any previously persisted state
+// serverKey: Identifier for the server (e.g., "127.0.0.1:8080")
+Future<Void> initializeMockS3Persistence(std::string const& serverKey);
+
 // Process a Mock S3 request directly (for wrapping/chaos injection)
 // This is the low-level request processor used by MockS3RequestHandler
 Future<Void> processMockS3Request(Reference<HTTP::IncomingRequest> req, Reference<HTTP::OutgoingResponse> response);

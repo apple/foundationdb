@@ -1,0 +1,59 @@
+testClass = "Backup"
+
+[configuration]
+buggify = false
+faultInjection = false
+
+# BackupS3BlobCorrectness with Heavy S3 Chaos Injection
+# 
+# This test validates that S3 backup and restore operations work correctly
+# under aggressive fault injection conditions:
+# - 25% error rate (S3 operations fail 1 in 4 times)
+# - 30% throttling rate (requests throttled/delayed)
+# - 15% delay rate (additional random delays 0-10s)
+# - 1% corruption rate (data corruption during transfer)
+#
+# The test runs with Cycle (data integrity), RandomClogging (network chaos),
+# and Rollback (transaction chaos) workloads to create realistic failure scenarios.
+
+[[test]]
+testTitle = 'BackupS3BlobCorrectnessHeavyChaos'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+waitForQuiescenceEnd = false
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'BackupS3BlobCorrectness'
+    backupAfter = 35.0
+    restoreStartAfterBackupFinished = 30.0
+    abortAndRestartAfter = 0.0
+    stopDifferentialAfter = 0.0
+    performRestore = true
+    backupRangesCount = -1
+    skipDirtyRestore = false
+    backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
+    # Heavy chaos: aggressive testing with data corruption
+    enableChaos = true
+    errorRate = 0.25
+    throttleRate = 0.30
+    delayRate = 0.15
+    corruptionRate = 0.01
+    maxDelay = 10.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 400.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 90.0
+    testDuration = 400.0
+

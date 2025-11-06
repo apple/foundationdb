@@ -41,7 +41,7 @@ struct BulkDumping : TestWorkload {
 	bool pass = true;
 	int cancelTimes = 0;
 	int maxCancelTimes = 0;
-	int bulkLoadTransportMethod = 1; // Default to CP method
+	BulkLoadTransportMethod bulkLoadTransportMethod = BulkLoadTransportMethod::CP; // Default to CP method
 	std::string jobRoot = "";
 
 	// Chaos injection options
@@ -75,7 +75,8 @@ struct BulkDumping : TestWorkload {
 	BulkDumping(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), enabled(true), pass(true), cancelTimes(0),
 	    maxCancelTimes(getOption(options, "maxCancelTimes"_sr, deterministicRandom()->randomInt(0, 2))),
-	    bulkLoadTransportMethod(getOption(options, "bulkLoadTransportMethod"_sr, 1)),
+	    bulkLoadTransportMethod(
+	        static_cast<BulkLoadTransportMethod>(getOption(options, "bulkLoadTransportMethod"_sr, 1))),
 	    jobRoot(getOption(options, "jobRoot"_sr, ""_sr).toString()) {
 		maxCancelTimes = 0; // TODO(BulkLoad): allow to cancel job when job ID randomly generated.
 
@@ -196,6 +197,7 @@ struct BulkDumping : TestWorkload {
 				tr.clear(bulkDumpKeys);
 				tr.clear(bulkLoadJobKeys);
 				tr.clear(bulkLoadTaskKeys);
+				tr.clear(bulkLoadJobHistoryKeys);
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
@@ -445,6 +447,14 @@ struct BulkDumping : TestWorkload {
 		if (self->clientId != 0) {
 			return Void();
 		}
+
+		// Cleanup any leftover state from previous test iterations BEFORE starting work
+		// This ensures we start clean even if a previous iteration timed out or crashed
+		if (self->bulkLoadTransportMethod == BulkLoadTransportMethod::BLOBSTORE && g_network->isSimulated()) {
+			// Clear MockS3Server storage to prevent memory accumulation over test iterations
+			clearMockS3Storage();
+		}
+
 		if (g_network->isSimulated()) {
 			// Network partition between CC and DD can cause DD no longer existing,
 			// which results in the bulk loading task cannot complete
@@ -485,15 +495,12 @@ struct BulkDumping : TestWorkload {
 		}
 		state std::string dumpFolder = self->jobRoot.empty() ? simulationBulkDumpFolder : self->jobRoot;
 		state BulkDumpState bulkDumpJob =
-		    createBulkDumpJob(bulkDumpJobRange,
-		                      dumpFolder,
-		                      BulkLoadType::SST,
-		                      static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod));
+		    createBulkDumpJob(bulkDumpJobRange, dumpFolder, BulkLoadType::SST, self->bulkLoadTransportMethod);
 		TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Submitting Dump Job").detail("Job", bulkDumpJob.getJobId());
 		wait(timeoutError(submitBulkDumpJob(cx, bulkDumpJob), self->jobSubmitTimeout));
 		TraceEvent("BulkDumpingWorkLoad")
 		    .detail("Phase", "Dump Job Submitted")
-		    .detail("TransportMethod", self->bulkLoadTransportMethod)
+		    .detail("TransportMethod", convertBulkLoadTransportMethodToString(self->bulkLoadTransportMethod))
 		    .detail("JobRoot", dumpFolder)
 		    .detail("Job", bulkDumpJob.toString());
 
@@ -534,10 +541,7 @@ struct BulkDumping : TestWorkload {
 			state UID dataSourceId = bulkDumpJob.getJobId();
 			state std::string dataSourceRoot = bulkDumpJob.getJobRoot();
 			state BulkLoadJobState bulkLoadJob =
-			    createBulkLoadJob(dataSourceId,
-			                      bulkLoadJobRange,
-			                      dataSourceRoot,
-			                      static_cast<BulkLoadTransportMethod>(self->bulkLoadTransportMethod));
+			    createBulkLoadJob(dataSourceId, bulkLoadJobRange, dataSourceRoot, self->bulkLoadTransportMethod);
 			TraceEvent("BulkDumpingWorkLoad").detail("Phase", "Submitting Load Job").detail("JobId", dataSourceId);
 			wait(timeoutError(submitBulkLoadJob(cx, bulkLoadJob), self->jobSubmitTimeout));
 			TraceEvent("BulkDumpingWorkLoad")
@@ -605,7 +609,7 @@ struct BulkDumping : TestWorkload {
 
 	ACTOR Future<Void> _setup(BulkDumping* self, Database cx) {
 		// Only client 0 registers the MockS3Server to avoid duplicates
-		if (self->clientId == 0 && self->bulkLoadTransportMethod == 2) { // BLOBSTORE method
+		if (self->clientId == 0 && self->bulkLoadTransportMethod == BulkLoadTransportMethod::BLOBSTORE) {
 			// Check if we're using a local mock server URL pattern
 			bool useMockS3 = self->jobRoot.find("127.0.0.1") != std::string::npos ||
 			                 self->jobRoot.find("localhost") != std::string::npos ||
