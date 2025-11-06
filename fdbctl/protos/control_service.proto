@@ -25,10 +25,8 @@ service ControlService {
     // encryption, and other critical cluster parameters.
     rpc Configure(ConfigureRequest) returns (ConfigureReply);
 
-    // Retrieves the current read version (transaction version) of the database.
-    rpc GetReadVersion(GetReadVersionRequest) returns (GetReadVersionReply);
-
     // Retrieves comprehensive cluster status including health, performance, and configuration.
+    // Docs: https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/mr-status.rst
     rpc GetStatus(GetStatusRequest) returns (GetStatusReply);
 
     // Retrieves the list of all worker processes in the cluster.
@@ -45,6 +43,15 @@ service ControlService {
 
     // Forcefully terminates worker processes. Use with caution - prefer Exclude for graceful removal.
     rpc Kill(KillRequest) returns (KillReply);
+
+    // Manages maintenance mode for zones. Maintenance mode prevents data distribution from moving
+    // data away from processes in the specified zone. A zone that is under maintenance will not
+    // have data moved away from it even if processes in that zone fail. In particular, this means
+    // the cluster will not attempt to heal the replication factor as a result of failures in the
+    // maintenance zone. This is useful when the amount of time that the processes in a fault domain
+    // are expected to be absent is reasonably short and you don’t want to move data to and from the
+    // affected processes.
+    rpc Maintenance(MaintenanceRequest) returns (MaintenanceReply);
 }
 
 //------ Messages -------
@@ -57,7 +64,7 @@ message Worker {
     // These fields help FoundationDB make intelligent placement decisions for
     // data replication and fault tolerance.
     message Locality {
-        // Unique identifier for this process
+        // unique identifier for this process
         optional string process_id = 1;
 
         // Zone identifier - typically represents a failure domain (e.g., rack, availability zone)
@@ -73,7 +80,8 @@ message Worker {
         optional string data_hall_id = 5;
     }
 
-    // Network address where this worker can be reached (e.g., "127.0.0.1:4500")
+    // Network address of the worker. This is the Flow endpoint which is primarily
+    // used to identify the worker.
     optional string address = 1;
 
     // gRPC address for this worker if gRPC is enabled
@@ -93,7 +101,7 @@ message GetCoordinatorsRequest {}
 
 // Response containing the current cluster coordinators.
 message GetCoordinatorsReply {
-    // List of coordinator addresses in the format "ip:port"
+    // List of coordinator addresses in the format "ip:port" or "host:port"
     repeated string coordinators = 1;
 }
 
@@ -104,16 +112,13 @@ message ChangeCoordinatorsRequest {
     // Human-readable description for the cluster (e.g., cluster name)
     optional string cluster_description = 1;
 
-    // If true, disables the configuration database
-    optional bool disable_config_db = 2;
-
     // If true, automatically selects coordinators based on the current cluster topology.
     // When false, uses the addresses specified in new_coordinator_addresses.
-    optional bool automatic_coordinators = 3;
+    optional bool automatic_coordinators = 2;
 
     // List of addresses to use as new coordinators (when automatic_coordinators is false).
-    // Each address should be in the format "ip:port".
-    repeated string new_coordinator_addresses = 4;
+    // Each address should be in the format "[ip|host]:port".
+    repeated string new_coordinator_addresses = 3;
 }
 
 // Response to a coordinator change operation.
@@ -148,28 +153,37 @@ message ConfigureRequest {
     optional bool tss = 2;
 
     // Redundancy mode determines how many copies of data are maintained
-    // and what failure scenarios the cluster can survive
+    // and what failure scenarios the cluster can survive.
+    // Refer `replication-policy.md`
     enum RedundancyMode {
-        UNSET_REDUNDANCY = 0;     // No change to redundancy mode
-        SINGLE = 1;               // One copy, not fault tolerant (for testing only)
-        DOUBLE = 2;               // Two copies, survives one failure
-        TRIPLE = 3;               // Three copies, survives two failures
-        THREE_DATA_HALL = 4;      // Three data hall configuration for geographic redundancy
-        THREE_DATACENTER = 5;     // Three datacenter configuration for maximum availability
+        UNSET_REDUNDANCY = 0;         // No change to redundancy mode
+        SINGLE = 1;                   // One copy, not fault tolerant (for testing only)
+        DOUBLE = 2;                   // Two copies, survives one failure
+        TRIPLE = 3;                   // Three copies, survives two failures
+        THREE_DATA_HALL = 4;          // Three data hall configuration , survives failure of one
+                                      // complete data hall and one additional machine in another
+                                      // data hall
+        THREE_DATA_HALL_FALLBACK = 5; // Similar to three_data_hall, differing only in that data is
+                                      // stored on two instead of three replicas. This configuration
+                                      // is useful to unblock data distribution when a data hall
+                                      // becomes temporarily unavailable
+        THREE_DATACENTER = 6;         // Three datacenter configuration for maximum availability
     }
     // Desired redundancy mode for the database
     optional RedundancyMode redundancy_mode = 3;
 
     // Storage engine determines the underlying storage technology and performance characteristics
+    // Refer `FdbTypes.h::KeyValueStoreType::StoreType`.
     enum StorageEngine {
-        UNSET_STORAGE = 0;        // No change to storage engine
-        SSD = 1;                  // B-Tree optimized for SSDs (default)
-        SSD_1 = 2;                // ssd-1 variant
-        SSD_2 = 3;                // ssd-2 variant (newer redwood engine)
-        MEMORY = 4;               // In-memory storage (for testing or caching)
-        MEMORY_1 = 5;             // memory-1 variant
-        MEMORY_2 = 6;             // memory-2 variant
-        MEMORY_RADIXTREE = 7;     // memory-radixtree variant
+        NONE = 0;                 // No change to storage engine
+        SSD_BTREE_V1 = 1;
+        SSD_BTREE_V2 = 2;
+        SSD = 3;                  // Same as SSD_BTREE_V2
+        SSD_REDWOOD_V1 = 4;
+        SSD_ROCKSDB_V1 = 5;
+        SSD_SHARDED_ROCKSDB = 6;
+        MEMORY = 7;
+        MEMORY_RADIXTREE = 8;
     }
     // Desired storage engine for the database
     optional StorageEngine storage_engine = 4;
@@ -215,32 +229,29 @@ message ConfigureRequest {
     enum EncryptionAtRestMode {
         UNSET_ENCRYPTION = 0;     // No change to encryption mode
         DISABLED_ENCRYPTION = 1;  // Disable encryption at rest
-        DOMAIN_AWARE = 2;         // Domain-aware encryption (tenant-based)
-        CLUSTER_AWARE = 3;        // Cluster-wide encryption
+        CLUSTER_AWARE = 2;        // Cluster-wide encryption
     }
     // Encryption at rest mode for the database
     optional EncryptionAtRestMode encryption_at_rest_mode = 13;
 
     // Other database features
 
-    // If true, enables blob granules for storing large values
-    optional bool blob_granules_enabled = 14;
-
     // List of addresses to exclude during recruitment (format: "ip" or "ip:port")
-    repeated string exclude_addresses = 15;
+    repeated string exclude_addresses = 14;
 
     // Number of testing storage servers to maintain
-    optional int32 tss_count = 16;
+    optional int32 tss_count = 15;
 
     // Control flags
 
     // If true, skip safety checks (dangerous - use with caution)
-    optional bool force = 17;
+    optional bool force = 16;
 }
 
 // Response to a database configuration request.
 message ConfigureReply {
     // Result codes indicating the outcome of the configuration operation
+    // Refer: GenericManagementAPI.actor.h::ConfigurationResult
     enum Result {
         SUCCESS = 0;                                  // Configuration succeeded
         NO_OPTIONS_PROVIDED = 1;                      // No configuration options were provided
@@ -272,17 +283,6 @@ message ConfigureReply {
 
     // Additional human-readable details for errors or warnings
     optional string message = 2;
-}
-
-// Request to get the current read version of the database.
-// The read version is a monotonically increasing transaction version number
-// used for snapshot isolation.
-message GetReadVersionRequest {}
-
-// Response containing the current read version.
-message GetReadVersionReply {
-    // Current read version (transaction version number)
-    optional int64 version = 1;
 }
 
 // Request to retrieve the cluster status.
@@ -318,7 +318,7 @@ message IncludeRequest {
     // List of localities to include (format: "locality_key:locality_value")
     repeated string localities = 3;
 
-    // If true, include workers that were marked as failed
+    // If true, only include workers that were marked as failed
     optional bool failed = 4;
 }
 
@@ -335,7 +335,8 @@ message ExcludeRequest {
     // If true, exclude all workers (rarely used, requires force flag)
     optional bool all = 1;
 
-    // If true, mark workers as failed (more aggressive than normal exclude)
+    // If true, mark workers as failed. This flag will drop all the data for the
+    // specified workers and could cause data loss.
     optional bool failed = 2;
 
     // If true, don't wait for data migration to complete before returning
@@ -387,7 +388,6 @@ message ExcludeStatusReply {
 
 // Request to kill (terminate) worker processes.
 // This is a forceful operation that immediately stops processes.
-// Use with caution - prefer exclude for graceful removal.
 message KillRequest {
     // If true, kill all workers (requires extreme caution)
     optional bool all = 1;
@@ -398,3 +398,45 @@ message KillRequest {
 
 // Response to a kill operation.
 message KillReply {}
+
+// Request to manage maintenance mode for zones.
+// Maintenance mode prevents data distribution from moving data away from the
+// specified zone, allowing safe maintenance operations (e.g., hardware upgrades).
+// Only one zone can be in maintenance mode at a time.
+message MaintenanceRequest {
+    // Operation type for maintenance
+    enum Operation {
+        GET = 0;     // Get current maintenance status
+        SET = 1;     // Set maintenance mode for a zone
+        CLEAR = 2;   // Clear maintenance mode
+    }
+
+    // The operation to perform
+    Operation operation = 1;
+
+    // Zone ID to place in maintenance mode (required for SET operation)
+    optional string zone_id = 2;
+
+    // Duration in seconds for maintenance mode (required for SET operation)
+    optional double duration_seconds = 3;
+}
+
+// Response to a maintenance operation.
+message MaintenanceReply {
+    enum Result {
+        SUCCESS = 0;                          // Operation succeeded
+        INVALID_PARAMETERS = 2;               // Invalid parameters for the operation
+    }
+
+    // Result code
+    optional Result result = 1;
+
+    // Current or active zone ID in maintenance (if any)
+    optional string zone_id = 2;
+
+    // Remaining seconds for the current maintenance (if active)
+    optional int64 remaining_seconds = 3;
+
+    // Human-readable message with additional details
+    optional string message = 4;
+}
