@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/fdbrpc.h"
 #include "flow/Deque.h"
 #include "fdbserver/Knobs.h"
 
