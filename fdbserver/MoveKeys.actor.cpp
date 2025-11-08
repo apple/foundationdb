@@ -60,6 +60,25 @@ bool shouldCreateCheckpoint(const UID& dataMoveId) {
 	return (type == DataMoveType::PHYSICAL || type == DataMoveType::PHYSICAL_EXP);
 }
 
+std::unordered_map<std::string, std::string> generateTeamIds(
+    std::unordered_map<std::string, std::vector<std::string>>& dcServerIds) {
+	std::unordered_map<std::string, std::string> dcTeamIds;
+	for (auto& [dc, serverIds] : dcServerIds) {
+		std::sort(serverIds.begin(), serverIds.end());
+		std::string teamId;
+		for (const auto& serverId : serverIds) {
+			if (teamId.size() == 0) {
+				teamId = serverId;
+			} else {
+				teamId += "," + serverId;
+			}
+		}
+		// Use the concatenated server ids as the team id to avoid conflicts.
+		dcTeamIds[dc] = teamId;
+	}
+	return dcTeamIds;
+}
+
 // Unassigns keyrange `range` from server `ssId`, except ranges in `shards`.
 // Note: krmSetRangeCoalescing() doesn't work in this case since each shard is assigned an ID.
 ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range, std::vector<Shard> shards, UID logId) {
@@ -1710,7 +1729,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					serverListEntries.push_back(tr.get(serverListKeyFor(servers[s])));
 				}
 				std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
-
+				state std::unordered_map<std::string, std::vector<std::string>> dcServers;
 				for (int s = 0; s < serverListValues.size(); s++) {
 					if (!serverListValues[s].present()) {
 						// Attempt to move onto a server that isn't in serverList (removed or never added to the
@@ -1719,6 +1738,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						// TODO(psm): Mark the data move as 'deleting'.
 						throw move_to_removed_server();
 					}
+					auto si = decodeServerListValue(serverListValues[s].get());
+					ASSERT(si.id() == servers[s]);
+					auto it = dcServers.find(si.locality.describeDcId());
+					if (it == dcServers.end()) {
+						dcServers[si.locality.describeDcId()] = std::vector<std::string>();
+					}
+					dcServers[si.locality.describeDcId()].push_back(si.id().shortString());
 				}
 
 				currentKeys = KeyRangeRef(begin, keys.end);
@@ -1730,6 +1756,15 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 					state Key endKey = old.back().key;
 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
+
+					if (ranges.front() != currentKeys) {
+						TraceEvent("MoveShardsPartialRange")
+						    .detail("ExpectedRange", ranges.front())
+						    .detail("ActualRange", currentKeys)
+						    .detail("DataMoveId", dataMoveId)
+						    .detail("RowLimit", SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT)
+						    .detail("ByteLimit", SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
+					}
 
 					// Check that enough servers for each shard are in the correct state
 					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
@@ -1804,6 +1839,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									TraceEvent(
 									    SevWarn, "StartMoveShardsCancelConflictingDataMove", relocationIntervalId)
 									    .detail("Range", rangeIntersectKeys)
+									    .detail("CurrentDataMoveRange", ranges[0])
 									    .detail("DataMoveID", dataMoveId.toString())
 									    .detail("ExistingDataMoveID", destId.toString());
 									wait(cleanUpDataMove(occ, destId, lock, startMoveKeysLock, keys, ddEnabledState));
@@ -1866,6 +1902,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					dataMove.ranges.clear();
 					dataMove.ranges.push_back(KeyRangeRef(keys.begin, currentKeys.end));
 					dataMove.dest.insert(servers.begin(), servers.end());
+					dataMove.dcTeamIds = generateTeamIds(dcServers);
 				}
 
 				if (currentKeys.end == keys.end) {
@@ -3346,6 +3383,8 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
 	int8_t nextLocality = 0;
+	std::unordered_map<std::string, std::vector<std::string>> dcServerIds;
+
 	for (auto& s : servers) {
 		if (!dcId_locality.contains(s.locality.dcId())) {
 			tr.set(arena, tagLocalityListKeyFor(s.locality.dcId()), tagLocalityListValue(nextLocality));
@@ -3355,6 +3394,8 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 		Tag& t = dcId_locality[s.locality.dcId()];
 		server_tag[s.id()] = Tag(t.locality, t.id);
 		t.id++;
+
+		dcServerIds[s.locality.describeDcId()].push_back(s.id().shortString());
 	}
 	std::sort(servers.begin(), servers.end());
 
@@ -3401,11 +3442,16 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 		                                  UnassignShard(false));
 		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), shardId, UID());
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
-
 		for (auto& s : servers) {
 			krmSetPreviouslyEmptyRange(
 			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysValue(shardId), serverKeysFalse);
 		}
+
+		DataMoveMetaData metadata{ shardId, allKeys };
+		metadata.dcTeamIds = generateTeamIds(dcServerIds);
+
+		// Data move metadata will be clean up on DD restarts.
+		tr.set(arena, dataMoveKeyFor(shardId), dataMoveValue(metadata));
 	} else {
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 
