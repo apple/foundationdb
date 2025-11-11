@@ -2,12 +2,14 @@
 # FoundationDB source code
 
 #[=======================================================================[.rst:
-Finddotnet
+FindRocksDB
 -------
 
-Find dotnet, the free, open-source, cross-platform framework for building modern apps and powerful cloud services
+Find RocksDB, a high-performance, embeddable key-value store developed by
+Facebook that is optimized for fast storage devices like SSDs and multi-core
+processors
 
-dotnet_ROOT variable can be used for HINTS for different version of dotnet.
+ROCKSDB_ROOT variable can be used for HINTS for different version of RocksDB.
 
 Result variables
 ^^^^^^^^^^^^^^^^
@@ -15,11 +17,11 @@ Result variables
 This module will set the following variables in your project:
 
 ``ROCKSDB_FOUND``
-  If false, do not try to use dotnet.
+  If false, do not try to use RocksDB.
 ``ROCKSDB_VERSION``
-  the version of the dotnet found
-``dotnet_EXECUTABLE``
-  path to `dotnet` executable
+  the version of the RocksDB found
+``ROCKSDB_INCLUDE_DIR``
+  include 
 #]=======================================================================]
 
 if(NOT ROCKSDB_ROOT)
