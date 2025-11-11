@@ -11,7 +11,7 @@ set(out_file ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll)
 if(CSHARP_USE_MONO)
   add_custom_command(
     OUTPUT ${out_file}
-    COMMAND ${MCS_EXECUTABLE} ARGS ${TRACE_LOG_HELPER_REFERENCES} ${SRCS}
+    COMMAND ${CSHARP_COMPILER_EXECUTABLE} ARGS ${TRACE_LOG_HELPER_REFERENCES} ${SRCS}
             "-target:library" "-out:${out_file}"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     DEPENDS ${TRACELOGHELPER_SRCS}

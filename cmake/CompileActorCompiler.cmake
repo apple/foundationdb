@@ -26,7 +26,7 @@ if(WIN32)
 elseif(CSHARP_USE_MONO)
   add_custom_command(
     OUTPUT actorcompiler.exe
-    COMMAND ${MCS_EXECUTABLE} ARGS ${ACTOR_COMPILER_REFERENCES}
+    COMMAND ${CSHARP_COMPILER_EXECUTABLE} ARGS ${ACTOR_COMPILER_REFERENCES}
             ${ACTORCOMPILER_SRCS} "-target:exe" "-out:actorcompiler.exe"
     DEPENDS ${ACTORCOMPILER_SRCS}
     COMMENT "Compile actor compiler"
