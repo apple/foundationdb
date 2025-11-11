@@ -20,7 +20,7 @@ elseif(CSHARP_USE_MONO)
   set(VEXILLOGRAPHER_EXE "${CMAKE_CURRENT_BINARY_DIR}/vexillographer.exe")
   add_custom_command(
     OUTPUT ${VEXILLOGRAPHER_EXE}
-    COMMAND ${MCS_EXECUTABLE} ARGS ${VEXILLOGRAPHER_REFERENCES}
+    COMMAND ${CSHARP_COMPILER_EXECUTABLE} ARGS ${VEXILLOGRAPHER_REFERENCES}
             ${VEXILLOGRAPHER_SRCS} -target:exe -out:${VEXILLOGRAPHER_EXE}
     DEPENDS ${VEXILLOGRAPHER_SRCS}
     COMMENT "Compile Vexillographer")
@@ -55,7 +55,7 @@ function(vexillographer_compile)
     add_custom_command(
       OUTPUT ${VX_OUTPUT}
       COMMAND
-        ${MONO_EXECUTABLE} ${VEXILLOGRAPHER_EXE}
+      ${MONO_EXECUTABLE} ${VEXILLOGRAPHER_EXE}
         ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options ${VX_LANG}
         ${VX_OUT}
       DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options

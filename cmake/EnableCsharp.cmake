@@ -12,4 +12,9 @@ if(DOTNET_FOUND)
 endif()
 
 find_package(mono REQUIRED)
-set(CSHARP_USE_MONO TRUE)
+if(mono_FOUND)
+  set(CSHARP_USE_MONO TRUE)
+  return()
+endif()
+
+message(FATAL_ERROR "Unable to find dotnet or mono as C# compiler")
