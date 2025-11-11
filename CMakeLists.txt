@@ -67,7 +67,7 @@ if(USE_SCCACHE)
   find_package(sccache)
 endif()
 
-option(WITH_ACAC "Enale actor stack recording" OFF)
+option(WITH_ACAC "Enable actor stack recording" OFF)
 if(WITH_ACAC)
   message(STATUS "Build FoundationDB with AcAC support")
   if(FDB_RELEASE OR FDB_RELEASE_CANDIDATE)
