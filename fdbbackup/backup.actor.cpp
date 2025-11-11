@@ -317,6 +317,7 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot-interval", SO_REQ_SEP },
 	{ OPT_MOD_ACTIVE_INTERVAL, "--active-snapshot-interval", SO_REQ_SEP },
+	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -3011,6 +3012,7 @@ struct BackupModifyOptions {
 	Optional<std::string> proxy;
 	Optional<int> snapshotIntervalSeconds;
 	Optional<int> activeSnapshotIntervalSeconds;
+	Optional<std::string> encryptionKeyFile;
 	bool hasChanges() const {
 		return destURL.present() || snapshotIntervalSeconds.present() || activeSnapshotIntervalSeconds.present();
 	}
@@ -3026,7 +3028,11 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 
 	state Reference<IBackupContainer> bc;
 	if (options.destURL.present()) {
-		bc = openBackupContainer(exeBackup.toString().c_str(), options.destURL.get(), options.proxy, {});
+		TraceEvent("ModifyBackupSetNewContainer")
+		    .detail("TagName", tagName)
+		    .detail("DestURL", options.destURL.get())
+			.detail("EncryptionKeyFile", options.encryptionKeyFile.present() ? options.encryptionKeyFile.get() : "None");
+		bc = openBackupContainer(exeBackup.toString().c_str(), options.destURL.get(), options.proxy, options.encryptionKeyFile);
 		try {
 			wait(timeoutError(bc->create(), 30));
 		} catch (Error& e) {
@@ -3087,6 +3093,7 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 
 			if (options.destURL.present()) {
 				config.backupContainer().set(tr, bc);
+				wait(bc->writeEncryptionMetadata());
 			}
 
 			wait(tr->commit());
@@ -3830,6 +3837,7 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_ENCRYPTION_KEY_FILE:
 				encryptionKeyFile = args->OptionArg();
+				modifyOptions.encryptionKeyFile = encryptionKeyFile;
 				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
