@@ -81,7 +81,7 @@ function(dotnet_build project_file_path)
       ${dotnet_EXECUTABLE} ARGS build ${project_file_path} --configuration
       "${configuration}" --output "${project_binary_directory}" --self-contained
     DEPENDS ${ARG_SOURCE}
-    WORKING_DIRECTORY "${project_root_path}"
+    WORKING_DIRECTORY "${project_root_directory}"
     COMMENT "Build ${project} using .NET framework")
   add_custom_target(${project} DEPENDS ${project_binary_path})
 
