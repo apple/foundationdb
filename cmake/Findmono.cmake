@@ -61,7 +61,11 @@ else() # UNIX
     NAMES ${chsarp_mono_names} NAMES_PER_DIR
     PATHS ${csharp_mono_paths})
 
+
   if(EXISTS ${csharp_mono_compiler})
+    set(MCS_EXECUTABLE "${csharp_mono_version_temp}")
+    mark_as_advanced(MCS_EXECUTABLE)
+
     # Determine version
     find_program(
       csharp_mono_interpreter # variable is added to the cache, we removed it
