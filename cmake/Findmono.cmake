@@ -63,7 +63,7 @@ else() # UNIX
 
 
   if(EXISTS ${csharp_mono_compiler})
-    set(MCS_EXECUTABLE "${csharp_mono_version_temp}")
+    set(MCS_EXECUTABLE "${csharp_mono_compiler}")
     mark_as_advanced(MCS_EXECUTABLE)
 
     # Determine version
