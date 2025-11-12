@@ -192,6 +192,75 @@ struct ExpectedIdempotencyIdCountForKey {
 	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
 };
 
+struct CommitBatchLatency {
+	double initializationTime = 0;
+	double preResolutionTime = 0;
+	double resolutionTime = 0;
+	double postResolutionTime = 0;
+	double transactionLoggingTime = 0;
+	double replyTime = 0;
+	double totalTime = 0;
+
+	CommitBatchLatency() {}
+
+	inline void reset() {
+		initializationTime = 0;
+		preResolutionTime = 0;
+		resolutionTime = 0;
+		postResolutionTime = 0;
+		transactionLoggingTime = 0;
+		replyTime = 0;
+		totalTime = 0;
+	}
+};
+
+struct CommitProxyServiceTracing {
+public:
+	CommitProxyServiceTracing(const UID& debugID) : debugID(debugID) {}
+
+	inline void update(std::shared_ptr<CommitBatchLatency> latencyMetrics) {
+		initializationTime = initializationTime + latencyMetrics->initializationTime;
+		preResolutionTime = preResolutionTime + latencyMetrics->preResolutionTime;
+		resolutionTime = resolutionTime + latencyMetrics->resolutionTime;
+		postResolutionTime = postResolutionTime + latencyMetrics->postResolutionTime;
+		transactionLoggingTime = transactionLoggingTime + latencyMetrics->transactionLoggingTime;
+		replyTime = replyTime + latencyMetrics->replyTime;
+		totalTime = totalTime + latencyMetrics->totalTime;
+	}
+
+	inline void log() {
+		TraceEvent(SevInfo, "CommitProxyServiceTracing", debugID)
+		    .detail("InitializationTime", initializationTime)
+		    .detail("PreResolutionTime", preResolutionTime)
+		    .detail("ResolutionTime", resolutionTime)
+		    .detail("PostResolutionTime", postResolutionTime)
+		    .detail("TransactionLoggingTime", transactionLoggingTime)
+		    .detail("ReplyTime", replyTime)
+		    .detail("TotalTime", totalTime);
+		reset();
+	}
+
+private:
+	inline void reset() {
+		initializationTime = 0;
+		preResolutionTime = 0;
+		resolutionTime = 0;
+		postResolutionTime = 0;
+		transactionLoggingTime = 0;
+		replyTime = 0;
+		totalTime = 0;
+	}
+
+	UID debugID;
+	double initializationTime = 0;
+	double preResolutionTime = 0;
+	double resolutionTime = 0;
+	double postResolutionTime = 0;
+	double transactionLoggingTime = 0;
+	double replyTime = 0;
+	double totalTime = 0;
+};
+
 struct RangeLock;
 struct ProxyCommitData {
 	UID dbgid;
@@ -275,6 +344,8 @@ struct ProxyCommitData {
 	Version lastShardMove;
 
 	std::shared_ptr<RangeLock> rangeLock = nullptr;
+
+	std::shared_ptr<CommitProxyServiceTracing> serviceTracing = nullptr;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
@@ -365,6 +436,7 @@ struct ProxyCommitData {
 	                   : nullptr),
 	    lastShardMove(invalidVersion), epoch(epoch) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
+		serviceTracing = std::make_shared<CommitProxyServiceTracing>(dbgid);
 	}
 };
 struct RangeLock {
