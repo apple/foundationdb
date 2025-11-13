@@ -21,7 +21,7 @@ This module will set the following variables in your project:
 ``ROCKSDB_VERSION``
   the version of the RocksDB found
 ``ROCKSDB_INCLUDE_DIR``
-  include 
+  The path to the directory containing the RocksDB header files.
 #]=======================================================================]
 
 if(NOT ROCKSDB_ROOT)
