@@ -36,7 +36,7 @@ target_include_directories(fdbrpclinktest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/li
 if(COMPILE_EIO)
   add_library(eio STATIC libeio/eio.c)
   if(USE_VALGRIND)
-    target_link_libraries(eio PUBLIC Valgrind)
+    target_link_libraries(eio PUBLIC valgrind)
   endif()
   target_compile_definitions(eio PRIVATE USE_UCONTEXT)
   target_compile_options(eio BEFORE PRIVATE -w) # disable warnings for eio
@@ -60,7 +60,7 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
     target_compile_options(coro BEFORE PRIVATE -w) # disable warnings for third party
   endif()
   if(USE_VALGRIND)
-    target_link_libraries(coro PUBLIC Valgrind)
+    target_link_libraries(coro PUBLIC valgrind)
   endif()
 endif()
 
