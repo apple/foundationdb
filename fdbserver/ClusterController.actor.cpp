@@ -223,6 +223,243 @@ bool ClusterControllerData::remoteTransactionSystemContainsDegradedServers() {
 	return false;
 }
 
+ACTOR Future<Void> recruitSingleLogRouter(ClusterControllerData* cluster,
+                                          ClusterControllerData::DBInfo* db,
+                                          int logRouterTagId,
+                                          int logSetIndex,
+                                          Reference<ILogSystem> logSystem,
+                                          LogSystemConfig config) {
+	state Tag routerTag = Tag(tagLocalityLogRouter, logRouterTagId);
+
+	TraceEvent("RecruitingLogRouter", cluster->id)
+	    .detail("TagId", logRouterTagId)
+	    .detail("LogSetIndex", logSetIndex)
+	    .detail("Tag", routerTag.toString());
+
+	// Step 1: Determine start version
+	// The peek cursor will automatically adjust to the actual popped version on TLogs,
+	// so we can just start at version 0
+	state Version startVersion = 0;
+
+	TraceEvent("LogRouterStartVersion", cluster->id)
+	    .detail("TagId", logRouterTagId)
+	    .detail("StartVersion", startVersion)
+	    .detail("Note", "PeekCursorWillAdjustToPopperVersion");
+
+	// Step 2: Recruit a worker for the new log router
+	state Optional<Key> targetDcId;
+	if (config.tLogs[logSetIndex].locality == tagLocalitySatellite) {
+		for (auto& region : db->config.regions) {
+			for (auto& dc : region.satellites) {
+				targetDcId = dc.dcId;
+				break;
+			}
+			if (targetDcId.present())
+				break;
+		}
+	} else {
+		if (db->recoveryData->remoteDcIds.size() > 0) {
+			targetDcId = db->recoveryData->remoteDcIds[0];
+		}
+	}
+
+	state std::vector<WorkerDetails> workers;
+	for (auto const& [id, worker] : cluster->id_worker) {
+		bool correctDc = true;
+		if (targetDcId.present() && cluster->addr_locality.count(worker.details.interf.address())) {
+			auto& locality = cluster->addr_locality.at(worker.details.interf.address());
+			correctDc = locality.dcId().present() && locality.dcId().get() == targetDcId.get();
+		}
+
+		if (correctDc && !db->config.isExcludedServer(worker.details.interf.addresses(), worker.details.interf.locality) &&
+		    worker.details.processClass.machineClassFitness(ProcessClass::LogRouter) < ProcessClass::NeverAssign) {
+			workers.push_back(worker.details);
+		}
+	}
+
+	if (workers.empty()) {
+		TraceEvent(SevWarn, "NoWorkersForLogRouter", cluster->id)
+		    .detail("TagId", logRouterTagId)
+		    .detail("TargetDcId", targetDcId);
+		throw recruitment_failed();
+	}
+
+	state WorkerInterface worker = workers[deterministicRandom()->randomInt(0, workers.size())].interf;
+
+	TraceEvent("RecruitingLogRouterOnWorker", cluster->id)
+	    .detail("WorkerID", worker.id())
+	    .detail("TagId", logRouterTagId)
+	    .detail("TargetDcId", targetDcId);
+
+	// Step 3: Initialize the log router
+	state InitializeLogRouterRequest req;
+	req.recoveryCount = db->recoveryData->cstate.myDBState.recoveryCount;
+	req.routerTag = routerTag;
+	req.startVersion = startVersion;
+	req.locality = config.tLogs[logSetIndex].locality;
+	req.isReplacement = true;
+
+	for (auto& tLogSet : config.tLogs) {
+		if (tLogSet.isLocal && tLogSet.tLogs.size() > 0) {
+			req.tLogLocalities = tLogSet.tLogLocalities;
+			req.tLogPolicy = tLogSet.tLogPolicy;
+			break;
+		}
+	}
+
+	if (db->recoveryData->logSystem.isValid()) {
+		auto lsConfig = db->recoveryData->logSystem->getLogSystemConfig();
+		if (lsConfig.recoveredAt.present()) {
+			req.recoverAt = lsConfig.recoveredAt.get();
+		}
+	}
+
+	req.allowDropInSim = false;
+
+	state TLogInterface logRouterInterf = wait(transformErrors(
+	    throwErrorOr(worker.logRouter.getReplyUnlessFailedFor(req,
+	                                                           SERVER_KNOBS->TLOG_TIMEOUT,
+	                                                           SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+	    recruitment_failed()));
+
+	TraceEvent("LogRouterRecruited", cluster->id)
+	    .detail("TagId", logRouterTagId)
+	    .detail("LogRouterID", logRouterInterf.id())
+	    .detail("WorkerID", worker.id())
+	    .detail("LogSetIndex", logSetIndex);
+
+	// Step 4: Update the log system configuration
+	logSystem->updateLogRouter(logSetIndex, logRouterTagId, logRouterInterf);
+
+	// Step 5: Trigger registration update to propagate to ServerDBInfo
+	db->recoveryData->registrationTrigger.trigger();
+
+	TraceEvent("LogRouterRecruitmentComplete", cluster->id)
+	    .detail("TagId", logRouterTagId)
+	    .detail("LogRouterID", logRouterInterf.id());
+
+	return Void();
+}
+
+ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* cluster, ClusterControllerData::DBInfo* db) {
+	// Wait until log system is valid
+	while (!db->recoveryData.isValid() || !db->recoveryData->logSystem.isValid()) {
+		wait(delay(1.0));
+	}
+
+	state Reference<ILogSystem> logSystem = db->recoveryData->logSystem;
+	state uint64_t recoveryCount = db->recoveryData->cstate.myDBState.recoveryCount;
+	state LogSystemConfig config = logSystem->getLogSystemConfig();
+
+	// Find the log set with log routers (should be remote/satellite)
+	state int logSetIndex = -1;
+
+	for (int i = 0; i < config.tLogs.size(); i++) {
+		if (config.tLogs[i].logRouters.size() > 0) {
+			logSetIndex = i;
+			break;
+		}
+	}
+
+	if (logSetIndex == -1) {
+		TraceEvent("NoLogRoutersToMonitor", cluster->id).log();
+		return Void();
+	}
+
+	TraceEvent("StartMonitoringLogRouters", cluster->id)
+	    .detail("LogSetIndex", logSetIndex)
+	    .detail("LogRouterCount", config.tLogs[logSetIndex].logRouters.size())
+	    .detail("IsLocal", config.tLogs[logSetIndex].isLocal)
+	    .detail("Locality", config.tLogs[logSetIndex].locality)
+	    .detail("RecoveryCount", recoveryCount);
+
+	loop {
+		// Check if recovery changed - if so, exit and let a new monitor start
+		if (!db->recoveryData.isValid() || !db->recoveryData->logSystem.isValid() ||
+		    db->recoveryData->cstate.myDBState.recoveryCount != recoveryCount) {
+			TraceEvent("LogRouterMonitoringEnded", cluster->id)
+			    .detail("Reason", "RecoveryChanged")
+			    .detail("OldRecoveryCount", recoveryCount)
+			    .detail("NewRecoveryCount",
+			            db->recoveryData.isValid() ? db->recoveryData->cstate.myDBState.recoveryCount : -1);
+			return Void();
+		}
+
+		// Build list of failure monitors for all log routers
+		state std::vector<Future<Void>> failures;
+
+		config = logSystem->getLogSystemConfig();
+
+		// Re-check log set index in case config changed
+		if (logSetIndex >= config.tLogs.size() || config.tLogs[logSetIndex].logRouters.empty()) {
+			logSetIndex = -1;
+			for (int i = 0; i < config.tLogs.size(); i++) {
+				if (config.tLogs[i].logRouters.size() > 0) {
+					logSetIndex = i;
+					break;
+				}
+			}
+			if (logSetIndex == -1) {
+				TraceEvent("NoLogRoutersToMonitor", cluster->id).log();
+				return Void();
+			}
+		}
+
+		for (int i = 0; i < config.tLogs[logSetIndex].logRouters.size(); i++) {
+			if (config.tLogs[logSetIndex].logRouters[i].present()) {
+				auto& logRouter = config.tLogs[logSetIndex].logRouters[i];
+				failures.push_back(waitFailureClient(logRouter.interf().waitFailure,
+				                                     SERVER_KNOBS->TLOG_TIMEOUT,
+				                                     -SERVER_KNOBS->TLOG_TIMEOUT /
+				                                         SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+				                                     /*trace=*/true));
+
+				TraceEvent("MonitoringLogRouter", cluster->id).detail("TagId", i).detail("RouterID", logRouter.interf().id());
+			}
+		}
+
+		if (failures.empty()) {
+			TraceEvent(SevWarn, "NoLogRoutersPresent", cluster->id).detail("LogSetIndex", logSetIndex);
+			wait(delay(1.0));
+			continue;
+		}
+
+	// Wait for any log router to fail
+	wait(quorum(failures, 1));
+
+	TraceEvent(SevWarn, "LogRouterFailureDetected", cluster->id).detail("LogSetIndex", logSetIndex);
+
+	// Find which log routers failed and re-recruit them
+	state std::vector<int> failedTagIds;
+	state LogSystemConfig newConfig = logSystem->getLogSystemConfig();
+
+	for (int i = 0; i < newConfig.tLogs[logSetIndex].logRouters.size(); i++) {
+		if (!newConfig.tLogs[logSetIndex].logRouters[i].present()) {
+			failedTagIds.push_back(i);
+			TraceEvent(SevWarn, "IdentifiedFailedLogRouter", cluster->id)
+			    .detail("TagId", i)
+			    .detail("LogSetIndex", logSetIndex);
+		}
+	}
+
+	// Re-recruit all failed log routers
+	for (state int tagIdIndex = 0; tagIdIndex < failedTagIds.size(); tagIdIndex++) {
+		state int tagId = failedTagIds[tagIdIndex];
+		try {
+			wait(recruitSingleLogRouter(cluster, db, tagId, logSetIndex, logSystem, newConfig));
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "LogRouterRecruitmentFailed", cluster->id)
+			    .error(e)
+			    .detail("TagId", tagId)
+			    .detail("LogSetIndex", logSetIndex);
+		}
+	}
+
+	// Wait a bit before restarting monitoring
+	wait(delay(1.0));
+	}
+}
+
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
                                         ServerCoordinators coordinators) {
@@ -2817,6 +3054,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		self.addActor.send(workerHealthMonitor(&self));
 		self.addActor.send(updateRemoteDCHealth(&self));
 	}
+
+	// Start monitoring log routers for re-recruitment
+	self.addActor.send(monitorAndRecruitLogRouters(&self, &self.db));
 
 	loop choose {
 		when(ErrorOr<Void> err = wait(error)) {

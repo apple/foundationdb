@@ -321,6 +321,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	Future<Void> onLogSystemConfigChange() final;
 
+	void updateLogRouter(int logSetIndex, int tagId, TLogInterface const& newLogRouter) final;
+
 	Version getEnd() const final;
 
 	Version getPeekEnd() const;

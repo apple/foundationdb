@@ -639,6 +639,9 @@ struct InitializeLogRouterRequest {
 	                     // selectively drop responses to initialization messages to test recovery behavior under
 	                     // partial failures. Must only be true in simulation.
 
+	// For replacement log routers - to handle checkRemoved() race condition
+	bool isReplacement;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -651,7 +654,8 @@ struct InitializeLogRouterRequest {
 		           reply,
 		           recoverAt,
 		           knownLockedTLogIds,
-		           allowDropInSim);
+		           allowDropInSim,
+		           isReplacement);
 	}
 };
 

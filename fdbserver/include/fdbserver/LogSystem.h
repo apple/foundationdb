@@ -681,6 +681,9 @@ struct ILogSystem {
 	// Returns when the log system configuration has changed due to a tlog rejoin.
 	virtual Future<Void> onLogSystemConfigChange() = 0;
 
+	// Update a specific log router in the log system configuration
+	virtual void updateLogRouter(int logSetIndex, int tagId, TLogInterface const& newLogRouter) = 0;
+
 	virtual void getPushLocations(VectorRef<Tag> tags,
 	                              std::vector<int>& locations,
 	                              bool allLocations = false,

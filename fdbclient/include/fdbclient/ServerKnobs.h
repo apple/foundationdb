@@ -95,6 +95,7 @@ public:
 	int CONCURRENT_LOG_ROUTER_READS;
 	int LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED; // 0==peek from primary, non-zero==peek from satellites
 	double LOG_ROUTER_PEEK_SWITCH_DC_TIME;
+	double LOG_ROUTER_REPLACEMENT_GRACE_PERIOD; // Grace period for replacement log routers to appear in ServerDBInfo
 	double DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME;
 	double DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME;
 	int64_t TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES;

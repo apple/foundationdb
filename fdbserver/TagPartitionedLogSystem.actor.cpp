@@ -486,16 +486,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 				}
 			}
 			for (auto& t : it->logRouters) {
-				if (t->get().present()) {
-					failed.push_back(waitFailureClient(t->get().interf().waitFailure,
-					                                   /* failureReactionTime */ SERVER_KNOBS->TLOG_TIMEOUT,
-					                                   /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
-					                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-					                                   /* trace */ true,
-					                                   /* traceMsg */ "LogRouterFailed"_sr));
-				} else {
-					changes.push_back(t->onChange());
-				}
+				// Don't monitor current generation log routers for failures - just monitor for changes
+				// They can be re-recruited by cluster controller without triggering recovery
+				changes.push_back(t->onChange());
 			}
 			for (const auto& worker : it->backupWorkers) {
 				if (worker->get().present()) {
@@ -1719,6 +1712,35 @@ ACTOR Future<Version> TagPartitionedLogSystem::getPoppedTxs(TagPartitionedLogSys
 
 Future<Version> TagPartitionedLogSystem::getTxsPoppedVersion() {
 	return getPoppedTxs(this);
+}
+
+void TagPartitionedLogSystem::updateLogRouter(int logSetIndex, int tagId, TLogInterface const& newLogRouter) {
+	if (logSetIndex < 0 || logSetIndex >= tLogs.size()) {
+		TraceEvent(SevWarn, "UpdateLogRouterInvalidIndex", dbgid)
+		    .detail("LogSetIndex", logSetIndex)
+		    .detail("TotalLogSets", tLogs.size());
+		return;
+	}
+
+	auto& logSet = tLogs[logSetIndex];
+
+	if (tagId < 0 || tagId >= logSet->logRouters.size()) {
+		TraceEvent(SevWarn, "UpdateLogRouterInvalidTagId", dbgid)
+		    .detail("LogSetIndex", logSetIndex)
+		    .detail("TagId", tagId)
+		    .detail("TotalLogRouters", logSet->logRouters.size());
+		return;
+	}
+
+	logSet->logRouters[tagId]->set(OptionalInterface<TLogInterface>(newLogRouter));
+	logSystemConfigChanged.trigger();
+
+	TraceEvent("LogRouterUpdated", dbgid)
+	    .detail("LogSetIndex", logSetIndex)
+	    .detail("TagId", tagId)
+	    .detail("NewRouterID", newLogRouter.id())
+	    .detail("IsLocal", logSet->isLocal)
+	    .detail("Locality", logSet->locality);
 }
 
 ACTOR Future<Void> TagPartitionedLogSystem::confirmEpochLive_internal(Reference<LogSet> logSet, Optional<UID> debugID) {

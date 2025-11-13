@@ -847,8 +847,16 @@ Future<Void> logRouterCore(TLogInterface interf,
 
 Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                           uint64_t recoveryCount,
-                          TLogInterface myInterface) {
+                          TLogInterface myInterface,
+                          bool isReplacement,
+                          double localRecruitmentTime) {
 	while (true) {
+		// If this is a replacement log router, give grace period for ServerDBInfo to update
+		if (isReplacement && now() - localRecruitmentTime < SERVER_KNOBS->LOG_ROUTER_REPLACEMENT_GRACE_PERIOD) {
+			co_await delay(1.0); // Check again in 1 second
+			continue;
+		}
+
 		bool isDisplaced =
 		    ((db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) ||
 		     (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED));
@@ -869,12 +877,17 @@ Future<Void> logRouter(TLogInterface interf,
 		    .detail("Tag", req.routerTag.toString())
 		    .detail("Localities", req.tLogLocalities.size())
 		    .detail("Locality", req.locality);
+
+		// Capture local recruitment time to avoid clock skew issues
+		double localRecruitmentTime = now();
+
 		Future<Void> core = logRouterCore(interf, req, db);
 		while (true) {
 			bool shouldExit = false;
 			co_await Choose()
 			    .When(core, [&](const Void&) { shouldExit = true; })
-			    .When(checkRemoved(db, req.recoveryCount, interf), [](const Void&) { /* do nothing */ })
+			    .When(checkRemoved(db, req.recoveryCount, interf, req.isReplacement, localRecruitmentTime),
+			          [](const Void&) { /* do nothing */ })
 			    .run();
 			if (shouldExit) {
 				co_return;
