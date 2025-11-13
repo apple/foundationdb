@@ -1736,7 +1736,9 @@ public:
 					                                   satelliteTLogWriteAntiQuorumFallback,
 					                                   false)
 					        : primarySatelliteProcessesDead.validate(satelliteTLogPolicyFallback);
-					bool remoteSatelliteTLogsDead =
+					// Ignore remoteSatelliteTLogsDead because remote satellites are not used and
+					// not affecting recovery.
+					/* bool remoteSatelliteTLogsDead =
 					    satelliteTLogWriteAntiQuorumFallback
 					        ? !validateAllCombinations(badCombo,
 					                                   remoteSatelliteProcessesDead,
@@ -1744,7 +1746,7 @@ public:
 					                                   remoteSatelliteLocalitiesLeft,
 					                                   satelliteTLogWriteAntiQuorumFallback,
 					                                   false)
-					        : remoteSatelliteProcessesDead.validate(satelliteTLogPolicyFallback);
+					        : remoteSatelliteProcessesDead.validate(satelliteTLogPolicyFallback); */
 
 					if (usableRegions > 1) {
 						notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) ||
@@ -1765,8 +1767,7 @@ public:
 					}
 
 					if (usableRegions > 1 && allowLogSetKills) {
-						tooManyDead = (primaryTLogsDead && primarySatelliteTLogsDead) ||
-						              (remoteTLogsDead && remoteSatelliteTLogsDead) ||
+						tooManyDead = (primaryTLogsDead && primarySatelliteTLogsDead) || remoteTLogsDead ||
 						              (primaryTLogsDead && remoteTLogsDead) ||
 						              (primaryProcessesDead.validate(storagePolicy) &&
 						               remoteProcessesDead.validate(storagePolicy));
