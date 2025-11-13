@@ -17,9 +17,9 @@ endif()
 ################################################################################
 
 if(USE_VALGRIND)
-  find_package(Valgrind REQUIRED)
-  add_library(Valgrind INTERFACE)
-  target_link_libraries(Valgrind INTERFACE "${valgrind_INCLUDE_DIRS}")
+  find_package(valgrind REQUIRED)
+  add_library(valgrind INTERFACE)
+  target_include_directories(valgrind INTERFACE "${valgrind_INCLUDE_DIRS}")
 endif()
 
 ################################################################################

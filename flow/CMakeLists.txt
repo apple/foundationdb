@@ -161,7 +161,7 @@ foreach(ft flow flow_sampling flowlinktest)
   target_link_libraries(${ft} PRIVATE ${FLOW_LIBS})
 
   if(USE_VALGRIND)
-    target_link_libraries(${ft} PUBLIC Valgrind)
+    target_link_libraries(${ft} PUBLIC valgrind)
   endif()
 
   target_link_libraries(${ft} PUBLIC OpenSSL::SSL)

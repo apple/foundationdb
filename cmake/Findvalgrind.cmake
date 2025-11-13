@@ -2,7 +2,7 @@
 # FoundationDB source code
 
 #[=======================================================================[.rst:
-FindValgrind
+Findvalgrind
 -------
 
 Find valgrind, an instrumentation framework for building dynamic analysis tools.
@@ -41,7 +41,7 @@ endif()
 
 find_path(
   valgrind_INCLUDE_DIRS
-  NAMES valgrind/valgrind.h
+  NAMES valgrind.h
   PATH_SUFFIXES valgrind valgrind/include
   HINTS ${valgrind_ROOT})
 if(NOT valgrind_INCLUDE_DIRS)
