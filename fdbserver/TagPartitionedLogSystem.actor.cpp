@@ -2831,6 +2831,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 				    .detail("LogRouterTags", self->logRouterTags);
 				for (int i = 0; i < self->logRouterTags; i++) {
 					InitializeLogRouterRequest req;
+					req.reqId = deterministicRandom()->randomUniqueID();
 					req.recoveryCount = recoveryCount;
 					req.routerTag = Tag(tagLocalityLogRouter, i);
 					req.startVersion = lastStart;
@@ -2887,6 +2888,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 				    .detail("LogRouterTags", old.logRouterTags);
 				for (int i = 0; i < old.logRouterTags; i++) {
 					InitializeLogRouterRequest req;
+					req.reqId = deterministicRandom()->randomUniqueID();
 					req.recoveryCount = recoveryCount;
 					req.routerTag = Tag(tagLocalityLogRouter, i);
 					req.startVersion = lastStart;
@@ -3055,6 +3057,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 	TraceEvent("LogRouterInitReqSent3").detail("Locality", remoteLocality).detail("LogRouterTags", self->logRouterTags);
 	for (int i = 0; i < self->logRouterTags; i++) {
 		InitializeLogRouterRequest req;
+		req.reqId = deterministicRandom()->randomUniqueID();
 		req.recoveryCount = recoveryCount;
 		req.routerTag = Tag(tagLocalityLogRouter, i);
 		req.startVersion = startVersion;

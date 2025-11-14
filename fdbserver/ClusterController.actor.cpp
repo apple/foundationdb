@@ -268,6 +268,7 @@ ACTOR Future<Void> recruitSingleLogRouter(ClusterControllerData* cluster,
 
 	// Initialize the log router
 	state InitializeLogRouterRequest req;
+	req.reqId = deterministicRandom()->randomUniqueID();
 	req.recoveryCount = db->recoveryData->cstate.myDBState.recoveryCount;
 	req.routerTag = routerTag;
 	req.startVersion = 0; // The peek cursor will automatically adjust to the actual popped version on TLogs

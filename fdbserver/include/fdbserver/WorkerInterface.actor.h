@@ -641,6 +641,7 @@ struct InitializeLogRouterRequest {
 
 	// For replacement log routers - to handle checkRemoved() race condition
 	bool isReplacement;
+	UID reqId;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -655,7 +656,8 @@ struct InitializeLogRouterRequest {
 		           recoverAt,
 		           knownLockedTLogIds,
 		           allowDropInSim,
-		           isReplacement);
+		           isReplacement,
+		           reqId);
 	}
 };
 
