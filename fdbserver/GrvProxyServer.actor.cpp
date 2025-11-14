@@ -531,6 +531,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
 			bool canBeQueued = true;
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
 			        SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ||
+			    // Occasionally inject queue pressure in simulation to test queue overflow handling
 			    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01))) {
 				// When the limit is hit, try to drop requests from the lower priority queues.
 				if (req.priority == TransactionPriority::BATCH) {

@@ -1,5 +1,22 @@
+/*
+ * TxnTimeout.actor.cpp
+ *
+ * This workload validates that FoundationDB's transaction timeout mechanisms work correctly
+ * by creating long-running transactions that intentionally approach (but don't exceed) the
+ * configured transaction lifetime limits.
+ *
+ * Test Strategy:
+ * 1. Configures transaction lifetime via MAX_READ/WRITE_TRANSACTION_LIFE_VERSIONS knobs
+ * 2. Creates transactions that perform read-modify-write operations with artificial delays
+ * 3. Ensures transactions complete successfully when staying within timeout bounds
+ * 4. Detects and reports any premature transaction_too_old errors
+ *
+ * The workload runs with failure injection disabled to ensure consistent timeout behavior
+ * and verify that the timeout enforcement is working as designed without interference from
+ * other failure modes.
+ */
+
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/Knobs.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
@@ -16,34 +33,38 @@
 struct TxnTimeout : TestWorkload {
 	static constexpr auto NAME = "TxnTimeout";
 
-	bool enabled{ false };
-	double testDuration{ 0.0 };
-	int actorsPerClient{ 0 };
-	int nodeCountPerClientPerActor{ 0 };
-	double txnMinSecDuration{ 0 };
+	// Configuration parameters
+	double testDuration{ 0.0 }; // Total duration of the test in seconds
+	int actorsPerClient{ 0 }; // Number of concurrent transaction actors per test client
+	int nodeCountPerClientPerActor{ 0 }; // Number of unique keys each actor operates on
+	double txnTargetDuration{ 0.0 }; // Target minimum duration for each transaction (seconds)
 
-	int txnsTotal{ 0 };
-	int txnsSucceeded{ 0 };
-	int txnsFailed{ 0 };
+	// Metrics tracked during test execution
+	int txnsTotal{ 0 }; // Total number of transactions attempted
+	int txnsSucceeded{ 0 }; // Number of transactions that completed successfully
+	int txnsFailed{ 0 }; // Number of transactions that failed with unexpected timeout errors
 
 	TxnTimeout(const WorkloadContext& wctx) : TestWorkload(wctx) {
-		testDuration = getOption(options, "testDuration"_sr, 120);
+		// Parse workload configuration from TOML test definition
+		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		actorsPerClient = getOption(options, "actorsPerClient"_sr, 1);
 		nodeCountPerClientPerActor = getOption(options, "nodeCountPerClientPerActor"_sr, 100);
-		txnMinSecDuration = getOption(options, "txnMinSecDuration"_sr, 5);
+		txnTargetDuration = getOption(options, "txnTargetDuration"_sr, 5.0);
 	}
 
 	Future<Void> setup(const Database& db) override {
 		TraceEvent("TxnTimeoutSetup")
-		    .detail("Enabled", enabled)
 		    .detail("TestDuration", testDuration)
 		    .detail("ActorsPerClient", actorsPerClient)
 		    .detail("NodeCountPerClientPerActor", nodeCountPerClientPerActor)
-		    .detail("TxnTimeoutThreshold", txnMinSecDuration);
+		    .detail("TxnTargetDuration", txnTargetDuration)
+		    .detail("MaxReadTxnLifeVersions", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+		    .detail("MaxWriteTxnLifeVersions", SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS);
 		return Void();
 	}
 
 	Future<Void> start(const Database& db) override {
+		// Only run in simulation without buggify to get deterministic timeout behavior
 		if (!g_network->isSimulated() || isGeneralBuggifyEnabled()) {
 			return Void();
 		}
@@ -51,163 +72,193 @@ struct TxnTimeout : TestWorkload {
 	}
 
 	Future<bool> check(const Database& db) override {
+		// Skip validation if test didn't run
 		if (!g_network->isSimulated() || isGeneralBuggifyEnabled()) {
 			return true;
 		}
+
+		// Test succeeds if all transactions completed without unexpected timeout failures
 		if (txnsFailed > 0 || txnsSucceeded == 0 || txnsSucceeded != txnsTotal) {
-			TraceEvent(SevError, "TxnTimeoutCheckErrorFailures")
+			TraceEvent(SevError, "TxnTimeoutCheckFailure")
 			    .detail("TxnsSucceeded", txnsSucceeded)
 			    .detail("TxnsFailed", txnsFailed)
-			    .detail("TxnsTotal", txnsTotal);
+			    .detail("TxnsTotal", txnsTotal)
+			    .detail("Reason",
+			            txnsFailed > 0 ? "UnexpectedTimeoutErrors"
+			                           : (txnsSucceeded == 0 ? "NoSuccessfulTransactions" : "CountMismatch"));
+			return false;
 		}
+
+		TraceEvent("TxnTimeoutCheckSuccess").detail("TxnsSucceeded", txnsSucceeded).detail("TxnsTotal", txnsTotal);
 		return true;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
+	// Disable all failure injection to ensure clean timeout behavior testing
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
-	ACTOR static Future<Void> testData(TxnTimeout* self, Database db) {
-		TraceEvent("TxnTimeoutTestDataStart");
-		state RangeResult keyRanges;
-		state Transaction tr(db);
-		TraceEvent("TxnTimeoutTestDataMid1");
-		loop {
-			try {
-				state RangeResult keyRanges_ =
-				    wait(tr.getRange(KeyRangeRef{ "foo"_sr, strinc("foo"_sr) }, CLIENT_KNOBS->TOO_MANY));
-				keyRanges = keyRanges_;
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-		TraceEvent("TxnTimeoutTestDataMid2");
-		for (auto& kv : keyRanges) {
-			TraceEvent("TxnTimeoutTestData").detail("Key", kv.key);
-		}
-		TraceEvent("TxnTimeoutTestDataEnd");
-		return Void();
-	}
-
-	ACTOR static Future<Void> fill(TxnTimeout* self, Database db, int actorIdx) {
-		TraceEvent("TxnTimeoutFillStart").detail("ActorIdx", actorIdx);
+	// Initializes the database with test data for each actor to operate on
+	// Each actor creates nodeCountPerClientPerActor keys initialized to value "0"
+	ACTOR static Future<Void> populateDatabase(TxnTimeout* self, Database db, int actorIdx) {
 		state int nodeIdx = 0;
-		loop {
-			if (nodeIdx == self->nodeCountPerClientPerActor) {
-				TraceEvent("TxnTimeoutFillEnd").detail("ActorIdx", actorIdx);
-				return Void();
-			}
+		for (; nodeIdx < self->nodeCountPerClientPerActor; nodeIdx++) {
 			state Transaction tr(db);
 			loop {
 				try {
-					state std::string key = std::format("foo_client{}_actor{}_node{}",
-					                                    std::to_string(self->clientId),
-					                                    std::to_string(actorIdx),
-					                                    std::to_string(nodeIdx));
-					state std::string val = "0";
-					tr.set(key, val);
+					// Generate unique key per client/actor/node combination
+					state std::string key = std::format("txntimeout_c{}_a{}_n{}", self->clientId, actorIdx, nodeIdx);
+					tr.set(key, "0");
 					wait(tr.commit());
-					nodeIdx++;
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
 				}
 			}
 		}
-	}
 
-	ACTOR static Future<Void> fillForAllActors(TxnTimeout* self, Database db) {
-		TraceEvent("TxnTimeoutFillForAllActorsStart");
-		std::vector<Future<Void>> fills;
-		for (int actorIdx = 0; actorIdx < self->actorsPerClient; ++actorIdx) {
-			fills.push_back(fill(self, db, actorIdx));
-		}
-		wait(waitForAll(fills));
-		TraceEvent("TxnTimeoutFillForAllActorsEnd");
+		TraceEvent("TxnTimeoutPopulateComplete")
+		    .detail("ClientId", self->clientId)
+		    .detail("ActorIdx", actorIdx)
+		    .detail("KeysCreated", nodeIdx);
 		return Void();
 	}
 
-	// Serially (via async api) makes txns
-	// These txns intentionally wait upto TIMEOUT limit picked in knob
-	// I should dump that value in a trace event at test start time
-	// Then: for every client, I should know: num txns, total time it took, fail count (couldn't go upto TIMEOUT i.e.
-	// got too_old too early)
-	// Maybe the test should disable any fault injection and do buggify = false? Goal is to
-	// ensure we are within timeout bounds.. to that end, no txn should fail?
-	// TODO: add more client workloads.. e.g. read snapshot, write only, read-write mixed.. for now let's do read only
-	// TODO: make the workload fail for too_old cases
-	// THINK: hard code testing for 10 seconds?
-	// ADD: table scan use-case, i think if i tr.get *after* 5 seconds of creating the txn, then it should start showing
-	// too_old issue
-	// TODO: improve check by only checking txns for failures if we know that txn start -> commit is less than 10s
-	// (assuming 10s timeout). generally i pin at 7, but it's possible initial read let's say takes 11, then there's no
-	// wait start->commit is under 10, so failure is expected. in practice however, given i am disabling fault injection
-	// and buggify, read should never be that long. perhaps i can enable those faults and with this improved/accurate
-	// checking, still get test to pass 100K times?
+	// Runs database population in parallel for all actors
+	ACTOR static Future<Void> populateDatabaseAllActors(TxnTimeout* self, Database db) {
+		state std::vector<Future<Void>> populationActors;
+		for (int actorIdx = 0; actorIdx < self->actorsPerClient; ++actorIdx) {
+			populationActors.push_back(populateDatabase(self, db, actorIdx));
+		}
+		wait(waitForAll(populationActors));
+		TraceEvent("TxnTimeoutPopulateAllComplete").detail("ClientId", self->clientId);
+		return Void();
+	}
+
+	/*
+	 * Transaction client actor that performs read-modify-write operations with intentional delays.
+	 *
+	 * Each transaction:
+	 * 1. Gets a read version and reads a value from the database
+	 * 2. Waits until txnTargetDuration seconds have elapsed (artificially extending the transaction)
+	 * 3. Writes an incremented value back
+	 * 4. Commits the transaction
+	 *
+	 * The goal is to test that transactions can stay open for txnTargetDuration seconds
+	 * without hitting transaction_too_old errors, as long as that duration is within
+	 * the configured MAX_*_TRANSACTION_LIFE_VERSIONS bounds.
+	 *
+	 * Error Handling:
+	 * - Expected errors during recovery (future_version, commit_unknown_result, process_behind) are tolerated
+	 * - Version jumps due to recovery (>MAX_WRITE_TRANSACTION_LIFE_VERSIONS) are tolerated
+	 * - Any other transaction_too_old or similar timeout errors are counted as failures
+	 */
 	ACTOR static Future<Void> txnClient(TxnTimeout* self, Database db, int actorIdx) {
-		TraceEvent("TxnTimeoutTxnClientStart");
 		state int nodeIdx = 0;
-		state double tStart = now();
+		state double workloadStartTime = now();
+
+		// Run transactions for 80% of test duration to allow time for cleanup
+		state double runDuration = self->testDuration * 0.8;
+
 		loop {
+			// Cycle through all keys for this actor
 			if (nodeIdx == self->nodeCountPerClientPerActor) {
-				nodeIdx = 0; // reset
+				nodeIdx = 0;
 			}
-			if (now() - tStart > self->testDuration * 0.8) {
-				TraceEvent("TxnTimeoutTxnClientDurationOver");
+
+			// Stop when we've reached the target run duration
+			if (now() - workloadStartTime > runDuration) {
+				TraceEvent("TxnTimeoutClientComplete")
+				    .detail("ClientId", self->clientId)
+				    .detail("ActorIdx", actorIdx)
+				    .detail("Duration", now() - workloadStartTime);
 				break;
 			}
-			TraceEvent("TxnTimeoutTxnClient1a");
+
 			state Transaction tr(db);
-			state Version rv1 = 0;
+			state Version readVersion = 0;
+			state double txnStartTime = now();
 			self->txnsTotal++;
+
 			loop {
 				try {
-					state std::string key = std::format("foo_client{}_actor{}_node{}",
-					                                    std::to_string(self->clientId),
-					                                    std::to_string(actorIdx),
-					                                    std::to_string(nodeIdx));
-					TraceEvent("TxnTimeoutTxnClient1b");
-					state double readStartT = now();
-					state Version rv1_ = wait(tr.getReadVersion());
-					rv1 = rv1_; // todo: there's syntatic sugar for this somewhere i remember
-					state Optional<Value> val = wait(tr.get(StringRef(key)));
-					state double readDuration = now() - readStartT;
-					TraceEvent("TxnTimeoutTxnClient2");
-					if (self->txnMinSecDuration > readDuration) {
-						wait(delay(self->txnMinSecDuration - readDuration));
+					// Generate the same key pattern as in populate phase
+					state std::string key = std::format("txntimeout_c{}_a{}_n{}", self->clientId, actorIdx, nodeIdx);
+
+					// Get read version and read the current value
+					state double readStartTime = now();
+					Version rv = wait(tr.getReadVersion());
+					readVersion = rv;
+
+					Optional<Value> val = wait(tr.get(StringRef(key)));
+					state double readDuration = now() - readStartTime;
+
+					// Artificial delay to extend transaction lifetime to target duration
+					// This is the core of the test: keeping transactions open near the timeout limit
+					if (self->txnTargetDuration > readDuration) {
+						wait(delay(self->txnTargetDuration - readDuration));
 					}
-					const int newVal = std::stoi(val.get().toString()) + 1;
-					tr.set(key, std::to_string(newVal));
-					state double latency = now() - tStart;
-					TraceEvent("TxnTimeoutTxnClient3");
+
+					// Perform write operation (increment counter)
+					int currentVal = std::stoi(val.get().toString());
+					tr.set(key, std::to_string(currentVal + 1));
+
+					// Commit and measure total transaction latency
 					wait(tr.commit());
+					state double txnLatency = now() - txnStartTime;
+
 					self->txnsSucceeded++;
-					TraceEvent("TxnTimeoutTxnClient4")
+					TraceEvent("TxnTimeoutTxnSuccess")
+					    .detail("ClientId", self->clientId)
+					    .detail("ActorIdx", actorIdx)
 					    .detail("Key", key)
-					    .detail("Val", val.get())
-					    .detail("Latency", latency);
+					    .detail("OldValue", currentVal)
+					    .detail("TxnLatency", txnLatency)
+					    .detail("ReadVersion", readVersion);
+
 					nodeIdx++;
 					break;
+
 				} catch (Error& e) {
-					state bool okError = e.code() == error_code_future_version ||
-					                     e.code() == error_code_commit_unknown_result ||
-					                     e.code() == error_code_process_behind;
-					TraceEvent("TxnTimeoutTxnClientError")
+					// These errors are expected during recovery and shouldn't count as failures
+					state bool isExpectedRecoveryError = e.code() == error_code_future_version ||
+					                                     e.code() == error_code_commit_unknown_result ||
+					                                     e.code() == error_code_process_behind;
+
+					TraceEvent(isExpectedRecoveryError ? SevInfo : SevWarn, "TxnTimeoutTxnError")
+					    .detail("ClientId", self->clientId)
+					    .detail("ActorIdx", actorIdx)
 					    .detail("RecoveryState", self->dbInfo->get().recoveryState)
+					    .detail("ReadVersion", readVersion)
 					    .errorUnsuppressed(e);
 
 					wait(tr.onError(e));
 
-					Version rv2 = wait(tr.getReadVersion());
-					// two cases: 1) recovery 100M bump, or 2) stale rv issue (attach graphs in pr)
-					const bool rvDeltaHigh = (rv2 - rv1) > SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-					if (okError || rvDeltaHigh) {
-						TraceEvent("TxnTimeoutRecoveryNotBumpingFailed").detail("RV1", rv1).detail("RV2", rv2);
-					} else {
+					// Check if version jumped significantly (indicating recovery)
+					Version newReadVersion = wait(tr.getReadVersion());
+					Version versionDelta = newReadVersion - readVersion;
+					bool isRecoveryVersionJump = versionDelta > SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+
+					// Only count as failure if it's not a recovery-related issue
+					if (!isExpectedRecoveryError && !isRecoveryVersionJump) {
 						self->txnsFailed++;
-						TraceEvent("TxnTimeoutNoRecoveryBumpingFailed").detail("RV1", rv1).detail("RV2", rv2);
+						TraceEvent(SevError, "TxnTimeoutUnexpectedFailure")
+						    .detail("ClientId", self->clientId)
+						    .detail("ActorIdx", actorIdx)
+						    .detail("OldReadVersion", readVersion)
+						    .detail("NewReadVersion", newReadVersion)
+						    .detail("VersionDelta", versionDelta)
+						    .detail("TxnDuration", now() - txnStartTime)
+						    .errorUnsuppressed(e);
+					} else {
+						TraceEvent("TxnTimeoutExpectedFailure")
+						    .detail("ClientId", self->clientId)
+						    .detail("ActorIdx", actorIdx)
+						    .detail("OldReadVersion", readVersion)
+						    .detail("NewReadVersion", newReadVersion)
+						    .detail("VersionDelta", versionDelta)
+						    .detail("IsRecoveryError", isExpectedRecoveryError)
+						    .detail("IsVersionJump", isRecoveryVersionJump);
 					}
 				}
 			}
@@ -215,29 +266,37 @@ struct TxnTimeout : TestWorkload {
 		return Void();
 	}
 
+	/*
+	 * Main workload orchestration.
+	 *
+	 * Phase 1: Populate the database with initial test data
+	 * Phase 2: Run concurrent transaction clients that test timeout behavior
+	 * Phase 3: Report final metrics
+	 */
 	ACTOR Future<Void> workload(TxnTimeout* self, Database db) {
-		TraceEvent("TxnTimeoutWorkloadStart");
+		TraceEvent("TxnTimeoutWorkloadStart")
+		    .detail("ClientId", self->clientId)
+		    .detail("TestDuration", self->testDuration)
+		    .detail("ActorsPerClient", self->actorsPerClient);
 
-		// Phase 1: fill
-		TraceEvent("TxnTimeoutWorkloadFillStart");
-		wait(fillForAllActors(self, db));
-		TraceEvent("TxnTimeoutWorkloadFillEnd");
-		wait(testData(self, db));
+		// Phase 1: Initialize database with test data
+		wait(populateDatabaseAllActors(self, db));
 
-		// Phase 2: timeout check
+		// Phase 2: Run transaction clients that test timeout behavior
 		state std::vector<Future<Void>> txnClients;
 		for (int actorIdx = 0; actorIdx < self->actorsPerClient; ++actorIdx) {
 			txnClients.emplace_back(txnClient(self, db, actorIdx));
 		}
-
 		wait(waitForAll(txnClients));
 
-		TraceEvent("TxnTimeoutWorkloadMetrics")
+		// Phase 3: Report final metrics
+		TraceEvent("TxnTimeoutWorkloadComplete")
+		    .detail("ClientId", self->clientId)
 		    .detail("TxnsSucceeded", self->txnsSucceeded)
 		    .detail("TxnsFailed", self->txnsFailed)
-		    .detail("TxnsTotal", self->txnsTotal);
+		    .detail("TxnsTotal", self->txnsTotal)
+		    .detail("SuccessRate", self->txnsTotal > 0 ? (double)self->txnsSucceeded / self->txnsTotal : 0.0);
 
-		TraceEvent("TxnTimeoutWorkloadEnd");
 		return Void();
 	}
 };
