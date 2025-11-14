@@ -1,0 +1,46 @@
+#ifndef FDB_C_OPTIONS_G_H
+#define FDB_C_OPTIONS_G_H
+#pragma once
+
+/*
+ * FoundationDB C API
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an 'AS IS' BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ * Do not include this file directly.
+ */
+
+{% for scope, options in scopes %}
+typedef enum {
+{% if options | length > 0 %}
+{% for option in options %}
+    /* {{ option.comment }} */
+{% if scope.value.endswith('Option') %}
+    /* Parameter: {{ 'Option takes no parameter' if option.param_type.name == 'NONE' else '(' + option.param_type.value + ') ' + (option.param_desc or '') }} {{ 'This is a hidden parameter and should not be used directly by applications.' if option.hidden else '' }}*/
+{% endif %}
+    FDB_{{ scope.get_c_description() }}_{{ option.name | upper }}={{ option.code }}{{ ',' if not loop.last else '' }}
+{% if not loop.last %}
+
+{% endif %}
+{% endfor %}
+{% else %}
+    /* This option is only a placeholder for C compatibility and should not be used */
+    FDB_{{ scope.get_c_description() }}_DUMMY_DO_NOT_USE=-1
+{% endif %}
+} FDB{{ scope.value }};
+
+{% endfor %}
+#endif
