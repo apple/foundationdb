@@ -24,8 +24,7 @@
 
 #include <grpcpp/support/status.h>
 
-#include "fdbctl/control_service/control_service.pb.h"
-#include "fdbctl/control_service/control_service.grpc.pb.h"
+#include "fdbctl/ControlCommands.h"
 #include "fdbclient/IClientApi.h"
 
 #define DEFINE_GRPC_HANDLER(rpcName, handlerName)                                                                      \
@@ -37,6 +36,16 @@ namespace fdbctl {
 class ControlServiceImpl final : public fdbctl::ControlService::Service {
 public:
 	ControlServiceImpl(Reference<IDatabase> db);
+
+	DEFINE_GRPC_HANDLER(GetCoordinators, getCoordinators);
+	DEFINE_GRPC_HANDLER(ChangeCoordinators, changeCoordinators);
+	// DEFINE_GRPC_HANDLER(Configure, configure);
+	DEFINE_GRPC_HANDLER(GetStatus, getStatus);
+	DEFINE_GRPC_HANDLER(GetWorkers, getWorkers);
+	DEFINE_GRPC_HANDLER(Include, include);
+	// DEFINE_GRPC_HANDLER(Exclude, exclude);
+	// DEFINE_GRPC_HANDLER(ExcludeStatus, excludeStatus);
+	DEFINE_GRPC_HANDLER(Kill, kill);
 
 private:
 	// Bridges flow with gRPC handlers. The RPC handlers are defined using `DEFINE_GRPC_HANDLER`
