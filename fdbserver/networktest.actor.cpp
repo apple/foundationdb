@@ -627,6 +627,47 @@ struct P2PNetworkTest {
 		}
 	}
 
+	ACTOR static Future<Void> run_impl_simple(P2PNetworkTest* self) {
+		state ActorCollection actors(false);
+
+		self->startTime = now();
+
+		fmt::print("{0} listeners, {1} remotes, {2} outgoing connections\n",
+		           self->listeners.size(),
+		           self->remotes.size(),
+		           self->connectionsOut);
+
+		for (auto n : self->remotes) {
+			printf("Remote: %s\n", n.toString().c_str());
+		}
+
+		for (auto el : self->listeners) {
+			printf("Listener: %s\n", el->getListenAddress().toString().c_str());
+		}
+
+		if (!self->listeners.empty()) {
+			state Reference<IConnection> conn1 = wait(self->listeners[0]->accept());
+			printf("Server: connected from %s\n", conn1->getPeerAddress().toString().c_str());
+			try {
+				wait(conn1->acceptHandshake());
+				printf("Server: connected from %s, handshake done\n", conn1->getPeerAddress().toString().c_str());
+			} catch (Error& e) {
+				printf("Server: handshake error %s\n", e.what());
+			}
+			threadSleep(11.0);
+			return Void();
+		}
+
+		if (!self->remotes.empty()) {
+			state Reference<IConnection> conn2 = wait(INetworkConnections::net()->connect(self->remotes[0]));
+			printf("Client: connected to %s\n", self->remotes[0].toString().c_str());
+			wait(conn2->connectHandshake());
+			printf("Client: connected to %s, handshake done\n", self->remotes[0].toString().c_str());
+		}
+
+		return Void();
+	}
+
 	Future<Void> run() { return run_impl(this); }
 };
 
