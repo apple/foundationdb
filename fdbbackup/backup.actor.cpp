@@ -1129,7 +1129,9 @@ static void printBackupUsage(bool devhelp) {
 	       "                 This option indicates to the backup agent that it will only need to record the log files, "
 	       "and ignore the range files.\n");
 	printf("  --encryption-key-file"
-	       "                 The AES-256-GCM key in the provided file is used for encrypting backup files.\n");
+	       "                 The AES-256-GCM key in the provided file is used for encrypting backup files.\n"
+		   "                 For modify operations, need to pass key only if Backup container URL is changed to re-encrypt all future "
+		   "backup files. \n");
 	printf("  --encrypt-files 0/1"
 	       "                 If passed, this argument will allow the user to override the database encryption state to "
 	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
