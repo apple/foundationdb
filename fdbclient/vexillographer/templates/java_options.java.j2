@@ -1,0 +1,31 @@
+package com.apple.foundationdb;
+
+{% set class_comment = scope_comments[scope] %}
+/**
+ * {{ class_comment }}{{ ' There are currently no options available.' if options | length == 0 else '' }}
+ */
+public class {{ scope.value }}s extends OptionsSet {
+	public {{ scope.value }}s( OptionConsumer consumer ) { super(consumer); }
+{% for option in options %}
+{% if not option.hidden %}
+
+{% if option.comment %}
+	/**
+	 * {{ option.comment | replace_backticks }}{{ '.' if not option.comment.endswith('.') else '' }}
+{% if option.param_desc %}
+	 * 
+	 * @param value {{ option.param_desc.strip() }}
+{% endif %}
+	 */
+{% endif %}
+{% if option.comment.startswith('Deprecated') %}
+	@Deprecated
+{% endif %}
+{% if option.param_type.name == 'NONE' %}
+	public void set{{ option.name | snake_to_camel }}() { setOption({{ option.code }}); }
+{% else %}
+	public void set{{ option.name | snake_to_camel }}({{ java_type_map[option.param_type] }} value) { setOption({{ option.code }}, value); }
+{% endif %}
+{% endif %}
+{% endfor %}
+}

@@ -1,0 +1,32 @@
+#ifndef FDBCLIENT_FDBOPTIONS_G_H
+#define FDBCLIENT_FDBOPTIONS_G_H
+#pragma once
+
+#include "fdbclient/FDBOptions.h"
+
+{% for scope, options in scopes %}
+struct FDB{{ scope.value }}s {
+	friend class FDBOptionInfoMap<FDB{{ scope.value }}s>;
+
+	enum Option : int {
+{% for option in options %}
+		/* {{ option.comment }} */
+{% if scope.value.endswith('Option') %}
+		/* Parameter: {{ 'Option takes no parameter' if option.param_type.name == 'NONE' else '(' + option.param_type.value + ') ' + (option.param_desc or '') }} {{ 'This is a hidden parameter and should not be used directly by applications.' if option.hidden else '' }}*/
+{% endif %}
+		{{ option.name | upper }}={{ option.code }}{{ ',' if not loop.last else '' }}
+{% if not loop.last %}
+
+{% endif %}
+{% endfor %}
+	};
+
+	static FDBOptionInfoMap<FDB{{ scope.value }}s> optionInfo;
+
+private:
+	static void init();
+};
+
+{% endfor %}
+
+#endif

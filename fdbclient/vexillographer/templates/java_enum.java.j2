@@ -1,0 +1,36 @@
+package com.apple.foundationdb;
+
+{% set class_comment = scope_comments[scope] %}
+/**
+ * {{ class_comment }}{{ ' There are currently no options available.' if options | length == 0 else '' }}
+ */
+{{ 'public ' if scope_is_public[scope] else '' }}enum {{ scope.value }} {
+{% for option in options %}
+{% if not option.hidden %}
+	/**
+	 * {{ (option.comment if option.comment else 'Currently undocumented') | replace_backticks }}{{ '.' if option.comment and not option.comment.endswith('.') else '' }}
+	 */
+{% if option.comment.startswith('Deprecated') %}
+	@Deprecated
+{% endif %}
+	{{ option.name | upper }}({{ option.code }}){{ ',' if not loop.last else ';' }}
+{% if not loop.last %}
+
+{% endif %}
+{% endif %}
+{% endfor %}
+    private final int code;
+
+    {{ scope.value }}(int code) {
+        this.code = code;
+    }
+
+    /**
+     * Gets the FoundationDB native-level constant code for a {@code {{ scope.value }}}.
+     *
+     * @return the native code for a FoundationDB {@code {{ scope.value }}} constant.
+     */
+    public int code() {
+        return this.code;
+    }
+}
