@@ -108,7 +108,7 @@ struct TxnTimeout : TestWorkload {
 				try {
 					// Generate unique key per client/actor/node combination
 					state std::string key = std::format("txntimeout_c{}_a{}_n{}", self->clientId, actorIdx, nodeIdx);
-					tr.set(key, "0");
+					tr.set(StringRef(key), "0"_sr);
 					wait(tr.commit());
 					break;
 				} catch (Error& e) {
@@ -200,8 +200,9 @@ struct TxnTimeout : TestWorkload {
 					}
 
 					// Perform write operation (increment counter)
-					int currentVal = std::stoi(val.get().toString());
-					tr.set(key, std::to_string(currentVal + 1));
+					state int currentVal = std::stoi(val.get().toString());
+					state std::string newVal = std::to_string(currentVal + 1);
+					tr.set(StringRef(key), StringRef(newVal));
 
 					// Commit and measure total transaction latency
 					wait(tr.commit());
@@ -221,18 +222,19 @@ struct TxnTimeout : TestWorkload {
 
 				} catch (Error& e) {
 					// These errors are expected during recovery and shouldn't count as failures
-					state bool isExpectedRecoveryError = e.code() == error_code_future_version ||
-					                                     e.code() == error_code_commit_unknown_result ||
-					                                     e.code() == error_code_process_behind;
+					state Error err = e;
+					state bool isExpectedRecoveryError = err.code() == error_code_future_version ||
+					                                     err.code() == error_code_commit_unknown_result ||
+					                                     err.code() == error_code_process_behind;
 
 					TraceEvent(isExpectedRecoveryError ? SevInfo : SevWarn, "TxnTimeoutTxnError")
 					    .detail("ClientId", self->clientId)
 					    .detail("ActorIdx", actorIdx)
 					    .detail("RecoveryState", self->dbInfo->get().recoveryState)
 					    .detail("ReadVersion", readVersion)
-					    .errorUnsuppressed(e);
+					    .errorUnsuppressed(err);
 
-					wait(tr.onError(e));
+					wait(tr.onError(err));
 
 					// Check if version jumped significantly (indicating recovery)
 					Version newReadVersion = wait(tr.getReadVersion());
@@ -249,7 +251,7 @@ struct TxnTimeout : TestWorkload {
 						    .detail("NewReadVersion", newReadVersion)
 						    .detail("VersionDelta", versionDelta)
 						    .detail("TxnDuration", now() - txnStartTime)
-						    .errorUnsuppressed(e);
+						    .errorUnsuppressed(err);
 					} else {
 						TraceEvent("TxnTimeoutExpectedFailure")
 						    .detail("ClientId", self->clientId)
