@@ -810,14 +810,14 @@ ACTOR Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database
 	}
 }
 
-// TODO(ahusain): ClusterController orchestrating recovery, self message can be avoided.
-Future<Void> sendMasterRegistration(ClusterRecoveryData* self,
-                                    LogSystemConfig const& logSystemConfig,
-                                    std::vector<CommitProxyInterface> commitProxies,
-                                    std::vector<GrvProxyInterface> grvProxies,
-                                    std::vector<ResolverInterface> resolvers,
-                                    DBRecoveryCount recoveryCount,
-                                    std::vector<UID> priorCommittedLogServers) {
+// Directly calls clusterRegisterMaster
+void sendMasterRegistration(ClusterRecoveryData* self,
+                            LogSystemConfig const& logSystemConfig,
+                            std::vector<CommitProxyInterface> commitProxies,
+                            std::vector<GrvProxyInterface> grvProxies,
+                            std::vector<ResolverInterface> resolvers,
+                            DBRecoveryCount recoveryCount,
+                            std::vector<UID> priorCommittedLogServers) {
 	RegisterMasterRequest masterReq;
 	masterReq.id = self->masterInterface.id();
 	masterReq.mi = self->masterInterface.locality;
@@ -832,7 +832,8 @@ Future<Void> sendMasterRegistration(ClusterRecoveryData* self,
 	masterReq.priorCommittedLogServers = priorCommittedLogServers;
 	masterReq.recoveryState = self->recoveryState;
 	masterReq.recoveryStalled = self->recruitmentStalled->get();
-	return brokenPromiseToNever(self->clusterController.registerMaster.getReply(masterReq));
+
+	clusterRegisterMaster(self->controllerData, masterReq);
 }
 
 ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Reference<ILogSystem> logSystem) {
@@ -857,23 +858,22 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 		    .detail("LastEpochEnd", self->lastEpochEnd);
 
 		if (!self->cstateUpdated.isSet()) {
-			wait(sendMasterRegistration(self.getPtr(),
-			                            logSystemConfig,
-			                            self->provisionalCommitProxies,
-			                            self->provisionalGrvProxies,
-			                            self->resolvers,
-			                            self->cstate.myDBState.recoveryCount,
-			                            self->cstate.prevDBState.getPriorCommittedLogServers()));
-
+			sendMasterRegistration(self.getPtr(),
+			                       logSystemConfig,
+			                       self->provisionalCommitProxies,
+			                       self->provisionalGrvProxies,
+			                       self->resolvers,
+			                       self->cstate.myDBState.recoveryCount,
+			                       self->cstate.prevDBState.getPriorCommittedLogServers());
 		} else if (self->recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 			updateLogsKey = updateLogsValue(self, cx);
-			wait(sendMasterRegistration(self.getPtr(),
-			                            logSystemConfig,
-			                            self->commitProxies,
-			                            self->grvProxies,
-			                            self->resolvers,
-			                            self->cstate.myDBState.recoveryCount,
-			                            std::vector<UID>()));
+			sendMasterRegistration(self.getPtr(),
+			                       logSystemConfig,
+			                       self->commitProxies,
+			                       self->grvProxies,
+			                       self->resolvers,
+			                       self->cstate.myDBState.recoveryCount,
+			                       std::vector<UID>());
 		} else {
 			// The cluster should enter the accepting commits phase soon, and then we will register again
 			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet", probe::decoration::rare);
