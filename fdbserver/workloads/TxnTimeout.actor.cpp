@@ -190,7 +190,7 @@ struct TxnTimeout : TestWorkload {
 					Version rv = wait(tr.getReadVersion());
 					readVersion = rv;
 
-					Optional<Value> val = wait(tr.get(StringRef(key)));
+					state Optional<Value> val = wait(tr.get(StringRef(key)));
 					state double readDuration = now() - readStartTime;
 
 					// Artificial delay to extend transaction lifetime to target duration
