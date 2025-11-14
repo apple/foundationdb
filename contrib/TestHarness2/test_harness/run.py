@@ -516,7 +516,7 @@ class TestRun:
         resources.start()
         process = subprocess.Popen(
             command,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=self.temp_path,
             text=True,
@@ -529,9 +529,10 @@ class TestRun:
             if self.use_valgrind
             else (None if config.long_running else config.kill_seconds)
         )
-        err_out: str
+        out: str = ""
+        err_out: str = ""
         try:
-            _, err_out = process.communicate(timeout=timeout)
+            out, err_out = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             process.kill()
             _, err_out = process.communicate()
@@ -549,6 +550,9 @@ class TestRun:
         self.summary.summarize(self.temp_path, " ".join(command))
         # Note: joshua_logtool is called after determinism analysis file organization
         # in the run_tests method to ensure files are properly organized
+
+        with open(self.temp_path / "fdbserver.stdout", "w") as stream:
+            stream.write(out)
 
         return self.summary.ok()
 

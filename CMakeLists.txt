@@ -62,8 +62,12 @@ endif()
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 
+option(USE_SCCACHE "Use sccache if found" ON)
+if(USE_SCCACHE)
+  find_package(sccache)
+endif()
 
-option(WITH_ACAC "Enale actor stack recording" OFF)
+option(WITH_ACAC "Enable actor stack recording" OFF)
 if(WITH_ACAC)
   message(STATUS "Build FoundationDB with AcAC support")
   if(FDB_RELEASE OR FDB_RELEASE_CANDIDATE)

@@ -1,0 +1,7 @@
+<Project>
+    <PropertyGroup>
+        <OutDir>${_DN_OUTPUT_PATH}/</OutDir>
+        <DOTNET_PACKAGE_VERSION>${_DN_VERSION}</DOTNET_PACKAGE_VERSION>
+        ${_DN_CUSTOM_BUILDPROPS}
+    </PropertyGroup>
+</Project>

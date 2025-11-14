@@ -17,7 +17,9 @@ endif()
 ################################################################################
 
 if(USE_VALGRIND)
-  find_package(Valgrind REQUIRED)
+  find_package(valgrind REQUIRED)
+  add_library(valgrind INTERFACE)
+  target_include_directories(valgrind INTERFACE "${valgrind_INCLUDE_DIRS}")
 endif()
 
 ################################################################################
@@ -261,10 +263,11 @@ set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON
 
 # TOML can download and install itself into the binary directory, so it should
 # always be available.
-find_package(toml11 QUIET)
+find_package(toml11 3.4.0)
 if(toml11_FOUND)
+  message(STATUS "Using TOML11 from system")
   add_library(toml11_target INTERFACE)
-  target_link_libraries(toml11_target INTERFACE toml11::toml11)
+  target_link_libraries(toml11_target INTERFACE toml11)
 else()
   include(ExternalProject)
   ExternalProject_add(toml11Project

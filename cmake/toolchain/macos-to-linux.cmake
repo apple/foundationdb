@@ -24,7 +24,7 @@ set(MONO_EXECUTABLE /Library/Frameworks/Mono.framework/Versions/Current/bin/mono
 if(NOT EXISTS ${MONO_EXECUTABLE})
   message(FATAL_ERROR "Cross compilation: Mono is not installed.")
 endif()
-set(MCS_EXECUTABLE /Library/Frameworks/Mono.framework/Versions/Current/bin/mcs CACHE STRING "" FORCE)
+set(CSHARP_COMPILER_EXECUTABLE /Library/Frameworks/Mono.framework/Versions/Current/bin/mcs CACHE STRING "" FORCE)
 
 execute_process(COMMAND which python3
 WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
