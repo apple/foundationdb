@@ -810,7 +810,7 @@ ACTOR Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database
 	}
 }
 
-// Directly call clusterRegisterMaster instead of sending RPC to avoid self-messaging overhead
+// Directly calls clusterRegisterMaster
 void sendMasterRegistration(ClusterRecoveryData* self,
                             LogSystemConfig const& logSystemConfig,
                             std::vector<CommitProxyInterface> commitProxies,

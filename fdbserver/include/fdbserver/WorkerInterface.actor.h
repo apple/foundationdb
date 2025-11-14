@@ -158,7 +158,6 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 	RequestStream<struct RecruitStorageRequest> recruitStorage;
 	RequestStream<struct RegisterWorkerRequest> registerWorker;
 	RequestStream<struct GetWorkersRequest> getWorkers;
-	RequestStream<struct RegisterMasterRequest> registerMaster;
 	RequestStream<struct GetServerDBInfoRequest>
 	    getServerDBInfo; // only used by testers; the cluster controller will send the serverDBInfo to workers
 	RequestStream<struct UpdateWorkerHealthRequest> updateWorkerHealth;
@@ -178,10 +177,9 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
-		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
-		       updateWorkerHealth.getFuture().isReady() || tlogRejoin.getFuture().isReady() ||
-		       notifyBackupWorkerDone.getFuture().isReady() || changeCoordinators.getFuture().isReady() ||
-		       getEncryptionAtRestMode.getFuture().isReady();
+		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
+		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
+		       changeCoordinators.getFuture().isReady() || getEncryptionAtRestMode.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -191,7 +189,6 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 		recruitStorage.getEndpoint(TaskPriority::ClusterController);
 		registerWorker.getEndpoint(TaskPriority::ClusterControllerWorker);
 		getWorkers.getEndpoint(TaskPriority::ClusterController);
-		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
 		getServerDBInfo.getEndpoint(TaskPriority::ClusterController);
 		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
 		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
@@ -212,7 +209,6 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 		           recruitStorage,
 		           registerWorker,
 		           getWorkers,
-		           registerMaster,
 		           getServerDBInfo,
 		           updateWorkerHealth,
 		           tlogRejoin,
@@ -255,8 +251,6 @@ struct RegisterMasterRequest {
 	RecoveryState recoveryState;
 	bool recoveryStalled;
 
-	ReplyPromise<Void> reply;
-
 	RegisterMasterRequest() : logSystemConfig(0) {}
 
 	template <class Ar>
@@ -276,14 +270,9 @@ struct RegisterMasterRequest {
 		           configuration,
 		           priorCommittedLogServers,
 		           recoveryState,
-		           recoveryStalled,
-		           reply);
+		           recoveryStalled);
 	}
 };
-
-// Instantiated in worker.actor.cpp
-extern template class RequestStream<RegisterMasterRequest, false>;
-extern template struct NetNotifiedQueue<RegisterMasterRequest, false>;
 
 struct RecruitFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 2224085;
