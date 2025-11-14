@@ -144,13 +144,11 @@ message ConfigureAutoSuggestReply {
 // This is one of the most critical operations for a FoundationDB cluster,
 // affecting redundancy, storage engines, process roles, and various other settings.
 message ConfigureRequest {
-    // Database creation flags
-
     // If true, initialize a new database (only valid on first use of cluster)
     optional bool new_database = 1;
 
-    // If true, enables testing storage server configuration
-    optional bool tss = 2;
+    // If true, skip safety checks (dangerous - use with caution)
+    optional bool force = 2;
 
     // Redundancy mode determines how many copies of data are maintained
     // and what failure scenarios the cluster can survive.
@@ -190,40 +188,55 @@ message ConfigureRequest {
 
     // Process role counts control how many processes are assigned to each role.
     // -1 means restore to the default value for the current cluster size.
+    message RoleCounts {
+        // Number of transaction log processes
+        optional int32 logs = 1;
 
-    // Number of transaction log processes
-    optional int32 logs = 5;
+        // Number of commit proxy processes (handle transaction commits)
+        optional int32 commit_proxies = 2;
 
-    // Number of commit proxy processes (handle transaction commits)
-    optional int32 commit_proxies = 6;
+        // Number of GRV (GetReadVersion) proxy processes (handle read version requests)
+        optional int32 grv_proxies = 3;
 
-    // Number of GRV (GetReadVersion) proxy processes (handle read version requests)
-    optional int32 grv_proxies = 7;
-
-    // Number of resolver processes (handle transaction conflicts)
-    optional int32 resolvers = 8;
-
-    // Perpetual storage wiggle settings control automatic storage server replacement
-    // to proactively detect hardware issues
-
-    // Enables automatic cycling of storage servers
-    optional bool perpetual_storage_wiggle = 9;
-
-    // Locality filter for wiggle: "locality_key:locality_value" or "0" to disable filtering
-    optional string perpetual_storage_wiggle_locality = 10;
-
-    // Storage engine type to wiggle (optional filter)
-    optional string perpetual_storage_wiggle_engine = 11;
-
-    // Storage migration controls how data moves between different storage types
-    enum StorageMigrationType {
-        UNSET_MIGRATION = 0;      // No change to migration type
-        DISABLED = 1;             // Disable storage migration
-        GRADUAL = 2;              // Gradually migrate data
-        AGGRESSIVE = 3;           // Aggressively migrate data
+        // Number of resolver processes (handle transaction conflicts)
+        optional int32 resolvers = 4;
     }
-    // How to handle storage migration when changing storage engines
-    optional StorageMigrationType storage_migration_type = 12;
+    optional RoleCounts roles_counts = 5;
+
+    // List of addresses to exclude during recruitment (format: "ip" or "ip:port")
+    repeated string exclude_addresses = 6;
+
+    // Testing Storage Server configuration.
+    message TssConfig {
+        // If true, enables testing storage server configuration
+        optional bool enable_tss = 1;
+
+        // Number of testing storage servers to maintain
+        optional int32 tss_count = 2;
+    }
+    optional TssConfig tss_config = 7;
+
+    // Perpetual storage wiggle settings control automatic storage server replacement.
+    message PerpetualStorageWiggleConfig {
+        // Enables automatic cycling of storage servers
+        optional bool enable = 1;
+
+        // Locality filter for wiggle: "locality_key:locality_value" or "0" to disable filtering
+        optional string locality_filter = 2;
+
+        // Storage engine type to wiggle (optional filter)
+        optional StorageEngine storage_engine = 3;
+
+        // Storage migration controls how data moves between different storage types
+        enum StorageMigrationType {
+            UNSET_MIGRATION = 0;      // No change to migration type
+            DISABLED = 1;             // Disable storage migration
+            GRADUAL = 2;              // Gradually migrate data
+            AGGRESSIVE = 3;           // Aggressively migrate data
+        }
+        optional StorageMigrationType storage_migration_type = 4;
+    }
+    optional PerpetualStorageWiggleConfig perpetual_storage_wiggle_config = 8;
 
     // Encryption at rest settings control how data is encrypted on disk
     enum EncryptionAtRestMode {
@@ -232,20 +245,7 @@ message ConfigureRequest {
         CLUSTER_AWARE = 2;        // Cluster-wide encryption
     }
     // Encryption at rest mode for the database
-    optional EncryptionAtRestMode encryption_at_rest_mode = 13;
-
-    // Other database features
-
-    // List of addresses to exclude during recruitment (format: "ip" or "ip:port")
-    repeated string exclude_addresses = 14;
-
-    // Number of testing storage servers to maintain
-    optional int32 tss_count = 15;
-
-    // Control flags
-
-    // If true, skip safety checks (dangerous - use with caution)
-    optional bool force = 16;
+    optional EncryptionAtRestMode encryption_at_rest_mode = 9;
 }
 
 // Response to a database configuration request.
@@ -387,13 +387,16 @@ message ExcludeStatusReply {
 }
 
 // Request to kill (terminate) worker processes.
-// This is a forceful operation that immediately stops processes.
+// This is a forceful operation that stops processes (immediately or after a duration).
 message KillRequest {
     // If true, kill all workers (requires extreme caution)
     optional bool all = 1;
 
     // List of specific worker addresses to kill (format: "ip:port")
     repeated string addresses = 2;
+
+    // Duration in seconds to suspend the worker before killing it.
+    optional int32 duration_seconds = 3;
 }
 
 // Response to a kill operation.
