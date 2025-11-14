@@ -903,7 +903,9 @@ void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest re
 }
 
 void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest const& req) {
-	req.reply.send(Void());
+	++self->registerMasterRequests;
+	// inlined calling, thus no need to reply here
+	// req.reply.send(Void());
 
 	TraceEvent("MasterRegistrationReceived", self->id)
 	    .detail("MasterId", req.id)
@@ -2883,8 +2885,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			TraceEvent("CoordinationPingSent", self.id).detail("TimeStep", message.timeStep);
 		}
 		when(RegisterMasterRequest req = waitNext(interf.registerMaster.getFuture())) {
-			++self.registerMasterRequests;
-			clusterRegisterMaster(&self, req);
+			ASSERT(false); // Deprecated RPC
 		}
 		when(UpdateWorkerHealthRequest req = waitNext(interf.updateWorkerHealth.getFuture())) {
 			if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
