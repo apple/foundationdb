@@ -231,12 +231,11 @@ ACTOR Future<Void> recruitSingleLogRouter(ClusterControllerData* cluster,
                                           LogSystemConfig config) {
 	state Tag routerTag = Tag(tagLocalityLogRouter, logRouterTagId);
 
-	TraceEvent("RecruitingLogRouter", cluster->id)
-	    .detail("LogSetIndex", logSetIndex)
-	    .detail("Tag", routerTag);
+	TraceEvent("RecruitingLogRouter", cluster->id).detail("LogSetIndex", logSetIndex).detail("Tag", routerTag);
 
 	// Recruit a worker for the new log router
-	state Optional<Key> targetDcId = db->recoveryData->remoteDcIds.size() ? db->recoveryData->remoteDcIds[0] : Optional<Key>();
+	state Optional<Key> targetDcId =
+	    db->recoveryData->remoteDcIds.size() ? db->recoveryData->remoteDcIds[0] : Optional<Key>();
 
 	state std::vector<WorkerDetails> workers;
 	for (auto const& [id, worker] : cluster->id_worker) {
@@ -246,7 +245,8 @@ ACTOR Future<Void> recruitSingleLogRouter(ClusterControllerData* cluster,
 			correctDc = locality.dcId().present() && locality.dcId().get() == targetDcId.get();
 		}
 
-		if (correctDc && !db->config.isExcludedServer(worker.details.interf.addresses(), worker.details.interf.locality) &&
+		if (correctDc &&
+		    !db->config.isExcludedServer(worker.details.interf.addresses(), worker.details.interf.locality) &&
 		    worker.details.processClass.machineClassFitness(ProcessClass::LogRouter) < ProcessClass::NeverAssign) {
 			workers.push_back(worker.details);
 		}
@@ -292,11 +292,10 @@ ACTOR Future<Void> recruitSingleLogRouter(ClusterControllerData* cluster,
 
 	req.allowDropInSim = false;
 
-	state TLogInterface logRouterInterf = wait(transformErrors(
-	    throwErrorOr(worker.logRouter.getReplyUnlessFailedFor(req,
-	                                                           SERVER_KNOBS->TLOG_TIMEOUT,
-	                                                           SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-	    recruitment_failed()));
+	state TLogInterface logRouterInterf =
+	    wait(transformErrors(throwErrorOr(worker.logRouter.getReplyUnlessFailedFor(
+	                             req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+	                         recruitment_failed()));
 
 	TraceEvent("LogRouterRecruited", cluster->id)
 	    .detail("Tag", routerTag)
@@ -319,7 +318,7 @@ ACTOR Future<Void> recruitSingleLogRouter(ClusterControllerData* cluster,
 
 ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 	// Wait until fully recovered
-	while (self->db.serverInfo->get().recoveryState <= RecoveryState::FULLY_RECOVERED) {
+	while (self->db.serverInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
 		wait(self->db.serverInfo->onChange());
 	}
 
@@ -342,7 +341,7 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 		return Void();
 	}
 
-	TraceEvent("StartMonitoringLogRouters", self->id)
+	TraceEvent("LogRouterMonitoringStart", self->id)
 	    .detail("LogSetIndex", logSetIndex)
 	    .detail("LogRouterCount", config.tLogs[logSetIndex].logRouters.size())
 	    .detail("IsLocal", config.tLogs[logSetIndex].isLocal)
@@ -370,13 +369,13 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 		for (int i = 0; i < config.tLogs[logSetIndex].logRouters.size(); i++) {
 			ASSERT(config.tLogs[logSetIndex].logRouters[i].present());
 			auto& logRouter = config.tLogs[logSetIndex].logRouters[i];
-			failures.push_back(waitFailureClient(logRouter.interf().waitFailure,
-													SERVER_KNOBS->TLOG_TIMEOUT,
-													-SERVER_KNOBS->TLOG_TIMEOUT /
-														SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-													/*trace=*/true));
+			failures.push_back(
+			    waitFailureClient(logRouter.interf().waitFailure,
+			                      SERVER_KNOBS->TLOG_TIMEOUT,
+			                      -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+			                      /*trace=*/true));
 
-			TraceEvent("MonitoringLogRouter", self->id).detail("TagId", i).detail("RouterID", logRouter.interf().id());
+			TraceEvent("LogRouterMonitoring", self->id).detail("TagId", i).detail("RouterID", logRouter.interf().id());
 		}
 
 		// Wait for any log router to fail
@@ -389,9 +388,7 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 		for (int i = 0; i < failures.size(); i++) {
 			if (failures[i].isReady() || failures[i].isError()) {
 				failedTagIds.push_back(i);
-				TraceEvent(SevWarn, "IdentifiedFailedLogRouter", self->id)
-					.detail("TagId", i)
-					.detail("LogSetIndex", logSetIndex);
+				TraceEvent(SevWarn, "LogRouterMonitoringFoundFailed", self->id).detail("TagId", i);
 			}
 		}
 
@@ -402,10 +399,10 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 			try {
 				wait(recruitSingleLogRouter(self, &self->db, tagId, logSetIndex, logSystem, newConfig));
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "LogRouterRecruitmentFailed", self->id)
-					.error(e)
-					.detail("TagId", tagId)
-					.detail("LogSetIndex", logSetIndex);
+				TraceEvent(SevWarn, "LogRouterMonitoringRecruitmentFailed", self->id)
+				    .error(e)
+				    .detail("TagId", tagId)
+				    .detail("LogSetIndex", logSetIndex);
 			}
 		}
 

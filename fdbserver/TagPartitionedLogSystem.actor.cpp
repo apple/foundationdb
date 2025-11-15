@@ -488,17 +488,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 			for (auto& t : it->logRouters) {
 				// Don't monitor current generation log routers for failures - just monitor for changes
 				// They can be re-recruited by cluster controller without triggering recovery
-				if (t->get().present()) {
-					// logRouters can be empty during recovery
-					failed.push_back(waitFailureClient(t->get().interf().waitFailure,
-					                                   /* failureReactionTime */ SERVER_KNOBS->TLOG_TIMEOUT,
-					                                   /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
-					                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-					                                   /* trace */ true,
-					                                   /* traceMsg */ "LogRouterFailed"_sr));
-				} else {
-					changes.push_back(t->onChange());
-				}
+				changes.push_back(t->onChange());
 			}
 			for (const auto& worker : it->backupWorkers) {
 				if (worker->get().present()) {

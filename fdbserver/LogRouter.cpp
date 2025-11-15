@@ -872,6 +872,7 @@ Future<Void> logRouter(TLogInterface interf,
                        Reference<AsyncVar<ServerDBInfo> const> db) {
 	try {
 		TraceEvent("LogRouterStart", interf.id())
+		    .detail("Epoch", req.recoveryCount)
 		    .detail("Start", req.startVersion)
 		    .detail("Tag", req.routerTag.toString())
 		    .detail("Localities", req.tLogLocalities.size())
@@ -894,7 +895,7 @@ Future<Void> logRouter(TLogInterface interf,
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
-			TraceEvent("LogRouterTerminated", interf.id()).errorUnsuppressed(e);
+			TraceEvent("LogRouterTerminated", interf.id()).errorUnsuppressed(e).detail("Epoch", req.recoveryCount);
 			co_return;
 		}
 		throw;
