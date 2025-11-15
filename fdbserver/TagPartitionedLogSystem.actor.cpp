@@ -1728,16 +1728,8 @@ Future<Version> TagPartitionedLogSystem::getTxsPoppedVersion() {
 }
 
 void TagPartitionedLogSystem::updateLogRouter(int logSetIndex, int tagId, TLogInterface const& newLogRouter) {
-	if (logSetIndex < 0 || logSetIndex >= tLogs.size()) {
-		TraceEvent(SevWarn, "UpdateLogRouterInvalidIndex", dbgid)
-		    .detail("LogSetIndex", logSetIndex)
-		    .detail("TotalLogSets", tLogs.size());
-		return;
-	}
-
+	ASSERT(tagId >= 0 && tagId < tLogs[logSetIndex]->logRouters.size());
 	auto& logSet = tLogs[logSetIndex];
-
-	ASSERT(tagId >= 0 && tagId < logSet->logRouters.size());
 
 	logSet->logRouters[tagId]->set(OptionalInterface<TLogInterface>(newLogRouter));
 	logSystemConfigChanged.trigger();
