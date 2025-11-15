@@ -93,6 +93,10 @@ function backup {
     cmd_args+=("--encryption-key-file" "${local_encryption_key_file}")
   fi
 
+  if [[ "${USE_PARTITIONED_LOG}" == "true" ]]; then
+    cmd_args+=("--partitioned-log-experimental")
+  fi
+
   for knob in "${KNOBS[@]}"; do
     cmd_args+=("${knob}")
   done
@@ -352,6 +356,7 @@ set -o noclobber
 
 # Parse command line arguments
 USE_ENCRYPTION=false
+USE_PARTITIONED_LOG=$(((RANDOM % 2)) && echo true || echo false )
 PARAMS=()
 
 while (( "$#" )); do
@@ -362,6 +367,14 @@ while (( "$#" )); do
       ;;
     --encrypt-at-random)
       USE_ENCRYPTION=$(((RANDOM % 2)) && echo true || echo false )
+      shift
+      ;;
+    --partitioned-log-experimental)
+      USE_PARTITIONED_LOG=true
+      shift
+      ;;
+    --partitioned-log-experimental-at-random)
+      USE_PARTITIONED_LOG=$(((RANDOM % 2)) && echo true || echo false )
       shift
       ;;
     -*|--*=) # unsupported flags
@@ -479,6 +492,7 @@ else
   log "Using plaintext for backups"
 fi
 readonly ENCRYPTION_KEY_FILE
+readonly USE_PARTITIONED_LOG
 
 # Set host, bucket, and blob_credentials_file whether MockS3Server or s3.
 readonly path_prefix="ctests"

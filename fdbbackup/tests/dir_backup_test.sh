@@ -17,6 +17,9 @@ set -o noclobber
 # Globals that get set below and are used when we cleanup.
 SCRATCH_DIR=
 readonly TAG="test_backup"
+USE_PARTITIONED_LOG=$(((RANDOM % 2)) && echo true || echo false )
+USE_ENCRYPTION=$(((RANDOM % 2)) && echo true || echo false )
+ENCRYPTION_KEY_FILE=
 
 # Install signal traps. Calls the cleanup function.
 trap "exit 1" HUP INT PIPE QUIT TERM
@@ -27,6 +30,10 @@ function cleanup {
   shutdown_fdb_cluster
   if [[ -d "${SCRATCH_DIR}" ]]; then
     rm -rf "${SCRATCH_DIR}"
+  fi
+  # Clean up encryption key file
+  if [[ -n "${ENCRYPTION_KEY_FILE:-}" ]] && [[ -f "${ENCRYPTION_KEY_FILE}" ]]; then
+    rm -f "${ENCRYPTION_KEY_FILE}"
   fi
 }
 
@@ -43,18 +50,38 @@ function resolve_to_absolute_path {
   realpath "${p}"
 }
 
+function create_encryption_key_file {
+  local key_file="${1}"
+  log "Creating encryption key file at ${key_file}"
+  dd if=/dev/urandom bs=32 count=1 of="${key_file}" 2>/dev/null
+  chmod 600 "${key_file}"
+}
+
 # Run the fdbbackup command.
 # $1 The build directory so we can find bin/fdbbackup command.
 # $2 The scratch directory where the fdb.cluster file can be found.
+# $3 encryption key file (optional)
 function backup {
   local local_build_dir="${1}"
   local scratch_dir="${2}"
-  if ! "${local_build_dir}"/bin/fdbbackup start \
-    -C "${scratch_dir}/loopback_cluster/fdb.cluster" \
-    -t "${TAG}" -w \
-    -d "file://${scratch_dir}/backups" \
-    --log --logdir="${scratch_dir}"
-  then
+  local local_encryption_key_file="${3:-}"
+
+  local cmd_args=(
+    "-C" "${scratch_dir}/loopback_cluster/fdb.cluster"
+    "-t" "${TAG}" "-w"
+    "-d" "file://${scratch_dir}/backups"
+    "--log" "--logdir=${scratch_dir}"
+  )
+
+  if [[ -n "${local_encryption_key_file}" ]]; then
+    cmd_args+=("--encryption-key-file" "${local_encryption_key_file}")
+  fi
+
+  if [[ "${USE_PARTITIONED_LOG}" == "true" ]]; then
+    cmd_args+=("--partitioned-log-experimental")
+  fi
+
+  if ! "${local_build_dir}"/bin/fdbbackup start "${cmd_args[@]}"; then
     err "Start fdbbackup failed"
     return 1
   fi
@@ -63,9 +90,12 @@ function backup {
 # Run the fdbrestore command.
 # $1 The build directory
 # $2 The scratch directory
+# $3 encryption key file (optional)
 function restore {
   local local_build_dir="${1}"
   local scratch_dir="${2}"
+  local local_encryption_key_file="${3:-}"
+
   # Find the most recent backup. See here for why:
   # https://forums.foundationdb.org/t/restoring-a-completed-backup-version-results-in-an-error/1845
   if ! backup=$(ls -dt "${scratch_dir}"/backups/backup-* | head -1 ); then
@@ -76,12 +106,19 @@ function restore {
     err "Failed to get basename"
     return 1
   fi
-  if ! "${local_build_dir}"/bin/fdbrestore start \
-    --dest-cluster-file "${scratch_dir}/loopback_cluster/fdb.cluster" \
-    -t "${TAG}" -w \
-    -r "file://${scratch_dir}/backups/${backup_name}" \
-    --log --logdir="${scratch_dir}"
-  then
+
+  local cmd_args=(
+    "--dest-cluster-file" "${scratch_dir}/loopback_cluster/fdb.cluster"
+    "-t" "${TAG}" "-w"
+    "-r" "file://${scratch_dir}/backups/${backup_name}"
+    "--log" "--logdir=${scratch_dir}"
+  )
+
+  if [[ -n "${local_encryption_key_file}" ]]; then
+    cmd_args+=("--encryption-key-file" "${local_encryption_key_file}")
+  fi
+
+  if ! "${local_build_dir}"/bin/fdbrestore start "${cmd_args[@]}"; then
     err "Start fdbrestore failed"
     return 1
   fi
@@ -90,9 +127,12 @@ function restore {
 # Run a backup to the fs and then a restore.
 # $1 build directory
 # $2 the scratch directory
+# $3 encryption key file (optional)
 function test_dir_backup_and_restore {
   local local_build_dir="${1}"
   local scratch_dir="${2}"
+  local local_encryption_key_file="${3:-}"
+
   log "Load data"
   # Just do a few keys.
   if ! load_data "${local_build_dir}" "${scratch_dir}"; then
@@ -100,7 +140,7 @@ function test_dir_backup_and_restore {
     return 1
   fi
   log "Run backup"
-  if ! backup "${local_build_dir}" "${scratch_dir}"; then
+  if ! backup "${local_build_dir}" "${scratch_dir}" "${local_encryption_key_file}"; then
     err "Failed backup"
     return 1
   fi
@@ -110,7 +150,7 @@ function test_dir_backup_and_restore {
     return 1
   fi
   log "Restore"
-  if ! restore "${local_build_dir}" "${scratch_dir}"; then
+  if ! restore "${local_build_dir}" "${scratch_dir}" "${local_encryption_key_file}"; then
     err "Failed restore"
     return 1
   fi
@@ -182,6 +222,16 @@ fi
 SCRATCH_DIR=$(resolve_to_absolute_path "${tmpdir}")
 readonly SCRATCH_DIR
 
+# Create encryption key file if needed
+if [[ "${USE_ENCRYPTION}" == "true" ]]; then
+  ENCRYPTION_KEY_FILE="${SCRATCH_DIR}/test_encryption_key_file"
+  create_encryption_key_file "${ENCRYPTION_KEY_FILE}"
+fi
+
+readonly USE_PARTITIONED_LOG
+readonly USE_ENCRYPTION
+readonly ENCRYPTION_KEY_FILE
+
 # Startup fdb cluster and backup agent.
 if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${SCRATCH_DIR}" 1; then
   err "Failed start FDB cluster"
@@ -195,5 +245,5 @@ fi
 log "Backup_agent is up"
 
 # Run tests.
-test_dir_backup_and_restore "${build_dir}" "${SCRATCH_DIR}"
+test_dir_backup_and_restore "${build_dir}" "${SCRATCH_DIR}" "${ENCRYPTION_KEY_FILE}"
 log_test_result $? "test_dir_backup_and_restore"
