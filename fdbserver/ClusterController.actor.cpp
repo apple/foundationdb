@@ -223,95 +223,105 @@ bool ClusterControllerData::remoteTransactionSystemContainsDegradedServers() {
 	return false;
 }
 
-ACTOR Future<Void> recruitSingleLogRouter(ClusterControllerData* cluster,
-                                          ClusterControllerData::DBInfo* db,
-                                          int logRouterTagId,
-                                          int logSetIndex,
-                                          Reference<ILogSystem> logSystem,
-                                          LogSystemConfig config) {
-	state Tag routerTag = Tag(tagLocalityLogRouter, logRouterTagId);
-
-	TraceEvent("RecruitingLogRouter", cluster->id).detail("LogSetIndex", logSetIndex).detail("Tag", routerTag);
-
-	// Recruit a worker for the new log router
+// Recruit failed log routers in parallel
+ACTOR Future<Void> recruitLogRouters(ClusterControllerData* cluster,
+                                     ClusterControllerData::DBInfo* db,
+                                     std::vector<int> tagIds,
+                                     int logSetIndex,
+                                     Reference<ILogSystem> logSystem,
+                                     LogSystemConfig config) {
 	state Optional<Key> targetDcId =
 	    db->recoveryData->remoteDcIds.size() ? db->recoveryData->remoteDcIds[0] : Optional<Key>();
 
-	state std::vector<WorkerDetails> workers;
-	for (auto const& [id, worker] : cluster->id_worker) {
-		bool correctDc = false;
-		if (targetDcId.present() && cluster->addr_locality.count(worker.details.interf.address())) {
-			auto& locality = cluster->addr_locality.at(worker.details.interf.address());
-			correctDc = locality.dcId().present() && locality.dcId().get() == targetDcId.get();
-		}
+	// Use getWorkersForRoleInDatacenter to get workers for all log routers at once
+	std::map<Optional<Standalone<StringRef>>, int> id_used;
+	cluster->updateKnownIds(&id_used);
 
-		if (correctDc &&
-		    !db->config.isExcludedServer(worker.details.interf.addresses(), worker.details.interf.locality) &&
-		    worker.details.processClass.machineClassFitness(ProcessClass::LogRouter) < ProcessClass::NeverAssign) {
-			workers.push_back(worker.details);
-		}
-	}
+	state std::vector<WorkerDetails> workers =
+	    cluster->getWorkersForRoleInDatacenter(targetDcId, ProcessClass::LogRouter, tagIds.size(), db->config, id_used);
 
-	if (workers.empty()) {
-		TraceEvent(SevWarn, "NoWorkersForLogRouter", cluster->id)
-		    .detail("TagId", logRouterTagId)
+	if (workers.size() < tagIds.size()) {
+		TraceEvent(SevWarn, "NotEnoughWorkersForLogRouters", cluster->id)
+		    .detail("Required", tagIds.size())
+		    .detail("Available", workers.size())
 		    .detail("TargetDcId", targetDcId);
 		throw recruitment_failed();
 	}
 
-	state WorkerInterface worker = workers[deterministicRandom()->randomInt(0, workers.size())].interf;
-
-	TraceEvent("RecruitingLogRouterOnWorker", cluster->id)
-	    .detail("WorkerID", worker.id())
-	    .detail("Tag", routerTag)
+	TraceEvent("RecruitingLogRouters", cluster->id)
+	    .detail("Count", tagIds.size())
+	    .detail("LogSetIndex", logSetIndex)
 	    .detail("TargetDcId", targetDcId);
 
-	// Initialize the log router
-	state InitializeLogRouterRequest req;
-	req.reqId = deterministicRandom()->randomUniqueID();
-	req.recoveryCount = db->recoveryData->cstate.myDBState.recoveryCount;
-	req.routerTag = routerTag;
-	req.startVersion = 0; // The peek cursor will automatically adjust to the actual popped version on TLogs
-	req.locality = config.tLogs[logSetIndex].locality;
-	req.isReplacement = true;
+	// Build requests for all log routers and send them in parallel
+	state std::vector<Future<ErrorOr<TLogInterface>>> recruitments;
 
-	for (auto& tLogSet : config.tLogs) {
-		if (!tLogSet.isLocal && tLogSet.tLogs.size() > 0) {
-			req.tLogLocalities = tLogSet.tLogLocalities;
-			req.tLogPolicy = tLogSet.tLogPolicy;
-			break;
+	for (int i = 0; i < tagIds.size(); i++) {
+		Tag routerTag = Tag(tagLocalityLogRouter, tagIds[i]);
+		InitializeLogRouterRequest req;
+		req.reqId = deterministicRandom()->randomUniqueID();
+		req.recoveryCount = db->recoveryData->cstate.myDBState.recoveryCount;
+		req.routerTag = routerTag;
+		req.startVersion = 0; // The peek cursor will automatically adjust to the actual popped version on TLogs
+		req.locality = config.tLogs[logSetIndex].locality;
+		req.isReplacement = true;
+
+		for (auto& tLogSet : config.tLogs) {
+			if (!tLogSet.isLocal && tLogSet.tLogs.size() > 0) {
+				req.tLogLocalities = tLogSet.tLogLocalities;
+				req.tLogPolicy = tLogSet.tLogPolicy;
+				break;
+			}
 		}
+
+		if (db->recoveryData->logSystem.isValid()) {
+			auto lsConfig = db->recoveryData->logSystem->getLogSystemConfig();
+			if (lsConfig.recoveredAt.present()) {
+				req.recoverAt = lsConfig.recoveredAt.get();
+			}
+		}
+
+		req.allowDropInSim = false;
+
+		TraceEvent("RecruitingLogRouterOnWorker", cluster->id)
+		    .detail("WorkerID", workers[i].interf.id())
+		    .detail("Tag", routerTag)
+		    .detail("TagId", tagIds[i]);
+
+		recruitments.push_back(workers[i].interf.logRouter.getReplyUnlessFailedFor(
+		    req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY));
 	}
 
-	if (db->recoveryData->logSystem.isValid()) {
-		auto lsConfig = db->recoveryData->logSystem->getLogSystemConfig();
-		if (lsConfig.recoveredAt.present()) {
-			req.recoverAt = lsConfig.recoveredAt.get();
+	// Wait for all recruitments to complete
+	wait(waitForAll(recruitments));
+
+	// Update all successfully recruited log routers
+	for (int i = 0; i < recruitments.size(); i++) {
+		ErrorOr<TLogInterface> result = recruitments[i].get();
+		if (result.isError()) {
+			TraceEvent(SevWarn, "LogRouterRecruitmentFailed", cluster->id)
+			    .error(result.getError())
+			    .detail("TagId", tagIds[i]);
+			throw recruitment_failed();
 		}
+
+		TLogInterface logRouterInterf = result.get();
+		Tag routerTag = Tag(tagLocalityLogRouter, tagIds[i]);
+
+		TraceEvent("LogRouterRecruited", cluster->id)
+		    .detail("Tag", routerTag)
+		    .detail("LogRouterID", logRouterInterf.id())
+		    .detail("WorkerID", workers[i].interf.id())
+		    .detail("LogSetIndex", logSetIndex);
+
+		// Update the log system configuration
+		logSystem->updateLogRouter(logSetIndex, tagIds[i], logRouterInterf);
 	}
-
-	req.allowDropInSim = false;
-
-	state TLogInterface logRouterInterf =
-	    wait(transformErrors(throwErrorOr(worker.logRouter.getReplyUnlessFailedFor(
-	                             req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-	                         recruitment_failed()));
-
-	TraceEvent("LogRouterRecruited", cluster->id)
-	    .detail("Tag", routerTag)
-	    .detail("LogRouterID", logRouterInterf.id())
-	    .detail("WorkerID", worker.id())
-	    .detail("LogSetIndex", logSetIndex);
-
-	// Update the log system configuration
-	logSystem->updateLogRouter(logSetIndex, logRouterTagId, logRouterInterf);
 
 	// Trigger registration update to propagate to ServerDBInfo
 	db->recoveryData->registrationTrigger.trigger();
 
-	TraceEvent("LogRouterRecruitmentComplete", cluster->id)
-	    .detail("Tag", routerTag)
-	    .detail("LogRouterID", logRouterInterf.id());
+	TraceEvent("LogRoutersRecruitmentComplete", cluster->id).detail("Count", tagIds.size());
 
 	return Void();
 }
@@ -412,16 +422,14 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 				}
 			}
 
-			// Re-recruit all failed log routers
-			state int tagIdIndex = 0;
-			for (; tagIdIndex < failedTagIds.size(); tagIdIndex++) {
-				state int tagId = failedTagIds[tagIdIndex];
+			// Re-recruit all failed log routers in parallel
+			if (!failedTagIds.empty()) {
 				try {
-					wait(recruitSingleLogRouter(self, &self->db, tagId, logSetIndex, logSystem, newConfig));
+					wait(recruitLogRouters(self, &self->db, failedTagIds, logSetIndex, logSystem, newConfig));
 				} catch (Error& e) {
-					TraceEvent(SevWarn, "LogRouterMonitoringRecruitmentFailed", self->id)
+					TraceEvent(SevWarn, "LogRoutersRecruitmentFailed", self->id)
 					    .error(e)
-					    .detail("TagId", tagId)
+					    .detail("FailedCount", failedTagIds.size())
 					    .detail("LogSetIndex", logSetIndex);
 				}
 			}
