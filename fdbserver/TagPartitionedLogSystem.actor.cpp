@@ -469,6 +469,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 	// Never returns normally, but throws an error if the subsystem stops working
 	loop {
 		std::vector<Future<Void>> failed;
+		std::vector<Future<Void>> routerFailed;
 		std::vector<Future<Void>> backupFailed(1, Never());
 		std::vector<Future<Void>> changes;
 
@@ -486,9 +487,16 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 				}
 			}
 			for (auto& t : it->logRouters) {
-				// Don't monitor current generation log routers for failures - just monitor for changes
-				// They can be re-recruited by cluster controller without triggering recovery
-				changes.push_back(t->onChange());
+				if (t->get().present()) {
+					routerFailed.push_back(waitFailureClient(t->get().interf().waitFailure,
+					                                         /* failureReactionTime */ SERVER_KNOBS->TLOG_TIMEOUT,
+					                                         /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
+					                                             SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+					                                         /* trace */ true,
+					                                         /* traceMsg */ "LogRouterFailed"_sr));
+				} else {
+					changes.push_back(t->onChange());
+				}
 			}
 			for (const auto& worker : it->backupWorkers) {
 				if (worker->get().present()) {
@@ -505,6 +513,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		}
 
 		if (!self->recoveryCompleteWrittenToCoreState.get()) {
+			failed.insert(failed.end(), routerFailed.begin(), routerFailed.end());
 			for (auto& old : self->oldLogData) {
 				for (auto& it : old.tLogs) {
 					for (auto& t : it->logRouters) {
@@ -536,6 +545,10 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 				}
 			}
 		}
+
+		// Don't monitor current generation log routers after full recovery.
+		// They are monitored and recruited by monitorAndRecruitLogRouters().
+		routerFailed.clear();
 
 		if (self->hasRemoteServers && (!self->remoteRecovery.isReady() || self->remoteRecovery.isError())) {
 			changes.push_back(self->remoteRecovery);
