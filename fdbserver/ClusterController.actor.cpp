@@ -317,109 +317,119 @@ ACTOR Future<Void> recruitSingleLogRouter(ClusterControllerData* cluster,
 }
 
 ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
-
-	// Wait until fully recovered
-	while (self->db.serverInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
-		wait(self->db.serverInfo->onChange());
-	}
-
-	ASSERT(self->db.recoveryData.isValid());
-	state uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
-	state Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
-	state LogSystemConfig config = logSystem->getLogSystemConfig();
-
-	// Find the log set with log routers (should be remote/satellite)
-	state int logSetIndex = -1;
-
-	for (int i = 0; i < config.tLogs.size(); i++) {
-		if (config.tLogs[i].logRouters.size() > 0) {
-			logSetIndex = i;
-			break;
-		}
-	}
-
-	if (logSetIndex == -1) {
-		TraceEvent("NoLogRoutersToMonitor", self->id).log();
-		return Void();
-	}
-
-	TraceEvent("LogRouterMonitoringStart", self->id)
-	    .detail("LogSetIndex", logSetIndex)
-	    .detail("LogRouterCount", config.tLogs[logSetIndex].logRouters.size())
-	    .detail("IsLocal", config.tLogs[logSetIndex].isLocal)
-	    .detail("Locality", config.tLogs[logSetIndex].locality)
-	    .detail("RecoveryCount", recoveryCount);
-
 	loop {
-		// Check if recovery changed - if so, exit and let a new monitor start
-		if (!self->db.recoveryData.isValid() || !self->db.recoveryData->logSystem.isValid() ||
-		    self->db.serverInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED ||
-		    self->db.recoveryData->cstate.myDBState.recoveryCount != recoveryCount) {
-			TraceEvent("LogRouterMonitoringEnded", self->id)
-			    .detail("Reason", "RecoveryChanged")
-			    .detail("OldRecoveryCount", recoveryCount)
-			    .detail("NewRecoveryCount",
-			            self->db.recoveryData.isValid() ? self->db.recoveryData->cstate.myDBState.recoveryCount : -1);
-			return Void();
+		// Wait until fully recovered
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
+			wait(self->db.serverInfo->onChange());
 		}
 
-		// Build list of failure monitors for all log routers
-		state std::vector<Future<Void>> failures;
+		ASSERT(self->db.recoveryData.isValid());
+		state uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
+		state Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
+		state LogSystemConfig config = logSystem->getLogSystemConfig();
 
-		config = logSystem->getLogSystemConfig();
+		// Find the log set with log routers (should be remote/satellite)
+		state int logSetIndex = -1;
 
-		ASSERT(config.tLogs[logSetIndex].logRouters.size() > 0);
-		for (int i = 0; i < config.tLogs[logSetIndex].logRouters.size(); i++) {
-			ASSERT(config.tLogs[logSetIndex].logRouters[i].present());
-			auto& logRouter = config.tLogs[logSetIndex].logRouters[i];
-			failures.push_back(
-			    waitFailureClient(logRouter.interf().waitFailure,
-			                      SERVER_KNOBS->TLOG_TIMEOUT,
-			                      -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-			                      /*trace=*/true));
-
-			TraceEvent("LogRouterMonitoring", self->id).detail("TagId", i).detail("RouterID", logRouter.interf().id());
-		}
-
-		// Wait for any log router to fail OR recovery to change
-		choose {
-			when(wait(quorum(failures, 1))) {
-				// Log router failed, continue to handle it
-			}
-			when(wait(self->db.serverInfo->onChange())) {
-				// Recovery state changed, loop back to check if we should exit
-				continue;
+		for (int i = 0; i < config.tLogs.size(); i++) {
+			if (config.tLogs[i].logRouters.size() > 0) {
+				logSetIndex = i;
+				break;
 			}
 		}
 
-		// Find which log routers failed and re-recruit them
-		state std::vector<int> failedTagIds;
-		state LogSystemConfig newConfig = logSystem->getLogSystemConfig();
-
-		for (int i = 0; i < failures.size(); i++) {
-			if (failures[i].isReady() || failures[i].isError()) {
-				failedTagIds.push_back(i);
-				TraceEvent(SevWarn, "LogRouterMonitoringFoundFailed", self->id).detail("TagId", i);
+		if (logSetIndex == -1) {
+			TraceEvent("NoLogRoutersToMonitor", self->id).detail("RecoveryCount", recoveryCount).log();
+			// Wait for recovery to change before trying again
+			while (self->db.serverInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
+			       self->db.recoveryData.isValid() &&
+			       self->db.recoveryData->cstate.myDBState.recoveryCount == recoveryCount) {
+				wait(self->db.serverInfo->onChange());
 			}
+			continue;
 		}
 
-		// Re-recruit all failed log routers
-		state int tagIdIndex = 0;
-		for (; tagIdIndex < failedTagIds.size(); tagIdIndex++) {
-			state int tagId = failedTagIds[tagIdIndex];
-			try {
-				wait(recruitSingleLogRouter(self, &self->db, tagId, logSetIndex, logSystem, newConfig));
-			} catch (Error& e) {
-				TraceEvent(SevWarn, "LogRouterMonitoringRecruitmentFailed", self->id)
-				    .error(e)
-				    .detail("TagId", tagId)
-				    .detail("LogSetIndex", logSetIndex);
-			}
-		}
+		TraceEvent("LogRouterMonitoringStart", self->id)
+		    .detail("LogSetIndex", logSetIndex)
+		    .detail("LogRouterCount", config.tLogs[logSetIndex].logRouters.size())
+		    .detail("IsLocal", config.tLogs[logSetIndex].isLocal)
+		    .detail("Locality", config.tLogs[logSetIndex].locality)
+		    .detail("RecoveryCount", recoveryCount);
 
-		// Wait a bit before restarting monitoring
-		wait(delay(1.0));
-	}
+		loop {
+			// Check if recovery changed - if so, exit inner loop and restart monitoring for new recovery
+			if (!self->db.recoveryData.isValid() || !self->db.recoveryData->logSystem.isValid() ||
+			    self->db.serverInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED ||
+			    self->db.recoveryData->cstate.myDBState.recoveryCount != recoveryCount) {
+				TraceEvent("LogRouterMonitoringEnded", self->id)
+				    .detail("Reason", "RecoveryChanged")
+				    .detail("OldRecoveryCount", recoveryCount)
+				    .detail("NewRecoveryCount",
+				            self->db.recoveryData.isValid() ? self->db.recoveryData->cstate.myDBState.recoveryCount
+				                                            : -1);
+				break; // Break inner loop, will restart monitoring for new recovery
+			}
+
+			// Build list of failure monitors for all log routers
+			state std::vector<Future<Void>> failures;
+
+			config = logSystem->getLogSystemConfig();
+
+			ASSERT(config.tLogs[logSetIndex].logRouters.size() > 0);
+			for (int i = 0; i < config.tLogs[logSetIndex].logRouters.size(); i++) {
+				ASSERT(config.tLogs[logSetIndex].logRouters[i].present());
+				auto& logRouter = config.tLogs[logSetIndex].logRouters[i];
+				failures.push_back(
+				    waitFailureClient(logRouter.interf().waitFailure,
+				                      SERVER_KNOBS->TLOG_TIMEOUT,
+				                      -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+				                      /*trace=*/true));
+
+				TraceEvent("LogRouterMonitoring", self->id)
+				    .detail("TagId", i)
+				    .detail("RouterID", logRouter.interf().id());
+			}
+
+			// Wait for any log router to fail OR recovery to change
+			choose {
+				when(wait(quorum(failures, 1))) {
+					// Log router failed, continue to handle it
+				}
+				when(wait(self->db.serverInfo->onChange())) {
+					// Recovery state changed, loop back to check if we should exit
+					continue;
+				}
+			}
+
+			// Find which log routers failed and re-recruit them
+			state std::vector<int> failedTagIds;
+			state LogSystemConfig newConfig = logSystem->getLogSystemConfig();
+
+			for (int i = 0; i < failures.size(); i++) {
+				if (failures[i].isReady() || failures[i].isError()) {
+					failedTagIds.push_back(i);
+					TraceEvent(SevWarn, "LogRouterMonitoringFoundFailed", self->id).detail("TagId", i);
+				}
+			}
+
+			// Re-recruit all failed log routers
+			state int tagIdIndex = 0;
+			for (; tagIdIndex < failedTagIds.size(); tagIdIndex++) {
+				state int tagId = failedTagIds[tagIdIndex];
+				try {
+					wait(recruitSingleLogRouter(self, &self->db, tagId, logSetIndex, logSystem, newConfig));
+				} catch (Error& e) {
+					TraceEvent(SevWarn, "LogRouterMonitoringRecruitmentFailed", self->id)
+					    .error(e)
+					    .detail("TagId", tagId)
+					    .detail("LogSetIndex", logSetIndex);
+				}
+			}
+
+			// Wait a bit before restarting monitoring
+			wait(delay(1.0));
+		} // End of inner loop (monitoring this recovery)
+	} // End of outer loop (restart for each recovery)
 }
 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
