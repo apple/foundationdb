@@ -1873,7 +1873,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	throw internal_error();
 }
 
-ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self, bool exThrown) {
+ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self) {
 	if (self.isValid()) {
 		wait(delay(0.0));
 
