@@ -330,6 +330,150 @@ ACTOR Future<Void> recruitLogRouters(ClusterControllerData* cluster,
 	return Void();
 }
 
+// Recruit failed backup workers in parallel
+ACTOR Future<Void> recruitBackupWorkers(ClusterControllerData* cluster,
+                                         ClusterControllerData::DBInfo* db,
+                                         std::vector<std::pair<int, LogEpoch>> tagIdEpochs,
+                                         Reference<ILogSystem> logSystem,
+                                         LogSystemConfig config,
+                                         Database cx) {
+	// Get workers for all backup workers at once
+	std::map<Optional<Standalone<StringRef>>, int> id_used;
+	cluster->updateKnownIds(&id_used);
+
+	state std::vector<WorkerDetails> workers = cluster->getWorkersForRoleInDatacenter(
+	    cluster->clusterControllerDcId, ProcessClass::Backup, tagIdEpochs.size(), db->config, id_used);
+
+	if (workers.size() < tagIdEpochs.size()) {
+		TraceEvent(SevWarn, "NotEnoughWorkersForBackupWorkers", cluster->id)
+		    .detail("Required", tagIdEpochs.size())
+		    .detail("Available", workers.size());
+		throw recruitment_failed();
+	}
+
+	// Get saved backup progress from database to determine start versions
+	state Reference<BackupProgress> backupProgress(
+	    new BackupProgress(cluster->id, logSystem->getOldEpochTagsVersionsInfo()));
+	wait(getBackupProgress(cx, cluster->id, backupProgress, /*logging=*/false));
+
+	// Get unfinished backup work which includes epoch end versions
+	state std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> unfinishedBackup =
+	    backupProgress->getUnfinishedBackup();
+
+	TraceEvent("RecruitingBackupWorkers", cluster->id)
+	    .detail("Count", tagIdEpochs.size())
+	    .detail("RecoveryCount", db->recoveryData->cstate.myDBState.recoveryCount);
+
+	// Build requests for all backup workers and send them in parallel
+	state std::vector<Future<ErrorOr<InitializeBackupReply>>> recruitments;
+
+	for (int i = 0; i < tagIdEpochs.size(); i++) {
+		int tagId = tagIdEpochs[i].first;
+		LogEpoch backupEpoch = tagIdEpochs[i].second;
+		Tag backupTag = Tag(tagLocalityLogRouter, tagId);
+
+		InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
+		req.recruitedEpoch = db->recoveryData->cstate.myDBState.recoveryCount;
+		req.backupEpoch = backupEpoch;
+		req.routerTag = backupTag;
+		req.totalTags = config.logRouterTags;
+
+		// Find the backup work info for this epoch to get start and end versions
+		bool foundWork = false;
+		for (const auto& [epochVersionTags, tagVersions] : unfinishedBackup) {
+			LogEpoch epoch = std::get<0>(epochVersionTags);
+			Version epochEnd = std::get<1>(epochVersionTags);
+
+			if (epoch == backupEpoch) {
+				auto it = tagVersions.find(backupTag);
+				if (it != tagVersions.end()) {
+					// Resume from saved version + 1
+					req.startVersion = it->second + 1;
+					foundWork = true;
+					TraceEvent("BackupWorkerResumingFromSavedVersion", cluster->id)
+					    .detail("Tag", backupTag)
+					    .detail("Epoch", backupEpoch)
+					    .detail("SavedVersion", it->second)
+					    .detail("StartVersion", req.startVersion);
+				}
+
+				// Set end version if not current epoch
+				if (backupEpoch != db->recoveryData->cstate.myDBState.recoveryCount) {
+					req.endVersion = epochEnd - 1;
+				}
+				break;
+			}
+		}
+
+		if (!foundWork) {
+			// No saved progress found for this tag, start from epoch begin
+			// This can happen for newly failed workers in current epoch
+			auto epochStatus = backupProgress->getEpochStatus(backupEpoch);
+			auto it = epochStatus.find(backupTag);
+			if (it != epochStatus.end()) {
+				req.startVersion = it->second + 1;
+			} else {
+				// Start from the beginning of the current epoch
+				req.startVersion = logSystem->getLogSystemConfig().tLogs.size() > 0
+				                       ? logSystem->getLogSystemConfig().tLogs[0].startVersion
+				                       : 0;
+			}
+			TraceEvent("BackupWorkerStartingFromDefault", cluster->id)
+			    .detail("Tag", backupTag)
+			    .detail("Epoch", backupEpoch)
+			    .detail("StartVersion", req.startVersion);
+		}
+
+		TraceEvent("RecruitingBackupWorkerOnWorker", cluster->id)
+		    .detail("WorkerID", workers[i].interf.id())
+		    .detail("Tag", backupTag)
+		    .detail("TagId", tagId)
+		    .detail("Epoch", backupEpoch)
+		    .detail("StartVersion", req.startVersion)
+		    .detail("EndVersion", req.endVersion.present() ? req.endVersion.get() : -1);
+
+		recruitments.push_back(workers[i].interf.backup.getReplyUnlessFailedFor(
+		    req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY));
+	}
+
+	// Wait for all recruitments to complete
+	wait(waitForAll(recruitments));
+
+	// Update all successfully recruited backup workers
+	state std::vector<InitializeBackupReply> newRecruits;
+	for (int i = 0; i < recruitments.size(); i++) {
+		ErrorOr<InitializeBackupReply> result = recruitments[i].get();
+		if (result.isError()) {
+			TraceEvent(SevWarn, "BackupWorkerRecruitmentFailed", cluster->id)
+			    .error(result.getError())
+			    .detail("TagId", tagIdEpochs[i].first)
+			    .detail("Epoch", tagIdEpochs[i].second);
+			throw recruitment_failed();
+		}
+
+		InitializeBackupReply reply = result.get();
+		Tag backupTag = Tag(tagLocalityLogRouter, tagIdEpochs[i].first);
+
+		TraceEvent("BackupWorkerRecruited", cluster->id)
+		    .detail("Tag", backupTag)
+		    .detail("BackupWorkerID", reply.interf.id())
+		    .detail("WorkerID", workers[i].interf.id())
+		    .detail("Epoch", tagIdEpochs[i].second);
+
+		newRecruits.push_back(reply);
+	}
+
+	// Update the log system with newly recruited backup workers
+	logSystem->setBackupWorkers(newRecruits);
+
+	// Trigger registration update to propagate to ServerDBInfo
+	db->recoveryData->registrationTrigger.trigger();
+
+	TraceEvent("BackupWorkersRecruitmentComplete", cluster->id).detail("Count", tagIdEpochs.size());
+
+	return Void();
+}
+
 ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 	loop {
 		// Wait until fully recovered
@@ -434,6 +578,140 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 					TraceEvent(SevWarn, "LogRoutersRecruitmentFailed", self->id)
 					    .error(e)
 					    .detail("FailedCount", failedTagIds.size())
+					    .detail("LogSetIndex", logSetIndex);
+				}
+			}
+
+			// Wait a bit before restarting monitoring
+			wait(delay(1.0));
+		} // End of inner loop (monitoring this recovery)
+	} // End of outer loop (restart for each recovery)
+}
+
+ACTOR Future<Void> monitorAndRecruitBackupWorkers(ClusterControllerData* self) {
+	loop {
+		// Wait until fully recovered
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
+			wait(self->db.serverInfo->onChange());
+		}
+
+		ASSERT(self->db.recoveryData.isValid());
+		state uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
+		state Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
+		state LogSystemConfig config = logSystem->getLogSystemConfig();
+		state Database cx = openDBOnServer(self->db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+
+		// Find the log set with backup workers (should be the first local log set)
+		state int logSetIndex = -1;
+
+		for (int i = 0; i < config.tLogs.size(); i++) {
+			if (config.tLogs[i].isLocal && config.tLogs[i].backupWorkers.size() > 0) {
+				logSetIndex = i;
+				break;
+			}
+		}
+
+		if (logSetIndex == -1) {
+			TraceEvent("NoBackupWorkersToMonitor", self->id).detail("RecoveryCount", recoveryCount).log();
+			// Wait for recovery to change before trying again
+			while (self->db.serverInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
+			       self->db.recoveryData.isValid() &&
+			       self->db.recoveryData->cstate.myDBState.recoveryCount == recoveryCount) {
+				wait(self->db.serverInfo->onChange());
+			}
+			continue;
+		}
+
+		TraceEvent("BackupWorkerMonitoringStart", self->id)
+		    .detail("LogSetIndex", logSetIndex)
+		    .detail("BackupWorkerCount", config.tLogs[logSetIndex].backupWorkers.size())
+		    .detail("RecoveryCount", recoveryCount);
+
+		loop {
+			// Check if recovery changed - if so, exit inner loop and restart monitoring for new recovery
+			if (!self->db.recoveryData.isValid() || !self->db.recoveryData->logSystem.isValid() ||
+			    self->db.serverInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED ||
+			    self->db.recoveryData->cstate.myDBState.recoveryCount != recoveryCount) {
+				TraceEvent("BackupWorkerMonitoringEnded", self->id)
+				    .detail("Reason", "RecoveryChanged")
+				    .detail("OldRecoveryCount", recoveryCount)
+				    .detail("NewRecoveryCount",
+				            self->db.recoveryData.isValid() ? self->db.recoveryData->cstate.myDBState.recoveryCount
+				                                            : -1);
+				break; // Break inner loop, will restart monitoring for new recovery
+			}
+
+			// Build list of failure monitors for all backup workers
+			state std::vector<Future<Void>> failures;
+			state std::vector<std::pair<int, LogEpoch>> backupWorkerInfo; // tagId, epoch
+
+			config = logSystem->getLogSystemConfig();
+
+			if (config.tLogs[logSetIndex].backupWorkers.size() == 0) {
+				// No backup workers in current epoch, wait for change
+				wait(self->db.serverInfo->onChange());
+				continue;
+			}
+
+			for (int i = 0; i < config.tLogs[logSetIndex].backupWorkers.size(); i++) {
+				if (!config.tLogs[logSetIndex].backupWorkers[i].present()) {
+					// Backup worker not present, skip
+					continue;
+				}
+				auto& backupWorker = config.tLogs[logSetIndex].backupWorkers[i];
+				failures.push_back(
+				    waitFailureClient(backupWorker.interf().waitFailure,
+				                      SERVER_KNOBS->BACKUP_TIMEOUT,
+				                      -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+				                      /*trace=*/true));
+
+				// Store tag id and epoch for this backup worker
+				backupWorkerInfo.emplace_back(i, recoveryCount);
+
+				TraceEvent("BackupWorkerMonitoring", self->id)
+				    .detail("TagId", i)
+				    .detail("WorkerID", backupWorker.interf().id());
+			}
+
+			if (failures.empty()) {
+				// No backup workers to monitor, wait for change
+				wait(self->db.serverInfo->onChange());
+				continue;
+			}
+
+			// Wait for any backup worker to fail OR recovery to change
+			choose {
+				when(wait(quorum(failures, 1))) {
+					// Backup worker failed, continue to handle it
+				}
+				when(wait(self->db.serverInfo->onChange())) {
+					// Recovery state changed, loop back to check if we should exit
+					continue;
+				}
+			}
+
+			// Find which backup workers failed and re-recruit them
+			state std::vector<std::pair<int, LogEpoch>> failedBackupWorkers;
+			state LogSystemConfig newConfig = logSystem->getLogSystemConfig();
+
+			for (int i = 0; i < failures.size(); i++) {
+				if (failures[i].isReady() || failures[i].isError()) {
+					failedBackupWorkers.push_back(backupWorkerInfo[i]);
+					TraceEvent(SevWarn, "BackupWorkerMonitoringFoundFailed", self->id)
+					    .detail("TagId", backupWorkerInfo[i].first)
+					    .detail("Epoch", backupWorkerInfo[i].second);
+				}
+			}
+
+			// Re-recruit all failed backup workers in parallel
+			if (!failedBackupWorkers.empty()) {
+				try {
+					wait(recruitBackupWorkers(
+					    self, &self->db, failedBackupWorkers, logSystem, newConfig, cx));
+				} catch (Error& e) {
+					TraceEvent(SevWarn, "BackupWorkersRecruitmentFailed", self->id)
+					    .error(e)
+					    .detail("FailedCount", failedBackupWorkers.size())
 					    .detail("LogSetIndex", logSetIndex);
 				}
 			}
@@ -3041,6 +3319,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 	// Start monitoring log routers for re-recruitment
 	self.addActor.send(monitorAndRecruitLogRouters(&self));
+
+	// Start monitoring backup workers for re-recruitment
+	self.addActor.send(monitorAndRecruitBackupWorkers(&self));
 
 	loop choose {
 		when(ErrorOr<Void> err = wait(error)) {
