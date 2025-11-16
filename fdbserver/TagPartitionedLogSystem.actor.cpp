@@ -498,18 +498,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 					changes.push_back(t->onChange());
 				}
 			}
-			for (const auto& worker : it->backupWorkers) {
-				if (worker->get().present()) {
-					backupFailed.push_back(waitFailureClient(worker->get().interf().waitFailure,
-					                                         /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
-					                                         /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
-					                                             SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-					                                         /* trace */ true,
-					                                         /* traceMsg */ "BackupWorkerFailed"_sr));
-				} else {
-					changes.push_back(worker->onChange());
-				}
-			}
 		}
 
 		if (!self->recoveryCompleteWrittenToCoreState.get()) {
@@ -528,20 +516,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 						} else {
 							changes.push_back(t->onChange());
 						}
-					}
-				}
-				// Monitor changes of backup workers for old epochs.
-				for (const auto& worker : old.tLogs[0]->backupWorkers) {
-					if (worker->get().present()) {
-						backupFailed.push_back(
-						    waitFailureClient(worker->get().interf().waitFailure,
-						                      /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
-						                      /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
-						                          SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-						                      /* trace */ true,
-						                      /* traceMsg */ "OldBackupWorkerFailed"_sr));
-					} else {
-						changes.push_back(worker->onChange());
 					}
 				}
 			}
@@ -564,8 +538,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 
 		ASSERT(failed.size() >= 1);
 		wait(quorum(changes, 1) ||
-		     tagError<Void>(traceAfter(quorum(failed, 1), "TPLSOnErrorLogSystemFailed"), tlog_failed()) ||
-		     tagError<Void>(traceAfter(quorum(backupFailed, 1), "TPLSOnErrorBackupFailed"), backup_worker_failed()));
+		     tagError<Void>(traceAfter(quorum(failed, 1), "TPLSOnErrorLogSystemFailed"), tlog_failed()));
 	}
 }
 

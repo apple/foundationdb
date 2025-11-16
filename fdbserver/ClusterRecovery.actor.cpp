@@ -1865,9 +1865,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(changeCoordinators(self));
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	self->addActor.send(configurationMonitor(self, cx));
-	if (self->configuration.backupWorkerEnabled) {
-		self->addActor.send(recruitBackupWorkers(self, cx));
-	} else {
+	if (!self->configuration.backupWorkerEnabled) {
 		self->logSystem->setOldestBackupEpoch(self->cstate.myDBState.recoveryCount);
 	}
 
