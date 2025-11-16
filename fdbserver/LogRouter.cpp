@@ -392,8 +392,11 @@ Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Refe
 		    .When(logSystemChanged,
 		          [&](const Void&) {
 			          if (logSystem->get()) {
+				          // For replacement log routers (startVersion == 0), don't use recoverAt as the end
+				          // parameter because it would clamp the popped version we read from the cursor
+				          Optional<Version> endVer = (startVersion == 0) ? Optional<Version>() : recoverAt;
 				          result = logSystem->get()->peekLogRouter(
-				              dbgid, beginVersion, routerTag, useSatellite, recoverAt, knownLockedTLogIds);
+				              dbgid, beginVersion, routerTag, useSatellite, endVer, knownLockedTLogIds);
 				          primaryPeekLocation = result->getPrimaryPeekLocation();
 				          TraceEvent("LogRouterPeekLocation", dbgid)
 				              .detail("LogID", result->getPrimaryPeekLocation())
@@ -409,8 +412,11 @@ Future<Reference<ILogSystem::IPeekCursor>> LogRouterData::getPeekCursorData(Refe
 			          CODE_PROBE(true, "Detect log router slow peeks");
 			          TraceEvent(SevWarnAlways, "LogRouterSlowPeek", dbgid).detail("NextTrySatellite", !useSatellite);
 			          useSatellite = !useSatellite;
+			          // For replacement log routers (startVersion == 0), don't use recoverAt as the end
+			          // parameter because it would clamp the popped version we read from the cursor
+			          Optional<Version> endVer = (startVersion == 0) ? Optional<Version>() : recoverAt;
 			          result = logSystem->get()->peekLogRouter(
-			              dbgid, beginVersion, routerTag, useSatellite, recoverAt, knownLockedTLogIds);
+			              dbgid, beginVersion, routerTag, useSatellite, endVer, knownLockedTLogIds);
 			          primaryPeekLocation = result->getPrimaryPeekLocation();
 			          TraceEvent("LogRouterPeekLocation", dbgid)
 			              .detail("LogID", result->getPrimaryPeekLocation())
@@ -435,10 +441,29 @@ Future<Void> LogRouterData::pullAsyncData() {
 	Version lastVer = 0;
 	std::vector<int> tags; // an optimization to avoid reallocating vector memory in every loop
 
+	bool isReplaced = startVersion == 0; // replacement log router
+
 	while (true) {
 		r = co_await getPeekCursorData(r, tagAt);
 
 		minKnownCommittedVersion = std::max(minKnownCommittedVersion, r->getMinKnownCommittedVersion());
+
+		// For replacement log routers, use the popped version as the actual start,
+		// which is returned by the peek cursor automatically if peeking below it.
+		if (isReplaced) {
+			Version poppedVer = r->popped();
+			if (poppedVer > version.get()) {
+				TraceEvent("LogRouterReplacementStartVersion", dbgid)
+				    .detail("InitialVersion", version.get())
+				    .detail("PoppedVersion", poppedVer)
+				    .detail("CursorVersion", r->version().version)
+				    .detail("RouterTag", routerTag.toString());
+				tagAt = poppedVer + 1;
+				version.set(poppedVer);
+				continue;
+			}
+			isReplaced = false;
+		}
 
 		Version ver = 0;
 		std::vector<TagsAndMessage> messages;
@@ -449,6 +474,11 @@ Future<Void> LogRouterData::pullAsyncData() {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
 					co_await waitForVersionAndLog(ver);
+					TraceEvent("LogRouterPullData")
+					    .detail("FromVersion", lastVer)
+					    .detail("OrigVersion", version.get())
+					    .detail("ToVersion", ver)
+					    .detail("MessageCount", messages.size());
 
 					commitMessages(ver, messages);
 					version.set(ver);

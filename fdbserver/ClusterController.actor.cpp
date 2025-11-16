@@ -248,6 +248,8 @@ ACTOR Future<Void> recruitLogRouters(ClusterControllerData* cluster,
 		throw recruitment_failed();
 	}
 
+	// Replacement log routers will determine their own start version by querying
+	// the popped version from the peek cursor in LogRouter.cpp
 	TraceEvent("RecruitingLogRouters", cluster->id)
 	    .detail("Count", tagIds.size())
 	    .detail("LogSetIndex", logSetIndex)
@@ -262,7 +264,9 @@ ACTOR Future<Void> recruitLogRouters(ClusterControllerData* cluster,
 		req.reqId = deterministicRandom()->randomUniqueID();
 		req.recoveryCount = db->recoveryData->cstate.myDBState.recoveryCount;
 		req.routerTag = routerTag;
-		req.startVersion = 0; // The peek cursor will automatically adjust to the actual popped version on TLogs
+		// Start at version 0 - the log router will determine the actual start version
+		// by querying the popped version from the peek cursor
+		req.startVersion = 0;
 		req.locality = config.tLogs[logSetIndex].locality;
 		req.isReplacement = true;
 
