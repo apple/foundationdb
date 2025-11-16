@@ -3121,8 +3121,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					Future<Void> logRouterProcess = logRouter(recruited, req, dbInfo);
 					logRouterProcess = logRouterCache.removeOnReady(req.reqId, logRouterProcess);
 					errorForwarders.add(
-					    zombie(recruited,
-					           forwardError(errors, Role::LOG_ROUTER, recruited.id(), logRouterProcess)));
+					    zombie(recruited, forwardError(errors, Role::LOG_ROUTER, recruited.id(), logRouterProcess)));
 
 					TraceEvent("LogRouterInitRequest", req.reqId).detail("LogRouterId", recruited.id());
 					if (!skipInitRspInSim(interf.id(), req.allowDropInSim)) {
