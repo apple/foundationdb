@@ -332,11 +332,11 @@ ACTOR Future<Void> recruitLogRouters(ClusterControllerData* cluster,
 
 // Recruit failed backup workers in parallel
 ACTOR Future<Void> recruitBackupWorkers(ClusterControllerData* cluster,
-                                         ClusterControllerData::DBInfo* db,
-                                         std::vector<std::pair<int, LogEpoch>> tagIdEpochs,
-                                         Reference<ILogSystem> logSystem,
-                                         LogSystemConfig config,
-                                         Database cx) {
+                                        ClusterControllerData::DBInfo* db,
+                                        std::vector<std::pair<int, LogEpoch>> tagIdEpochs,
+                                        Reference<ILogSystem> logSystem,
+                                        LogSystemConfig config,
+                                        Database cx) {
 	// Get workers for all backup workers at once
 	std::map<Optional<Standalone<StringRef>>, int> id_used;
 	cluster->updateKnownIds(&id_used);
@@ -706,8 +706,7 @@ ACTOR Future<Void> monitorAndRecruitBackupWorkers(ClusterControllerData* self) {
 			// Re-recruit all failed backup workers in parallel
 			if (!failedBackupWorkers.empty()) {
 				try {
-					wait(recruitBackupWorkers(
-					    self, &self->db, failedBackupWorkers, logSystem, newConfig, cx));
+					wait(recruitBackupWorkers(self, &self->db, failedBackupWorkers, logSystem, newConfig, cx));
 				} catch (Error& e) {
 					TraceEvent(SevWarn, "BackupWorkersRecruitmentFailed", self->id)
 					    .error(e)
@@ -830,7 +829,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			}
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(db->recoveryData, /*exThrown=*/false));
+			wait(cleanupRecoveryActorCollection(db->recoveryData));
 			ASSERT(addActor.isEmpty());
 
 			wait(spinDelay);
@@ -844,7 +843,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				wait(delay(0.0));
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(db->recoveryData, /*exThrown=*/true));
+			wait(cleanupRecoveryActorCollection(db->recoveryData));
 			ASSERT(addActor.isEmpty());
 			if (cluster->outstandingRemoteRequestChecker.isValid()) {
 				cluster->outstandingRemoteRequestChecker.cancel();
