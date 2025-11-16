@@ -24,6 +24,7 @@ package directory
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
@@ -43,13 +44,19 @@ func (n *node) exists() bool {
 	return true
 }
 
-func (n *node) prefetchMetadata(rtr fdb.ReadTransaction) *node {
+// prefetchMetadata will make sure that layer information starts being prefetched.
+// If subspace is nil, this is a no-op and returns false.
+// Caller is responsible for closing the future used to fetch layer information.
+func (n *node) prefetchMetadata(rtr fdb.ReadTransaction) (*node, bool) {
 	if n.exists() {
 		n.layer(rtr)
+		return n, true
 	}
-	return n
+	return n, false
 }
 
+// layer will start a future to fetch layer information, unless one already exists.
+// Caller is responsible for properly closing this future.
 func (n *node) layer(rtr fdb.ReadTransaction) fdb.FutureByteSlice {
 	if n._layer == nil {
 		fv := rtr.Get(n.subspace.Sub([]byte("layer")))
@@ -59,16 +66,16 @@ func (n *node) layer(rtr fdb.ReadTransaction) fdb.FutureByteSlice {
 	return n._layer
 }
 
-func (n *node) isInPartition(tr *fdb.Transaction, includeEmptySubpath bool) bool {
-	return n.exists() && bytes.Compare(n._layer.MustGet(), []byte("partition")) == 0 && (includeEmptySubpath || len(n.targetPath) > len(n.path))
+func (n *node) isInPartition(ctx context.Context, tr *fdb.Transaction, includeEmptySubpath bool) bool {
+	return n.exists() && bytes.Compare(n._layer.MustGet(ctx), []byte("partition")) == 0 && (includeEmptySubpath || len(n.targetPath) > len(n.path))
 }
 
 func (n *node) getPartitionSubpath() []string {
 	return n.targetPath[len(n.path):]
 }
 
-func (n *node) getContents(dl directoryLayer, tr *fdb.Transaction) (DirectorySubspace, error) {
-	l, err := n._layer.Get()
+func (n *node) getContents(ctx context.Context, dl directoryLayer, tr *fdb.Transaction) (DirectorySubspace, error) {
+	l, err := n._layer.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
