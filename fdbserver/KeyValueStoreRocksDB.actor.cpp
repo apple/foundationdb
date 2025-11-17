@@ -1161,6 +1161,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 
 	state std::vector<std::pair<const char*, std::string>> strPropertyStats = {
 		{ "LevelStats", rocksdb::DB::Properties::kLevelStats },
+		{ "BlockCacheEntryStats", rocksdb::DB::Properties::kBlockCacheEntryStats },
 	};
 
 	state std::vector<std::pair<const char*, std::string>> levelStrPropertyStats = {
