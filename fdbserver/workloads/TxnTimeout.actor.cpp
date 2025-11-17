@@ -98,6 +98,13 @@ struct TxnTimeout : TestWorkload {
 	// Disable all failure injection to ensure clean timeout behavior testing
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
+	// Generates a consistent key format for the workload
+	// Format: "txntimeout_c{clientId}_a{actorIdx}_n{nodeIdx}"
+	// This ensures the same key is used during populate and transaction phases
+	static std::string makeKey(int clientId, int actorIdx, int nodeIdx) {
+		return std::format("txntimeout_c{}_a{}_n{}", clientId, actorIdx, nodeIdx);
+	}
+
 	// Initializes the database with test data for each actor to operate on
 	// Each actor creates nodeCountPerClientPerActor keys initialized to value "0"
 	ACTOR static Future<Void> populateDatabase(TxnTimeout* self, Database db, int actorIdx) {
@@ -107,7 +114,7 @@ struct TxnTimeout : TestWorkload {
 			loop {
 				try {
 					// Generate unique key per client/actor/node combination
-					state std::string key = std::format("txntimeout_c{}_a{}_n{}", self->clientId, actorIdx, nodeIdx);
+					state std::string key = makeKey(self->clientId, actorIdx, nodeIdx);
 					tr.set(StringRef(key), "0"_sr);
 					wait(tr.commit());
 					break;
@@ -183,7 +190,7 @@ struct TxnTimeout : TestWorkload {
 			loop {
 				try {
 					// Generate the same key pattern as in populate phase
-					state std::string key = std::format("txntimeout_c{}_a{}_n{}", self->clientId, actorIdx, nodeIdx);
+					state std::string key = makeKey(self->clientId, actorIdx, nodeIdx);
 
 					// Get read version and read the current value
 					state double readStartTime = now();
