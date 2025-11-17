@@ -263,28 +263,11 @@ function(add_flow_target)
         endforeach()
 
         list(APPEND generated_files ${out_file})
-        if(WIN32)
-          add_custom_command(
-            OUTPUT "${out_file}"
-            COMMAND $<TARGET_FILE:actorcompiler> "${in_file}" "${out_file}"
-                    ${actor_compiler_flags}
-            DEPENDS "${in_file}" actorcompiler
-            COMMENT "Compile actor: ${src}")
-        elseif(CSHARP_USE_MONO)
-          add_custom_command(
-            OUTPUT "${out_file}"
-            COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${in_file}" "${out_file}"
-                    ${actor_compiler_flags} > /dev/null
-            DEPENDS "${in_file}" actorcompiler
-            COMMENT "Compile actor: ${src}")
-        else()
-          add_custom_command(
-            OUTPUT "${out_file}"
-            COMMAND ${actor_exe} "${in_file}" "${out_file}"
-                    ${actor_compiler_flags} > /dev/null
-            DEPENDS "${in_file}" actorcompiler
-            COMMENT "Compile actor: ${src}")
-        endif()
+        add_custom_command(OUTPUT "${out_file}"
+          COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}"
+                  ${ACTORCOMPILER_COMMAND} "${in_file}" "${out_file}" ${actor_compiler_flags}
+          DEPENDS "${in_file}" actorcompiler
+          COMMENT "Compile actor: ${src}")
       endif()
     endforeach()
     if(PASS_COMPILATION_UNIT)
