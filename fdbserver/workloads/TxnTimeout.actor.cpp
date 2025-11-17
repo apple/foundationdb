@@ -9,7 +9,7 @@
  * 1. Configures transaction lifetime via MAX_READ/WRITE_TRANSACTION_LIFE_VERSIONS knobs
  * 2. Creates transactions that perform read-modify-write operations with artificial delays
  * 3. Ensures transactions complete successfully when staying within timeout bounds
- * 4. Detects and reports any premature transaction_too_old errors
+ * 4. Detects and reports any errors
  *
  * The workload runs with failure injection disabled to ensure consistent timeout behavior
  * and verify that the timeout enforcement is working as designed without interference from
@@ -37,19 +37,19 @@ struct TxnTimeout : TestWorkload {
 	double testDuration{ 0.0 }; // Total duration of the test in seconds
 	int actorsPerClient{ 0 }; // Number of concurrent transaction actors per test client
 	int nodeCountPerClientPerActor{ 0 }; // Number of unique keys each actor operates on
-	double txnTargetDuration{ 0.0 }; // Target minimum duration for each transaction (seconds)
+	double txnMinDuration{ 0.0 }; // Target minimum duration for each transaction (seconds)
 
 	// Metrics tracked during test execution
 	int txnsTotal{ 0 }; // Total number of transactions attempted
 	int txnsSucceeded{ 0 }; // Number of transactions that completed successfully
-	int txnsFailed{ 0 }; // Number of transactions that failed with unexpected timeout errors
+	int txnsFailed{ 0 }; // Number of transactions that failed with unexpected errors
 
 	TxnTimeout(const WorkloadContext& wctx) : TestWorkload(wctx) {
 		// Parse workload configuration from TOML test definition
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		actorsPerClient = getOption(options, "actorsPerClient"_sr, 1);
 		nodeCountPerClientPerActor = getOption(options, "nodeCountPerClientPerActor"_sr, 100);
-		txnTargetDuration = getOption(options, "txnTargetDuration"_sr, 5.0);
+		txnMinDuration = getOption(options, "txnMinDuration"_sr, 5.0);
 	}
 
 	Future<Void> setup(const Database& db) override {
@@ -57,23 +57,24 @@ struct TxnTimeout : TestWorkload {
 		    .detail("TestDuration", testDuration)
 		    .detail("ActorsPerClient", actorsPerClient)
 		    .detail("NodeCountPerClientPerActor", nodeCountPerClientPerActor)
-		    .detail("TxnTargetDuration", txnTargetDuration)
+		    .detail("TxnMinDuration", txnMinDuration)
 		    .detail("MaxReadTxnLifeVersions", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
 		    .detail("MaxWriteTxnLifeVersions", SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS);
 		return Void();
 	}
 
+	static bool runTest() { return g_network->isSimulated() && !isGeneralBuggifyEnabled(); }
+
 	Future<Void> start(const Database& db) override {
-		// Only run in simulation without buggify to get deterministic timeout behavior
-		if (!g_network->isSimulated() || isGeneralBuggifyEnabled()) {
+		if (!runTest()) {
 			return Void();
 		}
+
 		return timeout(reportErrors(workload(this, db), "TxnTimeoutError"), testDuration, Void());
 	}
 
 	Future<bool> check(const Database& db) override {
-		// Skip validation if test didn't run
-		if (!g_network->isSimulated() || isGeneralBuggifyEnabled()) {
+		if (!runTest()) {
 			return true;
 		}
 
@@ -89,7 +90,6 @@ struct TxnTimeout : TestWorkload {
 			return false;
 		}
 
-		TraceEvent("TxnTimeoutCheckSuccess").detail("TxnsSucceeded", txnsSucceeded).detail("TxnsTotal", txnsTotal);
 		return true;
 	}
 
@@ -124,7 +124,7 @@ struct TxnTimeout : TestWorkload {
 		return Void();
 	}
 
-	// Runs database population in parallel for all actors
+	// Runs database population concurrently across actors and clients
 	ACTOR static Future<Void> populateDatabaseAllActors(TxnTimeout* self, Database db) {
 		state std::vector<Future<Void>> populationActors;
 		for (int actorIdx = 0; actorIdx < self->actorsPerClient; ++actorIdx) {
@@ -140,11 +140,11 @@ struct TxnTimeout : TestWorkload {
 	 *
 	 * Each transaction:
 	 * 1. Gets a read version and reads a value from the database
-	 * 2. Waits until txnTargetDuration seconds have elapsed (artificially extending the transaction)
+	 * 2. Waits until txnMinDuration seconds have elapsed (artificially extending the transaction)
 	 * 3. Writes an incremented value back
 	 * 4. Commits the transaction
 	 *
-	 * The goal is to test that transactions can stay open for txnTargetDuration seconds
+	 * The goal is to test that transactions can stay open for txnMinDuration seconds
 	 * without hitting transaction_too_old errors, as long as that duration is within
 	 * the configured MAX_*_TRANSACTION_LIFE_VERSIONS bounds.
 	 *
@@ -195,8 +195,8 @@ struct TxnTimeout : TestWorkload {
 
 					// Artificial delay to extend transaction lifetime to target duration
 					// This is the core of the test: keeping transactions open near the timeout limit
-					if (self->txnTargetDuration > readDuration) {
-						wait(delay(self->txnTargetDuration - readDuration));
+					if (self->txnMinDuration > readDuration) {
+						wait(delay(self->txnMinDuration - readDuration));
 					}
 
 					// Perform write operation (increment counter)

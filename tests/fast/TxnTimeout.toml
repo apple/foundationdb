@@ -41,10 +41,10 @@ testTitle = "TxnTimeout"
     # This ensures sufficient key space to avoid excessive conflicts
     nodeCountPerClientPerActor = 100
 
-    # Target transaction duration: 7 seconds
+    # Min transaction duration: 7 seconds
     # This is safely below the 15-second timeout limit, providing ~8 seconds of buffer
     # The test verifies that transactions can consistently stay open for this duration
-    txnTargetDuration = 7
+    txnMinDuration = 7
 
     # Background workload: Cycle provides realistic database activity
     # This ensures the timeout test runs under realistic conditions with concurrent transactions
