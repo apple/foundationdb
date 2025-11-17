@@ -685,6 +685,7 @@ struct InitializeBackupRequest {
 	int totalTags;
 	Version startVersion;
 	Optional<Version> endVersion;
+	bool isReplacement;
 	ReplyPromise<struct InitializeBackupReply> reply;
 
 	InitializeBackupRequest() = default;
@@ -692,7 +693,16 @@ struct InitializeBackupRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, recruitedEpoch, backupEpoch, routerTag, totalTags, startVersion, endVersion, reply);
+		serializer(ar,
+		           reqId,
+		           recruitedEpoch,
+		           backupEpoch,
+		           routerTag,
+		           totalTags,
+		           startVersion,
+		           endVersion,
+		           isReplacement,
+		           reply);
 	}
 };
 
