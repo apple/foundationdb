@@ -455,6 +455,7 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 }
 
 // Monitors failures of backup workers of current generation and returns their tag IDs.
+// If there is a new recovery, returns an empty vector.
 ACTOR Future<std::vector<int>> monitorBackupWorkers(ClusterControllerData* self, Reference<ILogSystem> logSystem) {
 	state std::vector<Future<Void>> failures;
 	state std::vector<int> failedTagIds;
@@ -471,7 +472,7 @@ ACTOR Future<std::vector<int>> monitorBackupWorkers(ClusterControllerData* self,
 
 	if (logSetIndex == -1) {
 		// No backup workers to monitor
-		return Never();
+		return failedTagIds;
 	}
 
 	// Current generation backup workers
@@ -488,7 +489,20 @@ ACTOR Future<std::vector<int>> monitorBackupWorkers(ClusterControllerData* self,
 		                      /*traceMsg=*/"BackupWorkerFailed"_sr));
 	}
 
-	wait(quorum(failures, 1));
+	if (failures.empty()) {
+		// No backup workers to monitor
+		return failedTagIds;
+	}
+
+	// Wait for any backup worker to fail OR recovery to change
+	choose {
+		when(wait(quorum(failures, 1))) {
+			// Backup worker failed, continue to handle it
+		}
+		when(wait(self->db.serverInfo->onChange())) {
+			return failedTagIds;
+		}
+	}
 
 	for (int i = 0; i < failures.size(); i++) {
 		if (failures[i].isReady() || failures[i].isError()) {
@@ -513,7 +527,7 @@ ACTOR Future<Void> recruitFailedBackupWorkers(ClusterControllerData* cluster,
 	    cluster->clusterControllerDcId, ProcessClass::Backup, tagIds.size(), db->config, id_used);
 
 	if (workers.size() < tagIds.size()) {
-		TraceEvent(SevWarnAlways, "NotEnoughWorkersForBackupWorkers", cluster->id)
+		TraceEvent(SevWarn, "NotEnoughWorkersForBackupWorkers", cluster->id)
 		    .detail("Required", tagIds.size())
 		    .detail("Available", workers.size());
 		throw recruitment_failed();

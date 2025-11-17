@@ -704,6 +704,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> se
 		req.routerTag = idsTags[i].second;
 		req.totalTags = logRouterTags;
 		req.startVersion = startVersion;
+		req.isReplacement = false;
 		TraceEvent("BackupRecruitment", self->dbgid)
 		    .detail("RequestID", req.reqId)
 		    .detail("Tag", req.routerTag.toString())
@@ -748,6 +749,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> se
 			req.totalTags = std::get<2>(epochVersionTags);
 			req.startVersion = version; // savedVersion + 1
 			req.endVersion = std::get<1>(epochVersionTags) - 1;
+			req.isReplacement = false;
 			TraceEvent("BackupRecruitment", self->dbgid)
 			    .detail("RequestID", req.reqId)
 			    .detail("Tag", req.routerTag.toString())
@@ -1865,7 +1867,9 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	self->addActor.send(changeCoordinators(self));
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	self->addActor.send(configurationMonitor(self, cx));
-	if (!self->configuration.backupWorkerEnabled) {
+	if (self->configuration.backupWorkerEnabled) {
+		self->addActor.send(recruitBackupWorkers(self, cx));
+	} else {
 		self->logSystem->setOldestBackupEpoch(self->cstate.myDBState.recoveryCount);
 	}
 

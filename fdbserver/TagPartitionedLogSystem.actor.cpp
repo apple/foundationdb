@@ -498,6 +498,18 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 					changes.push_back(t->onChange());
 				}
 			}
+			for (const auto& worker : it->backupWorkers) {
+				if (worker->get().present()) {
+					backupFailed.push_back(waitFailureClient(worker->get().interf().waitFailure,
+					                                         /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
+					                                         /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
+					                                             SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+					                                         /* trace */ true,
+					                                         /* traceMsg */ "BackupWorkerFailed"_sr));
+				} else {
+					changes.push_back(worker->onChange());
+				}
+			}
 		}
 
 		if (!self->recoveryCompleteWrittenToCoreState.get()) {
@@ -517,8 +529,26 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 							changes.push_back(t->onChange());
 						}
 					}
+					// Monitor changes of backup workers for old epochs.
+					for (const auto& worker : old.tLogs[0]->backupWorkers) {
+						if (worker->get().present()) {
+							backupFailed.push_back(
+							    waitFailureClient(worker->get().interf().waitFailure,
+							                      /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
+							                      /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
+							                          SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+							                      /* trace */ true,
+							                      /* traceMsg */ "OldBackupWorkerFailed"_sr));
+						} else {
+							changes.push_back(worker->onChange());
+						}
+					}
 				}
 			}
+		} else {
+			// Skip monitoring backup workers after full recovery.
+			backupFailed.clear();
+			backupFailed.push_back(Never());
 		}
 
 		if (SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_ENABLED) {
@@ -534,11 +564,11 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		}
 
 		changes.push_back(self->recoveryCompleteWrittenToCoreState.onChange());
-		changes.push_back(self->backupWorkerChanged.onTrigger());
 
 		ASSERT(failed.size() >= 1);
 		wait(quorum(changes, 1) ||
-		     tagError<Void>(traceAfter(quorum(failed, 1), "TPLSOnErrorLogSystemFailed"), tlog_failed()));
+		     tagError<Void>(traceAfter(quorum(failed, 1), "TPLSOnErrorLogSystemFailed"), tlog_failed()) ||
+		     tagError<Void>(traceAfter(quorum(backupFailed, 1), "TPLSOnErrorBackupFailed"), backup_worker_failed()));
 	}
 }
 
@@ -2021,6 +2051,27 @@ void TagPartitionedLogSystem::setBackupWorkers(const std::vector<InitializeBacku
 		TraceEvent("AddBackupWorker", dbgid).detail("Epoch", logsetEpoch).detail("BackupWorkerID", reply.interf.id());
 	}
 	TraceEvent("SetOldestBackupEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
+	backupWorkerChanged.trigger();
+}
+
+void TagPartitionedLogSystem::updateBackupWorkers(const std::vector<int>& tagIds,
+                                                  const std::vector<InitializeBackupReply>& replies) {
+	ASSERT(tLogs.size() > 0);
+
+	Reference<LogSet> logset = tLogs[0];
+
+	int i = 0;
+	for (const auto& reply : replies) {
+		const int tagId = tagIds[i];
+		i++;
+
+		ASSERT(tagId >= 0 && tagId < logset->backupWorkers.size());
+
+		auto worker = makeReference<AsyncVar<OptionalInterface<BackupInterface>>>(
+		    OptionalInterface<BackupInterface>(reply.interf));
+		logset->backupWorkers[tagId] = worker;
+		TraceEvent("UpdateBackupWorker", dbgid).detail("TagId", tagId).detail("BackupWorkerID", reply.interf.id());
+	}
 	backupWorkerChanged.trigger();
 }
 
