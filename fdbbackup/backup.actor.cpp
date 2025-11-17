@@ -3051,7 +3051,7 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 		}
 	} else {
 		if (options.encryptionKeyFile.present()) {
-			fprintf(stdinfo,
+			fprintf(stdout,
 			        " Encryption key file specified without a new destination URL."
 			        " The encryption key will not be used.\n");
 		}
