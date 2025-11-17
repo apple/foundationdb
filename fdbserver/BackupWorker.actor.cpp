@@ -1176,7 +1176,16 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch recoveryCount, BackupData* self) {
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
+                                LogEpoch recoveryCount,
+                                BackupData* self,
+                                bool isReplacement,
+                                double localRecruitmentTime) {
+	while (isReplacement && now() - localRecruitmentTime < SERVER_KNOBS->BACKUP_WORKER_REPLACEMENT_GRACE_PERIOD) {
+		// If this is a replacement log router, give grace period for ServerDBInfo to update
+		wait(delay(1.0)); // Check again in 1 second
+	}
+
 	loop {
 		bool isDisplaced =
 		    db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED;
@@ -1238,7 +1247,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 	    .detail("LogEpoch", req.recruitedEpoch)
 	    .detail("BackupEpoch", req.backupEpoch);
 	try {
-		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
+		addActor.send(checkRemoved(db, req.recruitedEpoch, &self, req.isReplacement, now()));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
 		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
 			addActor.send(monitorBackupProgress(&self));
@@ -1271,7 +1280,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 			}
 			when(wait(done)) {
 				TraceEvent("BackupWorkerDone", self.myId).detail("BackupEpoch", self.backupEpoch);
-				// Notify master so that this worker can be removed from log system, then this
+				// Notify CC so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
 				wait(brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
 				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
