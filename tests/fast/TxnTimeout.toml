@@ -4,16 +4,16 @@
 #   Validates that FoundationDB's transaction timeout mechanisms work correctly by
 #   testing that transactions can remain open for extended durations (approaching but
 #   not exceeding the configured timeout limits) without prematurely failing with
-#   transaction_too_old errors.
+#   errors.
 #
 # Test Design:
 #   - Configures transaction lifetime to 15 seconds via MAX_*_TRANSACTION_LIFE_VERSIONS knobs
 #   - Creates transactions that intentionally stay open for ~7 seconds (well within limits)
 #   - Verifies all transactions complete successfully without timeout errors
-#   - Runs with failure injection disabled for deterministic behavior
+#   - Runs with failure injection disabled for tsting the happy path
 #
 # Success Criteria:
-#   - All transactions complete successfully (no transaction_too_old errors)
+#   - All transactions complete successfully (e.g. no transaction_too_old errors)
 #   - Transactions consistently stay open for the target duration (7 seconds)
 #   - Test passes even with concurrent Cycle workload providing background load
 
@@ -34,7 +34,7 @@ testTitle = "TxnTimeout"
     testDuration = 360.0
 
     # Each test client spawns 4 concurrent transaction actors
-    # This provides parallelism to stress test the timeout mechanism
+    # This provides concurrency to stress test the timeout mechanism
     actorsPerClient = 4
 
     # Each actor operates on 100 unique keys, cycling through them

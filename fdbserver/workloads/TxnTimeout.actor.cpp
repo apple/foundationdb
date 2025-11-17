@@ -201,7 +201,7 @@ struct TxnTimeout : TestWorkload {
 					state double readDuration = now() - readStartTime;
 
 					// Artificial delay to extend transaction lifetime to target duration
-					// This is the core of the test: keeping transactions open near the timeout limit
+					// This is the core of the test: keeping transactions open longer than the usual 5 seconds
 					if (self->txnMinDuration > readDuration) {
 						wait(delay(self->txnMinDuration - readDuration));
 					}
@@ -228,13 +228,12 @@ struct TxnTimeout : TestWorkload {
 					break;
 
 				} catch (Error& e) {
-					// These errors are expected during recovery and shouldn't count as failures
 					state Error err = e;
-					state bool isExpectedRecoveryError = err.code() == error_code_future_version ||
-					                                     err.code() == error_code_commit_unknown_result ||
-					                                     err.code() == error_code_process_behind;
+					state bool isExpectedError = err.code() == error_code_future_version ||
+					                             err.code() == error_code_commit_unknown_result ||
+					                             err.code() == error_code_process_behind;
 
-					TraceEvent(isExpectedRecoveryError ? SevInfo : SevWarn, "TxnTimeoutTxnError")
+					TraceEvent(isExpectedError ? SevInfo : SevWarn, "TxnTimeoutTxnError")
 					    .detail("ClientId", self->clientId)
 					    .detail("ActorIdx", actorIdx)
 					    .detail("RecoveryState", self->dbInfo->get().recoveryState)
@@ -243,13 +242,12 @@ struct TxnTimeout : TestWorkload {
 
 					wait(tr.onError(err));
 
-					// Check if version jumped significantly (indicating recovery)
+					// Check if version jumped significantly (e.g stale read version, recovery)
 					Version newReadVersion = wait(tr.getReadVersion());
 					Version versionDelta = newReadVersion - readVersion;
-					bool isRecoveryVersionJump = versionDelta > SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+					const bool isHighVersionJump = versionDelta > SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 
-					// Only count as failure if it's not a recovery-related issue
-					if (!isExpectedRecoveryError && !isRecoveryVersionJump) {
+					if (!isExpectedError && !isHighVersionJump) {
 						self->txnsFailed++;
 						TraceEvent(SevError, "TxnTimeoutUnexpectedFailure")
 						    .detail("ClientId", self->clientId)
@@ -266,8 +264,8 @@ struct TxnTimeout : TestWorkload {
 						    .detail("OldReadVersion", readVersion)
 						    .detail("NewReadVersion", newReadVersion)
 						    .detail("VersionDelta", versionDelta)
-						    .detail("IsRecoveryError", isExpectedRecoveryError)
-						    .detail("IsVersionJump", isRecoveryVersionJump);
+						    .detail("IsExpectedError", isExpectedError)
+						    .detail("IsHighVersionJump", isHighVersionJump);
 					}
 				}
 			}
