@@ -10,7 +10,7 @@
 #   - Configures transaction lifetime to 15 seconds via MAX_*_TRANSACTION_LIFE_VERSIONS knobs
 #   - Creates transactions that intentionally stay open for ~7 seconds (well within limits)
 #   - Verifies all transactions complete successfully without timeout errors
-#   - Runs with failure injection disabled for tsting the happy path
+#   - Runs with failure injection disabled for testing the happy path
 #
 # Success Criteria:
 #   - All transactions complete successfully (e.g. no transaction_too_old errors)

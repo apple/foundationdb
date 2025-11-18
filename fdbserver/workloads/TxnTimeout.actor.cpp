@@ -101,22 +101,30 @@ struct TxnTimeout : TestWorkload {
 	// Generates a consistent key format for the workload
 	// Format: "txntimeout_c{clientId}_a{actorIdx}_n{nodeIdx}"
 	// This ensures the same key is used during populate and transaction phases
-	static std::string makeKey(int clientId, int actorIdx, int nodeIdx) {
-		return std::format("txntimeout_c{}_a{}_n{}", clientId, actorIdx, nodeIdx);
+	static Key makeKey(int clientId, int actorIdx, int nodeIdx) {
+		return Key(std::format("txntimeout_c{}_a{}_n{}", clientId, actorIdx, nodeIdx));
 	}
 
 	// Initializes the database with test data for each actor to operate on
 	// Each actor creates nodeCountPerClientPerActor keys initialized to value "0"
+	// Keys are batched into transactions for efficiency
 	ACTOR static Future<Void> populateDatabase(TxnTimeout* self, Database db, int actorIdx) {
 		state int nodeIdx = 0;
-		for (; nodeIdx < self->nodeCountPerClientPerActor; nodeIdx++) {
+		// Batch size is 1/4 of total keys, resulting in 4 batches per actor
+		state int batchSize = std::max(1, self->nodeCountPerClientPerActor / 4);
+
+		while (nodeIdx < self->nodeCountPerClientPerActor) {
 			state Transaction tr(db);
 			loop {
 				try {
-					// Generate unique key per client/actor/node combination
-					state std::string key = makeKey(self->clientId, actorIdx, nodeIdx);
-					tr.set(StringRef(key), "0"_sr);
+					// Batch up to batchSize keys in a single transaction
+					state int batchEnd = std::min(nodeIdx + batchSize, self->nodeCountPerClientPerActor);
+					for (int i = nodeIdx; i < batchEnd; i++) {
+						Key key = makeKey(self->clientId, actorIdx, i);
+						tr.set(key, "0"_sr);
+					}
 					wait(tr.commit());
+					nodeIdx = batchEnd;
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
@@ -190,14 +198,14 @@ struct TxnTimeout : TestWorkload {
 			loop {
 				try {
 					// Generate the same key pattern as in populate phase
-					state std::string key = makeKey(self->clientId, actorIdx, nodeIdx);
+					state Key key = makeKey(self->clientId, actorIdx, nodeIdx);
 
 					// Get read version and read the current value
 					state double readStartTime = now();
 					Version rv = wait(tr.getReadVersion());
 					readVersion = rv;
 
-					state Optional<Value> val = wait(tr.get(StringRef(key)));
+					state Optional<Value> val = wait(tr.get(key));
 					state double readDuration = now() - readStartTime;
 
 					// Artificial delay to extend transaction lifetime to target duration
@@ -209,7 +217,7 @@ struct TxnTimeout : TestWorkload {
 					// Perform write operation (increment counter)
 					state int currentVal = std::stoi(val.get().toString());
 					state std::string newVal = std::to_string(currentVal + 1);
-					tr.set(StringRef(key), StringRef(newVal));
+					tr.set(key, StringRef(newVal));
 
 					// Commit and measure total transaction latency
 					wait(tr.commit());
@@ -243,7 +251,8 @@ struct TxnTimeout : TestWorkload {
 					wait(tr.onError(err));
 
 					// Check if version jumped significantly (e.g stale read version, recovery)
-					Version newReadVersion = wait(tr.getReadVersion());
+					state Transaction rvTr(db);
+					Version newReadVersion = wait(rvTr.getReadVersion());
 					Version versionDelta = newReadVersion - readVersion;
 					const bool isHighVersionJump = versionDelta > SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 
