@@ -8,13 +8,10 @@ endif()
 
 
 if(WITH_ROCKSDB)
+  find_package(LZ4 REQUIRED)
   include(CompileRocksDB)
-  # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
-  # statically, so find the static library here.
-  find_library(lz4_STATIC_LIBRARIES
-    NAMES liblz4.a REQUIRED)
   if(WITH_LIBURING)
-    find_package(uring)
+    find_package(uring REQUIRED)
   endif()
 endif()
 
@@ -141,11 +138,11 @@ if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
     target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
-    target_link_libraries(fdbserver PRIVATE fdbclient sqlite ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+    target_link_libraries(fdbserver PRIVATE fdbclient sqlite ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${LZ4_LIBRARY})
     target_compile_definitions(fdbserver PRIVATE BOOST_ASIO_HAS_IO_URING=1 BOOST_ASIO_DISABLE_EPOLL=1)
   else()
     target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-    target_link_libraries(fdbserver PRIVATE fdbclient sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+    target_link_libraries(fdbserver PRIVATE fdbclient sqlite ${ROCKSDB_LIBRARIES} ${LZ4_LIBRARY})
   endif()
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient sqlite)
@@ -178,3 +175,5 @@ if(NOT OPEN_FOR_IDE)
     fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbserver DESTINATION sbin COMPONENT server)
   endif()
 endif()
+
+target_link_libraries(fdbserver PUBLIC fdbctl)

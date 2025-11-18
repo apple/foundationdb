@@ -1,0 +1,445 @@
+syntax = "proto3";
+
+package fdbctl;
+
+option go_package = "github.com/apple/foundationdb/fdbctl";
+option java_package = "com.apple.foundationdb.fdbctl";
+
+//------ RPCs ------
+
+// ControlService provides administrative and management operations for a FoundationDB cluster.
+// This service allows control over cluster configuration, coordinator management, worker lifecycle,
+// and monitoring of cluster health and status.
+service ControlService {
+    // Retrieves the current list of coordinators for the cluster.
+    rpc GetCoordinators(GetCoordinatorsRequest) returns (GetCoordinatorsReply);
+
+    // Changes the cluster's coordinators. This is a critical operation that should be
+    // performed carefully as coordinators maintain cluster configuration state.
+    rpc ChangeCoordinators(ChangeCoordinatorsRequest) returns (ChangeCoordinatorsReply);
+
+    // Suggests optimal configuration parameters based on current cluster topology.
+    rpc ConfigureAutoSuggest(ConfigureAutoSuggestRequest) returns (ConfigureAutoSuggestReply);
+
+    // Configures database settings including redundancy mode, storage engine, process counts,
+    // encryption, and other critical cluster parameters.
+    rpc Configure(ConfigureRequest) returns (ConfigureReply);
+
+    // Retrieves comprehensive cluster status including health, performance, and configuration.
+    // Docs: https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/mr-status.rst
+    rpc GetStatus(GetStatusRequest) returns (GetStatusReply);
+
+    // Retrieves the list of all worker processes in the cluster.
+    rpc GetWorkers(GetWorkersRequest) returns (GetWorkersReply);
+
+    // Re-enables previously excluded workers, allowing them to rejoin the cluster.
+    rpc Include(IncludeRequest) returns (IncludeReply);
+
+    // Excludes workers from the cluster, triggering graceful data migration away from them.
+    rpc Exclude(ExcludeRequest) returns (ExcludeReply);
+
+    // Retrieves the status of worker exclusions including in-progress migrations.
+    rpc ExcludeStatus(ExcludeStatusRequest) returns (ExcludeStatusReply);
+
+    // Forcefully terminates worker processes. Use with caution - prefer Exclude for graceful removal.
+    rpc Kill(KillRequest) returns (KillReply);
+
+    // Manages maintenance mode for zones. Maintenance mode prevents data distribution from moving
+    // data away from processes in the specified zone. A zone that is under maintenance will not
+    // have data moved away from it even if processes in that zone fail. In particular, this means
+    // the cluster will not attempt to heal the replication factor as a result of failures in the
+    // maintenance zone. This is useful when the amount of time that the processes in a fault domain
+    // are expected to be absent is reasonably short and you don’t want to move data to and from the
+    // affected processes.
+    rpc Maintenance(MaintenanceRequest) returns (MaintenanceReply);
+}
+
+//------ Messages -------
+
+// Worker represents a FoundationDB process in the cluster.
+// Workers can have different roles (storage, transaction, etc.) and are
+// identified by their network address and locality information.
+message Worker {
+    // Locality describes the physical or logical location of a worker process.
+    // These fields help FoundationDB make intelligent placement decisions for
+    // data replication and fault tolerance.
+    message Locality {
+        // unique identifier for this process
+        optional string process_id = 1;
+
+        // Zone identifier - typically represents a failure domain (e.g., rack, availability zone)
+        optional string zone_id = 2;
+
+        // Machine identifier - identifies the physical or virtual machine
+        optional string machine_id = 3;
+
+        // Datacenter identifier - identifies which datacenter this worker is in
+        optional string dc_id = 4;
+
+        // Data hall identifier - identifies which data hall within a datacenter
+        optional string data_hall_id = 5;
+    }
+
+    // Network address of the worker. This is the Flow endpoint which is primarily
+    // used to identify the worker.
+    optional string address = 1;
+
+    // gRPC address for this worker if gRPC is enabled
+    optional string grpc_address = 2;
+
+    // Process class determines the worker's role (e.g., "storage", "transaction", "stateless")
+    optional string process_class = 3;
+
+    // Locality information describing where this worker is physically/logically located
+    optional Locality locality = 4;
+}
+
+// Request to retrieve the current cluster coordinators.
+// This returns the list of processes that are currently acting as coordinators
+// for the cluster's coordination state.
+message GetCoordinatorsRequest {}
+
+// Response containing the current cluster coordinators.
+message GetCoordinatorsReply {
+    // List of coordinator addresses in the format "ip:port" or "host:port"
+    repeated string coordinators = 1;
+}
+
+// Request to change the cluster's coordinators.
+// Coordinators maintain the cluster's configuration and state. Changing them
+// is a critical operation that should be done carefully.
+message ChangeCoordinatorsRequest {
+    // Human-readable description for the cluster (e.g., cluster name)
+    optional string cluster_description = 1;
+
+    // If true, automatically selects coordinators based on the current cluster topology.
+    // When false, uses the addresses specified in new_coordinator_addresses.
+    optional bool automatic_coordinators = 2;
+
+    // List of addresses to use as new coordinators (when automatic_coordinators is false).
+    // Each address should be in the format "[ip|host]:port".
+    repeated string new_coordinator_addresses = 3;
+}
+
+// Response to a coordinator change operation.
+message ChangeCoordinatorsReply {
+    // True if the coordinators were actually changed, false if they remained the same
+    optional bool changed = 1;
+
+    // The current list of coordinator addresses after the operation
+    repeated string coordinators = 2;
+}
+
+// Request for automatic configuration suggestions.
+// Analyzes the current cluster and returns suggested configuration parameters.
+message ConfigureAutoSuggestRequest {}
+
+// Response containing suggested configuration parameters.
+message ConfigureAutoSuggestReply {
+    // Suggested configuration that can be used with the Configure RPC
+    ConfigureRequest configure_request = 1;
+}
+
+// Request to configure database settings.
+// This is one of the most critical operations for a FoundationDB cluster,
+// affecting redundancy, storage engines, process roles, and various other settings.
+message ConfigureRequest {
+    // If true, initialize a new database (only valid on first use of cluster)
+    optional bool new_database = 1;
+
+    // If true, skip safety checks (dangerous - use with caution)
+    optional bool force = 2;
+
+    // Redundancy mode determines how many copies of data are maintained
+    // and what failure scenarios the cluster can survive.
+    // Refer `replication-policy.md`
+    enum RedundancyMode {
+        UNSET_REDUNDANCY = 0;         // No change to redundancy mode
+        SINGLE = 1;                   // One copy, not fault tolerant (for testing only)
+        DOUBLE = 2;                   // Two copies, survives one failure
+        TRIPLE = 3;                   // Three copies, survives two failures
+        THREE_DATA_HALL = 4;          // Three data hall configuration , survives failure of one
+                                      // complete data hall and one additional machine in another
+                                      // data hall
+        THREE_DATA_HALL_FALLBACK = 5; // Similar to three_data_hall, differing only in that data is
+                                      // stored on two instead of three replicas. This configuration
+                                      // is useful to unblock data distribution when a data hall
+                                      // becomes temporarily unavailable
+        THREE_DATACENTER = 6;         // Three datacenter configuration for maximum availability
+    }
+    // Desired redundancy mode for the database
+    optional RedundancyMode redundancy_mode = 3;
+
+    // Storage engine determines the underlying storage technology and performance characteristics
+    // Refer `FdbTypes.h::KeyValueStoreType::StoreType`.
+    enum StorageEngine {
+        NONE = 0;                 // No change to storage engine
+        SSD_BTREE_V1 = 1;
+        SSD_BTREE_V2 = 2;
+        SSD = 3;                  // Same as SSD_BTREE_V2
+        SSD_REDWOOD_V1 = 4;
+        SSD_ROCKSDB_V1 = 5;
+        SSD_SHARDED_ROCKSDB = 6;
+        MEMORY = 7;
+        MEMORY_RADIXTREE = 8;
+    }
+    // Desired storage engine for the database
+    optional StorageEngine storage_engine = 4;
+
+    // Process role counts control how many processes are assigned to each role.
+    // -1 means restore to the default value for the current cluster size.
+    message RoleCounts {
+        // Number of transaction log processes
+        optional int32 logs = 1;
+
+        // Number of commit proxy processes (handle transaction commits)
+        optional int32 commit_proxies = 2;
+
+        // Number of GRV (GetReadVersion) proxy processes (handle read version requests)
+        optional int32 grv_proxies = 3;
+
+        // Number of resolver processes (handle transaction conflicts)
+        optional int32 resolvers = 4;
+    }
+    optional RoleCounts roles_counts = 5;
+
+    // List of addresses to exclude during recruitment (format: "ip" or "ip:port")
+    repeated string exclude_addresses = 6;
+
+    // Testing Storage Server configuration.
+    message TssConfig {
+        // If true, enables testing storage server configuration
+        optional bool enable_tss = 1;
+
+        // Number of testing storage servers to maintain
+        optional int32 tss_count = 2;
+    }
+    optional TssConfig tss_config = 7;
+
+    // Perpetual storage wiggle settings control automatic storage server replacement.
+    message PerpetualStorageWiggleConfig {
+        // Enables automatic cycling of storage servers
+        optional bool enable = 1;
+
+        // Locality filter for wiggle: "locality_key:locality_value" or "0" to disable filtering
+        optional string locality_filter = 2;
+
+        // Storage engine type to wiggle (optional filter)
+        optional StorageEngine storage_engine = 3;
+
+        // Storage migration controls how data moves between different storage types
+        enum StorageMigrationType {
+            UNSET_MIGRATION = 0;      // No change to migration type
+            DISABLED = 1;             // Disable storage migration
+            GRADUAL = 2;              // Gradually migrate data
+            AGGRESSIVE = 3;           // Aggressively migrate data
+        }
+        optional StorageMigrationType storage_migration_type = 4;
+    }
+    optional PerpetualStorageWiggleConfig perpetual_storage_wiggle_config = 8;
+
+    // Encryption at rest settings control how data is encrypted on disk
+    enum EncryptionAtRestMode {
+        UNSET_ENCRYPTION = 0;     // No change to encryption mode
+        DISABLED_ENCRYPTION = 1;  // Disable encryption at rest
+        CLUSTER_AWARE = 2;        // Cluster-wide encryption
+    }
+    // Encryption at rest mode for the database
+    optional EncryptionAtRestMode encryption_at_rest_mode = 9;
+}
+
+// Response to a database configuration request.
+message ConfigureReply {
+    // Result codes indicating the outcome of the configuration operation
+    // Refer: GenericManagementAPI.actor.h::ConfigurationResult
+    enum Result {
+        SUCCESS = 0;                                  // Configuration succeeded
+        NO_OPTIONS_PROVIDED = 1;                      // No configuration options were provided
+        CONFLICTING_OPTIONS = 2;                      // Conflicting configuration options were specified
+        UNKNOWN_OPTION = 3;                           // An unknown configuration option was provided
+        INCOMPLETE_CONFIGURATION = 4;                 // Configuration is incomplete
+        INVALID_CONFIGURATION = 5;                    // Configuration is invalid
+        STORAGE_MIGRATION_DISABLED = 6;               // Storage migration is disabled
+        DATABASE_ALREADY_CREATED = 7;                 // Database has already been created
+        DATABASE_CREATED = 8;                         // Database was newly created
+        DATABASE_UNAVAILABLE = 9;                     // Database is unavailable
+        STORAGE_IN_UNKNOWN_DCID = 10;                 // Storage servers in unknown datacenter ID
+        REGION_NOT_FULLY_REPLICATED = 11;             // Region is not fully replicated
+        MULTIPLE_ACTIVE_REGIONS = 12;                 // Multiple active regions detected
+        REGIONS_CHANGED = 13;                         // Regions configuration changed
+        NOT_ENOUGH_WORKERS = 14;                      // Not enough workers to satisfy configuration
+        REGION_REPLICATION_MISMATCH = 15;             // Region replication mismatch
+        DCID_MISSING = 16;                            // Datacenter ID is missing
+        LOCKED_NOT_NEW = 17;                          // Database is locked but not new
+        SUCCESS_WARN_PPW_GRADUAL = 18;                // Success with warning about perpetual wiggle gradual mode
+        SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL = 19; // Success with warning about experimental sharded RocksDB
+        DATABASE_IS_REGISTERED = 20;                  // Database is already registered
+        ENCRYPTION_AT_REST_MODE_ALREADY_SET = 21;     // Encryption mode is already set
+        INVALID_STORAGE_TYPE = 22;                    // Invalid storage type specified
+    }
+
+    // Result code indicating success or specific error/warning
+    Result result = 1;
+
+    // Additional human-readable details for errors or warnings
+    optional string message = 2;
+}
+
+// Request to retrieve the cluster status.
+// This provides comprehensive information about the cluster's health and state.
+message GetStatusRequest {}
+
+// Response containing the cluster status.
+message GetStatusReply {
+    // JSON-formatted status information containing cluster health, performance metrics,
+    // configuration, processes, and workload information
+    optional string result = 1;
+}
+
+// Request to retrieve all workers in the cluster.
+message GetWorkersRequest {}
+
+// Response containing the list of all workers.
+message GetWorkersReply {
+    // List of all worker processes in the cluster
+    repeated Worker workers = 1;
+}
+
+// Request to include (re-enable) previously excluded workers.
+// This reverses the effect of an Exclude operation, allowing workers to
+// participate in the cluster again.
+message IncludeRequest {
+    // If true, include all previously excluded workers
+    optional bool all = 1;
+
+    // List of specific addresses to include (format: "ip" or "ip:port")
+    repeated string addresses = 2;
+
+    // List of localities to include (format: "locality_key:locality_value")
+    repeated string localities = 3;
+
+    // If true, only include workers that were marked as failed
+    optional bool failed = 4;
+}
+
+// Response to an include operation.
+message IncludeReply {
+    // Number of workers included.
+    optional int32 num_included = 1;
+}
+
+// Request to exclude workers from the cluster.
+// Excluding a worker prevents it from being assigned new data or roles,
+// and the cluster will migrate existing data away from it.
+message ExcludeRequest {
+    // If true, exclude all workers (rarely used, requires force flag)
+    optional bool all = 1;
+
+    // If true, mark workers as failed. This flag will drop all the data for the
+    // specified workers and could cause data loss.
+    optional bool failed = 2;
+
+    // If true, don't wait for data migration to complete before returning
+    optional bool no_wait = 3;
+
+    // If true, bypass safety checks (use with extreme caution)
+    optional bool force = 4;
+
+    // List of localities to exclude (format: "locality_key:locality_value")
+    repeated string localities = 5;
+
+    // List of process addresses to exclude (format: "ip:port")
+    repeated string processes = 6;
+
+    // List of host addresses to exclude (format: "ip", excludes all ports on that host)
+    repeated string hosts = 7;
+}
+
+// Response to an exclude operation.
+message ExcludeReply {
+    // Number of workers excluded
+    optional int32 num_excluded = 1;
+
+    // True if data movement is complete.
+    optional bool data_movement_complete = 2;
+}
+
+// Request to get the status of exclusions.
+message ExcludeStatusRequest {}
+
+// Response containing the status of all exclusions.
+// TODO: Use Locality structure instead of strings.
+message ExcludeStatusReply {
+    // Addresses that are currently excluded
+    repeated string excluded_addresses = 1;
+
+    // Localities that are currently excluded
+    repeated string excluded_localities = 2;
+
+    // Addresses that are marked as failed
+    repeated string failed_addresses = 3;
+
+    // Localities that are marked as failed
+    repeated string failed_localities = 4;
+
+    // Exclusions that are currently in progress (data migration not yet complete)
+    repeated string in_progress_excludes = 5;
+}
+
+// Request to kill (terminate) worker processes.
+// This is a forceful operation that stops processes (immediately or after a duration).
+message KillRequest {
+    // If true, kill all workers (requires extreme caution)
+    optional bool all = 1;
+
+    // List of specific worker addresses to kill (format: "ip:port")
+    repeated string addresses = 2;
+
+    // Duration in seconds to suspend the worker before killing it.
+    optional int32 duration_seconds = 3;
+}
+
+// Response to a kill operation.
+message KillReply {}
+
+// Request to manage maintenance mode for zones.
+// Maintenance mode prevents data distribution from moving data away from the
+// specified zone, allowing safe maintenance operations (e.g., hardware upgrades).
+// Only one zone can be in maintenance mode at a time.
+message MaintenanceRequest {
+    // Operation type for maintenance
+    enum Operation {
+        GET = 0;     // Get current maintenance status
+        SET = 1;     // Set maintenance mode for a zone
+        CLEAR = 2;   // Clear maintenance mode
+    }
+
+    // The operation to perform
+    Operation operation = 1;
+
+    // Zone ID to place in maintenance mode (required for SET operation)
+    optional string zone_id = 2;
+
+    // Duration in seconds for maintenance mode (required for SET operation)
+    optional double duration_seconds = 3;
+}
+
+// Response to a maintenance operation.
+message MaintenanceReply {
+    enum Result {
+        SUCCESS = 0;                          // Operation succeeded
+        INVALID_PARAMETERS = 2;               // Invalid parameters for the operation
+    }
+
+    // Result code
+    optional Result result = 1;
+
+    // Current or active zone ID in maintenance (if any)
+    optional string zone_id = 2;
+
+    // Remaining seconds for the current maintenance (if active)
+    optional int64 remaining_seconds = 3;
+
+    // Human-readable message with additional details
+    optional string message = 4;
+}

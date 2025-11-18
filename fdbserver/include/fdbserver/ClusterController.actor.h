@@ -3410,6 +3410,8 @@ public:
 	}
 };
 
+void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest const& req);
+
 #include "flow/unactorcompiler.h"
 
 #endif

@@ -20,10 +20,8 @@
 
 #pragma once
 
-#include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
 #include "flow/swift_support.h"
-#include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/ClientKnobs.h"
 
@@ -1282,7 +1280,6 @@ public:
 	double FASTRESTORE_VB_LAUNCH_DELAY;
 	int64_t FASTRESTORE_ROLE_LOGGING_DELAY;
 	int64_t FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL; // How quickly to update process metrics for restore
-	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
 	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
 	int64_t FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS;
 	bool FASTRESTORE_TRACK_REQUEST_LATENCY; // true to track reply latency of each request in a request batch

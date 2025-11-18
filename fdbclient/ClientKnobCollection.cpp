@@ -21,16 +21,16 @@
 #include "fdbclient/ClientKnobCollection.h"
 
 ClientKnobCollection::ClientKnobCollection(Randomize randomize, IsSimulated isSimulated)
-  : flowKnobs(randomize, isSimulated), clientKnobs(randomize) {}
+  : flowKnobs(randomize, isSimulated), clientKnobs(randomize, isSimulated) {}
 
 void ClientKnobCollection::initialize(Randomize randomize, IsSimulated isSimulated) {
 	flowKnobs.initialize(randomize, isSimulated);
-	clientKnobs.initialize(randomize);
+	clientKnobs.initialize(randomize, isSimulated);
 }
 
 void ClientKnobCollection::reset(Randomize randomize, IsSimulated isSimulated) {
 	flowKnobs.reset(randomize, isSimulated);
-	clientKnobs.reset(randomize);
+	clientKnobs.reset(randomize, isSimulated);
 }
 
 Optional<KnobValue> ClientKnobCollection::tryParseKnobValue(std::string const& knobName,
@@ -47,7 +47,16 @@ Optional<KnobValue> ClientKnobCollection::tryParseKnobValue(std::string const& k
 }
 
 bool ClientKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) {
-	return knobValue.visitSetKnob(knobName, flowKnobs) || knobValue.visitSetKnob(knobName, clientKnobs);
+	// Do not short circuit by directly returning:
+	//     knobValue.visitSetKnob(knobName, flowKnobs) || knobValue.visitSetKnob(knobName, clientKnobs)
+	// This is because if a knob with name FOO exists in both fdbclient/ClientKnobs.h and flow/Knobs.h, then
+	// only flow knob FOO will be updated but client knob FOO will not.
+	// Although today there are no knobs that share their name between flow and client, this was done to be
+	// consistent with ServerKnobCollection, see:
+	// https://github.com/apple/foundationdb/blob/596f4cba6dcac00a14080c57d5ea037272240a08/fdbclient/ServerKnobCollection.cpp#L51-L57
+	const bool setFlowKnob = knobValue.visitSetKnob(knobName, flowKnobs);
+	const bool setClientKnob = knobValue.visitSetKnob(knobName, clientKnobs);
+	return setFlowKnob || setClientKnob;
 }
 
 bool ClientKnobCollection::isAtomic(std::string const& knobName) const {

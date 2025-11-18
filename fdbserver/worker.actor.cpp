@@ -77,6 +77,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ApiVersion.h"
+#include "fdbctl/ControlService.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -106,9 +107,6 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 
 template class RequestStream<RecruitMasterRequest, false>;
 template struct NetNotifiedQueue<RecruitMasterRequest, false>;
-
-template class RequestStream<RegisterMasterRequest, false>;
-template struct NetNotifiedQueue<RegisterMasterRequest, false>;
 
 template class RequestStream<InitializeCommitProxyRequest, false>;
 template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
@@ -287,6 +285,10 @@ Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future
 
 Future<Void> deregisterGrpcService(const UID& id) {
 #ifdef FLOW_GRPC_ENABLED
+	if (g_network->isSimulated()) {
+		return Void();
+	}
+
 	if (GrpcServer::instance() != nullptr) {
 		return GrpcServer::instance()->deregisterRoleServices(id);
 	}
@@ -2141,11 +2143,12 @@ bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
 ACTOR Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnectionRecord> ccr) {
 	if (GrpcServer::instance() == nullptr) {
 		return Never();
+	} else if (g_network->isSimulated()) {
+		return Never();
 	}
 
 	auto db = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION);
 	Reference<IDatabase> idb = wait(safeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(db)));
-
 	auto services = GrpcServer::ServiceList{};
 	GrpcServer::instance()->registerRoleServices(UID(), services);
 	TraceEvent("WorkerGrpcServerStart").detail("Address", GrpcServer::instance()->getAddress());

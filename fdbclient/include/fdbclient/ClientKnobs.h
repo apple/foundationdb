@@ -29,6 +29,11 @@
 FDB_BOOLEAN_PARAM(Randomize);
 FDB_BOOLEAN_PARAM(IsSimulated);
 
+// Returns a deterministically random transaction timeout value for simulation testing.
+// More weight is given to the famous 5s timeout, but [1, 10] range is returned with lower weight.
+// This is only be used in simulation.
+int getSimulatedTxnTimeoutSeconds();
+
 class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE ClientKnobs : public KnobsImpl<ClientKnobs> {
 public:
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
@@ -51,6 +56,7 @@ public:
 	int MAX_COMMIT_PROXY_CONNECTIONS;
 	int MAX_GRV_PROXY_CONNECTIONS;
 	double STATUS_IDLE_TIMEOUT;
+	double GRPC_CTL_SERVICE_DEFAULT_TIMEOUT; // Default timeout for gRPC FDBCTL service requests
 	bool SEND_ENTIRE_VERSION_VECTOR;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
@@ -353,8 +359,8 @@ public:
 	// Enable to logging verbose trace events related to the accumulative checksum
 	bool ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING;
 
-	ClientKnobs(Randomize randomize);
-	void initialize(Randomize randomize);
+	ClientKnobs(Randomize randomize, IsSimulated isSimulated);
+	void initialize(Randomize randomize, IsSimulated isSimulated);
 };
 
 #endif

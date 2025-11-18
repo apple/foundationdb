@@ -74,9 +74,9 @@
 #ifdef WITH_ROCKSDB
 
 // Enforcing rocksdb version.
-static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSDB_MINOR &&
-               ROCKSDB_PATCH == FDB_ROCKSDB_PATCH),
-              "Unsupported rocksdb version.");
+static_assert(ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR, "Unsupported RocksDB major version");
+static_assert(ROCKSDB_MINOR == FDB_ROCKSDB_MINOR, "Unsupported RocksDB minor version");
+static_assert(ROCKSDB_PATCH == FDB_ROCKSDB_PATCH, "Unsupported RocksDB patch version");
 
 namespace {
 using rocksdb::BackgroundErrorReason;
@@ -1161,6 +1161,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 
 	state std::vector<std::pair<const char*, std::string>> strPropertyStats = {
 		{ "LevelStats", rocksdb::DB::Properties::kLevelStats },
+		{ "BlockCacheEntryStats", rocksdb::DB::Properties::kBlockCacheEntryStats },
 	};
 
 	state std::vector<std::pair<const char*, std::string>> levelStrPropertyStats = {

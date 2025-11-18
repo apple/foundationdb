@@ -6383,7 +6383,10 @@ void Transaction::checkDeferredError() const {
 }
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database& cx) {
-	if (!cx->isError()) {
+	if (!cx->isError() && cx->globalConfig) {
+		// Note: For internal (fdbserver) databases, globalConfig->init() may not have been called,
+		// so we need to handle the case where globalConfig exists but isn't initialized yet.
+		// In that case, get() will return an empty Reference and we'll use the default value.
 		double sampleRate =
 		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 		double clientSamplingProbability = std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;

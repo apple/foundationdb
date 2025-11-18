@@ -21,7 +21,10 @@ This module will set the following variables in your project:
 #]=======================================================================]
 
 include(FindPackageHandleStandardArgs)
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
+find_package(
+  Python3
+  COMPONENTS Interpreter
+  REQUIRED)
 
 if(NOT Jinja2_ROOT)
   set(Jinja2_ROOT $ENV{Jinja2_ROOT})
@@ -32,7 +35,7 @@ execute_process(
   COMMAND ${Python3_EXECUTABLE} -c "import jinja2; print(jinja2.__version__)"
   RESULT_VARIABLE _Jinja2_NOT_FOUND
   OUTPUT_VARIABLE _Jinja2_VERSION_STRING
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
+  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 if(NOT _Jinja2_NOT_FOUND)
   set(Jinja2_VERSION ${_Jinja2_VERSION_STRING})
