@@ -6,7 +6,7 @@ if(WIN32)
 endif()
 
 find_package(dotnet 9.0)
-if(DOTNET_FOUND)
+if(dotnet_FOUND)
   set(CSHARP_USE_MONO FALSE)
   return()
 endif()
