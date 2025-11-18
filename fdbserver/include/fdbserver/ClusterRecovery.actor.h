@@ -277,7 +277,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	                    PromiseStream<Future<Void>> const& addActor,
 	                    bool forceRecovery)
 
-	  : controllerData(controllerData), dbgid(masterInterface.id()), lastEpochEnd(invalidVersion),
+	  : controllerData(controllerData), dbgid(clusterController.id()), lastEpochEnd(invalidVersion),
 	    recoveryTransactionVersion(invalidVersion), lastCommitTime(0), liveCommittedVersion(invalidVersion),
 	    databaseLocked(false), minKnownCommittedVersion(invalidVersion), hasConfiguration(false),
 	    coordinators(coordinators), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId),
