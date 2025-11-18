@@ -1,0 +1,12 @@
+#include "fdbclient/FDBOptions.g.h"
+
+{% for scope, options in scopes %}
+FDBOptionInfoMap<FDB{{ scope.value }}s> FDB{{ scope.value }}s::optionInfo;
+
+void FDB{{ scope.value }}s::init() {
+{% for option in options %}
+	ADD_OPTION_INFO(FDB{{ scope.value }}s, {{ option.name | upper }}, "{{ option.name | upper }}", "{{ option.comment | replace('"', '\\"') }}", "{{ 'Option takes no parameter' if option.param_type.name == 'NONE' else '(' + option.param_type.value + ') ' + (option.param_desc or '') | replace('"', '\\"') }}", {{ 'true' if option.param_desc else 'false' }}, {{ 'true' if option.hidden else 'false' }}, {{ 'true' if option.persistent else 'false' }}, {{ 'true' if option.sensitive else 'false' }}, {{ option.default_for if option.default_for is not none else -1 }}, FDBOptionInfo::ParamType::{{ option.param_type.value }})
+{% endfor %}
+}
+
+{% endfor %}
