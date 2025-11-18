@@ -124,6 +124,11 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	Key keyForIndex(int n) { return key(n); }
 	Key key(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }
 	Value value(int n) { return doubleToTestKey(n, keyPrefix); }
+	KeyRange keyRange(int n) {
+		Key beginKey = doubleToTestKey((double)n / nodeCount, keyPrefix);
+		Key endKey = beginKey.withSuffix(" end"_sr);
+		return KeyRangeRef(beginKey, endKey);
+	}
 	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
 
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
@@ -177,7 +182,11 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 							self->badRead("KeyR3", r3, tr);
 						int r4 = self->fromValue(v3.get());
 
-						tr.clear(self->key(r)); //< Shouldn't have an effect, but will break with wrong ordering
+						// Single key clear range op will be converted to point delete inside storage engine. Generating
+						// a larger range here to increase test coverage.
+						tr.clear(
+						    self->keyRange(r),
+						    AddConflictRange::True); //< Shouldn't have an effect, but will break with wrong ordering
 						tr.set(self->key(r), self->value(r3));
 						tr.set(self->key(r2), self->value(r4));
 						tr.set(self->key(r3), self->value(r2));

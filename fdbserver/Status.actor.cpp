@@ -521,7 +521,9 @@ struct RolesInfo {
 
 		try {
 			TraceEventFields const& storageMetrics = metrics.at("StorageMetrics");
-
+			if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.1)) {
+				throw AttributeNotFoundError("BytesStored");
+			}
 			obj.setKeyRawNumber("stored_bytes", storageMetrics.getValue("BytesStored"));
 			obj.setKeyRawNumber("kvstore_used_bytes", storageMetrics.getValue("KvstoreBytesUsed"));
 			obj.setKeyRawNumber("kvstore_free_bytes", storageMetrics.getValue("KvstoreBytesFree"));
@@ -633,7 +635,12 @@ struct RolesInfo {
 			}
 
 		} catch (AttributeNotFoundError& e) {
-			TraceEvent(SevWarnAlways, "StorageServerStatusJson").detail("MissingAttribute", e.getMissingAttribute());
+			TraceEvent(SevWarnAlways, "StorageServerStatusJson")
+			    .detail("MissingAttribute", e.getMissingAttribute())
+			    .detail("ServerId", iface.id().shortString())
+			    .detail("ServerRole", role)
+			    .detail("IsTss", iface.isTss())
+			    .detail("Address", iface.address().toString());
 		}
 		if (pDataLagSeconds) {
 			*pDataLagSeconds = dataLagSeconds;

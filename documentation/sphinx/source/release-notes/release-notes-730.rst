@@ -4,6 +4,135 @@
 Release Notes
 #############
 
+7.3.71
+======
+* Same as 7.3.71 release with AVX enabled.
+
+7.3.70
+======
+* Fixed handleTssMismatches crashes. `(PR #12377) <https://github.com/apple/foundationdb/pull/12377>`_
+* Improved TLS handshake mechanism. `(PR #12348) <https://github.com/apple/foundationdb/pull/12348>`_
+* Fixed restarting test failures. `(PR #12324) <https://github.com/apple/foundationdb/pull/12324>`_
+* Suppressed PingLatency events. `(PR #12316) <https://github.com/apple/foundationdb/pull/12316>`_
+* Fixed "Unknown error" when configuring regions. `(PR #12313) <https://github.com/apple/foundationdb/pull/12313>`_
+* Replaced '...' with actual random data in simulation workloads. `(PR #12273) <https://github.com/apple/foundationdb/pull/12273>`_
+* Added TLS performance counters. `(PR #12278) <https://github.com/apple/foundationdb/pull/12278>`_ and `(PR #12296) <https://github.com/apple/foundationdb/pull/12296>`_
+
+7.3.69
+======
+* Same as 7.3.68 release with AVX enabled.
+
+7.3.68
+======
+* Fixed a rare race that can cause recovery to be stuck. `(PR #12213) <https://github.com/apple/foundationdb/pull/12213>`_
+* Backported various go binding and documentation changes. `(PR #12146) <https://github.com/apple/foundationdb/pull/12146>`_
+
+7.3.67
+======
+* Same as 7.3.66 release with AVX enabled.
+
+7.3.66
+======
+* Fixed a restore speed regression. `(PR #12088) <https://github.com/apple/foundationdb/pull/12088>`_
+* Added per DC check for fdbcli's checkall command. `(PR #12089) <https://github.com/apple/foundationdb/pull/12089>`_
+* Added periodical flushes of old column families for Sharded RocksDB engine. `(PR #12123) <https://github.com/apple/foundationdb/pull/12123>`_
+
+7.3.65
+======
+* Same as 7.3.64 release with AVX enabled.
+
+7.3.64
+======
+* Fixed fdb-kubernetes-monitor to only log an error when there is one. `(PR #12112) <https://github.com/apple/foundationdb/pull/12112>`_
+* Fixed distributed conconsistency checker tester to always accept new requests from ConsistencyCheckUrgent role. `(PR #12001) <https://github.com/apple/foundationdb/pull/12001>`_
+* Added RocksDB compaction knobs and more metrics. `(PR #12016) <https://github.com/apple/foundationdb/pull/12016>`_, `(PR #11993) <https://github.com/apple/foundationdb/pull/11993>`_, `(PR #12054) <https://github.com/apple/foundationdb/pull/12054>`_, and `(PR #12055) <https://github.com/apple/foundationdb/pull/12055>`_
+* Fixed a rare restore bug due to a race condition. `(PR #12041) <https://github.com/apple/foundationdb/pull/12041>`_
+* Fixed backup reporting on snapshot restorable state and continuous log end version. `(PR #12038) <https://github.com/apple/foundationdb/pull/12038>`_ and `(PR #12069) <https://github.com/apple/foundationdb/pull/12069>`_
+
+7.3.63
+======
+* Same as 7.3.62 release with AVX enabled.
+
+7.3.62
+======
+* Reverted backup agents dry run request changes since 7.3.49 release. `(PR #11965) <https://github.com/apple/foundationdb/pull/11965>`_
+
+7.3.61
+======
+* Same as 7.3.60 release with AVX enabled.
+
+7.3.60
+======
+* Fixed a potential corruption of the destination storage server when shard_encode_location_metadata is enabled. `(PR #11934) <https://github.com/apple/foundationdb/pull/11934>`_
+* Paused storage wiggle when all storage servers do not have enough available space. `(PR #11911) <https://github.com/apple/foundationdb/pull/11911>`_
+* Updated Sharded RocksDB knobs. `(PR #11936) <https://github.com/apple/foundationdb/pull/11936>`_
+* Fixed storage migration to consider the perpetualStorageEngine setting. `(PR #11940) <https://github.com/apple/foundationdb/pull/11940>`_
+* Improved the coverage of location metadata auditing. `(PR #11897) <https://github.com/apple/foundationdb/pull/11897>`_
+
+7.3.59
+======
+* Same as 7.3.58 release with AVX enabled.
+
+7.3.58
+======
+* Updated fdbmonitor to only delay the restart of fdbserver if the process exited with an exit code other than 0. `(PR #11812) <https://github.com/apple/foundationdb/pull/11812>`_
+* Added knob to pause perpetual storage wiggle when TSS count target is met. `(PR #11824) <https://github.com/apple/foundationdb/pull/11824>`_
+* Updated exclusion code to reduce the requests that are made by locality-based exclusions. `(PR #11848) <https://github.com/apple/foundationdb/pull/11848>`_
+* Added multiple improvements to reduce the false positive rate of gray failure triggered recoveries. `(PR #11850) <https://github.com/apple/foundationdb/pull/11850>`_, `(PR #11852) <https://github.com/apple/foundationdb/pull/11852>`_, `(PR #11885) <https://github.com/apple/foundationdb/pull/11885>`_
+* Added a knob to use direct IO for ShardedRocks storage engine. `(PR #11891) <https://github.com/apple/foundationdb/pull/11891>`_
+* Added a knob to compact based on number of range deletions in file for ShardedRocks storage engine. `(PR #11890) <https://github.com/apple/foundationdb/pull/11890>`_
+* Updated RocksDB force flush interval based on the last flush time. `(PR #11845) <https://github.com/apple/foundationdb/pull/11845>`_
+
+7.3.57
+======
+* Same as 7.3.56 release with AVX enabled.
+
+7.3.56
+======
+* Added an option to force flush if RocksCb flush does not happen within a time interval. `(PR #11792) <https://github.com/apple/foundationdb/pull/11792>`_
+* Changed RocksDB histogram sample rate to 1. `(PR #11794) <https://github.com/apple/foundationdb/pull/11794>`_
+* Updated TLS input handling to allow multiple Criteria per NID. `(PR #11763) <https://github.com/apple/foundationdb/pull/11763>`_
+* Added Sharded RocksDB knobs and metrics for bloom filters. `(PR #11785) <https://github.com/apple/foundationdb/pull/11785>`_
+* Fixed a backup agent crash bug when receiving an invalid token error from S3. `(PR #11774) <https://github.com/apple/foundationdb/pull/11774>`_
+* Updated ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS Knob to prevent OOMs of RocksDB storage servers `(PR #11739) <https://github.com/apple/foundationdb/pull/11739>`_
+
+7.3.55
+======
+* Same as 7.3.54 release with AVX enabled.
+
+7.3.54
+======
+* Addressed urgent consistency checker related issues. `(PR #11736) <https://github.com/apple/foundationdb/pull/11736>`_
+* Addressed a downgrade related incompatibility issue between 7.3 patch releases. `(PR #11732) <https://github.com/apple/foundationdb/pull/11732>`_
+* Added knob LOG_CONNECTION_ATTEMPTS_ENABLED to log all incoming connections. `(PR #11713) <https://github.com/apple/foundationdb/pull/11713>`_
+
+7.3.53
+======
+* Same as 7.3.52 release with AVX enabled.
+
+7.3.52
+======
+* Improved Sharded Rocksdb to use a single iterator pool for all physical shards. `(PR #11694) <https://github.com/apple/foundationdb/pull/11694>`_
+* Changed the default values of various Sharded Rocksdb related knobs. `(PR #11706) <https://github.com/apple/foundationdb/pull/11706>`_
+* Removed CC_PAUSE_HEALTH_MONITOR knob. `(PR #11701) <https://github.com/apple/foundationdb/pull/11701>`_
+* Addressed protocol incompatibility issues between 7.3 patch releases. `(PR #11697) <https://github.com/apple/foundationdb/pull/11697>`_, `(PR #11705) <https://github.com/apple/foundationdb/pull/11705>`_
+
+7.3.51
+======
+* Same as 7.3.50 release with AVX enabled.
+
+7.3.50
+======
+* Converted an assertion for Sharded Rocksdb in storage server to error logs. `(PR #11622) <https://github.com/apple/foundationdb/pull/11622>`_
+* Fixed backup agents from retrying uploading in the presence of S3 token errors. `(PR #11602) <https://github.com/apple/foundationdb/pull/11602>`_
+* Fixed an inconsistent location metadata issue and invalid shard IDs generated by seed shard servers when SHARD_ENCODE_LOCATION_METADATA is enabled. `(PR #11640) <https://github.com/apple/foundationdb/pull/11640>`_ and `(PR #11647) <https://github.com/apple/foundationdb/pull/11647>`_
+* Enabled direct_io for RocksDB storage engine and wiggle knobs. `(PR #11636) <https://github.com/apple/foundationdb/pull/11636>`_
+* Added knobs for caching index blocks for Sharded RocksDB. `(PR #11649) <https://github.com/apple/foundationdb/pull/11649>`_ and `(PR #11680) <https://github.com/apple/foundationdb/pull/11680>`_
+* Added various data distributor knobs for performance tuning. `(PR #11668) <https://github.com/apple/foundationdb/pull/11668>`_ and `(PR #11665) <https://github.com/apple/foundationdb/pull/11665>`_
+* Increased the minimum age to wiggle to avoid re-wiggling migrated storage servers. `(PR #11684) <https://github.com/apple/foundationdb/pull/11684>`_
+* Added various version vector improvements. `(PR #11590) <https://github.com/apple/foundationdb/pull/11590>`_, `(PR #11599) <https://github.com/apple/foundationdb/pull/11599>`_, `(PR #11605) <https://github.com/apple/foundationdb/pull/11605>`_, `(PR #11608) <https://github.com/apple/foundationdb/pull/11608>`_, `(PR #11620) <https://github.com/apple/foundationdb/pull/11620>`_, `(PR #11626) <https://github.com/apple/foundationdb/pull/11626>`_ and `(PR #11631) <https://github.com/apple/foundationdb/pull/11631>`_
+* Removed upgrade tests before FDB 6.3. `(PR #11662) <https://github.com/apple/foundationdb/pull/11662>`_
+
 7.3.49
 ======
 * Same as 7.3.48 release with AVX enabled.

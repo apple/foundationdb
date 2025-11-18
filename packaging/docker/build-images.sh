@@ -241,7 +241,6 @@ echo "${blue}###################################################################
 ################################################################################
 artifactory_base_url="${ARTIFACTORY_URL:-https://artifactory.foundationdb.org}"
 aws_region="us-west-2"
-aws_account_id=$(aws --output text sts get-caller-identity --query 'Account')
 build_date=$(date +"%Y-%m-%dT%H:%M:%S%z")
 build_output_directory="${script_dir}/../../"
 source_code_diretory=$(awk -F= '/foundationdb_SOURCE_DIR:STATIC/{print $2}' "${build_output_directory}/CMakeCache.txt")

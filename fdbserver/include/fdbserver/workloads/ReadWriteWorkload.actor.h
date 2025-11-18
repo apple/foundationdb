@@ -64,7 +64,6 @@ struct ReadWriteCommon : KVWorkload {
 	// two type of transaction
 	int readsPerTransactionA, writesPerTransactionA;
 	int readsPerTransactionB, writesPerTransactionB;
-	std::string valueString;
 	double alpha; // probability for run TransactionA type
 	// transaction setting
 	bool useRYW;
@@ -108,7 +107,6 @@ struct ReadWriteCommon : KVWorkload {
 		writesPerTransactionB = getOption(options, "writesPerTransactionB"_sr, 9);
 		alpha = getOption(options, "alpha"_sr, 0.1);
 
-		valueString = std::string(maxValueBytes, '.');
 		if (nodePrefix > 0) {
 			keyBytes += 16;
 		}
@@ -164,7 +162,6 @@ struct ReadWriteCommon : KVWorkload {
 
 	Standalone<KeyValueRef> operator()(uint64_t n);
 	bool shouldRecord(double checkTime = now());
-	Value randomValue();
 };
 
 #include "flow/unactorcompiler.h"

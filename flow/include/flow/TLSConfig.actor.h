@@ -40,6 +40,9 @@
 #include "flow/flow.h"
 
 #include <openssl/x509.h>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
+
 typedef int NID;
 
 enum class MatchType {
@@ -68,9 +71,18 @@ struct Criteria {
 	bool operator==(const Criteria& c) const {
 		return criteria == c.criteria && match_type == c.match_type && location == c.location;
 	}
-};
 
-#include "flow/actorcompiler.h" // This must be the last #include.
+	bool operator<(const Criteria& c) const {
+		if (criteria != c.criteria) {
+			return criteria < c.criteria;
+		} else if (match_type != c.match_type) {
+			return match_type < c.match_type;
+		} else if (location != c.location) {
+			return location < c.location;
+		}
+		return false;
+	}
+};
 
 enum class TLSEndpointType { UNSET = 0, CLIENT, SERVER };
 
@@ -232,9 +244,9 @@ public:
 
 		std::string toString() const;
 
-		std::map<NID, Criteria> subject_criteria;
-		std::map<NID, Criteria> issuer_criteria;
-		std::map<NID, Criteria> root_criteria;
+		std::set<std::pair<NID, Criteria>> subject_criteria; // deduped and sorted
+		std::set<std::pair<NID, Criteria>> issuer_criteria;
+		std::set<std::pair<NID, Criteria>> root_criteria;
 
 		bool verify_cert = true;
 		bool verify_time = true;

@@ -269,6 +269,10 @@ public:
 	                                                // balanced/filledup before starting the next wiggle.
 	double PERPETUAL_WIGGLE_DELAY; // The max interval between the last wiggle finish and the next wiggle start
 	bool PERPETUAL_WIGGLE_DISABLE_REMOVER; // Whether the start of perpetual wiggle replace team remover
+	bool PERPETUAL_WIGGLE_PAUSE_AFTER_TSS_TARGET_MET;
+	double PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO; // Pause wiggle until all Storage servers have minimumn
+	                                                   // of PERPETUAL_WIGGLE_MIN_AVAILABLE_SPACE_RATIO disk
+	                                                   // space available.
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
@@ -449,6 +453,8 @@ public:
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
 	bool ROCKSDB_MUTE_LOGS;
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+	int64_t ROCKSDB_TTL_COMPACTION_SECONDS;
+	int64_t ROCKSDB_MAX_COMPACTION_BYTES;
 	int ROCKSDB_PREFIX_LEN;
 	double ROCKSDB_MEMTABLE_PREFIX_BLOOM_SIZE_RATIO;
 	int ROCKSDB_BLOOM_BITS_PER_KEY;
@@ -502,6 +508,7 @@ public:
 	int ROCKSDB_SINGLEKEY_DELETES_MAX;
 	bool ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE;
+	int ROCKSDB_CLEARRANGES_LIMIT_PER_COMMIT; // Max number of clearranges per commit with rocksdb kvstore.
 	bool ROCKSDB_ENABLE_COMPACT_ON_DELETION;
 	int64_t ROCKSDB_CDCF_SLIDING_WINDOW_SIZE; // CDCF: CompactOnDeletionCollectorFactory
 	int64_t ROCKSDB_CDCF_DELETION_TRIGGER; // CDCF: CompactOnDeletionCollectorFactory
@@ -543,6 +550,7 @@ public:
 	double ROCKSDB_CF_METRICS_DELAY;
 	int ROCKSDB_MAX_LOG_FILE_SIZE;
 	int ROCKSDB_KEEP_LOG_FILE_NUM;
+	int ROCKSDB_MANUAL_FLUSH_TIME_INTERVAL;
 	bool ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
 	bool ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	bool ROCKSDB_FULLFILE_CHECKSUM; // For validate sst files when compaction and producing backup files. TODO: set
@@ -553,6 +561,7 @@ public:
 	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+	bool SHARDED_ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
 	int SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
 	int SHARD_METADATA_SCAN_BYTES_LIMIT;
@@ -568,6 +577,7 @@ public:
 	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE;
 	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
 	bool SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
+	int SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD;
 	int SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t SHARDED_ROCKSDB_BLOCK_CACHE_SIZE;
 	double SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
@@ -581,8 +591,14 @@ public:
 	int SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
 	bool SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE;
 	int SHARDED_ROCKSDB_MAX_OPEN_FILES;
+	int SHARDED_ROCKSDB_COMPACTION_PRI;
 	bool SHARDED_ROCKSDB_READ_ASYNC_IO;
 	int SHARDED_ROCKSDB_PREFIX_LEN;
+	int SHARDED_ROCKSDB_BLOOM_FILTER_BITS;
+	double SHARDED_ROCKSDB_MEMTABLE_BLOOM_FILTER_RATIO;
+	double SHARDED_ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
+	bool SHARDED_ROCKSDB_USE_DIRECT_IO;
+	double SHARDED_ROCKSDB_FLUSH_PERIOD;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -725,7 +741,6 @@ public:
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
 	double CLIENT_REGISTER_INTERVAL;
-	bool CC_PAUSE_HEALTH_MONITOR;
 	bool CC_ENABLE_WORKER_HEALTH_MONITOR;
 	double CC_WORKER_HEALTH_CHECKING_INTERVAL; // The interval of refreshing the degraded server list.
 	double CC_DEGRADED_LINK_EXPIRATION_INTERVAL; // The time period from the last degradation report after which a
@@ -736,6 +751,8 @@ public:
 	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE; // The maximum number of degraded peers when excluding a server. When the
 	                                        // number of degraded peers is more than this value, we will not exclude
 	                                        // this server since it may because of server overload.
+	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE_MIN; // Similar to CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE which is an upper
+	                                            // bound, this is a lower bound.
 	int CC_MAX_EXCLUSION_DUE_TO_HEALTH; // The max number of degraded servers to exclude by Cluster Controller due to
 	                                    // degraded health.
 	bool CC_HEALTH_TRIGGER_RECOVERY; // If true, cluster controller will kill the master to trigger recovery when
@@ -743,8 +760,9 @@ public:
 	double CC_TRACKING_HEALTH_RECOVERY_INTERVAL; // The number of recovery count should not exceed
 	                                             // CC_MAX_HEALTH_RECOVERY_COUNT within
 	                                             // CC_TRACKING_HEALTH_RECOVERY_INTERVAL.
-	int CC_MAX_HEALTH_RECOVERY_COUNT; // The max number of recoveries can be triggered due to worker health within
-	                                  // CC_TRACKING_HEALTH_RECOVERY_INTERVAL
+	int CC_MAX_HEALTH_RECOVERY_COUNT; // The max number recoveries that can be triggered due to worker
+	                                  // health within CC_TRACKING_HEALTH_RECOVERY_INTERVAL. This count accounts for any
+	                                  // recovery trigger including non-gray failure ones.
 	bool CC_HEALTH_TRIGGER_FAILOVER; // Whether to enable health triggered failover in CC.
 	int CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION; // The minimum number of degraded servers that can trigger a
 	                                               // failover.
@@ -760,6 +778,8 @@ public:
 	                                             // determined as degraded satellite.
 	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether the remote log
 	                                             // router is degraded and may use trigger recovery to recover from it.
+	bool CC_INVALIDATE_EXCLUDED_PROCESSES; // When enabled, invalidate the complaints by processes that were excluded
+	                                       // in gray failure triggered recoveries.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 
@@ -1046,6 +1066,7 @@ public:
 	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
 	int SPLIT_METRICS_MAX_ROWS;
 	double STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL;
+	bool CONSISTENCY_CHECK_BACKWARD_READ;
 	int PHYSICAL_SHARD_MOVE_LOG_SEVERITY;
 	int FETCH_SHARD_BUFFER_BYTE_LIMIT;
 	int FETCH_SHARD_UPDATES_BYTE_LIMIT;

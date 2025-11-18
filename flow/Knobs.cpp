@@ -121,6 +121,9 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,              5.0 );
 	init( PING_LOGGING_INTERVAL,                               3.0 );
 	init( PING_SKETCH_ACCURACY,                                0.1 );
+	init( LOG_CONNECTION_ATTEMPTS_ENABLED,                   false );
+	init( CONNECTION_LOG_DIRECTORY,                             "" );
+	init( LOG_CONNECTION_INTERVAL_SECS,                          3 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
@@ -132,7 +135,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
 	init( TLS_MALLOC_ARENA_MAX,                                  6 );
 	init( TLS_HANDSHAKE_LIMIT,                                1000 );
-
+	init( DISABLE_MAINTHREAD_TLS_HANDSHAKE,                  false );
+	init( TLS_HANDSHAKE_FLOWLOCK_PRIORITY, static_cast<int>(TaskPriority::DefaultYield) );
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
 	init( NETWORK_TEST_REQUEST_COUNT,                            0 ); // 0 -> run forever
@@ -202,7 +206,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
 	init( INCREMENTAL_DELETE_INTERVAL,                         1.0 ); //every 1 second
-		
+
 	//Net2 and FlowTransport
 	init( MIN_COALESCE_DELAY,                                10e-6 ); if( randomize && BUGGIFY ) MIN_COALESCE_DELAY = 0;
 	init( MAX_COALESCE_DELAY,                                20e-6 ); if( randomize && BUGGIFY ) MAX_COALESCE_DELAY = 0;

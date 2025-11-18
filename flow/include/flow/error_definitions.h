@@ -108,6 +108,7 @@ ERROR( duplicate_snapshot_request, 1083, "A duplicate snapshot request has been 
 ERROR( dd_config_changed, 1084, "DataDistribution configuration changed." )
 ERROR( consistency_check_urgent_task_failed, 1085, "Consistency check urgent task is failed")
 ERROR( data_move_conflict, 1086, "Data move conflict in SS")
+ERROR( consistency_check_urgent_duplicate_request, 1087, "Consistency check urgent got a duplicate request")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -336,7 +337,6 @@ ERROR( backup_auth_unreadable, 2318, "Cannot read or parse one or more sources o
 ERROR( backup_does_not_exist, 2319, "Backup does not exist")
 ERROR( backup_not_filterable_with_key_ranges, 2320, "Backup before 6.3 cannot be filtered with key ranges")
 ERROR( backup_not_overlapped_with_keys_filter, 2321, "Backup key ranges doesn't overlap with key ranges filter")
-ERROR( bucket_not_in_url, 2322, "bucket is not in the URL for backup" )
 ERROR( restore_invalid_version, 2361, "Invalid restore version")
 ERROR( restore_corrupted_data, 2362, "Corrupted backup data")
 ERROR( restore_missing_data, 2363, "Missing backup data")

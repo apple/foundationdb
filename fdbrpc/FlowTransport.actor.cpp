@@ -20,9 +20,14 @@
 
 #include "fdbrpc/FlowTransport.h"
 #include "flow/Arena.h"
+#include "flow/IThreadPool.h"
+#include "flow/Knobs.h"
+#include "flow/NetworkAddress.h"
 #include "flow/network.h"
 
 #include <cstdint>
+#include <fstream>
+#include <string>
 #include <unordered_map>
 #if VALGRIND
 #include <memcheck.h>
@@ -310,6 +315,16 @@ public:
 		countConnEstablished.init("Net2.CountConnEstablished"_sr);
 		countConnClosedWithError.init("Net2.CountConnClosedWithError"_sr);
 		countConnClosedWithoutError.init("Net2.CountConnClosedWithoutError"_sr);
+		countConnIncompatible.init("Net2.CountConnIncompatible"_sr);
+		countConnIncompatibleWithOldClient.init("Net2.CountConnIncompatibleWithOldClient"_sr);
+		countConnHandshakeAccepted.init("Net2.CountConnHandshakeAccepted"_sr);
+		countConnHandshakeRequested.init("Net2.CountConnHandshakeRequested"_sr);
+		countIncomingConnRequested.init("Net2.CountIncomingConnRequested"_sr);
+		countIncomingConnAccepted.init("Net2.CountIncomingConnAccepted"_sr);
+		countOutgoingConnHandshakeComplete.init("Net2.CountOutgoingConnHandshakeComplete"_sr);
+		countOutgoingConnHandshakeRequested.init("Net2.CountOutgoingConnHandshakeRequested"_sr);
+		countIncomingConnectionTimedout.init("Net2.CountIncomingConnectionTimedout"_sr);
+		countIncomingConnConnected.init("Net2.CountIncomingConnConnected"_sr);
 	}
 
 	Reference<struct Peer> getPeer(NetworkAddress const& address);
@@ -338,6 +353,16 @@ public:
 	Int64MetricHandle countConnEstablished;
 	Int64MetricHandle countConnClosedWithError;
 	Int64MetricHandle countConnClosedWithoutError;
+	Int64MetricHandle countConnIncompatible;
+	Int64MetricHandle countConnIncompatibleWithOldClient;
+	Int64MetricHandle countConnHandshakeAccepted;
+	Int64MetricHandle countConnHandshakeRequested;
+	Int64MetricHandle countIncomingConnRequested;
+	Int64MetricHandle countIncomingConnAccepted;
+	Int64MetricHandle countOutgoingConnHandshakeComplete;
+	Int64MetricHandle countOutgoingConnHandshakeRequested;
+	Int64MetricHandle countIncomingConnectionTimedout;
+	Int64MetricHandle countIncomingConnConnected;
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>> incompatiblePeers;
 	AsyncTrigger incompatiblePeersChanged;
@@ -352,7 +377,111 @@ public:
 	Future<Void> publicKeyFileWatch;
 
 	std::unordered_map<Standalone<StringRef>, PublicKey> publicKeys;
+
+	struct ConnectionHistoryEntry {
+		int64_t time;
+		NetworkAddress addr;
+		bool failed;
+	};
+	std::deque<ConnectionHistoryEntry> connectionHistory;
+	Future<Void> connectionHistoryLoggerF;
+	Reference<IThreadPool> connectionLogWriterThread;
 };
+
+struct ConnectionLogWriter : IThreadPoolReceiver {
+	const std::string baseDir;
+	std::string fileName;
+	std::fstream file;
+
+	ConnectionLogWriter(const std::string baseDir) : baseDir(baseDir) {}
+
+	virtual ~ConnectionLogWriter() {
+		if (file.is_open())
+			file.close();
+	}
+
+	struct AppendAction : TypedAction<ConnectionLogWriter, AppendAction> {
+		std::string localAddr;
+		std::deque<TransportData::ConnectionHistoryEntry> entries;
+		AppendAction(std::string localAddr, std::deque<TransportData::ConnectionHistoryEntry>&& entries)
+		  : localAddr(localAddr), entries(std::move(entries)) {}
+
+		double getTimeEstimate() const { return 2; }
+	};
+
+	std::string newFileName() const { return baseDir + "fdb-connection-log-" + time_str() + ".csv"; }
+
+	void init() { fileName = newFileName(); }
+
+	std::string time_str() const { return std::to_string(now()); }
+
+	void openOrRoll() {
+		if (fileName.empty()) {
+			fileName = newFileName();
+		}
+
+		if (!file.is_open()) {
+			TraceEvent("OpenConnectionLog").detail("FileName", fileName);
+			file = std::fstream(fileName, std::ios::in | std::ios::out | std::ios::app);
+		}
+
+		if (!file.is_open()) {
+			TraceEvent(SevError, "ErrorOpenConnectionLog").detail("FileName", fileName);
+			throw io_error();
+		}
+
+		if (file.tellg() > 100 * 1024 * 1024 /* 100 MB */) {
+			file.close();
+			fileName = newFileName();
+			TraceEvent("RollConnectionLog").detail("FileName", fileName);
+			openOrRoll();
+		}
+	}
+
+	void action(AppendAction& a) {
+		openOrRoll();
+
+		std::string output;
+		for (const auto& entry : a.entries) {
+			output += std::to_string(entry.time) + ",";
+			output += a.localAddr + ",";
+			output += entry.failed ? "failed," : "success,";
+			output += entry.addr.toString() + "\n";
+		}
+		file << output;
+		file.flush();
+	}
+};
+
+ACTOR Future<Void> connectionHistoryLogger(TransportData* self) {
+	if (!FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
+		return Void();
+	}
+
+	state Future<Void> next = Void();
+
+	// One thread ensures async serialized execution on the log file.
+	if (g_network->isSimulated()) {
+		self->connectionLogWriterThread = Reference<IThreadPool>(new DummyThreadPool());
+	} else {
+		self->connectionLogWriterThread = createGenericThreadPool();
+	}
+
+	self->connectionLogWriterThread->addThread(new ConnectionLogWriter(FLOW_KNOBS->CONNECTION_LOG_DIRECTORY));
+	loop {
+		wait(next);
+		next = delay(FLOW_KNOBS->LOG_CONNECTION_INTERVAL_SECS);
+		if (self->connectionHistory.size() == 0) {
+			continue;
+		}
+		std::string localAddr = FlowTransport::getGlobalLocalAddress().toString();
+		auto action = new ConnectionLogWriter::AppendAction(localAddr, std::move(self->connectionHistory));
+		ASSERT(action != nullptr);
+		self->connectionLogWriterThread->post(action);
+		wait(delay(1));
+		ASSERT(self->connectionHistory.size() == 0);
+	}
+}
 
 ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 	state NetworkAddress lastAddress = NetworkAddress();
@@ -377,6 +506,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 			if (peer && (peer->pingLatencies.getPopulationSize() >= 10 || peer->connectFailedCount > 0 ||
 			             peer->timeoutCount > 0)) {
 				TraceEvent("PingLatency")
+				    .suppressFor(30.0)
 				    .detail("Elapsed", now() - peer->lastLoggedTime)
 				    .detail("PeerAddr", lastAddress)
 				    .detail("PeerAddress", lastAddress)
@@ -422,6 +552,8 @@ TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IP
     allowList(allowList == nullptr ? IPAllowList() : *allowList) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
+
+	connectionHistoryLoggerF = connectionHistoryLogger(this);
 }
 
 #define CONNECT_PACKET_V0 0x0FDB00A444020001LL
@@ -707,7 +839,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 						when(Reference<IConnection> _conn =
 						         wait(INetworkConnections::net()->connect(self->destination))) {
 							conn = _conn;
+							self->transport->countOutgoingConnHandshakeRequested++;
 							wait(conn->connectHandshake());
+							self->transport->countOutgoingConnHandshakeComplete++;
 							self->connectLatencies.addSample(now() - self->lastConnectTime);
 							if (FlowTransport::isClient()) {
 								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
@@ -1393,11 +1527,12 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 								    now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 							}
 							compatible = false;
+							transport->countConnIncompatible++;
 							if (!protocolVersion.hasInexpensiveMultiVersionClient()) {
 								if (peer) {
 									peer->protocolVersion->set(protocolVersion);
 								}
-
+								transport->countConnIncompatibleWithOldClient++;
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but
 								// it's safer to keep the old behavior.
 								throw incompatible_protocol_version();
@@ -1492,10 +1627,19 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 }
 
 ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<IConnection> conn) {
+	state TransportData::ConnectionHistoryEntry entry;
+	entry.time = now();
+	entry.addr = conn->getPeerAddress();
 	try {
+		self->countConnHandshakeRequested++;
 		wait(conn->acceptHandshake());
+		self->countConnHandshakeAccepted++;
 		state Promise<Reference<Peer>> onConnected;
 		state Future<Void> reader = connectionReader(self, conn, Reference<Peer>(), onConnected);
+		if (FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
+			entry.failed = false;
+			self->connectionHistory.push_back(entry);
+		}
 		choose {
 			when(wait(reader)) {
 				ASSERT(false);
@@ -1506,20 +1650,26 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 			}
 			when(wait(delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
 				CODE_PROBE(true, "Incoming connection timed out");
+				self->countIncomingConnectionTimedout++;
 				throw timed_out();
 			}
 		}
-		return Void();
+		self->countIncomingConnConnected++;
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
 			TraceEvent("IncomingConnectionError", conn->getDebugID())
 			    .errorUnsuppressed(e)
 			    .suppressFor(1.0)
 			    .detail("FromAddress", conn->getPeerAddress());
+			if (FLOW_KNOBS->LOG_CONNECTION_ATTEMPTS_ENABLED) {
+				entry.failed = true;
+				self->connectionHistory.push_back(entry);
+			}
 		}
 		conn->close();
-		return Void();
 	}
+
+	return Void();
 }
 
 ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr) {
@@ -1535,7 +1685,9 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 	state uint64_t connectionCount = 0;
 	try {
 		loop {
+			self->countIncomingConnRequested++;
 			Reference<IConnection> conn = wait(listener->accept());
+			self->countIncomingConnAccepted++;
 			if (conn) {
 				TraceEvent("ConnectionFrom", conn->getDebugID())
 				    .suppressFor(1.0)

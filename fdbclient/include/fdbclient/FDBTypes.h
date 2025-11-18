@@ -370,6 +370,8 @@ struct KeyRangeRef {
 		return KeyRangeRef(begin.removePrefix(prefix), end.removePrefix(prefix));
 	}
 
+	int prefixLength() const { return commonPrefixLength(begin, end); }
+
 	const KeyRangeRef& operator=(const KeyRangeRef& rhs) {
 		const_cast<KeyRef&>(begin) = rhs.begin;
 		const_cast<KeyRef&>(end) = rhs.end;
@@ -1668,24 +1670,30 @@ struct StorageMetadataType {
 	KeyValueStoreType storeType;
 
 	// no need to serialize part (should be assigned after initialization)
-	bool wrongConfigured = false;
+	// Used only during wiggling to find out if the SS has incorrect storageType
+	// compared to perpetualStorageWiggleType. If perpetualStorageWiggleType is not
+	// set, configuredStorageType is compared to SS storageType.
+	bool wrongConfiguredForWiggle = false;
 
 	StorageMetadataType() : createdTime(0) {}
-	StorageMetadataType(double t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
-	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured) {}
+	StorageMetadataType(double t,
+	                    KeyValueStoreType storeType = KeyValueStoreType::END,
+	                    bool wrongConfiguredForWiggle = false)
+	  : createdTime(t), storeType(storeType), wrongConfiguredForWiggle(wrongConfiguredForWiggle) {}
 
 	static double currentTime() { return g_network->timer(); }
 
 	bool operator==(const StorageMetadataType& b) const {
-		return createdTime == b.createdTime && storeType == b.storeType && wrongConfigured == b.wrongConfigured;
+		return createdTime == b.createdTime && storeType == b.storeType &&
+		       wrongConfiguredForWiggle == b.wrongConfiguredForWiggle;
 	}
 
 	bool operator<(const StorageMetadataType& b) const {
-		if (wrongConfigured == b.wrongConfigured) {
+		if (wrongConfiguredForWiggle == b.wrongConfiguredForWiggle) {
 			// the older SS has smaller createdTime
 			return createdTime < b.createdTime;
 		}
-		return wrongConfigured > b.wrongConfigured;
+		return wrongConfiguredForWiggle > b.wrongConfiguredForWiggle;
 	}
 
 	bool operator>(const StorageMetadataType& b) const { return b < *this; }
