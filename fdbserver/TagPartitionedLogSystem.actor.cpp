@@ -548,7 +548,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		} else {
 			// Skip monitoring backup workers after full recovery.
 			backupFailed.clear();
-			backupFailed.push_back(Never());
 		}
 
 		if (SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_ENABLED) {
@@ -566,9 +565,13 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		changes.push_back(self->recoveryCompleteWrittenToCoreState.onChange());
 
 		ASSERT(failed.size() >= 1);
+		Future<Void> backupWorkerFailed =
+		    backupFailed.size() > 0
+		        ? tagError<Void>(traceAfter(quorum(backupFailed, 1), "TPLSOnErrorBackupFailed"), backup_worker_failed())
+		        : Never();
 		wait(quorum(changes, 1) ||
 		     tagError<Void>(traceAfter(quorum(failed, 1), "TPLSOnErrorLogSystemFailed"), tlog_failed()) ||
-		     tagError<Void>(traceAfter(quorum(backupFailed, 1), "TPLSOnErrorBackupFailed"), backup_worker_failed()));
+		     backupWorkerFailed);
 	}
 }
 
