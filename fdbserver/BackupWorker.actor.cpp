@@ -141,6 +141,7 @@ struct BackupData : NonCopyable, ReferenceCounted<BackupData> {
 	bool pulling = false;
 	bool stopped = false;
 	bool exitEarly = false; // If the worker is on an old epoch and all backups starts a version >= the endVersion
+	bool isNoopMode = false; // True when backup key is not present and worker is popping without pulling/saving
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
 	Reference<FlowLock> lock;
 
@@ -356,7 +357,7 @@ struct BackupData : NonCopyable, ReferenceCounted<BackupData> {
 			    .detail("Version", savedVersion);
 			return;
 		}
-		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
+
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
 		DisabledTraceEvent("BackupWorkerPop", myId)
 		    .detail("Tag", popTag)
@@ -1127,6 +1128,8 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(Reference<BackupData> self, bool k
 	loop {
 		state Future<bool> present = monitorBackupStartedKeyChanges(self, !keyPresent, /*watch=*/true);
 		if (keyPresent) {
+			self->isNoopMode = false;
+			TraceEvent("BackupWorkerModeChange", self->myId).detail("Mode", "Pulling").detail("IsNoopMode", false);
 			pullFinished = pullAsyncData(self);
 			self->pulling = true;
 			wait(success(present) || pullFinished);
@@ -1143,7 +1146,9 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(Reference<BackupData> self, bool k
 			self->pulling = false;
 			TraceEvent("BackupWorkerPaused", self->myId).detail("Reason", "NoBackup");
 		} else {
-			// Backup key is not present, enter this NOOP POP mode.
+			// Backup key is not present, enter NOOP POP mode.
+			self->isNoopMode = true;
+			TraceEvent("BackupWorkerModeChange", self->myId).detail("Mode", "NoopPop").detail("IsNoopMode", true);
 			state Future<Version> committedVersion = self->getMinKnownCommittedVersion();
 
 			loop choose {
@@ -1275,7 +1280,10 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 		// noop pop as well as upload data: pop or skip upload before knowing
 		// there are backup keys. Set the "exitEarly" flag if needed.
 		bool present = wait(monitorBackupStartedKeyChanges(self, true, false));
-		TraceEvent("BackupWorkerWaitKey", self->myId).detail("Present", present).detail("ExitEarly", self->exitEarly);
+		TraceEvent("BackupWorkerWaitKey", self->myId)
+		    .detail("Present", present)
+		    .detail("ExitEarly", self->exitEarly)
+		    .detail("IsNoopMode", self->isNoopMode);
 
 		pull = self->exitEarly ? Void() : monitorBackupKeyOrPullData(self, present);
 		addActor.send(pull);
