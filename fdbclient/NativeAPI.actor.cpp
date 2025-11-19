@@ -669,7 +669,6 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 
 			cx->cc.logToTraceEvent(ev);
 
-			ev.detail("LocationCacheEntryCount", cx->locationCache.size());
 			ev.detail("MeanLatency", cx->latencies.mean())
 			    .detail("MedianLatency", cx->latencies.median())
 			    .detail("Latency90", cx->latencies.percentile(0.90))
@@ -1075,6 +1074,93 @@ Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
 	}
 	interfaces.insert(interfaces.end(), other.begin(), other.end());
 	return makeReference<LocationInfo>(interfaces, true);
+}
+
+ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
+	// Only run cleanup if TTL is enabled
+	if (CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL == 0.0) {
+		return Void();
+	}
+
+	TraceEvent("LocationCacheCleanup1")
+	    .detail("LOCATION_CACHE_ENTRY_TTL", CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL)
+	    .detail("LOCATION_CACHE_ENTRY_REFRESH_TIME", CLIENT_KNOBS->LOCATION_CACHE_ENTRY_REFRESH_TIME)
+	    .detail("LOCATION_CACHE_EVICTION_INTERVAL", CLIENT_KNOBS->LOCATION_CACHE_EVICTION_INTERVAL)
+	    .detail("LOCATION_CACHE_MAX_ENTRIES_PER_ITERATION", CLIENT_KNOBS->LOCATION_CACHE_MAX_ENTRIES_PER_ITERATION)
+	    .detail("LOCATION_CACHE_MAX_REMOVED_ENTRIES_PER_ITERATION",
+	            CLIENT_KNOBS->LOCATION_CACHE_MAX_REMOVED_ENTRIES_PER_ITERATION);
+
+	loop {
+		wait(delay(CLIENT_KNOBS->LOCATION_CACHE_EVICTION_INTERVAL));
+
+		double currentTime = now();
+		std::vector<KeyRangeRef> toRemove;
+		int totalCount = 0;
+
+		// Scan locationCache for expired entries
+		auto iter = cx->locationCache.randomRange();
+		for (; iter != cx->locationCache.lastItem(); ++iter) {
+			if (iter->value()) {
+				// Check the expireTime of the first cache entry as a representative
+				// All entries in a range typically have similar expiration times
+				if (iter->value()->expireTime > 0.0 && iter->value()->expireTime <= currentTime) {
+					toRemove.push_back(iter->range());
+					TraceEvent("LocationCacheCleanup3")
+					    .detail("TotalCount", totalCount)
+					    .detail("StorageServerInterfaceCacheSize", iter->value()->size())
+					    .detail("ExpireTime", iter->value()->expireTime)
+					    .detail("CurrentTime", currentTime);
+				}
+			}
+			totalCount++;
+			// If LOCATION_CACHE_MAX_ENTRIES_PER_ITERATION is set to a negative number the limitation per iteration is
+			// removed, same for LOCATION_CACHE_MAX_REMOVED_ENTRIES_PER_ITERATION.
+			if ((CLIENT_KNOBS->LOCATION_CACHE_MAX_ENTRIES_PER_ITERATION >= 0 &&
+			     totalCount > CLIENT_KNOBS->LOCATION_CACHE_MAX_ENTRIES_PER_ITERATION) ||
+			    CLIENT_KNOBS->LOCATION_CACHE_MAX_REMOVED_ENTRIES_PER_ITERATION >= 0 ||
+			    toRemove.size() > CLIENT_KNOBS->LOCATION_CACHE_MAX_REMOVED_ENTRIES_PER_ITERATION) {
+				break; // Avoid long blocking scans
+			}
+		}
+
+		// TODO (j-scheuermann): This approach is quite expensive and scans all cache locations.
+		// auto ranges = cx->locationCache.ranges();
+		// for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+		// 	if (iter->value()) {
+		// 		// Check the expireTime of the first cache entry as a representative
+		// 		// All entries in a range typically have similar expiration times
+		// 		if (iter->value()->expireTime > 0.0 && iter->value()->expireTime <= currentTime) {
+		// 			toRemove.push_back(iter->range());
+		// 			TraceEvent("LocationCacheCleanup2")
+		// 				.detail("Begin", iter.begin())
+		// 				.detail("End", iter.end())
+		// 				.detail("ExpireTime", iter->value()->expireTime)
+		// 				.detail("CurrentTime", currentTime);
+		// 		}
+		// 	}
+
+		// 	totalCount++;
+		// }
+
+		// Remove expired entries
+		for (const auto& range : toRemove) {
+			cx->locationCache.insert(range, Reference<LocationInfo>());
+		}
+
+		TraceEvent("LocationCacheCleanup4")
+		    .detail("RemovedRanges", toRemove.size())
+		    .detail("TotalCount", totalCount)
+		    .detail("CacheSize", cx->locationCache.size())
+		    .detail("Duration", now() - currentTime);
+
+		if (!toRemove.empty()) {
+			CODE_PROBE(true, "LocationCacheCleanup removed some entries");
+			TraceEvent("LocationCacheCleanup")
+			    .detail("RemovedRanges", toRemove.size())
+			    .detail("CheckedEntries", totalCount)
+			    .detail("CacheSize", cx->locationCache.size());
+		}
+	}
 }
 
 ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, StorageServerInterface>* cacheServers) {
@@ -1611,6 +1697,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	clientDBInfoMonitor = monitorClientDBInfoChange(this, clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
+	locationCacheCleanup = cleanupLocationCache(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 
@@ -1921,6 +2008,7 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	locationCacheCleanup.cancel();
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
 	}
@@ -3098,8 +3186,12 @@ bool checkOnlyEndpointFailed(const Database& cx, const Endpoint& endpoint) {
 			return true;
 		}
 	} else {
+		// todo check if endpoint failed !
 		cx->clearFailedEndpointOnHealthyServer(endpoint);
 	}
+
+	// TODO (j-scheuermann): Track if an endpoint and the server is failed.
+
 	return false;
 }
 
@@ -3122,9 +3214,16 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
 
 	bool onlyEndpointFailedAndNeedRefresh = false;
 	for (int i = 0; i < locationInfo.get().locations->size(); i++) {
-		if (checkOnlyEndpointFailed(cx, locationInfo.get().locations->get(i, member).getEndpoint())) {
+		auto endpoint = locationInfo.get().locations->get(i, member).getEndpoint();
+		// TODO (j-scheuermann) Update? How is a endpoint determined to be failed?
+		if (checkOnlyEndpointFailed(cx, endpoint)) {
 			onlyEndpointFailedAndNeedRefresh = true;
 		}
+
+		TraceEvent("GetKeyLocation")
+		    .detail("LocationSize", locationInfo.get().locations->size())
+		    .detail("PrimaryAddress", endpoint.getPrimaryAddress())
+		    .detail("Failed", onlyEndpointFailedAndNeedRefresh);
 	}
 
 	if (onlyEndpointFailedAndNeedRefresh) {
@@ -3274,9 +3373,16 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& c
 	for (const auto& locationInfo : locations) {
 		bool onlyEndpointFailedAndNeedRefresh = false;
 		for (int i = 0; i < locationInfo.locations->size(); i++) {
-			if (checkOnlyEndpointFailed(cx, locationInfo.locations->get(i, member).getEndpoint())) {
+			auto endpoint = locationInfo.locations->get(i, member).getEndpoint();
+			// TODO (j-scheuermann)L Update? How does the failure monitor detect a failed endpoint?
+			if (checkOnlyEndpointFailed(cx, endpoint)) {
 				onlyEndpointFailedAndNeedRefresh = true;
 			}
+
+			TraceEvent("GetKeyRangeLocations")
+			    .detail("LocationSize", locationInfo.locations->size())
+			    .detail("PrimaryAddress", endpoint.getPrimaryAddress())
+			    .detail("Failed", onlyEndpointFailedAndNeedRefresh);
 		}
 
 		if (onlyEndpointFailedAndNeedRefresh) {

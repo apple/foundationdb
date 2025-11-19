@@ -103,6 +103,12 @@ public:
 	// How often to run the background actor that removes expired location cache entries.
 	// Only has effect when LOCATION_CACHE_ENTRY_TTL > 0. Default 60 seconds.
 	double LOCATION_CACHE_EVICTION_INTERVAL;
+	// The maximum entries per cache evition iteration to check if they are expired.
+	// If set to a negative number all entries will be validated.
+	double LOCATION_CACHE_MAX_ENTRIES_PER_ITERATION;
+	// The maximum entires per cache evition iteration to remove.
+	// If set to a negative number all expired cache entries will be removed.
+	double LOCATION_CACHE_MAX_REMOVED_ENTRIES_PER_ITERATION;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
