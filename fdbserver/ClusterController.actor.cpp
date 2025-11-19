@@ -389,7 +389,7 @@ ACTOR Future<Void> recruitFailedBackupWorkers(ClusterControllerData* cluster,
 	    cluster->clusterControllerDcId, ProcessClass::Backup, tagIds.size(), db->config, id_used);
 
 	if (workers.size() < tagIds.size()) {
-		TraceEvent(SevWarn, "NotEnoughWorkersForBackupWorkers", cluster->id)
+		TraceEvent(SevWarnAlways, "NotEnoughWorkersForBackupWorkers", cluster->id)
 		    .detail("Required", tagIds.size())
 		    .detail("Available", workers.size());
 		throw recruitment_failed();
@@ -412,6 +412,13 @@ ACTOR Future<Void> recruitFailedBackupWorkers(ClusterControllerData* cluster,
 	state std::vector<Future<ErrorOr<InitializeBackupReply>>> recruitments;
 	state int logRouterTags = logSystem->getLogRouterTags();
 
+	if (recoveryCount < db->recoveryData->cstate.myDBState.recoveryCount) {
+		TraceEvent(SevWarnAlways, "RecruitBackupWorkersStaleRecovery", cluster->id)
+		    .detail("RequestedRecoveryCount", recoveryCount)
+		    .detail("CurrentRecoveryCount", db->recoveryData->cstate.myDBState.recoveryCount);
+		throw recruitment_failed();
+	}
+
 	for (int i = 0; i < tagIds.size(); i++) {
 		const int& tagId = tagIds[i];
 		Tag backupTag = Tag(tagLocalityLogRouter, tagId);
@@ -421,14 +428,16 @@ ACTOR Future<Void> recruitFailedBackupWorkers(ClusterControllerData* cluster,
 		req.backupEpoch = recoveryCount;
 		req.routerTag = backupTag;
 		req.totalTags = logRouterTags;
-		req.startVersion = 0; // to be determined by backup worker
+		req.startVersion = 0; // to be determined by backup worker via BackupProgress::takeover()
 		req.isReplacement = true;
 
 		TraceEvent("RecruitingBackupWorkerOnWorker", cluster->id)
 		    .detail("WorkerID", workers[i].interf.id())
 		    .detail("Tag", backupTag)
 		    .detail("TagId", tagId)
-		    .detail("Epoch", recoveryCount);
+		    .detail("RecruitedEpoch", req.recruitedEpoch)
+		    .detail("BackupEpoch", req.backupEpoch)
+		    .detail("PassedRecoveryCount", recoveryCount);
 
 		recruitments.push_back(workers[i].interf.backup.getReplyUnlessFailedFor(
 		    req, SERVER_KNOBS->BACKUP_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY));
@@ -442,7 +451,7 @@ ACTOR Future<Void> recruitFailedBackupWorkers(ClusterControllerData* cluster,
 	for (int i = 0; i < recruitments.size(); i++) {
 		ErrorOr<InitializeBackupReply> result = recruitments[i].get();
 		if (result.isError()) {
-			TraceEvent(SevWarn, "BackupWorkerRecruitmentFailed", cluster->id)
+			TraceEvent(SevWarnAlways, "BackupWorkerRecruitmentFailed", cluster->id)
 			    .error(result.getError())
 			    .detail("TagId", tagIds[i])
 			    .detail("Epoch", recoveryCount);
@@ -461,6 +470,13 @@ ACTOR Future<Void> recruitFailedBackupWorkers(ClusterControllerData* cluster,
 		newRecruits.push_back(reply);
 	}
 
+	if (recoveryCount < db->recoveryData->cstate.myDBState.recoveryCount) {
+		TraceEvent(SevWarnAlways, "RecruitBackupWorkersStaleRecovery2", cluster->id)
+		    .detail("RequestedRecoveryCount", recoveryCount)
+		    .detail("CurrentRecoveryCount", db->recoveryData->cstate.myDBState.recoveryCount);
+		throw recruitment_failed();
+	}
+
 	// Update the log system with newly recruited backup workers
 	logSystem->updateBackupWorkers(tagIds, newRecruits);
 
@@ -468,7 +484,6 @@ ACTOR Future<Void> recruitFailedBackupWorkers(ClusterControllerData* cluster,
 	db->recoveryData->registrationTrigger.trigger();
 
 	TraceEvent("BackupWorkersRecruitmentComplete", cluster->id).detail("Count", tagIds.size());
-
 	return Void();
 }
 
