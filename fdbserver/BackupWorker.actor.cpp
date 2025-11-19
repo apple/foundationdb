@@ -121,7 +121,7 @@ struct VersionedMessage {
 	}
 };
 
-struct BackupData {
+struct BackupData : NonCopyable, ReferenceCounted<BackupData> {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
 	const int totalTags; // Total log router tags
@@ -565,7 +565,7 @@ struct BackupData {
 // Monitors "backupStartedKey". If "present" is true, wait until the key is set;
 // otherwise, wait until the key is cleared. If "watch" is false, do not perform
 // the wait for key set/clear events. Returns if key present.
-ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool present, bool watch) {
+ACTOR Future<bool> monitorBackupStartedKeyChanges(Reference<BackupData> self, bool present, bool watch) {
 	loop {
 		state ReadYourWritesTransaction tr(self->cx);
 
@@ -613,7 +613,7 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool present
 }
 
 // Set "latestBackupWorkerSavedVersion" key for backups
-ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVersions) {
+ACTOR Future<Void> setBackupKeys(Reference<BackupData> self, std::map<UID, Version> savedLogVersions) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 
 	loop {
@@ -666,7 +666,7 @@ ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedL
 // version key is set by one process, which is stored in each BackupConfig in
 // the system space. The client can know if a backup is restorable by checking
 // log saved version > snapshot version.
-ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
+ACTOR Future<Void> monitorBackupProgress(Reference<BackupData> self) {
 	state Future<Void> interval;
 
 	loop {
@@ -704,7 +704,7 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 	}
 }
 
-ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
+ACTOR Future<Void> saveProgress(Reference<BackupData> self, Version backupVersion) {
 	state Transaction tr(self->cx);
 	state Key key = backupProgressKeyFor(self->myId);
 
@@ -764,7 +764,7 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	return Void();
 }
 
-ACTOR static Future<Void> updateLogBytesWritten(BackupData* self,
+ACTOR static Future<Void> updateLogBytesWritten(Reference<BackupData> self,
                                                 std::vector<UID> backupUids,
                                                 std::vector<Reference<IBackupFile>> logFiles) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
@@ -791,7 +791,7 @@ ACTOR static Future<Void> updateLogBytesWritten(BackupData* self,
 // Saves messages in the range of [0, numMsg) to a file and then remove these
 // messages. The file content format is a sequence of (Version, sub#, msgSize, message).
 // Note only ready backups are saved.
-ACTOR Future<Void> saveMutationsToFile(BackupData* self,
+ACTOR Future<Void> saveMutationsToFile(Reference<BackupData> self,
                                        Version popVersion,
                                        int numMsg,
                                        std::unordered_set<BlobCipherDetails> cipherDetails) {
@@ -920,7 +920,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 }
 
 // Uploads self->messages to cloud storage and updates savedVersion.
-ACTOR Future<Void> uploadData(BackupData* self) {
+ACTOR Future<Void> uploadData(Reference<BackupData> self) {
 	state Version popVersion = invalidVersion;
 
 	loop {
@@ -997,7 +997,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 	}
 }
 
-ACTOR static Future<Version> getNoopVersion(BackupData* self) {
+ACTOR static Future<Version> getNoopVersion(Reference<BackupData> self) {
 	state Transaction tr(self->cx);
 
 	loop {
@@ -1019,7 +1019,7 @@ ACTOR static Future<Version> getNoopVersion(BackupData* self) {
 }
 
 // Pulls data from TLog servers using LogRouter tag.
-ACTOR Future<Void> pullAsyncData(BackupData* self) {
+ACTOR Future<Void> pullAsyncData(Reference<BackupData> self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
 
@@ -1121,7 +1121,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	}
 }
 
-ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent) {
+ACTOR Future<Void> monitorBackupKeyOrPullData(Reference<BackupData> self, bool keyPresent) {
 	state Future<Void> pullFinished = Void();
 
 	loop {
@@ -1178,7 +1178,7 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 LogEpoch recoveryCount,
-                                BackupData* self,
+                                Reference<BackupData> self,
                                 bool isReplacement,
                                 double localRecruitmentTime) {
 	while (isReplacement && now() - localRecruitmentTime < SERVER_KNOBS->BACKUP_WORKER_REPLACEMENT_GRACE_PERIOD) {
@@ -1202,7 +1202,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
 	}
 }
 
-ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
+ACTOR static Future<Void> monitorWorkerPause(Reference<BackupData> self) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 	state Future<Void> watch;
 
@@ -1232,58 +1232,75 @@ ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
 ACTOR Future<Void> backupWorker(BackupInterface interf,
                                 InitializeBackupRequest req,
                                 Reference<AsyncVar<ServerDBInfo> const> db) {
-	state BackupData self(interf.id(), db, req);
+	state Reference<BackupData> self;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> pull;
 	state Future<Void> done;
 
-	TraceEvent("BackupWorkerStart", self.myId)
-	    .detail("Tag", req.routerTag.toString())
+	TraceEvent("BackupWorkerStart", interf.id())
+	    .detail("Tag", req.routerTag)
 	    .detail("TotalTags", req.totalTags)
 	    .detail("StartVersion", req.startVersion)
 	    .detail("EndVersion", req.endVersion.present() ? req.endVersion.get() : -1)
 	    .detail("LogEpoch", req.recruitedEpoch)
-	    .detail("BackupEpoch", req.backupEpoch);
+	    .detail("BackupEpoch", req.backupEpoch)
+	    .detail("IsReplacement", req.isReplacement);
+
+	// If this is a replacement worker, try to resume from saved progress
+	if (req.isReplacement && req.startVersion == 0) {
+		state Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
+		Version savedVersion = wait(BackupProgress::takeover(cx, interf.id(), req.backupEpoch, req.routerTag));
+		// Resume from saved version + 1
+		req.startVersion = savedVersion + 1;
+		TraceEvent("BackupWorkerResumeFromSavedVersion", interf.id())
+		    .detail("Tag", req.routerTag.toString())
+		    .detail("Epoch", req.backupEpoch)
+		    .detail("SavedVersion", savedVersion)
+		    .detail("StartVersion", req.startVersion);
+	}
+
+	self = makeReference<BackupData>(interf.id(), db, req);
+
 	try {
-		addActor.send(checkRemoved(db, req.recruitedEpoch, &self, req.isReplacement, now()));
+		addActor.send(checkRemoved(db, req.recruitedEpoch, self, req.isReplacement, now()));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
 		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
-			addActor.send(monitorBackupProgress(&self));
+			addActor.send(monitorBackupProgress(self));
 		}
-		addActor.send(monitorWorkerPause(&self));
+		addActor.send(monitorWorkerPause(self));
 
 		// Check if backup key is present to avoid race between this check and
 		// noop pop as well as upload data: pop or skip upload before knowing
 		// there are backup keys. Set the "exitEarly" flag if needed.
-		bool present = wait(monitorBackupStartedKeyChanges(&self, true, false));
-		TraceEvent("BackupWorkerWaitKey", self.myId).detail("Present", present).detail("ExitEarly", self.exitEarly);
+		bool present = wait(monitorBackupStartedKeyChanges(self, true, false));
+		TraceEvent("BackupWorkerWaitKey", self->myId).detail("Present", present).detail("ExitEarly", self->exitEarly);
 
-		pull = self.exitEarly ? Void() : monitorBackupKeyOrPullData(&self, present);
+		pull = self->exitEarly ? Void() : monitorBackupKeyOrPullData(self, present);
 		addActor.send(pull);
-		done = self.exitEarly ? Void() : uploadData(&self);
+		done = self->exitEarly ? Void() : uploadData(self);
 
 		loop choose {
 			when(wait(dbInfoChange)) {
 				dbInfoChange = db->onChange();
-				Reference<ILogSystem> ls = ILogSystem::fromServerDBInfo(self.myId, db->get(), true);
+				Reference<ILogSystem> ls = ILogSystem::fromServerDBInfo(self->myId, db->get(), true);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
 				if (hasPseudoLocality) {
-					self.logSystem.set(ls);
-					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
+					self->logSystem.set(ls);
+					self->oldestBackupEpoch = std::max(self->oldestBackupEpoch, ls->getOldestBackupEpoch());
 				}
-				TraceEvent("BackupWorkerLogSystem", self.myId)
+				TraceEvent("BackupWorkerLogSystem", self->myId)
 				    .detail("HasBackupLocality", hasPseudoLocality)
-				    .detail("OldestBackupEpoch", self.oldestBackupEpoch)
-				    .detail("Tag", self.tag.toString());
+				    .detail("OldestBackupEpoch", self->oldestBackupEpoch)
+				    .detail("Tag", self->tag);
 			}
 			when(wait(done)) {
-				TraceEvent("BackupWorkerDone", self.myId).detail("BackupEpoch", self.backupEpoch);
+				TraceEvent("BackupWorkerDone", self->myId).detail("BackupEpoch", self->backupEpoch);
 				// Notify CC so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
 				wait(brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
-				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
+				    BackupWorkerDoneRequest(self->myId, self->backupEpoch))));
 				break;
 			}
 			when(wait(error)) {}
@@ -1292,14 +1309,14 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 		state Error err = e;
 		if (e.code() == error_code_worker_removed) {
 			pull = Void(); // cancels pulling
-			self.stop();
+			self->stop();
 			try {
 				wait(done);
 			} catch (Error& e) {
-				TraceEvent("BackupWorkerShutdownError", self.myId).errorUnsuppressed(e);
+				TraceEvent("BackupWorkerShutdownError", self->myId).errorUnsuppressed(e);
 			}
 		}
-		TraceEvent("BackupWorkerTerminated", self.myId).errorUnsuppressed(err);
+		TraceEvent("BackupWorkerTerminated", self->myId).errorUnsuppressed(err);
 		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
 			throw err;
 		}

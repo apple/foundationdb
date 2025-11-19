@@ -68,6 +68,13 @@ public:
 
 	void delref() { ReferenceCounted<BackupProgress>::delref(); }
 
+	// Read the previously saved version for a backup worker to resume from, and replace
+	// the old worker's key with the new worker's key. This is used when a backup worker
+	// is re-recruited after a failure. Returns the saved version, or the read version if
+	// no progress was saved. This function atomically transfers ownership from the old
+	// worker to the new worker within a single transaction.
+	static Future<Version> takeover(Database cx, UID newWorkerID, LogEpoch backupEpoch, Tag tag);
+
 private:
 	std::set<Tag> enumerateLogRouterTags(int logRouterTags) const {
 		std::set<Tag> tags;
