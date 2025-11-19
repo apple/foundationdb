@@ -513,7 +513,7 @@ ACTOR Future<Void> recruitFailedBackupWorkers(ClusterControllerData* cluster,
 	    cluster->clusterControllerDcId, ProcessClass::Backup, tagIds.size(), db->config, id_used);
 
 	if (workers.size() < tagIds.size()) {
-		TraceEvent(SevWarn, "NotEnoughWorkersForBackupWorkers", cluster->id)
+		TraceEvent(SevWarnAlways, "NotEnoughWorkersForBackupWorkers", cluster->id)
 		    .detail("Required", tagIds.size())
 		    .detail("Available", workers.size());
 		throw recruitment_failed();

@@ -192,7 +192,7 @@ ACTOR Future<Version> _takeover(Database cx, UID newWorkerID, LogEpoch backupEpo
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state Version readVersion = tr.getReadVersion().get();
+			state Version readVersion = wait(tr.getReadVersion());
 			state RangeResult results = wait(tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
