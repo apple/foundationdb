@@ -1,0 +1,62 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ProjectSchemaDefinitions xmlns="clr-namespace:Microsoft.Build.Framework.XamlTypes;assembly=Microsoft.Build.Framework" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:sys="clr-namespace:System;assembly=mscorlib" xmlns:impl="clr-namespace:Microsoft.VisualStudio.Project.Contracts.Implementation;assembly=Microsoft.VisualStudio.Project.Contracts.Implementation">
+  <Rule
+    Name="ActorCompiler"
+    PageTemplate="tool"
+    DisplayName="Flow Actor Compiler"
+    Order="200">
+    <Rule.DataSource>
+      <DataSource
+        Persistence="ProjectFile"
+        ItemType="ActorCompiler" />
+    </Rule.DataSource>
+    <Rule.Categories>
+      <Category Name="Options">
+        <Category.DisplayName>
+          <sys:String>Options</sys:String>
+        </Category.DisplayName>
+      </Category>
+      <Category Name="Command Line">
+        <Category.DisplayName>
+          <sys:String>Command Line</sys:String>
+        </Category.DisplayName>
+      </Category>
+    </Rule.Categories>
+    <BoolProperty Name="EnableCompile" Category="Options">
+      <BoolProperty.DisplayName>
+        <sys:String>Compile generated file</sys:String>
+      </BoolProperty.DisplayName>
+      <BoolProperty.Description>
+        <sys:String>The resulting file is a C++ module to be compiled, not a header file to be included</sys:String>
+      </BoolProperty.Description>
+    </BoolProperty>    
+    <StringProperty
+      Subtype="ActorCompilerOptions"
+      Name="ActorCompilerOptions"
+      Category="Options">
+      <StringProperty.DisplayName>
+        <sys:String>Actor Compiler Options</sys:String>
+      </StringProperty.DisplayName>
+      <StringProperty.Description>
+        <sys:String>Actor Compiler Options</sys:String>
+      </StringProperty.Description>
+    </StringProperty>
+    <StringProperty
+      Subtype="AdditionalOptions"
+      Name="AdditionalOptions"
+      Category="Command Line">
+      <StringProperty.DisplayName>
+        <sys:String>Additional C++ Options</sys:String>
+      </StringProperty.DisplayName>
+      <StringProperty.Description>
+        <sys:String>Options passed to the C++ compiler processing the generated code</sys:String>
+      </StringProperty.Description>
+    </StringProperty>
+  </Rule>
+  <ItemType Name="ActorCompiler" DisplayName="Flow Actor Compiler" />
+  <FileExtension Name=".actor.cpp" ContentType="ActorCompiler" />
+  <ContentType Name="ActorCompiler" DisplayName="Actor Compiler" ItemType="ActorCompiler" />
+
+  <ItemType Name="Dependency" DisplayName="External Dependency" />
+  <ContentType Name="Dependency" DisplayName="External Dependency" ItemType="Dependency" />
+</ProjectSchemaDefinitions>

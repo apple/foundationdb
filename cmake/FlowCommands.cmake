@@ -263,11 +263,24 @@ function(add_flow_target)
         endforeach()
 
         list(APPEND generated_files ${out_file})
-        add_custom_command(OUTPUT "${out_file}"
-          COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}"
-                  ${ACTORCOMPILER_COMMAND} "${in_file}" "${out_file}" ${actor_compiler_flags}
-          DEPENDS "${in_file}" actorcompiler
-          COMMENT "Compile actor: ${src}")
+        if(ACTORCOMPILER_CSHARP_COMMAND)
+          set(py_out_file "${out_file}.py_gen")
+          set(cs_out_file "${out_file}.cs_gen")
+          add_custom_command(OUTPUT "${out_file}"
+            COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}"
+                    ${ACTORCOMPILER_COMMAND} "${in_file}" "${py_out_file}" ${actor_compiler_flags}
+            COMMAND ${ACTORCOMPILER_CSHARP_COMMAND} "${in_file}" "${cs_out_file}" ${actor_compiler_flags}
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/flow/actorcompiler_py/compare_actor_output.py "${cs_out_file}" "${py_out_file}"
+            COMMAND ${CMAKE_COMMAND} -E copy "${py_out_file}" "${out_file}"
+            DEPENDS "${in_file}" actorcompiler
+            COMMENT "Compile and compare actor: ${src}")
+        else()
+          add_custom_command(OUTPUT "${out_file}"
+            COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}"
+                    ${ACTORCOMPILER_COMMAND} "${in_file}" "${out_file}" ${actor_compiler_flags}
+            DEPENDS "${in_file}" actorcompiler
+            COMMENT "Compile actor: ${src}")
+        endif()
       endif()
     endforeach()
     if(PASS_COMPILATION_UNIT)

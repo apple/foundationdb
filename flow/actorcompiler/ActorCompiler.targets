@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemDefinitionGroup>
+    <!-- These are default property settings for an .actor.cpp file (<ActorCompiler> project item)-->
+    <ActorCompiler>
+      <ActorCompilerOptions></ActorCompilerOptions>
+      <EnableCompile>true</EnableCompile>
+    </ActorCompiler>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+      <!-- This includes the ActorCompiler.xml file, which defines the property page UI for an <ActorCompiler> project item -->
+    <PropertyPageSchema
+      Include="$(MSBuildThisFileDirectory)$(MSBuildThisFileName).xml" />
+    <!-- This makes "Flow Actor Compiler" available from the "Item Type" menu -->
+    <AvailableItemName Include="ActorCompiler">
+      <Targets>_ActorCompiler</Targets>
+    </AvailableItemName>
+    <!-- This item is used to reference the actorcompiler .exe; possibly a property would be better? -->
+    <ActorCompilerExe Include="$(SolutionDir)bin\$(Configuration)\actorcompiler.exe"/>
+  </ItemGroup>
+  <PropertyGroup>
+    <!-- The "fast up to date check" done by the IDE (not MSBuild!) doesn't notice when the compiler .exe has changed,
+      presumably because it isn't part of the project.  Disabling this seems fine for now. -->
+    <!-- <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck> -->
+    <!-- This is what links us into the standard C++ build process so that our generated C++ files actually get compiled.
+      It will apparently only work if this .targets file is imported
+      into the project BEFORE the standard C++ property sheet, which is unfortunate. -->
+    <BuildGenerateSourcesTargets>
+      $(BuildGenerateSourcesTargets);
+      ComputeACOutput;
+    </BuildGenerateSourcesTargets>
+  </PropertyGroup>
+
+  
+  <!-- This is the target referenced by BuildGenerateSourcesTargets above, which tells the build process
+    about the generated .g.cpp file. -->
+  <Target Name="ComputeACOutput">
+    <ItemGroup>
+      <ClCompile Include="%(ActorCompiler.RelativeDir)%(ActorCompiler.Filename).g%(ActorCompiler.Extension)"
+                 Condition="'%(ActorCompiler.EnableCompile)'!='false'"
+                 />
+    </ItemGroup>
+  </Target>
+
+  <!-- This target runs the actual actorcompiler.  The BeforeTargets and AfterTargets are required to actually run it! -->
+  <Target Name="_ActorCompiler"
+    BeforeTargets="Midl"
+    AfterTargets="CustomBuild"
+    Inputs="@(ActorCompilerExe);@(ActorCompiler)"
+    Outputs="@(ActorCompiler->'%(RelativeDir)%(Filename).g%(Extension)')"
+    >
+    <Exec Command="&quot;@(ActorCompilerExe)&quot; %(ActorCompiler.Identity) %(ActorCompiler.RelativeDir)%(ActorCompiler.Filename).g%(ActorCompiler.Extension) %(ActorCompiler.ActorCompilerOptions)"/>
+  </Target>
+</Project>
