@@ -357,11 +357,12 @@ ACTOR Future<std::vector<int>> monitorBackupWorkers(ClusterControllerData* self,
 			continue;
 		}
 		auto& worker = config.tLogs[logSetIndex].backupWorkers[i];
-		failures.push_back(waitFailureClient(worker.interf().waitFailure,
-		                                     SERVER_KNOBS->BACKUP_TIMEOUT,
-		                                     -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-		                                     /*trace=*/true,
-		                                     /*traceMsg=*/"BackupWorkerFailed"_sr));
+		failures.push_back(
+		    waitFailureClient(worker.interf().waitFailure,
+		                      SERVER_KNOBS->BACKUP_TIMEOUT,
+		                      -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+		                      /*trace=*/true,
+		                      /*traceMsg=*/"BackupWorkerFailed"_sr));
 	}
 
 	if (failures.empty()) {
@@ -616,7 +617,7 @@ ACTOR Future<Void> monitorAndRecruitBackupWorkers(ClusterControllerData* self) {
 			logSystem->setOldestBackupEpoch(recoveryCount);
 
 			// Wait for a new recovery
-			while (self->db.serverInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED &&
+			while (self->db.serverInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			       self->db.recoveryData.isValid() &&
 			       self->db.recoveryData->cstate.myDBState.recoveryCount == recoveryCount) {
 				wait(self->db.serverInfo->onChange());
