@@ -20,6 +20,7 @@
 
 #include "fdbserver/BackupProgress.actor.h"
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
@@ -176,6 +177,66 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 			wait(tr.onError(e));
 		}
 	}
+}
+
+// This function scans all backup progress entries to find the one matching the given
+// (epoch, tag) pair. When found, it deletes the old key and writes a new key with the
+// new workerID, effectively transferring ownership from the failed worker to the
+// replacement worker.
+ACTOR Future<Version> _takeover(Database cx, UID newWorkerID, LogEpoch backupEpoch, Tag tag) {
+	state Transaction tr(cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state Version readVersion = tr.getReadVersion().get();
+			state RangeResult results = wait(tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+
+			// Scan all progress entries to find the one matching our epoch and tag
+			for (auto& it : results) {
+				WorkerBackupStatus status = decodeBackupProgressValue(it.value);
+				if (status.epoch == backupEpoch && status.tag == tag) {
+					UID oldWorkerID = decodeBackupProgressKey(it.key);
+					state Version savedVersion = status.version;
+
+					// Delete the old worker's key
+					tr.clear(it.key);
+
+					// Write the new worker's key with the same status
+					Key newKey = backupProgressKeyFor(newWorkerID);
+					tr.set(newKey, it.value);
+
+					TraceEvent("BackupProgressTakeover", newWorkerID)
+					    .detail("Epoch", backupEpoch)
+					    .detail("Tag", tag)
+					    .detail("SavedVersion", savedVersion)
+					    .detail("OldWorkerID", oldWorkerID)
+					    .detail("NewWorkerID", newWorkerID);
+
+					wait(tr.commit());
+					return savedVersion;
+				}
+			}
+
+			// No matching progress found, use the this transaction's read version
+			TraceEvent("BackupProgressNoTakeover", newWorkerID)
+			    .detail("Epoch", backupEpoch)
+			    .detail("Tag", tag)
+			    .detail("ReadVersion", readVersion)
+			    .detail("TotalProgressEntries", results.size());
+			return readVersion;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+Future<Version> BackupProgress::takeover(Database cx, UID newWorkerID, LogEpoch backupEpoch, Tag tag) {
+	return _takeover(cx, newWorkerID, backupEpoch, tag);
 }
 
 TEST_CASE("/BackupProgress/Unfinished") {
