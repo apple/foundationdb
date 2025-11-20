@@ -1,0 +1,57 @@
+# Transaction Timeout Validation Test
+#
+# Purpose:
+#   Validates that FoundationDB's transaction timeout mechanisms work correctly by
+#   testing that transactions can remain open for extended durations (approaching but
+#   not exceeding the configured timeout limits) without prematurely failing with
+#   errors.
+#
+# Test Design:
+#   - Configures transaction lifetime to 15 seconds via MAX_*_TRANSACTION_LIFE_VERSIONS knobs
+#   - Creates transactions that intentionally stay open for ~7 seconds (well within limits)
+#   - Verifies all transactions complete successfully without timeout errors
+#   - Runs with failure injection disabled for testing the happy path
+#
+# Success Criteria:
+#   - All transactions complete successfully (e.g. no transaction_too_old errors)
+#   - Transactions consistently stay open for the target duration (7 seconds)
+#   - Test passes even with concurrent Cycle workload providing background load
+
+[[knobs]]
+# Configure transaction lifetime to 15 seconds
+# At 1M versions/second rate, this equals 15,000,000 versions
+max_read_transaction_life_versions = 15000000
+max_write_transaction_life_versions = 15000000
+
+[[test]]
+testTitle = "TxnTimeout"
+
+    # Primary test workload: Transaction timeout validation
+    [[test.workload]]
+    testName = 'TxnTimeout'
+
+    # Test runs for 6 minutes to gather sufficient data
+    testDuration = 360.0
+
+    # Each test client spawns 4 concurrent transaction actors
+    # This provides concurrency to stress test the timeout mechanism
+    actorsPerClient = 4
+
+    # Each actor operates on 100 unique keys, cycling through them
+    # This ensures sufficient key space to avoid excessive conflicts
+    nodeCountPerClientPerActor = 100
+
+    # Min transaction duration: 7 seconds
+    # This is safely below the 15-second timeout limit, providing ~8 seconds of buffer
+    # The test verifies that transactions can consistently stay open for this duration
+    txnMinDuration = 7
+
+    # Background workload: Cycle provides realistic database activity
+    # This ensures the timeout test runs under realistic conditions with concurrent transactions
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30
+    transactionsPerSecond = 250.0
+    testDuration = 360.0
+    expectedRate = 0  # No specific rate expectation, just background activity
+
