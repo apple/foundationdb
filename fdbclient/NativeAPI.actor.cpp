@@ -1776,10 +1776,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
     QueueModel* model = nullptr,
     bool compareReplicas = false,
     int requiredReplicas = 0) {
-	if (alternatives->hasCaches) {
-		return loadBalance(
-		    alternatives->locations(), channel, request, taskID, atMostOnce, model, compareReplicas, requiredReplicas);
-	}
 	return fmap(
 	    [ctx](auto const& res) {
 		    if (res.cached) {

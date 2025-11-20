@@ -948,30 +948,6 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 	}
 }
 
-void updateLocationCacheWithCaches(DatabaseContext* self,
-                                   const std::map<UID, StorageServerInterface>& removed,
-                                   const std::map<UID, StorageServerInterface>& added) {
-	// TODO: this needs to be more clever in the future
-	auto ranges = self->locationCache.ranges();
-	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
-		if (iter->value() && iter->value()->hasCaches) {
-			auto& val = iter->value();
-			std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
-			interfaces.reserve(val->size() - removed.size() + added.size());
-			for (int i = 0; i < val->size(); ++i) {
-				const auto& interf = (*val)[i];
-				if (removed.count(interf->interf.id()) == 0) {
-					interfaces.emplace_back(interf);
-				}
-			}
-			for (const auto& p : added) {
-				interfaces.push_back(makeReference<ReferencedInterface<StorageServerInterface>>(p.second));
-			}
-			iter->value() = makeReference<LocationInfo>(interfaces, true);
-		}
-	}
-}
-
 ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
 	// Only run cleanup if TTL is enabled
 	if (CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL == 0.0) {
@@ -988,7 +964,7 @@ ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
 		// Scan locationCache for expired entries
 		auto iter = cx->locationCache.randomRange();
 		for (; iter != cx->locationCache.lastItem(); ++iter) {
-			if (iter->value() && iter->value()->hasCaches) {
+			if (iter->value()) {
 				// Check the expireTime of the first cache entry as a representative
 				// All entries in a range typically have similar expiration times
 				if (iter->value()->expireTime > 0.0 && iter->value()->expireTime <= currentTime) {
@@ -1605,6 +1581,7 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	locationCacheCleanup.cancel();
 	storage = nullptr;
 
 	if (grvUpdateHandler.isValid()) {

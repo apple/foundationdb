@@ -67,17 +67,13 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	  : Locations(v),
 	    expireTime(CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL > 0.0 ? now() + CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL
 	                                                            : 0.0) {}
-	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
-	  : Locations(v), hasCaches(hasCaches),
-	    expireTime(CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL > 0.0 ? now() + CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL
-	                                                            : 0.0) {}
+
 	LocationInfo(const LocationInfo&) = delete;
 	LocationInfo(LocationInfo&&) = delete;
 	LocationInfo& operator=(const LocationInfo&) = delete;
 	LocationInfo& operator=(LocationInfo&&) = delete;
 	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
 
-	bool hasCaches = false;
 	// Absolute expiration time for this cache entry. 0 means no expiration (TTL disabled).
 	double expireTime = 0.0;
 };
