@@ -253,10 +253,16 @@ struct TxnTimeout : TestWorkload {
 					// Check if version jumped significantly (e.g stale read version, recovery)
 					state Transaction rvTr(db);
 					Version newReadVersion = wait(rvTr.getReadVersion());
+					// The version delta is "best guess" because the newReadVersion could itself by stale, therefore
+					// the delta could be smaller than (sequencer commit version - readVersion)
 					Version versionDelta = newReadVersion - readVersion;
 					const bool isHighVersionJump = versionDelta > SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+					const double txnDuration = now() - txnStartTime;
+					const bool tooMuchTimeHasPassed =
+					    txnDuration >
+					    ((double)SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND);
 
-					if (!isExpectedError && !isHighVersionJump) {
+					if (!isExpectedError && !isHighVersionJump && !tooMuchTimeHasPassed) {
 						self->txnsFailed++;
 						TraceEvent(SevError, "TxnTimeoutUnexpectedFailure")
 						    .detail("ClientId", self->clientId)
@@ -264,7 +270,7 @@ struct TxnTimeout : TestWorkload {
 						    .detail("OldReadVersion", readVersion)
 						    .detail("NewReadVersion", newReadVersion)
 						    .detail("VersionDelta", versionDelta)
-						    .detail("TxnDuration", now() - txnStartTime)
+						    .detail("TxnDuration", txnDuration)
 						    .errorUnsuppressed(err);
 					} else {
 						TraceEvent("TxnTimeoutExpectedFailure")
@@ -276,6 +282,8 @@ struct TxnTimeout : TestWorkload {
 						    .detail("IsExpectedError", isExpectedError)
 						    .detail("IsHighVersionJump", isHighVersionJump);
 					}
+
+					txnStartTime = now();
 				}
 			}
 		}
