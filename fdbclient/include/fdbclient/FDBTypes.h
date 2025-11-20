@@ -317,7 +317,7 @@ struct KeyRangeRef {
 	KeyRangeRef() {}
 	KeyRangeRef(const KeyRef& begin, const KeyRef& end) : begin(begin), end(end) {
 		if (begin > end) {
-			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end).backtrace();
 			throw inverted_range();
 		}
 	}
@@ -393,7 +393,7 @@ struct KeyRangeRef {
 		}
 
 		if (begin > end) {
-			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end).backtrace();
 			throw inverted_range();
 		};
 	}

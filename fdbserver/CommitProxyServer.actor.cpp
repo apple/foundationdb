@@ -1195,8 +1195,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
-		if (self->committed[t] == ConflictBatch::TransactionCommitted &&
-			(!self->locked || trs[t].isLockAware())) {
+		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
 			applyMetadataMutations(trs[t].spanContext,
 			                       *pProxyCommitData,
@@ -1270,32 +1269,59 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	return Void();
 }
 
-Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
-                                          const MutationRef* mutation) {
+WriteMutationRefVar writeMutation(CommitBatchContext* self, const MutationRef* mutation) {
 	self->toCommit.writeTypedMessage(*mutation);
 	return std::variant<MutationRef, VectorRef<MutationRef>>{ *mutation };
 }
 
 void pushToBackupMutations(CommitBatchContext* self,
-						   ProxyCommitData* const pProxyCommitData,
-						   MutationRef const& m) {
-	KeyRangeRef mutationRange(m.param1, m.param2);
-	KeyRangeRef intersectionRange;
-
-	// Identify and add the intersecting ranges of the mutation to the array of mutations to serialize
-	for (auto backupRange : pProxyCommitData->vecBackupKeys.intersectingRanges(mutationRange)) {
-		// Get the backup sub range
-		const auto& backupSubrange = backupRange.range();
-
-		// Determine the intersecting range
-		intersectionRange = mutationRange & backupSubrange;
-
-		// Create the custom mutation for the specific backup tag
-		MutationRef backupMutation(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
+                           ProxyCommitData* const pProxyCommitData,
+                           Arena& arena,
+                           MutationRef const& m,
+                           MutationRef const& writtenMutation,
+                           Optional<MutationRef> const& encryptedMutation) {
+	if (m.type != MutationRef::Type::ClearRange) {
+		ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || writtenMutation.isEncrypted());
 
 		// Add the mutation to the relevant backup tag
-		for (auto backupName : backupRange.value()) {
-			self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, backupMutation);
+		for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
+			// If encryption is enabled make sure the mutation we are writing is also encrypted
+			CODE_PROBE(writtenMutation.isEncrypted(), "using encrypted backup mutation", probe::decoration::rare);
+			self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, writtenMutation);
+		}
+	} else {
+		KeyRangeRef mutationRange(m.param1, m.param2);
+		KeyRangeRef intersectionRange;
+
+		// Identify and add the intersecting ranges of the mutation to the array of mutations to serialize
+		for (auto backupRange : pProxyCommitData->vecBackupKeys.intersectingRanges(mutationRange)) {
+			// Get the backup sub range
+			const auto& backupSubrange = backupRange.range();
+
+			// Determine the intersecting range
+			intersectionRange = mutationRange & backupSubrange;
+
+			// Create the custom mutation for the specific backup tag
+			MutationRef backupMutation(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
+
+			if (pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+				CODE_PROBE(true, "encrypting clear range backup mutation", probe::decoration::rare);
+				if (backupMutation.param1 == m.param1 && backupMutation.param2 == m.param2 &&
+				    encryptedMutation.present()) {
+					backupMutation = encryptedMutation.get();
+				} else {
+					EncryptCipherDomainId domainId = getEncryptDetailsFromMutationRef(pProxyCommitData, backupMutation);
+					double encryptionTimeV = 0;
+					backupMutation = backupMutation.encrypt(
+					    self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP, &encryptionTimeV);
+				}
+			}
+			ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || backupMutation.isEncrypted());
+
+			// Add the mutation to the relevant backup tag
+			for (auto backupName : backupRange.value()) {
+				self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, backupMutation);
+			}
 		}
 	}
 }
@@ -1471,8 +1497,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					    pProxyCommitData->dbgid);
 				}
 
-				WriteMutationRefVar var =
-				    wait(writeMutation(self, &m));
+				WriteMutationRefVar var = writeMutation(self, &m);
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
@@ -1551,7 +1576,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				}
 
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
-				WriteMutationRefVar var = wait(writeMutation(self, &m));
+				WriteMutationRefVar var = writeMutation(self, &m);
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
@@ -1576,7 +1601,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				continue;
 			}
 
-			pushToBackupMutations(self, pProxyCommitData, m);
+			pushToBackupMutations(self, pProxyCommitData, arena, m, writtenMutation, encryptedMutation);
 		}
 
 		if (checkSample) {
@@ -1726,7 +1751,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 				    self->commitVersion,
 				    pProxyCommitData->dbgid);
 			}
-			WriteMutationRefVar var = wait(writeMutation(self, &pProxyCommitData->idempotencyClears[i]));
+			WriteMutationRefVar var = writeMutation(self, &pProxyCommitData->idempotencyClears[i]);
 			ASSERT(std::holds_alternative<MutationRef>(var));
 		}
 		pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
@@ -1802,11 +1827,11 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion); //< Is this valid?
 
 	// TraceEvent("ProxyPush", pProxyCommitData->dbgid)
-	//     .detail("PrevVersion", self->prevVersion)
-	//     .detail("Version", self->commitVersion)
-	//     .detail("TransactionsSubmitted", trs.size())
-	//     .detail("TransactionsCommitted", self->commitCount)
-	//     .detail("TxsPopTo", self->msg.popTo);
+	// 	    .detail("PrevVersion", self->prevVersion)
+	// 	    .detail("Version", self->commitVersion)
+	// 	    .detail("TransactionsSubmitted", trs.size())
+	//	    .detail("TransactionsCommitted", self->commitCount)
+	//	    .detail("TxsPopTo", self->msg.popTo);
 
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion);
@@ -2192,7 +2217,9 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* pCommitData,
 	try {
 		wait(maxLivenessTimeout);
 	} catch (Error& err) {
-		TraceEvent(SevInfo, "CommitBatchFailed").detail("Stage", context.stage).detail("ErrorCode", err.code());
+		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid)
+		    .detail("Stage", context.stage)
+		    .detail("ErrorCode", err.code());
 		throw failed_to_progress();
 	}
 
