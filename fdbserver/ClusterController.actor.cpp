@@ -285,7 +285,7 @@ ACTOR Future<Void> recruitLogRouters(ClusterControllerData* cluster,
 			}
 		}
 
-		req.allowDropInSim = false;
+		req.allowDropInSim = g_network->isSimulated() && deterministicRandom()->coinflip();
 
 		TraceEvent("RecruitingLogRouterOnWorker", cluster->id)
 		    .detail("WorkerID", workers[i].interf.id())
@@ -347,8 +347,8 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 
 		for (int i = 0; i < config.tLogs.size(); i++) {
 			if (config.tLogs[i].logRouters.size() > 0) {
+				ASSERT_WE_THINK(logSetIndex == -1); // only one log set should have log routers
 				logSetIndex = i;
-				break;
 			}
 		}
 
@@ -431,7 +431,7 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 				try {
 					wait(recruitLogRouters(self, &self->db, failedTagIds, logSetIndex, logSystem, newConfig));
 				} catch (Error& e) {
-					TraceEvent(SevWarn, "LogRoutersRecruitmentFailed", self->id)
+					TraceEvent(SevWarnAlways, "LogRoutersRecruitmentFailed", self->id)
 					    .error(e)
 					    .detail("FailedCount", failedTagIds.size())
 					    .detail("LogSetIndex", logSetIndex);
