@@ -4412,14 +4412,16 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							// select a server from primary DC to do audit
 							// ValidateRestore compares source vs restored data, single replica is fine
 							if (rangeLocations[rangeLocationIndex].servers.empty()) {
-								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
+								TraceEvent(SevInfo, "DDScheduleAuditOnRangeSkipped", self->ddId)
 								    .detail("Reason", "No servers found for shard")
 								    .detail("AuditID", audit->coreState.id)
 								    .detail("AuditRange", audit->coreState.range)
 								    .detail("TaskRange", taskRange)
 								    .detail("AuditType", auditType);
 								++numSkippedShards;
-								break; // Skip this shard, move to next range
+								// Skip the entire task range (all audit states for this shard)
+								taskRangeBegin = taskRange.end;
+								continue; // Continue to check if there are more states in this range
 							}
 							int dcid = 0;
 							for (const auto& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
