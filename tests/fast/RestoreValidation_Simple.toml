@@ -1,0 +1,42 @@
+# RestoreValidation_Simple.toml
+#
+# Simple test to validate restore correctness using audit_storage
+#
+# Flow:
+# 1. Cycle generates data
+# 2. Backup and restore to \xff\x02/rlog/ prefix
+# 3. Validation audits the restored data
+
+testClass = "Backup"
+
+[configuration]
+buggify = false
+faultInjection = false
+generateFearless = false
+minimumRegions = 1
+config = "single usable_regions=1 storage_engine=ssd-2 tenant_mode=disabled"
+
+[[test]]
+testTitle = 'RestoreValidationSimple'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+waitForQuiescenceBegin = false
+runFailureWorkloads = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 100
+    transactionsPerSecond = 10.0
+    testDuration = 10.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'BackupAndRestoreValidation'
+    backupAfter = 60.0
+    restoreAfter = 110.0
+    addPrefix = '\xff\x02/rlog/'
+
+    [[test.workload]]
+    testName = 'RestoreValidation'
+    validateAfter = 130.0
+    maxWaitTime = 600.0

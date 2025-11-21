@@ -2819,24 +2819,19 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 		// Coalesce the shard map to make random selection below more efficient.
 		shardMap.coalesce(allKeys);
-		wait(yield());
+	wait(yield());
 
-		// In this context "all" refers to all of the shards relevant for this particular backup
-		state int countAllShards = countShardsDone + countShardsNotDone;
+	// In this context "all" refers to all of the shards relevant for this particular backup
+	state int countAllShards = countShardsDone + countShardsNotDone;
 
-		if (countShardsNotDone == 0) {
-			TraceEvent("FileBackupSnapshotDispatchFinished")
-			    .detail("BackupUID", config.getUid())
-			    .detail("AllShards", countAllShards)
-			    .detail("ShardsDone", countShardsDone)
-			    .detail("ShardsNotDone", countShardsNotDone)
-			    .detail("SnapshotBeginVersion", snapshotBeginVersion)
-			    .detail("SnapshotTargetEndVersion", snapshotTargetEndVersion)
-			    .detail("CurrentVersion", recentReadVersion)
-			    .detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
-			Params.snapshotFinished().set(task, true);
-			return Void();
-		}
+	// NOTE: Don't finish here even if countShardsNotDone == 0. We need to dispatch tasks first.
+	// The completion check after dispatch (with dispatchedInThisIteration guard) prevents
+	// finishing in the same iteration we dispatch the last tasks.
+	if (countShardsNotDone == 0) {
+		TraceEvent("FileBackupSnapshotDispatchAllDoneBeforeDispatch")
+		    .detail("BackupUID", config.getUid())
+		    .detail("Note", "Will check again after dispatch loop");
+	}
 
 		// Decide when the next snapshot dispatch should run.
 		state Version nextDispatchVersion;
@@ -2907,11 +2902,14 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		    .detail("SnapshotTargetEndVersion", snapshotTargetEndVersion)
 		    .detail("NextDispatchVersion", nextDispatchVersion)
 		    .detail("CurrentVersion", recentReadVersion)
-		    .detail("TimeElapsed", timeElapsed)
-		    .detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
+	    .detail("TimeElapsed", timeElapsed)
+	    .detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
 
-		// Dispatch random shards to catch up to the expected progress
-		while (countShardsToDispatch > 0) {
+	// Track whether we dispatched any tasks in this iteration
+	state bool dispatchedInThisIteration = false;
+
+	// Dispatch random shards to catch up to the expected progress
+	while (countShardsToDispatch > 0) {
 			// First select ranges to add
 			state std::vector<KeyRange> rangesToAdd;
 
@@ -3040,16 +3038,20 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 						}
 					}
 
-					wait(waitForAll(addTaskFutures));
-					wait(tr->commit());
-					break;
-				} catch (Error& e) {
-					wait(tr->onError(e));
-				}
+				wait(waitForAll(addTaskFutures));
+				wait(tr->commit());
+				dispatchedInThisIteration = true;
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
 			}
 		}
+	}
 
-		if (countShardsNotDone == 0) {
+	// Only finish if all shards are done AND we didn't dispatch any tasks this iteration.
+	// This prevents the bug where we mark snapshot finished immediately after dispatching
+	// the last batch of tasks, before they actually complete.
+	if (countShardsNotDone == 0 && !dispatchedInThisIteration) {
 			TraceEvent("FileBackupSnapshotDispatchFinished")
 			    .detail("BackupUID", config.getUid())
 			    .detail("AllShards", countAllShards)
@@ -6775,18 +6777,20 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		if (!onlyApplyMutationLogs) {
-			state int index;
-			for (index = 0; index < restoreRanges.size(); index++) {
-				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
-				                                .removePrefix(removePrefix)
-				                                .withPrefix(addPrefix);
-				RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
-				if (existingRows.size() > 0) {
-					throw restore_destination_not_empty();
-				}
+	if (!onlyApplyMutationLogs) {
+		state int index;
+		for (index = 0; index < restoreRanges.size(); index++) {
+			KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
+			                                .removePrefix(removePrefix)
+			                                .withPrefix(addPrefix);
+			RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
+			// Allow restoring over existing data when restoring with a prefix (for validation)
+			// addPrefix.size() > 0 indicates this is a validation restore
+			if (existingRows.size() > 0 && addPrefix.size() == 0) {
+				throw restore_destination_not_empty();
 			}
 		}
+	}
 		// Make new restore config
 		state RestoreConfig restore(uid);
 
