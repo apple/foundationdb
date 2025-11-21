@@ -56,10 +56,8 @@ struct VersionedMessage {
 	// Returns the estimated size of the message in bytes, assuming 6 tags.
 	size_t getEstimatedSize() const { return message.size() + TagsAndMessage::getHeaderSize(6); }
 
-	// Returns true if the message is a mutation that could be backed up (normal keys, system key backup ranges, or the
-	// metadata version key)
-	bool isCandidateBackupMessage(MutationRef* m,
-	                              const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
+	// Returns true if the message is a mutation
+	bool isThisMessageMutation(MutationRef* m) {
 		for (Tag tag : tags) {
 			if (tag.locality == tagLocalitySpecial || tag.locality == tagLocalityTxs) {
 				return false; // skip Txs mutations
@@ -77,7 +75,18 @@ struct VersionedMessage {
 			CODE_PROBE(true, "Returning false for OTELSpanContextMessage");
 			return false;
 		}
+
 		reader >> *m;
+		return true;
+	}
+
+	// Returns true if the message is a mutation that could be backed up (normal keys, system key backup ranges, or the
+	// metadata version key)
+	bool isCandidateBackupMessage(MutationRef* m,
+	                              const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
+		if (!isThisMessageMutation(m))
+			return false;
+
 		if (m->isEncrypted()) {
 			// In case the mutation is encrypted, get the decrypted mutation and also update message to point to
 			// the decrypted mutation.
@@ -102,11 +111,11 @@ struct VersionedMessage {
 	}
 
 	void collectCipherDetailIfEncrypted(std::unordered_set<BlobCipherDetails>& cipherDetails) {
-		ASSERT(!message.empty());
-		if (*message.begin() == MutationRef::Encrypted) {
-			ArenaReader reader(arena, message, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-			MutationRef m;
-			reader >> m;
+		MutationRef m;
+		if (!isThisMessageMutation(&m))
+			return;
+
+		if (m.isEncrypted()) {
 			m.updateEncryptCipherDetails(cipherDetails);
 		}
 	}
