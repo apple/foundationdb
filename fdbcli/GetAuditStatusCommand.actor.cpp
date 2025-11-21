@@ -134,7 +134,7 @@ ACTOR Future<AuditPhase> getAuditProgressByServer(Database cx,
 
 ACTOR Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {
 	if (auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
-	    auditType == AuditType::ValidateLocationMetadata) {
+	    auditType == AuditType::ValidateLocationMetadata || auditType == AuditType::ValidateRestore) {
 		wait(getAuditProgressByRange(cx, auditType, auditId, auditRange));
 	} else if (auditType == AuditType::ValidateStorageServerShard) {
 		state std::vector<Future<Void>> fs;
@@ -186,6 +186,8 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		type = AuditType::ValidateLocationMetadata;
 	} else if (tokencmp(tokens[1], "ssshard")) {
 		type = AuditType::ValidateStorageServerShard;
+	} else if (tokencmp(tokens[1], "validate_restore")) {
+		type = AuditType::ValidateRestore;
 	} else {
 		printUsage(tokens[0]);
 		return false;
@@ -244,16 +246,17 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 
 CommandFactory getAuditStatusFactory(
     "get_audit_status",
-    CommandHelp("get_audit_status [ha|replica|locationmetadata|ssshard] [id|recent|phase|progress] [ARGs]",
-                "Retrieve audit storage status",
-                "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
-                "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
-                "To fetch status of audits in a specific phase: `get_audit_status [Type] phase "
-                "[running|complete|failed|error] count'\n"
-                "To fetch audit progress via ID: `get_audit_status [Type] progress [ID]'\n"
-                "Supported types include: 'ha', `replica`, `locationmetadata`, `ssshard`. \n"
-                "If specified, `Count' is how many rows to audit.\n"
-                "If not specified, check all rows in audit.\n"
-                "Phase can be `Invalid=0', `Running=1', `Complete=2', `Error=3', or `Failed=4'.\n"
-                "See also `audit_storage' command."));
+    CommandHelp(
+        "get_audit_status [ha|replica|locationmetadata|ssshard|validate_restore] [id|recent|phase|progress] [ARGs]",
+        "Retrieve audit storage status",
+        "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
+        "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
+        "To fetch status of audits in a specific phase: `get_audit_status [Type] phase "
+        "[running|complete|failed|error] count'\n"
+        "To fetch audit progress via ID: `get_audit_status [Type] progress [ID]'\n"
+        "Supported types include: 'ha', `replica`, `locationmetadata`, `ssshard`, `validate_restore`. \n"
+        "If specified, `Count' is how many rows to audit.\n"
+        "If not specified, check all rows in audit.\n"
+        "Phase can be `Invalid=0', `Running=1', `Complete=2', `Error=3', or `Failed=4'.\n"
+        "See also `audit_storage' command."));
 } // namespace fdb_cli
