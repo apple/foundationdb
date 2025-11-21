@@ -348,8 +348,8 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 			co_await safeThreadFutureToFuture(tr->commit());
 			co_return grpc::Status::OK;
 		} catch (Error& e) {
-			if (err.code() == error_code_actor_cancelled) {
-				throw err;
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
 			}
 
 			err = e;
