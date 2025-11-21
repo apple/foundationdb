@@ -2997,18 +2997,13 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// In this context "all" refers to all of the shards relevant for this particular backup
 		state int countAllShards = countShardsDone + countShardsNotDone;
 
+		// NOTE: Don't finish here even if countShardsNotDone == 0. We need to dispatch tasks first.
+		// The completion check after dispatch (with dispatchedInThisIteration guard) prevents
+		// finishing in the same iteration we dispatch the last tasks.
 		if (countShardsNotDone == 0) {
-			TraceEvent("FileBackupSnapshotDispatchFinished")
+			TraceEvent("FileBackupSnapshotDispatchAllDoneBeforeDispatch")
 			    .detail("BackupUID", config.getUid())
-			    .detail("AllShards", countAllShards)
-			    .detail("ShardsDone", countShardsDone)
-			    .detail("ShardsNotDone", countShardsNotDone)
-			    .detail("SnapshotBeginVersion", snapshotBeginVersion)
-			    .detail("SnapshotTargetEndVersion", snapshotTargetEndVersion)
-			    .detail("CurrentVersion", recentReadVersion)
-			    .detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
-			Params.snapshotFinished().set(task, true);
-			return Void();
+			    .detail("Note", "Will check again after dispatch loop");
 		}
 
 		// Decide when the next snapshot dispatch should run.
@@ -3082,6 +3077,9 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		    .detail("CurrentVersion", recentReadVersion)
 		    .detail("TimeElapsed", timeElapsed)
 		    .detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
+
+		// Track whether we dispatched any tasks in this iteration
+		state bool dispatchedInThisIteration = false;
 
 		// Dispatch random shards to catch up to the expected progress
 		while (countShardsToDispatch > 0) {
@@ -3215,6 +3213,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 					wait(waitForAll(addTaskFutures));
 					wait(tr->commit());
+					dispatchedInThisIteration = true;
 					break;
 				} catch (Error& e) {
 					wait(tr->onError(e));
@@ -3222,7 +3221,10 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 			}
 		}
 
-		if (countShardsNotDone == 0) {
+		// Only finish if all shards are done AND we didn't dispatch any tasks this iteration.
+		// This prevents the bug where we mark snapshot finished immediately after dispatching
+		// the last batch of tasks, before they actually complete.
+		if (countShardsNotDone == 0 && !dispatchedInThisIteration) {
 			TraceEvent("FileBackupSnapshotDispatchFinished")
 			    .detail("BackupUID", config.getUid())
 			    .detail("AllShards", countAllShards)
@@ -6984,7 +6986,9 @@ public:
 				                                .removePrefix(removePrefix)
 				                                .withPrefix(addPrefix);
 				RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
-				if (existingRows.size() > 0) {
+				// Allow restoring over existing data when restoring with a prefix (for validation)
+				// addPrefix.size() > 0 indicates this is a validation restore
+				if (existingRows.size() > 0 && addPrefix.size() == 0) {
 					throw restore_destination_not_empty();
 				}
 			}
