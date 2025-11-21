@@ -221,31 +221,31 @@ struct RestoreValidationWorkload : TestWorkload {
 						throw;
 					}
 
-				// Filter for our audit ID
-				state bool foundOurAudit = false;
-				state bool allComplete = true;
-				state bool anyError = false;
+					// Filter for our audit ID
+					state bool foundOurAudit = false;
+					state bool allComplete = true;
+					state bool anyError = false;
 
-				for (const auto& auditState : auditStates) {
-					if (auditState.id == auditId) {
-						foundOurAudit = true;
+					for (const auto& auditState : auditStates) {
+						if (auditState.id == auditId) {
+							foundOurAudit = true;
 
-						if (auditState.getPhase() == AuditPhase::Running) {
-							allComplete = false;
-						} else if (auditState.getPhase() == AuditPhase::Error ||
-						           auditState.getPhase() == AuditPhase::Failed) {
-							anyError = true;
-							finalPhase = auditState.getPhase();
-							if (!auditState.error.empty()) {
-								errorMessage = auditState.error;
-							} else {
-								errorMessage = "Unknown error";
+							if (auditState.getPhase() == AuditPhase::Running) {
+								allComplete = false;
+							} else if (auditState.getPhase() == AuditPhase::Error ||
+							           auditState.getPhase() == AuditPhase::Failed) {
+								anyError = true;
+								finalPhase = auditState.getPhase();
+								if (!auditState.error.empty()) {
+									errorMessage = auditState.error;
+								} else {
+									errorMessage = "Unknown error";
+								}
+							} else if (auditState.getPhase() == AuditPhase::Complete) {
+								finalPhase = AuditPhase::Complete;
 							}
-						} else if (auditState.getPhase() == AuditPhase::Complete) {
-							finalPhase = AuditPhase::Complete;
 						}
 					}
-				}
 
 					if (!foundOurAudit) {
 						TraceEvent(SevWarn, "RestoreValidationNoAuditStates")
