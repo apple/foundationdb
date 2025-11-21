@@ -474,7 +474,7 @@ Future<Void> LogRouterData::pullAsyncData() {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
 					co_await waitForVersionAndLog(ver);
-					TraceEvent("LogRouterPullData")
+					DisabledTraceEvent("LogRouterPullData")
 					    .detail("FromVersion", lastVer)
 					    .detail("OrigVersion", version.get())
 					    .detail("ToVersion", ver)
