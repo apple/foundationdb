@@ -298,7 +298,15 @@ ACTOR Future<Void> recruitLogRouters(ClusterControllerData* cluster,
 	}
 
 	// Wait for all recruitments to complete
-	wait(waitForAll(recruitments) || delay(SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_TIMEOUT));
+	state Future<Void> timeout = delay(SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_TIMEOUT);
+	wait(waitForAll(recruitments) || timeout);
+
+	if (timeout.isReady()) {
+		TraceEvent(SevWarn, "LogRoutersRecruitmentTimeout", cluster->id)
+		    .detail("TagCount", tagIds.size())
+		    .detail("LogSetIndex", logSetIndex);
+		throw recruitment_failed();
+	}
 
 	// Update all successfully recruited log routers
 	for (int i = 0; i < recruitments.size(); i++) {
