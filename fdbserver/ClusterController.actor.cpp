@@ -286,6 +286,7 @@ ACTOR Future<Void> recruitLogRouters(ClusterControllerData* cluster,
 		}
 
 		req.allowDropInSim = g_network->isSimulated() && deterministicRandom()->coinflip();
+		CODE_PROBE(req.allowDropInSim, "Log router recruitment requests dropped in simulation");
 
 		TraceEvent("RecruitingLogRouterOnWorker", cluster->id)
 		    .detail("WorkerID", workers[i].interf.id())
@@ -297,7 +298,7 @@ ACTOR Future<Void> recruitLogRouters(ClusterControllerData* cluster,
 	}
 
 	// Wait for all recruitments to complete
-	wait(waitForAll(recruitments));
+	wait(waitForAll(recruitments) || delay(SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_TIMEOUT));
 
 	// Update all successfully recruited log routers
 	for (int i = 0; i < recruitments.size(); i++) {
@@ -370,6 +371,7 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 		    .detail("Locality", config.tLogs[logSetIndex].locality)
 		    .detail("RecoveryCount", recoveryCount);
 
+		state double failedRecuitDelay = 1.0;
 		loop {
 			// Check if recovery changed - if so, exit inner loop and restart monitoring for new recovery
 			if (!self->db.recoveryData.isValid() || !self->db.recoveryData->logSystem.isValid() ||
@@ -427,19 +429,22 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 			}
 
 			// Re-recruit all failed log routers in parallel
-			if (!failedTagIds.empty()) {
-				try {
-					wait(recruitLogRouters(self, &self->db, failedTagIds, logSetIndex, logSystem, newConfig));
-				} catch (Error& e) {
-					TraceEvent(SevWarnAlways, "LogRoutersRecruitmentFailed", self->id)
-					    .error(e)
-					    .detail("FailedCount", failedTagIds.size())
-					    .detail("LogSetIndex", logSetIndex);
-				}
+			ASSERT_WE_THINK(!failedTagIds.empty());
+			try {
+				wait(recruitLogRouters(self, &self->db, failedTagIds, logSetIndex, logSystem, newConfig));
+				failedRecuitDelay = 1.0; // Reset backoff on success
+			} catch (Error& e) {
+				CODE_PROBE(true, "Log router re-recruitment failed");
+				failedRecuitDelay = std::min(failedRecuitDelay * 2, 60.0); // Exponential backoff up to 1 minute
+				TraceEvent(SevWarnAlways, "LogRoutersRecruitmentFailed", self->id)
+				    .error(e)
+				    .detail("FailedCount", failedTagIds.size())
+				    .detail("LogSetIndex", logSetIndex)
+				    .detail("NextRetryDelay", failedRecuitDelay);
 			}
 
 			// Wait a bit before restarting monitoring
-			wait(delay(1.0));
+			wait(delay(failedRecuitDelay));
 		} // End of inner loop (monitoring this recovery)
 	} // End of outer loop (restart for each recovery)
 }

@@ -866,6 +866,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SINGLETON_RECRUIT_BME_DELAY,                          10.0 );
 	init( RECORD_RECOVER_AT_IN_CSTATE,                         false ); if( randomize && BUGGIFY ) RECORD_RECOVER_AT_IN_CSTATE = deterministicRandom()->coinflip();
 	init( TRACK_TLOG_RECOVERY,                                  true ); if ( randomize && BUGGIFY ) TRACK_TLOG_RECOVERY = deterministicRandom()->coinflip();
+	init( CC_RERECRUIT_LOG_ROUTER_TIMEOUT,                       5.0 );
 
 	//Move Keys
 	init( SHARD_READY_DELAY,                                    0.25 );

@@ -640,7 +640,7 @@ struct InitializeLogRouterRequest {
 	                     // partial failures. Must only be true in simulation.
 
 	// For replacement log routers - to handle checkRemoved() race condition
-	bool isReplacement;
+	bool isReplacement = false;
 	UID reqId;
 
 	template <class Ar>
