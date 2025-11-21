@@ -596,8 +596,7 @@ set(test_venv_cmd "")
 string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
 string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
 string(APPEND test_venv_cmd "&& pip install --upgrade pip ")
-#string(APPEND test_venv_cmd "&& pip install --no-cache-dir -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt")
-string(APPEND test_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt")
+string(APPEND test_venv_cmd "&& pip install --no-cache-dir -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt")
 # NOTE: At this stage we are in the virtual environment and Python3_EXECUTABLE is not available anymore
 string(APPEND test_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 -m pip install .) ")
 add_test(
