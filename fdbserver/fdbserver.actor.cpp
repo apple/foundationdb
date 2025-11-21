@@ -88,6 +88,7 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/SimpleCounter.h"
+#include "fdbclient/BackupAgent.actor.h"
 
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
@@ -1828,6 +1829,7 @@ private:
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 		}
+		fileBackupAgentProxy = proxy;
 
 		setThreadLocalDeterministicRandomSeed(randomSeed);
 
