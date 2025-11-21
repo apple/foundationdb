@@ -484,7 +484,15 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		state bool allLogs =
 		    newState.tLogs.size() ==
 		    configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
-		state bool finalUpdate = !newState.oldTLogData.size() && allLogs;
+
+		// When remote tlogs are recruited and caught up, only then we purge the old tlog generation state
+		// Therefore these invariants should hold:
+		//       allLogs false => newState.oldTLogData non-empty
+		//       newState.oldTLogData empty => allLogs true (contrapositive of above)
+		// The following line codifies these invariants to be checked in simulation
+		ASSERT_WE_THINK(allLogs || !newState.oldTLogData.empty());
+
+		state bool finalUpdate = newState.oldTLogData.empty() && allLogs;
 		TraceEvent("TrackTLogRecovery")
 		    .detail("FinalUpdate", finalUpdate)
 		    .detail("NewState.tlogs", newState.tLogs.size())
@@ -519,7 +527,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			           self->dbgid)
 			    .detail("ActiveGenerations", 1)
 			    .trackLatest(self->clusterRecoveryGenerationsEventHolder->trackingKey);
-		} else if (!newState.oldTLogData.size() && self->recoveryState < RecoveryState::STORAGE_RECOVERED) {
+		} else if (newState.oldTLogData.empty() && self->recoveryState < RecoveryState::STORAGE_RECOVERED) {
 			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
 			TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
 			           self->dbgid)
