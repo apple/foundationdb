@@ -142,6 +142,11 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		    .detail("Tag", printable(restoreTag))
 		    .detail("AddPrefix", printable(self->addPrefix));
 
+		// Wait a bit to ensure all restored data is committed and visible
+		// The restore API returns success before all data is fully flushed to storage servers
+		wait(delay(5.0));
+		TraceEvent("BARV_RestoreDataStabilizationWait").detail("WaitTime", 5.0);
+
 		// Write a completion marker so RestoreValidation knows restore is fully done
 		state Key completionMarker = restoreValidationCompletionKey;
 		state Transaction markTr(cx);
