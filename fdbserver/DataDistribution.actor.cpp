@@ -4701,8 +4701,6 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 				throw audit_storage_failed();
 			}
 			audit->retryCount++;
-			// Wait a bit before retrying to let data distribution stabilize
-			wait(delay(1.0));
 			audit->actors.add(scheduleAuditOnRange(self, audit, req.range));
 		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			throw audit_storage_failed();
