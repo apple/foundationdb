@@ -4408,29 +4408,39 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								    .detail("AuditType", auditType);
 								return Void();
 							}
-						} else if (auditType == AuditType::ValidateRestore) {
-							// select a server from primary DC to do audit
-							// ValidateRestore compares source vs restored data, single replica is fine
-							int dcid = 0;
-							for (const auto& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
-								if (dcid == 0) {
-									// in primary DC randomly select a server to do the audit task
-									const int idx = deterministicRandom()->randomInt(0, dcServers.size());
-									targetServer = dcServers[idx];
-								}
-								for (int i = 0; i < dcServers.size(); i++) {
-									if (dcServers[i].id() == targetServer.id()) {
-										ASSERT_WE_THINK(dcid == 0);
-									} else {
-										req.targetServers.push_back(dcServers[i].id());
-									}
-									storageServersToCheck.push_back(dcServers[i]);
-								}
-								dcid++;
-							}
-						} else {
-							UNREACHABLE();
+					} else if (auditType == AuditType::ValidateRestore) {
+						// select a server from primary DC to do audit
+						// ValidateRestore compares source vs restored data, single replica is fine
+						if (rangeLocations[rangeLocationIndex].servers.empty()) {
+							TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
+							    .detail("Reason", "No servers found for shard")
+							    .detail("AuditID", audit->coreState.id)
+							    .detail("AuditRange", audit->coreState.range)
+							    .detail("TaskRange", taskRange)
+							    .detail("AuditType", auditType);
+							++numSkippedShards;
+							break; // Skip this shard, move to next range
 						}
+						int dcid = 0;
+						for (const auto& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
+							if (dcid == 0) {
+								// in primary DC randomly select a server to do the audit task
+								const int idx = deterministicRandom()->randomInt(0, dcServers.size());
+								targetServer = dcServers[idx];
+							}
+							for (int i = 0; i < dcServers.size(); i++) {
+								if (dcServers[i].id() == targetServer.id()) {
+									ASSERT_WE_THINK(dcid == 0);
+								} else {
+									req.targetServers.push_back(dcServers[i].id());
+								}
+								storageServersToCheck.push_back(dcServers[i]);
+							}
+							dcid++;
+						}
+					} else {
+						UNREACHABLE();
+					}
 						// Set doAuditOnStorageServer
 						ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
 						while (audit->remainingBudgetForAuditTasks.get() == 0) {
