@@ -132,8 +132,8 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 			// the commit will fail with commit_unknown_result().
 			ASSERT(false);
 		} catch (Error& e) {
-			if (err.code() == error_code_actor_cancelled) {
-				throw err;
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
 			}
 
 			err = Error(e);
