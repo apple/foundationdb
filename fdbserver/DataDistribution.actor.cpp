@@ -4425,6 +4425,11 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							}
 							int dcid = 0;
 							for (const auto& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
+								if (dcServers.empty()) {
+									// Skip empty server lists for this DC
+									dcid++;
+									continue;
+								}
 								if (dcid == 0) {
 									// in primary DC randomly select a server to do the audit task
 									const int idx = deterministicRandom()->randomInt(0, dcServers.size());
