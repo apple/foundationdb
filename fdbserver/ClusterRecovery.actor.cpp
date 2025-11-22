@@ -501,6 +501,18 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		}
 
 		wait(minRecoveryDuration);
+
+		if (!allLogs && newState.oldTLogData.empty()) {
+			TraceEvent(SevError, "FooRecoveryInvariant1")
+			    .detail("AllLogs", allLogs)
+			    .detail("OldTLogSize", newState.oldTLogData.size())
+			    .detail("NewTLogSize", newState.tLogs.size())
+			    .detail("FinalUpdate", finalUpdate)
+			    .detail("WillBeFullyRecovered", finalUpdate)
+			    .detail("CurrRecoveryState", self->recoveryState)
+			    .detail("RecoveryCompleteWrittenToCoreStateWillBeSetToTrue", !newState.oldTLogData.size());
+		}
+
 		self->logSystem->coreStateWritten(newState);
 
 		if (self->recoveryReadyForCommits.canBeSet()) {
