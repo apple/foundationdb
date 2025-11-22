@@ -102,9 +102,25 @@ struct VersionedMessage {
 	}
 
 	void collectCipherDetailIfEncrypted(std::unordered_set<BlobCipherDetails>& cipherDetails) {
+		for (Tag tag : tags) {
+			if (tag.locality == tagLocalitySpecial || tag.locality == tagLocalityTxs) {
+				return; // skip Txs mutations
+			}
+		}
+
+		ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
+
+		// Return for LogProtocolMessage and SpanContextMessage metadata messages.
+		if (LogProtocolMessage::isNextIn(reader))
+			return;
+		if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader))
+			return;
+		if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
+			return;
+		}
+
 		ASSERT(!message.empty());
 		if (*message.begin() == MutationRef::Encrypted) {
-			ArenaReader reader(arena, message, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 			MutationRef m;
 			reader >> m;
 			m.updateEncryptCipherDetails(cipherDetails);
