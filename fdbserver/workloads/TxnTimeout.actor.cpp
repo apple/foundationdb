@@ -102,7 +102,7 @@ struct TxnTimeout : TestWorkload {
 	// Format: "txntimeout_c{clientId}_a{actorIdx}_n{nodeIdx}"
 	// This ensures the same key is used during populate and transaction phases
 	static Key makeKey(int clientId, int actorIdx, int nodeIdx) {
-		return Key(std::format("txntimeout_c{}_a{}_n{}", clientId, actorIdx, nodeIdx));
+		return Key(format("txntimeout_c%d_a%d_n%d", clientId, actorIdx, nodeIdx));
 	}
 
 	// Initializes the database with test data for each actor to operate on
