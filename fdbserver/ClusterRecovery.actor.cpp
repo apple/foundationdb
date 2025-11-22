@@ -485,13 +485,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		    newState.tLogs.size() ==
 		    configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 
-		// When remote tlogs are recruited and caught up, only then we purge the old tlog generation state
-		// Therefore these invariants should hold:
-		//       allLogs false => newState.oldTLogData non-empty
-		//       newState.oldTLogData empty => allLogs true (contrapositive of above)
-		// The following line codifies these invariants to be checked in simulation
-		ASSERT_WE_THINK(allLogs || !newState.oldTLogData.empty());
-
 		state bool finalUpdate = newState.oldTLogData.empty() && allLogs;
 		TraceEvent("TrackTLogRecovery")
 		    .detail("FinalUpdate", finalUpdate)
@@ -510,6 +503,19 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 
 		wait(minRecoveryDuration);
 		self->logSystem->coreStateWritten(newState);
+
+		// When remote tlogs are recruited and caught up, only then we purge the old tlog generation state
+		// Therefore these invariants should hold:
+		//       allLogs false => newState.oldTLogData non-empty
+		//       newState.oldTLogData empty => allLogs true (contrapositive of above)
+		// The following line codifies these invariants to be checked in simulation
+		if (!(allLogs || !newState.oldTLogData.empty())) {
+			TraceEvent(SevError, "FooRecoveryInvariant1")
+			    .detail("AllLogs", allLogs)
+			    .detail("OldTLogSize", newState.oldTLogData.size())
+			    .detail("NewTLogSize", newState.tLogs.size());
+		}
+		ASSERT_WE_THINK(allLogs || !newState.oldTLogData.empty());
 
 		if (self->recoveryReadyForCommits.canBeSet()) {
 			self->recoveryReadyForCommits.send(Void());
