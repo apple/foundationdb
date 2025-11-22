@@ -64,15 +64,18 @@ private:
 struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
 	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
 	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
-	  : Locations(v) {}
-	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
-	  : Locations(v), hasCaches(hasCaches) {}
+	  : Locations(v),
+	    expireTime(CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL > 0.0 ? now() + CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL
+	                                                            : 0.0) {}
+
 	LocationInfo(const LocationInfo&) = delete;
 	LocationInfo(LocationInfo&&) = delete;
 	LocationInfo& operator=(const LocationInfo&) = delete;
 	LocationInfo& operator=(LocationInfo&&) = delete;
-	bool hasCaches = false;
 	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
+
+	// Absolute expiration time for this cache entry. 0 means no expiration (TTL disabled).
+	double expireTime = 0.0;
 };
 
 using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
@@ -376,6 +379,7 @@ public:
 	Future<Void> tssMismatchHandler;
 	PromiseStream<std::pair<UID, std::vector<DetailedTSSMismatch>>> tssMismatchStream;
 	Future<Void> grvUpdateHandler;
+	Future<Void> locationCacheCleanup;
 	Reference<CommitProxyInfo> commitProxies;
 	Reference<GrvProxyInfo> grvProxies;
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
