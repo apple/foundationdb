@@ -4445,6 +4445,18 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								}
 								dcid++;
 							}
+							// If all dcServers were empty, skip this shard
+							if (storageServersToCheck.empty()) {
+								TraceEvent(SevInfo, "DDScheduleAuditOnRangeSkipped", self->ddId)
+								    .detail("Reason", "All DC server lists empty")
+								    .detail("AuditID", audit->coreState.id)
+								    .detail("AuditRange", audit->coreState.range)
+								    .detail("TaskRange", taskRange)
+								    .detail("AuditType", auditType);
+								++numSkippedShards;
+								taskRangeBegin = taskRange.end;
+								continue;
+							}
 						} else {
 							UNREACHABLE();
 						}
