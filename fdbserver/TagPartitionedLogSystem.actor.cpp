@@ -469,7 +469,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 	// Never returns normally, but throws an error if the subsystem stops working
 	loop {
 		std::vector<Future<Void>> failed;
-		std::vector<Future<Void>> backupFailed(1, Never());
+		std::vector<Future<Void>> routerFailed;
+		std::vector<Future<Void>> backupFailed;
 		std::vector<Future<Void>> changes;
 
 		for (auto& it : self->tLogs) {
@@ -487,12 +488,12 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 			}
 			for (auto& t : it->logRouters) {
 				if (t->get().present()) {
-					failed.push_back(waitFailureClient(t->get().interf().waitFailure,
-					                                   /* failureReactionTime */ SERVER_KNOBS->TLOG_TIMEOUT,
-					                                   /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
-					                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-					                                   /* trace */ true,
-					                                   /* traceMsg */ "LogRouterFailed"_sr));
+					routerFailed.push_back(waitFailureClient(t->get().interf().waitFailure,
+					                                         /* failureReactionTime */ SERVER_KNOBS->TLOG_TIMEOUT,
+					                                         /* failureReactionSlope */ -SERVER_KNOBS->TLOG_TIMEOUT /
+					                                             SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+					                                         /* trace */ true,
+					                                         /* traceMsg */ "LogRouterFailed"_sr));
 				} else {
 					changes.push_back(t->onChange());
 				}
@@ -512,6 +513,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		}
 
 		if (!self->recoveryCompleteWrittenToCoreState.get()) {
+			failed.insert(failed.end(), routerFailed.begin(), routerFailed.end());
 			for (auto& old : self->oldLogData) {
 				for (auto& it : old.tLogs) {
 					for (auto& t : it->logRouters) {
@@ -526,35 +528,45 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 							changes.push_back(t->onChange());
 						}
 					}
-				}
-				// Monitor changes of backup workers for old epochs.
-				for (const auto& worker : old.tLogs[0]->backupWorkers) {
-					if (worker->get().present()) {
-						backupFailed.push_back(
-						    waitFailureClient(worker->get().interf().waitFailure,
-						                      /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
-						                      /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
-						                          SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
-						                      /* trace */ true,
-						                      /* traceMsg */ "OldBackupWorkerFailed"_sr));
-					} else {
-						changes.push_back(worker->onChange());
+					// Monitor changes of backup workers for old epochs.
+					for (const auto& worker : old.tLogs[0]->backupWorkers) {
+						if (worker->get().present()) {
+							backupFailed.push_back(
+							    waitFailureClient(worker->get().interf().waitFailure,
+							                      /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
+							                      /* failureReactionSlope */ -SERVER_KNOBS->BACKUP_TIMEOUT /
+							                          SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+							                      /* trace */ true,
+							                      /* traceMsg */ "OldBackupWorkerFailed"_sr));
+						} else {
+							changes.push_back(worker->onChange());
+						}
 					}
 				}
 			}
+		} else {
+			// Skip monitoring backup workers after full recovery.
+			backupFailed.clear();
 		}
+
+		// Don't monitor current generation log routers after full recovery.
+		// They are monitored and recruited by monitorAndRecruitLogRouters().
+		routerFailed.clear();
 
 		if (self->hasRemoteServers && (!self->remoteRecovery.isReady() || self->remoteRecovery.isError())) {
 			changes.push_back(self->remoteRecovery);
 		}
 
 		changes.push_back(self->recoveryCompleteWrittenToCoreState.onChange());
-		changes.push_back(self->backupWorkerChanged.onTrigger());
 
 		ASSERT(failed.size() >= 1);
+		Future<Void> backupWorkerFailed =
+		    backupFailed.size() > 0
+		        ? tagError<Void>(traceAfter(quorum(backupFailed, 1), "TPLSOnErrorBackupFailed"), backup_worker_failed())
+		        : Never();
 		wait(quorum(changes, 1) ||
 		     tagError<Void>(traceAfter(quorum(failed, 1), "TPLSOnErrorLogSystemFailed"), tlog_failed()) ||
-		     tagError<Void>(traceAfter(quorum(backupFailed, 1), "TPLSOnErrorBackupFailed"), backup_worker_failed()));
+		     backupWorkerFailed);
 	}
 }
 
@@ -1721,6 +1733,21 @@ Future<Version> TagPartitionedLogSystem::getTxsPoppedVersion() {
 	return getPoppedTxs(this);
 }
 
+void TagPartitionedLogSystem::updateLogRouter(int logSetIndex, int tagId, TLogInterface const& newLogRouter) {
+	ASSERT(tagId >= 0 && tagId < tLogs[logSetIndex]->logRouters.size());
+	auto& logSet = tLogs[logSetIndex];
+
+	logSet->logRouters[tagId]->set(OptionalInterface<TLogInterface>(newLogRouter));
+	logSystemConfigChanged.trigger();
+
+	TraceEvent("LogRouterUpdated", dbgid)
+	    .detail("LogSetIndex", logSetIndex)
+	    .detail("TagId", tagId)
+	    .detail("NewRouterID", newLogRouter.id())
+	    .detail("IsLocal", logSet->isLocal)
+	    .detail("Locality", logSet->locality);
+}
+
 ACTOR Future<Void> TagPartitionedLogSystem::confirmEpochLive_internal(Reference<LogSet> logSet, Optional<UID> debugID) {
 	state std::vector<Future<Void>> alive;
 	int numPresent = 0;
@@ -2022,6 +2049,27 @@ void TagPartitionedLogSystem::setBackupWorkers(const std::vector<InitializeBacku
 		TraceEvent("AddBackupWorker", dbgid).detail("Epoch", logsetEpoch).detail("BackupWorkerID", reply.interf.id());
 	}
 	TraceEvent("SetOldestBackupEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
+	backupWorkerChanged.trigger();
+}
+
+void TagPartitionedLogSystem::updateBackupWorkers(const std::vector<int>& tagIds,
+                                                  const std::vector<InitializeBackupReply>& replies) {
+	ASSERT(tLogs.size() > 0);
+
+	Reference<LogSet> logset = tLogs[0];
+
+	int i = 0;
+	for (const auto& reply : replies) {
+		const int tagId = tagIds[i];
+		i++;
+
+		ASSERT(tagId >= 0 && tagId < logset->backupWorkers.size());
+
+		auto worker = makeReference<AsyncVar<OptionalInterface<BackupInterface>>>(
+		    OptionalInterface<BackupInterface>(reply.interf));
+		logset->backupWorkers[tagId] = worker;
+		TraceEvent("UpdateBackupWorker", dbgid).detail("TagId", tagId).detail("BackupWorkerID", reply.interf.id());
+	}
 	backupWorkerChanged.trigger();
 }
 
@@ -2805,6 +2853,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 				    .detail("LogRouterTags", self->logRouterTags);
 				for (int i = 0; i < self->logRouterTags; i++) {
 					InitializeLogRouterRequest req;
+					req.reqId = deterministicRandom()->randomUniqueID();
 					req.recoveryCount = recoveryCount;
 					req.routerTag = Tag(tagLocalityLogRouter, i);
 					req.startVersion = lastStart;
@@ -2814,6 +2863,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					req.recoverAt = self->recoverAt.get();
 					req.knownLockedTLogIds = self->knownLockedTLogIds;
 					req.allowDropInSim = SERVER_KNOBS->CC_RECOVERY_INIT_REQ_ALLOW_DROP_IN_SIM && !forRemote;
+					req.isReplacement = false;
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -2860,6 +2910,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 				    .detail("LogRouterTags", old.logRouterTags);
 				for (int i = 0; i < old.logRouterTags; i++) {
 					InitializeLogRouterRequest req;
+					req.reqId = deterministicRandom()->randomUniqueID();
 					req.recoveryCount = recoveryCount;
 					req.routerTag = Tag(tagLocalityLogRouter, i);
 					req.startVersion = lastStart;
@@ -2868,6 +2919,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					req.locality = locality;
 					req.recoverAt = old.recoverAt;
 					req.allowDropInSim = SERVER_KNOBS->CC_RECOVERY_INIT_REQ_ALLOW_DROP_IN_SIM && !forRemote;
+					req.isReplacement = false;
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
@@ -3027,6 +3079,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 	TraceEvent("LogRouterInitReqSent3").detail("Locality", remoteLocality).detail("LogRouterTags", self->logRouterTags);
 	for (int i = 0; i < self->logRouterTags; i++) {
 		InitializeLogRouterRequest req;
+		req.reqId = deterministicRandom()->randomUniqueID();
 		req.recoveryCount = recoveryCount;
 		req.routerTag = Tag(tagLocalityLogRouter, i);
 		req.startVersion = startVersion;
@@ -3034,6 +3087,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		req.tLogPolicy = logSet->tLogPolicy;
 		req.locality = remoteLocality;
 		req.allowDropInSim = false;
+		req.isReplacement = false;
 		TraceEvent("RemoteTLogRouterReplies", self->dbgid)
 		    .detail("WorkerID", remoteWorkers.logRouters[i % remoteWorkers.logRouters.size()].id());
 		logRouterInitializationReplies.push_back(transformErrors(

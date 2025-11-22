@@ -705,6 +705,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> se
 		req.routerTag = idsTags[i].second;
 		req.totalTags = logRouterTags;
 		req.startVersion = startVersion;
+		req.isReplacement = false;
 		TraceEvent("BackupRecruitment", self->dbgid)
 		    .detail("RequestID", req.reqId)
 		    .detail("Tag", req.routerTag.toString())
@@ -749,6 +750,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> se
 			req.totalTags = std::get<2>(epochVersionTags);
 			req.startVersion = version; // savedVersion + 1
 			req.endVersion = std::get<1>(epochVersionTags) - 1;
+			req.isReplacement = false;
 			TraceEvent("BackupRecruitment", self->dbgid)
 			    .detail("RequestID", req.reqId)
 			    .detail("Tag", req.routerTag.toString())
@@ -1911,7 +1913,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	throw internal_error();
 }
 
-ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self, bool exThrown) {
+ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self) {
 	if (self.isValid()) {
 		wait(delay(0.0));
 
