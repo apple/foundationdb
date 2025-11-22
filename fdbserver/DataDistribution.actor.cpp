@@ -4206,13 +4206,13 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::sh
 			}
 			wait(delay(0.1));
 		}
-		TraceEvent(SevInfo, "DDDispatchAuditStorageEnd", self->ddId)
-		    .detail("AuditID", audit->coreState.id)
-		    .detail("Range", range)
-		    .detail("AuditType", auditType)
-		    .detail("TotalRanges", totalCount)
-		    .detail("TotalComplete", completedCount)
-		    .detail("CompleteRatio", completedCount * 1.0 / totalCount);
+	TraceEvent(SevInfo, "DDDispatchAuditStorageEnd", self->ddId)
+	    .detail("AuditID", audit->coreState.id)
+	    .detail("Range", range)
+	    .detail("AuditType", auditType)
+	    .detail("TotalRanges", totalCount)
+	    .detail("TotalComplete", completedCount)
+	    .detail("CompleteRatio", totalCount > 0 ? completedCount * 1.0 / totalCount : 0.0);
 
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
