@@ -4696,14 +4696,9 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
 		} else if (e.code() == error_code_wrong_shard_server) {
-			// wrong_shard_server means stale shard location data
-			// Retry a few times to see if data distribution stabilizes
-			if (audit->retryCount >= 3) {
-				// After retries, fail the audit so it can be retried from scratch
-				throw audit_storage_failed();
-			}
-			audit->retryCount++;
-			audit->actors.add(scheduleAuditOnRange(self, audit, req.range));
+			// wrong_shard_server means stale shard location data - treat as transient error
+			// Let the higher-level retry logic handle it
+			throw e;
 		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			throw audit_storage_failed();
 		} else {
