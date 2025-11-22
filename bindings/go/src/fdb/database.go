@@ -28,6 +28,7 @@ import "C"
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 )
 
@@ -96,7 +97,7 @@ func (d Database) CreateTransaction() (Transaction, error) {
 	var outt *C.FDBTransaction
 
 	if err := C.fdb_database_create_transaction(d.ptr, &outt); err != 0 {
-		return Transaction{}, Error{int(err)}
+		return Transaction{}, fmt.Errorf("failed to create transaction: %w", Error{int(err)})
 	}
 
 	t := &transaction{outt, d}
