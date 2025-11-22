@@ -408,7 +408,7 @@ Future<grpc::Status> kill(Reference<IDatabase> db, const KillRequest* req, KillR
 		co_return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "ERROR: both fields `all` and `addresses` set");
 	}
 
-	Reference<ITransaction> tr = getTransaction(db);
+	Reference<ITransaction> tr = db->createTransaction();
 	std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
 	co_await getWorkerInterfaces(tr, &address_interface, true);
 
