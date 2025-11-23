@@ -4423,18 +4423,20 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								taskRangeBegin = taskRange.end;
 								continue; // Continue to check if there are more states in this range
 							}
-							int dcid = 0;
-							for (const auto& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
-								if (dcServers.empty()) {
-									// Skip empty server lists for this DC
-									dcid++;
-									continue;
-								}
-								if (dcid == 0) {
-									// in primary DC randomly select a server to do the audit task
-									const int idx = deterministicRandom()->randomInt(0, dcServers.size());
-									targetServer = dcServers[idx];
-								}
+						int dcid = 0;
+						bool targetServerSet = false;
+						for (const auto& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
+							if (dcServers.empty()) {
+								// Skip empty server lists for this DC
+								dcid++;
+								continue;
+							}
+							if (!targetServerSet) {
+								// On first non-empty DC, randomly select a server to do the audit task
+								const int idx = deterministicRandom()->randomInt(0, dcServers.size());
+								targetServer = dcServers[idx];
+								targetServerSet = true;
+							}
 								for (int i = 0; i < dcServers.size(); i++) {
 									if (dcServers[i].id() == targetServer.id()) {
 										ASSERT_WE_THINK(dcid == 0);
