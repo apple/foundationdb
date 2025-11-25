@@ -317,6 +317,7 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot-interval", SO_REQ_SEP },
 	{ OPT_MOD_ACTIVE_INTERVAL, "--active-snapshot-interval", SO_REQ_SEP },
+	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1128,7 +1129,10 @@ static void printBackupUsage(bool devhelp) {
 	       "                 This option indicates to the backup agent that it will only need to record the log files, "
 	       "and ignore the range files.\n");
 	printf("  --encryption-key-file"
-	       "                 The AES-256-GCM key in the provided file is used for encrypting backup files.\n");
+	       "                 The AES-256-GCM key in the provided file is used for encrypting backup files.\n"
+	       "                 For modify operations, need to pass encryption key file only if Backup container URL is "
+	       "changed to "
+	       "re-encrypt all future backup files. \n");
 	printf("  --encrypt-files 0/1"
 	       "                 If passed, this argument will allow the user to override the database encryption state to "
 	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
@@ -3011,6 +3015,7 @@ struct BackupModifyOptions {
 	Optional<std::string> proxy;
 	Optional<int> snapshotIntervalSeconds;
 	Optional<int> activeSnapshotIntervalSeconds;
+	Optional<std::string> encryptionKeyFile;
 	bool hasChanges() const {
 		return destURL.present() || snapshotIntervalSeconds.present() || activeSnapshotIntervalSeconds.present();
 	}
@@ -3026,7 +3031,13 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 
 	state Reference<IBackupContainer> bc;
 	if (options.destURL.present()) {
-		bc = openBackupContainer(exeBackup.toString().c_str(), options.destURL.get(), options.proxy, {});
+		TraceEvent("ModifyBackupSetNewContainer")
+		    .detail("TagName", tagName)
+		    .detail("DestURL", options.destURL.get())
+		    .detail("EncryptionKeyFile",
+		            options.encryptionKeyFile.present() ? options.encryptionKeyFile.get() : "None");
+		bc = openBackupContainer(
+		    exeBackup.toString().c_str(), options.destURL.get(), options.proxy, options.encryptionKeyFile);
 		try {
 			wait(timeoutError(bc->create(), 30));
 		} catch (Error& e) {
@@ -3037,6 +3048,12 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 			        options.destURL.get().c_str(),
 			        e.what());
 			throw backup_error();
+		}
+	} else {
+		if (options.encryptionKeyFile.present()) {
+			fprintf(stdout,
+			        " Encryption key file specified without a new destination URL."
+			        " The encryption key will not be used.\n");
 		}
 	}
 
@@ -3087,6 +3104,7 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 
 			if (options.destURL.present()) {
 				config.backupContainer().set(tr, bc);
+				wait(bc->writeEncryptionMetadata());
 			}
 
 			wait(tr->commit());
@@ -3830,6 +3848,7 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_ENCRYPTION_KEY_FILE:
 				encryptionKeyFile = args->OptionArg();
+				modifyOptions.encryptionKeyFile = encryptionKeyFile;
 				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
