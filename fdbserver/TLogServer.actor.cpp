@@ -1624,6 +1624,12 @@ void commitMessages(TLogData* self,
 void commitMessages(TLogData* self, Reference<LogData> logData, Version version, Arena arena, StringRef messages) {
 	ArenaReader rd(arena, messages, Unversioned());
 	self->tempTagMessages.clear();
+
+	// Estimate message count to reserve capacity and avoid reallocations
+	size_t estimatedMsgCount = std::max(size_t(messages.size() / 150), size_t(10));
+	estimatedMsgCount = std::min(estimatedMsgCount, size_t(5000));
+	self->tempTagMessages.reserve(estimatedMsgCount);
+
 	while (!rd.empty()) {
 		TagsAndMessage tagsAndMsg;
 		tagsAndMsg.loadFromArena(&rd, nullptr);
