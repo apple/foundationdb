@@ -104,6 +104,12 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
+	// TTL disabled by default to preserve existing behavior; set > 0 to enable
+	init( LOCATION_CACHE_ENTRY_TTL,                 0.0 ); if ( randomize && BUGGIFY ) LOCATION_CACHE_ENTRY_TTL = deterministicRandom()->randomInt(0, 20);
+	// When cache entry is used, extend its expiration by this amount (sliding window)
+	init( LOCATION_CACHE_ENTRY_REFRESH_TIME,      300.0 ); if ( randomize && BUGGIFY ) LOCATION_CACHE_ENTRY_REFRESH_TIME = deterministicRandom()->randomInt(5, 10);
+	// Run location cache cleanup every 60 seconds when TTL is enabled
+	init( LOCATION_CACHE_EVICTION_INTERVAL,        60.0 ); if ( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_INTERVAL = 5.0;
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );

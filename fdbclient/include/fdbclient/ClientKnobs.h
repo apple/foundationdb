@@ -100,6 +100,15 @@ public:
 	int LOCATION_CACHE_EVICTION_SIZE_SIM;
 	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
 	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
+	// If > 0, each key-location cache entry expires this many seconds after insertion.
+	// Default 0 disables TTL expiration and keeps current behavior.
+	double LOCATION_CACHE_ENTRY_TTL;
+	// If > 0, extend the expireTime by this many seconds when a cached entry is used (cache hit).
+	// Only has effect when LOCATION_CACHE_ENTRY_TTL > 0.
+	double LOCATION_CACHE_ENTRY_REFRESH_TIME;
+	// How often to run the background actor that removes expired location cache entries.
+	// Only has effect when LOCATION_CACHE_ENTRY_TTL > 0. Default 60 seconds.
+	double LOCATION_CACHE_EVICTION_INTERVAL;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
