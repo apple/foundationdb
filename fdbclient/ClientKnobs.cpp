@@ -97,17 +97,11 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
-	// TTL disabled by default to preserve existing behavior; set > 0 to enable
-	init( LOCATION_CACHE_ENTRY_TTL,                                 0.0 ); if ( randomize && BUGGIFY ) LOCATION_CACHE_ENTRY_TTL = deterministicRandom()->randomInt(10, 60);
-	// When cache entry is used, extend its expiration by this amount (sliding window)
-	init( LOCATION_CACHE_ENTRY_REFRESH_TIME,                      300.0 ); if ( randomize && BUGGIFY ) LOCATION_CACHE_ENTRY_REFRESH_TIME = deterministicRandom()->randomInt(10, 60);
-	// Run location cache cleanup every 60 seconds when TTL is enabled
-	init( LOCATION_CACHE_EVICTION_INTERVAL,                        60.0 );
+	// The interval in seconds to run the cache eviction logic. If enabled will iterate over the location cache entries and remove
+    // stale/failed entries.
+	init( LOCATION_CACHE_EVICTION_INTERVAL,                 0.0 );
 	// The maximum entries per cache evition iteration to check if they are expired. If set to a negative number all entries will be validated.
-	init( LOCATION_CACHE_MAX_ENTRIES_PER_ITERATION,              1000.0 );
-	// The maximum entires per cache evition iteration to remove. If set to a negative number all expired cache entries will be removed.
-	init( LOCATION_CACHE_MAX_REMOVED_ENTRIES_PER_ITERATION,        60.0 );
-
+	init( LOCATION_CACHE_MAX_ENTRIES_PER_ITERATION,         1000.0 );
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
