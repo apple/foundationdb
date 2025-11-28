@@ -3335,6 +3335,130 @@ Optional<Database> connectToCluster(std::string const& clusterFile,
 	return db;
 };
 
+static constexpr CSimpleOpt::SOption* const allOptionArrays[] = { g_rgOptions,
+	                                                              g_rgAgentOptions,
+	                                                              g_rgBackupStartOptions,
+	                                                              g_rgBackupModifyOptions,
+	                                                              g_rgBackupStatusOptions,
+	                                                              g_rgBackupAbortOptions,
+	                                                              g_rgBackupCleanupOptions,
+	                                                              g_rgBackupDiscontinueOptions,
+	                                                              g_rgBackupWaitOptions,
+	                                                              g_rgBackupPauseOptions,
+	                                                              g_rgBackupExpireOptions,
+	                                                              g_rgBackupDeleteOptions,
+	                                                              g_rgBackupDescribeOptions,
+	                                                              g_rgBackupDumpOptions,
+	                                                              g_rgBackupTagsOptions,
+	                                                              g_rgBackupListOptions,
+	                                                              g_rgBackupQueryOptions,
+	                                                              g_rgRestoreOptions,
+	                                                              g_rgDBAgentOptions,
+	                                                              g_rgDBStartOptions,
+	                                                              g_rgDBStatusOptions,
+	                                                              g_rgDBSwitchOptions,
+	                                                              g_rgDBAbortOptions,
+	                                                              g_rgDBPauseOptions };
+
+// The last element in SOption arrays is always END_MARKER = SO_END_OF_OPTIONS.
+constexpr CSimpleOpt::SOption END_MARKER = SO_END_OF_OPTIONS;
+
+
+/**
+ * Validates and processes a command-line option.
+ *
+ * This function checks if the current argument (argv[i]) matches any known option.
+ * If the option requires a parameter, it consumes the next argument as the parameter.
+ * The processed option (and its parameter, if any) are added to the 'options' vector.
+ *
+ * Parameters:
+ *   argc    - Total number of command-line arguments.
+ *   argv    - Array of command-line argument strings.
+ *   i       - Current index in argv; incremented if a parameter is consumed.
+ *   options - Vector to which valid options (and their parameters, if any) are appended.
+ *
+ * Returns:
+ *   true if the option is recognized and valid (and its parameter, if required, is present);
+ *   false otherwise.
+ *
+ * This function is used to reorder and validate command-line arguments.
+ */
+static bool processOption(int argc, char* argv[], int& i, std::vector<char*>& options) {
+	std::string_view option = argv[i];
+
+	options.emplace_back(argv[i]);
+	size_t equalPos = option.find('=');
+
+	if (equalPos != std::string_view::npos) {
+		option = option.substr(0, equalPos);
+	}
+
+	for (auto* opt : allOptionArrays) {
+		for (int j = 0; opt[j].nId != END_MARKER.nId; ++j) {
+			const char* knownOpt = opt[j].pszArg;
+			size_t knownOptLen = strlen(knownOpt);
+			bool isPrefixOpt = knownOptLen > 1 && knownOpt[knownOptLen - 1] == '-';
+
+			if (option == knownOpt || (isPrefixOpt &&
+									   option.size() >= knownOptLen &&
+									   option.compare(0, knownOptLen, knownOpt) == 0))
+			{
+				if (opt[j].nArgType == SO_REQ_SEP && equalPos == std::string_view::npos) {
+					++i;
+					if (i >= argc) {
+						fmt::print(stderr, "ERROR: Option {} requires a parameter\n", option);
+						return false;
+					}
+					options.emplace_back(argv[i]);
+				}
+				return true;
+			}
+		}
+	}
+	fmt::print(stderr, "ERROR: Unknown option '{}'\n", option);
+	return false;
+}
+
+/**
+ * Reorders command-line arguments so that all non-option parameters (subcommands) are placed before options.
+ * Validates all options using processOption. Returns the reordered arguments via the output parameters
+ * newArgC (argument count) and newArgV (argument vector).
+ *
+ * Note: The returned newArgV pointer points to static storage (argvStorage)
+ */
+static bool reorderArguments(int argc, char* argv[], int& newArgC, char**& newArgV) {
+	static std::vector<char*> argvStorage;
+	std::vector<char*> parameters;
+	std::vector<char*> options;
+
+	parameters.push_back(argv[0]); // program name
+	auto isOptions = [](const char* arg) -> bool { return arg && *arg == '-'; };
+
+	for (int i = 1; i < argc; ++i) {
+		char* arg = argv[i];
+
+		if (isOptions(arg)) {
+			if (!processOption(argc, argv, i, options))
+				return false;
+		} else {
+			parameters.emplace_back(arg);
+		}
+	}
+
+	argvStorage.reserve(parameters.size() + options.size() + 1); // +1 for null terminator
+	argvStorage = parameters;
+	argvStorage.insert(argvStorage.end(), options.begin(), options.end());
+
+	newArgC = static_cast<int>(argvStorage.size());
+
+	argvStorage.push_back(nullptr); // Null-terminate the argv array
+	newArgV = argvStorage.data();
+
+	return true;
+}
+
+#ifndef EXCLUDE_MAIN_FUNCTION
+
 int main(int argc, char* argv[]) {
 	platformInit();
 
@@ -3361,165 +3485,172 @@ int main(int argc, char* argv[]) {
 
 		std::unique_ptr<CSimpleOpt> args;
 
+		char** newArgV{};
+		int newArgC{};
+
+		if (!reorderArguments(argc, argv, newArgC, newArgV)) {
+			return FDB_EXIT_ERROR;
+		}
+
 		switch (programExe) {
 		case ProgramExe::AGENT:
-			args = std::make_unique<CSimpleOpt>(argc, argv, g_rgAgentOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+			args = std::make_unique<CSimpleOpt>(newArgC, newArgV, g_rgAgentOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 			break;
 		case ProgramExe::DR_AGENT:
-			args = std::make_unique<CSimpleOpt>(argc, argv, g_rgDBAgentOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+			args = std::make_unique<CSimpleOpt>(newArgC, newArgV, g_rgDBAgentOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 			break;
 		case ProgramExe::BACKUP:
 			// Display backup help, if no arguments
-			if (argc < 2) {
+			if (newArgC < 2) {
 				printBackupUsage(false);
 				return FDB_EXIT_ERROR;
 			} else {
 				// Get the backup type
-				backupType = getBackupType(argv[1]);
+				backupType = getBackupType(newArgV[1]);
 
 				// Create the appropriate simple opt
 				switch (backupType) {
 				case BackupType::START:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupStartOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupStartOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::STATUS:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupStatusOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupStatusOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::ABORT:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupAbortOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupAbortOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::CLEANUP:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupCleanupOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupCleanupOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::WAIT:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupWaitOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupWaitOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::DISCONTINUE:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupDiscontinueOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupDiscontinueOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::PAUSE:
 				case BackupType::RESUME:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::EXPIRE:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupExpireOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupExpireOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::DELETE_BACKUP:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupDeleteOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupDeleteOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::DESCRIBE:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupDescribeOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupDescribeOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::DUMP:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupDumpOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupDumpOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::LIST:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupListOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupListOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::QUERY:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupQueryOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupQueryOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::MODIFY:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupModifyOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupModifyOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::TAGS:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgBackupTagsOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgBackupTagsOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::UNDEFINED:
 				default:
 					args =
-					    std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    std::make_unique<CSimpleOpt>(newArgC, newArgV, g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				}
 			}
 			break;
 		case ProgramExe::DB_BACKUP:
 			// Display backup help, if no arguments
-			if (argc < 2) {
+			if (newArgC < 2) {
 				printDBBackupUsage(false);
 				return FDB_EXIT_ERROR;
 			} else {
 				// Get the backup type
-				dbType = getDBType(argv[1]);
+				dbType = getDBType(newArgV[1]);
 
 				// Create the appropriate simple opt
 				switch (dbType) {
 				case DBType::START:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgDBStartOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgDBStartOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case DBType::STATUS:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgDBStatusOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgDBStatusOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case DBType::SWITCH:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgDBSwitchOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgDBSwitchOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case DBType::ABORT:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgDBAbortOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgDBAbortOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case DBType::PAUSE:
 				case DBType::RESUME:
 					args = std::make_unique<CSimpleOpt>(
-					    argc - 1, &argv[1], g_rgDBPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    newArgC - 1, &newArgV[1], g_rgDBPauseOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case DBType::UNDEFINED:
 				default:
 					args =
-					    std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					    std::make_unique<CSimpleOpt>(newArgC, newArgV, g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				}
 			}
 			break;
 		case ProgramExe::RESTORE:
-			if (argc < 2) {
+			if (newArgC < 2) {
 				printRestoreUsage(false);
 				return FDB_EXIT_ERROR;
 			}
 			// Get the restore operation type
-			restoreType = getRestoreType(argv[1]);
+			restoreType = getRestoreType(newArgV[1]);
 			if (restoreType == RestoreType::UNKNOWN) {
-				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+				args = std::make_unique<CSimpleOpt>(newArgC, newArgV, g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 			} else {
 				args = std::make_unique<CSimpleOpt>(
-				    argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+				    newArgC - 1, newArgV + 1, g_rgRestoreOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 			}
 			break;
 		case ProgramExe::FASTRESTORE_TOOL:
-			if (argc < 2) {
+			if (newArgC < 2) {
 				printFastRestoreUsage(false);
 				return FDB_EXIT_ERROR;
 			}
 			// Get the restore operation type
-			restoreType = getRestoreType(argv[1]);
+			restoreType = getRestoreType(newArgV[1]);
 			if (restoreType == RestoreType::UNKNOWN) {
-				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+				args = std::make_unique<CSimpleOpt>(newArgC, newArgV, g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 			} else {
 				args = std::make_unique<CSimpleOpt>(
-				    argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+				    newArgC - 1, newArgV + 1, g_rgRestoreOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 			}
 			break;
 		case ProgramExe::UNDEFINED:
 		default:
 			fprintf(stderr, "FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-			fprintf(stderr, "ERROR: Unable to determine program type based on executable `%s'\n", argv[0]);
+			fprintf(stderr, "ERROR: Unable to determine program type based on executable `%s'\n", newArgV[0]);
 			return FDB_EXIT_ERROR;
 			break;
 		}
@@ -3593,7 +3724,7 @@ int main(int argc, char* argv[]) {
 
 		BackupModifyOptions modifyOptions;
 
-		if (argc == 1) {
+		if (newArgC == 1) {
 			printUsage(programExe, false);
 			return FDB_EXIT_ERROR;
 		}
@@ -3612,30 +3743,30 @@ int main(int argc, char* argv[]) {
 
 			case SO_ARG_INVALID_DATA:
 				fprintf(stderr, "ERROR: invalid argument to option `%s'\n", args->OptionText());
-				printHelpTeaser(argv[0]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 				break;
 
 			case SO_ARG_INVALID:
 				fprintf(stderr, "ERROR: argument given for option `%s'\n", args->OptionText());
-				printHelpTeaser(argv[0]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 				break;
 
 			case SO_ARG_MISSING:
 				fprintf(stderr, "ERROR: missing argument for option `%s'\n", args->OptionText());
-				printHelpTeaser(argv[0]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 
 			case SO_OPT_INVALID:
 				fprintf(stderr, "ERROR: unknown option `%s'\n", args->OptionText());
-				printHelpTeaser(argv[0]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 				break;
 
 			default:
 				fprintf(stderr, "ERROR: argument given for option `%s'\n", args->OptionText());
-				printHelpTeaser(argv[0]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 				break;
 			}
@@ -3722,7 +3853,7 @@ int main(int argc, char* argv[]) {
 				long long ver = 0;
 				if (!sscanf(a, "%lld", &ver)) {
 					fprintf(stderr, "ERROR: Could not parse expiration version `%s'\n", a);
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 
@@ -3794,7 +3925,7 @@ int main(int argc, char* argv[]) {
 				try {
 					addKeyRange(args->OptionArg(), backupKeys);
 				} catch (Error&) {
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				break;
@@ -3803,7 +3934,7 @@ int main(int argc, char* argv[]) {
 					std::string line = readFileBytes(args->OptionArg(), 64 * 1024 * 1024);
 					addKeyRange(line, backupKeys);
 				} catch (Error&) {
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				break;
@@ -3811,7 +3942,7 @@ int main(int argc, char* argv[]) {
 				try {
 					addKeyRange(args->OptionArg(), backupKeysFilter);
 				} catch (Error&) {
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				break;
@@ -3837,7 +3968,7 @@ int main(int argc, char* argv[]) {
 				int seconds;
 				if (!sscanf(a, "%d", &seconds)) {
 					fprintf(stderr, "ERROR: Could not parse snapshot interval `%s'\n", a);
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				if (optId == OPT_SNAPSHOTINTERVAL) {
@@ -3887,7 +4018,7 @@ int main(int argc, char* argv[]) {
 				addPrefix = decode_hex_string(args->OptionArg(), err);
 				if (err) {
 					fprintf(stderr, "ERROR: Could not parse add prefix\n");
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				break;
@@ -3897,7 +4028,7 @@ int main(int argc, char* argv[]) {
 				removePrefix = decode_hex_string(args->OptionArg(), err);
 				if (err) {
 					fprintf(stderr, "ERROR: Could not parse remove prefix\n");
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				break;
@@ -3906,7 +4037,7 @@ int main(int argc, char* argv[]) {
 				const char* a = args->OptionArg();
 				if (!sscanf(a, "%d", &maxErrors)) {
 					fprintf(stderr, "ERROR: Could not parse max number of errors `%s'\n", a);
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				break;
@@ -3916,7 +4047,7 @@ int main(int argc, char* argv[]) {
 				long long ver = 0;
 				if (!sscanf(a, "%lld", &ver)) {
 					fprintf(stderr, "ERROR: Could not parse database beginVersion `%s'\n", a);
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				beginVersion = ver;
@@ -3927,7 +4058,7 @@ int main(int argc, char* argv[]) {
 				long long ver = 0;
 				if (!sscanf(a, "%lld", &ver)) {
 					fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				restoreVersion = ver;
@@ -3938,7 +4069,7 @@ int main(int argc, char* argv[]) {
 				long long ver = 0;
 				if (!sscanf(a, "%lld", &ver)) {
 					fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				snapshotVersion = ver;
@@ -3981,7 +4112,7 @@ int main(int argc, char* argv[]) {
 				ti = parse_with_suffix(args->OptionArg(), "MiB");
 				if (!ti.present()) {
 					fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args->OptionArg());
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				memLimit = ti.get();
@@ -3990,7 +4121,7 @@ int main(int argc, char* argv[]) {
 				ti = parse_with_suffix(args->OptionArg(), "MiB");
 				if (!ti.present()) {
 					fprintf(stderr, "ERROR: Could not parse virtual memory limit from `%s'\n", args->OptionArg());
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				virtualMemLimit = ti.get();
@@ -4037,7 +4168,7 @@ int main(int argc, char* argv[]) {
 			switch (programExe) {
 			case ProgramExe::AGENT:
 				fprintf(stderr, "ERROR: Backup Agent does not support argument value `%s'\n", args->File(argLoop));
-				printHelpTeaser(argv[0]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 				break;
 
@@ -4046,7 +4177,7 @@ int main(int argc, char* argv[]) {
 				// Error, if the keys option was not specified
 				if (backupKeys.size() == 0) {
 					fprintf(stderr, "ERROR: Unknown backup option value `%s'\n", args->File(argLoop));
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				// Otherwise, assume the item is a key range
@@ -4054,7 +4185,7 @@ int main(int argc, char* argv[]) {
 					try {
 						addKeyRange(args->File(argLoop), backupKeys);
 					} catch (Error&) {
-						printHelpTeaser(argv[0]);
+						printHelpTeaser(newArgV[0]);
 						return FDB_EXIT_ERROR;
 					}
 				}
@@ -4062,20 +4193,20 @@ int main(int argc, char* argv[]) {
 
 			case ProgramExe::RESTORE:
 				fprintf(stderr, "ERROR: FDB Restore does not support argument value `%s'\n", args->File(argLoop));
-				printHelpTeaser(argv[0]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 				break;
 
 			case ProgramExe::FASTRESTORE_TOOL:
 				fprintf(
 				    stderr, "ERROR: FDB Fast Restore Tool does not support argument value `%s'\n", args->File(argLoop));
-				printHelpTeaser(argv[0]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 				break;
 
 			case ProgramExe::DR_AGENT:
 				fprintf(stderr, "ERROR: DR Agent does not support argument value `%s'\n", args->File(argLoop));
-				printHelpTeaser(argv[0]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 				break;
 
@@ -4083,7 +4214,7 @@ int main(int argc, char* argv[]) {
 				// Error, if the keys option was not specified
 				if (backupKeys.size() == 0) {
 					fprintf(stderr, "ERROR: Unknown DR option value `%s'\n", args->File(argLoop));
-					printHelpTeaser(argv[0]);
+					printHelpTeaser(newArgV[0]);
 					return FDB_EXIT_ERROR;
 				}
 				// Otherwise, assume the item is a key range
@@ -4091,7 +4222,7 @@ int main(int argc, char* argv[]) {
 					try {
 						addKeyRange(args->File(argLoop), backupKeys);
 					} catch (Error&) {
-						printHelpTeaser(argv[0]);
+						printHelpTeaser(newArgV[0]);
 						return FDB_EXIT_ERROR;
 					}
 				}
@@ -4267,7 +4398,7 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually
 				// writeable.
-				openBackupContainer(argv[0], destinationContainer, proxy, encryptionKeyFile);
+				openBackupContainer(newArgV[0], destinationContainer, proxy, encryptionKeyFile);
 				f = stopAfter(submitBackup(db,
 				                           destinationContainer,
 				                           proxy,
@@ -4342,7 +4473,7 @@ int main(int argc, char* argv[]) {
 					if (!initCluster())
 						return FDB_EXIT_ERROR;
 				}
-				f = stopAfter(expireBackupData(argv[0],
+				f = stopAfter(expireBackupData(newArgV[0],
 				                               destinationContainer,
 				                               proxy,
 				                               expireVersion,
@@ -4356,7 +4487,7 @@ int main(int argc, char* argv[]) {
 
 			case BackupType::DELETE_BACKUP:
 				initTraceFile();
-				f = stopAfter(deleteBackupContainer(argv[0], destinationContainer, proxy));
+				f = stopAfter(deleteBackupContainer(newArgV[0], destinationContainer, proxy));
 				break;
 
 			case BackupType::DESCRIBE:
@@ -4367,7 +4498,7 @@ int main(int argc, char* argv[]) {
 
 				// Only pass database optionDatabase Describe will lookup version timestamps if a cluster file was
 				// given, but quietly skip them if not.
-				f = stopAfter(describeBackup(argv[0],
+				f = stopAfter(describeBackup(newArgV[0],
 				                             destinationContainer,
 				                             proxy,
 				                             describeDeep,
@@ -4389,7 +4520,7 @@ int main(int argc, char* argv[]) {
 
 			case BackupType::QUERY:
 				initTraceFile();
-				f = stopAfter(queryBackup(argv[0],
+				f = stopAfter(queryBackup(newArgV[0],
 				                          destinationContainer,
 				                          proxy,
 				                          backupKeysFilter,
@@ -4403,13 +4534,13 @@ int main(int argc, char* argv[]) {
 
 			case BackupType::DUMP:
 				initTraceFile();
-				f = stopAfter(dumpBackupData(argv[0], destinationContainer, proxy, dumpBegin, dumpEnd));
+				f = stopAfter(dumpBackupData(newArgV[0], destinationContainer, proxy, dumpBegin, dumpEnd));
 				break;
 
 			case BackupType::UNDEFINED:
 			default:
-				fprintf(stderr, "ERROR: Unsupported backup action %s\n", argv[1]);
-				printHelpTeaser(argv[0]);
+				fprintf(stderr, "ERROR: Unsupported backup action %s\n", newArgV[1]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 				break;
 			}
@@ -4599,8 +4730,8 @@ int main(int argc, char* argv[]) {
 				break;
 			case DBType::UNDEFINED:
 			default:
-				fprintf(stderr, "ERROR: Unsupported DR action %s\n", argv[1]);
-				printHelpTeaser(argv[0]);
+				fprintf(stderr, "ERROR: Unsupported DR action %s\n", newArgV[1]);
+				printHelpTeaser(newArgV[0]);
 				return FDB_EXIT_ERROR;
 				break;
 			}
@@ -4687,3 +4818,162 @@ int main(int argc, char* argv[]) {
 
 	flushAndExit(status);
 }
+
+#else // EXCLUDE_MAIN_FUNCTION
+
+int main() {
+
+	printf("=== Running ParsedArgs Tests ===\n");
+
+	auto testOptionParsing = [](std::initializer_list<const char*> args,
+								const std::vector<std::string>& expectedOptions = {},
+								bool shouldSucceed = true,
+								const char* testName = "",
+								bool expectCSimpleOptions = false) -> bool {
+		printf("\n--- Test: %s ---\n", testName);
+		static std::vector<std::string> persistentArgs;
+		persistentArgs.clear();
+		persistentArgs.reserve(args.size());
+		for (const char* arg : args) {
+			persistentArgs.emplace_back(arg);
+		}
+		int argc = static_cast<int>(persistentArgs.size());
+
+		std::vector<char*> argv;
+		for (auto& arg : persistentArgs) {
+			argv.push_back(arg.data());
+		}
+		argv.push_back(nullptr);
+
+		int argcNew {};
+		char** argvNew {};
+
+		printf("DEBUG: argc: %d\n", argc);
+		for (int i = 0; i < argv.size(); ++i) {
+			printf("DEBUG: argv[%d]: %s\n", i, argv[i]);
+		}
+
+		bool success = reorderArguments(argc, argv.data(), argcNew, argvNew);
+
+		printf("DEBUG: argcNew: %d\n", argcNew);
+		for (int i = 0; i < argcNew; ++i) {
+			printf("DEBUG: argvNew[%d]: %s\n", i, argvNew[i]);
+		}
+
+		if (success != shouldSucceed) {
+			printf("%s: FAIL - Expected %s but got %s\n",
+					testName,
+					shouldSucceed ? "success" : "failure",
+					success ? "success" : "failure");
+			return false;
+		}
+		if (!shouldSucceed) {
+			printf("\n\t--- Test PASSED: %s (expected failure)---\n", testName);
+			return true;
+		}
+
+		// Test CSimpleOpt conversion
+		std::vector<std::string> actualOptions;
+		for (int i = 1; i < argcNew; i++) {
+			actualOptions.push_back(argvNew[i]);
+		}
+
+		if (actualOptions != expectedOptions) {
+			printf("%s: FAIL - Options mismatch\n", testName);
+			printf("      Expected options (%zu): ", expectedOptions.size());
+			for (const auto& opt : expectedOptions)
+				printf("'%s' ", opt.c_str());
+			printf("\n      Actual options (%zu): ", actualOptions.size());
+			for (const auto& opt : actualOptions)
+				printf("'%s' ", opt.c_str());
+			printf("\n");
+			return false;
+		}
+
+		// Test with actual CSimpleOpt if expected
+		if (expectCSimpleOptions && !expectedOptions.empty()) {
+			try {
+				std::unique_ptr<CSimpleOpt> simpleOpt = std::make_unique<CSimpleOpt>(
+				    argcNew, const_cast<char**>(argvNew), g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+
+				ESOError lastError = SO_SUCCESS;
+				bool foundExpectedOptions = true;
+
+				while (simpleOpt->Next()) {
+					lastError = simpleOpt->LastError();
+					if (lastError != SO_SUCCESS) {
+						printf("CSimpleOpt parsing error: %d\n", lastError);
+						foundExpectedOptions = false;
+						break;
+					}
+
+					int optId = simpleOpt->OptionId();
+					printf("CSimpleOpt found option: id=%d, text='%s', arg='%s'\n",
+							optId,
+							simpleOpt->OptionText(),
+							simpleOpt->OptionArg() ? simpleOpt->OptionArg() : "null");
+				}
+
+				if (!foundExpectedOptions) {
+					printf("%s: FAIL - CSimpleOpt parsing failed\n", testName);
+					return false;
+				}
+			} catch (const std::exception& e) {
+				printf("%s: FAIL - CSimpleOpt exception: %s\n", testName, e.what());
+				return false;
+			}
+		}
+
+		printf("\n\t--- Test PASSED: %s ---\n", testName);
+		return true;
+	};
+
+	printf("\n1) Basic Command Tests:\n");
+	bool allPassed = true;
+	allPassed &= testOptionParsing({ "fdbbackup", "status" }, { "status" }, true, "1.1 Single command");
+	allPassed &= testOptionParsing({ "fdbbackup" }, {}, true, "1.2 No commands");
+	allPassed &= testOptionParsing({ "fdbbackup", "unknown" }, { "unknown" }, true, "1.3 Unknown command");
+	allPassed &= testOptionParsing({ "fdbbackup", "unknown1", "unknown2" }, { "unknown1", "unknown2"}, true, "1.4 Several unknown commands");
+
+	printf("\n2) Command Positioning Tests:\n");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "--cluster-file", "/cluster" }, { "start", "--cluster-file", "/cluster" },
+								true, "2.1 Command before options");
+	allPassed &= testOptionParsing({ "fdbbackup", "--cluster-file", "/cluster", "start" }, { "start", "--cluster-file", "/cluster" },
+								true, "2.2 Command after options");
+	allPassed &= testOptionParsing({ "fdbbackup", "--cluster-file", "/cluster", "list", "--json" }, { "list", "--cluster-file", "/cluster", "--json" },
+								true, "2.3 Options before and after command");
+
+	printf("\n3) Option Parameter Tests:\n");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "-C", "/cluster" }, { "start", "-C", "/cluster" },
+								true, "3.1 Short option with parameter");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "--snapshot-interval", "30" }, { "start", "--snapshot-interval", "30" },
+								true, "3.2 Option with parameter");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "--logdir", "/logs", "--trace-format", "json" }, { "start", "--logdir", "/logs", "--trace-format", "json" },
+								true, "3.3 Multiple options with parameters");
+
+	printf("\n4) Equal Sign Parameter Tests:\n");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "--cluster-file=/cluster" }, { "start", "--cluster-file=/cluster" },
+								true, "4.1 Option with equals");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "--snapshot-interval", "30", "--cluster-file=/cluster" },
+								{ "start", "--snapshot-interval", "30", "--cluster-file=/cluster" },
+								true, "4.2 Multiple options using both equals and space separators");
+
+	printf("\n5) Prefix Option Tests:\n");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "--knob-max_workers", "10" }, { "start", "--knob-max_workers", "10" },
+								true, "5.1 Knob option with parameter");
+
+	printf("\n6) Global flag options and CSimpleOpt Tests:\n");
+	allPassed &= testOptionParsing({ "fdbbackup", "--version", "-h" }, {"--version", "-h"}, true, "6.1 Version flag", true);
+
+	printf("\n7) Error Tests:\n");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "--unknown-option" }, {}, false, "7.1 Unknown option");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "--cluster-file" }, {}, false, "7.2 Missing parameter");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "--cluster-file", "--help" }, {"start", "--cluster-file", "--help"}, true, "7.3 Option as parameter");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "--cluster-file=/cluster", "-C=" }, {"start", "--cluster-file=/cluster", "-C="}, true, "7.4 Option with empty parameter value using equals");
+	allPassed &= testOptionParsing({ "fdbbackup", "start", "-C=" }, {"start", "-C="}, true, "7.5 Empty parameter value with equals");
+
+	printf("\n=== %s ===\n", allPassed ? "All tests PASSED!" : "Some tests FAILED!");
+	return allPassed ? 0 : 1;
+}
+
+#endif // EXCLUDE_MAIN_FUNCTION
