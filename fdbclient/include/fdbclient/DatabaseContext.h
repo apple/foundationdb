@@ -64,13 +64,9 @@ private:
 struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
 	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
 	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
-	  : Locations(v),
-	    expireTime(CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL > 0.0 ? now() + CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL
-	                                                            : 0.0) {}
+	  : Locations(v) {}
 	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
-	  : Locations(v), hasCaches(hasCaches),
-	    expireTime(CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL > 0.0 ? now() + CLIENT_KNOBS->LOCATION_CACHE_ENTRY_TTL
-	                                                            : 0.0) {}
+	  : Locations(v), hasCaches(hasCaches) {}
 	LocationInfo(const LocationInfo&) = delete;
 	LocationInfo(LocationInfo&&) = delete;
 	LocationInfo& operator=(const LocationInfo&) = delete;
@@ -78,8 +74,6 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
 
 	bool hasCaches = false;
-	// Absolute expiration time for this cache entry. 0 means no expiration (TTL disabled).
-	double expireTime = 0.0;
 };
 
 using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
