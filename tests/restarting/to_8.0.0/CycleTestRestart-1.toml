@@ -2,6 +2,7 @@
 maxTLogVersion = 7
 disableTss = true
 disableHostname = true
+tenantModes = ['disabled']
 
 [[test]]
 testTitle = 'Clogged'
