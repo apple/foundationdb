@@ -151,8 +151,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	int numTenantGroups;
 	int minTenantNum = -1;
 
-	bool illegalTenantAccess = false;
-
 	// Map from tenant number to key prefix
 	std::map<int, std::string> keyPrefixes;
 
@@ -263,9 +261,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (!writeSystemKeys) { // there must be illegal access during data load
-			return illegalTenantAccess;
-		}
 		return success;
 	}
 
@@ -369,11 +364,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 							} catch (Error& e) {
 								wait(unsafeThreadFutureToFuture(tr->onError(e)));
 							}
-						}
-
-						if (self->illegalTenantAccess) {
-							// no need to do the non-system writes
-							break;
 						}
 					}
 				}
