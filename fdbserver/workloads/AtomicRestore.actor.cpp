@@ -21,6 +21,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -106,7 +107,9 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              self->backupRanges,
 			                              true,
 			                              StopWhenDone::False,
-			                              self->usePartitionedLogs));
+			                              self->usePartitionedLogs,
+			                              IncrementalBackupOnly::False,
+			                              {}));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
