@@ -59,8 +59,18 @@ public:
 	}
 
 	ACTOR static Future<int> read(Reference<AsyncFileEncrypted> self, void* data, int length, int64_t offset) {
-		state const uint32_t firstBlock = offset / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
-		state const uint32_t lastBlock = (offset + length - 1) / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
+		if (self->fileSize == -1) {
+			state int64_t fileSize = wait(self->file->size());
+			self->fileSize = fileSize;
+		}
+		if (offset >= self->fileSize) {
+			return 0;
+		}
+		if (offset + length > self->fileSize) {
+			length = self->fileSize - offset;
+		}
+		state uint32_t firstBlock = offset / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
+		state uint32_t lastBlock = (offset + length - 1) / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
 		state uint32_t block;
 		state unsigned char* output = reinterpret_cast<unsigned char*>(data);
 		state int bytesRead = 0;

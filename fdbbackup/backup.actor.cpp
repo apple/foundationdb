@@ -1967,7 +1967,8 @@ ACTOR Future<Void> submitBackup(Database db,
                                 WaitForComplete waitForCompletion,
                                 StopWhenDone stopWhenDone,
                                 UsePartitionedLog usePartitionedLog,
-                                IncrementalBackupOnly incrementalBackupOnly) {
+                                IncrementalBackupOnly incrementalBackupOnly,
+                                Optional<std::string> encryptionKeyFile) {
 	try {
 		state FileBackupAgent backupAgent;
 		ASSERT(!backupRanges.empty());
@@ -2020,7 +2021,8 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              encryptionEnabled,
 			                              stopWhenDone,
 			                              usePartitionedLog,
-			                              incrementalBackupOnly));
+			                              incrementalBackupOnly,
+			                              encryptionKeyFile));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -4203,7 +4205,8 @@ int main(int argc, char* argv[]) {
 				                           waitForDone,
 				                           stopWhenDone,
 				                           usePartitionedLog,
-				                           incrementalBackupOnly));
+				                           incrementalBackupOnly,
+				                           encryptionKeyFile));
 				break;
 			}
 

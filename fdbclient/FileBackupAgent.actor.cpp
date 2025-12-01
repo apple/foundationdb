@@ -3548,6 +3548,9 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 			}
 		}
 
+		Reference<IBackupContainer> bc = wait(config.backupContainer().getOrThrow(tr));
+		wait(bc->writeEncryptionMetadata());
+
 		config.stateEnum().set(tr, EBackupState::STATE_RUNNING);
 
 		state Reference<TaskFuture> backupFinished = futureBucket->future(tr);
@@ -6134,9 +6137,19 @@ public:
 			throw restore_error();
 		}
 
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString(), proxy, {});
+		state Reference<IBackupContainer> bc =
+		    IBackupContainer::openContainer(url.toString(), proxy, encryptionKeyFileName);
 
 		state BackupDescription desc = wait(bc->describeBackup(true));
+
+		if (desc.fileLevelEncryption && !encryptionKeyFileName.present()) {
+			fprintf(stderr, "ERROR: Backup is encrypted, please provide the encryption key file path.\n");
+			throw restore_error();
+		} else if (!desc.fileLevelEncryption && encryptionKeyFileName.present()) {
+			fprintf(stderr, "ERROR: Backup is not encrypted, please remove the encryption key file path.\n");
+			throw restore_error();
+		}
+
 		if (cxOrig.present()) {
 			wait(desc.resolveVersionTimes(cxOrig.get()));
 		}
@@ -6394,6 +6407,7 @@ public:
 		}
 
 		state Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
+
 		bc = fileBackup::getBackupContainerWithProxy(bc);
 
 		if (fastRestore) {

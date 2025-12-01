@@ -233,7 +233,8 @@ Future<bool> BackupContainerLocalDirectory::exists() {
 
 Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std::string& path) {
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
-	if (usesEncryption()) {
+	// Skip encryption for properties/ folder
+	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
 		flags |= IAsyncFile::OPEN_ENCRYPTED;
 	}
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::readFile");
@@ -291,7 +292,8 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::writeFile");
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
 	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
-	if (usesEncryption()) {
+	// Skip encryption for properties/ folder
+	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
 		flags |= IAsyncFile::OPEN_ENCRYPTED;
 	}
 	std::string fullPath = joinPath(m_path, path);
