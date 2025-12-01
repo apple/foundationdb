@@ -146,7 +146,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	Reference<IDatabase> db;
 
-	// std::vector<Reference<ITenant>> tenants;
 	std::set<TenantName> createdTenants;
 	int numTenants;
 	int numTenantGroups;
@@ -173,11 +172,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		// Only enable special keys writes when allowed to access system keys
 		specialKeysWritesEnabled = useSystemKeys && deterministicRandom()->coinflip();
 
-		// int maxTenants = getOption(options, "numTenants"_sr, 4);
-		numTenants = 0; // deterministicRandom()->randomInt(0, maxTenants + 1);
-
-		// int maxTenantGroups = getOption(options, "numTenantGroups"_sr, numTenants);
-		numTenantGroups = 0; // deterministicRandom()->randomInt(0, maxTenantGroups + 1);
+		numTenants = 0;
+		numTenantGroups = 0;
 
 		// See https://github.com/apple/foundationdb/issues/2424
 		if (BUGGIFY) {
@@ -254,30 +250,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Reference<IDatabase> db = wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 		self->db = db;
 
-		std::vector<Future<Void>> tenantFutures;
-		// The last tenant will not be created
 		ASSERT(self->numTenants == 0);
-		for (int i = 0; i < self->numTenants; ++i) {
-			//TenantName tenantName = getTenant(i);
-			//TenantMapEntry entry;
-			// entry.tenantGroup = self->getTenantGroup(i);
-			// tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
-			// self->createdTenants.insert(tenantName);
-		}
-		wait(waitForAll(tenantFutures));
-
-		// Open one extra tenant to test the failure of using a tenant that doesn't exist
-		for (int i = 0; i < self->numTenants + 1; ++i) {
-			// TenantName tenantName = getTenant(i);
-			// self->tenants.push_back(self->db->openTenant(tenantName));
-		}
-
-		// When domain-aware encryption is enabled, writing random keys without specifying tenant may cause Redwood to
-		// create too many pages.
-		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		if (config.encryptionAtRestMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
-			self->minTenantNum = 0;
-		}
 
 		return Void();
 	}
@@ -298,6 +271,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	Key getKeyForIndex(int tenantNum, int idx) {
 		idx += minNode;
+		ASSERT(idx >= 0);
 		if (adjacentKeys) {
 			return Key(keyPrefixes[tenantNum] + std::string(idx, '\x00'));
 		} else {
@@ -306,7 +280,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	}
 
 	KeyRef getMaxKey(Reference<ITransaction> tr) const {
-		if (useSystemKeys) { //  && !tr->getTenant().present()) {
+		if (useSystemKeys) {
 			return systemKeys.end;
 		} else {
 			return normalKeys.end;
@@ -319,8 +293,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
-		m.push_back( transactions.getMetric() );
-		m.push_back( retries.getMetric() );
+		// m.push_back( transactions.getMetric() );
+		// m.push_back( retries.getMetric() );
 	}
 
 	// Prevent a write only transaction whose commit was previously cancelled from being reordered after this
@@ -357,9 +331,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					wait(self->writeBarrier(self->db));
 					for (; i < nodesPerTenant; i += keysPerBatch) {
 						ASSERT(tenantNum < 0);
-						// 						state Reference<ITransaction> tr = tenantNum < 0
-						//						                                       ? self->db->createTransaction()
-						//						                                       : self->tenants[tenantNum]->createTransaction();
 						state Reference<ITransaction> tr = self->db->createTransaction();
 						loop {
 							if (now() - startTime > self->testDuration)
@@ -432,13 +403,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		state std::vector<Future<Void>> operations;
 		state int waitLocation = 0;
 
-		state int tenantNum = -1; // deterministicRandom()->randomInt(self->minTenantNum, self->tenants.size());
-		if (tenantNum == -1) {
-			tr = self->db->createTransaction();
-		}
-//		} else {
-//			tr = self->tenants[tenantNum]->createTransaction();
-//		}
+		state int tenantNum = -1;
+		tr = self->db->createTransaction();
 
 		state bool rawAccess = tenantNum == -1 && deterministicRandom()->coinflip();
 
