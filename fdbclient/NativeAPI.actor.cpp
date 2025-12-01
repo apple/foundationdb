@@ -1122,10 +1122,10 @@ ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
 				// Iterate over all storage interfaces for this location (key range) cache.
 				for (int i = 0; i < locationInfo->size(); ++i) {
 					const auto& interf = (*locationInfo)[i];
-					// Check if the address is marked as failed in the FailureMonitor. If so remove this key range and
+					// Check if the endpoint is marked as failed in the FailureMonitor. If so remove this key range and
 					// stop iterating over the other storage interfaces. A single failed storage interface is enough to
 					// remove the cached entry.
-					if (IFailureMonitor::failureMonitor().getState(interf->interf.address()).isFailed()) {
+					if (IFailureMonitor::failureMonitor().getState(interf->interf.getValue.getEndpoint()).isFailed()) {
 						toRemove.push_back(iter->range());
 						break;
 					}
