@@ -1,7 +1,6 @@
 [[test]]
 testTitle='CloggedConfigureDatabaseTest'
 clearAfterTest=false
-tenantModes = ['disabled']
 
     [[test.workload]]
     testName='ConfigureDatabase'
