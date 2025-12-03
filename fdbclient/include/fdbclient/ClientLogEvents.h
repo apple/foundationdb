@@ -25,6 +25,14 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
 
+// NOTE: data structures defined in this file and serialization thereof represent
+// persistent format state internal to FDB. Changes that render old values unreadable
+// will break upgrade simulation tests.
+
+// Local defines for removed types that linger on in metadata created in older systems.
+typedef StringRef LegacyTenantNameRef;
+typedef Standalone<LegacyTenantNameRef> LegacyTenantName;
+
 namespace FdbClientLogEvents {
 enum class EventType {
 	GET_VERSION_LATENCY = 0,
@@ -42,7 +50,7 @@ static_assert(sizeof(TransactionPriorityType) == 4, "transaction_profiling_analy
 
 struct Event {
 	Event(EventType t, double ts, const Optional<Standalone<StringRef>>& dc)
-		: type(t), startTs(ts) {
+		  : type(t), startTs(ts) {
 		if (dc.present())
 			dcId = dc.get();
 	}
@@ -50,12 +58,13 @@ struct Event {
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
-		return serializer(ar, type, startTs, dcId);
+		return serializer(ar, type, startTs, dcId, tenant);
 	}
 
 	EventType type{ EventType::UNSET };
 	double startTs{ 0 };
 	Key dcId{};
+	Optional<LegacyTenantName> tenant{};
 
 	void logEvent(std::string id, int maxFieldLength) const {}
 };
@@ -107,7 +116,7 @@ struct EventGetVersion_V3 : public Event {
 	                   double lat,
 	                   TransactionPriority priority,
 	                   Version version)
-	  : Event(EventType::GET_VERSION_LATENCY, ts, dcId), latency(lat), readVersion(version) {
+		: Event(EventType::GET_VERSION_LATENCY, ts, dcId), latency(lat), readVersion(version) {
 		switch (priority) {
 		// Unfortunately, the enum serialized here disagrees with the enum used elsewhere for the values used by each
 		// priority
