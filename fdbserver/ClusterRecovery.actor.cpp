@@ -1292,43 +1292,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		self->allTags.push_back(decodeServerTagValue(kv.value));
 	}
 
-	// TODO(gglass): remove this stuff for real once it's working
-	// 	Optional<Value> metaclusterRegistrationVal =
-	// 	    wait(self->txnStateStore->readValue(metacluster::metadata::metaclusterRegistration().key));
-	// 	Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration =
-	//	    UnversionedMetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
-	// Optional<ClusterName> metaclusterName;
-	// Optional<UID> metaclusterId;
-	// Optional<ClusterName> clusterName;
-	// Optional<UID> clusterId;
-	// self->controllerData->db.metaclusterRegistration = metaclusterRegistration;
-	// if (metaclusterRegistration.present()) {
-	// 		self->controllerData->db.metaclusterName = metaclusterRegistration.get().metaclusterName;
-	//		self->controllerData->db.clusterType = metaclusterRegistration.get().clusterType;
-	//		metaclusterName = metaclusterRegistration.get().metaclusterName;
-	//		metaclusterId = metaclusterRegistration.get().metaclusterId;
-	//		if (metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA) {
-	//			clusterName = metaclusterRegistration.get().name;
-	//			clusterId = metaclusterRegistration.get().id;
-	//	}
-	//	} else {
-	//		self->controllerData->db.metaclusterName = Optional<ClusterName>();
-	//		self->controllerData->db.clusterType = ClusterType::STANDALONE;
-	//}
-	// 
-	// TraceEvent("MetaclusterMetadata")
-	// .detail("ClusterType", clusterTypeToString(self->controllerData->db.clusterType))
-	//	    .detail("MetaclusterName", metaclusterName)
-	//  .detail("MetaclusterId", metaclusterId)
-	//	    .detail("DataClusterName", clusterName)
-	//	    .detail("DataClusterId", clusterId)
-	//	    .trackLatest(self->metaclusterEventHolder->trackingKey);
-
 	uniquify(self->allTags);
-
-	// auto kvs = self->txnStateStore->readRange( systemKeys );
-	// for( auto & kv : kvs.get() )
-	//	TraceEvent("ClusterRecoveredTXS", self->dbgid).detail("K", kv.key).detail("V", kv.value);
 
 	self->txnStateLogAdapter->setNextVersion(
 	    oldLogSystem->getEnd()); //< FIXME: (1) the log adapter should do this automatically after recovery; (2) if we
