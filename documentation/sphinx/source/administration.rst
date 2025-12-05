@@ -12,7 +12,6 @@ Administration
    configuration
    moving-a-cluster
    tls
-   authorization
    bulkload-user
    bulkdump
    
