@@ -26,8 +26,6 @@ FoundationDB supports language bindings for application development using the or
 
 * :doc:`known-limitations` describes both long-term design limitations of FoundationDB and short-term limitations applicable to the current version.
 
-* :doc:`tenants` describes the use of the tenants feature to define named transaction domains.
-
 * :doc:`automatic-idempotency` describes the use of a transaction option to prevent transactions from failing with ``commit_unknown_result``.
 
 .. toctree::
@@ -46,5 +44,4 @@ FoundationDB supports language bindings for application development using the or
     known-limitations
     transaction-profiler-analyzer
     api-version-upgrade-guide
-    tenants
     automatic-idempotency
