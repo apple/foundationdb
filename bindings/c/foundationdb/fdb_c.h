@@ -555,7 +555,7 @@ DLLEXPORT const char* fdb_get_client_version(void);
  * are (far) before the documented to be supported FDB versions listed here:
  * here: https://github.com/apple/foundationdb/blob/main/README.md
  *
- * However this also requires removing a bunch of unit testing on the deprecated 
+ * However this also requires removing a bunch of unit testing on the deprecated
  * old API versions so circle back and remove all of this stuff.
  *
  * TODO(gglass): address above.
@@ -565,8 +565,8 @@ DLLEXPORT const char* fdb_get_client_version(void);
 typedef struct FDB_cluster FDBCluster;
 
 typedef enum {
-       /* This option is only a placeholder for C compatibility and should not be used */
-       FDB_CLUSTER_OPTION_DUMMY_DO_NOT_USE = -1
+	/* This option is only a placeholder for C compatibility and should not be used */
+	FDB_CLUSTER_OPTION_DUMMY_DO_NOT_USE = -1
 } FDBClusterOption;
 #endif
 

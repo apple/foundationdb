@@ -1224,15 +1224,15 @@ struct SnapshotFileBackupEncryptionKeys {
 //
 // EncryptedRangeFileWriter will insert the required padding, header, and extra
 // end/begin keys around the 1MB boundaries as needed.
-	
+
 struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	EncryptedRangeFileWriter(Database cx,
 	                         Arena* arena,
 	                         EncryptionAtRestMode encryptMode,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0)
-	  : cx(cx), arena(arena), file(file), encryptMode(encryptMode), blockSize(blockSize),
-	    blockEnd(0), fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
+	  : cx(cx), arena(arena), file(file), encryptMode(encryptMode), blockSize(blockSize), blockEnd(0),
+	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
 	}
@@ -1309,10 +1309,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self,
-	                                                  KeyRef key) {
-		state EncryptCipherDomainId curDomainId =
-		    wait(getEncryptionDomainDetails(key, self->encryptMode));
+	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self, KeyRef key) {
+		state EncryptCipherDomainId curDomainId = wait(getEncryptionDomainDetails(key, self->encryptMode));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
@@ -1354,9 +1352,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	// TODO(gglass): this has been simplified for ten-ant removal.  Maybe it can be
 	// simplified further.
-	static Future<EncryptCipherDomainId> getEncryptionDomainDetails(
-	    KeyRef key,
-	    EncryptionAtRestMode encryptMode) {
+	static Future<EncryptCipherDomainId> getEncryptionDomainDetails(KeyRef key, EncryptionAtRestMode encryptMode) {
 		if (isSystemKey(key)) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
@@ -1639,10 +1635,10 @@ private:
 };
 
 ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
-								  Standalone<VectorRef<KeyValueRef>>* results,
-								  bool encryptedBlock,
-								  EncryptionAtRestMode encryptMode,
-								  Optional<int64_t> blockDomainId) {
+                                        Standalone<VectorRef<KeyValueRef>>* results,
+                                        bool encryptedBlock,
+                                        EncryptionAtRestMode encryptMode,
+                                        Optional<int64_t> blockDomainId) {
 	// Read begin key, if this fails then block was invalid.
 	state uint32_t kLen = reader->consumeNetworkUInt32();
 	state const uint8_t* k = reader->consume(kLen);
@@ -2467,8 +2463,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				// Initialize range file writer and write begin key
 				if (encryptMode.mode != EncryptionAtRestMode::DISABLED) {
 					CODE_PROBE(true, "using encrypted snapshot file writer", probe::decoration::rare);
-					rangeFile = std::make_unique<EncryptedRangeFileWriter>(
-					    cx, &arena, encryptMode, outFile, blockSize);
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, encryptMode, outFile, blockSize);
 				} else {
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}
@@ -4255,8 +4250,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			Standalone<VectorRef<KeyValueRef>> data = wait(decodeRangeFileBlock(inFile, readOffset, readLen, cx));
 			blockData = data;
 		} catch (Error& e) {
-			if (e.code() == error_code_encrypt_keys_fetch_failed ||
-			    e.code() == error_code_encrypt_key_not_found) {
+			if (e.code() == error_code_encrypt_keys_fetch_failed || e.code() == error_code_encrypt_key_not_found) {
 				return Void();
 			}
 			throw;

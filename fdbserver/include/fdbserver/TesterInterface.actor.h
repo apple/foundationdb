@@ -133,16 +133,15 @@ enum test_type_t {
 	TEST_TYPE_CONSISTENCY_CHECK_URGENT
 };
 
-ACTOR Future<Void> runTests(
-    Reference<IClusterConnectionRecord> connRecord,
-    test_type_t whatToRun,
-    test_location_t whereToRun,
-    int minTestersExpected,
-    std::string fileName = std::string(),
-    StringRef startingConfiguration = StringRef(),
-    LocalityData locality = LocalityData(),
-    UnitTestParameters testOptions = UnitTestParameters(),
-    bool restartingTest = false);
+ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
+                            test_type_t whatToRun,
+                            test_location_t whereToRun,
+                            int minTestersExpected,
+                            std::string fileName = std::string(),
+                            StringRef startingConfiguration = StringRef(),
+                            LocalityData locality = LocalityData(),
+                            UnitTestParameters testOptions = UnitTestParameters(),
+                            bool restartingTest = false);
 
 #include "flow/unactorcompiler.h"
 #endif

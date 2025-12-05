@@ -1310,8 +1310,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "waitopen")) {
-					wait(makeInterruptable(success(safeThreadFutureToFuture(
-					    getTransaction(db, tr, options, intrans)->getReadVersion()))));
+					wait(makeInterruptable(
+					    success(safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion()))));
 					continue;
 				}
 
@@ -1597,8 +1597,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						Version v = wait(makeInterruptable(safeThreadFutureToFuture(
-						    getTransaction(db, tr, options, intrans)->getReadVersion())));
+						Version v = wait(makeInterruptable(
+						    safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
 						fmt::print("{}\n", v);
 					}
 					continue;

@@ -253,8 +253,8 @@ Future<bool> ClientWorkload::check(Database const& cx) {
 	return impl->runActor<bool>(impl, [this](Database const& db) { return impl->child->check(db); });
 }
 Future<std::vector<PerfMetric>> ClientWorkload::getMetrics() {
-	return impl->runActor<std::vector<PerfMetric>>(
-	    impl, [this](Database const& db) { return impl->child->getMetrics(); });
+	return impl->runActor<std::vector<PerfMetric>>(impl,
+	                                               [this](Database const& db) { return impl->child->getMetrics(); });
 }
 void ClientWorkload::getMetrics(std::vector<PerfMetric>& m) {
 	ASSERT(false);

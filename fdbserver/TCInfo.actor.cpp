@@ -373,8 +373,8 @@ std::string TCMachineTeamInfo::getMachineIDsStr() const {
 }
 
 TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers)
-  : servers(servers), healthy(true), wrongConfiguration(false),
-    priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), id(deterministicRandom()->randomUniqueID()) {
+  : servers(servers), healthy(true), wrongConfiguration(false), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY),
+    id(deterministicRandom()->randomUniqueID()) {
 	if (servers.empty()) {
 		TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers").log();
 	}

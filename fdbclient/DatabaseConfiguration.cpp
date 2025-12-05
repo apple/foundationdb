@@ -426,10 +426,11 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 		} else if (kv.second.type() == json_spirit::str_type) {
 			// For string values, some properties can set with a "<name>=<value>" syntax in "configure"
 			// Such properties are listed here:
-			static std::set<std::string> directSet = {
-				"storage_migration_type", "encryption_at_rest_mode",
-				"storage_engine",         "log_engine",  "perpetual_storage_wiggle_engine"
-			};
+			static std::set<std::string> directSet = { "storage_migration_type",
+				                                       "encryption_at_rest_mode",
+				                                       "storage_engine",
+				                                       "log_engine",
+				                                       "perpetual_storage_wiggle_engine" };
 
 			if (directSet.contains(kv.first)) {
 				result += kv.first + "=" + kv.second.get_str();

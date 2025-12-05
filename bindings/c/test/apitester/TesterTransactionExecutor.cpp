@@ -268,7 +268,7 @@ protected:
 			fdb::Database db = thisRef->executor->selectDatabase();
 			thisRef->fdbDb.atomic_store(db);
 			std::atomic_store(&thisRef->fdbDbOps,
-							  std::dynamic_pointer_cast<fdb::IDatabaseOps>(std::make_shared<fdb::Database>(db)));
+			                  std::dynamic_pointer_cast<fdb::IDatabaseOps>(std::make_shared<fdb::Database>(db)));
 			if (thisRef->transactional) {
 				thisRef->fdbTx.atomic_store(thisRef->fdbDbOps->createTransaction());
 			}
@@ -693,10 +693,7 @@ public:
 
 	const TransactionExecutorOptions& getOptions() override { return options; }
 
-	void execute(TOpStartFct startFct,
-	             TOpContFct cont,
-	             bool transactional,
-	             bool restartOnTimeout) override {
+	void execute(TOpStartFct startFct, TOpContFct cont, bool transactional, bool restartOnTimeout) override {
 		try {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {

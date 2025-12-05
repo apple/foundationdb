@@ -76,9 +76,7 @@ ACTOR Future<bool> getKeyServers(
 		keyServerLocationFuture =
 		    commitProxyInfo->get(0, &CommitProxyInterface::getKeyServersLocations)
 		        .getReplyUnlessFailedFor(
-		            GetKeyServerLocationsRequest({}, begin, end, limitKeyServers, false, latestVersion, Arena()),
-		            2,
-		            0);
+		            GetKeyServerLocationsRequest({}, begin, end, limitKeyServers, false, latestVersion, Arena()), 2, 0);
 
 		state bool keyServersInsertedForThisIteration = false;
 		choose {

@@ -83,8 +83,8 @@ public:
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping),
-	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_),
+	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_),
+	    provisionalCommitProxy(provisionalCommitProxy_),
 	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
 	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch), rangeLock(proxyCommitData_.rangeLock) {
 		if (encryptMode.isEncryptionEnabled()) {

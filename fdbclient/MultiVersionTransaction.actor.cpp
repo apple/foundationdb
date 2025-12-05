@@ -1380,8 +1380,8 @@ Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Refer
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
-	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this),
-	                                                           dbState->transactionDefaultOptions));
+	return Reference<ITransaction>(
+	    new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this), dbState->transactionDefaultOptions));
 }
 
 void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {

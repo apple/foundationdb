@@ -52,7 +52,6 @@ typedef Standalone<TenantNameRef> TenantName;
 typedef StringRef TenantGroupNameRef;
 typedef Standalone<TenantGroupNameRef> TenantGroupName;
 
-
 // This allows us to dictate which exceptions we SHOULD get.
 // We can use this to suppress expected exceptions, and take action
 // if we don't get an exception wqe should have gotten.
@@ -260,9 +259,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	Future<bool> check(Database const& cx) override {
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
 	Key getKeyForIndex(int tenantNum, int idx) {
 		idx += minNode;
@@ -743,7 +740,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				    error_code_special_keys_api_failure,
 				    ExceptionContract::possibleIf(
 				        key == "auto_coordinators"_sr.withPrefix(
-									 SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)))
+				                   SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)))
 			};
 		}
 
@@ -765,10 +762,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		TestGetKey(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
 		  : BaseTest(id, workload, "TestGetKey") {
 			keysel = makeKeySel();
-			contract = { std::make_pair(error_code_key_outside_legal_range,
-				                        ExceptionContract::requiredIf((keysel.getKey() > workload->getMaxKey(tr)))),
-				         std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
-				         std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
+			contract = {
+				std::make_pair(error_code_key_outside_legal_range,
+				               ExceptionContract::requiredIf((keysel.getKey() > workload->getMaxKey(tr)))),
+				std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 			};
 		}
 
@@ -1025,12 +1023,10 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		  : BaseTestCallback(id, workload, "TestAddReadConflictRange") {
 			key1 = makeKey();
 			key2 = makeKey();
-			contract = {
-				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
-				std::make_pair(error_code_key_outside_legal_range,
-							   ExceptionContract::requiredIf((key1 > workload->getMaxKey(tr)) ||
-															 (key2 > workload->getMaxKey(tr))))
-			};
+			contract = { std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
+				         std::make_pair(error_code_key_outside_legal_range,
+				                        ExceptionContract::requiredIf((key1 > workload->getMaxKey(tr)) ||
+				                                                      (key2 > workload->getMaxKey(tr)))) };
 		}
 
 		void callback(Reference<ITransaction> tr) override { tr->addReadConflictRange(KeyRangeRef(key1, key2)); }
@@ -1262,16 +1258,17 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		  : BaseTest(id, workload, "TestWatch") {
 			key = makeKey();
 			printf("Watching: %d %s\n", key.size(), printable(key.substr(0, std::min(key.size(), 20))).c_str());
-			contract = { std::make_pair(error_code_key_too_large,
-				                        key.size() > getMaxWriteKeySize(key, true)    ? ExceptionContract::Always
-				                        : key.size() > getMaxWriteKeySize(key, false) ? ExceptionContract::Possible
-				                                                                      : ExceptionContract::Never),
-				         std::make_pair(error_code_watches_disabled, ExceptionContract::Possible),
-				         std::make_pair(error_code_key_outside_legal_range,
-				                        ExceptionContract::requiredIf((key >= workload->getMaxKey(tr)))),
-				         std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
-				         std::make_pair(error_code_timed_out, ExceptionContract::Possible),
-				         std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
+			contract = {
+				std::make_pair(error_code_key_too_large,
+				               key.size() > getMaxWriteKeySize(key, true)    ? ExceptionContract::Always
+				               : key.size() > getMaxWriteKeySize(key, false) ? ExceptionContract::Possible
+				                                                             : ExceptionContract::Never),
+				std::make_pair(error_code_watches_disabled, ExceptionContract::Possible),
+				std::make_pair(error_code_key_outside_legal_range,
+				               ExceptionContract::requiredIf((key >= workload->getMaxKey(tr)))),
+				std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				std::make_pair(error_code_timed_out, ExceptionContract::Possible),
+				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 			};
 		}
 

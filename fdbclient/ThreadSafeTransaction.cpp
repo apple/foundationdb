@@ -169,9 +169,8 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 	onMainThreadVoid([db]() { db->delref(); });
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
-                                             ISingleThreadTransaction::Type type)
-	: initialized(std::make_shared<std::atomic_bool>(false)) {
+ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type)
+  : initialized(std::make_shared<std::atomic_bool>(false)) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 

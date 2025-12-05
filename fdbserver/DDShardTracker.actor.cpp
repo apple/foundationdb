@@ -1337,8 +1337,7 @@ DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitPara
     output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), bulkLoadTaskCollection(params.bulkLoadTaskCollection),
     readyToStart(params.readyToStart), anyZeroHealthyTeams(params.anyZeroHealthyTeams),
-    trackerCancelled(params.trackerCancelled),
-    usableRegions(params.usableRegions) {}
+    trackerCancelled(params.trackerCancelled), usableRegions(params.usableRegions) {}
 
 DataDistributionTracker::~DataDistributionTracker() {
 	if (trackerCancelled) {

@@ -345,8 +345,7 @@ struct WatchValueRequest {
 	                  Version ver,
 	                  Optional<TagSet> tags,
 	                  Optional<UID> debugID)
-	  : spanContext(spanContext), key(key), value(value), version(ver), tags(tags),
-	    debugID(debugID) {}
+	  : spanContext(spanContext), key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -510,7 +509,7 @@ struct GetKeyValuesStreamRequest {
 
 	GetKeyValuesStreamRequest() {}
 
-	bool verify() const { return true; }		
+	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -715,11 +714,8 @@ struct WaitMetricsRequest {
 
 	bool verify() const { return true; }
 
-	WaitMetricsRequest(Version version,
-	                   KeyRangeRef const& keys,
-	                   StorageMetrics const& min,
-	                   StorageMetrics const& max)
-		: keys(arena, keys), min(min), max(max), legacyVersion(version) {}
+	WaitMetricsRequest(Version version, KeyRangeRef const& keys, StorageMetrics const& min, StorageMetrics const& max)
+	  : keys(arena, keys), min(min), max(max), legacyVersion(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -751,7 +747,7 @@ struct SplitMetricsRequest {
 	Optional<int> minSplitBytes;
 
 	bool verify() const { return true; }
-	
+
 	SplitMetricsRequest() {}
 	SplitMetricsRequest(KeyRangeRef const& keys,
 	                    StorageMetrics const& limits,
@@ -855,8 +851,7 @@ struct SplitRangeRequest {
 	ReplyPromise<SplitRangeReply> reply;
 
 	SplitRangeRequest() {}
-	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize)
-	  : keys(arena, keys), chunkSize(chunkSize) {}
+	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

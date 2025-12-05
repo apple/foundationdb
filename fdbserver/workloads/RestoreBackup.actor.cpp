@@ -131,21 +131,21 @@ struct RestoreBackupWorkload : TestWorkload {
 		wait(clearDatabase(cx));
 
 		wait(success(self->backupAgent.restore(cx,
-											   cx,
-											   self->tag,
-											   Key(self->backupContainer->getURL()),
-											   self->backupContainer->getProxy(),
-											   WaitForComplete::True,
-											   ::invalidVersion,
-											   Verbose::True,
-											   KeyRange(),
-											   Key(),
-											   Key(),
-											   LockDB::True,
-											   OnlyApplyMutationLogs::False,
-											   InconsistentSnapshotOnly::False,
-											   ::invalidVersion,
-											   self->encryptionKeyFileName)));
+		                                       cx,
+		                                       self->tag,
+		                                       Key(self->backupContainer->getURL()),
+		                                       self->backupContainer->getProxy(),
+		                                       WaitForComplete::True,
+		                                       ::invalidVersion,
+		                                       Verbose::True,
+		                                       KeyRange(),
+		                                       Key(),
+		                                       Key(),
+		                                       LockDB::True,
+		                                       OnlyApplyMutationLogs::False,
+		                                       InconsistentSnapshotOnly::False,
+		                                       ::invalidVersion,
+		                                       self->encryptionKeyFileName)));
 		return Void();
 	}
 

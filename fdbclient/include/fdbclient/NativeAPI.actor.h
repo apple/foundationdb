@@ -281,8 +281,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Future<Void> startFuture;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionState(TaskPriority taskID, SpanContext spanContext)
-		: taskID(taskID), spanContext(spanContext) {}
+	TransactionState(TaskPriority taskID, SpanContext spanContext) : taskID(taskID), spanContext(spanContext) {}
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,

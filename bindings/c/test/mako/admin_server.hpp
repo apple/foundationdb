@@ -65,8 +65,7 @@ struct StopRequest {
 	void serialize(Ar&, unsigned int) {}
 };
 
-using Request =
-    boost::variant<PingRequest, StopRequest>;
+using Request = boost::variant<PingRequest, StopRequest>;
 
 class AdminServer {
 	const Arguments& args;

@@ -1065,9 +1065,8 @@ struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 		});
 	}
 
-	SingleSpecialKeyImpl(KeyRef k,
-	                     const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f)
-		: SpecialKeyRangeReadImpl(singleKeyRange(k)), k(k), f(f) {}
+	SingleSpecialKeyImpl(KeyRef k, const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f)
+	  : SpecialKeyRangeReadImpl(singleKeyRange(k)), k(k), f(f) {}
 
 private:
 	Key k;
@@ -1191,9 +1190,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
                                  IsSwitchable switchable)
   : dbId(deterministicRandom()->randomUniqueID()), lockAware(lockAware), switchable(switchable),
     connectionRecord(connectionRecord), proxyProvisional(false), clientLocality(clientLocality),
-    enableLocalityLoadBalance(enableLocalityLoadBalance), internal(internal),
-    cc("TransactionMetrics", dbId.toString()), transactionReadVersions("ReadVersions", cc),
-    transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
+    enableLocalityLoadBalance(enableLocalityLoadBalance), internal(internal), cc("TransactionMetrics", dbId.toString()),
+    transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
     transactionBatchReadVersions("BatchPriorityReadVersions", cc),
@@ -1216,8 +1214,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
-    transactionStatusRequests("StatusRequests", cc),
-	transactionsTooOld("TooOld", cc),
+    transactionStatusRequests("StatusRequests", cc), transactionsTooOld("TooOld", cc),
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
     transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
@@ -1413,42 +1410,40 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<WorkerInterfacesSpecialKeyImpl>(
 		                            KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr)));
-		registerSpecialKeysImpl(SpecialKeySpace::MODULE::STATUSJSON,
-		                        SpecialKeySpace::IMPLTYPE::READONLY,
-		                        std::make_unique<SingleSpecialKeyImpl>(
-		                            "\xff\xff/status/json"_sr,
-		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
-			                            if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
-				                            ++ryw->getDatabase()->transactionStatusRequests;
-				                            return getJSON(ryw->getDatabase());
-			                            } else {
-				                            return Optional<Value>();
-			                            }
-		                            }));
-		registerSpecialKeysImpl(SpecialKeySpace::MODULE::CLUSTERFILEPATH,
-		                        SpecialKeySpace::IMPLTYPE::READONLY,
-		                        std::make_unique<SingleSpecialKeyImpl>(
-		                            "\xff\xff/cluster_file_path"_sr,
-		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
-			                            try {
-				                            if (ryw->getDatabase().getPtr() &&
-				                                ryw->getDatabase()->getConnectionRecord()) {
-					                            Optional<Value> output =
-					                                StringRef(ryw->getDatabase()->getConnectionRecord()->getLocation());
-					                            return output;
-				                            }
-			                            } catch (Error& e) {
-				                            return e;
-			                            }
-			                            return Optional<Value>();
-		                            }));
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::STATUSJSON,
+		    SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<SingleSpecialKeyImpl>(
+		        "\xff\xff/status/json"_sr, [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
+				        ++ryw->getDatabase()->transactionStatusRequests;
+				        return getJSON(ryw->getDatabase());
+			        } else {
+				        return Optional<Value>();
+			        }
+		        }));
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::CLUSTERFILEPATH,
+		    SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<SingleSpecialKeyImpl>(
+		        "\xff\xff/cluster_file_path"_sr, [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			        try {
+				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
+					        Optional<Value> output =
+					            StringRef(ryw->getDatabase()->getConnectionRecord()->getLocation());
+					        return output;
+				        }
+			        } catch (Error& e) {
+				        return e;
+			        }
+			        return Optional<Value>();
+		        }));
 
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::CONNECTIONSTRING,
 		    SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<SingleSpecialKeyImpl>(
-		        "\xff\xff/connection_string"_sr,
-		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+		        "\xff\xff/connection_string"_sr, [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			        try {
 				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
 					        Reference<IClusterConnectionRecord> f = ryw->getDatabase()->getConnectionRecord();
@@ -1459,23 +1454,22 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 				        return e;
 			        }
 			        return Optional<Value>();
-				}));
-		registerSpecialKeysImpl(SpecialKeySpace::MODULE::CLUSTERID,
-		                        SpecialKeySpace::IMPLTYPE::READONLY,
-		                        std::make_unique<SingleSpecialKeyImpl>(
-		                            "\xff\xff/cluster_id"_sr,
-		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
-			                            try {
-				                            if (ryw->getDatabase().getPtr()) {
-					                            return map(getClusterId(ryw->getDatabase()), [](UID id) {
-						                            return Optional<Value>(StringRef(id.toString()));
-					                            });
-				                            }
-			                            } catch (Error& e) {
-				                            return e;
-			                            }
-			                            return Optional<Value>();
-		                            }));
+		        }));
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::CLUSTERID,
+		    SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<SingleSpecialKeyImpl>(
+		        "\xff\xff/cluster_id"_sr, [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			        try {
+				        if (ryw->getDatabase().getPtr()) {
+					        return map(getClusterId(ryw->getDatabase()),
+					                   [](UID id) { return Optional<Value>(StringRef(id.toString())); });
+				        }
+			        } catch (Error& e) {
+				        return e;
+			        }
+			        return Optional<Value>();
+		        }));
 	}
 	throttleExpirer = recurring([this]() { expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 
@@ -1511,8 +1505,7 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
-    transactionStatusRequests("StatusRequests", cc),
-	transactionsTooOld("TooOld", cc),
+    transactionStatusRequests("StatusRequests", cc), transactionsTooOld("TooOld", cc),
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
     transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),

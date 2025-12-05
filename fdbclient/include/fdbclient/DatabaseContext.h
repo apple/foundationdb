@@ -211,12 +211,8 @@ public:
 		return cx;
 	}
 
-	Optional<KeyRangeLocationInfo> getCachedLocation(const KeyRef&,
-	                                                 Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const KeyRangeRef&,
-	                        std::vector<KeyRangeLocationInfo>&,
-	                        int limit,
-	                        Reverse reverse);
+	Optional<KeyRangeLocationInfo> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::False);
+	bool getCachedLocations(const KeyRangeRef&, std::vector<KeyRangeLocationInfo>&, int limit, Reverse reverse);
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
 	void invalidateCache(const KeyRef& key, Reverse isBackward = Reverse::False);
 	void invalidateCache(const KeyRangeRef& keys);

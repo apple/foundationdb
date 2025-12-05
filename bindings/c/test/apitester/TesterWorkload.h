@@ -116,14 +116,10 @@ protected:
 	void schedule(TTaskFct task);
 
 	// Execute a transaction within the workload
-	void execTransaction(TOpStartFct startFct,
-	                     TTaskFct cont,
-	                     bool failOnError = true);
+	void execTransaction(TOpStartFct startFct, TTaskFct cont, bool failOnError = true);
 
 	// Execute a non-transactional database operation within the workload
-	void execOperation(TOpStartFct startFct,
-	                   TTaskFct cont,
-	                   bool failOnError = true);
+	void execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError = true);
 
 	// Log an error message, increase error counter
 	void error(const std::string& msg);
@@ -137,10 +133,7 @@ protected:
 private:
 	WorkloadManager* manager;
 
-	void doExecute(TOpStartFct startFct,
-	               TTaskFct cont,
-	               bool failOnError,
-	               bool transactional);
+	void doExecute(TOpStartFct startFct, TTaskFct cont, bool failOnError, bool transactional);
 
 	// Decrease scheduled task counter, notify the workload manager
 	// that the task is done if no more tasks schedule

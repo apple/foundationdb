@@ -109,23 +109,16 @@ void WorkloadBase::schedule(TTaskFct task) {
 	});
 }
 
-void WorkloadBase::execTransaction(TOpStartFct startFct,
-                                   TTaskFct cont,
-                                   bool failOnError) {
+void WorkloadBase::execTransaction(TOpStartFct startFct, TTaskFct cont, bool failOnError) {
 	doExecute(startFct, cont, failOnError, true);
 }
 
 // Execute a non-transactional database operation within the workload
-void WorkloadBase::execOperation(TOpStartFct startFct,
-                                 TTaskFct cont,
-                                 bool failOnError) {
+void WorkloadBase::execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError) {
 	doExecute(startFct, cont, failOnError, false);
 }
 
-void WorkloadBase::doExecute(TOpStartFct startFct,
-                             TTaskFct cont,
-                             bool failOnError,
-                             bool transactional) {
+void WorkloadBase::doExecute(TOpStartFct startFct, TTaskFct cont, bool failOnError, bool transactional) {
 	ASSERT(inProgress);
 	if (failed) {
 		return;

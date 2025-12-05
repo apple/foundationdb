@@ -359,9 +359,7 @@ public:
 	std::vector<std::string> disabledFailureInjectionWorkloads;
 };
 
-ACTOR Future<DistributedTestResults> runWorkload(Database cx,
-                                                 std::vector<TesterInterface> testers,
-                                                 TestSpec spec);
+ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
 
 void logMetrics(std::vector<PerfMetric> metrics);
 

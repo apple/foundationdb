@@ -1548,8 +1548,8 @@ public:
 };
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
-  : ISingleThreadTransaction(cx->deferredError), tr(cx), cache(&arena), writes(&arena), retries(0),
-    approximateSize(0), creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
+  : ISingleThreadTransaction(cx->deferredError), tr(cx), cache(&arena), writes(&arena), retries(0), approximateSize(0),
+    creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
     specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end), options(tr) {
 	std::copy(
 	    cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(), std::back_inserter(persistentOptions));

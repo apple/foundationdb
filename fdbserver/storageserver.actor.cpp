@@ -826,12 +826,8 @@ public:
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 
-	ServerWatchMetadata(Key key,
-	                    Optional<Value> value,
-	                    Version version,
-	                    Optional<TagSet> tags,
-	                    Optional<UID> debugID)
-	: key(key), value(value), version(version), tags(tags), debugID(debugID) {}
+	ServerWatchMetadata(Key key, Optional<Value> value, Version version, Optional<TagSet> tags, Optional<UID> debugID)
+	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
 };
 
 struct BusiestWriteTagContext {
@@ -2411,8 +2407,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			CODE_PROBE(latest >= minVersion && latest < data->data().latestVersion,
 			           "Starting watch loop with latestVersion > data->version",
 			           probe::decoration::rare);
-			GetValueRequest getReq(
-			    span.context, metadata->key, latest, metadata->tags, options, VersionVector());
+			GetValueRequest getReq(span.context, metadata->key, latest, metadata->tags, options, VersionVector());
 			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
 			GetValueReply reply = wait(getReq.reply.getFuture());
@@ -2999,12 +2994,8 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 	if (data->shards[key]->isReadable()) {
 		try {
 			// TODO: Use a lower level API may be better? Or tweak priorities?
-			GetValueRequest req(pOriginalReq->spanContext,
-			                    key,
-			                    version,
-			                    pOriginalReq->tags,
-			                    pOriginalReq->options,
-			                    VersionVector());
+			GetValueRequest req(
+			    pOriginalReq->spanContext, key, version, pOriginalReq->tags, pOriginalReq->options, VersionVector());
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
 			// original request level, rather than individual underlying lookups. The reason is that throttle any
 			// individual underlying lookup will fail the original request, which is not productive.
@@ -3342,7 +3333,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 		CODE_PROBE(true, "Reverse key selector returned only one result in range read");
 		maxBytes = std::numeric_limits<int>::max();
 		GetKeyValuesReply rep2 = wait(readRange(
-						data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context, options));
+		    data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context, options));
 		rep = rep2;
 		more = rep.more && rep.data.size() != distance + skipEqualKey;
 		ASSERT(rep.data.size() == 2 || !more);
@@ -3560,14 +3551,12 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 		state int offset1 = 0;
 		state int offset2;
-		state Future<Key> fBegin =
-		    req.begin.isFirstGreaterOrEqual()
-		        ? Future<Key>(req.begin.getKey())
-		        : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
-		state Future<Key> fEnd =
-		    req.end.isFirstGreaterOrEqual()
-		        ? Future<Key>(req.end.getKey())
-		        : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
+		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
+		                               ? Future<Key>(req.begin.getKey())
+		                               : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
+		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
+		                             ? Future<Key>(req.end.getKey())
+		                             : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
@@ -3623,13 +3612,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			state int remainingLimitBytes = req.limitBytes;
 
 			state double kvReadRange = g_network->timer();
-			GetKeyValuesReply _r = wait(readRange(data,
-			                                      version,
-			                                      KeyRangeRef(begin, end),
-			                                      req.limit,
-			                                      &remainingLimitBytes,
-			                                      span.context,
-			                                      req.options));
+			GetKeyValuesReply _r = wait(readRange(
+			    data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, req.options));
 			const double duration = g_network->timer() - kvReadRange;
 			data->counters.kvReadRangeLatencySample->addMeasurement(duration);
 			GetKeyValuesReply r = _r;
@@ -5322,14 +5306,12 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 		state int offset1 = 0;
 		state int offset2;
-		state Future<Key> fBegin =
-		    req.begin.isFirstGreaterOrEqual()
-		        ? Future<Key>(req.begin.getKey())
-		        : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
-		state Future<Key> fEnd =
-		    req.end.isFirstGreaterOrEqual()
-		        ? Future<Key>(req.end.getKey())
-		        : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
+		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
+		                               ? Future<Key>(req.begin.getKey())
+		                               : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
+		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
+		                             ? Future<Key>(req.end.getKey())
+		                             : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
@@ -5375,13 +5357,8 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			// because readRange is cheap when reading additional bytes
 			state int bytesForIndex =
 			    std::min(req.limitBytes, (int)(req.limitBytes * SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH));
-			GetKeyValuesReply getKeyValuesReply = wait(readRange(data,
-			                                                     version,
-			                                                     KeyRangeRef(begin, end),
-			                                                     req.limit,
-			                                                     &bytesForIndex,
-			                                                     span.context,
-			                                                     req.options));
+			GetKeyValuesReply getKeyValuesReply = wait(readRange(
+			    data, version, KeyRangeRef(begin, end), req.limit, &bytesForIndex, span.context, req.options));
 
 			// Unlock read lock before the subqueries because each
 			// subquery will route back to getValueQ or getKeyValuesQ with a new request having the same
@@ -5502,14 +5479,12 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 		state int offset1 = 0;
 		state int offset2;
-		state Future<Key> fBegin =
-		    req.begin.isFirstGreaterOrEqual()
-		        ? Future<Key>(req.begin.getKey())
-		        : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
-		state Future<Key> fEnd =
-		    req.end.isFirstGreaterOrEqual()
-		        ? Future<Key>(req.end.getKey())
-		        : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
+		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
+		                               ? Future<Key>(req.begin.getKey())
+		                               : findKey(data, req.begin, version, shard, &offset1, span.context, req.options);
+		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
+		                             ? Future<Key>(req.end.getKey())
+		                             : findKey(data, req.end, version, shard, &offset2, span.context, req.options);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 		if (req.options.present() && req.options.get().debugID.present())
@@ -5570,13 +5545,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				    .detail("Begin", begin.printable())
 				    .detail("End", end.printable());
 
-				GetKeyValuesReply _r = wait(readRange(data,
-				                                      version,
-				                                      KeyRangeRef(begin, end),
-				                                      req.limit,
-				                                      &byteLimit,
-				                                      span.context,
-				                                      req.options));
+				GetKeyValuesReply _r = wait(readRange(
+				    data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context, req.options));
 				readLock.release();
 				GetKeyValuesStreamReply r(_r);
 
@@ -11634,11 +11604,9 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 
 		// case 1: no watch set for the current key
 		if (!metadata.isValid()) {
-			metadata = makeReference<ServerWatchMetadata>(
-			  req.key, req.value, req.version, req.tags, req.debugID);
+			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
 			KeyRef key = self->setWatchMetadata(metadata);
-			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key),
-			                               metadata->versionPromise);
+			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
 			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
 		}
 		// case 2: there is a watch in the map and it has the same value so just update version
@@ -11669,11 +11637,9 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 			metadata->versionPromise.send(req.version);
 			metadata->watch_impl.cancel();
 
-			metadata = makeReference<ServerWatchMetadata>(
-				  req.key, req.value, req.version, req.tags, req.debugID);
+			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
 			KeyRef key = self->setWatchMetadata(metadata);
-			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key),
-			                               metadata->versionPromise);
+			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
 
 			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
 		}
@@ -11703,12 +11669,11 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 					}
 
 					if (reply.value == req.value) { // valSS == valreq
-						metadata = makeReference<ServerWatchMetadata>(
-							  req.key, req.value, req.version, req.tags, req.debugID);
+						metadata =
+						    makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
 						KeyRef key = self->setWatchMetadata(metadata);
 						metadata->watch_impl =
-						    forward(watchWaitForValueChange(self, span.context, key),
-						            metadata->versionPromise);
+						    forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
 						self->actors.add(
 						    watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
 					} else {
@@ -12450,7 +12415,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 			TraceEvent("StorageServerInitProgress", ssi.id())
 			    .detail("EngineType", self.storage.getKeyValueStoreType().toString())
-				// This is an intentionally useless detail to avoid renumbering things.
+			    // This is an intentionally useless detail to avoid renumbering things.
 			    .detail("Step", "9.SomeLinesOfCodeExecuted");
 		} else {
 			self.tag = seedTag;

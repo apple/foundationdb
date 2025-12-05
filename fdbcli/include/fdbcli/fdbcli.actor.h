@@ -104,7 +104,7 @@ struct CommandFactory {
 // seen.  Please stop cargo-culting useless comments.  Please write
 // comments about things that are important and non-obvious, not about
 // things that are trivial and obvious.
-	
+
 // advanceversion
 extern const KeyRef advanceVersionSpecialKey;
 // consistencycheck

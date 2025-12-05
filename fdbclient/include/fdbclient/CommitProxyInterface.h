@@ -141,15 +141,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar,
-		           grvProxies,
-		           commitProxies,
-		           id,
-		           forward,
-		           history,
-				   encryptKeyProxy,
-		           clusterId,
-		           clusterType);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, encryptKeyProxy, clusterId, clusterType);
 	}
 };
 
@@ -166,7 +158,7 @@ struct ExpireIdempotencyIdRequest {
 
 	ExpireIdempotencyIdRequest() {}
 	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte)
-		: commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte) {}
+	  : commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte) {}
 
 	bool verify() const { return true; }
 
@@ -222,16 +214,8 @@ struct CommitTransactionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           transaction,
-		           reply,
-		           flags,
-		           debugID,
-		           commitCostEstimation,
-		           tagSet,
-		           spanContext,
-		           idempotencyId,
-		           arena);
+		serializer(
+		    ar, transaction, reply, flags, debugID, commitCostEstimation, tagSet, spanContext, idempotencyId, arena);
 	}
 };
 
@@ -407,9 +391,10 @@ struct GetKeyServerLocationsRequest {
 	                             Optional<KeyRef> const& end,
 	                             int limit,
 	                             bool reverse,
-								 Version version,
+	                             Version version,
 	                             Arena const& arena)
-		: arena(arena), spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse), legacyVersion(version) {}
+	  : arena(arena), spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse),
+	    legacyVersion(version) {}
 
 	bool verify() const { return true; }
 

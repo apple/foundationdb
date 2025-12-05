@@ -269,10 +269,7 @@ std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key) {
 	    bigEndian32(*(int32_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t) + sizeof(int64_t))));
 }
 
-void _addResult(VectorRef<MutationRef>* result,
-                int* mutationSize,
-                Arena* arena,
-                MutationRef logValue) {
+void _addResult(VectorRef<MutationRef>* result, int* mutationSize, Arena* arena, MutationRef logValue) {
 	result->push_back_deep(*arena, logValue);
 	*mutationSize += logValue.expectedSize();
 }

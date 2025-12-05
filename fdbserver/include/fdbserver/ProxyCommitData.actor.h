@@ -313,7 +313,7 @@ struct ProxyCommitData {
 	// RangeLock feature currently is not compatible with encryption.
 	bool rangeLockEnabled() {
 		return SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-			!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && !encryptMode.isEncryptionEnabled();
+		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && !encryptMode.isEncryptionEnabled();
 	}
 
 	ProxyCommitData(UID dbgid,
@@ -328,13 +328,13 @@ struct ProxyCommitData {
 	                uint16_t commitProxyIndex,
 	                LogEpoch epoch)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),
-	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
-	    logAdapter(nullptr), txnStateStore(nullptr), committedVersion(recoveryTransactionVersion),
-	    minKnownCommittedVersion(0), version(0), lastVersionTime(0), commitVersionRequestNumber(1),
-	    mostRecentProcessedRequestNumber(0), firstProxy(firstProxy), encryptMode(encryptMode),
-	    encryptionMonitor(makeReference<GetEncryptCipherKeysMonitor>()), provisional(provisional), lastCoalesceTime(0),
-	    locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
-	    localCommitBatchesStarted(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
+	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master), logAdapter(nullptr),
+	    txnStateStore(nullptr), committedVersion(recoveryTransactionVersion), minKnownCommittedVersion(0), version(0),
+	    lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0), firstProxy(firstProxy),
+	    encryptMode(encryptMode), encryptionMonitor(makeReference<GetEncryptCipherKeysMonitor>()),
+	    provisional(provisional), lastCoalesceTime(0), locked(false),
+	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), localCommitBatchesStarted(0),
+	    getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),

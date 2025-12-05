@@ -1028,8 +1028,7 @@ ACTOR Future<Void> clearData(Database cx) {
 
 			// If the result is non-empty, it is possible that there is some bug.
 			if (!rangeResult.empty()) {
-				TraceEvent(SevError, "TesterClearFailure")
-				    .detail("FirstKey", rangeResult[0].key);
+				TraceEvent(SevError, "TesterClearFailure").detail("FirstKey", rangeResult[0].key);
 
 				ASSERT(false);
 			}
@@ -1131,9 +1130,7 @@ ACTOR Future<Void> checkConsistencyScanAfterTest(Database cx, TesterConsistencyS
 	return Void();
 }
 
-ACTOR Future<DistributedTestResults> runWorkload(Database cx,
-                                                 std::vector<TesterInterface> testers,
-                                                 TestSpec spec) {
+ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec) {
 	TraceEvent("TestRunning")
 	    .detail("WorkloadTitle", spec.title)
 	    .detail("TesterCount", testers.size())
@@ -3059,23 +3056,12 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
-		tests = runTests(cc,
-		                 ci,
-		                 iTesters,
-		                 testSet.testSpecs,
-		                 startingConfiguration,
-		                 locality,
-		                 restartingTest);
+		tests = runTests(cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality, restartingTest);
 	} else {
-		tests = reportErrors(runTests(cc,
-		                              ci,
-		                              testSet.testSpecs,
-		                              at,
-		                              minTestersExpected,
-		                              startingConfiguration,
-		                              locality,
-		                              restartingTest),
-		                     "RunTests");
+		tests = reportErrors(
+		    runTests(
+		        cc, ci, testSet.testSpecs, at, minTestersExpected, startingConfiguration, locality, restartingTest),
+		    "RunTests");
 	}
 
 	choose {

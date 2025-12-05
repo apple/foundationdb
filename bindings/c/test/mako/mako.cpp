@@ -87,8 +87,9 @@ using namespace mako;
 
 thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
-std::pair<Transaction, std::optional<std::string> /*token*/>
-createNewTransaction(Database db, Arguments const& args, int id) {
+std::pair<Transaction, std::optional<std::string> /*token*/> createNewTransaction(Database db,
+                                                                                  Arguments const& args,
+                                                                                  int id) {
 	return { db.createTransaction(), {} };
 }
 

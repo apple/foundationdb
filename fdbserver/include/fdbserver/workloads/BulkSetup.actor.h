@@ -59,10 +59,7 @@ void setAuthToken(T const& self, Transaction& tr) {
 }
 
 ACTOR template <class T>
-Future<bool> checkRangeSimpleValueSize(Database cx,
-                                       T* workload,
-                                       uint64_t begin,
-                                       uint64_t end) {
+Future<bool> checkRangeSimpleValueSize(Database cx, T* workload, uint64_t begin, uint64_t end) {
 	loop {
 		state Transaction tr(cx);
 		setAuthToken(*workload, tr);
@@ -82,10 +79,7 @@ Future<bool> checkRangeSimpleValueSize(Database cx,
 
 // Returns true if the range was added
 ACTOR template <class T>
-Future<uint64_t> setupRange(Database cx,
-                            T* workload,
-                            uint64_t begin,
-                            uint64_t end) {
+Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t end) {
 	state uint64_t bytesInserted = 0;
 	loop {
 		state Transaction tr(cx);

@@ -35,8 +35,7 @@ public:
 	                                                                                 int expectedShardCount) {
 		state Version version = 0;
 		loop {
-			auto locations = mgs->getKeyRangeLocations(
-			                                           keys,
+			auto locations = mgs->getKeyRangeLocations(keys,
 			                                           shardLimit,
 			                                           Reverse::False,
 			                                           SpanContext(),
@@ -57,8 +56,8 @@ public:
 			           probe::decoration::rare);
 
 			try {
-				Optional<StorageMetrics> res = wait(
-				    ::waitStorageMetricsWithLocation(version, keys, locations, min, max, permittedError));
+				Optional<StorageMetrics> res =
+				    wait(::waitStorageMetricsWithLocation(version, keys, locations, min, max, permittedError));
 
 				TraceEvent(SevDebug, "MGSWaitStorageMetrics")
 				    .detail("Phase", "GetStorageMetrics")
@@ -92,8 +91,7 @@ public:
 	                                                                       Optional<int> minSplitBytes) {
 		loop {
 			state std::vector<KeyRangeLocationInfo> locations =
-			    mgs->getKeyRangeLocations(
-			                              keys,
+			    mgs->getKeyRangeLocations(keys,
 			                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
 			                              Reverse::False,
 			                              SpanContext(),
@@ -735,8 +733,7 @@ Reference<LocationInfo> buildLocationInfo(const std::vector<StorageServerInterfa
 	return makeReference<LocationInfo>(serverRefs);
 }
 
-Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(
-                                                             Key key,
+Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(Key key,
                                                              SpanContext spanContext,
                                                              Optional<UID> debugID,
                                                              UseProvisionalProxies useProvisionalProxies,
@@ -755,8 +752,7 @@ Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(
 	ASSERT_EQ(srcTeam.size(), 1);
 	rep.results.emplace_back(single, extractStorageServerInterfaces(srcTeam.front().servers));
 
-	return KeyRangeLocationInfo(KeyRange(rep.results[0].first),
-	                            buildLocationInfo(rep.results[0].second));
+	return KeyRangeLocationInfo(KeyRange(rep.results[0].first), buildLocationInfo(rep.results[0].second));
 }
 
 Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
@@ -787,8 +783,7 @@ Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
 
 	std::vector<KeyRangeLocationInfo> results;
 	for (int shard = 0; shard < rep.results.size(); shard++) {
-		results.emplace_back((rep.results[shard].first & keys),
-		                     buildLocationInfo(rep.results[shard].second));
+		results.emplace_back((rep.results[shard].first & keys), buildLocationInfo(rep.results[shard].second));
 	}
 	return results;
 }
@@ -985,9 +980,7 @@ struct MockGlobalStateTester {
 	}
 
 	KeyRangeLocationInfo getKeyLocationInfo(KeyRef key, std::shared_ptr<MockGlobalState> mgs) {
-		return mgs
-		    ->getKeyLocation(
-							 key, SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, 0)
+		return mgs->getKeyLocation(key, SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, 0)
 		    .get();
 	}
 
@@ -996,13 +989,7 @@ struct MockGlobalStateTester {
 	                                                       std::shared_ptr<MockGlobalState> mgs) {
 		return mgs
 		    ->getKeyRangeLocations(
-		                           keys,
-		                           limit,
-		                           Reverse::False,
-		                           SpanContext(),
-		                           Optional<UID>(),
-		                           UseProvisionalProxies::False,
-		                           0)
+		        keys, limit, Reverse::False, SpanContext(), Optional<UID>(), UseProvisionalProxies::False, 0)
 		    .get();
 	}
 };
