@@ -250,12 +250,28 @@ PYTHON_APP_STDERR_FILE="${APP_RUN_TEMP_DIR}/python_app_stderr.log"
 
 # Execute Python test harness
 echo "Executing TestHarness2 with seed ${JOSHUA_SEED}..." >&2
+
+# Run TestHarness - output goes to stdout via tee AND gets saved to file
 python3 -m test_harness.app "${PYTHON_CMD_ARGS[@]}" 2> "${PYTHON_APP_STDERR_FILE}" | tee "${PYTHON_APP_STDOUT_FILE}"
 PYTHON_EXIT_CODE=$?
 
 echo "TestHarness2 execution finished. Exit code: ${PYTHON_EXIT_CODE}" >&2
 
-# Note: stdout is already output via tee, no need to cat the file
+# Check if stdout file is empty and generate fallback if needed
+# This ensures Joshua ALWAYS gets XML output, never empty string
+if [ ! -s "${PYTHON_APP_STDOUT_FILE}" ] || [ $(wc -c < "${PYTHON_APP_STDOUT_FILE}") -eq 0 ]; then
+    echo "WARNING: TestHarness2 produced no output (file size: $(stat -f%z "${PYTHON_APP_STDOUT_FILE}" 2>/dev/null || echo 0) bytes) - generating fallback XML" >&2
+
+    # LAST RESORT FALLBACK: Python crashed before producing any output
+    # - TestFile/RandomSeed/Buggify/FaultInjection only exist in trace files (may not exist if Python crashed early)
+    # - Parsing JSON/XML traces in bash is complex and unreliable
+    # - Primary fallback (TestHarness2/app.py finally block) should extract config from traces
+    # - This shell fallback only triggers if Python never started or crashed during init
+    # - JoshuaSeed (from env var) is sufficient to identify the failed test in Joshua FDB
+    echo "<Test TestFile=\"UNKNOWN\" RandomSeed=\"UNKNOWN\" BuggifyEnabled=\"UNKNOWN\" FaultInjectionEnabled=\"UNKNOWN\" JoshuaSeed=\"${JOSHUA_SEED}\" Ok=\"0\" CrashReason=\"TestHarnessProducedNoOutput\" PythonExitCode=\"${PYTHON_EXIT_CODE}\"><JoshuaMessage Severity=\"40\" Message=\"TestHarness2 crashed or timed out before producing any output. Seed=${JOSHUA_SEED}\"/></Test>"
+fi
+
+# Note: stdout was already output via tee above (or fallback echo if empty)
     
     # Check if test actually failed
 if [ -f "${PYTHON_APP_STDOUT_FILE}" ] && grep -q 'Ok="0"' "${PYTHON_APP_STDOUT_FILE}"; then
