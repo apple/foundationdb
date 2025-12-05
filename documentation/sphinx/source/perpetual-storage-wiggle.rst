@@ -29,20 +29,24 @@ With a perpetual wiggle, storage migrations will be much less impactful. The wig
 Configuration
 =============
 
-You can configure the Perpetual Storage Wiggle via the FDB :ref:`command line interface <command-line-interface>`.
+You can configure the Perpetual Storage Wiggle via ``fdbcli`` :ref:`command line interface <command-line-interface>`.
 
-Note that to have the Perpetual Storage Wiggle change the storage engine type, you must configure ``storage_migration_type=gradual``.
+To enable the Perpetual Storage Wiggle feature, you must configure ``storage_migration_type=gradual perpetual_storage_wiggle=1``.
+
+If you want to migrate a subset of storage servers to the new storage engine, you should combine the command above with ``perpetual_storage_wiggle_engine=<NEW_STORAGE_ENGINE> perpetual_storage_wiggle_locality=<LOCALITY_KEY>:<LOCALITY_VALUE>`` to ensure that only the targeted storage servers make use of the new storage engine.
 
 Example commands
 ----------------
 
-Open perpetual storage wiggle: ``configure perpetual_storage_wiggle=1``.
+Enable perpetual storage wiggle: ``configure storage_migration_type=gradual perpetual_storage_wiggle=1``.
 
-Disable perpetual storage wiggle on the cluster: ``configure perpetual_storage_wiggle=0``.
+Disable perpetual storage wiggle on the cluster: ``configure storage_migration_type=disabled perpetual_storage_wiggle=0``.
 
-Open perpetual storage wiggle for only processes matching the given locality key and value: ``configure perpetual_storage_wiggle=1 perpetual_storage_wiggle_locality=<LOCALITY_KEY>:<LOCALITY_VALUE>``.
+Enable perpetual storage wiggle only for processes matching the given locality key and value: ``configure perpetual_storage_wiggle=1 perpetual_storage_wiggle_locality=<LOCALITY_KEY>:<LOCALITY_VALUE>``.
 
 Disable perpetual storage wiggle locality matching filter, which wiggles all the processes: ``configure perpetual_storage_wiggle_locality=0``.
+
+Enable perpetual storage wiggle with new storage engine in the remote DC: ``configure perpetual_storage_wiggle_engine=<NEW_STORAGE_ENGINE> storage_migration_type=gradual perpetual_storage_wiggle=1 perpetual_storage_wiggle_locality=dcid:remote``.
 
 Monitor
 =======

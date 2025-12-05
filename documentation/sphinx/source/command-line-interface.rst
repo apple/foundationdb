@@ -71,7 +71,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [storage_migration_type={disabled|aggressive|gradual}] [tenant_mode={disabled|optional_experimental|required_experimental}] [encryption_at_rest_mode={aes_256_ctr|disabled}]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory|ssd-redwood-1|ssd-rocksdb-v1|ssd-sharded-rocksdb] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [storage_migration_type={disabled|aggressive|gradual}] [perpetual_storage_wiggle_engine={ssd|memory|ssd-redwood-1|ssd-rocksdb-v1|ssd-sharded-rocksdb}] [tenant_mode={disabled|optional_experimental|required_experimental}] [encryption_at_rest_mode={aes_256_ctr|disabled}]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -93,10 +93,13 @@ For descriptions of redundancy modes, see :ref:`configuration-choosing-redundanc
 storage engine
 ^^^^^^^^^^^^^^^
 
-The storage engine is responsible for durably storing data. FoundationDB has two storage engines:
+The storage engine is responsible for durably storing data. FoundationDB has different storage engines:
 
-* ``ssd``
+* ``ssd`` (default)
 * ``memory``
+* ``ssd-redwood-1``
+* ``ssd-rocksdb-v1``
+* ``ssd-sharded-rocksdb``
 
 For descriptions of storage engines, see :ref:`configuration-storage-engine`.
 
@@ -781,4 +784,3 @@ It will populate a list of available storage servers' network addresses. Users n
 ``hotrange <IP:PORT> <bytes|readBytes|readOps> <begin> <end> <splitCount>``
 
 Fetch read metrics from the given storage server to find the hot range. Run ``help hotrange`` to read the guide.
-
