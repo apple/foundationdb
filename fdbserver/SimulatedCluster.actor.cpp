@@ -2866,8 +2866,7 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 			                     protocolVersion);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 			// Yeah right, I agree, Whyyyyy?  Since it's 1s, should we poll some condition?  Is there a risk
-			// 1s is not enough and random weird shit happens after this?  That's the problem with
-			// UNDOCUMENTED MAGIC SHIT
+			// 1s is not enough and random weird bad stuff happens after this?
 		}
 
 		wait(HTTP::registerAlwaysFailHTTPHandler());
