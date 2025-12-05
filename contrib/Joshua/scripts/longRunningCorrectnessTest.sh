@@ -17,7 +17,6 @@ if [ ! -s "${OUTPUT_FILE}" ]; then
     echo "<Test TestFile=\"UNKNOWN\" RandomSeed=\"UNKNOWN\" BuggifyEnabled=\"UNKNOWN\" FaultInjectionEnabled=\"UNKNOWN\" JoshuaSeed=\"${JOSHUA_SEED}\" Ok=\"0\" CrashReason=\"TestHarnessProducedNoOutput\" PythonExitCode=\"${PYTHON_EXIT_CODE}\"><JoshuaMessage Severity=\"40\" Message=\"TestHarness2 crashed or timed out before producing any output.\"/></Test>"
 fi
 
-# Clean up temp file
 rm -f "${OUTPUT_FILE}"
 
 exit ${PYTHON_EXIT_CODE}

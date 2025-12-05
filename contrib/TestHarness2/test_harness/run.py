@@ -514,12 +514,17 @@ class TestRun:
         # self.log_test_plan(out)
         resources = ResourceMonitor()
         resources.start()
+        # Use binary mode (text=False) so we can handle fdbserver output that contains
+        # invalid UTF-8 bytes. This can happen with older binaries or when binary data
+        # leaks into stdout. With text=True, Python raises UnicodeDecodeError and we
+        # lose all output. With binary mode, we can decode with errors='replace' and
+        # still capture/report the output while flagging the issue.
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=self.temp_path,
-            text=False,  # Get bytes, we'll decode manually to handle errors
+            text=False,
             env=env,
         )
         did_kill = False
@@ -543,9 +548,15 @@ class TestRun:
                 decode_error_occurred = True
                 out = out_bytes.decode('utf-8', errors='replace') if out_bytes else ""
                 err_out = err_bytes.decode('utf-8', errors='replace') if err_bytes else ""
-                print(f"WARNING: UnicodeDecodeError at position {decode_ex.start} - invalid byte {hex(out_bytes[decode_ex.start])}. Output decoded with replacement.", file=sys.stderr)
-                # Mark test as failed BEFORE summarize() runs
-                self.summary.error = True
+                # Check if we're running with an old binary (restarting test with non-current binary)
+                is_old_binary = self.binary != config.binary
+                if is_old_binary:
+                    print(f"WARNING: UnicodeDecodeError at position {decode_ex.start} - invalid byte {hex(out_bytes[decode_ex.start])}. Output decoded with replacement. (Old binary - not failing test)", file=sys.stderr)
+                    # Don't fail tests for old binaries - we can't fix them
+                else:
+                    print(f"WARNING: UnicodeDecodeError at position {decode_ex.start} - invalid byte {hex(out_bytes[decode_ex.start])}. Output decoded with replacement.", file=sys.stderr)
+                    # Mark test as failed BEFORE summarize() runs (only for current binary)
+                    self.summary.error = True
         except subprocess.TimeoutExpired:
             process.kill()
             _, err_bytes = process.communicate()
@@ -567,10 +578,14 @@ class TestRun:
         
         # Add diagnostic info if decode error occurred (BEFORE summarize calculates Ok attribute)
         if decode_error_occurred:
+            is_old_binary = self.binary != config.binary
             decode_error_node = SummaryTree("UnicodeDecodeError")
-            decode_error_node.attributes["Severity"] = "40"
+            # Use Severity 30 (warning) for old binaries, 40 (error) for current binary
+            decode_error_node.attributes["Severity"] = "30" if is_old_binary else "40"
             decode_error_node.attributes["Message"] = "fdbserver output contained invalid UTF-8 bytes. Output decoded with replacement characters."
             decode_error_node.attributes["Position"] = "Check fdbserver.stdout for � characters"
+            if is_old_binary:
+                decode_error_node.attributes["Note"] = "Old binary - binary output tolerated"
             self.summary.out.append(decode_error_node)
         
         self.summary.summarize(self.temp_path, " ".join(command))
