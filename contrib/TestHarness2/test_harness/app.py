@@ -55,6 +55,7 @@ def create_error_xml(message: str, error_type: str = "FatalError", joshua_seed: 
 
 if __name__ == "__main__":
     logger = None
+    xml_output_generated = False
     try:
         parser = argparse.ArgumentParser(
             "TestHarness", formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -71,6 +72,7 @@ if __name__ == "__main__":
         
         test_runner = TestRunner()
         success = test_runner.run()
+        xml_output_generated = True  # TestRunner.run() calls dump(sys.stdout)
         
         logger.info(f"TestHarness2 completed. Success: {success}")
         
@@ -84,4 +86,18 @@ if __name__ == "__main__":
         _, _, exc_traceback = sys.exc_info()
         error = create_error_xml(str(e), "FatalError", str(getattr(config, 'joshua_seed', 'UNKNOWN')))
         error.dump(sys.stdout)
+        xml_output_generated = True
         exit(1)
+    finally:
+        # Ensure we ALWAYS output XML, even if we crash before TestRunner.run()
+        # This prevents Joshua from getting empty output
+        if not xml_output_generated:
+            if logger:
+                logger.error("TestHarness2 terminated without generating XML output - creating fallback")
+            error = create_error_xml(
+                "TestHarness2 terminated abnormally before generating test output",
+                "EmergencyFallback",
+                str(getattr(config, 'joshua_seed', 'UNKNOWN'))
+            )
+            error.dump(sys.stdout)
+            sys.stdout.flush()
