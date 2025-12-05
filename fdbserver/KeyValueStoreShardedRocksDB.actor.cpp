@@ -4269,7 +4269,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	mapping.push_back(std::make_pair(specialKeys, DEFAULT_CF_NAME));
 
 	for (auto it = dataMap.begin(); it != dataMap.end(); ++it) {
-		std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
+		std::cout << "Begin " << it->first.begin.printable() << ", End " << it->first.end.printable() << ", id "
 		          << it->second << "\n";
 	}
 	ASSERT(dataMap == mapping);
@@ -4289,7 +4289,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	{
 		auto dataMap = rocksdbStore->getDataMapping();
 		for (auto it = dataMap.begin(); it != dataMap.end(); ++it) {
-			std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
+			std::cout << "Begin " << it->first.begin.printable() << ", End " << it->first.end.printable() << ", id "
 			          << it->second << "\n";
 		}
 		ASSERT(dataMap == mapping);
@@ -4453,7 +4453,7 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	{
 		auto mapping = rocksdbStore->getDataMapping();
 		for (auto it = mapping.begin(); it != mapping.end(); ++it) {
-			std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
+			std::cout << "Begin " << it->first.begin.printable() << ", End " << it->first.end.printable() << ", id "
 			          << it->second << "\n";
 		}
 		ASSERT(mapping.size() == 1);
