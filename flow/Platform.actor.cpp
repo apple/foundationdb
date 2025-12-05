@@ -3530,7 +3530,7 @@ std::string format_backtrace(void** addresses, int numAddresses) {
 	// If it's a bare command name, probably `fdbserver`, then the user is
 	// probably running it out of their path, and help them avoid unnecessary
 	// manual labor to get a usable command by invoking `which` for them.
-	// Convserely if there is a '/' present then assuming it's a full path
+	// Conversely if there is a '/' present then assuming it's a full path
 	// and just use it. People who type non-absolute paths with directory
 	// separators on on their own.
 	if (binaryName.find('/') == std::string::npos) {
