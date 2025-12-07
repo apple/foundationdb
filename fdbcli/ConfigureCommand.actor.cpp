@@ -262,7 +262,8 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		    "WARN: Sharded RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
 		break;
 	case ConfigurationResult::DATABASE_IS_REGISTERED:
-		fprintf(stderr, "ERROR: a result of type `ConfigurationResult::DATABASE_IS_REGISTERED` was unexpectedly seen.\n");
+		fprintf(stderr,
+		        "ERROR: a result of type `ConfigurationResult::DATABASE_IS_REGISTERED` was unexpectedly seen.\n");
 		ret = false;
 		break;
 	case ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET:
