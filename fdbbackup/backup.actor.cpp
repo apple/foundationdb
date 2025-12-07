@@ -4188,8 +4188,8 @@ int main(int argc, char* argv[]) {
 			return result.present();
 		};
 
-		// The fastrestore tool does not yet support multiple ranges and is incompatible with tenants
-		// or other features that back up data in the system keys
+		// The fastrestore tool does not yet support multiple ranges and is incompatible with
+		// features that back up data in the system keys.
 		if (!restoreSystemKeys && !restoreUserKeys && backupKeys.empty() &&
 		    programExe != ProgramExe::FASTRESTORE_TOOL) {
 			addDefaultBackupRanges(backupKeys);

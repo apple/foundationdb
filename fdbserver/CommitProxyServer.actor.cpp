@@ -1055,9 +1055,9 @@ void replaceRawClearRanges(Arena& arena,
 
 		if (splitMutations.back().first == i) {
 			ASSERT_EQ(mutations[i].type, MutationRef::ClearRange);
-			// TODO(gglass): legacy comment below references ten-ant. Possibly some
+			// TODO(gglass): legacy comment below references tenant. Possibly some
 			// opportunity for simplification here. Legacy comment:
-			// replace with ten-ant aligned mutations
+			// replace with tenant aligned mutations
 			auto& currMutations = splitMutations.back().second;
 			while (!currMutations.empty()) {
 				mutations[curr] = currMutations.back();
@@ -1581,9 +1581,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
 			} else if (m.type == MutationRef::NoOp) {
-				// TODO(gglass): what is the deal with MutationRef::NoOp?  Can we remove it?
+				// TODO(gglass): what is the deal with MutationRef::NoOp? Is it needed?
 				// This used to be the following:
-				// ASSERT_EQ(pProxyCommitData->getTen-antMode(), Ten-antMode::REQUIRED);
+				// ASSERT_EQ(pProxyCommitData->getTenantMode(), TenantMode::REQUIRED);
 				ASSERT(false);
 				continue;
 			} else {

@@ -321,8 +321,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		state Reference<ReadYourWritesTransaction> defaultTx2 = makeReference<ReadYourWritesTransaction>(cx);
 		state bool disableRyw = deterministicRandom()->coinflip();
 
-		// Formerly ten-ant check that conflict ranges stay the same after commit
+		// Formerly tenant check that conflict ranges stay the same after commit
 		// and depending on if RYW is disabled
+		// TODO(gglass): is this still needed?
 		{
 			state RangeResult readresult1;
 			state RangeResult readresult2;

@@ -707,7 +707,7 @@ struct WaitMetricsRequest {
 	KeyRangeRef keys;
 	StorageMetrics min, max;
 	ReplyPromise<StorageMetrics> reply;
-	// TODO(gglass): this was ten-ant related.  Probably can be removed.
+	// TODO(gglass): this was tenant related.  See about removing it.
 	Version legacyVersion;
 
 	WaitMetricsRequest() {}

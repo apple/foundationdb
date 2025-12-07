@@ -330,7 +330,6 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,        true );
-	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
 	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
 	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );
 	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );

@@ -129,6 +129,7 @@ struct KmsConnLookupKeyIdsReqInfo {
 	// Encryption at-rest relies on partitioning database to define encryption domains, one such possible domain is
 	// "Tenants". It is possible that KMS assigned 'baseCipherId' embedded 'encryption domain information', hence, make
 	// the field optional.
+	// TODO(gglass): assess this for deletion
 	Optional<EncryptCipherDomainId> domainId;
 	EncryptCipherBaseKeyId baseCipherId;
 

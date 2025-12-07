@@ -443,8 +443,7 @@ public:
 	bool disableHostname = false;
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
-	// TODO(gglass): see about removing `encryptModes`
-	// By default, encryption mode is set randomly (based on the ten-ant mode)
+	// TODO(gglass): see about removing `encryptModes` (it relates to legacy deleted tenant support).
 	// If provided, set using EncryptionAtRestMode::fromString
 	std::vector<std::string> encryptModes;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig

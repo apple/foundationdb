@@ -609,6 +609,8 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 	// possible scenarios could be:
 	// 1. Cold start - cache getting warmed up
 	// 2. New cipher - new Tenant and/or KMS driven key-rotation
+	// TODO(gglass): tenant is deleted, so revisit the above comment (and actually, this whole file)
+	// and see what is needed.
 	// Frequency of the log is governed by KMS driven `refreshAt` interval which is usually a long duration (days if
 	// not months)
 	TraceEvent(SevInfo, "BlobCipherKeyInsertBaseCipherKeyLatest")
@@ -671,6 +673,7 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 	// possible scenarios could be:
 	// 1. Cold start - cache getting warmed up
 	// 2. New cipher - new Tenant and/or KMS driven key-rotation
+	// TODO(gglass): see comment elsewhere relating to this cut/pasted content
 	// Frequency of the log is governed by KMS driven `refreshAt` interval which is usually a long duration (days if
 	// not months)
 	TraceEvent(SevInfo, "BlobCipherKeyInsertBaseCipherKey")

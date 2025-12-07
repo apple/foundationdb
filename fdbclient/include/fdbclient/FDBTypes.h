@@ -1515,7 +1515,7 @@ typedef StringRef ClusterNameRef;
 typedef Standalone<ClusterNameRef> ClusterName;
 
 // TODO(gglass): delete metacluster code and tenant code and reassess the need for this enum
-enum class ClusterType { STANDALONE, METACLUSTER_MANAGEMENT, METACLUSTER_DATA };
+enum class ClusterType { STANDALONE, LEGACY_UNUSED_METACLUSTER_MANAGEMENT, LEGACY_UNUSED_METACLUSTER_DATA };
 
 struct GRVCacheSpace {
 	Version cachedReadVersion;

@@ -42,7 +42,6 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
-#include "fdbrpc/TokenSign.h"
 #include "fdbrpc/SimulatorKillType.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };

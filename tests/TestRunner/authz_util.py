@@ -51,6 +51,7 @@ def token_gen(private_key, claims, headers={}):
     return jwt.encode(headers, claims, private_key)
 
 
+# TODO(gglass): figure out what this is for and delete its caller logic
 def token_claim_1h(tenant_id: int):
     # JWT claim that is valid for 1 hour since time of invocation
     now = time.time()

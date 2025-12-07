@@ -236,7 +236,7 @@ public:
 	virtual void getSplitPoints(const SplitRangeRequest& req) = 0;
 
 	// The following method name suffix of `ForReal` replaces something
-	// that used to reference the now-deleted ten-ant feature.  We need
+	// that used to reference the now-deleted tenant feature.  We need
 	// *some suffix* to refer to the method that does the work.
 	virtual Future<Void> waitMetricsForReal(const WaitMetricsRequest& req) = 0;
 

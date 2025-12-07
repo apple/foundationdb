@@ -897,12 +897,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "aggressive",
              "gradual"
          ]},
-         "tenant_mode": {
-             "$enum":[
-             "disabled",
-             "optional_experimental",
-             "required_experimental"
-         ]},
          "encryption_at_rest_mode": {
              "$enum":[
              "disabled",
@@ -1073,11 +1067,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "kms_urls":[
             "https://127.0.0.1:1234"
          ]
-      },
-      "tenants":{
-         "num_tenants":0,
-         "num_tenant_groups":10,
-         "tenant_group_capacity":20
       },
       "idempotency_ids":{
          "size_bytes": 0,

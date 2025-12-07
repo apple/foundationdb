@@ -57,13 +57,13 @@ struct Event {
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
-		return serializer(ar, type, startTs, dcId, tenant);
+		return serializer(ar, type, startTs, dcId, legacyEmptyTenant);
 	}
 
 	EventType type{ EventType::UNSET };
 	double startTs{ 0 };
 	Key dcId{};
-	Optional<LegacyTenantName> tenant{};
+	Optional<LegacyTenantName> legacyEmptyTenant{};
 
 	void logEvent(std::string id, int maxFieldLength) const {}
 };

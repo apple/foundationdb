@@ -150,7 +150,7 @@ struct ClientDBInfo {
 extern template class ReplyPromise<struct ClientDBInfo>;
 extern template class ReplyPromise<class CachedSerialization<struct ClientDBInfo>>;
 
-// TODO(gglass): is this needed in a world without ten-ant
+// TODO(gglass): see if this can be removed now that tenant is removed.
 struct ExpireIdempotencyIdRequest {
 	constexpr static FileIdentifier file_identifier = 1900933;
 	Version commitVersion = invalidVersion;
@@ -382,7 +382,7 @@ struct GetKeyServerLocationsRequest {
 	bool reverse;
 	ReplyPromise<GetKeyServerLocationsReply> reply;
 
-	// TODO(gglass): this may be unused in a post-ten-ant world.
+	// TODO(gglass): see if this can be removed now that tenant is removed.
 	Version legacyVersion;
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false), legacyVersion(latestVersion) {}

@@ -216,6 +216,7 @@ class BaseInfo(object):
             self.dc_id = bb.get_bytes_with_length()
         if protocol_version >= PROTOCOL_VERSION_7_1:
             if bb.get_bool():
+                # Well it's unfortunate that this garbage is present.
                 self.tenant = bb.get_bytes_with_length()
 
 

@@ -1350,7 +1350,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		copyToBuffer(self, s->begin(), s->size());
 	}
 
-	// TODO(gglass): this has been simplified for ten-ant removal.  Maybe it can be
+	// TODO(gglass): this has been simplified for tenant removal.  Maybe it can be
 	// simplified further.
 	static Future<EncryptCipherDomainId> getEncryptionDomainDetails(KeyRef key, EncryptionAtRestMode encryptMode) {
 		if (isSystemKey(key)) {
@@ -1743,7 +1743,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 	state Arena arena;
 	state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 	state EncryptionAtRestMode encryptMode = config.encryptionAtRestMode;
-	state int64_t blockDomainId = -1; // Ten-antInfo::INVALID_TEN-ANT;
+	state int64_t blockDomainId = -1; // legacy comment: TenantInfo::INVALID_TENANT;
 
 	try {
 		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION or
@@ -7643,8 +7643,8 @@ public:
 			TraceEvent("AS_StartRestore").log();
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
-			// TODO(gglass): the following loop has been simplified with ten-ant removal.
-			// Possible bug area.  Remove this comment when confirmed it's OK.
+			// TODO(gglass): the following loop has been simplified with tenant removal.
+			// Possible bug area.  Revisit for possible bugs or simplification opportunities.
 			for (auto r : ranges) {
 				restoreRange.push_back_deep(restoreRange.arena(), r);
 			}

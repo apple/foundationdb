@@ -66,7 +66,7 @@ struct CycleWorkload : TestWorkload, Arena {
 		if (skipSetup) {
 			return Void();
 		}
-		// TODO: clean up this bit.  Leftover complexity from ten-ant induced templates, since removed.
+		// TODO(gglass): possible cleanup here.  Leftover tenant stuff.
 		Future<Void> prepare = Void();
 		return runAfter(prepare, [this, cx](Void) { return bulkSetup(cx, this, nodeCount, Promise<double>()); });
 	}
