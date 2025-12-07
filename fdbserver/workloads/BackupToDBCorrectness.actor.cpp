@@ -29,8 +29,7 @@
 #include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// TODO: explain the purpose of this workload and how it different from the
-// 20+ (literally) other backup/restore workloads.
+// This workload tests backing up one cluster to another.
 
 // A workload which test the correctness of backup and restore process. The
 // database must be idle after the restore completes, and this workload checks

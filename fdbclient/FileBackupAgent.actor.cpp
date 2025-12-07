@@ -1634,11 +1634,11 @@ private:
 	Key lastValue;
 };
 
-ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
-                                        Standalone<VectorRef<KeyValueRef>>* results,
-                                        bool encryptedBlock,
-                                        EncryptionAtRestMode encryptMode,
-                                        Optional<int64_t> blockDomainId) {
+ACTOR Future<Void> decodeKVPairs(StringRefReader* reader,
+                                 Standalone<VectorRef<KeyValueRef>>* results,
+                                 bool encryptedBlock,
+                                 EncryptionAtRestMode encryptMode,
+                                 Optional<int64_t> blockDomainId) {
 	// Read begin key, if this fails then block was invalid.
 	state uint32_t kLen = reader->consumeNetworkUInt32();
 	state const uint8_t* k = reader->consume(kLen);
@@ -1751,7 +1751,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		int32_t file_version = reader.consume<int32_t>();
 		ASSERT(!encryptMode.isEncryptionEnabled() || file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION);
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			wait(decodeKVPairs(&reader, &results, false, encryptMode, Optional<int64_t>()));
+			decodeKVPairs(&reader, &results, false, encryptMode, Optional<int64_t>());
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block", probe::decoration::rare);
 			// read header size
@@ -1772,7 +1772,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			StringRef decryptedData =
 			    wait(EncryptedRangeFileWriter::decrypt(cx, encryptHeader, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			wait(decodeKVPairs(&reader, &results, true, encryptMode, blockDomainId));
+			decodeKVPairs(&reader, &results, true, encryptMode, blockDomainId);
 		} else {
 			throw restore_unsupported_file_version();
 		}

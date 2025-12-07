@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-// TODO: explain the purpose of this workload.  Hint: NOT WHAT IT DOES.  EXPLAIN WHY IT EXISTS.
-
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
@@ -35,6 +33,7 @@ void traceError(const char* filename, int line, Error const& e) {
 
 #define TRACE_ERROR(e) traceError(__FILE__, __LINE__, e)
 
+// A workload attempts to read from two different clusters with the same read version.
 struct DifferentClustersSameRVWorkload : TestWorkload {
 	static constexpr auto NAME = "DifferentClustersSameRV";
 	Database originalDB;
