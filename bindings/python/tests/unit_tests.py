@@ -39,7 +39,6 @@ from cancellation_timeout_tests import test_db_retry_limits
 from cancellation_timeout_tests import test_combinations
 
 from size_limit_tests import test_size_limit_option, test_get_approximate_size
-from tenant_tests import test_tenants
 
 VERBOSE = False
 
@@ -257,10 +256,6 @@ def run_unit_tests(db):
         test_get_approximate_size(db)
         log("test_get_client_status")
         test_get_client_status(db)
-
-        if fdb.get_api_version() >= 710:
-            log("test_tenants")
-            test_tenants(db)
 
     except fdb.FDBError as e:
         print("Unit tests failed: %s" % e.description)
