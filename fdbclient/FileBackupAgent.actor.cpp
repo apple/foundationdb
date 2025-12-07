@@ -1634,18 +1634,16 @@ private:
 	Key lastValue;
 };
 
-ACTOR Future<Void> decodeKVPairs(StringRefReader* reader,
-                                 Standalone<VectorRef<KeyValueRef>>* results,
-                                 bool encryptedBlock,
-                                 EncryptionAtRestMode encryptMode,
-                                 Optional<int64_t> blockDomainId) {
+void decodeKVPairs(StringRefReader* reader,
+                   Standalone<VectorRef<KeyValueRef>>* results,
+                   bool encryptedBlock,
+                   EncryptionAtRestMode encryptMode,
+                   Optional<int64_t> blockDomainId) {
 	// Read begin key, if this fails then block was invalid.
-	state uint32_t kLen = reader->consumeNetworkUInt32();
-	state const uint8_t* k = reader->consume(kLen);
+	uint32_t kLen = reader->consumeNetworkUInt32();
+	const uint8_t* k = reader->consume(kLen);
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-	state KeyRef prevKey = KeyRef(k, kLen);
-	state bool done = false;
-	state Optional<EncryptCipherDomainId> prevDomainId;
+	KeyRef prevKey = KeyRef(k, kLen);
 	// Read kv pairs and end key
 	while (1) {
 		// Read a key.
@@ -1659,8 +1657,8 @@ ACTOR Future<Void> decodeKVPairs(StringRefReader* reader,
 		}
 
 		// Read a value, which must exist or the block is invalid
-		state uint32_t vLen = reader->consumeNetworkUInt32();
-		state const uint8_t* v = reader->consume(vLen);
+		uint32_t vLen = reader->consumeNetworkUInt32();
+		const uint8_t* v = reader->consume(vLen);
 
 		results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
 
@@ -1673,8 +1671,6 @@ ACTOR Future<Void> decodeKVPairs(StringRefReader* reader,
 	for (auto b : reader->remainder())
 		if (b != 0xFF)
 			throw restore_corrupted_data_padding();
-
-	return Void();
 }
 
 static Reference<IBackupContainer> getBackupContainerWithProxy(Reference<IBackupContainer> _bc) {
