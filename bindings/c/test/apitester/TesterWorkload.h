@@ -72,6 +72,7 @@ public:
 };
 
 // Workload configuration
+// The comments on this stuff make me weep for humanity.
 struct WorkloadConfig {
 	// Workload name
 	std::string name;
@@ -81,6 +82,13 @@ struct WorkloadConfig {
 
 	// Total number of clients
 	int numClients;
+
+	// Number of Tenants
+	// TODO(gglass): delete tenant support more aggressively out of files in this
+	// directory. For now leave it in with numTenants set to 0.  Prior deletion
+	// caused damage and the test cases spin or break themselves or *something*
+	// and end up timing out due to ctest 10 minute timeout.
+	int numTenants = 0;
 
 	// Selected FDB API version
 	int apiVersion;
@@ -116,10 +124,16 @@ protected:
 	void schedule(TTaskFct task);
 
 	// Execute a transaction within the workload
-	void execTransaction(TOpStartFct startFct, TTaskFct cont, bool failOnError = true);
+	void execTransaction(TOpStartFct startFct,
+	                     TTaskFct cont,
+	                     std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
+	                     bool failOnError = true);
 
 	// Execute a non-transactional database operation within the workload
-	void execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError = true);
+	void execOperation(TOpStartFct startFct,
+	                   TTaskFct cont,
+	                   std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
+	                   bool failOnError = true);
 
 	// Log an error message, increase error counter
 	void error(const std::string& msg);
@@ -133,7 +147,11 @@ protected:
 private:
 	WorkloadManager* manager;
 
-	void doExecute(TOpStartFct startFct, TTaskFct cont, bool failOnError, bool transactional);
+	void doExecute(TOpStartFct startFct,
+	               TTaskFct cont,
+	               std::optional<fdb::BytesRef> tenant,
+	               bool failOnError,
+	               bool transactional);
 
 	// Decrease scheduled task counter, notify the workload manager
 	// that the task is done if no more tasks schedule
