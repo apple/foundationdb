@@ -21,7 +21,7 @@ Start a cluster::
 
     <FDB_SRC_FOLDER>/tests/loopback_cluster/run_custom_cluster.sh . --storage_count 8 \
       --stateless_count 4 --stateless_taskset 0xf --logs_count 8 --logs_taskset 0xff0 --storage_taskset 0xffff000 \
-      --knobs '--knob_shard_encode_location_metadata=1 --knob_desired_teams_per_server=10 --knob_enable_read_lock_on_range=1'
+      --knobs '--knob_desired_teams_per_server=10'
 
 Start a sufficient number of SSs because too few can cause bulkload fail (In the above we started 8 SSs).
 
@@ -239,7 +239,7 @@ To load from 'S3' (presuming an empty cluster and presuming a previous dump whos
 Troubleshooting
 ===============
 
-:command:`BulkLoad` and :command:`BulkDump` require '--knob_shard_encode_location_metadata=1'.
+:command:`BulkLoad` requires '--knob_shard_encode_location_metadata=1' and '--knob_enable_read_lock_on_range=1'. :command:`BulkDump` works without additional knobs.
 
 As for backup, enable '--knob_http_verbose_level 10' to debug connection issues: the http request/response will be dumped on STDOUT.
 
