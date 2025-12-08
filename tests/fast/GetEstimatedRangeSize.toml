@@ -1,0 +1,13 @@
+[configuration]
+
+[[test]]
+testTitle = 'GetEstimatedRangeSizeTest'
+
+    [[test.workload]]
+    testName = 'GetEstimatedRangeSize'
+    nodeCount = 250000
+
+    [[test.workload]]
+    testName = 'GetEstimatedRangeSize'
+    checkOnly = true  # don't run setup
+    nodeCount = 250000
