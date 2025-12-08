@@ -490,6 +490,8 @@ status json
 
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
 
+.. _cli-throttle:
+
 throttle
 --------
 

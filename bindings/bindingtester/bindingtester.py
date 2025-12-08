@@ -705,6 +705,10 @@ def parse_args(argv):
         help="Disables snapshot operations for directory instructions.",
     )
 
+    parser.add_argument(
+        "--no-tenants", action="store_true", help="Disables tenant operations."
+    )
+
     return parser.parse_args(argv)
 
 
