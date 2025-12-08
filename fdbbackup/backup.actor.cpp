@@ -3063,10 +3063,9 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 				throw backup_error();
 			}
 
-			state Reference<IBackupContainer> prevContainer =
-			    wait(config.backupContainer().getOrThrow(tr, Snapshot::False, backup_invalid_info()));
-
 			if (options.destURL.present()) {
+				state Reference<IBackupContainer> prevContainer =
+				    wait(config.backupContainer().getOrThrow(tr, Snapshot::False, backup_invalid_info()));
 				std::string prevURL = prevContainer->getURL();
 				std::string newURL = options.destURL.get();
 				if (!prevURL.empty() && prevURL.back() == '/') {
@@ -3088,10 +3087,8 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 						throw backup_error();
 					}
 				}
-			}
 
-			state Reference<IBackupContainer> bc;
-			if (options.destURL.present()) {
+				state Reference<IBackupContainer> bc;
 				TraceEvent("ModifyBackupSetNewContainer")
 				    .detail("TagName", tagName)
 				    .detail("DestURL", options.destURL.get())
@@ -3110,18 +3107,13 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 					        e.what());
 					throw backup_error();
 				}
-			} else {
-				if (options.encryptionKeyFile.present()) {
-					fprintf(stdout,
-					        " Encryption key file specified without a new destination URL."
-					        " The encryption key will not be used.\n");
-				}
-			}
 
-			if (options.destURL.present()) {
-				printf("Previous backup container URL: %s\n", prevContainer->getURL().c_str());
 				config.backupContainer().set(tr, bc);
 				wait(bc->writeEncryptionMetadata());
+			} else if (options.encryptionKeyFile.present()) {
+				fprintf(stdout,
+				        " Encryption key file specified without a new destination URL."
+				        " The encryption key will not be used.\n");
 			}
 
 			if (options.snapshotIntervalSeconds.present()) {
