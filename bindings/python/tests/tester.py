@@ -308,7 +308,7 @@ class Tester:
                     else:
                         obj.set(key, value)
 
-                    if isDatabase
+                    if isDatabase:
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == "LOG_STACK":
                     prefix = inst.pop()
@@ -325,7 +325,7 @@ class Tester:
                     opType, key, value = inst.pop(3)
                     getattr(obj, opType.lower())(key, value)
 
-                    if isDatabase
+                    if isDatabase:
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == "SET_READ_VERSION":
                     inst.tr.set_read_version(self.last_version)
@@ -335,7 +335,7 @@ class Tester:
                     else:
                         obj.clear(inst.pop())
 
-                    if isDatabase
+                    if isDatabase:
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == "CLEAR_RANGE":
                     begin, end = inst.pop(2)
@@ -347,11 +347,11 @@ class Tester:
                     else:
                         obj.__delitem__(slice(begin, end))
 
-                    if isDatabase
+                    if isDatabase:
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == "CLEAR_RANGE_STARTS_WITH":
                     obj.clear_range_startswith(inst.pop())
-                    if isDatabase
+                    if isDatabase:
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == "READ_CONFLICT_RANGE":
                     inst.tr.add_read_conflict_range(inst.pop(), inst.pop())

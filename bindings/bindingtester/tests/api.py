@@ -673,7 +673,7 @@ class ApiTest(Test):
             else:
                 assert False, "Unknown operation: " + op
 
-            if read_performed and op not in database_reads
+            if read_performed and op not in database_reads:
                 self.outstanding_ops.append((self.stack_size, len(instructions) - 1))
 
             if args.concurrency == 1 and (
