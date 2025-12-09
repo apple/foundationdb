@@ -369,8 +369,7 @@ if(NOT OPEN_FOR_IDE)
     #
     # ctest . -R java-unit
     #
-    # ctest has lots of flexible command options, so be sure to refer to its documentation if you want to do something specific(documentation
-    # can be found at https://cmake.org/cmake/help/v3.19/manual/ctest.1.html)
+    # ctest has lots of flexible command options, so be sure to refer to its documentation if you want to do something specific.
 
     add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} ${JUNIT_RESOURCES} INCLUDE_JARS fdb-java
       ${JUNIT_JARS}/junit-jupiter-api-5.7.1.jar
