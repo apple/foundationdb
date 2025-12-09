@@ -49,13 +49,17 @@ function should_preserve_test_data {
 # Returns 1 if normal cleanup should continue
 function cleanup_with_preserve_check {
   if should_preserve_test_data; then
+    echo "$(date -Iseconds) cleanup_with_preserve_check: preserving data, shutting down servers only"
     # Shutdown servers but don't delete data
     if type shutdown_fdb_cluster &> /dev/null; then
+      echo "$(date -Iseconds) cleanup_with_preserve_check: calling shutdown_fdb_cluster"
       shutdown_fdb_cluster
     fi
     if type shutdown_mocks3 &> /dev/null; then
+      echo "$(date -Iseconds) cleanup_with_preserve_check: calling shutdown_mocks3"
       shutdown_mocks3
     fi
+    echo "$(date -Iseconds) cleanup_with_preserve_check: done (preserving data)"
     return 0
   fi
   return 1

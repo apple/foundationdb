@@ -168,43 +168,52 @@ start_mocks3() {
 }
 
 shutdown_mocks3() {
+    echo "$(date -Iseconds) shutdown_mocks3: starting (PID: ${MOCKS3_PID:-none})"
+    
     if [ -n "$MOCKS3_PID" ]; then
-        echo "Shutting down MockS3Server (PID: $MOCKS3_PID)"
-        # Try graceful shutdown first (SIGTERM)
+        # Check if process exists before trying to kill
         if kill -0 $MOCKS3_PID 2>/dev/null; then
+            echo "$(date -Iseconds) shutdown_mocks3: SIGTERM -> PID $MOCKS3_PID"
             kill $MOCKS3_PID 2>/dev/null || true
-            # Wait up to 5 seconds for graceful shutdown
-            for i in {1..5}; do
+            
+            # Very brief wait for graceful shutdown (reduced from 5s to 1s total)
+            for i in {1..2}; do
                 if ! kill -0 $MOCKS3_PID 2>/dev/null; then
+                    echo "$(date -Iseconds) shutdown_mocks3: process exited gracefully"
                     break
                 fi
-                sleep 1
+                sleep 0.5
             done
+            
             # Force kill if still running (SIGKILL)
             if kill -0 $MOCKS3_PID 2>/dev/null; then
-                echo "Force killing MockS3Server (PID: $MOCKS3_PID)"
+                echo "$(date -Iseconds) shutdown_mocks3: SIGKILL -> PID $MOCKS3_PID (didn't respond to SIGTERM)"
                 kill -9 $MOCKS3_PID 2>/dev/null || true
-                # Give SIGKILL a moment to take effect
-                sleep 0.5
+                # Very brief wait for SIGKILL (reduced from 0.5s)
+                sleep 0.1
+                
                 # Check if it survived kill -9 (should be impossible)
                 if kill -0 $MOCKS3_PID 2>/dev/null; then
                     # Get process info for debugging
                     proc_info=$(ps -p $MOCKS3_PID -o pid,ppid,stat,comm 2>/dev/null || echo "PID not in process table")
-                    echo "ERROR: MockS3Server (PID: $MOCKS3_PID) is unkillable (zombie or kernel issue)" >&2
+                    echo "$(date -Iseconds) ERROR: MockS3Server (PID: $MOCKS3_PID) is unkillable" >&2
                     echo "       Process info: ${proc_info}" >&2
-                    # Don't try SIGTERM again - if SIGKILL didn't work, nothing will
-                    # Don't use pkill - it would kill MockS3 instances from other concurrent tests
+                else
+                    echo "$(date -Iseconds) shutdown_mocks3: process killed with SIGKILL"
                 fi
             fi
-            # Don't wait() - the process should be dead after kill -9, and wait can hang
-            # if the PID was already reaped or is a child of a different shell
+        else
+            echo "$(date -Iseconds) shutdown_mocks3: process already dead"
         fi
     fi
 
     # Clean up log file
     if [ -n "$MOCKS3_LOG_FILE" ] && [ -f "$MOCKS3_LOG_FILE" ]; then
+        echo "$(date -Iseconds) shutdown_mocks3: removing log file"
         rm -f "$MOCKS3_LOG_FILE"
     fi
+    
+    echo "$(date -Iseconds) shutdown_mocks3: complete"
 }
 
 get_mocks3_url() {

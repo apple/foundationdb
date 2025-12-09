@@ -24,27 +24,60 @@ trap "exit 1" HUP INT PIPE QUIT TERM
 trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
+# Has a hard 30-second timeout to prevent CTest timeouts.
 function cleanup {
+  echo "$(date -Iseconds) cleanup: starting (with 30s hard timeout)"
+  
+  # Start a watchdog that will force-kill us if cleanup takes too long
+  local my_pid=$$
+  (
+    sleep 30
+    echo "$(date -Iseconds) CLEANUP TIMEOUT after 30s - forcing exit"
+    # Kill the main script and all its children
+    kill -9 -$my_pid 2>/dev/null || kill -9 $my_pid 2>/dev/null
+  ) &
+  local watchdog_pid=$!
+  # Disown so the watchdog doesn't get killed when we exit normally
+  disown $watchdog_pid 2>/dev/null || true
+  
   # Check if test data should be preserved (common function from tests_common.sh)
   if cleanup_with_preserve_check; then
+    echo "$(date -Iseconds) cleanup: preserving test data, skipping cleanup"
+    kill $watchdog_pid 2>/dev/null || true
     return 0
   fi
   
+  echo "$(date -Iseconds) cleanup: shutting down FDB cluster"
   if type shutdown_fdb_cluster &> /dev/null; then
     shutdown_fdb_cluster
+  else
+    echo "$(date -Iseconds) cleanup: shutdown_fdb_cluster not available"
   fi
+  
+  echo "$(date -Iseconds) cleanup: shutting down MockS3"
   if type shutdown_mocks3 &> /dev/null; then
     shutdown_mocks3
+  else
+    echo "$(date -Iseconds) cleanup: shutdown_mocks3 not available"
   fi
+  
+  echo "$(date -Iseconds) cleanup: shutting down AWS"
   if type shutdown_aws &> /dev/null; then
     shutdown_aws "${TEST_SCRATCH_DIR}"
+  else
+    echo "$(date -Iseconds) cleanup: shutdown_aws not available"
   fi
   
   # Clean up encryption key file
   if [[ -n "${ENCRYPTION_KEY_FILE:-}" ]] && [[ -f "${ENCRYPTION_KEY_FILE}" ]]; then
-    log "Removing encryption key file: ${ENCRYPTION_KEY_FILE}"
+    echo "$(date -Iseconds) cleanup: removing encryption key file: ${ENCRYPTION_KEY_FILE}"
     rm -f "${ENCRYPTION_KEY_FILE}"
   fi
+  
+  echo "$(date -Iseconds) cleanup: complete"
+  
+  # Cancel the watchdog since we finished in time
+  kill $watchdog_pid 2>/dev/null || true
 }
 
 # Resolve passed in reference to an absolute path.
