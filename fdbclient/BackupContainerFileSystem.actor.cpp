@@ -1327,6 +1327,10 @@ public:
 		Optional<Version> existingEncryptionMetadata = wait(bc->fileLevelEncryption().get());
 
 		if (!existingEncryptionMetadata.present()) {
+			bool exists = wait(bc->exists());
+			if (!exists) {
+				wait(bc->create());
+			}
 			wait(bc->fileLevelEncryption().set(bc->encryptionKeyFileName.present() ? 1 : 0));
 		}
 		return Void();
