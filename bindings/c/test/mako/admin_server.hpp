@@ -37,7 +37,7 @@
 
 extern thread_local mako::Logger logr;
 
-// IPC mechanism for executing administrative tasks (e.g. create/delete tenant) in support of benchmark.
+// IPC mechanism for executing administrative tasks in support of benchmark.
 // This is necessary because currently TLS configuration is a process-global setting.
 // Therefore, order to benchmark for authorization
 namespace mako::ipc {
@@ -53,61 +53,6 @@ struct DefaultResponse {
 	}
 };
 
-struct TenantIdsResponse {
-	boost::optional<std::string> error_message;
-	std::vector<int64_t> ids;
-
-	static TenantIdsResponse makeError(std::string msg) { return TenantIdsResponse{ msg, {} }; }
-
-	template <class Ar>
-	void serialize(Ar& ar, unsigned int) {
-		ar & error_message;
-		ar & ids;
-	}
-};
-
-struct BatchCreateTenantRequest {
-	using ResponseType = DefaultResponse;
-	std::string cluster_file;
-	int id_begin = 0;
-	int id_end = 0;
-
-	template <class Ar>
-	void serialize(Ar& ar, unsigned int) {
-		ar & cluster_file;
-		ar & id_begin;
-		ar & id_end;
-	}
-};
-
-struct BatchDeleteTenantRequest {
-	using ResponseType = DefaultResponse;
-	std::string cluster_file;
-	int id_begin = 0;
-	int id_end = 0;
-
-	template <class Ar>
-	void serialize(Ar& ar, unsigned int) {
-		ar & cluster_file;
-		ar & id_begin;
-		ar & id_end;
-	}
-};
-
-struct FetchTenantIdsRequest {
-	using ResponseType = TenantIdsResponse;
-	std::string cluster_file;
-	int id_begin;
-	int id_end;
-
-	template <class Ar>
-	void serialize(Ar& ar, unsigned int) {
-		ar & cluster_file;
-		ar & id_begin;
-		ar & id_end;
-	}
-};
-
 struct PingRequest {
 	using ResponseType = DefaultResponse;
 	template <class Ar>
@@ -120,8 +65,7 @@ struct StopRequest {
 	void serialize(Ar&, unsigned int) {}
 };
 
-using Request =
-    boost::variant<PingRequest, StopRequest, BatchCreateTenantRequest, BatchDeleteTenantRequest, FetchTenantIdsRequest>;
+using Request = boost::variant<PingRequest, StopRequest>;
 
 class AdminServer {
 	const Arguments& args;
@@ -130,13 +74,6 @@ class AdminServer {
 	boost::process::pstream pipe_to_client;
 	void start();
 	void configure();
-	boost::optional<std::string> getTenantPrefixes(fdb::Transaction tx,
-	                                               int id_begin,
-	                                               int id_end,
-	                                               std::vector<fdb::ByteString>& out_prefixes);
-	boost::optional<std::string> createTenant(fdb::Database db, int id_begin, int id_end);
-	boost::optional<std::string> deleteTenant(fdb::Database db, int id_begin, int id_end);
-	TenantIdsResponse fetchTenantIds(fdb::Database db, int id_begin, int id_end);
 
 	template <class T>
 	static void sendObject(boost::process::pstream& pipe, T obj) {

@@ -16,8 +16,6 @@ from fdb_version import CURRENT_VERSION, FUTURE_VERSION
 from local_cluster import LocalCluster
 from test_util import random_alphanum_string
 
-TENANT_API_VERSION = 720
-
 CLUSTER_ACTIONS = ["wiggle"]
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
@@ -183,9 +181,7 @@ class UpgradeTest:
     def __enter__(self):
         print("Starting cluster version {}".format(self.cluster_version))
         self.cluster.start_cluster()
-        self.cluster.create_database(
-            enable_tenants=(self.api_version >= TENANT_API_VERSION)
-        )
+        self.cluster.create_database()
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):

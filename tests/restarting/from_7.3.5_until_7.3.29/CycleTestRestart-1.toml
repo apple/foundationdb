@@ -1,6 +1,7 @@
 [configuration]
 storageEngineExcludeTypes=[3]
-tenantModes = ['disabled']
+encryptModes=['disabled']
+tenantModes=['disabled']
 
 [[knobs]]
 dd_physical_shard_move_probability = 0

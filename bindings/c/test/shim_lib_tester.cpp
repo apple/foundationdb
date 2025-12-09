@@ -206,13 +206,21 @@ void testBasicApi(const TesterOptions& options) {
 	}
 }
 
-void test710Api(const TesterOptions& options) {
-	fdb::Database db(options.clusterFile);
-	try {
-		db.openTenant(fdb::toBytesRef("not_existing_tenant"sv));
-	} catch (const fdb::Error& err) {
-		fdb_check(err, "Tenant not found expected", error_code_tenant_not_found);
-	}
+// NOTE: if we add a new API method that is not in old libraries,
+// then put in code to call that method here. In the higher level test
+// code that invokes this program, expect success when run against
+// the current library version and failure when running against an old
+// library that doesn't have the new API.
+//
+// There used to be an example of this paradigm that invoked
+// openTenant() and expected failure when running against 7.0.0.  This
+// no longer works because openTenant has been removed from current
+// code.  There also seems to be no relatively new API that we can
+// use for a test of this nature.  However, the future need for a test
+// of this nature can reasonably be anticipated, hence we retain
+// this comment and placeholder function.
+void testNewOnlyApi(const TesterOptions& options) {
+	// Implement when needed
 }
 
 } // namespace
@@ -236,13 +244,9 @@ int main(int argc, char** argv) {
 
 		std::thread network_thread{ [] { fdb_check(fdb::network::run(), "FDB network thread failed"); } };
 
-		// Try calling some basic functionality that is available
-		// in all recent API versions
 		testBasicApi(options);
 
-		// Try calling 710-specific API. This enables testing what
-		// happens if a library is missing a function
-		test710Api(options);
+		testNewOnlyApi(options);
 
 		fdb_check(fdb::network::stop(), "Stop network failed");
 		network_thread.join();

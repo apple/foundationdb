@@ -48,7 +48,6 @@ FDB_BOOLEAN_PARAM(IncrementalBackupOnly);
 FDB_BOOLEAN_PARAM(UsePartitionedLog);
 FDB_BOOLEAN_PARAM(TransformPartitionedLog);
 FDB_BOOLEAN_PARAM(OnlyApplyMutationLogs);
-FDB_BOOLEAN_PARAM(SnapshotBackupUseTenantCache);
 FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
 FDB_BOOLEAN_PARAM(ShowErrors);
 FDB_BOOLEAN_PARAM(AbortOldBackup);
@@ -593,7 +592,6 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
                                   Reference<KeyRangeMap<Version>> keyVersion,
-                                  std::map<int64_t, TenantName>* tenantMap,
                                   bool provisionalProxy);
 ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
 

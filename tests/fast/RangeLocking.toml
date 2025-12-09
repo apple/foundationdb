@@ -1,5 +1,4 @@
 [configuration]
-tenantModes = ['disabled'] # do not support tenant
 encryptModes = ['disabled'] # do not support encryption
 
 [[knobs]]

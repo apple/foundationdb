@@ -30,9 +30,6 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbclient/MetaclusterRegistration.h"
-
-#include "metacluster/MetaclusterMetrics.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -56,8 +53,6 @@ Future<StatusReply> clusterGetStatus(
     Version const& dcLogServerVersionDifference,
     Version const& dcStorageServerVersionDifference,
     ConfigBroadcaster const* const& conifgBroadcaster,
-    Optional<UnversionedMetaclusterRegistrationEntry> const& metaclusterRegistration,
-    metacluster::MetaclusterMetrics const& metaclusterMetrics,
     std::unordered_map<NetworkAddress, double /* latest time at which address was excluded */> const&
         excludedDegradedServers);
 

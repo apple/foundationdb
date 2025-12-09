@@ -60,8 +60,6 @@ public:
 	// TODO : give this function a more descriptive name
 	virtual bool isAsync() const { return false; }
 
-	virtual bool supportsTenants() const { return false; }
-
 	virtual ~SpecialKeyRangeReadImpl() {}
 
 protected:
@@ -303,10 +301,6 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override {
-		CODE_PROBE(true, "Accessing conflicting keys in tenant");
-		return true;
-	};
 };
 
 class ReadConflictRangeImpl : public SpecialKeyRangeReadImpl {
@@ -315,10 +309,6 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override {
-		CODE_PROBE(true, "Accessing read conflict ranges in tenant");
-		return true;
-	};
 };
 
 class WriteConflictRangeImpl : public SpecialKeyRangeReadImpl {
@@ -327,10 +317,6 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override {
-		CODE_PROBE(true, "Accessing write conflict ranges in tenant");
-		return true;
-	};
 };
 
 class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {

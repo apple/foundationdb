@@ -24,7 +24,6 @@
 #include "fdbclient/MultiVersionTransaction.h"
 
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/TenantInfo.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"

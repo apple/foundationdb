@@ -22,14 +22,15 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// A workload which test the correctness of upgrading DR from 5.1 to 5.2
+// TODO: explain the purpose of this workload and how it different from the
+// 20+ (literally) other backup/restore workloads.
+
 struct BackupToDBUpgradeWorkload : TestWorkload {
 	static constexpr auto NAME = "BackupToDBUpgrade";
 	double backupAfter, stopDifferentialAfter;
@@ -86,7 +87,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		}
 
 		ASSERT(g_simulator->extraDatabases.size() == 1);
-		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 
 		TraceEvent("DRU_Start").log();
 	}
@@ -278,23 +279,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	ACTOR static Future<Void> _setup(Database cx, BackupToDBUpgradeWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
 
-		if (cx->defaultTenant.present() || BUGGIFY) {
-			if (cx->defaultTenant.present()) {
-				TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
-
-				// If we are specifying sub-ranges (or randomly, if backing up normal keys), adjust them to be relative
-				// to the tenant
-				if (self->backupRanges.size() != 1 || self->backupRanges[0] != normalKeys ||
-				    deterministicRandom()->coinflip()) {
-					Standalone<VectorRef<KeyRangeRef>> modifiedBackupRanges;
-					for (int i = 0; i < self->backupRanges.size(); ++i) {
-						modifiedBackupRanges.push_back_deep(
-						    modifiedBackupRanges.arena(),
-						    self->backupRanges[i].withPrefix(entry.prefix, self->backupRanges.arena()));
-					}
-					self->backupRanges = modifiedBackupRanges;
-				}
-			}
+		if (BUGGIFY) {
 			for (auto r : getSystemBackupRanges()) {
 				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);
 			}

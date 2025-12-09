@@ -24,7 +24,6 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/Tenant.h"
 #include "fdbclient/Tracing.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.actor.h"
@@ -114,8 +113,6 @@ public:
 	// it will return false
 	virtual bool isValid() { return true; }
 
-	virtual Optional<TenantName> getTenant() = 0;
-
 	virtual void debugTrace(BaseTraceEvent&& event) = 0;
 	virtual void debugPrint(std::string const& message) = 0;
 
@@ -125,24 +122,11 @@ public:
 	};
 };
 
-class ITenant {
-public:
-	virtual ~ITenant() {}
-
-	virtual Reference<ITransaction> createTransaction() = 0;
-
-	virtual ThreadFuture<int64_t> getId() = 0;
-
-	virtual void addref() = 0;
-	virtual void delref() = 0;
-};
-
 // An interface that represents a connection to a cluster made by a client
 class IDatabase {
 public:
 	virtual ~IDatabase() {}
 
-	virtual Reference<ITenant> openTenant(TenantNameRef tenantName) = 0;
 	virtual Reference<ITransaction> createTransaction() = 0;
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 	virtual double getMainThreadBusyness() = 0;

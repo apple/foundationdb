@@ -32,7 +32,6 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/DirectBufferPool.java
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
-  src/main/com/apple/foundationdb/FDBTenant.java
   src/main/com/apple/foundationdb/FDBTransaction.java
   src/main/com/apple/foundationdb/FutureBool.java
   src/main/com/apple/foundationdb/FutureInt64.java
@@ -68,8 +67,6 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/ReadTransactionContext.java
   src/main/com/apple/foundationdb/subspace/package-info.java
   src/main/com/apple/foundationdb/subspace/Subspace.java
-  src/main/com/apple/foundationdb/Tenant.java
-  src/main/com/apple/foundationdb/TenantManagement.java
   src/main/com/apple/foundationdb/Transaction.java
   src/main/com/apple/foundationdb/TransactionContext.java
   src/main/com/apple/foundationdb/EventKeeper.java
@@ -372,8 +369,7 @@ if(NOT OPEN_FOR_IDE)
     #
     # ctest . -R java-unit
     #
-    # ctest has lots of flexible command options, so be sure to refer to its documentation if you want to do something specific(documentation
-    # can be found at https://cmake.org/cmake/help/v3.19/manual/ctest.1.html)
+    # ctest has lots of flexible command options, so be sure to refer to its documentation if you want to do something specific.
 
     add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} ${JUNIT_RESOURCES} INCLUDE_JARS fdb-java
       ${JUNIT_JARS}/junit-jupiter-api-5.7.1.jar

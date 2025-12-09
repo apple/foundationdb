@@ -70,12 +70,10 @@ class ReadYourWritesTransaction final : NonCopyable,
                                         public ISingleThreadTransaction,
                                         public FastAllocated<ReadYourWritesTransaction> {
 public:
-	explicit ReadYourWritesTransaction(Database const& cx,
-	                                   Optional<Reference<Tenant>> const& tenant = Optional<Reference<Tenant>>());
+	explicit ReadYourWritesTransaction(Database const& cx);
 	~ReadYourWritesTransaction();
 
 	void construct(Database const&) override;
-	void construct(Database const&, Reference<Tenant> const& tenant) override;
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
@@ -203,7 +201,6 @@ public:
 	}
 	Transaction& getTransaction() { return tr; }
 
-	Optional<Reference<Tenant>> getTenant() { return tr.getTenant(); }
 	TagSet const& getTags() const { return tr.getTags(); }
 
 	// used in template functions as returned Future type

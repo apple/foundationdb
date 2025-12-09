@@ -1,7 +1,6 @@
 testClass = "Backup"
 
 [configuration]
-tenantModes = ['disabled'] # Do not support tenant
 encryptModes = ['disabled'] # Do not support encryption
 
 [[test]]

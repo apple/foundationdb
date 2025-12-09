@@ -42,7 +42,6 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
-#include "fdbrpc/TokenSign.h"
 #include "fdbrpc/SimulatorKillType.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
@@ -428,9 +427,6 @@ public:
 	void disableFor(const std::string& desc, double time);
 
 	double checkDisabled(const std::string& desc) const;
-
-	// generate authz token for use in simulation environment
-	WipedString makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
 
 	// FIXME: simulation is generally discussed as being deterministic and single-threaded. So
 	// explain why we need thread_local variables here and a mutex just below.

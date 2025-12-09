@@ -47,7 +47,6 @@ if (WITH_SWIFT)
       "${CMAKE_BINARY_DIR}/fdbserver/include"
       "${CMAKE_SOURCE_DIR}/fdbrpc/include"
       "${CMAKE_BINARY_DIR}/fdbrpc/include"
-      "${CMAKE_SOURCE_DIR}/metacluster/include"
       "${CMAKE_SOURCE_DIR}/contrib/md5/include"
       "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
       "${CMAKE_SOURCE_DIR}/contrib/sqlite"
@@ -139,14 +138,14 @@ if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
     target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
-    target_link_libraries(fdbserver PRIVATE fdbclient metacluster sqlite ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${LZ4_LIBRARY})
+    target_link_libraries(fdbserver PRIVATE fdbclient sqlite ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${LZ4_LIBRARY})
     target_compile_definitions(fdbserver PRIVATE BOOST_ASIO_HAS_IO_URING=1 BOOST_ASIO_DISABLE_EPOLL=1)
   else()
     target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-    target_link_libraries(fdbserver PRIVATE fdbclient metacluster sqlite ${ROCKSDB_LIBRARIES} ${LZ4_LIBRARY})
+    target_link_libraries(fdbserver PRIVATE fdbclient sqlite ${ROCKSDB_LIBRARIES} ${LZ4_LIBRARY})
   endif()
 else()
-  target_link_libraries(fdbserver PRIVATE fdbclient metacluster sqlite)
+  target_link_libraries(fdbserver PRIVATE fdbclient sqlite)
 endif()
 
 if(USE_JEMALLOC)

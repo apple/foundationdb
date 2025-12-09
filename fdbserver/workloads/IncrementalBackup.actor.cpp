@@ -36,6 +36,9 @@
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// TODO: explain the purpose of this workload and how it different from the
+// 20+ (literally) other backup/restore workloads.
+
 struct IncrementalBackupWorkload : TestWorkload {
 	static constexpr auto NAME = "IncrementalBackup";
 
@@ -275,7 +278,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 			for (auto r : backupRanges) {
-				if (config.tenantMode != TenantMode::REQUIRED || !r.intersects(getSystemBackupRanges())) {
+				if (!r.intersects(getSystemBackupRanges())) {
 					restoreRange.push_back_deep(restoreRange.arena(), r);
 				} else {
 					KeyRangeRef normalKeyRange = r & normalKeys;

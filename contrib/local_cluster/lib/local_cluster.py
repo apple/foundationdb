@@ -19,7 +19,7 @@ async def configure_fdbserver(cluster_file: str):
     await (
         await lib.fdb_process.FDBCLIProcess(
             cluster_file=cluster_file,
-            commands="configure new single memory tenant_mode=optional_experimental",
+            commands="configure new single memory",
         ).run()
     ).wait()
     await lib.fdb_process.wait_fdbserver_available(cluster_file=cluster_file)

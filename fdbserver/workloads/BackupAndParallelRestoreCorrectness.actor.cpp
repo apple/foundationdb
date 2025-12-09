@@ -32,7 +32,6 @@
 
 #define TEST_ABORT_FASTRESTORE 0
 
-// A workload which test the correctness of backup and restore process
 struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "BackupAndParallelRestoreCorrectness";
 	double backupAfter, restoreAfter, abortAndRestartAfter;

@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/IdempotencyId.actor.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "flow/BooleanParam.h"

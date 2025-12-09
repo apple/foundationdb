@@ -49,7 +49,6 @@ public:
 	int numClientThreads;
 	int numDatabases;
 	int numClients;
-	int numTenants = -1;
 	int statsIntervalMs = 0;
 	TestSpec testSpec;
 	std::string bgBasePath;

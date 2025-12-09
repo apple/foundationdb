@@ -35,7 +35,4 @@
 /* API version introducing disable_client_bypass option */
 #define FDB_API_VERSION_DISABLE_CLIENT_BYPASS @FDB_AV_DISABLE_CLIENT_BYPASS@
 
-/* API version with multitenancy API released */
-#define FDB_API_VERSION_TENANT_API_RELEASED @FDB_AV_TENANT_API_RELEASED@
-
 #endif

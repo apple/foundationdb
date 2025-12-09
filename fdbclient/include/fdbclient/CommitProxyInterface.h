@@ -62,7 +62,6 @@ struct CommitProxyInterface {
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
-	PublicRequestStream<struct GetTenantIdRequest> getTenantId;
 	RequestStream<struct SetThrottledShardRequest> setThrottledShard;
 
 	UID id() const { return commit.getEndpoint().token; }
@@ -92,7 +91,6 @@ struct CommitProxyInterface {
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
 			expireIdempotencyId =
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
-			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 			setThrottledShard =
 			    RequestStream<struct SetThrottledShardRequest>(commit.getEndpoint().getAdjustedEndpoint(13));
 		}
@@ -112,7 +110,6 @@ struct CommitProxyInterface {
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
 		streams.push_back(expireIdempotencyId.getReceiver());
-		streams.push_back(getTenantId.getReceiver());
 		streams.push_back(setThrottledShard.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
@@ -132,9 +129,7 @@ struct ClientDBInfo {
 	UID clusterId;
 	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
-	TenantMode tenantMode;
 	ClusterType clusterType = ClusterType::STANDALONE;
-	Optional<ClusterName> metaclusterName;
 
 	ClientDBInfo() {}
 
@@ -146,17 +141,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar,
-		           grvProxies,
-		           commitProxies,
-		           id,
-		           forward,
-		           history,
-		           tenantMode,
-		           encryptKeyProxy,
-		           clusterId,
-		           clusterType,
-		           metaclusterName);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, encryptKeyProxy, clusterId, clusterType);
 	}
 };
 
@@ -165,21 +150,21 @@ struct ClientDBInfo {
 extern template class ReplyPromise<struct ClientDBInfo>;
 extern template class ReplyPromise<class CachedSerialization<struct ClientDBInfo>>;
 
+// TODO(gglass): see if this can be removed now that tenant is removed.
 struct ExpireIdempotencyIdRequest {
 	constexpr static FileIdentifier file_identifier = 1900933;
 	Version commitVersion = invalidVersion;
 	uint8_t batchIndexHighByte = 0;
-	TenantInfo tenant;
 
 	ExpireIdempotencyIdRequest() {}
-	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte, TenantInfo tenant)
-	  : commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte), tenant(tenant) {}
+	ExpireIdempotencyIdRequest(Version commitVersion, uint8_t batchIndexHighByte)
+	  : commitVersion(commitVersion), batchIndexHighByte(batchIndexHighByte) {}
 
-	bool verify() const { return tenant.isAuthorized(); }
+	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, commitVersion, batchIndexHighByte, tenant);
+		serializer(ar, commitVersion, batchIndexHighByte);
 	}
 };
 
@@ -222,26 +207,15 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<TagSet> tagSet;
 	IdempotencyIdRef idempotencyId;
 
-	TenantInfo tenantInfo;
+	bool verify() const { return true; }
 
 	CommitTransactionRequest() : CommitTransactionRequest(SpanContext()) {}
 	CommitTransactionRequest(SpanContext const& context) : spanContext(context), flags(0) {}
 
-	bool verify() const { return tenantInfo.isAuthorized(); }
-
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           transaction,
-		           reply,
-		           flags,
-		           debugID,
-		           commitCostEstimation,
-		           tagSet,
-		           spanContext,
-		           tenantInfo,
-		           idempotencyId,
-		           arena);
+		serializer(
+		    ar, transaction, reply, flags, debugID, commitCostEstimation, tagSet, spanContext, idempotencyId, arena);
 	}
 };
 
@@ -373,42 +347,6 @@ struct GetReadVersionRequest : TimedRequest {
 	}
 };
 
-struct GetTenantIdReply {
-	constexpr static FileIdentifier file_identifier = 11441284;
-	int64_t tenantId = TenantInfo::INVALID_TENANT;
-
-	GetTenantIdReply() {}
-	GetTenantIdReply(int64_t tenantId) : tenantId(tenantId) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, tenantId);
-	}
-};
-
-struct GetTenantIdRequest {
-	constexpr static FileIdentifier file_identifier = 11299717;
-	TenantName tenantName;
-	ReplyPromise<GetTenantIdReply> reply;
-
-	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
-	// a tenant is not present. If the metadata version is lower, the proxy must wait in case the tenant gets
-	// created. If latestVersion is specified, then the proxy will wait until it is sure that it has received
-	// updates from other proxies before answering.
-	Version minTenantVersion;
-
-	GetTenantIdRequest() : minTenantVersion(latestVersion) {}
-	GetTenantIdRequest(TenantNameRef const& tenantName, Version minTenantVersion)
-	  : tenantName(tenantName), minTenantVersion(minTenantVersion) {}
-
-	bool verify() const { return true; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply, tenantName, minTenantVersion);
-	}
-};
-
 struct GetKeyServerLocationsReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
@@ -438,36 +376,31 @@ struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
 	SpanContext spanContext;
-	TenantInfo tenant;
 	KeyRef begin;
 	Optional<KeyRef> end;
 	int limit;
 	bool reverse;
 	ReplyPromise<GetKeyServerLocationsReply> reply;
 
-	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
-	// a tenant is not present. If the metadata version is lower, the proxy must wait in case the tenant gets
-	// created. If latestVersion is specified, then the proxy will wait until it is sure that it has received
-	// updates from other proxies before answering.
-	Version minTenantVersion;
+	// TODO(gglass): see if this can be removed now that tenant is removed.
+	Version legacyVersion;
 
-	GetKeyServerLocationsRequest() : limit(0), reverse(false), minTenantVersion(latestVersion) {}
+	GetKeyServerLocationsRequest() : limit(0), reverse(false), legacyVersion(latestVersion) {}
 	GetKeyServerLocationsRequest(SpanContext spanContext,
-	                             TenantInfo const& tenant,
 	                             KeyRef const& begin,
 	                             Optional<KeyRef> const& end,
 	                             int limit,
 	                             bool reverse,
-	                             Version minTenantVersion,
+	                             Version version,
 	                             Arena const& arena)
-	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
-	    minTenantVersion(minTenantVersion) {}
+	  : arena(arena), spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse),
+	    legacyVersion(version) {}
 
-	bool verify() const { return tenant.isAuthorized(); }
+	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, minTenantVersion, arena);
+		serializer(ar, begin, end, limit, reverse, reply, spanContext, legacyVersion, arena);
 	}
 };
 

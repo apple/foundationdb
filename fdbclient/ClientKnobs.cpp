@@ -69,7 +69,6 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
 	init( FUTURE_VERSION_RETRY_DELAY,              .01 ); if( randomize && BUGGIFY ) FUTURE_VERSION_RETRY_DELAY = deterministicRandom()->random01();// FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
 	init( GRV_ERROR_RETRY_DELAY,                   5.0 ); if( randomize && BUGGIFY ) GRV_ERROR_RETRY_DELAY = 0.01 + 5 * deterministicRandom()->random01();
-	init( UNKNOWN_TENANT_RETRY_DELAY,              .01 ); if( randomize && BUGGIFY ) UNKNOWN_TENANT_RETRY_DELAY = 0.01 + deterministicRandom()->random01();
 	init( REPLY_BYTE_LIMIT,                      80000 );
 	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = deterministicRandom()->random01();
 	init( DEFAULT_MAX_BACKOFF,                     1.0 );
@@ -330,20 +329,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
 
-	// Tenants and Metacluster
-	init( MAX_TENANTS_PER_CLUSTER,                  1e6 );
-	init( TENANT_TOMBSTONE_CLEANUP_INTERVAL,         60 ); if ( randomize && BUGGIFY ) TENANT_TOMBSTONE_CLEANUP_INTERVAL = deterministicRandom()->random01() * 30;
-	init( MAX_DATA_CLUSTERS,                        1e5 );
-	init( REMOVE_CLUSTER_TENANT_BATCH_SIZE,         1e4 ); if ( randomize && BUGGIFY ) REMOVE_CLUSTER_TENANT_BATCH_SIZE = 1;
-	init( METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK,   5 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK = 1;
-	init( METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY, 1.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY = deterministicRandom()->random01() * 60;
-	init( METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT, 10.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT = 1 + deterministicRandom()->random01() * 59;
-	init( METACLUSTER_RESTORE_BATCH_SIZE,          1000 ); if ( randomize && BUGGIFY ) METACLUSTER_RESTORE_BATCH_SIZE = 1 + deterministicRandom()->randomInt(0, 3);
-	init( TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL,   2 ); if( randomize && BUGGIFY ) TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
-	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
-
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,        true );
-	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
 	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
 	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );
 	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );
@@ -356,6 +342,7 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ENABLE_MUTATION_CHECKSUM,                 false ); if ( randomize && BUGGIFY ) ENABLE_MUTATION_CHECKSUM = deterministicRandom()->coinflip();
 	init( ENABLE_ACCUMULATIVE_CHECKSUM,             false ); if ( randomize && BUGGIFY ) ENABLE_ACCUMULATIVE_CHECKSUM = deterministicRandom()->coinflip();
 	init( ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING,     false );
+
 	// clang-format on
 }
 

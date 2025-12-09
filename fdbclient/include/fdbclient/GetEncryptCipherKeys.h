@@ -28,7 +28,6 @@
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/Knobs.h"
 #include "fdbrpc/Stats.h"
-#include "fdbrpc/TenantInfo.h"
 #include "flow/Knobs.h"
 #include "flow/IRandom.h"
 

@@ -39,7 +39,6 @@ the contents of the system key space.
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"
@@ -132,10 +131,10 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
+// TODO(gglass): consider removing
 bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
                                        std::map<std::string, std::string> newConfig,
                                        bool creating);
-bool isTenantModeModeConfigValid(DatabaseConfiguration oldConfiguration, DatabaseConfiguration newConfiguration);
 
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
@@ -209,9 +208,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
-		if (!isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), m, creating)) {
-			return ConfigurationResult::INVALID_CONFIGURATION;
-		}
 	} else if (m.count(encryptionAtRestModeConfKey.toString()) != 0) {
 		// Encryption data at-rest mode can be set only at the time of database creation
 		return ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET;
@@ -254,8 +250,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					for (auto kv : m) {
 						newConfig.set(kv.first, kv.second);
 					}
-					if (!newConfig.isValid() || !isEncryptionAtRestModeConfigValid(oldConfig, m, creating) ||
-					    !isTenantModeModeConfigValid(oldConfig, newConfig)) {
+					if (!newConfig.isValid()) {
 						return ConfigurationResult::INVALID_CONFIGURATION;
 					}
 
@@ -421,15 +416,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
 					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 						warnShardedRocksDBIsExperimental = true;
-					}
-
-					if (newConfig.tenantMode != oldConfig.tenantMode) {
-						Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-						    wait(metacluster::metadata::metaclusterRegistration().get(tr));
-						if (metaclusterRegistration.present()) {
-							CODE_PROBE(true, "Attempt to change tenant mode in a metacluster", probe::decoration::rare);
-							return ConfigurationResult::DATABASE_IS_REGISTERED;
-						}
 					}
 				}
 			}

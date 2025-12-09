@@ -1,6 +1,4 @@
 [configuration]
-# Tenant lookups fail during the atomic restore because they aren't affected by locking
-allowDefaultTenant = false
 
 [[knobs]]
 rocksdb_read_value_timeout=300.0

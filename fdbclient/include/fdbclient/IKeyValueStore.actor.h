@@ -29,7 +29,6 @@
 #include "flow/Trace.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
-#include "fdbclient/Tenant.h"
 #include "fdbclient/IClosable.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "flow/flow.h"

@@ -23,12 +23,13 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// This workload tests backing up one cluster to another.
 
 // A workload which test the correctness of backup and restore process. The
 // database must be idle after the restore completes, and this workload checks
@@ -148,7 +149,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		}
 
 		ASSERT(g_simulator->extraDatabases.size() == 1);
-		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
 	}
@@ -161,23 +162,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup(Database cx, BackupToDBCorrectnessWorkload* self) {
-		if (!self->defaultBackup && (cx->defaultTenant.present() || BUGGIFY)) {
-			if (cx->defaultTenant.present()) {
-				TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
-
-				// If we are specifying sub-ranges (or randomly, if backing up normal keys), adjust them to be relative
-				// to the tenant
-				if (self->backupRanges.size() != 1 || self->backupRanges[0] != normalKeys ||
-				    deterministicRandom()->coinflip()) {
-					Standalone<VectorRef<KeyRangeRef>> modifiedBackupRanges;
-					for (int i = 0; i < self->backupRanges.size(); ++i) {
-						modifiedBackupRanges.push_back_deep(
-						    modifiedBackupRanges.arena(),
-						    self->backupRanges[i].withPrefix(entry.prefix, self->backupRanges.arena()));
-					}
-					self->backupRanges = modifiedBackupRanges;
-				}
-			}
+		if (BUGGIFY) {
 			for (auto r : getSystemBackupRanges()) {
 				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);
 			}
@@ -677,7 +662,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 				state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 				for (auto r : self->backupRanges) {
-					if (config.tenantMode != TenantMode::REQUIRED || !r.intersects(getSystemBackupRanges())) {
+					if (!r.intersects(getSystemBackupRanges())) {
 						restoreRange.push_back_deep(
 						    restoreRange.arena(),
 						    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));

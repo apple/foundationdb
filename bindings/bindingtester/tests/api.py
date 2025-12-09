@@ -37,12 +37,11 @@ def matches_op(op, target_op):
         op == target_op
         or op == target_op + "_SNAPSHOT"
         or op == target_op + "_DATABASE"
-        or op == target_op + "_TENANT"
     )
 
 
 def is_non_transaction_op(op):
-    return op.endswith("_DATABASE") or op.endswith("_TENANT")
+    return op.endswith("_DATABASE")
 
 
 class ApiTest(Test):
@@ -77,7 +76,6 @@ class ApiTest(Test):
             args.max_int_bits, args.api_version, args.types
         )
         self.api_version = args.api_version
-        self.allocated_tenants = set()
 
     def add_stack_items(self, num):
         self.stack_size += num
@@ -164,15 +162,6 @@ class ApiTest(Test):
             test_util.to_front(instructions, self.stack_size - read[0])
             instructions.append("WAIT_FUTURE")
 
-    def choose_tenant(self, new_tenant_probability):
-        if len(self.allocated_tenants) == 0 or random.random() < new_tenant_probability:
-            return self.random.random_string(random.randint(0, 30))
-        else:
-            tenant_list = list(self.allocated_tenants)
-            # sort to ensure deterministic selection of a tenant
-            tenant_list.sort()
-            return random.choice(tenant_list)
-
     def generate(self, args, thread_number):
         instructions = InstructionSet()
 
@@ -195,8 +184,6 @@ class ApiTest(Test):
         snapshot_reads = [x + "_SNAPSHOT" for x in reads]
         database_reads = [x + "_DATABASE" for x in reads]
         database_mutations = [x + "_DATABASE" for x in mutations]
-        tenant_reads = [x + "_TENANT" for x in reads]
-        tenant_mutations = [x + "_TENANT" for x in mutations]
         mutations += ["VERSIONSTAMP"]
         versions = ["GET_READ_VERSION", "SET_READ_VERSION", "GET_COMMITTED_VERSION"]
         snapshot_versions = ["GET_READ_VERSION_SNAPSHOT"]
@@ -222,14 +209,6 @@ class ApiTest(Test):
         ]
         txn_sizes = ["GET_APPROXIMATE_SIZE"]
         storage_metrics = ["GET_ESTIMATED_RANGE_SIZE", "GET_RANGE_SPLIT_POINTS"]
-        tenants = [
-            "TENANT_CREATE",
-            "TENANT_DELETE",
-            "TENANT_SET_ACTIVE",
-            "TENANT_CLEAR_ACTIVE",
-            "TENANT_LIST",
-            "TENANT_GET_ID",
-        ]
 
         op_choices += reads
         op_choices += mutations
@@ -244,11 +223,6 @@ class ApiTest(Test):
         op_choices += resets
         op_choices += txn_sizes
         op_choices += storage_metrics
-
-        if not args.no_tenants:
-            op_choices += tenants
-            op_choices += tenant_reads
-            op_choices += tenant_mutations
 
         idempotent_atomic_ops = [
             "BIT_AND",
@@ -281,8 +255,6 @@ class ApiTest(Test):
 
             if args.concurrency == 1 and (
                 op in database_mutations
-                or op in tenant_mutations
-                or op in ["TENANT_CREATE", "TENANT_DELETE"]
             ):
                 self.wait_for_reads(instructions)
                 test_util.blocking_commit(instructions)
@@ -698,55 +670,19 @@ class ApiTest(Test):
                 instructions.push_args(key1, key2, chunkSize)
                 instructions.append(op)
                 self.add_strings(1)
-            elif op == "TENANT_CREATE":
-                tenant_name = self.choose_tenant(0.8)
-                self.allocated_tenants.add(tenant_name)
-                instructions.push_args(tenant_name)
-                instructions.append(op)
-                self.add_strings(1)
-            elif op == "TENANT_DELETE":
-                tenant_name = self.choose_tenant(0.2)
-                if tenant_name in self.allocated_tenants:
-                    self.allocated_tenants.remove(tenant_name)
-                instructions.push_args(tenant_name)
-                instructions.append(op)
-                self.add_strings(1)
-            elif op == "TENANT_SET_ACTIVE":
-                tenant_name = self.choose_tenant(0.8)
-                instructions.push_args(tenant_name)
-                instructions.append(op)
-                self.add_strings(1)
-            elif op == "TENANT_CLEAR_ACTIVE":
-                instructions.append(op)
-            elif op == "TENANT_LIST":
-                self.ensure_string(instructions, 2)
-                instructions.push_args(self.random.random_int())
-                test_util.to_front(instructions, 2)
-                test_util.to_front(instructions, 2)
-                instructions.append(op)
-                self.add_strings(1)
-            elif op == "TENANT_GET_ID":
-                instructions.append(op)
-                self.add_strings(1)
             else:
                 assert False, "Unknown operation: " + op
 
-            if read_performed and op not in database_reads and op not in tenant_reads:
+            if read_performed and op not in database_reads:
                 self.outstanding_ops.append((self.stack_size, len(instructions) - 1))
 
             if args.concurrency == 1 and (
                 op in database_reads
                 or op in database_mutations
-                or op in tenant_reads
-                or op in tenant_mutations
-                or op in ["TENANT_CREATE", "TENANT_DELETE"]
             ):
                 instructions.append("WAIT_FUTURE")
 
         instructions.begin_finalization()
-
-        if not args.no_tenants:
-            instructions.append("TENANT_CLEAR_ACTIVE")
 
         if args.concurrency == 1:
             self.wait_for_reads(instructions)

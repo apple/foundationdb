@@ -317,7 +317,7 @@ struct KeyRangeRef {
 	KeyRangeRef() {}
 	KeyRangeRef(const KeyRef& begin, const KeyRef& end) : begin(begin), end(end) {
 		if (begin > end) {
-			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end).backtrace();
 			throw inverted_range();
 		}
 	}
@@ -393,7 +393,7 @@ struct KeyRangeRef {
 		}
 
 		if (begin > end) {
-			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end).backtrace();
 			throw inverted_range();
 		};
 	}
@@ -1423,82 +1423,7 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
-struct TenantMode {
-	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
-	// just before END.
-	// Note: OPTIONAL_TENANT is not named OPTIONAL because of a collision with a Windows macro.
-	enum Mode { DISABLED = 0, OPTIONAL_TENANT = 1, REQUIRED = 2, END = 3 };
-
-	TenantMode() : mode(DISABLED) {}
-	TenantMode(Mode mode) : mode(mode) {
-		if ((uint32_t)mode >= END) {
-			this->mode = DISABLED;
-		}
-	}
-	operator Mode() const { return Mode(mode); }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, mode);
-	}
-
-	// This does not go back-and-forth cleanly with toString
-	// The '_experimental' suffix, if present, needs to be removed in order to be parsed.
-	static TenantMode fromString(std::string mode) {
-		if (mode.find("_experimental") != std::string::npos) {
-			mode.replace(mode.find("_experimental"), std::string::npos, "");
-		}
-		if (mode == "disabled") {
-			return TenantMode::DISABLED;
-		} else if (mode == "optional") {
-			return TenantMode::OPTIONAL_TENANT;
-		} else if (mode == "required") {
-			return TenantMode::REQUIRED;
-		} else {
-			TraceEvent(SevError, "UnknownTenantMode").detail("TenantMode", mode);
-			ASSERT(false);
-			throw internal_error();
-		}
-	}
-
-	std::string toString() const {
-		switch (mode) {
-		case DISABLED:
-			return "disabled";
-		case OPTIONAL_TENANT:
-			return "optional_experimental";
-		case REQUIRED:
-			return "required_experimental";
-		default:
-			ASSERT(false);
-		}
-		return "";
-	}
-
-	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
-
-	static TenantMode fromValue(Optional<ValueRef> val) {
-		if (!val.present()) {
-			return DISABLED;
-		}
-
-		// A failed parsing returns 0 (DISABLED)
-		int num = atoi(val.get().toString().c_str());
-		if (num < 0 || num >= END) {
-			return DISABLED;
-		}
-
-		return static_cast<Mode>(num);
-	}
-
-	uint32_t mode;
-};
-
-template <>
-struct Traceable<TenantMode> : std::true_type {
-	static std::string toString(const TenantMode& value) { return value.toString(); }
-};
-
+// TODO(gglass): come back and see if more of this can be removed.  We only use DISABLED.
 struct EncryptionAtRestMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
@@ -1589,7 +1514,8 @@ struct Traceable<EncryptionAtRestMode> : std::true_type {
 typedef StringRef ClusterNameRef;
 typedef Standalone<ClusterNameRef> ClusterName;
 
-enum class ClusterType { STANDALONE, METACLUSTER_MANAGEMENT, METACLUSTER_DATA };
+// TODO(gglass): delete metacluster code and tenant code and reassess the need for this enum
+enum class ClusterType { STANDALONE, LEGACY_UNUSED_METACLUSTER_MANAGEMENT, LEGACY_UNUSED_METACLUSTER_DATA };
 
 struct GRVCacheSpace {
 	Version cachedReadVersion;

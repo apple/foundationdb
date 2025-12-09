@@ -92,6 +92,18 @@ using rocksdb::BackgroundErrorReason;
 using rocksdb::CompactionReason;
 using rocksdb::FlushReason;
 
+void logWriteSize(const rocksdb::WriteBatch* batch) {
+	int64_t fs_write_size = batch->Data().size();
+	// XXX horrors, unlocked increment
+	static int sharded_rocksdb_total_write_size = 0;
+	sharded_rocksdb_total_write_size += fs_write_size;
+	if (sharded_rocksdb_total_write_size > 10 * 1024 * 1024) {
+		TraceEvent(SevInfo, "GGLASSShardedRocksDB")
+		    .detail("TotalWriteSize", sharded_rocksdb_total_write_size)
+		    .detail("FsWriteSize", fs_write_size);
+	}
+}
+
 // Returns string representation of RocksDB background error reason.
 // Error reason code:
 // https://github.com/facebook/rocksdb/blob/12d798ac06bcce36be703b057d5f5f4dab3b270c/include/rocksdb/listener.h#L125
@@ -1454,7 +1466,9 @@ public:
 			    0 /* default_cf_ts_sz default:0 */);
 			dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 			persistRangeMapping(specialKeys, true);
-			status = db->Write(options, writeBatch.get());
+			rocksdb::WriteBatch* b = writeBatch.get();
+			logWriteSize(b);
+			status = db->Write(options, b);
 			if (!status.ok()) {
 				return status;
 			}
@@ -2621,6 +2635,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
+
+			logWriteSize(batch);
 
 			rocksdb::Status s = db->Write(options, batch);
 			if (!s.ok()) {

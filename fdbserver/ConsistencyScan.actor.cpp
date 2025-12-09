@@ -23,7 +23,6 @@
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbclient/json_spirit/json_spirit_writer_options.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
-#include "fdbrpc/TenantInfo.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
@@ -1255,7 +1254,7 @@ ACTOR Future<bool> getKeyServers(
 			    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
 			        .getReplyUnlessFailedFor(
 			            GetKeyServerLocationsRequest(
-			                span.context, TenantInfo(), begin, end, limitKeyServers, false, latestVersion, Arena()),
+			                span.context, begin, end, limitKeyServers, false, latestVersion, Arena()),
 			            2,
 			            0));
 

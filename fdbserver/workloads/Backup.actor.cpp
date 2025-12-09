@@ -23,7 +23,6 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRandom.h"
