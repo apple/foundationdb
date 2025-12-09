@@ -100,24 +100,15 @@ struct CommandFactory {
 
 // Special keys used by fdbcli commands
 
-// The comments below are the dumbest bunch of comments I have ever
-// seen.  Please stop cargo-culting useless comments.  Please write
-// comments about things that are important and non-obvious, not about
-// things that are trivial and obvious.
-
-// advanceversion
 extern const KeyRef advanceVersionSpecialKey;
-// consistencycheck
 extern const KeyRef consistencyCheckSpecialKey;
-// coordinators
 extern const KeyRef clusterDescriptionSpecialKey;
 extern const KeyRef configDBSpecialKey;
 extern const KeyRef coordinatorsAutoSpecialKey;
 extern const KeyRef coordinatorsProcessSpecialKey;
-// datadistribution
 extern const KeyRef ddModeSpecialKey;
 extern const KeyRef ddIgnoreRebalanceSpecialKey;
-// exclude/include
+
 extern const KeyRangeRef excludedServersSpecialKeyRange;
 extern const KeyRangeRef failedServersSpecialKeyRange;
 extern const KeyRangeRef excludedLocalitySpecialKeyRange;
@@ -127,31 +118,26 @@ extern const KeyRef failedForceOptionSpecialKey;
 extern const KeyRef excludedLocalityForceOptionSpecialKey;
 extern const KeyRef failedLocalityForceOptionSpecialKey;
 extern const KeyRangeRef exclusionInProgressSpecialKeyRange;
-// lock/unlock
+
 extern const KeyRef lockSpecialKey;
-// maintenance
+
 extern const KeyRangeRef maintenanceSpecialKeyRange;
 extern const KeyRef ignoreSSFailureSpecialKey;
-// setclass
+
 extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
-// Other special keys
+
 inline const KeyRef errorMsgSpecialKey = "\xff\xff/error_message"_sr;
 inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
-// help functions (Copied from fdbcli.actor.cpp)
 
-// get all workers' info
 ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
-// get all storages' interface
 ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                               std::map<std::string, StorageServerInterface>* interfaces);
 
-// compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
-// print the usage of the specified command
 void printUsage(StringRef command);
-// print the long description of the specified command
 void printLongDesc(StringRef command);
+
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
