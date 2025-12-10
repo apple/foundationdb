@@ -27,23 +27,12 @@ trap cleanup  EXIT
 # Has a hard 30-second timeout to prevent CTest timeouts.
 function cleanup {
   echo "$(date -Iseconds) cleanup: starting (with 30s hard timeout)"
-  
-  # Start a watchdog that will force-kill us if cleanup takes too long
-  local my_pid=$$
-  (
-    sleep 30
-    echo "$(date -Iseconds) CLEANUP TIMEOUT after 30s - forcing exit"
-    # Kill the main script and all its children
-    kill -9 -$my_pid 2>/dev/null || kill -9 $my_pid 2>/dev/null
-  ) &
-  local watchdog_pid=$!
-  # Disown so the watchdog doesn't get killed when we exit normally
-  disown $watchdog_pid 2>/dev/null || true
+  start_cleanup_watchdog 30
   
   # Check if test data should be preserved (common function from tests_common.sh)
   if cleanup_with_preserve_check; then
     echo "$(date -Iseconds) cleanup: preserving test data, skipping cleanup"
-    kill $watchdog_pid 2>/dev/null || true
+    cancel_cleanup_watchdog
     return 0
   fi
   
@@ -75,9 +64,7 @@ function cleanup {
   fi
   
   echo "$(date -Iseconds) cleanup: complete"
-  
-  # Cancel the watchdog since we finished in time
-  kill $watchdog_pid 2>/dev/null || true
+  cancel_cleanup_watchdog
 }
 
 # Resolve passed in reference to an absolute path.

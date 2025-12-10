@@ -29,16 +29,7 @@ trap cleanup  EXIT
 # Has a hard 30-second timeout to prevent CTest timeouts.
 function cleanup {
   echo "$(date -Iseconds) cleanup: starting (with 30s hard timeout)"
-  
-  # Start a watchdog that will force-kill us if cleanup takes too long
-  local my_pid=$$
-  (
-    sleep 30
-    echo "$(date -Iseconds) CLEANUP TIMEOUT after 30s - forcing exit"
-    kill -9 -$my_pid 2>/dev/null || kill -9 $my_pid 2>/dev/null
-  ) &
-  local watchdog_pid=$!
-  disown $watchdog_pid 2>/dev/null || true
+  start_cleanup_watchdog 30
   
   echo "$(date -Iseconds) cleanup: shutting down FDB cluster"
   shutdown_fdb_cluster
@@ -55,9 +46,7 @@ function cleanup {
   fi
   
   echo "$(date -Iseconds) cleanup: complete"
-  
-  # Cancel the watchdog since we finished in time
-  kill $watchdog_pid 2>/dev/null || true
+  cancel_cleanup_watchdog
 }
 
 # Resolve passed in reference to an absolute path.
