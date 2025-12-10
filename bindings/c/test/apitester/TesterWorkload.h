@@ -72,6 +72,7 @@ public:
 };
 
 // Workload configuration
+// The comments on this stuff make me weep for humanity.
 struct WorkloadConfig {
 	// Workload name
 	std::string name;
@@ -83,7 +84,11 @@ struct WorkloadConfig {
 	int numClients;
 
 	// Number of Tenants
-	int numTenants;
+	// TODO(gglass): delete tenant support more aggressively out of files in this
+	// directory. For now leave it in with numTenants set to 0.  Prior deletion
+	// caused damage and the test cases spin or break themselves or *something*
+	// and end up timing out due to ctest 10 minute timeout.
+	int numTenants = 0;
 
 	// Selected FDB API version
 	int apiVersion;

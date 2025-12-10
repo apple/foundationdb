@@ -138,5 +138,4 @@ Compatibility
 
 * Version vector: Version vector has a different path of updating metadata at proxies than the default one. Therefore, rangeLock temporarily is not available when the version vector is on.
 
-* Encryption and tenant: Currently, RangeLock does not have a clear functionality in the context of encryption and tenant, so when the encryption and tenant are on, we disable rangeLock for the clarity.
-
+* Encryption: Currently, RangeLock does not have a clear functionality in the context of encryption, so when encryption is enabled, we disable rangeLock for clarity.

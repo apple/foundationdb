@@ -30,7 +30,6 @@
 #include <utility>
 
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
@@ -39,8 +38,6 @@
 #include "fdbrpc/Locality.h"
 #include "flow/NetworkAddress.h"
 #include "flow/SystemMonitor.h"
-
-#include "metacluster/MetaclusterMetrics.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -146,9 +143,6 @@ public:
 		Future<Void> clientCounter;
 		int clientCount;
 		ClusterType clusterType = ClusterType::STANDALONE;
-		Optional<ClusterName> metaclusterName;
-		Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration;
-		metacluster::MetaclusterMetrics metaclusterMetrics;
 		Reference<ClusterRecoveryData> recoveryData;
 
 		DBInfo()

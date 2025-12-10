@@ -253,7 +253,6 @@ else()
   add_subdirectory(fdbservice)
 endif()
 add_subdirectory(fdbbackup)
-add_subdirectory(metacluster)
 add_subdirectory(tests)
 if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                      # x-compiling.

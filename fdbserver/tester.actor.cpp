@@ -44,7 +44,6 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
 #include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -64,7 +63,7 @@ WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
   : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
-    dbInfo(r.dbInfo), ccr(r.ccr), defaultTenant(r.defaultTenant), rangesToCheck(r.rangesToCheck) {}
+    dbInfo(r.dbInfo), ccr(r.ccr), rangesToCheck(r.rangesToCheck) {}
 
 WorkloadContext::~WorkloadContext() {}
 
@@ -511,7 +510,6 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.dbInfo = dbInfo;
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
-	wcx.defaultTenant = work.defaultTenant.castTo<TenantName>();
 	wcx.rangesToCheck = work.rangesToCheck;
 
 	workload = IWorkloadFactory::create(testName.toString(), wcx);
@@ -558,7 +556,6 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 	wcx.ccr = ccr;
 	wcx.dbInfo = dbInfo;
-	wcx.defaultTenant = work.defaultTenant.castTo<TenantName>();
 	wcx.rangesToCheck = work.rangesToCheck;
 	// FIXME: Other stuff not filled in; why isn't this constructed here and passed down to the other
 	// getWorkloadIface()?
@@ -703,7 +700,6 @@ ACTOR Future<Reference<TestWorkload>> getConsistencyCheckUrgentWorkloadIface(
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 	wcx.ccr = ccr;
 	wcx.dbInfo = dbInfo;
-	wcx.defaultTenant = work.defaultTenant.castTo<TenantName>();
 	wcx.rangesToCheck = work.rangesToCheck;
 	Reference<TestWorkload> iface = wait(getWorkloadIface(work, ccr, work.options[0], dbInfo));
 	return iface;
@@ -888,7 +884,6 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		if (work.useDatabase) {
 			cx = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
-			cx->defaultTenant = work.defaultTenant.castTo<TenantName>();
 			wait(delay(1.0));
 		}
 
@@ -999,7 +994,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	}
 }
 
-ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
+ACTOR Future<Void> clearData(Database cx) {
 	state Transaction tr(cx);
 
 	loop {
@@ -1024,75 +1019,21 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 	}
 
 	tr = Transaction(cx);
-	loop {
-		try {
-			tr.debugTransaction(debugRandom()->randomUniqueID());
-			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
-			TraceEvent("TesterClearingTenantsStart", tr.trState->readOptions.get().debugID.get());
-			state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
-			    wait(TenantMetadata::tenantMap().getRange(&tr, {}, {}, 1000));
 
-			TraceEvent("TesterClearingTenantsDeletingBatch", tr.trState->readOptions.get().debugID.get())
-			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
-			    .detail("BatchSize", tenants.results.size());
-
-			std::vector<Future<Void>> deleteFutures;
-			for (auto const& [id, entry] : tenants.results) {
-				if (!defaultTenant.present() || entry.tenantName != defaultTenant.get()) {
-					deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&tr, id));
-				}
-			}
-
-			CODE_PROBE(deleteFutures.size() > 0, "Clearing tenants after test");
-
-			wait(waitForAll(deleteFutures));
-			wait(tr.commit());
-
-			TraceEvent("TesterClearingTenantsDeletedBatch", tr.trState->readOptions.get().debugID.get())
-			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
-			    .detail("BatchSize", tenants.results.size());
-
-			if (!tenants.more) {
-				TraceEvent("TesterClearingTenantsComplete", tr.trState->readOptions.get().debugID.get())
-				    .detail("AtVersion", tr.getCommittedVersion());
-				break;
-			}
-			tr.reset();
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "TesterClearingTenantsError", tr.trState->readOptions.get().debugID.get()).error(e);
-			wait(tr.onError(e));
-		}
-	}
-
-	tr = Transaction(cx);
 	loop {
 		try {
 			tr.debugTransaction(debugRandom()->randomUniqueID());
 			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			state RangeResult rangeResult = wait(tr.getRange(normalKeys, 1));
-			state Optional<Key> tenantPrefix;
 
-			// If the result is non-empty, it is possible that there is some bad interaction between the test
-			// and the optional simulated default tenant:
-			//
-			// 1. If the test is creating/deleting tenants itself, then it should disable the default tenant.
-			// 2. If the test is opening Database objects itself, then it needs to propagate the default tenant
-			//    value from the existing Database.
-			// 3. If the test is using raw access or system key access and writing to the normal key-space, then
-			//    it should disable the default tenant.
+			// If the result is non-empty, it is possible that there is some bug.
 			if (!rangeResult.empty()) {
-				if (cx->defaultTenant.present()) {
-					TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
-					tenantPrefix = entry.prefix;
-				}
-
-				TraceEvent(SevError, "TesterClearFailure")
-				    .detail("DefaultTenant", cx->defaultTenant)
-				    .detail("TenantPrefix", tenantPrefix)
-				    .detail("FirstKey", rangeResult[0].key);
+				TraceEvent(SevError, "TesterClearFailure").detail("FirstKey", rangeResult[0].key);
 
 				ASSERT(false);
 			}
+			// TODO(gglass): the assert below is leftover from some tenant logic.  If it fails, take it out.
+			// If not, leave it in and take out this comment.
 			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 			TraceEvent("TesterCheckDatabaseClearedDone", tr.trState->readOptions.get().debugID.get());
 			break;
@@ -1189,10 +1130,7 @@ ACTOR Future<Void> checkConsistencyScanAfterTest(Database cx, TesterConsistencyS
 	return Void();
 }
 
-ACTOR Future<DistributedTestResults> runWorkload(Database cx,
-                                                 std::vector<TesterInterface> testers,
-                                                 TestSpec spec,
-                                                 Optional<TenantName> defaultTenant) {
+ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec) {
 	TraceEvent("TestRunning")
 	    .detail("WorkloadTitle", spec.title)
 	    .detail("TesterCount", testers.size())
@@ -1217,7 +1155,6 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 		req.clientId = i;
 		req.clientCount = testers.size();
 		req.sharedRandomNumber = sharedRandom;
-		req.defaultTenant = defaultTenant.castTo<TenantNameRef>();
 		req.disabledFailureInjectionWorkloads = spec.disabledFailureInjectionWorkloads;
 		workRequests.push_back(testers[i].recruitments.getReply(req));
 	}
@@ -1311,7 +1248,7 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	options.push_back_deep(options.arena(), KeyValueRef("configMode"_sr, configMode));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
-	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
+	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec));
 
 	return Void();
 }
@@ -1436,7 +1373,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	state double start = now();
 	state bool lastRun = false;
 	loop {
-		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
+		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec));
 		if (testResults.ok() || lastRun) {
 			if (g_network->isSimulated()) {
 				g_simulator->connectionFailuresDisableDuration = connectionFailures;
@@ -1979,13 +1916,12 @@ ACTOR Future<bool> runTest(Database cx,
                            std::vector<TesterInterface> testers,
                            TestSpec spec,
                            Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                           Optional<TenantName> defaultTenant,
                            TesterConsistencyScanState* consistencyScanState) {
 	state DistributedTestResults testResults;
 	state double savedDisableDuration = 0;
 
 	try {
-		Future<DistributedTestResults> fTestResults = runWorkload(cx, testers, spec, defaultTenant);
+		Future<DistributedTestResults> fTestResults = runWorkload(cx, testers, spec);
 		if (g_network->isSimulated() && spec.simConnectionFailuresDisableDuration > 0) {
 			savedDisableDuration = g_simulator->connectionFailuresDisableDuration;
 			g_simulator->connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
@@ -2094,7 +2030,7 @@ ACTOR Future<bool> runTest(Database cx,
 	if (spec.useDB && spec.clearAfterTest) {
 		try {
 			TraceEvent("TesterClearingDatabase").log();
-			wait(timeoutError(clearData(cx, defaultTenant), 1000.0));
+			wait(timeoutError(clearData(cx), 1000.0));
 		} catch (Error& e) {
 			TraceEvent(SevError, "ErrorClearingDatabaseAfterTest").error(e);
 			throw; // If we didn't do this, we don't want any later tests to run on this DB
@@ -2146,6 +2082,8 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
 	{ "disableRemoteKVS",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
+	// TODO(gglass): remove this when it's no longer used.  For now it's a useful signal in a toml file
+	// for tests against functionality that might not actually be tenant related and hence need to keep.
 	{ "allowDefaultTenant",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDefaultTenant", ""); } }
 };
@@ -2680,8 +2618,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             std::vector<TestSpec> tests,
                             StringRef startingConfiguration,
                             LocalityData locality,
-                            Optional<TenantName> defaultTenant,
-                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
                             bool restartingTest) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
@@ -2737,7 +2673,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 	if (useDB) {
 		cx = openDBOnServer(dbInfo);
-		cx->defaultTenant = defaultTenant;
 	}
 
 	consistencyScanState.enabled = g_network->isSimulated() && deterministicRandom()->coinflip();
@@ -2835,17 +2770,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	if (useDB) {
-		std::vector<Future<Void>> tenantFutures;
-		for (auto tenant : tenantsToCreate) {
-			TenantMapEntry entry;
-			if (deterministicRandom()->coinflip()) {
-				entry.tenantGroup = "TestTenantGroup"_sr;
-			}
-			TraceEvent("CreatingTenant").detail("Tenant", tenant).detail("TenantGroup", entry.tenantGroup);
-			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, entry)));
-		}
-
-		wait(waitForAll(tenantFutures));
 		if (g_network->isSimulated()) {
 			wait(initializeSimConfig(cx));
 		}
@@ -2913,7 +2837,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (; idx < tests.size(); idx++) {
 		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
 		knobProtectiveGroup = std::make_unique<KnobProtectiveGroup>(tests[idx].overrideKnobs);
-		wait(success(runTest(cx, testers, tests[idx], dbInfo, defaultTenant, &consistencyScanState)));
+		wait(success(runTest(cx, testers, tests[idx], dbInfo, &consistencyScanState)));
 		knobProtectiveGroup.reset(nullptr);
 		printf("Run test:%s Done.\n", tests[idx].title.toString().c_str());
 		// do we handle a failure here?
@@ -2973,8 +2897,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             int minTestersExpected,
                             StringRef startingConfiguration,
                             LocalityData locality,
-                            Optional<TenantName> defaultTenant,
-                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
                             bool restartingTest) {
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) |
 	                  GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
@@ -3006,7 +2928,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (int i = 0; i < workers.size(); i++)
 		ts.push_back(workers[i].interf.testerInterface);
 
-	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant, tenantsToCreate, restartingTest));
+	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, restartingTest));
 	return Void();
 }
 
@@ -3044,8 +2966,6 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             StringRef startingConfiguration,
                             LocalityData locality,
                             UnitTestParameters testOptions,
-                            Optional<TenantName> defaultTenant,
-                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
                             bool restartingTest) {
 	state TestSet testSet;
 	state std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup(nullptr);
@@ -3136,27 +3056,12 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
-		tests = runTests(cc,
-		                 ci,
-		                 iTesters,
-		                 testSet.testSpecs,
-		                 startingConfiguration,
-		                 locality,
-		                 defaultTenant,
-		                 tenantsToCreate,
-		                 restartingTest);
+		tests = runTests(cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality, restartingTest);
 	} else {
-		tests = reportErrors(runTests(cc,
-		                              ci,
-		                              testSet.testSpecs,
-		                              at,
-		                              minTestersExpected,
-		                              startingConfiguration,
-		                              locality,
-		                              defaultTenant,
-		                              tenantsToCreate,
-		                              restartingTest),
-		                     "RunTests");
+		tests = reportErrors(
+		    runTests(
+		        cc, ci, testSet.testSpecs, at, minTestersExpected, startingConfiguration, locality, restartingTest),
+		    "RunTests");
 	}
 
 	choose {

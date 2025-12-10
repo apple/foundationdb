@@ -110,7 +110,6 @@ public:
 		                                       .anyZeroHealthyTeams = zeroHealthyTeams,
 		                                       .shards = &shards,
 		                                       .trackerCancelled = &ddcx.trackerCancelled,
-		                                       .ddTenantCache = {},
 		                                       .usableRegions = -1 });
 		actors.add(DataDistributionTracker::run(shardTracker,
 		                                        initData,

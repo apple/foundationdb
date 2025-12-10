@@ -1,9 +1,0 @@
-[configuration]
-testClass = "Encryption"
-encryptModes = ['domain_aware', 'cluster_aware']
-
-[[test]]
-testTitle = 'EncryptKeyProxy'
-
-    [[test.workload]]
-    testName = 'EncryptKeyProxyTest'

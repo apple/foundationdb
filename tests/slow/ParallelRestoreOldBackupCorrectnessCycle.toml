@@ -1,6 +1,4 @@
 [configuration]
-# tenants are not supported with parallel restore
-allowDefaultTenant = false
 
 [[test]]
 testTitle = 'BackupAndRestore'

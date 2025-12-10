@@ -1,6 +1,5 @@
 [configuration]
 buggify = false
-tenantModes = ['disabled']
 
 [[test]]
 testTitle='ExpectStableThroughput'

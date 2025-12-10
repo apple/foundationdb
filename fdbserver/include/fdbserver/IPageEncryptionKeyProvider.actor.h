@@ -19,8 +19,6 @@
  */
 
 #include "fdbclient/Knobs.h"
-#include "fdbclient/TenantManagement.actor.h"
-#include "fdbrpc/TenantInfo.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H)
 #define FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H
 #include "fdbserver/IPageEncryptionKeyProvider.actor.g.h"
@@ -30,7 +28,6 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/Tenant.h"
 
 #include "fdbserver/IPager.h"
 #include "fdbserver/Knobs.h"
@@ -292,8 +289,10 @@ private:
 	Reference<BlobCipherKey> cipherKeys[NUM_CIPHER];
 };
 
-// Key provider which extract tenant id from range key prefixes, and fetch tenant specific encryption keys from
-// EncryptKeyProxy.
+// Key provider which was originally intended to extract tenant id from range key prefixes,
+// and to fetch tenant specific encryption keys from EncryptKeyProxy.  This has been
+// left in place in the interest of getting the code to compile as part of tenant removal.
+// TODO(gglass): investigate removing or simplifying this code.
 template <EncodingType encodingType,
           typename std::enable_if<encodingType == AESEncryption || encodingType == AESEncryptionWithAuth, bool>::type =
               true>
@@ -362,19 +361,8 @@ public:
 		if (key.startsWith(systemKeysPrefix)) {
 			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, systemKeysPrefix.size() };
 		}
-		// Cluster-aware encryption.
-		if (encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE) {
-			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
-		}
-		// Key smaller than tenant prefix in size belongs to the default domain.
-		if (key.size() < TenantAPI::PREFIX_SIZE) {
-			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
-		}
-		int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(key);
-		if (tenantId == TenantInfo::INVALID_TENANT) {
-			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
-		}
-		return { tenantId, TenantAPI::PREFIX_SIZE };
+		// ten-ant stuff removed.
+		return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 	}
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
@@ -388,4 +376,5 @@ private:
 };
 
 #include "flow/unactorcompiler.h"
+
 #endif

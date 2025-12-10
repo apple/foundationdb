@@ -40,6 +40,8 @@ These documents explain the engineering design of FoundationDB, with detailed in
 
 * :doc:`bulkdump` describes how to do snapshot data dump to blobstore or local file system.
 
+* :doc:`bulkload` describes the technical implementation of bulk data loading from external sources.
+
 * :doc:`auditstorage` describes how to do data replica consistency check and location metadata consistency check efficiently.
 
 .. toctree::
@@ -65,4 +67,5 @@ These documents explain the engineering design of FoundationDB, with detailed in
    consistency-check-urgent
    rangelock
    bulkdump
+   bulkload
    auditstorage

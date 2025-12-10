@@ -99,9 +99,6 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "datadistribution",
 	  KeyRangeRef("data_distribution/"_sr, "data_distribution0"_sr)
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "tenant", KeyRangeRef("tenant/"_sr, "tenant0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "tenantmap",
-	  KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiCommandToRange = {
@@ -134,12 +131,6 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 
 	// never being called if KeySelector is already normalized
 	ASSERT(ks->offset != 1);
-
-	// Throw error if module doesn't support tenants and we have a tenant
-	if (ryw->getTenant().present() && !skrImpl->supportsTenants()) {
-		CODE_PROBE(true, "Illegal tenant access to special keys module");
-		throw illegal_tenant_access();
-	}
 
 	state Key startKey(skrImpl->getKeyRange().begin);
 	state Key endKey(skrImpl->getKeyRange().end);
@@ -364,21 +355,6 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Ranges ranges =
 	    sks->getReadImpls().intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
 
-	// Check tenant legality separately from below iterations
-	// because it may be partially completed and returned
-	// before illegal range is checked due to the limits handler
-	if (ryw->getTenant().present()) {
-		for (auto iter : ranges) {
-			if (iter->value() == nullptr) {
-				continue;
-			}
-			if (!iter->value()->supportsTenants()) {
-				CODE_PROBE(true, "Illegal tenant access to special keys module");
-				throw illegal_tenant_access();
-			}
-		}
-	}
-
 	// TODO : workaround to write this two together to make the code compact
 	// The issue here is boost::iterator_range<> doest not provide rbegin(), rend()
 	iter = reverse ? ranges.end() : ranges.begin();
@@ -504,10 +480,6 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 		    .detail("Value", value.toString());
 		throw special_keys_no_write_module_found();
 	}
-	if (!impl->supportsTenants() && ryw->getTenant().present()) {
-		CODE_PROBE(true, "Illegal tenant write to special keys module");
-		throw illegal_tenant_access();
-	}
 	return impl->set(ryw, key, value);
 }
 
@@ -525,10 +497,6 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range);
 		throw special_keys_no_write_module_found();
 	}
-	if (!begin->supportsTenants() && ryw->getTenant().present()) {
-		CODE_PROBE(true, "Illegal tenant clear range to special keys module");
-		throw illegal_tenant_access();
-	}
 	return begin->clear(ryw, range);
 }
 
@@ -538,10 +506,6 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	auto impl = writeImpls[key];
 	if (impl == nullptr)
 		throw special_keys_no_write_module_found();
-	if (!impl->supportsTenants() && ryw->getTenant().present()) {
-		CODE_PROBE(true, "Illegal tenant clear to special keys module", probe::decoration::rare);
-		throw illegal_tenant_access();
-	}
 	return impl->clear(ryw, key);
 }
 
@@ -628,18 +592,8 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 		}
 		++iter;
 	}
-	state std::vector<SpecialKeyRangeRWImpl*>::const_iterator it;
-	// Check validity of tenant support before iterating through
-	// module ptrs and potentially getting partial commits
-	if (ryw->getTenant().present()) {
-		for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
-			if (!(*it)->supportsTenants()) {
-				CODE_PROBE(true, "Illegal tenant commit to special keys module", probe::decoration::rare);
-				throw illegal_tenant_access();
-			}
-		}
-	}
 
+	state std::vector<SpecialKeyRangeRWImpl*>::const_iterator it;
 	for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
 		Optional<std::string> msg = wait((*it)->commit(ryw));
 		if (msg.present()) {

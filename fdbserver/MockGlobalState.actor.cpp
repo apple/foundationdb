@@ -33,11 +33,9 @@ public:
 	                                                                                 StorageMetrics permittedError,
 	                                                                                 int shardLimit,
 	                                                                                 int expectedShardCount) {
-		state TenantInfo tenantInfo;
 		state Version version = 0;
 		loop {
-			auto locations = mgs->getKeyRangeLocations(tenantInfo,
-			                                           keys,
+			auto locations = mgs->getKeyRangeLocations(keys,
 			                                           shardLimit,
 			                                           Reverse::False,
 			                                           SpanContext(),
@@ -58,8 +56,8 @@ public:
 			           probe::decoration::rare);
 
 			try {
-				Optional<StorageMetrics> res = wait(
-				    ::waitStorageMetricsWithLocation(tenantInfo, version, keys, locations, min, max, permittedError));
+				Optional<StorageMetrics> res =
+				    wait(::waitStorageMetricsWithLocation(version, keys, locations, min, max, permittedError));
 
 				TraceEvent(SevDebug, "MGSWaitStorageMetrics")
 				    .detail("Phase", "GetStorageMetrics")
@@ -76,8 +74,7 @@ public:
 				} else if (e.code() == error_code_future_version) {
 					wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
 				} else {
-					bool ok = e.code() == error_code_tenant_not_found;
-					TraceEvent(ok ? SevInfo : SevError, "MGSWaitStorageMetricsError").error(e);
+					TraceEvent(SevError, "MGSWaitStorageMetricsError").error(e);
 					throw;
 				}
 			}
@@ -92,11 +89,9 @@ public:
 	                                                                       StorageMetrics limit,
 	                                                                       StorageMetrics estimated,
 	                                                                       Optional<int> minSplitBytes) {
-		state TenantInfo tenantInfo;
 		loop {
 			state std::vector<KeyRangeLocationInfo> locations =
-			    mgs->getKeyRangeLocations(tenantInfo,
-			                              keys,
+			    mgs->getKeyRangeLocations(keys,
 			                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
 			                              Reverse::False,
 			                              SpanContext(),
@@ -124,17 +119,7 @@ public:
 
 class MockStorageServerImpl {
 public:
-	ACTOR static Future<Void> waitMetricsTenantAware(MockStorageServer* self, WaitMetricsRequest req) {
-		if (req.tenantInfo.hasTenant()) {
-			// TODO(xwang) add support for tenant test, search for tenant entry
-			Optional<TenantMapEntry> entry;
-			Optional<Key> tenantPrefix = entry.map(&TenantMapEntry::prefix);
-			if (tenantPrefix.present()) {
-				UNREACHABLE();
-				// req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
-			}
-		}
-
+	ACTOR static Future<Void> waitMetricsForReal(MockStorageServer* self, WaitMetricsRequest req) {
 		if (!self->isReadable(req.keys)) {
 			self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 		} else {
@@ -374,8 +359,8 @@ void MockStorageServer::addActor(Future<Void> future) {
 
 void MockStorageServer::getSplitPoints(const SplitRangeRequest& req) {}
 
-Future<Void> MockStorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req) {
-	return MockStorageServerImpl::waitMetricsTenantAware(this, req);
+Future<Void> MockStorageServer::waitMetricsForReal(const WaitMetricsRequest& req) {
+	return MockStorageServerImpl::waitMetricsForReal(this, req);
 }
 
 void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {
@@ -748,8 +733,7 @@ Reference<LocationInfo> buildLocationInfo(const std::vector<StorageServerInterfa
 	return makeReference<LocationInfo>(serverRefs);
 }
 
-Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(TenantInfo tenant,
-                                                             Key key,
+Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(Key key,
                                                              SpanContext spanContext,
                                                              Optional<UID> debugID,
                                                              UseProvisionalProxies useProvisionalProxies,
@@ -768,12 +752,10 @@ Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(TenantInfo tenant,
 	ASSERT_EQ(srcTeam.size(), 1);
 	rep.results.emplace_back(single, extractStorageServerInterfaces(srcTeam.front().servers));
 
-	return KeyRangeLocationInfo(KeyRange(toPrefixRelativeRange(rep.results[0].first, tenant.prefix), rep.arena),
-	                            buildLocationInfo(rep.results[0].second));
+	return KeyRangeLocationInfo(KeyRange(rep.results[0].first), buildLocationInfo(rep.results[0].second));
 }
 
 Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
-    TenantInfo tenant,
     KeyRange keys,
     int limit,
     Reverse reverse,
@@ -801,8 +783,7 @@ Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
 
 	std::vector<KeyRangeLocationInfo> results;
 	for (int shard = 0; shard < rep.results.size(); shard++) {
-		results.emplace_back((toPrefixRelativeRange(rep.results[shard].first, tenant.prefix) & keys),
-		                     buildLocationInfo(rep.results[shard].second));
+		results.emplace_back((rep.results[shard].first & keys), buildLocationInfo(rep.results[shard].second));
 	}
 	return results;
 }
@@ -999,9 +980,7 @@ struct MockGlobalStateTester {
 	}
 
 	KeyRangeLocationInfo getKeyLocationInfo(KeyRef key, std::shared_ptr<MockGlobalState> mgs) {
-		return mgs
-		    ->getKeyLocation(
-		        TenantInfo(), key, SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, 0)
+		return mgs->getKeyLocation(key, SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, 0)
 		    .get();
 	}
 
@@ -1009,14 +988,8 @@ struct MockGlobalStateTester {
 	                                                       int limit,
 	                                                       std::shared_ptr<MockGlobalState> mgs) {
 		return mgs
-		    ->getKeyRangeLocations(TenantInfo(),
-		                           keys,
-		                           limit,
-		                           Reverse::False,
-		                           SpanContext(),
-		                           Optional<UID>(),
-		                           UseProvisionalProxies::False,
-		                           0)
+		    ->getKeyRangeLocations(
+		        keys, limit, Reverse::False, SpanContext(), Optional<UID>(), UseProvisionalProxies::False, 0)
 		    .get();
 	}
 };

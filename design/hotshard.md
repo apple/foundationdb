@@ -106,7 +106,6 @@ When a hot shard cannot be split (due to minimum size constraints or lack of sam
 - If you need to store a counter, consider sharding them across N disjoint keys (e.g., counter/<bucket>/…) and aggregate in clients or background jobs. This keeps the per-key mutation rate below the commit proxy’s hot-shard throttle.
 - If you are storing append-only logs,  split them into multiple partitions (such as log/<partition>/<ts>), rotating partitions over time rather than funneling through a single key path.
 - Avoid “read-modify-write” cycles. Use FDB's atomic operations (like ATOMIC_ADD) when possible, and throttle/queue work in clients so they don’t stampede on that hot key.
-- For multi-tenant schemas, assign each tenant a disjoint key subspace so a busy tenant won’t penalize others. (‘Tenant’ here just means a logical customer/namespace using separate key prefixes.)
 
 ### Avoiding Read Hotspots
 

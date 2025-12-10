@@ -50,13 +50,9 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 	});
 }
 
-Reference<ITenant> ThreadSafeDatabase::openTenant(TenantNameRef tenantName) {
-	return makeReference<ThreadSafeTenant>(Reference<ThreadSafeDatabase>::addRef(this), tenantName);
-}
-
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 	auto type = isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, Optional<TenantName>(), nullptr));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db, type));
 }
 
 void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -173,36 +169,8 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 	onMainThreadVoid([db]() { db->delref(); });
 }
 
-ThreadSafeTenant::ThreadSafeTenant(Reference<ThreadSafeDatabase> db, TenantName name) : db(db), name(name) {
-	Tenant* tenant = this->tenant = Tenant::allocateOnForeignThread();
-	DatabaseContext* cx = db->db;
-	onMainThreadVoid([tenant, cx, name]() {
-		cx->addref();
-		new (tenant) Tenant(Database(cx), name);
-	});
-}
-
-Reference<ITransaction> ThreadSafeTenant::createTransaction() {
-	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name, tenant));
-}
-
-ThreadFuture<int64_t> ThreadSafeTenant::getId() {
-	Tenant* tenant = this->tenant;
-	return onMainThread([tenant]() -> Future<int64_t> { return tenant->getIdFuture(); });
-}
-
-ThreadSafeTenant::~ThreadSafeTenant() {
-	Tenant* t = this->tenant;
-	if (t)
-		onMainThreadVoid([t]() { t->delref(); });
-}
-
-ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
-                                             ISingleThreadTransaction::Type type,
-                                             Optional<TenantName> tenantName,
-                                             Tenant* tenantPtr)
-  : tenantName(tenantName), initialized(std::make_shared<std::atomic_bool>(false)) {
+ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type)
+  : initialized(std::make_shared<std::atomic_bool>(false)) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -213,22 +181,13 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	auto init = this->initialized;
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
-	onMainThreadVoid([tr, cx, type, tenantPtr, init]() {
+	onMainThreadVoid([tr, cx, type, init]() {
 		cx->addref();
 		Database db(cx);
-		if (tenantPtr) {
-			Reference<Tenant> tenant = Reference<Tenant>::addRef(tenantPtr);
-			if (type == ISingleThreadTransaction::Type::RYW) {
-				new (tr) ReadYourWritesTransaction(db, tenant);
-			} else {
-				tr->construct(db, tenant);
-			}
+		if (type == ISingleThreadTransaction::Type::RYW) {
+			new (tr) ReadYourWritesTransaction(db);
 		} else {
-			if (type == ISingleThreadTransaction::Type::RYW) {
-				new (tr) ReadYourWritesTransaction(db);
-			} else {
-				tr->construct(db);
-			}
+			tr->construct(db);
 		}
 		*init = true;
 	});
@@ -535,10 +494,6 @@ ThreadFuture<Void> ThreadSafeTransaction::checkDeferredError() {
 ThreadFuture<Void> ThreadSafeTransaction::onError(Error const& e) {
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, e]() { return tr->onError(e); });
-}
-
-Optional<TenantName> ThreadSafeTransaction::getTenant() {
-	return tenantName;
 }
 
 void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) noexcept {

@@ -23,7 +23,6 @@ class TempCluster(LocalCluster):
         authorization_keypair_id: str = "",
         remove_at_exit: bool = True,
         custom_config: dict = {},
-        enable_tenants: bool = True,
         enable_encryption_at_rest: bool = False,
     ):
         self.build_dir = Path(build_dir).resolve()
@@ -33,7 +32,6 @@ class TempCluster(LocalCluster):
         tmp_dir.mkdir(parents=True)
         self.tmp_dir = tmp_dir
         self.remove_at_exit = remove_at_exit
-        self.enable_tenants = enable_tenants
         self.enable_encryption_at_rest = enable_encryption_at_rest
         super().__init__(
             tmp_dir,
@@ -52,10 +50,7 @@ class TempCluster(LocalCluster):
 
     def __enter__(self):
         super().__enter__()
-        if self.enable_tenants:
-            super().create_database()
-        else:
-            super().create_database(enable_tenants=False)
+        super().create_database()
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):
@@ -104,11 +99,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.disable_tenants:
-        enable_tenants = False
-    else:
-        enable_tenants = True
-
     tls_config = None
     if args.tls_enabled:
         tls_config = TLSConfig(
@@ -120,7 +110,6 @@ if __name__ == "__main__":
         args.build_dir,
         args.process_number,
         tls_config=tls_config,
-        enable_tenants=enable_tenants,
         authorization_kty=args.authorization_kty,
         authorization_keypair_id=args.authorization_keypair_id,
         remove_at_exit=not args.no_remove_at_exit,

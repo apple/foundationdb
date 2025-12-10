@@ -43,7 +43,7 @@ bool compareShardInfo(const DDShardInfo& a, const DDShardInfo& other) {
 	              a.primarySrc == other.primarySrc && a.remoteSrc == other.remoteSrc &&
 	              a.remoteDest == other.remoteDest;
 	if (!result) {
-		std::cout << a.key.toStringView() << " | " << other.key.toStringView() << "\n";
+		std::cout << a.key.printable() << " | " << other.key.printable() << "\n";
 		std::cout << a.hasDest << " | " << other.hasDest << "\n";
 		std::cout << describe(a.primarySrc) << " | " << describe(other.primarySrc) << "\n";
 		std::cout << describe(a.primaryDest) << " | " << describe(other.primaryDest) << "\n";

@@ -173,7 +173,7 @@ Python
 ------
 
 * Bindings work in Cygwin.
-* The :ref:`transactional decorator <api-python-transactional-decorator>` no longer warns of a transaction approaching the 5 second limit.
+* Some obsolete stuff deleted from this line.
 
 Ruby
 ----

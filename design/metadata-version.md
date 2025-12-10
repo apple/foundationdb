@@ -26,10 +26,6 @@ The metadata version can be accessed like ordinary keys. The value is read from 
 
 The key can only be written atomically in the transaction, with the mutate type `SetVersiondstampedValue`. The value must be `metadataVersionRequired`Value, or the FDB library will raise an `Invalid API Call` error. When the transaction is committed, the commit version will be used to overwrite the value. 
 
-### Tenants
-
-All tenants will share the same global metadata version; there is no isolation between tenants for this key.
-
 ## Example
 
 ### Python

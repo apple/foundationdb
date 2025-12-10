@@ -1,6 +1,7 @@
 [configuration]
 storageEngineExcludeTypes=[5]
 tenantModes = ['disabled']
+encryptModes=['disabled']
 
 [[knobs]]
 enable_version_vector = false

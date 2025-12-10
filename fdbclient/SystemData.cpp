@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -975,6 +976,7 @@ const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
 const KeyRef triggerDDTeamInfoPrintKey("\xff/triggerDDTeamInfoPrint"_sr);
 
 const KeyRef encryptionAtRestModeConfKey("\xff/conf/encryption_at_rest_mode"_sr);
+// TOOD(gglass): see if this can be removed:
 const KeyRef tenantModeConfKey("\xff/conf/tenant_mode"_sr);
 
 const KeyRangeRef excludedServersKeys("\xff/conf/excluded/"_sr, "\xff/conf/excluded0"_sr);

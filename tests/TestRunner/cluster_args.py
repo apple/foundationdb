@@ -24,12 +24,6 @@ def CreateTmpFdbClusterArgParser(description):
     )
 
     parser.add_argument(
-        "--disable-tenants",
-        help="Do not enable tenant mode",
-        action="store_true",
-        default=False,
-    )
-    parser.add_argument(
         "--blob-granules-enabled", help="Enable blob granules", action="store_true"
     )
     parser.add_argument(

@@ -35,14 +35,12 @@
 
 #include <boost/unordered_map.hpp>
 
-#include "fdbrpc/TokenSign.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
 #include "fdbrpc/JsonWebKeySet.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/IPAllowList.h"
-#include "fdbrpc/TokenCache.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
@@ -2176,7 +2174,6 @@ void FlowTransport::createInstance(bool isClient,
                                    uint64_t transportId,
                                    int maxWellKnownEndpoints,
                                    IPAllowList const* allowList) {
-	TokenCache::createInstance();
 	g_network->setGlobal(INetwork::enFlowTransport,
 	                     (flowGlobalType) new FlowTransport(transportId, maxWellKnownEndpoints, allowList));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType)&FlowTransport::getGlobalLocalAddress);

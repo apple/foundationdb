@@ -25,14 +25,15 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// A workload which test the correctness of backup and restore process
+// TODO: explain the purpose of this workload and how it different from the
+// 20+ (literally) other backup/restore workloads.
+
 struct RestoreWorkload : TestWorkload {
 	static constexpr auto NAME = "Restore";
 	Key backupTag, backupTag1, backupTag2;
@@ -196,8 +197,7 @@ struct RestoreWorkload : TestWorkload {
 				// from the rest
 				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
 				for (int i = 0; i < self->restoreRanges.size(); ++i) {
-					if (config.tenantMode != TenantMode::REQUIRED ||
-					    !self->restoreRanges[i].intersects(getSystemBackupRanges())) {
+					if (!self->restoreRanges[i].intersects(getSystemBackupRanges())) {
 						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
 					} else {
 						KeyRangeRef normalKeyRange = self->restoreRanges[i] & normalKeys;

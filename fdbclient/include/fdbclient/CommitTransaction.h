@@ -632,6 +632,7 @@ struct CommitTransactionRef {
 	bool lock_aware = false; // set when metadata mutations are present
 	Optional<SpanContext> spanContext;
 
+	// TODO(gglass): see if this can be removed.
 	// set by Commit Proxy
 	// The tenants associated with this transaction. This field only existing
 	// when tenant mode is required and this transaction has metadata mutations

@@ -42,7 +42,7 @@ struct ConflictBatch {
 	enum TransactionCommitResult {
 		TransactionConflict = 0,
 		TransactionTooOld,
-		TransactionTenantFailure,
+		TransactionUnusedResultValue1,
 		TransactionCommitted,
 		TransactionLockReject,
 	};

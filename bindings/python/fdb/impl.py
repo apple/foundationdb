@@ -162,8 +162,6 @@ def add_operation(fname, v):
     )
     setattr(globals()["Database"], fname, f)
     setattr(globals()["Transaction"], fname, f)
-    setattr(globals()["Tenant"], fname, f)
-
 
 def fill_operations():
     _dict = getattr(_opts, "MutationType")
@@ -225,8 +223,8 @@ def transactional(*tr_args, **tr_kwargs):
     one of two actions, depending on the type of the parameter passed
     to the function at call time.
 
-    If given a Database or Tenant, a Transaction will be created and
-    passed into the wrapped code in place of the Database or Tenant.
+    If given a Database, a Transaction will be created and
+    passed into the wrapped code in place of the Database.
     After the function is complete, the newly created transaction
     will be committed.
 
@@ -1292,20 +1290,6 @@ class _TransactionCreator(_FDBBase):
         return TransactionCreator
 
 
-def process_tenant_name(name):
-    if isinstance(name, tuple):
-        return pack(name)
-    elif isinstance(name, bytes):
-        return name
-    else:
-        raise TypeError(
-            "Tenant name must be of type "
-            + bytes.__name__
-            + " or of type "
-            + tuple.__name__
-        )
-
-
 class Database(_TransactionCreator):
     def __init__(self, dpointer):
         self.dpointer = dpointer
@@ -1318,14 +1302,6 @@ class Database(_TransactionCreator):
     def _set_option(self, option, param, length):
         self.capi.fdb_database_set_option(self.dpointer, option, param, length)
 
-    def open_tenant(self, name):
-        tname = process_tenant_name(name)
-        pointer = ctypes.c_void_p()
-        self.capi.fdb_database_open_tenant(
-            self.dpointer, tname, len(tname), ctypes.byref(pointer)
-        )
-        return Tenant(pointer.value)
-
     def create_transaction(self):
         pointer = ctypes.c_void_p()
         self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
@@ -1333,22 +1309,6 @@ class Database(_TransactionCreator):
 
     def get_client_status(self):
         return Key(self.capi.fdb_database_get_client_status(self.dpointer))
-
-
-class Tenant(_TransactionCreator):
-    def __init__(self, tpointer):
-        self.tpointer = tpointer
-
-    def __del__(self):
-        self.capi.fdb_tenant_destroy(self.tpointer)
-
-    def create_transaction(self):
-        pointer = ctypes.c_void_p()
-        self.capi.fdb_tenant_create_transaction(self.tpointer, ctypes.byref(pointer))
-        return Transaction(pointer.value, self)
-
-    def get_id(self):
-        return FutureInt64(self.capi.fdb_tenant_get_id(self.tpointer))
 
 
 fill_operations()
@@ -1693,15 +1653,6 @@ def init_c_api():
     _capi.fdb_database_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_database_destroy.restype = None
 
-    _capi.fdb_database_open_tenant.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.POINTER(ctypes.c_void_p),
-    ]
-    _capi.fdb_database_open_tenant.restype = ctypes.c_int
-    _capi.fdb_database_open_tenant.errcheck = check_error_code
-
     _capi.fdb_database_create_transaction.argtypes = [
         ctypes.c_void_p,
         ctypes.POINTER(ctypes.c_void_p),
@@ -1720,19 +1671,6 @@ def init_c_api():
 
     _capi.fdb_database_get_client_status.argtypes = [ctypes.c_void_p]
     _capi.fdb_database_get_client_status.restype = ctypes.c_void_p
-
-    _capi.fdb_tenant_destroy.argtypes = [ctypes.c_void_p]
-    _capi.fdb_tenant_destroy.restype = None
-
-    _capi.fdb_tenant_get_id.argtypes = [ctypes.c_void_p]
-    _capi.fdb_tenant_get_id.restype = ctypes.c_void_p
-
-    _capi.fdb_tenant_create_transaction.argtypes = [
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_void_p),
-    ]
-    _capi.fdb_tenant_create_transaction.restype = ctypes.c_int
-    _capi.fdb_tenant_create_transaction.errcheck = check_error_code
 
     _capi.fdb_transaction_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_destroy.restype = None

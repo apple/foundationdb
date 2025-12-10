@@ -10,6 +10,35 @@ FDB_DATA=()
 readonly FDB_DATA_KEYCOUNT=${FDB_DATA_KEYCOUNT:-100}
 readonly FDB_KEY_PREFIX=${FDB_KEY_PREFIX:-"key__"}
 
+# Cleanup watchdog PID (used by start/cancel_cleanup_watchdog)
+CLEANUP_WATCHDOG_PID=""
+
+# Start a watchdog that will force-kill the script if cleanup takes too long.
+# This prevents CTest timeouts when cleanup hangs.
+# $1 - timeout in seconds (default: 30)
+function start_cleanup_watchdog {
+  local timeout_seconds="${1:-30}"
+  local my_pid=$$
+  (
+    set -x  # Debug output to show what the watchdog is doing
+    sleep "$timeout_seconds"
+    echo "$(date -Iseconds) CLEANUP TIMEOUT after ${timeout_seconds}s - forcing exit"
+    # Try to kill the process group first (minus sign = process group),
+    # fall back to just the main PID if we're not the process group leader
+    kill -9 -$my_pid 2>/dev/null || kill -9 $my_pid 2>/dev/null
+  ) &
+  CLEANUP_WATCHDOG_PID=$!
+  disown $CLEANUP_WATCHDOG_PID 2>/dev/null || true
+}
+
+# Cancel the cleanup watchdog (call this when cleanup finishes successfully)
+function cancel_cleanup_watchdog {
+  if [[ -n "${CLEANUP_WATCHDOG_PID:-}" ]]; then
+    kill $CLEANUP_WATCHDOG_PID 2>/dev/null || true
+    CLEANUP_WATCHDOG_PID=""
+  fi
+}
+
 # Log a message to STDOUT with timestamp prefix
 # $1 message to log
 function log {
@@ -49,13 +78,17 @@ function should_preserve_test_data {
 # Returns 1 if normal cleanup should continue
 function cleanup_with_preserve_check {
   if should_preserve_test_data; then
+    echo "$(date -Iseconds) cleanup_with_preserve_check: preserving data, shutting down servers only"
     # Shutdown servers but don't delete data
     if type shutdown_fdb_cluster &> /dev/null; then
+      echo "$(date -Iseconds) cleanup_with_preserve_check: calling shutdown_fdb_cluster"
       shutdown_fdb_cluster
     fi
     if type shutdown_mocks3 &> /dev/null; then
+      echo "$(date -Iseconds) cleanup_with_preserve_check: calling shutdown_mocks3"
       shutdown_mocks3
     fi
+    echo "$(date -Iseconds) cleanup_with_preserve_check: done (preserving data)"
     return 0
   fi
   return 1

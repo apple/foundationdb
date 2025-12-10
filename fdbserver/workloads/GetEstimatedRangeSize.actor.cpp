@@ -20,7 +20,6 @@
 
 #include <cstring>
 
-#include "fdbrpc/TenantName.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
@@ -36,17 +35,12 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	int nodeCount;
 	double testDuration;
 	Key keyPrefix;
-	bool hasTenant;
-	Optional<TenantName> tenantName;
-	Optional<Reference<Tenant>> tenant;
 	bool checkOnly;
 
 	GetEstimatedRangeSizeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		nodeCount = getOption(options, "nodeCount"_sr, 10000);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
-		hasTenant = hasOption(options, "tenant"_sr);
-		tenantName = hasTenant ? getOption(options, "tenant"_sr, "DefaultNeverUsed"_sr) : Optional<TenantName>();
 		checkOnly = getOption(options, "checkOnly"_sr, false);
 	}
 
@@ -54,24 +48,19 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		if (checkOnly) {
 			return Void();
 		}
-		// The following call to bulkSetup() assumes that we have a valid tenant.
-		ASSERT(hasTenant);
-		tenant = makeReference<Tenant>(cx, tenantName.get());
-		// Use default values for arguments between (and including) postSetupWarming and endNodeIdx params.
 		return bulkSetup(cx,
 		                 this,
 		                 nodeCount,
 		                 Promise<double>(),
-		                 true,
-		                 0.0,
-		                 1e12,
-		                 std::vector<uint64_t>(),
-		                 Promise<std::vector<std::pair<uint64_t, double>>>(),
-		                 0,
-		                 0.1,
-		                 0,
-		                 0,
-		                 { tenant.get() });
+		                 /*valuesInconsequential=*/true,
+		                 /*postSetupWarming=*/0.0,
+		                 /*maxKeyInsertRate=*/1e12,
+		                 /*insertionCountsToMeasure=*/std::vector<uint64_t>(),
+		                 /*ratesAtKeyCounts=*/Promise<std::vector<std::pair<uint64_t, double>>>(),
+		                 /*keySaveIncrement=*/0,
+		                 /*keyCheckInterval=*/0.1,
+		                 /*startNodeIndex=*/0,
+		                 /*endNodeIdx=*/0);
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -105,14 +94,13 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		state ReadYourWritesTransaction tr(cx, self->tenant);
+		state ReadYourWritesTransaction tr(cx);
 		state double totalDelay = 0.0;
-		TraceEvent(SevDebug, "GetSizeStart").detail("Tenant", self->tenant);
 
 		loop {
 			try {
 				state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
-				TraceEvent(SevDebug, "GetSizeResult").detail("Tenant", self->tenant).detail("Size", size);
+				TraceEvent(SevDebug, "GetSizeResult").detail("Size", size);
 				if (!sizeIsAsExpected(self, size) && totalDelay < 300.0) {
 					totalDelay += 5.0;
 					wait(delay(5.0));
@@ -120,7 +108,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 					return size;
 				}
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(e).detail("Tenant", self->tenant);
+				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}

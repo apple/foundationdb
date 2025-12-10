@@ -159,7 +159,6 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 		    }
 		    scheduledTaskDone();
 	    },
-	    tenant,
 	    transactional,
 	    maxTxTimeoutMs > 0);
 }

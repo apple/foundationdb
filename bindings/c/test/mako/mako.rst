@@ -137,10 +137,6 @@ Arguments
 - | ``--tls_ca_file <path>``
   | Use TLS CA file located in ``<path>``
 
-- | ``--authorization_token_file <path>``
-  | Use authorization token JSON file located in ``<path>``
-  | Expected content is a JSON object where each key is a tenant name and the mapped value is a token string
-
 - | ``--transaction_timeout_tx <duration>``
   | Duration in milliseconds after which a transaction times out in run mode. Set as transaction option.
 

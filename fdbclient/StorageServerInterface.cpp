@@ -53,7 +53,6 @@ void TSS_traceMismatch(TraceEvent& event,
                        const GetValueReply& tss,
                        const ComparisonType& type) {
 	event.detail("Key", req.key)
-	    .detail("Tenant", req.tenantInfo.tenantId)
 	    .detail("Version", req.version)
 	    .detail(type == TSS_COMPARISON ? "SSReply" : "SourceSSReply",
 	            src.value.present() ? traceChecksumValue(src.value.get()) : "missing")
@@ -117,7 +116,6 @@ void TSS_traceMismatch(TraceEvent& event,
 	event
 	    .detail("KeySelector",
 	            format("%s%s:%d", req.sel.orEqual ? "=" : "", req.sel.getKey().printable().c_str(), req.sel.offset))
-	    .detail("Tenant", req.tenantInfo.tenantId)
 	    .detail("Version", req.version)
 	    .detail(type == TSS_COMPARISON ? "SSReply" : "SourceSSReply",
 	            format("%s%s:%d", src.sel.orEqual ? "=" : "", src.sel.getKey().printable().c_str(), src.sel.offset))
@@ -139,7 +137,6 @@ const char* LB_mismatchTraceName(const GetKeyValuesRequest& req, const Compariso
 static void traceKeyValuesSummary(TraceEvent& event,
                                   const KeySelectorRef& begin,
                                   const KeySelectorRef& end,
-                                  int64_t tenantId,
                                   Version version,
                                   int limit,
                                   int limitBytes,
@@ -152,7 +149,6 @@ static void traceKeyValuesSummary(TraceEvent& event,
 	std::string tssSummaryString = format("(%d)%s", tssSize, tssMore ? "+" : "");
 	event.detail("Begin", format("%s%s:%d", begin.orEqual ? "=" : "", begin.getKey().printable().c_str(), begin.offset))
 	    .detail("End", format("%s%s:%d", end.orEqual ? "=" : "", end.getKey().printable().c_str(), end.offset))
-	    .detail("Tenant", tenantId)
 	    .detail("Version", version)
 	    .detail("Limit", limit)
 	    .detail("LimitBytes", limitBytes)
@@ -173,7 +169,6 @@ static std::string hexStringRef(const StringRef& s) {
 static void traceKeyValuesDiff(TraceEvent& event,
                                const KeySelectorRef& begin,
                                const KeySelectorRef& end,
-                               int64_t tenantId,
                                Version version,
                                int limit,
                                int limitBytes,
@@ -183,7 +178,7 @@ static void traceKeyValuesDiff(TraceEvent& event,
                                bool tssMore,
                                const ComparisonType& type) {
 	traceKeyValuesSummary(
-	    event, begin, end, tenantId, version, limit, limitBytes, ssKV.size(), ssMore, tssKV.size(), tssMore, type);
+	    event, begin, end, version, limit, limitBytes, ssKV.size(), ssMore, tssKV.size(), tssMore, type);
 	bool mismatchFound = false;
 	for (int i = 0; i < std::max(ssKV.size(), tssKV.size()); i++) {
 		if (i >= ssKV.size() || i >= tssKV.size() || ssKV[i] != tssKV[i]) {
@@ -218,7 +213,6 @@ void TSS_traceMismatch(TraceEvent& event,
 	traceKeyValuesDiff(event,
 	                   req.begin,
 	                   req.end,
-	                   req.tenantInfo.tenantId,
 	                   req.version,
 	                   req.limit,
 	                   req.limitBytes,
@@ -249,7 +243,6 @@ void TSS_traceMismatch(TraceEvent& event,
 	traceKeyValuesSummary(event,
 	                      req.begin,
 	                      req.end,
-	                      req.tenantInfo.tenantId,
 	                      req.version,
 	                      req.limit,
 	                      req.limitBytes,
@@ -282,7 +275,6 @@ void TSS_traceMismatch(TraceEvent& event,
 	traceKeyValuesDiff(event,
 	                   req.begin,
 	                   req.end,
-	                   req.tenantInfo.tenantId,
 	                   req.version,
 	                   req.limit,
 	                   req.limitBytes,

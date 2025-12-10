@@ -29,7 +29,6 @@
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
-#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -2123,7 +2122,6 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
     WorkerDetails rkWorker,
     JsonBuilderObject* qos,
     JsonBuilderObject* data_overlay,
-    JsonBuilderObject* tenants,
     std::set<std::string>* incomplete_reasons,
     Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture) {
 	state JsonBuilderObject statusObj;
@@ -2205,10 +2203,6 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		transactions["committed"] = txnCommitOutSuccess.getStatus();
 
 		statusObj["transactions"] = transactions;
-
-		if (commitProxyStats.size() > 0) {
-			(*tenants)["num_tenants"] = commitProxyStats[0].getUint64("NumTenants");
-		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -2929,8 +2923,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
     Version dcLogServerVersionDifference,
     Version dcStorageServerVersionDifference,
     ConfigBroadcaster const* configBroadcaster,
-    Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration,
-    metacluster::MetaclusterMetrics metaclusterMetrics,
     std::unordered_map<NetworkAddress, double> excludedDegradedServers) {
 
 	state double tStart = timer();
@@ -3116,7 +3108,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
-		state JsonBuilderObject tenants;
 		state JsonBuilderObject metacluster;
 		state JsonBuilderObject storageWiggler;
 		state std::unordered_set<UID> wiggleServers;
@@ -3203,15 +3194,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
 			state std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(db,
-			                                         workers,
-			                                         mWorker,
-			                                         rkWorker,
-			                                         &qos,
-			                                         &dataOverlay,
-			                                         &tenants,
-			                                         &status_incomplete_reasons,
-			                                         storageServerFuture));
+			futures2.push_back(workloadStatusFetcher(
+			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(
@@ -3299,35 +3283,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Add qos section if it was populated
 			if (!qos.empty())
 				statusObj["qos"] = qos;
-
-			// Metacluster metadata
-			if (metaclusterRegistration.present()) {
-				metacluster["cluster_type"] = clusterTypeToString(metaclusterRegistration.get().clusterType);
-				metacluster["metacluster_name"] = metaclusterRegistration.get().metaclusterName;
-				metacluster["metacluster_id"] = metaclusterRegistration.get().metaclusterId.toString();
-				if (metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA) {
-					metacluster["data_cluster_name"] = metaclusterRegistration.get().name;
-					metacluster["data_cluster_id"] = metaclusterRegistration.get().id.toString();
-				} else if (!metaclusterMetrics.error.present()) { // clusterType == ClusterType::METACLUSTER_MANAGEMENT
-					metacluster["num_data_clusters"] = metaclusterMetrics.numDataClusters;
-					tenants["num_tenants"] = metaclusterMetrics.numTenants;
-					tenants["tenant_group_capacity"] = metaclusterMetrics.tenantGroupCapacity;
-					tenants["tenant_groups_allocated"] = metaclusterMetrics.tenantGroupsAllocated;
-				} else {
-					CODE_PROBE(true, "Failed to fetch metacluster metrics", probe::decoration::rare);
-					messages.push_back(JsonString::makeMessage(
-					    "metacluster_metrics_missing",
-					    fmt::format("Failed to fetch metacluster metrics: {}.", metaclusterMetrics.error.get())
-					        .c_str()));
-				}
-
-			} else {
-				metacluster["cluster_type"] = clusterTypeToString(ClusterType::STANDALONE);
-			}
-			statusObj["metacluster"] = metacluster;
-
-			if (!tenants.empty())
-				statusObj["tenants"] = tenants;
 
 			statusObj["version_epoch"] = versionEpochStatus;
 

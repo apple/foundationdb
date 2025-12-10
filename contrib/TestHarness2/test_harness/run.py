@@ -433,12 +433,12 @@ class TestRun:
         print(f"DEBUG: self.temp_path = {self.temp_path}", file=sys.stderr)
         print(f"DEBUG: self.temp_path.parent = {self.temp_path.parent}", file=sys.stderr)
         print(f"DEBUG: self.temp_path.parent.parent = {self.temp_path.parent.parent}", file=sys.stderr)
-        
+
         # The app logs (app_log.txt, python_app_stdout.log, python_app_stderr.log) are in the test-specific directory
         # which is self.temp_path.parent, not the top-level directory
         test_specific_dir = self.temp_path.parent
         print(f"DEBUG: test_specific_dir (self.temp_path.parent) = {test_specific_dir}", file=sys.stderr)
-        
+
         command = [
             sys.executable,
             str(joshua_logtool_script),
@@ -514,15 +514,21 @@ class TestRun:
         # self.log_test_plan(out)
         resources = ResourceMonitor()
         resources.start()
+        # Use binary mode (text=False) so we can handle fdbserver output that contains
+        # invalid UTF-8 bytes. This can happen with older binaries or when binary data
+        # leaks into stdout. With text=True, Python raises UnicodeDecodeError and we
+        # lose all output. With binary mode, we can decode with errors='replace' and
+        # still capture/report the output while flagging the issue.
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=self.temp_path,
-            text=True,
+            text=False,
             env=env,
         )
         did_kill = False
+        decode_error_occurred = False
         # No timeout for long running tests
         timeout = (
             20 * config.kill_seconds
@@ -532,10 +538,32 @@ class TestRun:
         out: str = ""
         err_out: str = ""
         try:
-            out, err_out = process.communicate(timeout=timeout)
+            out_bytes, err_bytes = process.communicate(timeout=timeout)
+            # Try normal UTF-8 decode first
+            try:
+                out = out_bytes.decode('utf-8') if out_bytes else ""
+                err_out = err_bytes.decode('utf-8') if err_bytes else ""
+            except UnicodeDecodeError as decode_ex:
+                # Binary data in output - decode with replacement
+                decode_error_occurred = True
+                out = out_bytes.decode('utf-8', errors='replace') if out_bytes else ""
+                err_out = err_bytes.decode('utf-8', errors='replace') if err_bytes else ""
+                # Check if we're running with an old binary (restarting test with non-current binary)
+                is_old_binary = self.binary != config.binary
+                if is_old_binary:
+                    print(f"WARNING: UnicodeDecodeError at position {decode_ex.start} - invalid byte {hex(out_bytes[decode_ex.start])}. Output decoded with replacement. (Old binary - not failing test)", file=sys.stderr)
+                    # Don't fail tests for old binaries - we can't fix them
+                else:
+                    print(f"WARNING: UnicodeDecodeError at position {decode_ex.start} - invalid byte {hex(out_bytes[decode_ex.start])}. Output decoded with replacement.", file=sys.stderr)
+                    # Mark test as failed BEFORE summarize() runs (only for current binary)
+                    self.summary.error = True
         except subprocess.TimeoutExpired:
             process.kill()
-            _, err_out = process.communicate()
+            _, err_bytes = process.communicate()
+            try:
+                err_out = err_bytes.decode('utf-8') if err_bytes else ""
+            except UnicodeDecodeError:
+                err_out = err_bytes.decode('utf-8', errors='replace') if err_bytes else ""
             did_kill = True
         resources.stop()
         resources.join()
@@ -547,6 +575,19 @@ class TestRun:
         self.summary.was_killed = did_kill
         self.summary.valgrind_out_file = valgrind_file
         self.summary.error_out = err_out
+        
+        # Add diagnostic info if decode error occurred (BEFORE summarize calculates Ok attribute)
+        if decode_error_occurred:
+            is_old_binary = self.binary != config.binary
+            decode_error_node = SummaryTree("UnicodeDecodeError")
+            # Use Severity 30 (warning) for old binaries, 40 (error) for current binary
+            decode_error_node.attributes["Severity"] = "30" if is_old_binary else "40"
+            decode_error_node.attributes["Message"] = "fdbserver output contained invalid UTF-8 bytes. Output decoded with replacement characters."
+            decode_error_node.attributes["Position"] = "Check fdbserver.stdout for � characters"
+            if is_old_binary:
+                decode_error_node.attributes["Note"] = "Old binary - binary output tolerated"
+            self.summary.out.append(decode_error_node)
+        
         self.summary.summarize(self.temp_path, " ".join(command))
         # Note: joshua_logtool is called after determinism analysis file organization
         # in the run_tests method to ensure files are properly organized
@@ -554,20 +595,135 @@ class TestRun:
         with open(self.temp_path / "fdbserver.stdout", "w") as stream:
             stream.write(out)
 
+        # Fallback: if no XML was generated at all, create minimal crash XML
+        if not self.summary.test_begin_found and len(str(self.summary.out.attributes.get("TestFile", ""))) == 0:
+            # Add minimal attributes so we at least have SOMETHING
+            if "TestFile" not in self.summary.out.attributes:
+                self.summary.out.attributes["TestFile"] = str(self.test_file)
+            if "RandomSeed" not in self.summary.out.attributes:
+                self.summary.out.attributes["RandomSeed"] = str(self.random_seed)
+            if "BuggifyEnabled" not in self.summary.out.attributes:
+                self.summary.out.attributes["BuggifyEnabled"] = "1" if self.buggify_enabled else "0"
+            if "FaultInjectionEnabled" not in self.summary.out.attributes:
+                self.summary.out.attributes["FaultInjectionEnabled"] = "1" if self.fault_injection_enabled else "0"
+
         return self.summary.ok()
 
 
-def decorate_summary(out: SummaryTree, test_file: Path, seed: int, buggify: bool):
+def parse_test_config_from_traces(temp_path: Path) -> Dict[str, str]:
+    """Parse TestConfiguring event from trace files when test crashes.
+
+    Returns dict with TestFile, RandomSeed, BuggifyEnabled, FaultInjectionEnabled if found.
+    """
+    import json
+    import glob
+
+    config_data = {}
+
+    # Find all trace files (both .xml and .json formats)
+    trace_files = list(temp_path.glob("trace.*.json")) + list(temp_path.glob("trace.*.xml"))
+
+    for trace_file in trace_files:
+        try:
+            if trace_file.suffix == ".json":
+                # Parse JSON trace file
+                with open(trace_file, 'r') as f:
+                    for line in f:
+                        try:
+                            event = json.loads(line)
+                            if event.get("Type") == "TestConfiguring":
+                                config_data["TestFile"] = event.get("TestFile", "UNKNOWN")
+                                config_data["RandomSeed"] = str(event.get("RandomSeed", "UNKNOWN"))
+                                config_data["BuggifyEnabled"] = str(event.get("BuggifyEnabled", "UNKNOWN"))
+                                config_data["FaultInjectionEnabled"] = str(event.get("FaultInjectionEnabled", "UNKNOWN"))
+                                config_data["JoshuaSeed"] = event.get("JoshuaSeed", "UNKNOWN")
+                                # Found it - return immediately
+                                return config_data
+                        except json.JSONDecodeError:
+                            continue
+            elif trace_file.suffix == ".xml":
+                # Parse XML trace file (simpler approach for XML)
+                with open(trace_file, 'r') as f:
+                    content = f.read()
+                    # Look for TestConfiguring event in XML
+                    if 'TestConfiguring' in content:
+                        import re
+                        # Extract attributes using regex
+                        test_file_match = re.search(r'TestFile="([^"]*)"', content)
+                        random_seed_match = re.search(r'RandomSeed="([^"]*)"', content)
+                        buggify_match = re.search(r'BuggifyEnabled="([^"]*)"', content)
+                        fault_injection_match = re.search(r'FaultInjectionEnabled="([^"]*)"', content)
+                        joshua_seed_match = re.search(r'JoshuaSeed="([^"]*)"', content)
+
+                        if test_file_match:
+                            config_data["TestFile"] = test_file_match.group(1)
+                        if random_seed_match:
+                            config_data["RandomSeed"] = random_seed_match.group(1)
+                        if buggify_match:
+                            config_data["BuggifyEnabled"] = buggify_match.group(1)
+                        if fault_injection_match:
+                            config_data["FaultInjectionEnabled"] = fault_injection_match.group(1)
+                        if joshua_seed_match:
+                            config_data["JoshuaSeed"] = joshua_seed_match.group(1)
+
+                        if config_data:
+                            return config_data
+        except Exception as e:
+            # If trace file is corrupt or unreadable, continue to next file
+            print(f"Warning: Could not parse trace file {trace_file}: {e}", file=sys.stderr)
+            continue
+
+    return config_data
+
+
+def decorate_summary(out: SummaryTree, test_file: Path, seed: int, buggify: bool, temp_path: Path | None = None):
     """Sometimes a test can crash before ProgramStart is written to the traces. These
     tests are then hard to reproduce (they can be reproduced through TestHarness but
     require the user to run in the joshua docker container). To account for this we
-    will write the necessary information into the attributes if it is missing."""
+    will write the necessary information into the attributes if it is missing.
+
+    If temp_path is provided and test appears to have crashed (missing attributes),
+    we'll try to parse the trace files for TestConfiguring event to get accurate config.
+    """
+    # Check if we need to look for config in trace files
+    needs_trace_parsing = (
+        temp_path is not None and
+        ("TestFile" not in out.attributes or
+         "RandomSeed" not in out.attributes or
+         "BuggifyEnabled" not in out.attributes or
+         "FaultInjectionEnabled" not in out.attributes)
+    )
+
+    print(f"DEBUG: decorate_summary called, temp_path={temp_path}, needs_trace_parsing={needs_trace_parsing}", file=sys.stderr)
+    print(f"DEBUG: out.attributes keys: {list(out.attributes.keys())}", file=sys.stderr)
+
+    if needs_trace_parsing:
+        # Try to get config from trace files first
+        trace_config = parse_test_config_from_traces(temp_path)
+        print(f"DEBUG: trace_config result: {trace_config}", file=sys.stderr)
+        if trace_config:
+            print(f"INFO: Recovered test config from trace files for crashed test", file=sys.stderr)
+            if "TestFile" not in out.attributes and "TestFile" in trace_config:
+                out.attributes["TestFile"] = trace_config["TestFile"]
+            if "RandomSeed" not in out.attributes and "RandomSeed" in trace_config:
+                out.attributes["RandomSeed"] = trace_config["RandomSeed"]
+            if "BuggifyEnabled" not in out.attributes and "BuggifyEnabled" in trace_config:
+                out.attributes["BuggifyEnabled"] = trace_config["BuggifyEnabled"]
+            if "FaultInjectionEnabled" not in out.attributes and "FaultInjectionEnabled" in trace_config:
+                out.attributes["FaultInjectionEnabled"] = trace_config["FaultInjectionEnabled"]
+            if "JoshuaSeed" in trace_config:
+                out.attributes["JoshuaSeed"] = trace_config["JoshuaSeed"]
+
+    # Fall back to defaults if still missing
     if "TestFile" not in out.attributes:
         out.attributes["TestFile"] = str(test_file)
     if "RandomSeed" not in out.attributes:
         out.attributes["RandomSeed"] = str(seed)
     if "BuggifyEnabled" not in out.attributes:
         out.attributes["BuggifyEnabled"] = "1" if buggify else "0"
+    if "FaultInjectionEnabled" not in out.attributes:
+        # Default to "1" (enabled) to match fdbserver default behavior
+        out.attributes["FaultInjectionEnabled"] = "1"
 
 
 class TestRunner:
@@ -602,49 +758,49 @@ class TestRunner:
         """Backup trace files before determinism check to preserve initial run traces."""
         temp_dir = config.run_temp_dir / str(self.uid)
         trace_files = list(temp_dir.glob("trace.*.json"))
-        
+
         if not trace_files:
             return
-            
+
         # Create backup directory for initial run traces
         backup_dir = temp_dir / f"trace_backup_{seed}"
         backup_dir.mkdir(exist_ok=True)
-        
+
         # Move trace files to backup (not copy) to clear the main directory
         for trace_file in trace_files:
             shutil.move(trace_file, backup_dir / trace_file.name)
-            
+
         print(f"Moved {len(trace_files)} trace files to backup {backup_dir}", file=sys.stderr)
 
     def restore_trace_files(self, seed: int):
         """Restore trace files after determinism check for analysis."""
         temp_dir = config.run_temp_dir / str(self.uid)
         backup_dir = temp_dir / f"trace_backup_{seed}"
-        
+
         if not backup_dir.exists():
             return
-            
+
         # Create analysis directory structure
         analysis_dir = temp_dir / f"determinism_analysis_{self.uid}"
         analysis_dir.mkdir(exist_ok=True)
-        
+
         initial_run_dir = analysis_dir / "initial_run"
         determinism_check_dir = analysis_dir / "determinism_check"
-        
+
         initial_run_dir.mkdir(exist_ok=True)
         determinism_check_dir.mkdir(exist_ok=True)
-        
+
         # Get initial trace names before moving them
         initial_trace_names = {f.name for f in backup_dir.glob("trace.*.json")}
-        
+
         # Move backed up traces to initial_run directory
         for trace_file in backup_dir.glob("trace.*.json"):
             shutil.move(trace_file, initial_run_dir / trace_file.name)
-        
+
         # Move ONLY the determinism check trace files to determinism_check directory
         # These are the NEW files from the determinism check run
         current_traces = list(temp_dir.glob("trace.*.json"))
-        
+
         for trace_file in current_traces:
             # Only move files that are NOT duplicates of the initial run
             if trace_file.name not in initial_trace_names:
@@ -666,10 +822,10 @@ class TestRunner:
                 else:
                     # Shouldn't happen, but move it anyway
                     shutil.move(trace_file, determinism_check_dir / trace_file.name)
-        
+
         # Clean up backup directory
         shutil.rmtree(backup_dir)
-        
+
         # Create analysis instructions
         readme_file = analysis_dir / "README.txt"
         with open(readme_file, 'w') as f:
@@ -682,7 +838,7 @@ class TestRunner:
             f.write(f"- determinism_check/: Trace files from the determinism check (second run only)\n\n")
             f.write(f"To analyze the determinism failure:\n")
             f.write(f"python3 contrib/TestHarness2/analyze_determinism_failure.py {initial_run_dir} {determinism_check_dir}\n\n")
-        
+
         print(f"Determinism check failed. Analysis files created in {analysis_dir}", file=sys.stderr)
 
     def _run_joshua_logtool_for_test(self, test_run):
@@ -690,18 +846,18 @@ class TestRunner:
         print(f"DEBUG: _run_joshua_logtool_for_test called for test {test_run.uid}", file=sys.stderr)
         print(f"DEBUG: test_run.summary.is_negative_test = {test_run.summary.is_negative_test}", file=sys.stderr)
         print(f"DEBUG: test_run.summary.ok() = {test_run.summary.ok()}", file=sys.stderr)
-        
+
         force_joshua_logtool = os.getenv("TH_FORCE_JOSHUA_LOGTOOL", "false").lower() in ("true", "1", "yes")
         archive_logs_on_failure = os.getenv("TH_ARCHIVE_LOGS_ON_FAILURE", "false").lower() in ("true", "1", "yes")
         enable_joshua_logtool = os.getenv("TH_ENABLE_JOSHUA_LOGTOOL", "false").lower() in ("true", "1", "yes")
-        
+
         print(f"DEBUG: TH_FORCE_JOSHUA_LOGTOOL = {force_joshua_logtool}", file=sys.stderr)
         print(f"DEBUG: TH_ARCHIVE_LOGS_ON_FAILURE = {archive_logs_on_failure}", file=sys.stderr)
         print(f"DEBUG: TH_ENABLE_JOSHUA_LOGTOOL = {enable_joshua_logtool}", file=sys.stderr)
-        
+
         if not test_run.summary.is_negative_test and (not test_run.summary.ok() or force_joshua_logtool):
             print(f"DEBUG: Conditions met for joshua_logtool execution", file=sys.stderr)
-            
+
             if not archive_logs_on_failure or not enable_joshua_logtool:
                 print(f"DEBUG: joshua_logtool skipped - archive_logs_on_failure={archive_logs_on_failure}, enable_joshua_logtool={enable_joshua_logtool}", file=sys.stderr)
                 child = SummaryTree("JoshuaLogTool")
@@ -771,18 +927,18 @@ class TestRunner:
             )
             result = result and run.success
             test_picker.add_time(test_files[0], run.run_time, run.summary.out)
-            decorate_summary(run.summary.out, file, seed + count, run.buggify_enabled)
+            decorate_summary(run.summary.out, file, seed + count, run.buggify_enabled, run.temp_path)
             if (
                 unseed_check
                 and run.summary.unseed is not None
                 and run.summary.unseed >= 0
             ):
                 run.summary.out.append(run.summary.list_simfdb())
-            
+
             # Run joshua_logtool for regular test failures (non-determinism)
             if not result:
                 self._run_joshua_logtool_for_test(run)
-            
+
             run.summary.out.dump(sys.stdout)
             if not result:
                 return False
@@ -794,7 +950,7 @@ class TestRunner:
             ):
                 # Backup trace files before determinism check
                 self.backup_trace_files(seed + count)
-                
+
                 run2 = TestRun(
                     binary,
                     file.absolute(),
@@ -808,17 +964,17 @@ class TestRunner:
                 )
                 test_picker.add_time(file, run2.run_time, run.summary.out)
                 decorate_summary(
-                    run2.summary.out, file, seed + count, run.buggify_enabled
+                    run2.summary.out, file, seed + count, run.buggify_enabled, run2.temp_path
                 )
                 result = result and run2.success
 
                 # Organize trace files for analysis if determinism check failed
                 if not result:
                     self.restore_trace_files(seed + count)
-                    
+
                     # Run joshua_logtool after file organization for determinism failures
                     self._run_joshua_logtool_for_test(run2)
-                
+
                 # Dump XML output after joshua_logtool has been called
                 run2.summary.out.dump(sys.stdout)
 
@@ -834,7 +990,7 @@ class TestRunner:
         )
         test_files = self.test_picker.choose_test()
         success = self.run_tests(test_files, seed, self.test_picker)
-        
+
         # Check if we should preserve logs on failure
         archive_logs_on_failure = os.getenv("TH_ARCHIVE_LOGS_ON_FAILURE", "false").lower() in ("true", "1", "yes")
         if config.clean_up and (success or not archive_logs_on_failure):
@@ -842,5 +998,5 @@ class TestRunner:
             shutil.rmtree(config.run_temp_dir / str(self.uid))
         elif not success and archive_logs_on_failure:
             print(f"DEBUG: Preserving logs due to TH_ARCHIVE_LOGS_ON_FAILURE=true", file=sys.stderr)
-        
+
         return success

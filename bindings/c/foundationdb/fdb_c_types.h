@@ -35,7 +35,6 @@ typedef struct FDB_future FDBFuture;
 typedef struct FDB_result FDBResult;
 typedef struct FDB_cluster FDBCluster;
 typedef struct FDB_database FDBDatabase;
-typedef struct FDB_tenant FDBTenant;
 typedef struct FDB_transaction FDBTransaction;
 
 typedef int fdb_error_t;

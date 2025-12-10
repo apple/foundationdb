@@ -40,7 +40,6 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/TLogInterface.h"
-#include "fdbserver/TenantCache.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/MockDataDistributor.h"
@@ -468,8 +467,6 @@ public:
 	Promise<Void> auditStorageInitialized;
 	bool auditStorageInitStarted;
 
-	Optional<Reference<TenantCache>> ddTenantCache;
-
 	// monitor DD configuration change
 	Promise<Version> configChangeWatching;
 	Future<Void> onConfigChange;
@@ -615,7 +612,7 @@ public:
 	}
 
 	// Initialize the required internal states of DataDistributor from system metadata. It's necessary before
-	// DataDistributor start working. Doesn't include initialization of optional components, like TenantCache, DDQueue,
+	// DataDistributor start working. Doesn't include initialization of optional components, like DDQueue,
 	// Tracker, TeamCollection. The components should call its own ::init methods.
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
 		loop {
@@ -977,8 +974,6 @@ public:
 	}
 
 	Future<Void> initDDConfigWatch();
-
-	Future<Void> initTenantCache();
 };
 
 Future<Void> DataDistributor::initDDConfigWatch() {
@@ -996,13 +991,6 @@ Future<Void> DataDistributor::initDDConfigWatch() {
 	                     });
 
 	return success(configChangeWatching.getFuture());
-}
-
-Future<Void> DataDistributor::initTenantCache() {
-	// SOMEDAY: support tenant cache in MockDD
-	ASSERT(!txnProcessor->isMocked());
-	ddTenantCache = makeReference<TenantCache>(txnProcessor->context(), ddId);
-	return ddTenantCache.get()->build();
 }
 
 inline void addAuditToAuditMap(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
@@ -2633,10 +2621,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 
-			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED || SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
-				wait(self->initTenantCache());
-			}
-
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
 			self->bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(self->ddId);
@@ -2680,7 +2664,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
 			                                       .shards = &shards,
 			                                       .trackerCancelled = &self->context->trackerCancelled,
-			                                       .ddTenantCache = self->ddTenantCache,
 			                                       .usableRegions = self->configuration.usableRegions });
 			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
 			                                                                 self->initData,
@@ -2717,23 +2700,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    "DDQueue",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
-
-			if (self->ddTenantCache.present()) {
-				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorTenantMap(),
-				                                    "DDTenantCacheMonitor",
-				                                    self->ddId,
-				                                    &normalDDQueueErrors()));
-			}
-			if (self->ddTenantCache.present() && SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
-				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorStorageQuota(),
-				                                    "StorageQuotaTracker",
-				                                    self->ddId,
-				                                    &normalDDQueueErrors()));
-				actors.push_back(reportErrorsExcept(self->ddTenantCache.get()->monitorStorageUsage(),
-				                                    "StorageUsageTracker",
-				                                    self->ddId,
-				                                    &normalDDQueueErrors()));
-			}
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			self->context->primaryTeamCollection = makeReference<DDTeamCollection>(DDTeamCollectionInitParams{
@@ -3352,14 +3318,6 @@ GetStorageWigglerStateReply getStorageWigglerStates(Reference<DataDistributor> s
 			std::tie(reply.remote, reply.lastStateChangeRemote) =
 			    self->teamCollection->teamCollections[1]->getStorageWigglerState();
 		}
-	}
-	return reply;
-}
-
-TenantsOverStorageQuotaReply getTenantsOverStorageQuota(Reference<DataDistributor> self) {
-	TenantsOverStorageQuotaReply reply;
-	if (self->ddTenantCache.present() && SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
-		reply.tenants = self->ddTenantCache.get()->getTenantsOverQuota();
 	}
 	return reply;
 }
@@ -5056,9 +5014,6 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 					continue;
 				}
 				actors.add(auditStorage(self, req));
-			}
-			when(TenantsOverStorageQuotaRequest req = waitNext(di.tenantsOverStorageQuota.getFuture())) {
-				req.reply.send(getTenantsOverStorageQuota(self));
 			}
 		}
 	} catch (Error& err) {

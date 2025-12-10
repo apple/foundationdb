@@ -24,6 +24,8 @@
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// TODO: explain purpose of this workload. Obviously simulation is aimed at correctness,
+// not performance, so a workload literally named Performance has some explaining to do.
 struct PerformanceWorkload : TestWorkload {
 	static constexpr auto NAME = "Performance";
 
@@ -137,7 +139,7 @@ struct PerformanceWorkload : TestWorkload {
 		TestSpec spec("PerformanceSetup"_sr, false, false);
 		spec.options = options;
 		spec.phases = TestWorkload::SETUP;
-		DistributedTestResults results = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
+		DistributedTestResults results = wait(runWorkload(cx, testers, spec));
 
 		return Void();
 	}
@@ -172,7 +174,7 @@ struct PerformanceWorkload : TestWorkload {
 				TestSpec spec("PerformanceRun"_sr, false, false);
 				spec.phases = TestWorkload::EXECUTION | TestWorkload::METRICS;
 				spec.options = options;
-				DistributedTestResults r = wait(runWorkload(cx, self->testers, spec, Optional<TenantName>()));
+				DistributedTestResults r = wait(runWorkload(cx, self->testers, spec));
 				results = r;
 			} catch (Error& e) {
 				TraceEvent("PerformanceRunError")

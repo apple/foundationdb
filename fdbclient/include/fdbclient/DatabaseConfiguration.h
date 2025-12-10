@@ -257,8 +257,6 @@ struct DatabaseConfiguration {
 	// Storage Migration Type
 	StorageMigrationType storageMigrationType;
 
-	TenantMode tenantMode;
-
 	EncryptionAtRestMode encryptionAtRestMode;
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList, const LocalityData& locality) const;

@@ -36,7 +36,6 @@ void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
 void forceLinkSimKmsConnectorTests();
 void forceLinkIThreadPoolTests();
-void forceLinkTokenSignTests();
 void forceLinkJsonWebKeySetTests();
 void forceLinkVersionVectorTests();
 void forceLinkRESTClientTests();
@@ -113,7 +112,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkMutationLogReaderTests();
 		forceLinkSimKmsConnectorTests();
 		forceLinkIThreadPoolTests();
-		forceLinkTokenSignTests();
 		forceLinkJsonWebKeySetTests();
 		forceLinkVersionVectorTests();
 		forceLinkRESTClientTests();

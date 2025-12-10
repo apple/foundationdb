@@ -123,7 +123,6 @@ public:
 };
 
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
-	const TenantInfo tenant;
 	const Key key;
 	const Optional<Value> value;
 
@@ -134,8 +133,7 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const Optional<UID> debugID;
 	const UseProvisionalProxies useProvisionalProxies;
 
-	WatchParameters(TenantInfo tenant,
-	                Key key,
+	WatchParameters(Key key,
 	                Optional<Value> value,
 	                Version version,
 	                TagSet tags,
@@ -143,7 +141,7 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	                TaskPriority taskID,
 	                Optional<UID> debugID,
 	                UseProvisionalProxies useProvisionalProxies)
-	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanContext(spanContext), taskID(taskID),
+	  : key(key), value(value), version(version), tags(tags), spanContext(spanContext), taskID(taskID),
 	    debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
 };
 
@@ -207,24 +205,17 @@ public:
 		                                           lockAware,
 		                                           internal,
 		                                           apiVersion.version(),
-		                                           switchable,
-		                                           defaultTenant));
+		                                           switchable));
 		cx->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(cx->clientInfo),
 		                       std::addressof(cx->clientInfo->get()));
 		return cx;
 	}
 
-	Optional<KeyRangeLocationInfo> getCachedLocation(const TenantInfo& tenant,
-	                                                 const KeyRef&,
-	                                                 Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const TenantInfo& tenant,
-	                        const KeyRangeRef&,
-	                        std::vector<KeyRangeLocationInfo>&,
-	                        int limit,
-	                        Reverse reverse);
+	Optional<KeyRangeLocationInfo> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::False);
+	bool getCachedLocations(const KeyRangeRef&, std::vector<KeyRangeLocationInfo>&, int limit, Reverse reverse);
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
-	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
-	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRangeRef& keys);
+	void invalidateCache(const KeyRef& key, Reverse isBackward = Reverse::False);
+	void invalidateCache(const KeyRangeRef& keys);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
@@ -248,7 +239,6 @@ public:
 	// Otherwise, ask GRVProxy for the up-to-date health metrics.
 	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
-	// Pass a valid `trState` with `hasTenant() == true` to make the function tenant-aware.
 	Future<StorageMetrics> getStorageMetrics(
 	    KeyRange const& keys,
 	    int shardLimit,
@@ -291,23 +281,23 @@ public:
 
 	// watch map operations
 
-	// Gets the watch metadata per tenant id and key
-	Reference<WatchMetadata> getWatchMetadata(int64_t tenantId, KeyRef key) const;
+	// Gets the watch metadata
+	Reference<WatchMetadata> getWatchMetadata(KeyRef key) const;
 
-	// Refreshes the watch metadata. If the same watch is used (this is determined by the tenant id and the key), the
+	// Refreshes the watch metadata. If the same watch is used, the
 	// metadata will be updated.
 	void setWatchMetadata(Reference<WatchMetadata> metadata);
 
 	// Removes the watch metadata
 	// If removeReferenceCount is set to be true, the corresponding WatchRefCount record is removed, too.
-	void deleteWatchMetadata(int64_t tenant, KeyRef key, bool removeReferenceCount = false);
+	void deleteWatchMetadata(KeyRef key, bool removeReferenceCount = false);
 
 	// Increases reference count to the given watch. Returns the number of references to the watch.
-	int32_t increaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
+	int32_t increaseWatchRefCount(KeyRef key, const Version& version);
 
 	// Decreases reference count to the given watch. If the reference count is dropped to 0, the watch metadata will be
 	// removed. Returns the number of references to the watch.
-	int32_t decreaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
+	int32_t decreaseWatchRefCount(KeyRef key, const Version& version);
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
@@ -359,8 +349,7 @@ public:
 	                         LockAware,
 	                         IsInternal = IsInternal::True,
 	                         int _apiVersion = ApiVersion::LATEST_VERSION,
-	                         IsSwitchable = IsSwitchable::False,
-	                         Optional<TenantName> defaultTenant = Optional<TenantName>());
+	                         IsSwitchable = IsSwitchable::False);
 
 	explicit DatabaseContext(const Error& err);
 
@@ -383,10 +372,6 @@ public:
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::False };
-
-	// The tenant used when none is specified for a transaction. Ordinarily this is unspecified, in which case the raw
-	// key-space is used.
-	Optional<TenantName> defaultTenant;
 
 	struct VersionRequest {
 		SpanContext spanContext;
@@ -482,8 +467,6 @@ public:
 	Counter transactionKeyServerLocationRequests;
 	Counter transactionKeyServerLocationRequestsCompleted;
 	Counter transactionStatusRequests;
-	Counter transactionTenantLookupRequests;
-	Counter transactionTenantLookupRequestsCompleted;
 	Counter transactionsTooOld;
 	Counter transactionsFutureVersions;
 	Counter transactionsNotCommitted;
@@ -613,21 +596,12 @@ public:
 	                            Version readVersion,
 	                            VersionVector& latestCommitVersion);
 
-	TenantMode getTenantMode() const {
-		CODE_PROBE(clientInfo->get().grvProxies.empty() || clientInfo->get().grvProxies[0].provisional,
-		           "Accessing tenant mode in provisional ClientDBInfo",
-		           probe::decoration::rare);
-		return clientInfo->get().tenantMode;
-	}
-
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
 
 	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
-
-	Future<int64_t> lookupTenant(TenantName tenant);
 
 	// Get client-side status information as a JSON string with the following schema:
 	// { "Healthy" : <overall health status: true or false>,
@@ -670,7 +644,7 @@ public:
 	void updateBackoff(const Error& err);
 
 private:
-	using WatchMapKey = std::pair<int64_t, Key>;
+	using WatchMapKey = Key;
 	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
 	using WatchMapValue = Reference<WatchMetadata>;
 	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;

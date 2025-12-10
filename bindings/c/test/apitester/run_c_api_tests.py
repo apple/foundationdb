@@ -156,7 +156,6 @@ class TestConfig:
     def __init__(self, test_file):
         config = toml.load(test_file)
         server_config = config.get("server", [{}])[0]
-        self.tenants_enabled = server_config.get("tenants_enabled", True)
         self.enable_encryption_at_rest = server_config.get(
             "enable_encryption_at_rest", False
         )
@@ -183,7 +182,6 @@ def run_test(args, test_file):
     with TempCluster(
         args.build_dir,
         config.num_processes,
-        enable_tenants=config.tenants_enabled,
         enable_encryption_at_rest=config.enable_encryption_at_rest,
         tls_config=tls_config,
     ) as cluster:

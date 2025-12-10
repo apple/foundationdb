@@ -20,11 +20,9 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/KeyBackedTypes.actor.h" // for key backed map codecs for tss mapping
-#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/Tenant.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -85,9 +83,8 @@ public:
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
-	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_),
+	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_),
+	    provisionalCommitProxy(provisionalCommitProxy_),
 	    accumulativeChecksumIndex(getCommitProxyAccumulativeChecksumIndex(proxyCommitData_.commitProxyIndex)),
 	    acsBuilder(proxyCommitData_.acsBuilder), epoch(proxyCommitData_.epoch), rangeLock(proxyCommitData_.rangeLock) {
 		if (encryptMode.isEncryptionEnabled()) {
@@ -157,9 +154,6 @@ private:
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
-	std::map<int64_t, TenantName>* tenantMap = nullptr;
-	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
-	std::set<int64_t>* lockedTenants = nullptr;
 	EncryptionAtRestMode encryptMode;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
@@ -536,7 +530,6 @@ private:
 		    commit,
 		    committedVersion,
 		    p.keyVersion,
-		    tenantMap,
 		    provisionalCommitProxy);
 	}
 
@@ -760,109 +753,6 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore", probe::decoration::rare);
-	}
-
-	void checkSetTenantMapPrefix(MutationRef m) {
-		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
-		if (m.param1.startsWith(prefix)) {
-			TenantMapEntry tenantEntry;
-			if (initialCommit) {
-				CODE_PROBE(true, "Recovering tenant from txn state store");
-				TenantMapEntryTxnStateStore txnStateStoreEntry = TenantMapEntryTxnStateStore::decode(m.param2);
-				tenantEntry.setId(txnStateStoreEntry.id);
-				tenantEntry.tenantName = txnStateStoreEntry.tenantName;
-				tenantEntry.tenantLockState = txnStateStoreEntry.tenantLockState;
-			} else {
-				tenantEntry = TenantMapEntry::decode(m.param2);
-			}
-
-			if (tenantMap) {
-				ASSERT(version != invalidVersion);
-
-				TraceEvent("CommitProxyInsertTenant", dbgid)
-				    .detail("Tenant", tenantEntry.tenantName)
-				    .detail("Id", tenantEntry.id)
-				    .detail("Version", version);
-
-				(*tenantMap)[tenantEntry.id] = tenantEntry.tenantName;
-				if (tenantNameIndex) {
-					(*tenantNameIndex)[tenantEntry.tenantName] = tenantEntry.id;
-				}
-			}
-			if (lockedTenants) {
-				if (tenantEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED) {
-					CODE_PROBE(true, "ApplyMetadataMutation unlock tenant");
-					lockedTenants->erase(tenantEntry.id);
-				} else {
-					CODE_PROBE(true, "ApplyMetadataMutation lock tenant");
-					lockedTenants->insert(tenantEntry.id);
-				}
-			}
-
-			if (!initialCommit) {
-				txnStateStore->set(KeyValueRef(m.param1, tenantEntry.toTxnStateStoreEntry().encode()));
-			}
-
-			// For now, this goes to all storage servers.
-			// Eventually, we can have each SS store tenants that apply only to the data stored on it.
-			if (toCommit) {
-				std::set<Tag> allTags;
-				auto allServers = txnStateStore->readRange(serverTagKeys).get();
-				for (auto& kv : allServers) {
-					allTags.insert(decodeServerTagValue(kv.value));
-				}
-
-				toCommit->addTags(allTags);
-
-				MutationRef privatized = m;
-				privatized.clearChecksumAndAccumulativeIndex();
-				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-
-				if (acsBuilder != nullptr) {
-					updateMutationWithAcsAndAddMutationToAcsBuilder(
-					    acsBuilder, privatized, allTags, accumulativeChecksumIndex, epoch.get(), version, dbgid);
-				}
-				writeMutation(privatized);
-			}
-
-			CODE_PROBE(true, "Tenant added to map");
-		}
-	}
-
-	template <bool Versioned>
-	void reportMetaclusterRegistration(ValueRef value) {
-		MetaclusterRegistrationEntryImpl<Versioned> entry = MetaclusterRegistrationEntryImpl<Versioned>::decode(value);
-
-		TraceEvent("SetMetaclusterRegistration", dbgid)
-		    .detail("ClusterType", entry.clusterType)
-		    .detail("MetaclusterID", entry.metaclusterId)
-		    .detail("MetaclusterName", entry.metaclusterName)
-		    .detail("ClusterID", entry.id)
-		    .detail("ClusterName", entry.name)
-		    .detail("MetaclusterVersion", entry.version);
-	}
-
-	void checkSetMetaclusterRegistration(MutationRef m) {
-		if (m.param1 == metacluster::metadata::metaclusterRegistration().key) {
-			if (MetaclusterRegistrationEntry::allowUnsupportedRegistrationWrites) {
-				reportMetaclusterRegistration<false>(m.param2);
-			} else {
-				CODE_PROBE(true, "Writing metacluster registration with version validation");
-				reportMetaclusterRegistration<true>(m.param2);
-			}
-
-			Optional<Value> value =
-			    txnStateStore->readValue(metacluster::metadata::unversionedMetaclusterRegistration().key).get();
-			if (!initialCommit) {
-				txnStateStore->set(KeyValueRef(m.param1, m.param2));
-			}
-
-			if (!value.present() || value.get() != m.param2) {
-				confChange = true;
-			}
-
-			CODE_PROBE(true, "Metacluster registration set");
-		}
 	}
 
 	void checkClearRangeLockPrefix(KeyRangeRef range) {
@@ -1269,103 +1159,6 @@ private:
 		confChange = true;
 	}
 
-	void checkClearTenantMapPrefix(KeyRangeRef range) {
-		KeyRangeRef subspace = TenantMetadata::tenantMap().subspace;
-		if (subspace.intersects(range)) {
-			if (tenantMap && tenantNameIndex) {
-				ASSERT(version != invalidVersion);
-
-				Optional<int64_t> startId = 0;
-				Optional<int64_t> endId;
-
-				if (range.begin > subspace.begin) {
-					startId = TenantIdCodec::lowerBound(range.begin.removePrefix(subspace.begin));
-				}
-				if (range.end.startsWith(subspace.begin)) {
-					endId = TenantIdCodec::lowerBound(range.end.removePrefix(subspace.begin));
-				}
-
-				TraceEvent("CommitProxyEraseTenants", dbgid)
-				    .detail("BeginTenant", startId)
-				    .detail("EndTenant", endId)
-				    .detail("Version", version);
-
-				auto startItr = startId.present() ? tenantMap->lower_bound(startId.get()) : tenantMap->end();
-				auto endItr = endId.present() ? tenantMap->lower_bound(endId.get()) : tenantMap->end();
-
-				auto itr = startItr;
-				while (itr != endItr) {
-					tenantNameIndex->erase(itr->second);
-					itr++;
-				}
-
-				tenantMap->erase(startItr, endItr);
-
-				if (lockedTenants) {
-					auto startItr = startId.present()
-					                    ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), startId.get())
-					                    : lockedTenants->end();
-					auto endItr = endId.present()
-					                  ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), endId.get())
-					                  : lockedTenants->end();
-					CODE_PROBE(startItr != endItr, "Deleting locked tenant");
-					lockedTenants->erase(startItr, endItr);
-				}
-			}
-
-			if (!initialCommit) {
-				txnStateStore->clear(range);
-			}
-
-			// For now, this goes to all storage servers.
-			// Eventually, we can have each SS store tenants that apply only to the data stored on it.
-			if (toCommit) {
-				std::set<Tag> allTags;
-				auto allServers = txnStateStore->readRange(serverTagKeys).get();
-				for (auto& kv : allServers) {
-					allTags.insert(decodeServerTagValue(kv.value));
-				}
-
-				toCommit->addTags(allTags);
-
-				MutationRef privatized;
-				privatized.clearChecksumAndAccumulativeIndex();
-				privatized.type = MutationRef::ClearRange;
-				privatized.param1 = systemKeys.begin.withSuffix(std::max(range.begin, subspace.begin), arena);
-				if (range.end < subspace.end) {
-					privatized.param2 = systemKeys.begin.withSuffix(range.end, arena);
-				} else {
-					privatized.param2 = systemKeys.begin.withSuffix(subspace.begin).withSuffix("\xff\xff"_sr, arena);
-				}
-				if (acsBuilder != nullptr) {
-					updateMutationWithAcsAndAddMutationToAcsBuilder(
-					    acsBuilder, privatized, allTags, accumulativeChecksumIndex, epoch.get(), version, dbgid);
-				}
-				writeMutation(privatized);
-			}
-
-			CODE_PROBE(true, "Tenant cleared from map");
-		}
-	}
-
-	void checkClearMetaclusterRegistration(KeyRangeRef range) {
-		if (range.contains(metacluster::metadata::metaclusterRegistration().key)) {
-			TraceEvent("ClearMetaclusterRegistration", dbgid);
-
-			Optional<Value> value =
-			    txnStateStore->readValue(metacluster::metadata::metaclusterRegistration().key).get();
-			if (!initialCommit) {
-				txnStateStore->clear(singleKeyRange(metacluster::metadata::metaclusterRegistration().key));
-			}
-
-			if (value.present()) {
-				confChange = true;
-			}
-
-			CODE_PROBE(true, "Metacluster registration cleared");
-		}
-	}
-
 	void checkClearMiscRangeKeys(KeyRangeRef range) {
 		if (initialCommit) {
 			return;
@@ -1418,8 +1211,6 @@ public:
 				checkSetWriteRecoverKey(m);
 				checkSetMinRequiredCommitVersionKey(m);
 				checkSetVersionEpochKey(m);
-				checkSetTenantMapPrefix(m);
-				checkSetMetaclusterRegistration(m);
 				checkSetOtherKeys(m);
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
 				KeyRangeRef range(m.param1, m.param2);
@@ -1437,8 +1228,6 @@ public:
 				checkClearTssMappingKeys(m, range);
 				checkClearTssQuarantineKeys(m, range);
 				checkClearVersionEpochKeys(m, range);
-				checkClearTenantMapPrefix(range);
-				checkClearMetaclusterRegistration(range);
 				checkClearMiscRangeKeys(range);
 			}
 		}

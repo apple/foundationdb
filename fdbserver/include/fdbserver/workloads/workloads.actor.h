@@ -58,7 +58,6 @@ struct WorkloadContext {
 	int64_t sharedRandomNumber;
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 	Reference<IClusterConnectionRecord> ccr;
-	Optional<TenantName> defaultTenant;
 	std::vector<KeyRange> rangesToCheck; // for urgent consistency checker
 
 	WorkloadContext();
@@ -360,10 +359,7 @@ public:
 	std::vector<std::string> disabledFailureInjectionWorkloads;
 };
 
-ACTOR Future<DistributedTestResults> runWorkload(Database cx,
-                                                 std::vector<TesterInterface> testers,
-                                                 TestSpec spec,
-                                                 Optional<TenantName> defaultTenant);
+ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
 
 void logMetrics(std::vector<PerfMetric> metrics);
 

@@ -43,12 +43,9 @@ namespace fdb_cli {
 constexpr char msgTypeKey[] = "type";
 constexpr char msgClusterKey[] = "cluster";
 constexpr char msgClusterTypeKey[] = "cluster_type";
-constexpr char msgMetaclusterName[] = "metacluster_name";
-constexpr char msgMetaclusterKey[] = "metacluster";
 constexpr char msgDataClustersKey[] = "data_clusters";
 constexpr char msgCapacityKey[] = "capacity";
 constexpr char msgAllocatedKey[] = "allocated";
-constexpr char msgTenantIdPrefixKey[] = "tenant_id_prefix";
 constexpr char msgErrorKey[] = "error";
 
 struct CommandHelp {
@@ -102,19 +99,16 @@ struct CommandFactory {
 };
 
 // Special keys used by fdbcli commands
-// advanceversion
+
 extern const KeyRef advanceVersionSpecialKey;
-// consistencycheck
 extern const KeyRef consistencyCheckSpecialKey;
-// coordinators
 extern const KeyRef clusterDescriptionSpecialKey;
 extern const KeyRef configDBSpecialKey;
 extern const KeyRef coordinatorsAutoSpecialKey;
 extern const KeyRef coordinatorsProcessSpecialKey;
-// datadistribution
 extern const KeyRef ddModeSpecialKey;
 extern const KeyRef ddIgnoreRebalanceSpecialKey;
-// exclude/include
+
 extern const KeyRangeRef excludedServersSpecialKeyRange;
 extern const KeyRangeRef failedServersSpecialKeyRange;
 extern const KeyRangeRef excludedLocalitySpecialKeyRange;
@@ -124,31 +118,26 @@ extern const KeyRef failedForceOptionSpecialKey;
 extern const KeyRef excludedLocalityForceOptionSpecialKey;
 extern const KeyRef failedLocalityForceOptionSpecialKey;
 extern const KeyRangeRef exclusionInProgressSpecialKeyRange;
-// lock/unlock
+
 extern const KeyRef lockSpecialKey;
-// maintenance
+
 extern const KeyRangeRef maintenanceSpecialKeyRange;
 extern const KeyRef ignoreSSFailureSpecialKey;
-// setclass
+
 extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
-// Other special keys
+
 inline const KeyRef errorMsgSpecialKey = "\xff\xff/error_message"_sr;
 inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
-// help functions (Copied from fdbcli.actor.cpp)
 
-// get all workers' info
 ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
-// get all storages' interface
 ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                               std::map<std::string, StorageServerInterface>* interfaces);
 
-// compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
-// print the usage of the specified command
 void printUsage(StringRef command);
-// print the long description of the specified command
 void printLongDesc(StringRef command);
+
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
@@ -223,9 +212,6 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 
-// metacluster command
-Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
-
 // blobrestore command
 ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
 // hotrange command
@@ -261,12 +247,6 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                        Reference<ITransaction> tr,
                                        std::vector<StringRef> tokens,
                                        std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
-// tenant command
-Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
-// tenant command compatibility layer
-Future<bool> tenantCommandForwarder(Reference<IDatabase> db, std::vector<StringRef> tokens);
-// tenantgroup command
-Future<bool> tenantGroupCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command

@@ -548,6 +548,7 @@ void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<KeyRef
 	if (prefix.present()) {
 		range = range.withPrefix(prefix.get(), req.arena);
 	}
+
 	std::vector<KeyRef> points = getSplitPoints(range, req.chunkSize, prefix);
 
 	reply.splitPoints.append_deep(reply.splitPoints.arena(), points.data(), points.size());

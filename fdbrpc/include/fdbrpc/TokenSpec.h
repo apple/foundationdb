@@ -22,6 +22,9 @@
 #define FDBRPC_TOKEN_SPEC_H
 #pragma once
 
+// TODO(gglass): is this stuff needed?
+#if 0
+
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -75,5 +78,7 @@ struct BasicTokenSpec {
 };
 
 } // namespace authz::jwt
+
+#endif
 
 #endif /*FDBRPC_TOKEN_SPEC_H*/

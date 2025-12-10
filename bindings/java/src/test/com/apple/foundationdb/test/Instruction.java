@@ -33,13 +33,11 @@ import com.apple.foundationdb.tuple.Tuple;
 class Instruction extends Stack {
 	private static final String SUFFIX_SNAPSHOT = "_SNAPSHOT";
 	private static final String SUFFIX_DATABASE = "_DATABASE";
-	private static final String SUFFIX_TENANT = "_TENANT";
 
-	final String op;
+    final String op;
 	final Tuple tokens;
 	final Context context;
 	final boolean isDatabase;
-	final boolean isTenant;
 	final boolean isSnapshot;
 	final Transaction tr;
 	final ReadTransaction readTr;
@@ -52,21 +50,12 @@ class Instruction extends Stack {
 
 		String fullOp = tokens.getString(0);
 		boolean isDatabaseLocal = fullOp.endsWith(SUFFIX_DATABASE);
-		isTenant = fullOp.endsWith(SUFFIX_TENANT);
 		isSnapshot = fullOp.endsWith(SUFFIX_SNAPSHOT);
 
 		if(isDatabaseLocal) {
 			tr = null;
 			readTr = null;
 			op = fullOp.substring(0, fullOp.length() - SUFFIX_DATABASE.length());
-		}
-		else if(isTenant) {
-			tr = null;
-			readTr = null;
-			op = fullOp.substring(0, fullOp.length() - SUFFIX_TENANT.length());
-			if (!context.tenant.isPresent()) {
-				isDatabaseLocal = true;
-			}
 		}
 		else if(isSnapshot) {
 			tr = context.getCurrentTransaction();
@@ -81,12 +70,12 @@ class Instruction extends Stack {
 
 		isDatabase = isDatabaseLocal;
 
-		tcx = isDatabase ? context.db : isTenant ? context.tenant.get() : tr;
-		readTcx = isDatabase ? context.db : isTenant ? context.tenant.get() : readTr;
+		tcx = isDatabase ? context.db : tr;
+		readTcx = isDatabase ? context.db : readTr;
 	}
 
 	boolean replaceTransaction(Transaction newTr) {
-		if(!isDatabase && !isTenant) {
+	        if(!isDatabase) {
 			context.replaceTransaction(newTr);
 			return true;
 		}
@@ -95,7 +84,7 @@ class Instruction extends Stack {
 	}
 
 	boolean replaceTransaction(Transaction oldTr, Transaction newTr) {
-		if(!isDatabase && !isTenant) {
+		if(!isDatabase) {
 			return context.replaceTransaction(oldTr, newTr);
 		}
 

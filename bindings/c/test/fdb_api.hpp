@@ -466,7 +466,6 @@ template <typename VarTraits>
 class TypedFuture : public Future {
 	friend class Future;
 	friend class Transaction;
-	friend class Tenant;
 
 	using SelfType = TypedFuture<VarTraits>;
 	using Future::Future;
@@ -520,7 +519,6 @@ inline KeySelector lastLessOrEqual(KeyRef key, int offset = 0) {
 
 class Transaction {
 	friend class Database;
-	friend class Tenant;
 	std::shared_ptr<native::FDBTransaction> tr;
 
 	explicit Transaction(native::FDBTransaction* tr_raw) {
@@ -673,8 +671,7 @@ public:
 	}
 };
 
-// Handle this as an abstract class instead of interface to preserve lifetime of fdb objects owned by Tenant and
-// Database.
+// Handle this as an abstract class instead of interface to preserve lifetime of fdb objects owned by Database.
 class IDatabaseOps {
 public:
 	virtual ~IDatabaseOps() = default;
@@ -682,69 +679,7 @@ public:
 	virtual Transaction createTransaction() = 0;
 };
 
-class Tenant final : public IDatabaseOps {
-	friend class Database;
-	std::shared_ptr<native::FDBTenant> tenant;
-
-	explicit Tenant(native::FDBTenant* tenant_raw) {
-		if (tenant_raw)
-			tenant = std::shared_ptr<native::FDBTenant>(tenant_raw, &native::fdb_tenant_destroy);
-	}
-
-public:
-	// This should only be mutated by API versioning
-	static inline CharsRef tenantManagementMapPrefix = "\xff\xff/management/tenant/map/";
-
-	Tenant(const Tenant&) noexcept = default;
-	Tenant& operator=(const Tenant&) noexcept = default;
-	Tenant() noexcept : tenant(nullptr) {}
-
-	void atomic_store(Tenant other) { std::atomic_store(&tenant, other.tenant); }
-
-	Tenant atomic_load() {
-		Tenant retVal;
-		retVal.tenant = std::atomic_load(&tenant);
-		return retVal;
-	}
-
-	static void createTenant(Transaction tr, BytesRef name) {
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, BytesRef());
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
-		tr.set(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))), BytesRef());
-	}
-
-	static void deleteTenant(Transaction tr, BytesRef name) {
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, BytesRef());
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
-		tr.clear(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))));
-	}
-
-	static TypedFuture<future_var::ValueRef> getTenant(Transaction tr, BytesRef name) {
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS, BytesRef());
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
-		return tr.get(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))), false);
-	}
-
-	Transaction createTransaction() override {
-		auto tx_native = static_cast<native::FDBTransaction*>(nullptr);
-		auto err = Error(native::fdb_tenant_create_transaction(tenant.get(), &tx_native));
-		if (err)
-			throwError("Failed to create transaction: ", err);
-		return Transaction(tx_native);
-	}
-
-	TypedFuture<future_var::Int64> getId() {
-		if (!tenant)
-			throw std::runtime_error("getId() from null tenant");
-		return native::fdb_tenant_get_id(tenant.get());
-	}
-};
-
 class Database : public IDatabaseOps {
-	friend class Tenant;
 	std::shared_ptr<native::FDBDatabase> db;
 
 public:
@@ -792,16 +727,6 @@ public:
 		}
 	}
 
-	Tenant openTenant(BytesRef name) {
-		if (!db)
-			throw std::runtime_error("openTenant from null database");
-		auto tenant_native = static_cast<native::FDBTenant*>(nullptr);
-		if (auto err = Error(native::fdb_database_open_tenant(db.get(), name.data(), name.size(), &tenant_native))) {
-			throwError(fmt::format("Failed to open tenant with name '{}': ", toCharsRef(name)), err);
-		}
-		return Tenant(tenant_native);
-	}
-
 	Transaction createTransaction() override {
 		if (!db)
 			throw std::runtime_error("create_transaction from null database");
@@ -816,9 +741,6 @@ public:
 };
 
 inline Error selectApiVersionNothrow(int version) {
-	if (version < FDB_API_VERSION_TENANT_API_RELEASED) {
-		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
-	}
 	return Error(native::fdb_select_api_version(version));
 }
 
@@ -829,9 +751,6 @@ inline void selectApiVersion(int version) {
 }
 
 inline Error selectApiVersionCappedNothrow(int version) {
-	if (version < FDB_API_VERSION_TENANT_API_RELEASED) {
-		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
-	}
 	return Error(
 	    native::fdb_select_api_version_impl(version, std::min(native::fdb_get_max_api_version(), FDB_API_VERSION)));
 }

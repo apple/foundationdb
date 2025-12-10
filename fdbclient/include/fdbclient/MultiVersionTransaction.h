@@ -39,7 +39,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef struct FDB_result FDBResult;
 	typedef struct FDB_cluster FDBCluster;
 	typedef struct FDB_database FDBDatabase;
-	typedef struct FDB_tenant FDBTenant;
 	typedef struct FDB_transaction FDBTransaction;
 
 	typedef int fdb_error_t;
@@ -109,10 +108,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*createDatabaseFromConnectionString)(const char* connectionString, FDBDatabase** db);
 
 	// Database
-	fdb_error_t (*databaseOpenTenant)(FDBDatabase* database,
-	                                  uint8_t const* tenantName,
-	                                  int tenantNameLength,
-	                                  FDBTenant** outTenant);
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
 	fdb_error_t (*databaseSetOption)(FDBDatabase* database,
 	                                 FDBDatabaseOption option,
@@ -137,12 +132,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
 
 	FDBFuture* (*databaseGetClientStatus)(FDBDatabase* db);
-
-	// Tenant
-	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
-
-	FDBFuture* (*tenantGetId)(FDBTenant* tenant);
-	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
@@ -345,11 +334,6 @@ public:
 	ThreadFuture<Void> onError(Error const& e) override;
 	void reset() override;
 
-	Optional<TenantName> getTenant() override {
-		ASSERT(false);
-		throw internal_error();
-	}
-
 	void debugTrace(BaseTraceEvent&& event) override;
 	void debugPrint(std::string const& message) override;
 
@@ -359,27 +343,6 @@ public:
 private:
 	const Reference<FdbCApi> api;
 	FdbCApi::FDBTransaction* const tr;
-};
-
-class DLTenant : public ITenant, ThreadSafeReferenceCounted<DLTenant> {
-public:
-	DLTenant(Reference<FdbCApi> api, FdbCApi::FDBTenant* tenant) : api(api), tenant(tenant) {}
-	~DLTenant() override {
-		if (tenant) {
-			api->tenantDestroy(tenant);
-		}
-	}
-
-	Reference<ITransaction> createTransaction() override;
-
-	ThreadFuture<int64_t> getId() override;
-
-	void addref() override { ThreadSafeReferenceCounted<DLTenant>::addref(); }
-	void delref() override { ThreadSafeReferenceCounted<DLTenant>::delref(); }
-
-private:
-	const Reference<FdbCApi> api;
-	FdbCApi::FDBTenant* tenant;
 };
 
 // An implementation of IDatabase that wraps a database object created on an externally loaded client library.
@@ -396,7 +359,6 @@ public:
 
 	ThreadFuture<Void> onReady();
 
-	Reference<ITenant> openTenant(TenantNameRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
@@ -463,7 +425,6 @@ private:
 };
 
 class MultiVersionDatabase;
-class MultiVersionTenant;
 
 // An implementation of ITransaction that wraps a transaction created either locally or through a dynamically loaded
 // external client. When needed (e.g on cluster version change), the MultiVersionTransaction can automatically replace
@@ -471,7 +432,6 @@ class MultiVersionTenant;
 class MultiVersionTransaction : public ITransaction, ThreadSafeReferenceCounted<MultiVersionTransaction> {
 public:
 	MultiVersionTransaction(Reference<MultiVersionDatabase> db,
-	                        Optional<Reference<MultiVersionTenant>> tenant,
 	                        UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions);
 
 	~MultiVersionTransaction() override;
@@ -538,8 +498,6 @@ public:
 	ThreadFuture<Void> onError(Error const& e) override;
 	void reset() override;
 
-	Optional<TenantName> getTenant() override;
-
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTransaction>::delref(); }
 
@@ -554,7 +512,6 @@ public:
 
 private:
 	const Reference<MultiVersionDatabase> db;
-	const Optional<Reference<MultiVersionTenant>> tenant;
 	ThreadSpinLock lock;
 
 	struct TransactionInfo {
@@ -642,50 +599,6 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 
 class MultiVersionApi;
 
-// An implementation of ITenant that wraps a tenant created either locally or through a dynamically loaded
-// external client. The wrapped ITenant is automatically changed when the MultiVersionDatabase used to create
-// it connects with a different version.
-class MultiVersionTenant final : public ITenant, ThreadSafeReferenceCounted<MultiVersionTenant> {
-public:
-	MultiVersionTenant(Reference<MultiVersionDatabase> db, TenantNameRef tenantName);
-	~MultiVersionTenant() override;
-
-	Reference<ITransaction> createTransaction() override;
-
-	template <class T, class... Args>
-	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITenant::*func)(Args...), Args&&... args);
-
-	ThreadFuture<int64_t> getId() override;
-
-	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
-	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
-
-	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
-	// IDatabase object that is currently interacting with the cluster.
-	struct TenantState : ThreadSafeReferenceCounted<TenantState> {
-		TenantState(Reference<MultiVersionDatabase> db, TenantNameRef tenantName);
-
-		// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
-		// to open transactions via an AsyncVar.
-		void updateTenant();
-
-		// Cleans up local state to break reference cycles
-		void close();
-
-		Reference<ThreadSafeAsyncVar<Reference<ITenant>>> tenantVar;
-		const TenantName tenantName;
-
-		Reference<MultiVersionDatabase> db;
-
-		Mutex tenantLock;
-		ThreadFuture<Void> tenantUpdater;
-
-		bool closed;
-	};
-
-	Reference<TenantState> tenantState;
-};
-
 class ClusterConnectionRecord {
 private:
 	enum class Type { FILE, CONNECTION_STRING };
@@ -751,7 +664,6 @@ public:
 
 	~MultiVersionDatabase() override;
 
-	Reference<ITenant> openTenant(TenantNameRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;

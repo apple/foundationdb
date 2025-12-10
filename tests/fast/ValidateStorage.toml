@@ -1,7 +1,6 @@
 [configuration]
 config = 'triple'
 generateFearless = true
-allowDefaultTenant = false
 machineCount = 18
 
 [[knobs]]
