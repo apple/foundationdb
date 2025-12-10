@@ -320,6 +320,7 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot-interval", SO_REQ_SEP },
 	{ OPT_MOD_ACTIVE_INTERVAL, "--active-snapshot-interval", SO_REQ_SEP },
+	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1132,7 +1133,10 @@ static void printBackupUsage(bool devhelp) {
 	       "                 This option indicates to the backup agent that it will only need to record the log files, "
 	       "and ignore the range files.\n");
 	printf("  --encryption-key-file"
-	       "                 The AES-256-GCM key in the provided file is used for encrypting backup files.\n");
+	       "                 The AES-256-GCM key in the provided file is used for encrypting backup files.\n"
+	       "                 For modify operations, need to pass encryption key file only if Backup container URL is "
+	       "changed to "
+	       "re-encrypt all future backup files. \n");
 	printf("  --encrypt-files 0/1"
 	       "                 If passed, this argument will allow the user to override the database encryption state to "
 	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
@@ -3021,6 +3025,7 @@ struct BackupModifyOptions {
 	Optional<std::string> proxy;
 	Optional<int> snapshotIntervalSeconds;
 	Optional<int> activeSnapshotIntervalSeconds;
+	Optional<std::string> encryptionKeyFile;
 	bool hasChanges() const {
 		return destURL.present() || snapshotIntervalSeconds.present() || activeSnapshotIntervalSeconds.present();
 	}
@@ -3033,22 +3038,6 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 	}
 
 	state KeyBackedTag tag = makeBackupTag(tagName);
-
-	state Reference<IBackupContainer> bc;
-	if (options.destURL.present()) {
-		bc = openBackupContainer(exeBackup.toString().c_str(), options.destURL.get(), options.proxy, {});
-		try {
-			wait(timeoutError(bc->create(), 30));
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
-				throw;
-			fprintf(stderr,
-			        "ERROR: Could not create backup container at '%s': %s\n",
-			        options.destURL.get().c_str(),
-			        e.what());
-			throw backup_error();
-		}
-	}
 
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
 	loop {
@@ -3084,6 +3073,59 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 				throw backup_error();
 			}
 
+			if (options.destURL.present()) {
+				state Reference<IBackupContainer> prevContainer =
+				    wait(config.backupContainer().getOrThrow(tr, Snapshot::False, backup_invalid_info()));
+				std::string prevURL = prevContainer->getURL();
+				std::string newURL = options.destURL.get();
+				if (!prevURL.empty() && prevURL.back() == '/') {
+					prevURL.pop_back();
+				}
+				if (!newURL.empty() && newURL.back() == '/') {
+					newURL.pop_back();
+				}
+
+				if (prevURL == newURL) {
+					if ((options.encryptionKeyFile.present() && !prevContainer->getEncryptionKeyFileName().present()) ||
+					    (!options.encryptionKeyFile.present() && prevContainer->getEncryptionKeyFileName().present()) ||
+					    (options.encryptionKeyFile.present() && prevContainer->getEncryptionKeyFileName().present() &&
+					     options.encryptionKeyFile.get() != prevContainer->getEncryptionKeyFileName().get())) {
+						fprintf(stderr,
+						        "Destination URL matches the existing backup URL for tag '%s', "
+						        "but the encryption key file does not match.\n",
+						        tagName.c_str());
+						throw backup_error();
+					}
+				}
+
+				state Reference<IBackupContainer> bc;
+				TraceEvent("ModifyBackupSetNewContainer")
+				    .detail("TagName", tagName)
+				    .detail("DestURL", options.destURL.get())
+				    .detail("EncryptionKeyFile",
+				            options.encryptionKeyFile.present() ? options.encryptionKeyFile.get() : "None");
+				bc = openBackupContainer(
+				    exeBackup.toString().c_str(), options.destURL.get(), options.proxy, options.encryptionKeyFile);
+				try {
+					wait(timeoutError(bc->create(), 30));
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled)
+						throw;
+					fprintf(stderr,
+					        "ERROR: Could not create backup container at '%s': %s\n",
+					        options.destURL.get().c_str(),
+					        e.what());
+					throw backup_error();
+				}
+
+				config.backupContainer().set(tr, bc);
+				wait(bc->writeEncryptionMetadata());
+			} else if (options.encryptionKeyFile.present()) {
+				fprintf(stdout,
+				        " Encryption key file specified without a new destination URL."
+				        " The encryption key will not be used.\n");
+			}
+
 			if (options.snapshotIntervalSeconds.present()) {
 				config.snapshotIntervalSeconds().set(tr, options.snapshotIntervalSeconds.get());
 			}
@@ -3093,10 +3135,6 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 				config.snapshotTargetEndVersion().set(tr,
 				                                      begin + ((int64_t)options.activeSnapshotIntervalSeconds.get() *
 				                                               CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
-			}
-
-			if (options.destURL.present()) {
-				config.backupContainer().set(tr, bc);
 			}
 
 			wait(tr->commit());
@@ -3855,6 +3893,7 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_ENCRYPTION_KEY_FILE:
 				encryptionKeyFile = args->OptionArg();
+				modifyOptions.encryptionKeyFile = encryptionKeyFile;
 				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
@@ -4157,8 +4196,8 @@ int main(int argc, char* argv[]) {
 		    .detail("Proxy", proxy.orDefault(""))
 		    .trackLatest("ProgramStart");
 
-		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents
-		// are logged. This thread will eventually run the network, so call it now.
+		// Ordinarily, this is done when the network is run. However, network thread should be set before
+		// TraceEvents are logged. This thread will eventually run the network, so call it now.
 		TraceEvent::setNetworkThread();
 
 		// Sets up blob credentials, including one from the environment FDB_BLOB_CREDENTIALS.
@@ -4255,7 +4294,8 @@ int main(int argc, char* argv[]) {
 			case BackupType::START: {
 				if (!initCluster())
 					return FDB_EXIT_ERROR;
-				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
+				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually
+				// writeable.
 				openBackupContainer(argv[0], destinationContainer, proxy, encryptionKeyFile);
 				f = stopAfter(submitBackup(db,
 				                           destinationContainer,
@@ -4540,8 +4580,8 @@ int main(int argc, char* argv[]) {
 				printf("[TODO][ERROR] FastRestore does not support RESTORE_ABORT yet!\n");
 				throw restore_error();
 				//					f = stopAfter( map(ba.abortRestore(db, KeyRef(tagName)),
-				//[tagName](FileBackupAgent::ERestoreState s) -> Void { 						printf("Tag: %s  State:
-				//%s\n", tagName.c_str(),
+				//[tagName](FileBackupAgent::ERestoreState s) -> Void { 						printf("Tag: %s
+				// State: %s\n", tagName.c_str(),
 				// FileBackupAgent::restoreStateText(s).toString().c_str()); 						return Void();
 				//					}) );
 				break;
@@ -4551,9 +4591,8 @@ int main(int argc, char* argv[]) {
 				// If no tag is specifically provided then print all tag status, don't just use "default"
 				if (tagProvided)
 					tag = tagName;
-				//					f = stopAfter( map(ba.restoreStatus(db, KeyRef(tag)), [](std::string s) -> Void {
-				//						printf("%s\n", s.c_str());
-				//						return Void();
+				//					f = stopAfter( map(ba.restoreStatus(db, KeyRef(tag)), [](std::string s) -> Void
+				//{ 						printf("%s\n", s.c_str()); 						return Void();
 				//					}) );
 				break;
 			default:
