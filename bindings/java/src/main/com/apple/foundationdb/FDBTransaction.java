@@ -778,17 +778,6 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
-	protected void finalize() throws Throwable {
-		try {
-			checkUnclosed("Transaction");
-			close();
-		}
-		finally {
-			super.finalize();
-		}
-	}
-
-	@Override
 	protected void closeInternal(long cPtr) {
 		if(eventKeeper!=null){
 			eventKeeper.increment(Events.JNI_CALL);
