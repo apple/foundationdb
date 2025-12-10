@@ -26,15 +26,27 @@ trap "exit 1" HUP INT PIPE QUIT TERM
 trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
+# Has a hard 30-second timeout to prevent CTest timeouts.
 function cleanup {
+  echo "$(date -Iseconds) cleanup: starting (with 30s hard timeout)"
+  start_cleanup_watchdog 30
+  
+  echo "$(date -Iseconds) cleanup: shutting down FDB cluster"
   shutdown_fdb_cluster
+  
   if [[ -d "${SCRATCH_DIR}" ]]; then
+    echo "$(date -Iseconds) cleanup: removing scratch dir: ${SCRATCH_DIR}"
     rm -rf "${SCRATCH_DIR}"
   fi
+  
   # Clean up encryption key file
   if [[ -n "${ENCRYPTION_KEY_FILE:-}" ]] && [[ -f "${ENCRYPTION_KEY_FILE}" ]]; then
+    echo "$(date -Iseconds) cleanup: removing encryption key file: ${ENCRYPTION_KEY_FILE}"
     rm -f "${ENCRYPTION_KEY_FILE}"
   fi
+  
+  echo "$(date -Iseconds) cleanup: complete"
+  cancel_cleanup_watchdog
 }
 
 # Resolve passed in reference to an absolute path.

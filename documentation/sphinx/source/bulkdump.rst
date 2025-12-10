@@ -17,26 +17,26 @@ Each subrange of data is dumped to a file at a version. All data within a file i
 Input and output
 ----------------
 When a user wants to start a bulkdump job, the user provides the range to dump and the path root of where to dump the data.
-The range can be any subrange within the user key space (i.e. " " ~ "\\xff").
-Dumping the data of the system key space and special key space (i.e. "\\xff" ~ "\\xff\\xff\\xff") is not allowed.
+The range can be any subrange within the user key space (i.e. ``""`` ~ ``\\xff``).
+Dumping the data of the system key space and special key space (i.e. ``\\xff`` ~ ``\\xff\\xff\\xff``) is not allowed.
 The path root can be either a `blobstore url <https://apple.github.io/foundationdb/backups.html#backup-urls>`_ or a path on the file system.
 Given the input range, if the range is large, the range is split into smaller subranges.
 Each subrange is dumped at a version to a folder. In particular, the folder is organized as following:
 
-1. (rootLocal)/(relativeFolder)/(dumpVersion)-manifest.txt (must have)
-2. (rootLocal)/(relativeFolder)/(dumpVersion)-data.sst (omitted if the subrange is empty)
-3. (rootLocal)/(relativeFolder)/(dumpVersion)-sample.sst (omitted if data size is too small to have a sample)
+1. :file:`{rootLocal}/{relativeFolder}/{dumpVersion}-manifest.txt` (must have)
+2. :file:`{rootLocal}/{relativeFolder}/{dumpVersion}-data.sst` (omitted if the subrange is empty)
+3. :file:`{rootLocal}/{relativeFolder}/{dumpVersion}-sample.sst` (omitted if data size is too small to have a sample)
 
-The (relativeFolder) is defined as (JobId)/(TaskId)/(BatchId). 
-The (dumpVersion) is the version of the data stored in the (dumpVersion)-data.sst file.
+The ``relativeFolder`` is defined as :file:`{JobId}/{TaskId}/{BatchId}`.
+The ``dumpVersion`` is the version of the data stored in the :file:`{dumpVersion}-data.sst` file.
 At any time, a FDB cluster can have at most one bulkdump job running. 
 A bulkdump job is partitioned into tasks per subrange and subranges never span a shard boundary.
 When dumping the subrange of a task, the data is collected in batches. All key-value pairs of a batch are collected at the same version.
-Above all, (JobId) is the unique ID of a job. (TaskId) is the unique ID of a task. (BatchId) is the unique ID of a batch.
+Above all, ``JobId`` is the unique ID of a job. ``TaskId`` is the unique ID of a task. ``BatchId`` is the unique ID of a batch.
 All tasks's data files of the same job are located at the same Job folder named by the JobId.
 A task can consist of multiple batches, where each batch has a distinct version. However, all the data within a single batch shares the same version.
 
-Each (relativeFolder) corresponds to exactly one subrange with exactly one manifest file. 
+Each ``relativeFolder`` corresponds to exactly one subrange with exactly one manifest file.
 The manifest file includes all necessary information for loading the data from the folder to a FDB cluster.
 The manifest file content includes the following information:
 
@@ -47,7 +47,7 @@ The manifest file content includes the following information:
 5. Datasize of the data in bytes
 6. Bytes sampling setting (when a cluster loads the folder, if the setting mismatches, the loading cluster does bytes sampling by itself; Otherwise, the loading cluster directly uses the sample file of the folder).
 
-In the job folder, there is a global manifest file named 'job-manifest.txt' that lists all ranges and their corresponding manifest files.
+In the job folder, there is a global manifest file named :file:`job-manifest.txt` that lists all ranges and their corresponding manifest files.
 When loading a cluster, users can use this global manifest to rebuild the data.
 
 How to use?
@@ -60,9 +60,11 @@ Clearing a job is achieved by erasing the entire user range space of the bulkdum
 
 FDBCLI provides following interfaces to do the operations:
 
-1. Submit a job: bulkdump dump (BeginKey) (EndKey) (RootFolder) // ...where RootFolder is a local directory on the filesystem or a blobstore URL. 
+1. Submit a job: bulkdump dump (BeginKey) (EndKey) (RootFolder) // ...where RootFolder is a local directory on the filesystem or a blobstore URL.
 2. Clear a job: bulkdump clear (JobID)
 3. Enable the feature: bulkdump mode on \| off // "bulkdump mode" command prints the current value (on or off) of the mode.
+
+For usage examples, see :doc:`bulkload-user`.
 
 ManagementAPI provides following interfaces to do the operations:
 
@@ -76,7 +78,7 @@ Mechanisms
 
 Workflow
 --------
-- Users input a range by a transaction and this range is persisted to bulkdump metadata (with "\\xff/bulkDump/" prefix).
+- Users input a range by a transaction and this range is persisted to bulkdump metadata (with ``\\xff/bulkDump/`` prefix).
 - Bulkdump metadata is range-based.
 - DD observes this range to dump by reading from metadata.
 - DD partitions the range into smaller subranges according.
@@ -93,7 +95,7 @@ Invariant
 - Each data filename is the version indicating the version of the data read by the SS.
 - Each subrange always has one manifest file indicating the metadata information of the data, such as Range, Checksum (to be implemented later in a separate PR), and FilePath. 
 - In SS, we dump files at first and then write metadata in the system key space. If any phase is failed, DD will re-do the range. For each time SS writes the folder (locally or in BlobStore), the SS erases the folder at first.
-- A SS handles at most one dump task at a time (the parallelism is protected by the knob SS_SERVE_BULKDUMP_PARALLELISM. With current implementation, this knob is set to 1. However, we leave the flexibility of setting bulkdump parallelism at a SS here).
+- A SS handles at most one dump task at a time (the parallelism is protected by the knob ``SS_SERVE_BULKDUMP_PARALLELISM``. With current implementation, this knob is set to 1. However, we leave the flexibility of setting bulkdump parallelism at a SS here).
 - Each subrange does not necessarily have a byteSample file and data file which depends on the data size. A SS may be assigned a range but the range is empty.
 
 Failure handling
