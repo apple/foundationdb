@@ -376,6 +376,23 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_set_option(FDBDatabase* d,
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
                                                                          FDBTransaction** out_transaction);
 
+// Dummy versions of tenant-related functions are needed in the FDB C library
+// because 7.x python bindings always load these functions on startup.
+// (In 8.0+, users should not be invoking this deleted experimental
+// functionality directly.)
+typedef struct FDB_tenant FDBTenant;
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_open_tenant(FDBDatabase* d,
+                                                                  uint8_t const* tenant_name,
+                                                                  int tenant_name_length,
+                                                                  FDBTenant** out_tenant);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
+                                                                       FDBTransaction** out_transaction);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_get_id(FDBTenant* tenant);
+
+DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_reboot_worker(FDBDatabase* db,
                                                                    uint8_t const* address,
                                                                    int address_length,
