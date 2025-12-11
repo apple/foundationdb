@@ -20,6 +20,7 @@
 
 #ifndef FLOW_OPENNETWORK_H
 #define FLOW_OPENNETWORK_H
+#include <sys/types.h>
 #pragma once
 
 #include "flow/ProtocolVersion.h"
@@ -175,6 +176,17 @@ public:
 		enS3FaultInjector = 23,
 		COUNT // Add new fields before this enumerator
 	};
+
+	uint64_t randomCounter = 0;
+
+	int numberOfPhysicalDatacenters = 0;
+	int numberOfProcessPerMachine = 0;
+	int numberOfMachines = 0;
+	int numberOfDesiredCoordinators = 0;
+	bool useTLS = false;
+	bool useIPv6 = false;
+	bool useHostname = false;
+	uint8_t storageEngineType = 6;
 
 	virtual void longTaskCheck(const char* name) {}
 

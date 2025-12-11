@@ -20,6 +20,7 @@
 
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
+#include "flow/Buggify.h"
 #define BOOST_DATE_TIME_NO_LIB
 
 #include <algorithm>
@@ -2666,6 +2667,19 @@ int main(int argc, char* argv[]) {
 
 		int unseed = noUnseed ? -1 : deterministicRandom()->randomInt(0, 100001);
 		TraceEvent("ElapsedTime")
+		    .setMaxEventLength(-1)
+		    .setMaxFieldLength(-1)
+		    .detail("RandomCounter", g_network->randomCounter)
+		    .detail("NumberOfPhysicalDatacenters", g_network->numberOfPhysicalDatacenters)
+		    .detail("NumberOfProcessPerMachine", g_network->numberOfProcessPerMachine)
+		    .detail("NumberOfMachines", g_network->numberOfMachines)
+		    .detail("NumberOfDesiredCoordinators", g_network->numberOfDesiredCoordinators)
+		    .detail("StorageReplicaPolicy", g_simulator->storagePolicy->info())
+		    .detail("TLogReplicaPolicy", g_simulator->tLogPolicy->info())
+		    .detail("StorageEngineType", g_network->storageEngineType)
+		    .detail("UseHostname", g_network->useHostname)
+		    .detail("UseTLS", g_network->useTLS)
+		    .detail("UseIPv6", g_network->useIPv6)
 		    .detail("SimTime", now() - startNow)
 		    .detail("RealTime", timer() - start)
 		    .detail("RandomUnseed", unseed);

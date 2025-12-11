@@ -657,6 +657,17 @@ class Summary:
                     self.out.append(child)
             self.out.attributes["SimElapsedTime"] = attrs["SimTime"]
             self.out.attributes["RealElapsedTime"] = attrs["RealTime"]
+            self.out.attributes["RandomCounter"] = attrs["RandomCounter"]
+            self.out.attributes["NumberOfPhysicalDatacenters"] = attrs["NumberOfPhysicalDatacenters"]
+            self.out.attributes["NumberOfProcessPerMachine"] = attrs["NumberOfProcessPerMachine"]
+            self.out.attributes["NumberOfMachines"] = attrs["NumberOfMachines"]
+            self.out.attributes["NumberOfDesiredCoordinators"] = attrs["NumberOfDesiredCoordinators"]
+            self.out.attributes["StorageReplicaPolicy"] = attrs["StorageReplicaPolicy"]
+            self.out.attributes["TLogReplicaPolicy"] = attrs["TLogReplicaPolicy"]
+            self.out.attributes["StorageEngineType"] = attrs["StorageEngineType"]
+            self.out.attributes["UseHostname"] = attrs["UseHostname"]
+            self.out.attributes["UseTLS"] = attrs["UseTLS"]
+            self.out.attributes["UseIPv6"] = attrs["UseIPv6"]
             if self.unseed is not None:
                 self.out.attributes["RandomUnseed"] = str(self.unseed)
 

@@ -39,6 +39,9 @@ uint64_t DeterministicRandom::gen64() {
 	next ^= rng();
 	if (TRACE_SAMPLE())
 		TraceEvent(SevSample, "Random").log();
+	if (g_network != nullptr) {
+		g_network->randomCounter++;
+	}
 	return curr;
 }
 

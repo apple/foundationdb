@@ -228,6 +228,8 @@ public:
 
 	// private:
 
+	uint64_t randomCounter = 0;
+
 	ASIOReactor reactor;
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;

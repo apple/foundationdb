@@ -20,6 +20,7 @@
 
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
+#include <cstdint>
 #pragma once
 #include <algorithm>
 #include <string>
@@ -304,10 +305,12 @@ public:
 	                                           std::string service,
 	                                           Reference<HTTP::IRequestHandler> requestHandler) = 0;
 
-	int desiredCoordinators;
-	int physicalDatacenters;
-	int processesPerMachine;
-	int listenersPerProcess;
+	uint64_t randomCounter = 0;
+
+	int desiredCoordinators; // TOLOG
+	int physicalDatacenters; // TOLOG
+	int processesPerMachine; // TOLOG
+	int listenersPerProcess; // TOLOG
 
 	// We won't kill machines in this set, but we might reboot
 	// them.  This is a conservative mechanism to prevent the
@@ -317,12 +320,12 @@ public:
 
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	std::vector<std::string> extraDatabases;
-	Reference<IReplicationPolicy> storagePolicy;
-	Reference<IReplicationPolicy> tLogPolicy;
+	Reference<IReplicationPolicy> storagePolicy; // TOLOG
+	Reference<IReplicationPolicy> tLogPolicy; // TOLOG
 	int32_t tLogWriteAntiQuorum;
 	Optional<Standalone<StringRef>> primaryDcId;
 	Reference<IReplicationPolicy> remoteTLogPolicy;
-	int32_t usableRegions;
+	int32_t usableRegions; // TOLOG
 	bool quiesced = false;
 	std::string disablePrimary;
 	std::string disableRemote;
@@ -331,15 +334,15 @@ public:
 	bool allowLogSetKills;
 	Optional<Standalone<StringRef>> remoteDcId;
 	bool hasSatelliteReplication;
-	Reference<IReplicationPolicy> satelliteTLogPolicy;
+	Reference<IReplicationPolicy> satelliteTLogPolicy; // TOLOG
 	Reference<IReplicationPolicy> satelliteTLogPolicyFallback;
 	int32_t satelliteTLogWriteAntiQuorum;
 	int32_t satelliteTLogWriteAntiQuorumFallback;
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
-	TSSMode tssMode;
+	TSSMode tssMode; // TOLOG
 	std::map<NetworkAddress, bool> corruptWorkerMap;
-	ConfigDBType configDBType;
+	ConfigDBType configDBType; // TOLOG
 
 	// Used by workloads that perform reconfigurations
 	int testerCount;
@@ -352,7 +355,7 @@ public:
 	double connectionFailureEnableTime; // Last time connection failure is enabled.
 	double connectionFailureDisableTime = 0; // Latest time connection failure should be disabled.
 	bool disableTLogRecoveryFinish;
-	BackupAgentType backupAgents;
+	BackupAgentType backupAgents; // TOLOG
 	BackupAgentType drAgents;
 	bool willRestart = false;
 	bool restarted = false;

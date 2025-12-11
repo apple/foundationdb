@@ -48,6 +48,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
+#include "flow/Buggify.h"
 #include "flow/IRandom.h"
 #include "flow/MkCert.h"
 #include "flow/ProcessEvents.h"
@@ -1856,6 +1857,7 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 // Sets storage engine based on testConfig details
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	auto storageEngineType = chooseSimulationStorageEngine(testConfig, db.encryptionAtRestMode.isEncryptionEnabled());
+	g_network->storageEngineType = static_cast<uint8_t>(storageEngineType);
 	STORAGE_ENGINE_CONFIG_MAPPER.at(storageEngineType)(this);
 }
 
@@ -2333,6 +2335,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableRemoteKVS");
 	}
+	// TOLOG
 	auto configDBType = testConfig.getConfigDBType();
 	startingConfigString += DatabaseConfiguration::configureStringFromJSON(startingConfigJSON);
 
@@ -2361,6 +2364,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 	TraceEvent("SimulatorConfig").setMaxFieldLength(10000).detail("ConfigString", StringRef(startingConfigString));
 
+	// TOLOG
 	const int dataCenters = simconfig.datacenters;
 	const int machineCount = simconfig.machine_count;
 	const int coordinatorCount = simconfig.coordinators;
@@ -2370,6 +2374,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	bool assignClasses = machineCount - dataCenters > 4 && deterministicRandom()->random01() < 0.5;
 
 	// Use SSL 5% of the time
+	// TOLOG
 	bool sslEnabled = deterministicRandom()->random01() < 0.10;
 	bool sslOnly = sslEnabled && deterministicRandom()->coinflip();
 	bool isTLS = sslEnabled && sslOnly;
@@ -2378,11 +2383,13 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	CODE_PROBE(!sslEnabled, "SSL disabled");
 
 	// Use IPv6 25% of the time
+	// TOLOG
 	bool useIPv6 = deterministicRandom()->random01() < 0.25;
 	CODE_PROBE(useIPv6, "Use IPv6");
 	CODE_PROBE(!useIPv6, "Use IPv4");
 
 	// Use hostname 25% of the time, unless it is disabled
+	// TOLOG
 	bool useHostname = !testConfig.disableHostname && deterministicRandom()->random01() < 0.25;
 	CODE_PROBE(useHostname, "Use hostname");
 	CODE_PROBE(!useHostname, "Use IP address");
@@ -2398,6 +2405,14 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		        ? testConfig.extraDatabaseCount
 		        : 1;
 	}
+
+	g_network->numberOfDesiredCoordinators = coordinatorCount;
+	g_network->numberOfProcessPerMachine = processesPerMachine;
+	g_network->numberOfPhysicalDatacenters = dataCenters;
+	g_network->numberOfMachines = machineCount;
+	g_network->useTLS = isTLS;
+	g_network->useIPv6 = useIPv6;
+	g_network->useHostname = useHostname;
 
 	std::vector<NetworkAddress> coordinatorAddresses;
 	std::vector<Hostname> coordinatorHostnames;
@@ -2618,6 +2633,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			}
 
 			// Choose a machine class
+			// TOLOG
 			ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
 			if (assignClasses) {
 				if (assignedMachines < 4)
