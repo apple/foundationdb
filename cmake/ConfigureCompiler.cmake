@@ -521,7 +521,7 @@ else()
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
     # Graviton2 or later
     # https://github.com/aws/aws-graviton-gettting-started
-    add_compile_options($<${is_cxx_compile}:-march=armv8.2-a+crc+simd>)
+    add_compile_options($<${is_cxx_compile}:-march=armv8.2-a+lse+crc>)
   endif()
 
   if (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
