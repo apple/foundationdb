@@ -27,8 +27,8 @@ package fdb
 import "C"
 
 import (
+	"context"
 	"errors"
-	"runtime"
 )
 
 // ErrMultiVersionClientUnavailable is returned when the multi-version client API is unavailable.
@@ -92,6 +92,7 @@ func (opt DatabaseOptions) setOpt(code int, param []byte) error {
 // preferable to use the (Database).Transact method, which handles
 // automatically creating and committing a transaction with appropriate retry
 // behavior.
+// Close() must be called on the returned transaction to avoid a memory leak.
 func (d Database) CreateTransaction() (Transaction, error) {
 	var outt *C.FDBTransaction
 
@@ -100,10 +101,6 @@ func (d Database) CreateTransaction() (Transaction, error) {
 	}
 
 	t := &transaction{outt, d}
-	// transactions cannot be destroyed explicitly if any future is still potentially used
-	// thus the GC is used to figure out when all Go wrapper objects for futures have gone out of scope,
-	// making the transaction ready to be garbage-collected.
-	runtime.SetFinalizer(t, (*transaction).destroy)
 
 	return Transaction{t}, nil
 }
@@ -115,22 +112,22 @@ func (d Database) CreateTransaction() (Transaction, error) {
 // process address is the form of IP:Port pair without the :tls suffix if the cluster is running
 // with TLS enabled. The address can also be multiple processes addresses concated by a comma, e.g.
 // "IP1:Port,IP2:port", in this case the RebootWorker will reboot all provided addresses concurrently.
-func (d Database) RebootWorker(address string, checkFile bool, suspendDuration int) error {
+func (d Database) RebootWorker(ctx context.Context, address string, checkFile bool, suspendDuration int) error {
+	f := newFuture(C.fdb_database_reboot_worker(
+		d.ptr,
+		byteSliceToPtr([]byte(address)),
+		C.int(len(address)),
+		C.fdb_bool_t(boolToInt(checkFile)),
+		C.int(suspendDuration),
+	),
+	)
+	defer f.Close()
+
 	t := &futureInt64{
-		future: newFutureWithDb(
-			d.database,
-			nil,
-			C.fdb_database_reboot_worker(
-				d.ptr,
-				byteSliceToPtr([]byte(address)),
-				C.int(len(address)),
-				C.fdb_bool_t(boolToInt(checkFile)),
-				C.int(suspendDuration),
-			),
-		),
+		future: f,
 	}
 
-	dbVersion, err := t.Get()
+	dbVersion, err := t.Get(ctx)
 
 	if dbVersion == 0 {
 		return errors.New("failed to send reboot process request")
@@ -142,16 +139,19 @@ func (d Database) RebootWorker(address string, checkFile bool, suspendDuration i
 // GetClientStatus returns a JSON byte slice containing database client-side status information.
 // At the top level the report describes the status of the Multi-Version Client database - its initialization state, the protocol version, the available client versions; it also embeds the status of the actual version-specific database and within it the addresses of various FDB server roles the client is aware of and their connection status.
 // NOTE: ErrMultiVersionClientUnavailable will be returned if the Multi-Version client API was not enabled.
-func (d Database) GetClientStatus() ([]byte, error) {
+func (d Database) GetClientStatus(ctx context.Context) ([]byte, error) {
 	if apiVersion == 0 {
 		return nil, errAPIVersionUnset
 	}
 
+	f := newFuture(C.fdb_database_get_client_status(d.ptr))
+	defer f.Close()
+
 	st := &futureByteSlice{
-		future: newFutureWithDb(d.database, nil, C.fdb_database_get_client_status(d.ptr)),
+		future: f,
 	}
 
-	b, err := st.Get()
+	b, err := st.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -162,20 +162,52 @@ func (d Database) GetClientStatus() ([]byte, error) {
 	return b, nil
 }
 
-func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, err error) {
+func autoCancel(ctx context.Context, tr CancellableTransaction) chan<- struct{} {
+	exitCh := make(chan struct{})
+	// This goroutine ensures that as soon as context is canceled the FoundationDB transaction will be canceled as well;
+	// this can in turn cause FoundationDB's `transaction_canceled` errors.
+	go func() {
+		select {
+		case <-exitCh:
+			// transaction finished before any context cancellation was acknowledged
+			return
+		case <-ctx.Done():
+			// context cancellation happened before transaction finished
+			// NOTE: canceling the transaction does not mean that transaction state changes did not happen,
+
+			tr.Cancel()
+
+			return
+		}
+	}()
+
+	return exitCh
+}
+
+// retryable is responsible for retrying the wrapped function for as long as the returned error is retryable.
+// In case of a non-retryable error, it is returned and transaction is closed.
+func retryable(ctx context.Context, tr Transaction, wrapped func() (interface{}, error)) (ret interface{}, txClose func(), err error) {
+	// NOTE: 'autoCancel' must be called outside of the defer function, so that the goroutine is started
+	ch := autoCancel(ctx, tr)
+	defer close(ch)
+
 	for {
 		ret, err = wrapped()
-
-		// No error means success!
 		if err == nil {
+			// No error means success!
+			// Caller is responsible for closing transaction after finishing using any future created within the transaction
+			// This return value is always nil in case of errors
+			txClose = tr.Close
+
 			return
 		}
 
-		// Check if the error chain contains an
-		// fdb.Error
+		// Check if the error chain contains an fdb.Error
 		var ep Error
 		if errors.As(err, &ep) {
-			processedErr := onError(ep).Get()
+			f := tr.OnError(ep)
+			processedErr := f.Get(ctx)
+			f.Close()
 			var newEp Error
 			if !errors.As(processedErr, &newEp) || newEp.Code != ep.Code {
 				// override original error only if not an Error or code changed
@@ -187,6 +219,10 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 		// If OnError returns an error, then it's not
 		// retryable; otherwise take another pass at things
 		if err != nil {
+
+			// destroy transaction; this will cancel all futures created within it
+			tr.Close()
+
 			return
 		}
 	}
@@ -204,36 +240,37 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 // error.
 //
 // The transaction is retried if the error is or wraps a retryable Error.
-// The error is unwrapped.
 //
-// Do not return Future objects from the function provided to Transact. The
-// Transaction created by Transact may be finalized at any point after Transact
-// returns, resulting in the cancellation of any outstanding
-// reads. Additionally, any errors returned or panicked by the Future will no
-// longer be able to trigger a retry of the caller-provided function.
+// In case of success a transaction close function is returned and caller must
+// call it after all futures have been used.
+// Any errors returned or panicked by the Future outside of the Transact() call
+// will no longer be able to trigger a retry of the caller-provided function.
 //
 // See the Transactor interface for an example of using Transact with
 // Transaction and Database objects.
-func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{}, error) {
+func (d Database) Transact(ctx context.Context, f func(Transaction) (interface{}, error)) (interface{}, func(), error) {
 	tr, err := d.CreateTransaction()
-	// Any error here is non-retryable
 	if err != nil {
-		return nil, err
+		// Any error here is non-retryable
+		return nil, nil, err
 	}
 
 	wrapped := func() (ret interface{}, err error) {
 		defer panicToError(&err)
 
 		ret, err = f(tr)
-
-		if err == nil {
-			err = tr.Commit().Get()
+		if err != nil {
+			return
 		}
+
+		f := tr.Commit()
+		err = f.Get(ctx)
+		f.Close()
 
 		return
 	}
 
-	return retryable(wrapped, tr.OnError)
+	return retryable(ctx, tr, wrapped)
 }
 
 // ReadTransact runs a caller-provided function inside a retry loop, providing
@@ -247,23 +284,20 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // transaction or return the error.
 //
 // The transaction is retried if the error is or wraps a retryable Error.
-// The error is unwrapped.
-// Read transactions are never committed and destroyed automatically via GC,
-// once all their futures go out of scope.
+// Read transactions are never committed.
 //
-// Do not return Future objects from the function provided to ReadTransact. The
-// Transaction created by ReadTransact may be finalized at any point after
-// ReadTransact returns, resulting in the cancellation of any outstanding
-// reads. Additionally, any errors returned or panicked by the Future will no
-// longer be able to trigger a retry of the caller-provided function.
+// In case of success a transaction close function is returned and caller must
+// call it after all futures have been used.
+// Any errors returned or panicked by the Future outside of the Transact() call
+// will no longer be able to trigger a retry of the caller-provided function.
 //
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
-func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (interface{}, error) {
+func (d Database) ReadTransact(ctx context.Context, f func(ReadTransaction) (interface{}, error)) (interface{}, func(), error) {
 	tr, err := d.CreateTransaction()
 	if err != nil {
 		// Any error here is non-retryable
-		return nil, err
+		return nil, nil, err
 	}
 
 	wrapped := func() (ret interface{}, err error) {
@@ -271,13 +305,12 @@ func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (in
 
 		ret, err = f(tr)
 
-		// read-only transactions are not committed and will be destroyed automatically via GC,
-		// once all the futures go out of scope
+		// read-only transactions are not committed and will be destroyed automatically when Transaction's Close() is called
 
 		return
 	}
 
-	return retryable(wrapped, tr.OnError)
+	return retryable(ctx, tr, wrapped)
 }
 
 // Options returns a DatabaseOptions instance suitable for setting options
@@ -297,11 +330,12 @@ func (d Database) Options() DatabaseOptions {
 //
 // If readVersion is non-zero, the boundary keys as of readVersion will be
 // returned.
-func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion int64) ([]Key, error) {
+func (d Database) LocalityGetBoundaryKeys(ctx context.Context, er ExactRange, limit int, readVersion int64) ([]Key, error) {
 	tr, err := d.CreateTransaction()
 	if err != nil {
 		return nil, err
 	}
+	defer tr.Close()
 
 	if readVersion != 0 {
 		tr.SetReadVersion(readVersion)
@@ -316,7 +350,7 @@ func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion 
 		append(Key("\xFF/keyServers/"), ek.FDBKey()...),
 	}
 
-	kvs, err := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).GetSliceWithError()
+	kvs, err := tr.Snapshot().GetRange(ffer, RangeOptions{Limit: limit}).Get(ctx)
 	if err != nil {
 		return nil, err
 	}

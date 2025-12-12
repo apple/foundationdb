@@ -22,6 +22,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"strings"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
@@ -105,7 +106,7 @@ var createOps = map[string]bool{
 	"OPEN_SUBSPACE":   true,
 }
 
-func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, idx int, t fdb.Transactor, rt fdb.ReadTransactor) {
+func (de *DirectoryExtension) processOp(ctx context.Context, sm *StackMachine, op string, isDB bool, idx int, t fdb.Transactor, rt fdb.ReadTransactor) {
 	defer func() {
 		if r := recover(); r != nil {
 			sm.store(idx, []byte("DIRECTORY_ERROR"))
@@ -142,7 +143,7 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		if l != nil {
 			layer = l.([]byte)
 		}
-		d, err := de.cwd().CreateOrOpen(t, tupleToPath(tuples[0]), layer)
+		d, err := de.cwd().CreateOrOpen(ctx, t, tupleToPath(tuples[0]), layer)
 		if err != nil {
 			panic(err)
 		}
@@ -157,10 +158,10 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		p := sm.waitAndPop().item
 		var d directory.Directory
 		if p == nil {
-			d, err = de.cwd().Create(t, tupleToPath(tuples[0]), layer)
+			d, err = de.cwd().Create(ctx, t, tupleToPath(tuples[0]), layer)
 		} else {
 			// p.([]byte) itself may be nil, but CreatePrefix handles that appropriately
-			d, err = de.cwd().CreatePrefix(t, tupleToPath(tuples[0]), layer, p.([]byte))
+			d, err = de.cwd().CreatePrefix(ctx, t, tupleToPath(tuples[0]), layer, p.([]byte))
 		}
 		if err != nil {
 			panic(err)
@@ -173,7 +174,7 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		if l != nil {
 			layer = l.([]byte)
 		}
-		d, err := de.cwd().Open(rt, tupleToPath(tuples[0]), layer)
+		d, err := de.cwd().Open(ctx, rt, tupleToPath(tuples[0]), layer)
 		if err != nil {
 			panic(err)
 		}
@@ -188,14 +189,14 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		de.errorIndex = sm.waitAndPop().item.(int64)
 	case op == "MOVE":
 		tuples := sm.popTuples(2)
-		d, err := de.cwd().Move(t, tupleToPath(tuples[0]), tupleToPath(tuples[1]))
+		d, err := de.cwd().Move(ctx, t, tupleToPath(tuples[0]), tupleToPath(tuples[1]))
 		if err != nil {
 			panic(err)
 		}
 		de.store(d)
 	case op == "MOVE_TO":
 		tuples := sm.popTuples(1)
-		d, err := de.cwd().MoveTo(t, tupleToPath(tuples[0]))
+		d, err := de.cwd().MoveTo(ctx, t, tupleToPath(tuples[0]))
 		if err != nil {
 			panic(err)
 		}
@@ -208,8 +209,8 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		// doesn't end up committing the version key. (Other languages have
 		// separate remove() and remove_if_exists() so don't have this tricky
 		// issue).
-		_, err := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
-			ok, err := de.cwd().Remove(tr, path)
+		_, txClose, err := t.Transact(ctx, func(tr fdb.Transaction) (interface{}, error) {
+			ok, err := de.cwd().Remove(ctx, tr, path)
 			if err != nil {
 				panic(err)
 			}
@@ -225,8 +226,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		if err != nil {
 			panic(err)
 		}
+		txClose()
 	case op == "LIST":
-		subs, err := de.cwd().List(rt, sm.maybePath())
+		subs, err := de.cwd().List(ctx, rt, sm.maybePath())
 		if err != nil {
 			panic(err)
 		}
@@ -236,7 +238,7 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		}
 		sm.store(idx, t.Pack())
 	case op == "EXISTS":
-		b, err := de.cwd().Exists(rt, sm.maybePath())
+		b, err := de.cwd().Exists(ctx, rt, sm.maybePath())
 		if err != nil {
 			panic(err)
 		}
@@ -275,10 +277,14 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		k := sm.waitAndPop().item.([]byte)
 		k = append(k, tuple.Tuple{de.index}.Pack()...)
 		v := de.css().Bytes()
-		t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+		_, txClose, err := t.Transact(ctx, func(tr fdb.Transaction) (interface{}, error) {
 			tr.Set(fdb.Key(k), v)
 			return nil, nil
 		})
+		if err != nil {
+			panic(err)
+		}
+		txClose()
 	case op == "LOG_DIRECTORY":
 		rp := sm.waitAndPop().item.([]byte)
 		ss := subspace.FromBytes(rp).Sub(de.index)
@@ -288,7 +294,7 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		v2 := tuple.Tuple{de.cwd().GetLayer()}.Pack()
 		k3 := ss.Pack(tuple.Tuple{"exists"})
 		var v3 []byte
-		exists, err := de.cwd().Exists(rt, nil)
+		exists, err := de.cwd().Exists(ctx, rt, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -300,19 +306,23 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		k4 := ss.Pack(tuple.Tuple{"children"})
 		var subs []string
 		if exists {
-			subs, err = de.cwd().List(rt, nil)
+			subs, err = de.cwd().List(ctx, rt, nil)
 			if err != nil {
 				panic(err)
 			}
 		}
 		v4 := tuplePackStrings(subs)
-		t.Transact(func(tr fdb.Transaction) (interface{}, error) {
+		_, txClose, err := t.Transact(ctx, func(tr fdb.Transaction) (interface{}, error) {
 			tr.Set(k1, v1)
 			tr.Set(k2, v2)
 			tr.Set(k3, v3)
 			tr.Set(k4, v4)
 			return nil, nil
 		})
+		if err != nil {
+			panic(err)
+		}
+		txClose()
 	case op == "STRIP_PREFIX":
 		ba := sm.waitAndPop().item.([]byte)
 		ssb := de.css().Bytes()

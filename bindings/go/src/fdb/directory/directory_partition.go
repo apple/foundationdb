@@ -23,6 +23,8 @@
 package directory
 
 import (
+	"context"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
@@ -80,16 +82,16 @@ func (dp directoryPartition) getLayerForPath(path []string) directoryLayer {
 	return dp.directoryLayer
 }
 
-func (dp directoryPartition) MoveTo(t fdb.Transactor, newAbsolutePath []string) (DirectorySubspace, error) {
-	return moveTo(t, dp.parentDirectoryLayer, dp.path, newAbsolutePath)
+func (dp directoryPartition) MoveTo(ctx context.Context, t fdb.Transactor, newAbsolutePath []string) (DirectorySubspace, error) {
+	return moveTo(ctx, t, dp.parentDirectoryLayer, dp.path, newAbsolutePath)
 }
 
-func (dp directoryPartition) Remove(t fdb.Transactor, path []string) (bool, error) {
+func (dp directoryPartition) Remove(ctx context.Context, t fdb.Transactor, path []string) (bool, error) {
 	dl := dp.getLayerForPath(path)
-	return dl.Remove(t, dl.partitionSubpath(dp.path, path))
+	return dl.Remove(ctx, t, dl.partitionSubpath(dp.path, path))
 }
 
-func (dp directoryPartition) Exists(rt fdb.ReadTransactor, path []string) (bool, error) {
+func (dp directoryPartition) Exists(ctx context.Context, rt fdb.ReadTransactor, path []string) (bool, error) {
 	dl := dp.getLayerForPath(path)
-	return dl.Exists(rt, dl.partitionSubpath(dp.path, path))
+	return dl.Exists(ctx, rt, dl.partitionSubpath(dp.path, path))
 }

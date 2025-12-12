@@ -22,6 +22,8 @@
 
 package fdb
 
+import "context"
+
 // Snapshot is a handle to a FoundationDB transaction snapshot, suitable for
 // performing snapshot reads. Snapshot reads offer a more relaxed isolation
 // level than FoundationDB's default serializable isolation, reducing
@@ -32,6 +34,8 @@ package fdb
 type Snapshot struct {
 	*transaction
 }
+
+var noOpFunc = func() {}
 
 // ReadTransact executes the caller-provided function, passing it the Snapshot
 // receiver object (as a ReadTransaction).
@@ -46,10 +50,17 @@ type Snapshot struct {
 //
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
-func (s Snapshot) ReadTransact(f func(ReadTransaction) (interface{}, error)) (r interface{}, err error) {
+func (s Snapshot) ReadTransact(ctx context.Context, f func(ReadTransaction) (interface{}, error)) (r interface{}, txClose func(), err error) {
 	defer panicToError(&err)
 
+	// NOTE: 'autoCancel' must be called outside of the defer function, so that the goroutine is started
+	ch := autoCancel(ctx, s)
+	defer close(ch)
+
 	r, err = f(s)
+	if err == nil {
+		txClose = noOpFunc
+	}
 	return
 }
 
@@ -66,11 +77,13 @@ func (s Snapshot) Snapshot() Snapshot {
 }
 
 // Get is equivalent to (Transaction).Get, performed as a snapshot read.
+// Close() must be called on the returned future to avoid a memory leak.
 func (s Snapshot) Get(key KeyConvertible) FutureByteSlice {
 	return s.get(key.FDBKey(), 1)
 }
 
 // GetKey is equivalent to (Transaction).GetKey, performed as a snapshot read.
+// Close() must be called on the returned future to avoid a memory leak.
 func (s Snapshot) GetKey(sel Selectable) FutureKey {
 	return s.getKey(sel.FDBKeySelector(), 1)
 }
@@ -83,6 +96,7 @@ func (s Snapshot) GetRange(r Range, options RangeOptions) RangeResult {
 
 // GetReadVersion is equivalent to (Transaction).GetReadVersion, performed as
 // a snapshot read.
+// Close() must be called on the returned future to avoid a memory leak.
 func (s Snapshot) GetReadVersion() FutureInt64 {
 	return s.getReadVersion()
 }
@@ -95,6 +109,7 @@ func (s Snapshot) GetDatabase() Database {
 
 // GetEstimatedRangeSizeBytes returns an estimate for the number of bytes
 // stored in the given range.
+// Close() must be called on the returned future to avoid a memory leak.
 func (s Snapshot) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
 	beginKey, endKey := r.FDBRangeKeys()
 	return s.getEstimatedRangeSizeBytes(

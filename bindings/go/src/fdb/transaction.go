@@ -25,6 +25,7 @@ package fdb
 // #define FDB_API_VERSION 800
 // #include <foundationdb/fdb_c.h>
 import "C"
+import "context"
 
 // A ReadTransaction can asynchronously read from a FoundationDB
 // database. Transaction and Snapshot both satisfy the ReadTransaction
@@ -42,9 +43,14 @@ type ReadTransaction interface {
 	GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64
 	GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray
 	Options() TransactionOptions
-	Cancel()
+
+	CancellableTransaction
 
 	ReadTransactor
+}
+
+type CancellableTransaction interface {
+	Cancel()
 }
 
 // Transaction is a handle to a FoundationDB transaction. Transaction is a
@@ -88,7 +94,9 @@ func (opt TransactionOptions) setOpt(code int, param []byte) error {
 	}, param)
 }
 
-func (t *transaction) destroy() {
+// Close will destroy the underlying transaction.
+// It must be called after all the transaction-associated futures have been closed.
+func (t *transaction) Close() {
 	C.fdb_transaction_destroy(t.ptr)
 }
 
@@ -116,10 +124,17 @@ func (t Transaction) GetDatabase() Database {
 //
 // See the Transactor interface for an example of using Transact with
 // Transaction and Database objects.
-func (t Transaction) Transact(f func(Transaction) (interface{}, error)) (r interface{}, err error) {
+func (t Transaction) Transact(ctx context.Context, f func(Transaction) (interface{}, error)) (r interface{}, txClose func(), err error) {
 	defer panicToError(&err)
 
+	// NOTE: 'autoCancel' must be called outside of the defer function, so that the goroutine is started
+	ch := autoCancel(ctx, t)
+	defer close(ch)
+
 	r, err = f(t)
+	if err == nil {
+		txClose = noOpFunc
+	}
 	return
 }
 
@@ -136,10 +151,17 @@ func (t Transaction) Transact(f func(Transaction) (interface{}, error)) (r inter
 //
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
-func (t Transaction) ReadTransact(f func(ReadTransaction) (interface{}, error)) (r interface{}, err error) {
+func (t Transaction) ReadTransact(ctx context.Context, f func(ReadTransaction) (interface{}, error)) (r interface{}, txClose func(), err error) {
 	defer panicToError(&err)
 
+	// NOTE: 'autoCancel' must be called outside of the defer function, so that the goroutine is started
+	ch := autoCancel(ctx, t)
+	defer close(ch)
+
 	r, err = f(t)
+	if err == nil {
+		txClose = noOpFunc
+	}
 	return
 }
 
@@ -189,9 +211,10 @@ func (t Transaction) Snapshot() Snapshot {
 //
 // Typical code will not use OnError directly. (Database).Transact uses
 // OnError internally to implement a correct retry loop.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) OnError(err Error) FutureNil {
 	return &futureNil{
-		future: newFuture(t.transaction, C.fdb_transaction_on_error(t.ptr, C.fdb_error_t(err.Code))),
+		future: newFuture(C.fdb_transaction_on_error(t.ptr, C.fdb_error_t(err.Code))),
 	}
 }
 
@@ -205,9 +228,10 @@ func (t Transaction) OnError(err Error) FutureNil {
 // be unable to determine whether a transaction succeeded. For more information,
 // see
 // https://apple.github.io/foundationdb/developer-guide.html#transactions-with-unknown-results.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) Commit() FutureNil {
 	return &futureNil{
-		future: newFuture(t.transaction, C.fdb_transaction_commit(t.ptr)),
+		future: newFuture(C.fdb_transaction_commit(t.ptr)),
 	}
 }
 
@@ -240,16 +264,17 @@ func (t Transaction) Commit() FutureNil {
 // changed using SetMaxWatches on the Database. Because a watch outlives the
 // transaction that creates it, any watch that is no longer needed should be
 // cancelled by calling (FutureNil).Cancel on its returned future.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) Watch(key KeyConvertible) FutureNil {
 	kb := key.FDBKey()
 	return &futureNil{
-		future: newFuture(t.transaction, C.fdb_transaction_watch(t.ptr, byteSliceToPtr(kb), C.int(len(kb)))),
+		future: newFuture(C.fdb_transaction_watch(t.ptr, byteSliceToPtr(kb), C.int(len(kb)))),
 	}
 }
 
 func (t *transaction) get(key []byte, snapshot int) FutureByteSlice {
 	return &futureByteSlice{
-		future: newFuture(t, C.fdb_transaction_get(
+		future: newFuture(C.fdb_transaction_get(
 			t.ptr,
 			byteSliceToPtr(key),
 			C.int(len(key)),
@@ -261,6 +286,7 @@ func (t *transaction) get(key []byte, snapshot int) FutureByteSlice {
 // Get returns the (future) value associated with the specified key. The read is
 // performed asynchronously and does not block the calling goroutine. The future
 // will become ready when the read is complete.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) Get(key KeyConvertible) FutureByteSlice {
 	return t.get(key.FDBKey(), 0)
 }
@@ -273,7 +299,7 @@ func (t *transaction) doGetRange(r Range, options RangeOptions, snapshot bool, i
 	ekey := esel.Key.FDBKey()
 
 	return futureKeyValueArray{
-		future: newFuture(t, C.fdb_transaction_get_range(
+		future: newFuture(C.fdb_transaction_get_range(
 			t.ptr,
 			byteSliceToPtr(bkey),
 			C.int(len(bkey)),
@@ -293,14 +319,12 @@ func (t *transaction) doGetRange(r Range, options RangeOptions, snapshot bool, i
 }
 
 func (t *transaction) getRange(r Range, options RangeOptions, snapshot bool) RangeResult {
-	f := t.doGetRange(r, options, snapshot, 1)
 	begin, end := r.FDBRangeKeySelectors()
 	return RangeResult{
 		t:        t,
 		sr:       SelectorRange{begin, end},
 		options:  options,
 		snapshot: snapshot,
-		f:        &f,
 	}
 }
 
@@ -315,7 +339,7 @@ func (t Transaction) GetRange(r Range, options RangeOptions) RangeResult {
 
 func (t *transaction) getEstimatedRangeSizeBytes(beginKey Key, endKey Key) FutureInt64 {
 	return &futureInt64{
-		future: newFuture(t, C.fdb_transaction_get_estimated_range_size_bytes(
+		future: newFuture(C.fdb_transaction_get_estimated_range_size_bytes(
 			t.ptr,
 			byteSliceToPtr(beginKey),
 			C.int(len(beginKey)),
@@ -333,6 +357,7 @@ func (t *transaction) getEstimatedRangeSizeBytes(beginKey Key, endKey Key) Futur
 // that reason it is recommended to use this API to query against large ranges for accuracy considerations.
 // For a rough reference, if the returned size is larger than 3MB, one can consider the size to be
 // accurate.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
 	beginKey, endKey := r.FDBRangeKeys()
 	return t.getEstimatedRangeSizeBytes(
@@ -343,7 +368,7 @@ func (t Transaction) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
 
 func (t *transaction) getRangeSplitPoints(beginKey Key, endKey Key, chunkSize int64) FutureKeyArray {
 	return &futureKeyArray{
-		future: newFuture(t, C.fdb_transaction_get_range_split_points(
+		future: newFuture(C.fdb_transaction_get_range_split_points(
 			t.ptr,
 			byteSliceToPtr(beginKey),
 			C.int(len(beginKey)),
@@ -357,6 +382,7 @@ func (t *transaction) getRangeSplitPoints(beginKey Key, endKey Key, chunkSize in
 // GetRangeSplitPoints returns a list of keys that can split the given range
 // into (roughly) equally sized chunks based on chunkSize.
 // Note: the returned split points contain the start key and end key of the given range.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray {
 	beginKey, endKey := r.FDBRangeKeys()
 	return t.getRangeSplitPoints(
@@ -368,13 +394,14 @@ func (t Transaction) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKe
 
 func (t *transaction) getReadVersion() FutureInt64 {
 	return &futureInt64{
-		future: newFuture(t, C.fdb_transaction_get_read_version(t.ptr)),
+		future: newFuture(C.fdb_transaction_get_read_version(t.ptr)),
 	}
 }
 
 // (Infrequently used) GetReadVersion returns the (future) transaction read version. The read is
 // performed asynchronously and does not block the calling goroutine. The future
 // will become ready when the read version is available.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) GetReadVersion() FutureInt64 {
 	return t.getReadVersion()
 }
@@ -434,19 +461,21 @@ func (t Transaction) GetCommittedVersion() (int64, error) {
 // committed and will result in the future completing with an error. Keep in
 // mind that a transaction which reads keys and then sets them to their current
 // values may be optimized to a read-only transaction.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) GetVersionstamp() FutureKey {
-	return &futureKey{future: newFuture(t.transaction, C.fdb_transaction_get_versionstamp(t.ptr))}
+	return &futureKey{future: newFuture(C.fdb_transaction_get_versionstamp(t.ptr))}
 }
 
 func (t *transaction) getApproximateSize() FutureInt64 {
 	return &futureInt64{
-		future: newFuture(t, C.fdb_transaction_get_approximate_size(t.ptr)),
+		future: newFuture(C.fdb_transaction_get_approximate_size(t.ptr)),
 	}
 }
 
 // Returns a future that is the approximate transaction size so far in this
 // transaction, which is the summation of the estimated size of mutations,
 // read conflict ranges, and write conflict ranges.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) GetApproximateSize() FutureInt64 {
 	return t.getApproximateSize()
 }
@@ -468,7 +497,7 @@ func boolToInt(b bool) int {
 func (t *transaction) getKey(sel KeySelector, snapshot int) FutureKey {
 	key := sel.Key.FDBKey()
 	return &futureKey{
-		future: newFuture(t, C.fdb_transaction_get_key(
+		future: newFuture(C.fdb_transaction_get_key(
 			t.ptr,
 			byteSliceToPtr(key),
 			C.int(len(key)),
@@ -488,6 +517,7 @@ func (t *transaction) getKey(sel KeySelector, snapshot int) FutureKey {
 // retrieved, using network bandwidth. Invoking
 // (TransactionOptions).SetReadYourWritesDisable will avoid both the caching and
 // the increased network bandwidth.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) GetKey(sel Selectable) FutureKey {
 	return t.getKey(sel.FDBKeySelector(), 0)
 }
@@ -587,7 +617,7 @@ func (t Transaction) Options() TransactionOptions {
 func localityGetAddressesForKey(t *transaction, key KeyConvertible) FutureStringSlice {
 	kb := key.FDBKey()
 	return &futureStringSlice{
-		future: newFuture(t, C.fdb_transaction_get_addresses_for_key(
+		future: newFuture(C.fdb_transaction_get_addresses_for_key(
 			t.ptr,
 			byteSliceToPtr(kb),
 			C.int(len(kb)),
@@ -599,6 +629,7 @@ func localityGetAddressesForKey(t *transaction, key KeyConvertible) FutureString
 // each of the storage servers responsible for storing key and its associated
 // value. The read is performed asynchronously and does not block the calling
 // goroutine. The future will become ready when the read is complete.
+// Close() must be called on the returned future to avoid a memory leak.
 func (t Transaction) LocalityGetAddressesForKey(key KeyConvertible) FutureStringSlice {
 	return localityGetAddressesForKey(t.transaction, key)
 }

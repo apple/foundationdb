@@ -29,6 +29,7 @@ import "C"
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -51,10 +52,10 @@ var (
 // exports and functions in preamble
 // (https://code.google.com/p/go-wiki/wiki/cgo#Global_functions)
 //
-//export unlockMutex
-func unlockMutex(p unsafe.Pointer) {
-	m := (*sync.Mutex)(p)
-	m.Unlock()
+//export goFutureReadyCallback
+func goFutureReadyCallback(pF, pRs unsafe.Pointer) {
+	rs := (*readySignal)(pRs)
+	close(*rs)
 }
 
 // A Transactor can execute a function that requires a Transaction. Functions
@@ -64,7 +65,8 @@ type Transactor interface {
 	// Transact executes the caller-provided function, providing it with a
 	// Transaction (itself a Transactor, allowing composition of transactional
 	// functions).
-	Transact(func(Transaction) (interface{}, error)) (interface{}, error)
+	// The returned function must be called after all futures have been closed, and is nil in case of error.
+	Transact(context.Context, func(Transaction) (interface{}, error)) (interface{}, func(), error)
 
 	// All Transactors are also ReadTransactors, allowing them to be used with
 	// read-only transactional functions.
@@ -79,7 +81,8 @@ type ReadTransactor interface {
 	// ReadTransact executes the caller-provided function, providing it with a
 	// ReadTransaction (itself a ReadTransactor, allowing composition of
 	// read-only transactional functions).
-	ReadTransact(func(ReadTransaction) (interface{}, error)) (interface{}, error)
+	// The returned function must be called after all futures have been closed, and is nil in case of error.
+	ReadTransact(context.Context, func(ReadTransaction) (interface{}, error)) (interface{}, func(), error)
 }
 
 func setOpt(setter func(*C.uint8_t, C.int) C.fdb_error_t, param []byte) error {

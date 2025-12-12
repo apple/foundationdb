@@ -23,6 +23,7 @@
 package fdb
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -52,11 +53,16 @@ func TestErrorWrapping(t *testing.T) {
 	}
 
 	for _, inputError := range testCases {
-		_, outputError := db.ReadTransact(func(rtr ReadTransaction) (interface{}, error) {
+		_, txClose, outputError := db.ReadTransact(context.Background(), func(rtr ReadTransaction) (interface{}, error) {
 			return nil, inputError
 		})
 		if inputError != outputError {
 			t.Errorf("expected error %v to be the same as %v", outputError, inputError)
+		}
+		if outputError == nil && txClose == nil {
+			t.Error("close function should not be nil on success")
+		} else if outputError != nil && txClose != nil {
+			t.Error("close function should be nil in case of error")
 		}
 	}
 }
