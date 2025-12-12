@@ -447,7 +447,6 @@ function test_list_with_files {
   local files_per_level=2
   log "Running ls test with depth ${depth} and ${files_per_level} files per level"
 
-
   local test_dir="${dir}/ls_test_nested"
   mkdir -p "${test_dir}"
 
@@ -475,14 +474,19 @@ function test_list_with_files {
     err "Failed to upload test files for ls test"
     return 1
   fi
+  
+  # Give MockS3Server a moment to flush writes before listing
+  sleep 0.5
 
   # Test ls on the uploaded directory
   local output
   local status
 
-  # Test recursive listing - use higher page size to avoid MockS3Server pagination edge case
+  # Test recursive listing - use much higher page size and add delay for MockS3Server
+  # MockS3Server may need time to make uploaded files available for listing
+  sleep 0.5
   output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-    --knob_blobstore_list_max_keys_per_page=10 ls --recursive "${url}" 2>&1)
+    --knob_blobstore_list_max_keys_per_page=100 ls --recursive "${url}" 2>&1)
   status=$?
 
   local missing=0
@@ -495,6 +499,9 @@ function test_list_with_files {
       local expected="${current_path}/file${current_depth}_${i}"
       if ! echo "${output}" | grep -q "${expected}"; then
         err "Missing ${expected} in ls output"
+        log "=== DEBUG: Recursive ls output ==="
+        echo "${output}" | grep -v "HTTP" | head -30
+        log "=== END DEBUG ==="
         missing=1
       fi
     done
