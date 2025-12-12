@@ -413,6 +413,33 @@ extern "C" DLLEXPORT void fdb_database_destroy(FDBDatabase* d) {
 	CATCH_AND_DIE(DB(d)->delref(););
 }
 
+// Define these symbols so that older client bindings (in particular,
+// python) can load them at startup. Nobody should be calling this
+// stuff in 8.0.0+ because it has always been experimental and is now
+// deleted.
+extern "C" DLLEXPORT fdb_error_t fdb_database_open_tenant(FDBDatabase* d,
+                                                          uint8_t const* tenant_name,
+                                                          int tenant_name_length,
+                                                          FDBTenant** out_tenant) {
+	fprintf(stderr, "Unexpected call to removed functionality [fdb_database_open_tenant]\n");
+	abort();
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {
+	fprintf(stderr, "Unexpected call to removed functionality [fdb_tenant_create_transaction]\n");
+	abort();
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_get_id(FDBTenant* tenant) {
+	fprintf(stderr, "Unexpected call to removed functionality [fdb_tenant_get_id]\n");
+	abort();
+}
+
+extern "C" DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant) {
+	fprintf(stderr, "Unexpected call to removed functionality [fdb_tenant_destroy]\n");
+	abort();
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d, FDBTransaction** out_transaction) {
 	CATCH_AND_RETURN(Reference<ITransaction> tr = DB(d)->createTransaction();
 	                 if (g_api_version <= 15) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

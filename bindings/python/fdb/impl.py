@@ -1302,6 +1302,25 @@ class Database(_TransactionCreator):
     def _set_option(self, option, param, length):
         self.capi.fdb_database_set_option(self.dpointer, option, param, length)
 
+    # XXX Adding this back temporarily to test C bindings changes to ensure
+    # that 7.x tenant-having python libraries can pass startup with 8.0.0
+    # libfdb_c.so. Client code that actually calls tenant related APIs will
+    # of course not obtain useful functionality. Returning `None` here seems
+    # both necessary and sufficient to ensure that clients don't think that
+    # they are able to obtain tenant-related functionality.
+    #
+    # TODO(gglass): remove once we think the C library has been fixed
+    # up.  We don't want to ship this stuff in 8.0.0 python bindings
+    # as that would perpetuate these unwanted dependencies on the C
+    # library.
+    def open_tenant(self, name):
+        tname = name  # this is a bug
+        pointer = ctypes.c_void_p()
+        self.capi.fdb_database_open_tenant(
+            self.dpointer, tname, len(tname), ctypes.byref(pointer)
+        )
+        return None
+
     def create_transaction(self):
         pointer = ctypes.c_void_p()
         self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
@@ -1653,6 +1672,27 @@ def init_c_api():
     _capi.fdb_database_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_database_destroy.restype = None
 
+    # XXX Adding this back temporarily to test C bindings changes to put
+    # this stuff back in, to avoid breaking 7.x tenant-having python libraries
+    # that want to load these symbols on process startup.
+    #
+    # TODO(gglass): remove once we think the C library has been fixed
+    # up.  We don't want to ship this stuff in 8.0.0 python bindings
+    # as that would perpetuate these unwanted dependencies on the C
+    # library.  Alternatively, only initialize this stuff in a non-default
+    # mode to be used only by internal testing with the very specific
+    # goal of ensuring that the C library has symbols to satisfy
+    # 7.x python client libraries.  Like "SIMULATE_7X_PYTHON_BINDINGS"
+    # mode.
+    _capi.fdb_database_open_tenant.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    _capi.fdb_database_open_tenant.restype = ctypes.c_int
+    _capi.fdb_database_open_tenant.errcheck = check_error_code
+
     _capi.fdb_database_create_transaction.argtypes = [
         ctypes.c_void_p,
         ctypes.POINTER(ctypes.c_void_p),
@@ -1671,6 +1711,19 @@ def init_c_api():
 
     _capi.fdb_database_get_client_status.argtypes = [ctypes.c_void_p]
     _capi.fdb_database_get_client_status.restype = ctypes.c_void_p
+
+    _capi.fdb_tenant_destroy.argtypes = [ctypes.c_void_p]
+    _capi.fdb_tenant_destroy.restype = None
+
+    _capi.fdb_tenant_get_id.argtypes = [ctypes.c_void_p]
+    _capi.fdb_tenant_get_id.restype = ctypes.c_void_p
+
+    _capi.fdb_tenant_create_transaction.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    _capi.fdb_tenant_create_transaction.restype = ctypes.c_int
+    _capi.fdb_tenant_create_transaction.errcheck = check_error_code
 
     _capi.fdb_transaction_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_destroy.restype = None
