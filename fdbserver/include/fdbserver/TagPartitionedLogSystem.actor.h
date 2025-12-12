@@ -321,6 +321,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	Future<Void> onLogSystemConfigChange() final;
 
+	void updateLogRouter(int logSetIndex, int tagId, TLogInterface const& newLogRouter) final;
+
 	Version getEnd() const final;
 
 	Version getPeekEnd() const;
@@ -349,7 +351,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const;
 
 	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) final;
-
+	void updateBackupWorkers(const std::vector<int>& tagIds, const std::vector<InitializeBackupReply>& replies) final;
 	bool removeBackupWorker(const BackupWorkerDoneRequest& req) final;
 
 	LogEpoch getOldestBackupEpoch() const final;

@@ -681,6 +681,9 @@ struct ILogSystem {
 	// Returns when the log system configuration has changed due to a tlog rejoin.
 	virtual Future<Void> onLogSystemConfigChange() = 0;
 
+	// Update a specific log router in the log system configuration
+	virtual void updateLogRouter(int logSetIndex, int tagId, TLogInterface const& newLogRouter) = 0;
+
 	virtual void getPushLocations(VectorRef<Tag> tags,
 	                              std::vector<int>& locations,
 	                              bool allLocations = false,
@@ -723,6 +726,8 @@ struct ILogSystem {
 	virtual Version popPseudoLocalityTag(Tag tag, Version upTo) = 0;
 
 	virtual void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) = 0;
+	virtual void updateBackupWorkers(const std::vector<int>& tagIds,
+	                                 const std::vector<InitializeBackupReply>& rplies) = 0;
 
 	// Removes a finished backup worker from log system and returns true. Returns false
 	// if the worker is not found.
