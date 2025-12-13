@@ -162,6 +162,13 @@ func (d Database) GetClientStatus() ([]byte, error) {
 	return b, nil
 }
 
+// GetMainThreadBusyness return network thread busyness (updated every 1s)
+// A value of 0 indicates that the client is more or less idle
+// A value of 1 (or more) indicates that the client is saturated
+func (d Database) GetMainThreadBusyness() float64 {
+	return float64(C.fdb_database_get_main_thread_busyness(d.database.ptr))
+}
+
 func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, err error) {
 	for {
 		ret, err = wrapped()
