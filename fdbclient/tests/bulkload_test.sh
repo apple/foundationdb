@@ -19,21 +19,41 @@ trap "exit 1" HUP INT PIPE QUIT TERM
 trap cleanup  EXIT
 
 # Cleanup. Called from signal trap.
+# Has a hard 30-second timeout to prevent CTest timeouts.
 function cleanup {
+  echo "$(date -Iseconds) cleanup: starting (with 30s hard timeout)"
+  start_cleanup_watchdog 30
+  
   # Check if test data should be preserved (common function from tests_common.sh)
   if cleanup_with_preserve_check; then
+    echo "$(date -Iseconds) cleanup: preserving test data, skipping cleanup"
+    cancel_cleanup_watchdog
     return 0
   fi
-
+  
+  echo "$(date -Iseconds) cleanup: shutting down FDB cluster"
   if type shutdown_fdb_cluster &> /dev/null; then
     shutdown_fdb_cluster
+  else
+    echo "$(date -Iseconds) cleanup: shutdown_fdb_cluster not available"
   fi
+  
+  echo "$(date -Iseconds) cleanup: shutting down MockS3"
   if type shutdown_mocks3 &> /dev/null; then
     shutdown_mocks3
+  else
+    echo "$(date -Iseconds) cleanup: shutdown_mocks3 not available"
   fi
+  
+  echo "$(date -Iseconds) cleanup: shutting down AWS"
   if type shutdown_aws &> /dev/null; then
     shutdown_aws "${TEST_SCRATCH_DIR}"
+  else
+    echo "$(date -Iseconds) cleanup: shutdown_aws not available"
   fi
+  
+  echo "$(date -Iseconds) cleanup: complete"
+  cancel_cleanup_watchdog
 }
 
 # Resolve passed in reference to an absolute path.

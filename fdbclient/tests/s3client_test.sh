@@ -382,6 +382,47 @@ function test_empty_bucket {
   fi
 }
 
+# Wait for files to become available in MockS3Server listings with retry logic
+# $1 s3client binary path
+# $2 credentials file
+# $3 logs directory
+# $4 url to list
+# $5 expected file count
+# $6 search pattern (e.g., "ls_test/file" to match ls_test/file1, ls_test/file2, etc.)
+# Returns 0 if all files found, 1 on timeout
+function wait_for_files_in_listing {
+  local s3client="$1"
+  local credentials="$2"
+  local logsdir="$3"
+  local url="$4"
+  local expected_count="$5"
+  local pattern="$6"
+  
+  local max_attempts=20  # 10 seconds total with 0.5s between attempts
+  local attempt=0
+  
+  while [[ $attempt -lt $max_attempts ]]; do
+    local output
+    output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
+      --knob_blobstore_list_max_keys_per_page=100 ls --recursive "${url}" 2>&1)
+    
+    local found_count
+    found_count=$(echo "${output}" | grep -c "${pattern}" || true)
+    
+    if [[ $found_count -ge $expected_count ]]; then
+      log "All ${expected_count} files found in listing (attempt $((attempt + 1)))"
+      return 0
+    fi
+    
+    attempt=$((attempt + 1))
+    sleep 0.5
+  done
+  
+  err "Timeout waiting for files in listing after ${max_attempts} attempts (10s)"
+  err "Expected ${expected_count} files matching '${pattern}', found ${found_count}"
+  return 1
+}
+
 # Test listing with existing files
 # $1 The url to go against
 # $2 Directory I can write test files in.
@@ -447,7 +488,6 @@ function test_list_with_files {
   local files_per_level=2
   log "Running ls test with depth ${depth} and ${files_per_level} files per level"
 
-
   local test_dir="${dir}/ls_test_nested"
   mkdir -p "${test_dir}"
 
@@ -475,14 +515,29 @@ function test_list_with_files {
     err "Failed to upload test files for ls test"
     return 1
   fi
+  
+  # Calculate total expected files in nested structure
+  # At each level: files_per_level files, plus subdirectories with their files
+  # Level 1: 2 files + subdir (Level 2: 2 files + subdir (Level 3: 2 files))
+  # Total: 2 + 2 + 2 = 6 files
+  local total_files=$((files_per_level * depth))
+  
+  # Extract path from URL for pattern matching
+  local url_path
+  url_path=$(echo "${url}" | sed -E 's|blobstore://[^/]+/([^?]+).*|\1|')
+  
+  # Wait for all files to be available in MockS3Server listing with retry logic
+  if ! wait_for_files_in_listing "${s3client}" "${credentials}" "${logsdir}" \
+      "${url}" "${total_files}" "${url_path}"; then
+    err "Failed waiting for files to become available in MockS3Server"
+    return 1
+  fi
 
-  # Test ls on the uploaded directory
+  # Now retrieve the listing for validation
   local output
   local status
-
-  # Test recursive listing - use higher page size to avoid MockS3Server pagination edge case
   output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-    --knob_blobstore_list_max_keys_per_page=10 ls --recursive "${url}" 2>&1)
+    --knob_blobstore_list_max_keys_per_page=100 ls --recursive "${url}" 2>&1)
   status=$?
 
   local missing=0
@@ -495,6 +550,9 @@ function test_list_with_files {
       local expected="${current_path}/file${current_depth}_${i}"
       if ! echo "${output}" | grep -q "${expected}"; then
         err "Missing ${expected} in ls output"
+        log "=== DEBUG: Recursive ls output ==="
+        echo "${output}" | grep -v "HTTP" | head -30
+        log "=== END DEBUG ==="
         missing=1
       fi
     done
@@ -507,11 +565,6 @@ function test_list_with_files {
     fi
   }
 
-  # Extract the path prefix from the URL (everything between host and ?)
-  # URL format: blobstore://host/path/prefix?query
-  local url_path
-  url_path=$(echo "${url}" | sed -E 's|blobstore://[^/]+/([^?]+).*|\1|')
-  
   check_nested_files "${url_path}" 1 "true"
 
   if [[ "${missing}" -ne 0 ]]; then
