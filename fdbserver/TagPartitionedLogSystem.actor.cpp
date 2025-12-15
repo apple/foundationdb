@@ -514,6 +514,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 
 		if (!self->recoveryCompleteWrittenToCoreState.get()) {
 			failed.insert(failed.end(), routerFailed.begin(), routerFailed.end());
+			routerFailed.clear();
 			for (auto& old : self->oldLogData) {
 				for (auto& it : old.tLogs) {
 					for (auto& t : it->logRouters) {
@@ -546,9 +547,13 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 			}
 		}
 
-		// Don't monitor current generation log routers after full recovery.
-		// They are monitored and recruited by monitorAndRecruitLogRouters().
-		routerFailed.clear();
+		if (SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_ENABLED) {
+			// Don't monitor current generation log routers after full recovery.
+			// They are monitored and recruited by monitorAndRecruitLogRouters().
+			routerFailed.clear();
+		} else {
+			failed.insert(failed.end(), routerFailed.begin(), routerFailed.end());
+		}
 
 		if (self->hasRemoteServers && (!self->remoteRecovery.isReady() || self->remoteRecovery.isError())) {
 			changes.push_back(self->remoteRecovery);

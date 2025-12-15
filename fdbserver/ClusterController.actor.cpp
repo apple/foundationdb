@@ -3052,8 +3052,10 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		self.addActor.send(updateRemoteDCHealth(&self));
 	}
 
-	// Start monitoring log routers for re-recruitment
-	self.addActor.send(monitorAndRecruitLogRouters(&self));
+	if (SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_ENABLED) {
+		// Start monitoring log routers for re-recruitment
+		self.addActor.send(monitorAndRecruitLogRouters(&self));
+	}
 
 	loop choose {
 		when(ErrorOr<Void> err = wait(error)) {
