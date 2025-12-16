@@ -1971,10 +1971,15 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 			}
 		}
 
+		// Calculate the maximum satellite_logs we can support based on available machines
+		bool useNormalDCsAsSatellites =
+		    datacenters > 4 && testConfig.minimumRegions < 2 && deterministicRandom()->random01() < 0.3;
+		int maxSatelliteLogs = getMaxSatelliteLogs();
+
 		if (deterministicRandom()->random01() < 0.25)
-			primaryObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+			primaryObj["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 		if (deterministicRandom()->random01() < 0.25)
-			remoteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+			remoteObj["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 
 		// We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log
 		// routers will not be able to keep up.
@@ -2031,14 +2036,12 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 			db.remoteDesiredTLogCount = deterministicRandom()->randomInt(1, 7);
 		}
 
-		bool useNormalDCsAsSatellites =
-		    datacenters > 4 && testConfig.minimumRegions < 2 && deterministicRandom()->random01() < 0.3;
 		StatusObject primarySatelliteObj;
 		primarySatelliteObj["id"] = useNormalDCsAsSatellites ? "1" : "2";
 		primarySatelliteObj["priority"] = 1;
 		primarySatelliteObj["satellite"] = 1;
 		if (deterministicRandom()->random01() < 0.25)
-			primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+			primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 		primaryDcArr.push_back(primarySatelliteObj);
 
 		StatusObject remoteSatelliteObj;
@@ -2046,7 +2049,7 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 		remoteSatelliteObj["priority"] = 1;
 		remoteSatelliteObj["satellite"] = 1;
 		if (deterministicRandom()->random01() < 0.25)
-			remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+			remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 		remoteDcArr.push_back(remoteSatelliteObj);
 
 		if (datacenters > 4) {
@@ -2055,7 +2058,7 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 			primarySatelliteObjB["priority"] = 1;
 			primarySatelliteObjB["satellite"] = 1;
 			if (deterministicRandom()->random01() < 0.25)
-				primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+				primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 			primaryDcArr.push_back(primarySatelliteObjB);
 
 			StatusObject remoteSatelliteObjB;
@@ -2063,7 +2066,7 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 			remoteSatelliteObjB["priority"] = 1;
 			remoteSatelliteObjB["satellite"] = 1;
 			if (deterministicRandom()->random01() < 0.25)
-				remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+				remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 			remoteDcArr.push_back(remoteSatelliteObjB);
 		}
 		if (useNormalDCsAsSatellites) {
@@ -2920,6 +2923,36 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	destructed = true;
 	wait(Never());
 	ASSERT(false);
+}
+
+// Helper function to calculate the maximum satellite_logs based on available machines per datacenter
+// We count the minimum number of machines in any satellite datacenter to ensure we don't over-provision
+int getMaxSatelliteLogs() {
+	if (!g_network->isSimulated()) {
+		return 6; // Conservative default for non-simulated environments
+	}
+
+	// Count machines per datacenter
+	std::map<Optional<Standalone<StringRef>>, int> machinesPerDC;
+	for (auto& process : g_simulator->getAllProcesses()) {
+		if (process->locality.dcId().present()) {
+			machinesPerDC[process->locality.dcId()]++;
+		}
+	}
+
+	// Find the minimum machines in satellite DCs (2, 3, 4, 5).
+	// Assume if DC 0, 1 are used, they will have more than 6 servers. Thus skipping them here.
+	int minSatelliteMachines = 6; // Start with max possible
+	for (int dcId = 2; dcId <= 5; dcId++) {
+		auto dcIdStr = Standalone<StringRef>(std::to_string(dcId));
+		int count = machinesPerDC[dcIdStr];
+		if (count > 0) {
+			minSatelliteMachines = std::min(minSatelliteMachines, count);
+		}
+	}
+
+	// Cap at 6 (the original max) and ensure at least 1
+	return std::max(1, std::min(6, minSatelliteMachines));
 }
 
 BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {
