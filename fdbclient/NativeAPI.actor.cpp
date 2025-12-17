@@ -1097,7 +1097,9 @@ ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
 		wait(delay(CLIENT_KNOBS->LOCATION_CACHE_EVICTION_INTERVAL));
 
 		std::vector<KeyRangeRef> toRemove;
+		std::set<NetworkAddress> logged;
 		int checkedEntries = 0;
+		int entriesWithValue = 0;
 		// Fetch the current ranges of the location cache.
 		auto ranges = cx->locationCache.ranges();
 		// Find where we left off using KEY (not iterator).
@@ -1118,14 +1120,37 @@ ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
 			}
 
 			if (iter->value()) {
+				entriesWithValue++;
 				auto& locationInfo = iter->value();
 				// Iterate over all storage interfaces for this location (key range) cache.
 				for (int i = 0; i < locationInfo->size(); ++i) {
 					const auto& interf = (*locationInfo)[i];
+					const auto addr = interf->interf.address();
+
+					// Added some debugging output, remove after testing and make use of IFailureMonitor::failureMonitor().getState(endpoint).isFailed()
+					const auto endpoint = interf->interf.getValue.getEndpoint();
+					const auto endpointFailed = IFailureMonitor::failureMonitor().getState(endpoint).isFailed();
+
+					if (logged.count(addr) == 0) {
+						const auto stableAddress = interf->interf.stableAddress();
+						const auto failureInformation = cx->getEndpointFailureInfo(endpoint);
+						TraceEvent("LocationCacheCleanupDebug")
+						    .detail("Address", addr)
+						    .detail("StableAddress", stableAddress)
+						    .detail("AddressFailed", IFailureMonitor::failureMonitor().getState(addr).isFailed())
+						    .detail("EndPointAddress", endpoint.getPrimaryAddress())
+						    .detail("EndPointStableAddress", endpoint.getStableAddress())
+						    .detail("EndpointFailed", endpointFailed)
+						    .detail("StableAddressFailed",
+						            IFailureMonitor::failureMonitor().getState(stableAddress).isFailed())
+						    .detail("FailedEndpointsOnHealthyServersInfoPresent", failureInformation.present());
+						logged.insert(addr);
+					}
+
 					// Check if the endpoint is marked as failed in the FailureMonitor. If so remove this key range and
 					// stop iterating over the other storage interfaces. A single failed storage interface is enough to
 					// remove the cached entry.
-					if (IFailureMonitor::failureMonitor().getState(interf->interf.getValue.getEndpoint()).isFailed()) {
+					if (endpointFailed) {
 						toRemove.push_back(iter->range());
 						break;
 					}
@@ -1144,18 +1169,44 @@ ACTOR static Future<Void> cleanupLocationCache(DatabaseContext* cx) {
 			currentValidationPosition = Key();
 		}
 
-		// Remove expired entries
+		// Remove entries with failed storage server interfaces.
 		for (const auto& range : toRemove) {
 			cx->locationCache.insert(range, Reference<LocationInfo>());
 		}
 
 		if (!toRemove.empty()) {
 			CODE_PROBE(true, "LocationCacheCleanup removed some entries");
-			TraceEvent("LocationCacheCleanup")
-			    .detail("NumRemovedRanges", toRemove.size())
-			    .detail("NumCheckedEntries", checkedEntries)
-			    .detail("NumLocalityCacheEntries", cx->locationCache.size());
 		}
+
+		// Remove entries from the failedEndpointsOnHealthyServersInfo map if the last refresh time
+		// is 2 x CLIENT_KNOBS->LOCATION_CACHE_EVICTION_INTERVAL ago. Otherwise entries in the map
+		// will never removed.
+		auto expireTimestamp = now() + 2 * CLIENT_KNOBS->LOCATION_CACHE_EVICTION_INTERVAL;
+		std::vector<Endpoint> failedEndpoints;
+		for (const auto failedEndpoint : cx->failedEndpointsOnHealthyServersInfo) {
+			if (failedEndpoint.second.lastRefreshTime <= expireTimestamp) {
+				failedEndpoints.push_back(failedEndpoint.first);
+			}
+		}
+
+		for (const auto& failedEndpoint : failedEndpoints) {
+			TraceEvent("LocationCacheRemoveFailedEndpoint")
+				.detail("Address", failedEndpoint.getPrimaryAddress());
+			cx->clearFailedEndpointOnHealthyServer(failedEndpoint);
+		}
+
+		// TODO move back after debugging into the statement above.
+		TraceEvent("LocationCacheCleanup")
+		    .detail("NumRemovedRanges", toRemove.size())
+		    .detail("NumCheckedEntries", checkedEntries)
+		    .detail("NumLocalityCacheEntries", cx->locationCache.size())
+		    .detail("DatabaseContextServerInterfaceSize", cx->server_interf.size())
+		    .detail("FailedEndpointsOnHealthyServersInfoSize", cx->failedEndpointsOnHealthyServersInfo.size())
+			.detail("FailedEndpointsOnHealthyServersInfoRemovedSize", failedEndpoints.size())
+		    .detail("SsidTagMappingSize", cx->ssidTagMapping.size())
+		    .detail("TssMapping", cx->tssMapping.size())
+		    .detail("ChangeFeedUpdaters", cx->changeFeedUpdaters.size())
+		    .detail("NumEntriesWithValue", entriesWithValue);
 	}
 }
 
