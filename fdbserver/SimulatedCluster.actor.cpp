@@ -2940,10 +2940,10 @@ int getMaxSatelliteLogs() {
 		}
 	}
 
-	// Find the minimum machines in satellite DCs (2, 3, 4, 5).
-	// Assume if DC 0, 1 are used, they will have more than 6 servers. Thus skipping them here.
+	// Find the minimum machines in satellite DCs (0, 1, 2, 3, 4, 5).
+	// Note normal DCs can be selected as satellites, see usage of useNormalDCsAsSatellites.
 	int minSatelliteMachines = 6; // Start with max possible
-	for (int dcId = 2; dcId <= 5; dcId++) {
+	for (int dcId = 0; dcId <= 5; dcId++) {
 		auto dcIdStr = Standalone<StringRef>(std::to_string(dcId));
 		int count = machinesPerDC[dcIdStr];
 		if (count > 0) {
