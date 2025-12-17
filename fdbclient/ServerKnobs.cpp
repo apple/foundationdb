@@ -82,6 +82,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CONCURRENT_LOG_ROUTER_READS,                             5 ); if( randomize && BUGGIFY ) CONCURRENT_LOG_ROUTER_READS = 1;
 	init( LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED,               1 ); if( randomize && BUGGIFY ) LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED = 0;
 	init( LOG_ROUTER_PEEK_SWITCH_DC_TIME,                       60.0 );
+	init( LOG_ROUTER_REPLACEMENT_GRACE_PERIOD,                  30.0 );
 	init( DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME,                    1.0 );
 	init( DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME,                    5.0 );
 	init( TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES,            2e9 ); if ( randomize && BUGGIFY ) TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES = 2e6;
@@ -858,6 +859,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SINGLETON_RECRUIT_BME_DELAY,                          10.0 );
 	init( RECORD_RECOVER_AT_IN_CSTATE,                         false ); if( randomize && BUGGIFY ) RECORD_RECOVER_AT_IN_CSTATE = deterministicRandom()->coinflip();
 	init( TRACK_TLOG_RECOVERY,                                  true ); if ( randomize && BUGGIFY ) TRACK_TLOG_RECOVERY = deterministicRandom()->coinflip();
+	init( CC_RERECRUIT_LOG_ROUTER_TIMEOUT,                       5.0 );
+	init( CC_RERECRUIT_LOG_ROUTER_ENABLED,                      true ); if ( randomize && BUGGIFY ) CC_RERECRUIT_LOG_ROUTER_ENABLED = deterministicRandom()->coinflip();
 
 	//Move Keys
 	init( SHARD_READY_DELAY,                                    0.25 );

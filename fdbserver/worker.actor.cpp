@@ -2206,6 +2206,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
+	state WorkerCache<TLogInterface> logRouterCache;
 	state Future<Void> blobWorkerFuture = Void();
 
 	state WorkerSnapRequest lastSnapReq;
@@ -3089,33 +3090,41 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				req.reply.send(recruited);
 			}
 			when(InitializeLogRouterRequest req = waitNext(interf.logRouter.getFuture())) {
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::LogRouter;
-				TLogInterface recruited(locality);
-				recruited.initEndpoints();
+				if (!logRouterCache.exists(req.reqId)) {
+					LocalLineage _;
+					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::LogRouter;
+					TLogInterface recruited(locality);
+					recruited.initEndpoints();
 
-				std::map<std::string, std::string> details;
-				startRole(Role::LOG_ROUTER, recruited.id(), interf.id(), details);
+					std::map<std::string, std::string> details;
+					startRole(Role::LOG_ROUTER, recruited.id(), interf.id(), details);
 
-				DUMPTOKEN(recruited.peekMessages);
-				DUMPTOKEN(recruited.peekStreamMessages);
-				DUMPTOKEN(recruited.popMessages);
-				DUMPTOKEN(recruited.commit);
-				DUMPTOKEN(recruited.lock);
-				DUMPTOKEN(recruited.getQueuingMetrics);
-				DUMPTOKEN(recruited.confirmRunning);
-				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.recoveryFinished);
-				DUMPTOKEN(recruited.disablePopRequest);
-				DUMPTOKEN(recruited.enablePopRequest);
-				DUMPTOKEN(recruited.snapRequest);
+					DUMPTOKEN(recruited.peekMessages);
+					DUMPTOKEN(recruited.peekStreamMessages);
+					DUMPTOKEN(recruited.popMessages);
+					DUMPTOKEN(recruited.commit);
+					DUMPTOKEN(recruited.lock);
+					DUMPTOKEN(recruited.getQueuingMetrics);
+					DUMPTOKEN(recruited.confirmRunning);
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.recoveryFinished);
+					DUMPTOKEN(recruited.disablePopRequest);
+					DUMPTOKEN(recruited.enablePopRequest);
+					DUMPTOKEN(recruited.snapRequest);
 
-				errorForwarders.add(
-				    zombie(recruited,
-				           forwardError(errors, Role::LOG_ROUTER, recruited.id(), logRouter(recruited, req, dbInfo))));
+					ReplyPromise<TLogInterface> logRouterReady = req.reply;
+					logRouterCache.set(req.reqId, logRouterReady.getFuture());
+					Future<Void> logRouterProcess = logRouter(recruited, req, dbInfo);
+					logRouterProcess = logRouterCache.removeOnReady(req.reqId, logRouterProcess);
+					errorForwarders.add(
+					    zombie(recruited, forwardError(errors, Role::LOG_ROUTER, recruited.id(), logRouterProcess)));
 
-				if (!skipInitRspInSim(interf.id(), req.allowDropInSim)) {
-					req.reply.send(recruited);
+					TraceEvent("LogRouterInitRequest", req.reqId).detail("LogRouterId", recruited.id());
+					if (!skipInitRspInSim(interf.id(), req.allowDropInSim)) {
+						logRouterReady.send(recruited);
+					}
+				} else {
+					forwardPromise(req.reply, logRouterCache.get(req.reqId));
 				}
 			}
 			when(CoordinationPingMessage m = waitNext(interf.coordinationPing.getFuture())) {

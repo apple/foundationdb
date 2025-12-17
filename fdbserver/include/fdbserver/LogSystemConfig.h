@@ -45,6 +45,8 @@ struct OptionalInterface {
 	std::string toString() const { return ident.toString(); }
 
 	bool operator==(UID const& r) const { return ident == r; }
+	bool operator==(OptionalInterface const& r) const { return ident == r.ident; }
+	bool operator!=(OptionalInterface const& r) const { return ident != r.ident; }
 
 	template <class Ar>
 	void serialize(Ar& ar);
