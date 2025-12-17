@@ -28,6 +28,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "flow/IRandom.h"
@@ -88,13 +89,15 @@ std::string generateRegions() {
 	StatusArray remoteDcArr;
 	remoteDcArr.push_back(remoteDcObj);
 
+	int maxSatelliteLogs = getMaxSatelliteLogs();
+
 	if (g_simulator->physicalDatacenters > 3 && deterministicRandom()->random01() < 0.5) {
 		StatusObject primarySatelliteObj;
 		primarySatelliteObj["id"] = "2";
 		primarySatelliteObj["priority"] = 1;
 		primarySatelliteObj["satellite"] = 1;
 		if (deterministicRandom()->random01() < 0.25)
-			primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+			primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 		primaryDcArr.push_back(primarySatelliteObj);
 
 		StatusObject remoteSatelliteObj;
@@ -102,7 +105,7 @@ std::string generateRegions() {
 		remoteSatelliteObj["priority"] = 1;
 		remoteSatelliteObj["satellite"] = 1;
 		if (deterministicRandom()->random01() < 0.25)
-			remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+			remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 		remoteDcArr.push_back(remoteSatelliteObj);
 
 		if (g_simulator->physicalDatacenters > 5 && deterministicRandom()->random01() < 0.5) {
@@ -111,7 +114,7 @@ std::string generateRegions() {
 			primarySatelliteObjB["priority"] = 1;
 			primarySatelliteObjB["satellite"] = 1;
 			if (deterministicRandom()->random01() < 0.25)
-				primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+				primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 			primaryDcArr.push_back(primarySatelliteObjB);
 
 			StatusObject remoteSatelliteObjB;
@@ -119,7 +122,7 @@ std::string generateRegions() {
 			remoteSatelliteObjB["priority"] = 1;
 			remoteSatelliteObjB["satellite"] = 1;
 			if (deterministicRandom()->random01() < 0.25)
-				remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
+				remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1, maxSatelliteLogs + 1);
 			remoteDcArr.push_back(remoteSatelliteObjB);
 
 			int satellite_replication_type = deterministicRandom()->randomInt(0, 3);

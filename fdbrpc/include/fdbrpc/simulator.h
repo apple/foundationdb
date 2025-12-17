@@ -471,6 +471,9 @@ extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int
 // Enables connection failures, i.e., clogging, in simulation
 void enableConnectionFailures(std::string const& context, double duration);
 
+// Return the maximum number of satellite logs that can be used based on the number of machines in simulation.
+int getMaxSatelliteLogs();
+
 FDB_BOOLEAN_PARAM(ForceDisable);
 // Disables connection failures, i.e., clogging, in simulation.
 // Returns the remaining seconds for the connection failures to be disabled
