@@ -6784,9 +6784,10 @@ public:
 				                                .removePrefix(removePrefix)
 				                                .withPrefix(addPrefix);
 				RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
-				// Allow restoring over existing data when restoring with a prefix (for validation)
-				// addPrefix.size() > 0 indicates this is a validation restore
-				if (existingRows.size() > 0 && addPrefix.size() == 0) {
+				// Allow restoring over existing data only when using the validation restore prefix.
+				// validateRestoreLogKeys.begin (\xff\x02/rlog/) is the designated prefix for validation restores.
+				// Using any other prefix with existing data could corrupt user data.
+				if (existingRows.size() > 0 && addPrefix != validateRestoreLogKeys.begin) {
 					throw restore_destination_not_empty();
 				}
 			}

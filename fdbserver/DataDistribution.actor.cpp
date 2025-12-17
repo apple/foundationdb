@@ -3729,9 +3729,16 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self,
 			// hence a new audit resumption loads audits from disk and launch the audits
 			// Since the resumed audit has already taken over the launchAudit job,
 			// we simply retry this launchAudit, then return the audit id to client
-			// Skip this injection for ValidateRestore as the simple test needs a clean run
+			// Simulation fault injection: randomly throw operation_failed to test DD can properly
+			// restart and resume audits that were in progress.
+			// ValidateRestore is excluded because the current simulation test for restore validation
+			// is a simple end-to-end test that expects the audit to complete without DD restart.
+			// Future work could add more comprehensive fault injection testing for ValidateRestore.
 			if (g_network->isSimulated() && auditType != AuditType::ValidateRestore &&
 			    deterministicRandom()->coinflip()) {
+				TraceEvent(SevInfo, "DDAuditStorageLaunchFaultInjection", self->ddId)
+				    .detail("AuditID", auditID_)
+				    .detail("AuditType", auditType);
 				throw operation_failed(); // Trigger DD restart and check if resume audit is correct
 			}
 			TraceEvent(SevInfo, "DDAuditStorageLaunchPersistNewAuditID", self->ddId)

@@ -4396,7 +4396,7 @@ static Future<ErrorOr<GetKeyValuesReply>> issueGetKeyValuesRequest(StorageServer
 
 // Helper: Read both source and restored data for a given range
 //
-// Restored data is stored at restoreLogKeys (\xff\x02/rlog/) in system key space.
+// Restored data is stored at validateRestoreLogKeys (\xff\x02/rlog/) in system key space.
 // NOTE: We read the ENTIRE restored keyspace (not just rangeToRead with prefix),
 // because restored keys are stored with their original names under the prefix.
 // E.g., source key "mykey" is restored as "\xff\x02/rlog/mykey"
@@ -4407,8 +4407,8 @@ ACTOR static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSource
                                                                                                 int limitBytes) {
 	// Construct the restored range by adding the restore prefix to the source range
 	// E.g., if source range is "key1 - key2", restored range is "\xff\x02/rlog/key1 - \xff\x02/rlog/key2"
-	state Key restoredBegin = rangeToRead.begin.withPrefix(restoreLogKeys.begin);
-	state Key restoredEnd = rangeToRead.end.withPrefix(restoreLogKeys.begin);
+	state Key restoredBegin = rangeToRead.begin.withPrefix(validateRestoreLogKeys.begin);
+	state Key restoredEnd = rangeToRead.end.withPrefix(validateRestoreLogKeys.begin);
 	state KeyRange restoredRange = KeyRangeRef(restoredBegin, restoredEnd);
 
 	TraceEvent("SSAuditRestoreFetch", data->thisServerID)
@@ -4517,7 +4517,7 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 		KeyValueRef restoredKV = restoredReply.data[restoredIdx];
 
 		// Remove the restore prefix from restored key to compare
-		Key restoredKeyWithoutPrefix = restoredKV.key.removePrefix(restoreLogKeys.begin);
+		Key restoredKeyWithoutPrefix = restoredKV.key.removePrefix(validateRestoreLogKeys.begin);
 
 		if (sourceKV.key == restoredKeyWithoutPrefix) {
 			// Keys match, compare values
@@ -4557,6 +4557,12 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 			break;
 		} else {
 			// Extra key in restored data (skip it, as per design doc: one-directional comparison)
+			// Log the extra key for visibility without failing the validation
+			TraceEvent(SevInfo, "SSAuditRestoreExtraKey", thisServerID)
+			    .detail("AuditId", auditID)
+			    .detail("AuditRange", auditRange)
+			    .detail("ExtraRestoredKey", restoredKV.key)
+			    .detail("NextSourceKey", sourceKV.key);
 			++restoredIdx;
 		}
 	}
@@ -4574,6 +4580,18 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 		    .detail("Version", version)
 		    .detail("ClaimRange", claimRange);
 		errors.push_back(error);
+	}
+
+	// Check for any remaining restored keys that don't have matching source keys
+	if (errors.empty() && restoredIdx < restoredReply.data.size() && !restoredReply.more) {
+		// Log the extra keys found in restored data
+		TraceEvent(SevInfo, "SSAuditRestoreExtraRestoredKeys", thisServerID)
+		    .detail("AuditId", auditID)
+		    .detail("AuditRange", auditRange)
+		    .detail("ExtraKeyCount", restoredReply.data.size() - restoredIdx)
+		    .detail("FirstExtraKey", restoredReply.data[restoredIdx].key)
+		    .detail("Version", version)
+		    .detail("ClaimRange", claimRange);
 	}
 
 	TraceEvent("SSAuditRestoreCompareEnd", thisServerID)
@@ -4672,7 +4690,7 @@ ACTOR Future<Void> auditRestoreQ(StorageServer* data, AuditStorageRequest req) {
 
 				// Update progress in the database
 				KeyRange completeRange = Standalone(KeyRangeRef(rangeToRead.begin, keyAfter(lastKey)));
-				if (!completeRange.empty() && claimRange.begin == completeRange.begin) {
+				if (!complete && !completeRange.empty() && claimRange.begin == completeRange.begin) {
 					claimRange = claimRange & completeRange;
 					AuditStorageState progressState(req.id, claimRange, req.getType());
 					progressState.setPhase(AuditPhase::Running);

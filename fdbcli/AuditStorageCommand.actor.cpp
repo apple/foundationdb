@@ -40,13 +40,19 @@
  *
  * EXAMPLE WORKFLOW:
  *   1. Backup:     fdbbackup start -d file:///backup -z
- *   2. Restore:    fdbbackup restore -r file:///backup --add-prefix "\xff\x02/rlog/"
- *   3. Validate:   fdb> audit_storage validate_restore "" "\xff"
- *   4. Check:      fdb> get_audit_status validate_restore id <AuditID>
- *   5. Cleanup:    fdb> clearrange "\xff\x02/rlog/" "\xff\x02/rlog0"
+ *   2. Stop:       fdbbackup discontinue -C <cluster_file>
+ *   3. Lock:       fdb> lock                               (save the returned UID)
+ *   4. Restore:    fdbrestore start -r file:///backup --add-prefix "\xff\x02/rlog/"
+ *   5. Validate:   fdb> audit_storage validate_restore "" "\xff"
+ *   6. Check:      fdb> get_audit_status validate_restore id <AuditID>
+ *   7. Unlock:     fdb> unlock <UID>
+ *   8. Cleanup:    fdb> clearrange "\xff\x02/rlog/" "\xff\x02/rlog0"
  *
- * NOTE: The --add-prefix parameter in step 2 allows the restore to run on a non-empty
- * database, enabling validation by comparing restored data against the source.
+ * NOTE: Steps 2-3 (stop backup and lock) prevent writes during validation, avoiding
+ * false positive audit errors. The --add-prefix parameter in step 4 allows the restore
+ * to run on a non-empty database, enabling validation by comparing restored data
+ * against the source. Both restore and audit use LOCK_AWARE transactions, so they
+ * work on a locked database.
  *
  * See fdbserver/storageserver.actor.cpp for detailed implementation docs.
  * ============================================================================
