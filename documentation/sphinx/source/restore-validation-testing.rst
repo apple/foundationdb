@@ -98,8 +98,38 @@ Verify Backup is Ready
 
 Look for ``Restorable: true`` and ``MaxRestorableVersion`` in the output.
 
+Stop the Backup
+^^^^^^^^^^^^^^^
+
+Before proceeding with restore validation, stop the backup to ensure no more differential data is being captured:
+
+::
+
+    # Stop the backup (use discontinue to keep the backup data)
+    ~/build_output/bin/fdbbackup discontinue -C ~/fdb_test.cluster
+
+    # Verify backup is stopped
+    ~/build_output/bin/fdbbackup status -C ~/fdb_test.cluster
+
+.. note::
+   Use ``discontinue`` rather than ``abort`` to preserve the backup data. The ``discontinue`` command stops the backup gracefully while keeping it restorable.
+
 Phase 3: Restore to Validation Prefix
 --------------------------------------
+
+Lock the Database
+^^^^^^^^^^^^^^^^^
+
+Before starting the restore, lock the database to prevent any writes during validation:
+
+::
+
+    ~/build_output/bin/fdbcli -C ~/fdb_test.cluster
+
+    # Lock the database - save the UID returned!
+    fdb> lock
+
+The lock command returns a UID that you'll need to unlock the database later.
 
 Restore with Prefix
 ^^^^^^^^^^^^^^^^^^^
@@ -118,7 +148,7 @@ Restore with Prefix
 .. warning::
    Using ``file:///Users/stack/fdb_backup`` (parent dir) instead of the full backup path will fail with "not restorable to any version".
 
-The ``\xff\x02/rlog/`` prefix is the ``restoreLogKeys`` range where validation looks for restored data.
+The ``\xff\x02/rlog/`` prefix is the ``validateRestoreLogKeys`` range where validation looks for restored data.
 
 .. important::
    **Restore will clear and overwrite any existing data at the destination range.** This is standard restore behavior. The restore process explicitly clears the destination range before writing restored data, so any pre-existing keys in ``\xff\x02/rlog/`` will be replaced.
@@ -293,6 +323,26 @@ Phase 7: Understanding Audit Design and Limitations
 .. important::
    The restore validation audit is designed to run immediately after a restore operation to verify the restore process didn't corrupt data. It compares the current database state with the restored data at the time of the audit.
 
+.. important::
+   **Lock the database before starting restore validation.** To avoid false positive audit errors caused by writes occurring between the backup snapshot and audit completion, you should lock the database before getting the restorableVersion and keep it locked until the audit completes. Any writes to the source data during this window will cause audit mismatches that are difficult to distinguish from actual restore corruption issues.
+
+   **Both restore and audit operations will continue to work on a locked database.** They use ``LOCK_AWARE`` transactions internally, which allows system operations to proceed while the lock prevents regular application writes. This is the recommended approach for accurate validation.
+
+   ::
+
+       # Lock the database before restore
+       fdb> lock
+
+       # Restore and audit will work - they use LOCK_AWARE transactions
+       # Regular application writes are blocked, preventing false positives
+
+       # Proceed with restore and validation
+       # ... perform restore ...
+       # ... run audit ...
+
+       # Unlock after audit completes
+       fdb> unlock <UID from lock command>
+
 What the Audit Validates
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -345,6 +395,18 @@ Do NOT use restore validation:
 
 Phase 8: Cleanup
 -----------------
+
+Unlock the Database
+^^^^^^^^^^^^^^^^^^^
+
+After validation is complete, unlock the database to allow normal operations:
+
+::
+
+    ~/build_output/bin/fdbcli -C ~/fdb_test.cluster
+
+    # Unlock using the UID from the lock command
+    fdb> unlock <UID from lock command>
 
 Clear Restored Data
 ^^^^^^^^^^^^^^^^^^^

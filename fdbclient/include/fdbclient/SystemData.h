@@ -626,7 +626,7 @@ extern const KeyRef backupLatestVersionsPrefix;
 extern const KeyRangeRef backupLogKeys;
 extern const KeyRangeRef applyLogKeys;
 // Key range reserved for restore validation data storage (system key space)
-extern const KeyRangeRef restoreLogKeys;
+extern const KeyRangeRef validateRestoreLogKeys;
 // Returns true if m is a blog (backup log) or alog (apply log) mutation
 bool isBackupLogMutation(const MutationRef& m);
 
