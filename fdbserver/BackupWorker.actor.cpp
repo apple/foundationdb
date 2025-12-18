@@ -1186,8 +1186,10 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<BackupData> self,
                                 bool isReplacement,
                                 double localRecruitmentTime) {
-	while (isReplacement && now() - localRecruitmentTime < SERVER_KNOBS->BACKUP_WORKER_REPLACEMENT_GRACE_PERIOD) {
-		// If this is a replacement log router, give grace period for ServerDBInfo to update
+	while (isReplacement && now() - localRecruitmentTime < SERVER_KNOBS->BACKUP_WORKER_REPLACEMENT_GRACE_PERIOD &&
+	       db->get().recoveryCount == recoveryCount) {
+		// If this is a replacement log router, give grace period for ServerDBInfo to update.
+		// If there is a new recovery, break immediately.
 		wait(delay(1.0)); // Check again in 1 second
 	}
 
