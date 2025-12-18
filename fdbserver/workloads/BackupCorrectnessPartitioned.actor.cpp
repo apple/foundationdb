@@ -47,9 +47,11 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 	static int backupAgentRequests;
 	LockDB locked{ false };
 	bool allowPauses;
+	bool allowBackupWorkerToggle;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
 	bool defaultBackup;
+	bool mightMissMutationLogs;
 	Optional<std::string> encryptionKeyFileName;
 
 	BackupAndRestorePartitionedCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -81,8 +83,14 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		                                 : 0.0);
 		agentRequest = getOption(options, "simBackupAgents"_sr, true);
 		allowPauses = getOption(options, "allowPauses"_sr, true);
+		// Currently disabling this toggling, as it is causing missing mutation logs,
+		// restorableState for each snapshot is not set properly in this scenario for backup v2
+		// which is causing the restore to fail.
+		// After fixing the issue, I will re-enable the toggling again.
+		allowBackupWorkerToggle = getOption(options, "allowBackupWorkerToggle"_sr, false);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 		defaultBackup = getOption(options, "defaultBackup"_sr, false);
+		mightMissMutationLogs = false;
 
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
@@ -242,6 +250,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		    .detail("DifferentialBackup", differentialBackup)
 		    .detail("StopDifferentialAfter", stopDifferentialAfter)
 		    .detail("AgentRequest", agentRequest)
+		    .detail("AllowBackupWorkerToggle", allowBackupWorkerToggle)
 		    .detail("Encrypted", encryptionKeyFileName.present());
 
 		return _start(cx, this);
@@ -301,6 +310,65 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> testBackupWorkerToggle(BackupAndRestorePartitionedCorrectnessWorkload* self,
+	                                                 Database cx,
+	                                                 Key tag,
+	                                                 UID randomID) {
+		if (self->allowBackupWorkerToggle && deterministicRandom()->random01() < 0.3) {
+			state int toggleCount = deterministicRandom()->randomInt(1, 4); // Random 1 to 3 toggles
+			TraceEvent("BARW_BackupWorkerToggleTest", randomID)
+			    .detail("Tag", printable(tag))
+			    .detail("TestingBackupWorkerToggle", true)
+			    .detail("ToggleCount", toggleCount);
+
+			// Waiting for the backup to start.
+			wait(delay(50));
+
+			// When we toggle backup_worker_enabled flag, we might miss uplaoding few mutation logs
+			self->mightMissMutationLogs = true;
+
+			try {
+				state int i;
+				for (i = 0; i < toggleCount; i++) {
+					// Disable backup workers
+					wait(disableBackupWorker(cx));
+					TraceEvent("BARW_BackupWorkerDisabled", randomID)
+					    .detail("Tag", printable(tag))
+					    .detail("ToggleIteration", i + 1)
+					    .detail("TotalToggles", toggleCount);
+
+					// Wait for a random period (5-15 seconds) with backup workers disabled
+					state double disabledDuration = deterministicRandom()->random01() * 10.0 + 5.0;
+					wait(delay(disabledDuration));
+
+					// Re-enable backup workers
+					wait(enableBackupWorker(cx));
+					TraceEvent("BARW_BackupWorkerReenabled", randomID)
+					    .detail("Tag", printable(tag))
+					    .detail("DisabledDuration", disabledDuration)
+					    .detail("ToggleIteration", i + 1)
+					    .detail("TotalToggles", toggleCount);
+
+					// Wait a bit before next toggle (if not the last one)
+					if (i < toggleCount - 1) {
+						state double betweenToggleDelay = deterministicRandom()->random01() * 5.0 + 2.0; // 2-7 seconds
+						wait(delay(betweenToggleDelay));
+					}
+				}
+
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				TraceEvent(SevError, "BARW_BackupWorkerToggleException", randomID)
+				    .error(e)
+				    .detail("Tag", printable(tag))
+				    .detail("ToggleCount", toggleCount);
+				throw;
+			}
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> doBackup(BackupAndRestorePartitionedCorrectnessWorkload* self,
 	                                   double startDelay,
 	                                   FileBackupAgent* backupAgent,
@@ -352,6 +420,9 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
 		}
+
+		state Future<Void> backupWorkerToggleTest = testBackupWorkerToggle(self, cx, tag, randomID);
+		wait(backupWorkerToggleTest);
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
@@ -586,84 +657,91 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 						                    : desc.maxRestorableVersion.get();
 					}
 				}
-				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					for (auto& kvrange : self->backupRanges) {
-						// version needs to be decided before this transaction otherwise
-						// this clear mutation might be backup as well
-						tr->clear(kvrange);
-					}
-					return Void();
-				}));
 
-				// restore database
-				TraceEvent("BARW_Restore", randomID)
-				    .detail("LastBackupContainer", lastBackupContainer->getURL())
-				    .detail("RestoreAfter", self->restoreAfter)
-				    .detail("BackupTag", printable(self->backupTag))
-				    .detail("TargetVersion", targetVersion);
-				state std::vector<Future<Version>> restores;
-				state std::vector<Standalone<StringRef>> restoreTags;
-				state bool multipleRangesInOneTag = false;
-				state int restoreIndex = 0;
-				// make sure system keys are not present in the restoreRanges as they will get restored first separately
-				// from the rest
-				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
-				Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges;
-				for (int i = 0; i < self->restoreRanges.size(); ++i) {
-					if (config.tenantMode != TenantMode::REQUIRED ||
-					    !self->restoreRanges[i].intersects(getSystemBackupRanges())) {
-						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
-					} else {
-						KeyRangeRef normalKeyRange = self->restoreRanges[i] & normalKeys;
-						KeyRangeRef systemKeyRange = self->restoreRanges[i] & systemKeys;
-						if (!normalKeyRange.empty()) {
-							modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), normalKeyRange);
+				if (targetVersion == -1 && !desc.maxRestorableVersion.present()) {
+					// Because of backup_worker_enabled toggle, we might miss mutation logs and the backup is not
+					// restorable. In that case, skip restore.
+					TraceEvent("BARW_RestoreSkipped", randomID)
+					    .detail("Reason", "BackupWorkers are disabled for some time")
+					    .detail("BackupDesc", desc.toString().c_str());
+					printf("Backup Description\n%s", desc.toString().c_str());
+					ASSERT(self->mightMissMutationLogs && desc.contiguousLogEnd.get() != desc.maxLogEnd.get() - 1);
+				} else {
+					wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						for (auto& kvrange : self->backupRanges) {
+							// version needs to be decided before this transaction otherwise
+							// this clear mutation might be backup as well
+							tr->clear(kvrange);
 						}
-						if (!systemKeyRange.empty()) {
-							systemRestoreRanges.push_back_deep(systemRestoreRanges.arena(), systemKeyRange);
+						return Void();
+					}));
+
+					// restore database
+					TraceEvent("BARW_Restore", randomID)
+					    .detail("LastBackupContainer", lastBackupContainer->getURL())
+					    .detail("RestoreAfter", self->restoreAfter)
+					    .detail("BackupTag", printable(self->backupTag))
+					    .detail("TargetVersion", targetVersion);
+					state std::vector<Future<Version>> restores;
+					state std::vector<Standalone<StringRef>> restoreTags;
+					state bool multipleRangesInOneTag = false;
+					state int restoreIndex = 0;
+					// make sure system keys are not present in the restoreRanges as they will get restored first
+					// separately from the rest
+					Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
+					Standalone<VectorRef<KeyRangeRef>> systemRestoreRanges;
+					for (int i = 0; i < self->restoreRanges.size(); ++i) {
+						if (config.tenantMode != TenantMode::REQUIRED ||
+						    !self->restoreRanges[i].intersects(getSystemBackupRanges())) {
+							modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
+						} else {
+							KeyRangeRef normalKeyRange = self->restoreRanges[i] & normalKeys;
+							KeyRangeRef systemKeyRange = self->restoreRanges[i] & systemKeys;
+							if (!normalKeyRange.empty()) {
+								modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), normalKeyRange);
+							}
+							if (!systemKeyRange.empty()) {
+								systemRestoreRanges.push_back_deep(systemRestoreRanges.arena(), systemKeyRange);
+							}
 						}
 					}
-				}
-				self->restoreRanges = modifiedRestoreRanges;
-				if (!systemRestoreRanges.empty()) {
-					// We are able to restore system keys first since we restore an entire cluster at once rather than
-					// partial key ranges.
-					// this is where it fails
-					wait(clearAndRestoreSystemKeys(
-					    cx, self, &backupAgent, targetVersion, lastBackupContainer, systemRestoreRanges));
-				}
-				// and here
+					self->restoreRanges = modifiedRestoreRanges;
+					if (!systemRestoreRanges.empty()) {
+						wait(clearAndRestoreSystemKeys(
+						    cx, self, &backupAgent, targetVersion, lastBackupContainer, systemRestoreRanges));
+					}
 
-				multipleRangesInOneTag = true;
-				Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
-				restoreTags.push_back(restoreTag);
-				printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
-				       restoreIndex,
-				       restoreTag.toString().c_str());
-				restores.push_back(backupAgent.restore(cx,
-				                                       cx,
-				                                       restoreTag,
-				                                       KeyRef(lastBackupContainer->getURL()),
-				                                       lastBackupContainer->getProxy(),
-				                                       self->restoreRanges,
-				                                       WaitForComplete::True,
-				                                       targetVersion,
-				                                       Verbose::True,
-				                                       Key(),
-				                                       Key(),
-				                                       self->locked,
-				                                       UnlockDB::True,
-				                                       OnlyApplyMutationLogs::False,
-				                                       InconsistentSnapshotOnly::False,
-				                                       ::invalidVersion,
-				                                       self->encryptionKeyFileName,
-				                                       {}));
+					multipleRangesInOneTag = true;
+					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
+					restoreTags.push_back(restoreTag);
+					printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
+					       restoreIndex,
+					       restoreTag.toString().c_str());
+					restores.push_back(backupAgent.restore(cx,
+					                                       cx,
+					                                       restoreTag,
+					                                       KeyRef(lastBackupContainer->getURL()),
+					                                       lastBackupContainer->getProxy(),
+					                                       self->restoreRanges,
+					                                       WaitForComplete::True,
+					                                       targetVersion,
+					                                       Verbose::True,
+					                                       Key(),
+					                                       Key(),
+					                                       self->locked,
+					                                       UnlockDB::True,
+					                                       OnlyApplyMutationLogs::False,
+					                                       InconsistentSnapshotOnly::False,
+					                                       ::invalidVersion,
+					                                       self->encryptionKeyFileName,
+					                                       {}));
 
-				wait(waitForAll(restores));
+					wait(waitForAll(restores));
 
-				for (auto& restore : restores) {
-					ASSERT(!restore.isError());
+					for (auto& restore : restores) {
+						ASSERT(!restore.isError());
+					}
 				}
 			}
 			state Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
