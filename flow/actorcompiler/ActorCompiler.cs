@@ -525,7 +525,7 @@ namespace actorcompiler
                 writer.WriteLine("ACTOR_TEST_CASE({0}, {1})", actor.name, actor.testCaseParameters);
             }
 
-            Console.WriteLine("\tCompiled ACTOR {0} (line {1})", actor.name, actor.SourceLine);
+            // Console.WriteLine("\tCompiled ACTOR {0} (line {1})", actor.name, actor.SourceLine);
         }
 
         const string thisAddress = "reinterpret_cast<unsigned long>(this)";
