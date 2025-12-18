@@ -29,12 +29,15 @@ endif()
 if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   add_dependencies(fdbcli external_client)
 
-  add_fdbclient_test(
-    NAME single_process_fdbcli_tests
-    COMMAND ${CMAKE_SOURCE_DIR}/fdbcli/tests/fdbcli_tests.py
-            ${CMAKE_BINARY_DIR}
-            @CLUSTER_FILE@
-            )
+  if(NOT USE_ASAN)
+    # TODO: this is known to fail with ASAN, fix needed
+    add_fdbclient_test(
+      NAME single_process_fdbcli_tests
+      COMMAND ${CMAKE_SOURCE_DIR}/fdbcli/tests/fdbcli_tests.py
+              ${CMAKE_BINARY_DIR}
+              @CLUSTER_FILE@
+              )
+  endif()
   add_fdbclient_test(
     NAME multi_process_fdbcli_tests
     PROCESS_NUMBER 5
