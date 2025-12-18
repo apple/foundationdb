@@ -3229,8 +3229,10 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		self.addActor.send(monitorAndRecruitLogRouters(&self));
 	}
 
-	// Start monitoring backup workers for re-recruitment
-	self.addActor.send(monitorAndRecruitBackupWorkers(&self));
+	if (SERVER_KNOBS->CC_RERECRUIT_BACKUP_WORKER_ENABLED) {
+		// Start monitoring backup workers for re-recruitment
+		self.addActor.send(monitorAndRecruitBackupWorkers(&self));
+	}
 
 	loop choose {
 		when(ErrorOr<Void> err = wait(error)) {

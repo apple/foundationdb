@@ -470,7 +470,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 	loop {
 		std::vector<Future<Void>> failed;
 		std::vector<Future<Void>> routerFailed;
-		std::vector<Future<Void>> backupFailed(1, Never());
+		std::vector<Future<Void>> backupFailed;
 		std::vector<Future<Void>> changes;
 
 		for (auto& it : self->tLogs) {
@@ -546,8 +546,10 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 				}
 			}
 		} else {
-			// Skip monitoring backup workers after full recovery.
-			backupFailed.clear();
+			if (SERVER_KNOBS->CC_RERECRUIT_BACKUP_WORKER_ENABLED) {
+				// Skip monitoring backup workers after full recovery.
+				backupFailed.clear();
+			}
 		}
 
 		if (SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_ENABLED) {
