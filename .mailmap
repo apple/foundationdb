@@ -1,0 +1,5 @@
+# This file maps author names and email addresses to canonical identities
+# Format: Preferred Name <preferred@email> Commit Name <commit@email>
+# See git-shortlog(1) for more information
+
+Mohamad Gebai <mohamad.gebai@mail.mcgill.ca>
