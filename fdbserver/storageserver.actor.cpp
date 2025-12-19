@@ -4556,19 +4556,27 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 			errors.push_back(error);
 			break;
 		} else {
-			// Extra key in restored data (skip it, as per design doc: one-directional comparison)
-			// Log the extra key for visibility without failing the validation
-			TraceEvent(SevInfo, "SSAuditRestoreExtraKey", thisServerID)
+			// Extra key in restored data
+			std::string error =
+			    format("Extra key in restored data: %s", Traceable<StringRef>::toString(restoredKV.key).c_str());
+			TraceEvent(SevError, "SSAuditRestoreExtraKey", thisServerID)
+			    .setMaxFieldLength(-1)
+			    .setMaxEventLength(-1)
 			    .detail("AuditId", auditID)
 			    .detail("AuditRange", auditRange)
+			    .detail("ErrorMessage", error)
 			    .detail("ExtraRestoredKey", restoredKV.key)
-			    .detail("NextSourceKey", sourceKV.key);
-			++restoredIdx;
+			    .detail("NextSourceKey", sourceKV.key)
+			    .detail("Version", version)
+			    .detail("ClaimRange", claimRange);
+			errors.push_back(error);
+			break;
 		}
 	}
 
 	// Check for any remaining source keys that are missing from restored data
-	if (errors.empty() && sourceIdx < sourceReply.data.size() && !sourceReply.more) {
+	// Only report as error if BOTH source and restored have no more data coming
+	if (errors.empty() && sourceIdx < sourceReply.data.size() && !sourceReply.more && !restoredReply.more) {
 		std::string error = format("Missing key(s) in restored data, next source key: %s",
 		                           Traceable<StringRef>::toString(sourceReply.data[sourceIdx].key).c_str());
 		TraceEvent(SevError, "SSAuditRestoreError", thisServerID)
