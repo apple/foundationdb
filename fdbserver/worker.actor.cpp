@@ -2161,7 +2161,7 @@ ACTOR Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnecti
 
 	auto db = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION);
 	Reference<IDatabase> idb = wait(safeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(db)));
-	auto services = GrpcServer::ServiceList{};
+	auto services = GrpcServer::ServiceList{ std::make_shared<fdbctl::ControlServiceImpl>(idb) };
 	GrpcServer::instance()->registerRoleServices(UID(), services);
 	TraceEvent("WorkerGrpcServerStart").detail("Address", GrpcServer::instance()->getAddress());
 	return Never();

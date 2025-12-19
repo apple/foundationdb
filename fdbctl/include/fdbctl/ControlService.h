@@ -43,8 +43,8 @@ public:
 	DEFINE_GRPC_HANDLER(GetStatus, getStatus);
 	DEFINE_GRPC_HANDLER(GetWorkers, getWorkers);
 	DEFINE_GRPC_HANDLER(Include, include);
-	// DEFINE_GRPC_HANDLER(Exclude, exclude);
-	// DEFINE_GRPC_HANDLER(ExcludeStatus, excludeStatus);
+	DEFINE_GRPC_HANDLER(Exclude, exclude);
+	DEFINE_GRPC_HANDLER(ExcludeStatus, excludeStatus);
 	DEFINE_GRPC_HANDLER(Kill, kill);
 
 private:
