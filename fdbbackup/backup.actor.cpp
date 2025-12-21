@@ -2667,7 +2667,11 @@ ACTOR Future<Void> expireBackupData(const char* name,
 						lastProgress = p;
 					}
 				}
-				when(wait(expire)) { break; }
+				// clang-format off
+				when(wait(expire)) {
+					break;
+				}
+				// clang-format on
 			}
 		}
 
@@ -2710,7 +2714,11 @@ ACTOR Future<Void> deleteBackupContainer(const char* name,
 
 		loop {
 			choose {
-				when(wait(done)) { break; }
+				// clang-format off
+				when(wait(done)) {
+					break;
+				}
+				// clang-format on
 				when(wait(delay(5))) {
 					if (numDeleted != lastUpdate) {
 						printf("\r%d...", numDeleted);
