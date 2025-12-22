@@ -2667,7 +2667,9 @@ ACTOR Future<Void> expireBackupData(const char* name,
 						lastProgress = p;
 					}
 				}
-				when(wait(expire)) { break; }
+				when(wait(expire)) {
+					break;
+				}
 			}
 		}
 
@@ -2710,7 +2712,9 @@ ACTOR Future<Void> deleteBackupContainer(const char* name,
 
 		loop {
 			choose {
-				when(wait(done)) { break; }
+				when(wait(done)) {
+					break;
+				}
 				when(wait(delay(5))) {
 					if (numDeleted != lastUpdate) {
 						printf("\r%d...", numDeleted);
@@ -3394,8 +3398,14 @@ static bool processOption(int argc, char* argv[], int& i, std::vector<char*>& op
 			size_t knownOptLen = strlen(knownOpt);
 			bool isPrefixOpt = knownOptLen > 1 && knownOpt[knownOptLen - 1] == '-';
 
-			if (option == knownOpt ||
-			    (isPrefixOpt && option.size() >= knownOptLen && option.compare(0, knownOptLen, knownOpt) == 0)) {
+			// Create normalized versions for hyphen-underscore equivalence
+			std::string optNorm(option);
+			std::replace(optNorm.begin(), optNorm.end(), '-', '_');
+			std::string knownNorm(knownOpt, isPrefixOpt ? knownOptLen - 1 : knownOptLen);
+			std::replace(knownNorm.begin(), knownNorm.end(), '-', '_');
+
+			if (optNorm == knownNorm || (isPrefixOpt && optNorm.size() >= knownNorm.size() &&
+			                             optNorm.compare(0, knownNorm.size(), knownNorm) == 0)) {
 				if (opt[j].nArgType == SO_REQ_SEP && equalPos == std::string_view::npos) {
 					++i;
 					if (i >= argc) {
@@ -3408,7 +3418,7 @@ static bool processOption(int argc, char* argv[], int& i, std::vector<char*>& op
 			}
 		}
 	}
-	fmt::print(stderr, "ERROR: Unknown option '{}'\n", option);
+	fmt::print(stderr, "ERROR: unknown option '{}'\n", option);
 	return false;
 }
 
