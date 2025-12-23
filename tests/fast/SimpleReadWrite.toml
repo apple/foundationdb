@@ -1,0 +1,8 @@
+[configuration]
+
+[[test]]
+testTitle = 'SimpleReadWriteTest'
+
+    [[test.workload]]
+    testName = 'SimpleReadWrite'
+
