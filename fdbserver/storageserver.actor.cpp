@@ -4424,13 +4424,16 @@ ACTOR static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSource
 
 	// Read restored data from system key space
 	// NOTE: Use database transaction to read system keys since this SS might not own them
+	// IMPORTANT: Use same byte limits as source query to ensure comparable results, since restored keys
+	// are larger (include prefix), which could cause fewer keys to be returned when byte limit is reached
 	state ErrorOr<GetKeyValuesReply> restoredResult;
 	try {
 		state Transaction tr(data->cx);
 		tr.setVersion(version);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		state RangeResult restoredData = wait(tr.getRange(restoredRange, limit, Snapshot::False, Reverse::False));
+		GetRangeLimits limits(limit, limitBytes);
+		state RangeResult restoredData = wait(tr.getRange(restoredRange, limits, Snapshot::False, Reverse::False));
 
 		// Convert RangeResult to GetKeyValuesReply format
 		GetKeyValuesReply restoredReply;
@@ -4556,10 +4559,10 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 			errors.push_back(error);
 			break;
 		} else {
-			// Extra key in restored data
+			// Extra key in restored data (treat as validation error)
 			std::string error =
 			    format("Extra key in restored data: %s", Traceable<StringRef>::toString(restoredKV.key).c_str());
-			TraceEvent(SevError, "SSAuditRestoreExtraKey", thisServerID)
+			TraceEvent(SevError, "SSAuditRestoreError", thisServerID)
 			    .setMaxFieldLength(-1)
 			    .setMaxEventLength(-1)
 			    .detail("AuditId", auditID)
@@ -4575,7 +4578,9 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 	}
 
 	// Check for any remaining source keys that are missing from restored data
-	// Only report as error if BOTH source and restored have no more data coming
+	// Only report as error if BOTH source and restored have no more data coming.
+	// We require !sourceReply.more because if there's more source data to fetch,
+	// we can't definitively say keys are missing until we've seen all source data.
 	if (errors.empty() && sourceIdx < sourceReply.data.size() && !sourceReply.more && !restoredReply.more) {
 		std::string error = format("Missing key(s) in restored data, next source key: %s",
 		                           Traceable<StringRef>::toString(sourceReply.data[sourceIdx].key).c_str());
@@ -4592,14 +4597,20 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 
 	// Check for any remaining restored keys that don't have matching source keys
 	if (errors.empty() && restoredIdx < restoredReply.data.size() && !restoredReply.more) {
-		// Log the extra keys found in restored data
-		TraceEvent(SevInfo, "SSAuditRestoreExtraRestoredKeys", thisServerID)
+		// Extra keys found in restored data - treat as validation error
+		std::string error = format("Extra key(s) in restored data, first extra key: %s",
+		                           Traceable<StringRef>::toString(restoredReply.data[restoredIdx].key).c_str());
+		TraceEvent(SevError, "SSAuditRestoreError", thisServerID)
+		    .setMaxFieldLength(-1)
+		    .setMaxEventLength(-1)
 		    .detail("AuditId", auditID)
 		    .detail("AuditRange", auditRange)
+		    .detail("ErrorMessage", error)
 		    .detail("ExtraKeyCount", restoredReply.data.size() - restoredIdx)
 		    .detail("FirstExtraKey", restoredReply.data[restoredIdx].key)
 		    .detail("Version", version)
 		    .detail("ClaimRange", claimRange);
+		errors.push_back(error);
 	}
 
 	TraceEvent("SSAuditRestoreCompareEnd", thisServerID)
