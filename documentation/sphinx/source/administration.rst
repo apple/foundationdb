@@ -14,6 +14,8 @@ Administration
    tls
    bulkload-user
    bulkdump
+   auditstorage
+   restore-validation-testing
    
 
 This document covers the administration of an existing FoundationDB cluster. We recommend you read this document before setting up a cluster for performance testing or production use.
