@@ -132,6 +132,13 @@ protected:
 	static const std::string defaultTagName;
 };
 
+// Snapshot generation mode for backup operations
+enum class SnapshotMode {
+	RANGEFILE = 0, // Traditional range file snapshots
+	BULKDUMP, // BulkDump snapshots
+	BOTH // Generate both formats for validation
+};
+
 class FileBackupAgent : public BackupAgentBase {
 public:
 	FileBackupAgent();
@@ -205,7 +212,8 @@ public:
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        Optional<UID> lockUID = Optional<UID>());
+	                        Optional<UID> lockUID = Optional<UID>(),
+	                        bool useRangeFileRestore = true);
 
 	// this method will construct range and version vectors and then call restore()
 	Future<Version> restore(Database cx,
@@ -223,7 +231,8 @@ public:
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {},
+	                        bool useRangeFileRestore = true);
 
 	// create a version vector of size ranges.size(), all elements are the same, i.e. beginVersion
 	Future<Version> restore(Database cx,
@@ -243,7 +252,8 @@ public:
 	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
 	                        Optional<std::string> const& encryptionKeyFileName = {},
-	                        Optional<UID> lockUID = Optional<UID>());
+	                        Optional<UID> lockUID = Optional<UID>(),
+	                        bool useRangeFileRestore = true);
 
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
@@ -283,7 +293,9 @@ public:
 	                          StopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {});
+	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          int snapshotMode = 0);
+	// snapshotMode: 0=RANGEFILE (default), 1=BULKDUMP, 2=BOTH
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          Optional<std::string> proxy,
@@ -295,7 +307,8 @@ public:
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {}) {
+	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          int snapshotMode = 0) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -308,7 +321,8 @@ public:
 			                    stopWhenDone,
 			                    partitionedLog,
 			                    incrementalBackupOnly,
-			                    encryptionKeyFileName) +
+			                    encryptionKeyFileName,
+			                    snapshotMode) +
 			       checkAndDisableBackupWorkers(cx);
 		});
 	}
@@ -910,6 +924,21 @@ public:
 
 	// Enable snapshot backup file encryption
 	KeyBackedProperty<bool> enableSnapshotBackupEncryption() { return configSpace.pack(__FUNCTION__sr); }
+
+	// Snapshot mode for backup: 0 = RANGEFILE (legacy), 1 = BULKDUMP (default in FDB 8.0+), 2 = BOTH
+	KeyBackedProperty<int> snapshotMode() { return configSpace.pack(__FUNCTION__sr); }
+
+	// Original BulkDump mode before backup enabled it - used to restore state after completion/crash
+	KeyBackedProperty<int> originalBulkDumpMode() { return configSpace.pack(__FUNCTION__sr); }
+
+	// BulkDump job ID - stored when BulkDump snapshot completes, used by BulkLoad restore
+	KeyBackedProperty<std::string> bulkDumpJobId() { return configSpace.pack(__FUNCTION__sr); }
+
+	// BulkDump total bytes - stored when BulkDump snapshot completes
+	KeyBackedProperty<int64_t> bulkDumpTotalBytes() { return configSpace.pack(__FUNCTION__sr); }
+
+	// BulkDump total keys - stored when BulkDump snapshot completes
+	KeyBackedProperty<int64_t> bulkDumpTotalKeys() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Latest version for which all prior versions have had their log copy tasks completed
 	KeyBackedProperty<Version> latestLogEndVersion() { return configSpace.pack(__FUNCTION__sr); }

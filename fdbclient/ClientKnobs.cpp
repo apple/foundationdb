@@ -164,6 +164,8 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BACKUP_LOCK_BYTES,                       1e8 );
 	init( BACKUP_RANGE_TIMEOUT,   TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
 	init( BACKUP_RANGE_MINWAIT,   std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
+	init( BULKDUMP_JOB_TIMEOUT,                    3600 * 24 ); // 24 hours - large DBs may take days
+	init( BULKLOAD_JOB_TIMEOUT,                    3600 * 24 ); // 24 hours - large DBs may take days
 	init( BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC,  10 * 60 );  // 10 minutes
 	init( BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC,   3600 * 24 * 10); // 10 days
 	init( BACKUP_SHARD_TASK_LIMIT,                1000 ); if( randomize && BUGGIFY ) BACKUP_SHARD_TASK_LIMIT = 4;

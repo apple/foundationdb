@@ -166,6 +166,8 @@ ERROR( bulkload_manifest_decode_error, 1246, "Bulkload manifest string is failed
 ERROR( range_lock_reject, 1247, "Range lock is rejected" )
 ERROR( range_unlock_reject, 1248, "Range unlock is rejected" )
 ERROR( bulkload_dataset_not_cover_required_range, 1249, "Bulkload dataset does not cover the required range" )
+ERROR( bulkload_invalid_configuration, 1250, "BulkLoad requires cluster configuration with both shard_encode_location_metadata=1 and enable_read_lock_on_range=1" )
+ERROR( bulkload_configuration_warning, 1251, "BulkLoad configuration warning" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -344,6 +346,10 @@ ERROR( blob_restore_invalid_manifest_url, 2386, "Invalid manifest URL" )
 ERROR( blob_restore_corrupted_manifest, 2387, "Corrupted manifest" )
 ERROR( blob_restore_missing_manifest, 2388, "Missing manifest" )
 ERROR( blob_migrator_replaced, 2389, "Blob migrator is replaced")
+ERROR( restore_bulkload_dataset_incomplete, 2390, "BulkDump dataset incomplete. Use --rangefile flag")
+ERROR( restore_bulkload_failed, 2391, "BulkLoad operation failed")
+ERROR( backup_bulkdump_timeout, 2392, "BulkDump operation timed out")
+ERROR( backup_bulkdump_failed, 2393, "BulkDump operation failed")
 
 ERROR( key_not_found, 2400, "Expected key is missing")
 ERROR( json_malformed, 2401, "JSON string was malformed")
