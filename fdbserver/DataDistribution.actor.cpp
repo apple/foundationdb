@@ -2563,6 +2563,14 @@ ACTOR Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> re
 	state Database cx = self->txnProcessor->context();
 	TraceEvent(SevInfo, "DDBulkDumpCoreStart", self->ddId);
 	loop {
+		// Dynamically check if BulkDump mode is enabled
+		state int currentMode = wait(getBulkDumpMode(cx));
+		if (!bulkDumpIsEnabled(currentMode)) {
+			// Mode is disabled - use a longer polling interval to avoid keeping DD "active"
+			// during QuietDatabase checks. BulkDumpTaskFunc will eventually enable the mode.
+			wait(delay(60.0));
+			continue;
+		}
 		try {
 			wait(bulkDumpManager(self));
 		} catch (Error& e) {
@@ -2798,16 +2806,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				self->bulkLoadTaskCollection->removeBulkLoadJobRange();
 			}
 
-			if (bulkDumpIsEnabled(self->initData->bulkDumpMode)) {
-				TraceEvent(SevInfo, "DDBulkDumpModeEnabled", self->ddId)
-				    .detail("UsableRegions", self->configuration.usableRegions);
-				self->bulkDumpEnabled = true;
-				if (self->configuration.usableRegions > 1) {
-					actors.push_back(
-					    bulkDumpCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
-				} else {
-					actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
-				}
+			// Always spawn bulkDumpCore - it will dynamically check the mode
+			TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
+			    .detail("UsableRegions", self->configuration.usableRegions)
+			    .detail("InitialMode", self->initData->bulkDumpMode);
+			if (self->configuration.usableRegions > 1) {
+				actors.push_back(bulkDumpCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+			} else {
+				actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
 			}
 
 			wait(waitForAll(actors));
