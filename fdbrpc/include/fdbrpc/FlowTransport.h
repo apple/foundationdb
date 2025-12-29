@@ -40,7 +40,6 @@ class IConnection;
 // WL: Well-known
 enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_UNAUTHORIZED_ENDPOINT, WLTOKEN_FIRST_AVAILABLE };
 
-#pragma pack(push, 4)
 class Endpoint {
 public:
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
@@ -119,7 +118,6 @@ public:
 		}
 	}
 };
-#pragma pack(pop)
 
 namespace std {
 template <>
