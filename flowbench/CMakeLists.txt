@@ -1,5 +1,4 @@
 project(flowbench)
-
 # This stub is kept to maintain the backward compatibility with the existing build
 # environment. It should be removed when a reasonable environment is established.
 if(NOT benchmark_ROOT)
@@ -18,6 +17,6 @@ add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
 if(FLOW_USE_ZSTD)
   target_include_directories(flowbench PRIVATE ${ZSTD_LIB_INCLUDE_DIR})
 endif()
-target_link_libraries(flowbench PRIVATE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_link_libraries(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 target_include_directories(flowbench INTERFACE $<TARGET_PROPERTY:benchmark::benchmark, INTERFACE_INCLUDE_DIRECTORIES>)
 target_link_libraries(flowbench benchmark::benchmark pthread flow fdbclient)
