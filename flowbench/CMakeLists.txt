@@ -1,4 +1,8 @@
 project(flowbench)
+
+fdb_find_sources(FLOWBENCH_SRCS)
+add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
+
 # This stub is kept to maintain the backward compatibility with the existing build
 # environment. It should be removed when a reasonable environment is established.
 if(NOT benchmark_ROOT)
@@ -9,14 +13,53 @@ if(NOT benchmark_ROOT)
   endif()
 endif()
 
-find_package(benchmark REQUIRED)
+find_package(benchmark)
 
-fdb_find_sources(FLOWBENCH_SRCS)
-add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
+if(benchmark_FOUND)
+  target_include_directories(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+  target_include_directories(flowbench INTERFACE $<TARGET_PROPERTY:benchmark::benchmark, INTERFACE_INCLUDE_DIRECTORIES>)
+  target_link_libraries(flowbench benchmark::benchmark)
+else()
+  ## This seems to be copy-pasted from the the google benchmark documentation.
+  ## It breaks if you attempt to re-use a build of googlebenchmark across FDB
+  ## builds.
+
+  # include the configurations from benchmark.cmake
+  configure_file(benchmark.cmake googlebenchmark-download/CMakeLists.txt)
+  # executing the configuration step
+  execute_process(
+      COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+      RESULT_VARIABLE results
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-download
+  )
+  # checking if the configuration step passed
+  if(results)
+      message(FATAL_ERROR "Configuration step for Benchmark has Failed. ${results}")
+  endif()
+  # executing the build step
+  execute_process(
+      COMMAND ${CMAKE_COMMAND} --build . --config Release
+      RESULT_VARIABLE results
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-download
+  )
+  # checking if the build step passed
+  if(results)
+    message(FATAL_ERROR "Build step for Benchmark has Failed. ${results}")
+  endif()
+
+  set(BENCHMARK_ENABLE_TESTING OFF)
+  add_subdirectory(
+    ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src
+    ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-build
+    EXCLUDE_FROM_ALL
+  )
+  add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
+  target_include_directories(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include"  ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src/include)
+  target_link_libraries(flowbench benchmark)
+endif()
+
 
 if(FLOW_USE_ZSTD)
   target_include_directories(flowbench PRIVATE ${ZSTD_LIB_INCLUDE_DIR})
 endif()
-target_include_directories(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
-target_include_directories(flowbench INTERFACE $<TARGET_PROPERTY:benchmark::benchmark, INTERFACE_INCLUDE_DIRECTORIES>)
-target_link_libraries(flowbench benchmark::benchmark pthread flow fdbclient)
+target_link_libraries(flowbench pthread flow fdbclient)
