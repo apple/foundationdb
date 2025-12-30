@@ -53,7 +53,6 @@ else()
     ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-build
     EXCLUDE_FROM_ALL
   )
-  add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
   target_include_directories(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include"  ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src/include)
   target_link_libraries(flowbench benchmark)
 endif()
