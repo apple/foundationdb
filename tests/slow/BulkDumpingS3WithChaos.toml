@@ -37,7 +37,7 @@ simpleConfig = false
 minimumRegions = 1
 # Use ssd-2 storage engine instead of rocksdb to avoid RocksDB bulk loading crashes
 # The RocksDB assertion failure indicates incompatibility with current bulk loading implementation
-config = "single usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
+config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
 
 # Disable all fault injection and network failures
 # buggify = false now controls ALL fault injection systems (BUGGIFY, failure workloads, AND global fault injection)
