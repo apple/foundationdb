@@ -169,23 +169,50 @@ endif()
 
 include(utils)
 
-# Flow and other tools are written in C# - so we need that dependency
-include(EnableCsharp)
+# First thing we need is the actor compiler
+option(
+  USE_CSHARP
+  "Prefer C# build tools (actor compiler, coverage tool, vexillographer) when a toolchain is available"
+  ON)
 
-# First thing we need is the actor compiler - and to compile and run the actor
-# compiler, we need mono
+if(NOT DEFINED FDB_USE_CSHARP_TOOLS)
+  set(FDB_USE_CSHARP_TOOLS ${USE_CSHARP})
+else()
+  set(USE_CSHARP ${FDB_USE_CSHARP_TOOLS})
+endif()
+
+set(CSHARP_TOOLCHAIN_FOUND FALSE)
+set(COVERAGETOOL_AVAILABLE FALSE)
+if(FDB_USE_CSHARP_TOOLS)
+  if(WIN32)
+    set(CSHARP_TOOLCHAIN_FOUND TRUE)
+  else()
+    find_package(mono)
+    if(mono_FOUND)
+      set(CSHARP_TOOLCHAIN_FOUND TRUE)
+      set(CSHARP_USE_MONO TRUE)
+    else()
+      find_package(dotnet)
+      if(dotnet_FOUND)
+        set(CSHARP_TOOLCHAIN_FOUND TRUE)
+      endif()
+    endif()
+  endif()
+endif()
+
 include(CompileActorCompiler)
 
-include(CompileCoverageTool)
+if(FDB_USE_CSHARP_TOOLS AND CSHARP_TOOLCHAIN_FOUND)
+  include(CompileCoverageTool)
+  set(COVERAGETOOL_AVAILABLE TRUE)
+else()
+  message(STATUS "C# tooling disabled or not found; skipping coverage tool build")
+endif()
+# Vexilographer generation is configured inside fdbclient
+include(CompileVexillographer)
 
 # with the actor compiler, we can now make the flow commands available
 include(FlowCommands)
-
-###############################################################################
-# Vexilographer
-###############################################################################
-
-include(CompileVexillographer)
 
 ###############################################################################
 # Generate config file
@@ -266,7 +293,7 @@ if(WITH_PYTHON AND WITH_C_BINDING)
 endif()
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
-  if(BUILD_JAVA_BINDING)
+  if(BUILD_JAVA_BINDING AND TARGET CopyJavadoc)
     add_dependencies(html CopyJavadoc)
   endif()
 endif()
