@@ -171,14 +171,19 @@ include(utils)
 
 # First thing we need is the actor compiler
 option(
-  USE_CSHARP
+  WITH_CSHARP
   "Prefer C# build tools (actor compiler, coverage tool, vexillographer) when a toolchain is available"
   ON)
 
+set(FDB_USE_CSHARP_TOOLS_EXPLICIT FALSE)
+if(DEFINED FDB_USE_CSHARP_TOOLS)
+  set(FDB_USE_CSHARP_TOOLS_EXPLICIT TRUE)
+endif()
+
 if(NOT DEFINED FDB_USE_CSHARP_TOOLS)
-  set(FDB_USE_CSHARP_TOOLS ${USE_CSHARP})
+  set(FDB_USE_CSHARP_TOOLS ${WITH_CSHARP})
 else()
-  set(USE_CSHARP ${FDB_USE_CSHARP_TOOLS})
+  set(WITH_CSHARP ${FDB_USE_CSHARP_TOOLS})
 endif()
 
 set(CSHARP_TOOLCHAIN_FOUND FALSE)
@@ -205,10 +210,11 @@ if(FDB_USE_CSHARP_TOOLS)
   endif()
 endif()
 
-if(FDB_USE_CSHARP_TOOLS AND NOT CSHARP_TOOLCHAIN_FOUND)
+if(FDB_USE_CSHARP_TOOLS_EXPLICIT AND FDB_USE_CSHARP_TOOLS
+   AND NOT CSHARP_TOOLCHAIN_FOUND)
   message(
     FATAL_ERROR
-    "FDB_USE_CSHARP_TOOLS=ON but no C# toolchain was found. Install .NET (dotnet) or Mono, or set FDB_USE_CSHARP_TOOLS=OFF.")
+    "FDB_USE_CSHARP_TOOLS is enabled, but CSHARP_TOOLCHAIN_FOUND is FALSE. Install .NET (dotnet) or Mono, or set WITH_CSHARP=OFF.")
 endif()
 
 include(CompileActorCompiler)
