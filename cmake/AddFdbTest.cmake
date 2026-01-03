@@ -225,29 +225,33 @@ function(stage_correctness_package)
     endforeach()
   endforeach()
 
-  list(APPEND package_files ${STAGE_OUT_DIR}/bin/fdbserver
-                            ${STAGE_OUT_DIR}/bin/coverage.fdbserver.xml
-                            ${STAGE_OUT_DIR}/bin/coverage.fdbclient.xml
-                            ${STAGE_OUT_DIR}/bin/coverage.fdbrpc.xml
-                            ${STAGE_OUT_DIR}/bin/coverage.flow.xml
-                            ${STAGE_OUT_DIR}/CMakeCache.txt
-    )
+  set(package_files ${STAGE_OUT_DIR}/bin/fdbserver
+                    ${STAGE_OUT_DIR}/CMakeCache.txt)
+
+  set(package_dependencies ${CMAKE_BINARY_DIR}/CMakeCache.txt
+                           ${CMAKE_BINARY_DIR}/packages/bin/fdbserver)
+
+  set(copy_sources ${CMAKE_BINARY_DIR}/packages/bin/fdbserver)
+  if(COVERAGETOOL_AVAILABLE)
+    list(APPEND package_files ${STAGE_OUT_DIR}/bin/coverage.fdbserver.xml
+                              ${STAGE_OUT_DIR}/bin/coverage.fdbclient.xml
+                              ${STAGE_OUT_DIR}/bin/coverage.fdbrpc.xml
+                              ${STAGE_OUT_DIR}/bin/coverage.flow.xml)
+    list(APPEND package_dependencies ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
+                                     ${CMAKE_BINARY_DIR}/lib/coverage.fdbclient.xml
+                                     ${CMAKE_BINARY_DIR}/lib/coverage.fdbrpc.xml
+                                     ${CMAKE_BINARY_DIR}/lib/coverage.flow.xml)
+    list(APPEND copy_sources ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
+                             ${CMAKE_BINARY_DIR}/lib/coverage.fdbclient.xml
+                             ${CMAKE_BINARY_DIR}/lib/coverage.fdbrpc.xml
+                             ${CMAKE_BINARY_DIR}/lib/coverage.flow.xml)
+  endif()
 
   add_custom_command(
     OUTPUT ${package_files}
-    DEPENDS ${CMAKE_BINARY_DIR}/CMakeCache.txt
-            ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
-            ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
-            ${CMAKE_BINARY_DIR}/lib/coverage.fdbclient.xml
-            ${CMAKE_BINARY_DIR}/lib/coverage.fdbrpc.xml
-            ${CMAKE_BINARY_DIR}/lib/coverage.flow.xml
+    DEPENDS ${package_dependencies}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/CMakeCache.txt ${STAGE_OUT_DIR}
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
-                                     ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
-                                     ${CMAKE_BINARY_DIR}/lib/coverage.fdbclient.xml
-                                     ${CMAKE_BINARY_DIR}/lib/coverage.fdbrpc.xml
-                                     ${CMAKE_BINARY_DIR}/lib/coverage.flow.xml
-                                     ${STAGE_OUT_DIR}/bin
+    COMMAND ${CMAKE_COMMAND} -E copy ${copy_sources} ${STAGE_OUT_DIR}/bin
     COMMENT "Copying files for ${STAGE_CONTEXT} package"
     )
 

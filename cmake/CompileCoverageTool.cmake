@@ -4,6 +4,8 @@ set(COVERAGETOOL_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/flow/coveragetool/Program.cs
     ${CMAKE_CURRENT_SOURCE_DIR}/flow/coveragetool/Properties/AssemblyInfo.cs)
 
+set(coveragetool_command "")
+
 if(WIN32)
   add_executable(coveragetool ${COVERAGETOOL_SRCS})
   target_compile_options(coveragetool PRIVATE "/langversion:6")
@@ -32,7 +34,16 @@ elseif(CSHARP_USE_MONO)
   add_custom_target(coveragetool
                     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/coveragetool.exe)
   set(coveragetool_exe "${CMAKE_CURRENT_BINARY_DIR}/coveragetool.exe")
+  set(coveragetool_command ${MONO_EXECUTABLE} ${coveragetool_exe})
 else()
   dotnet_build(${COVERAGETOOL_CSPROJ} SOURCE ${COVERAGETOOL_SRCS})
   set(coveragetool_exe "${coveragetool_EXECUTABLE_PATH}")
+  set(coveragetool_command ${dotnet_EXECUTABLE} ${coveragetool_exe})
 endif()
+
+if(NOT coveragetool_command)
+  set(coveragetool_command ${coveragetool_exe})
+endif()
+set(coveragetool_command
+    ${coveragetool_command}
+    CACHE INTERNAL "Command to run coveragetool")
