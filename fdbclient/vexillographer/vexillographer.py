@@ -86,15 +86,13 @@ HEADER_NOTICE_C = textwrap.dedent(
     """
 ).strip()
 
-HEADER_NOTICE_CPP = textwrap.dedent(
-    """
-    #ifndef FDBCLIENT_FDBOPTIONS_G_H
-    #define FDBCLIENT_FDBOPTIONS_G_H
-    #pragma once
+HEADER_NOTICE_CPP = """\
+#ifndef FDBCLIENT_FDBOPTIONS_G_H
+#define FDBCLIENT_FDBOPTIONS_G_H
+#pragma once
 
-    #include "fdbclient/FDBOptions.h"
-    """
-).strip()
+#include "fdbclient/FDBOptions.h"
+""".strip()
 
 LICENSE_PY = textwrap.dedent(
     """
@@ -404,12 +402,12 @@ WRITERS = {
 }
 
 
-def main(argv: List[str]) -> int:
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("input")
     parser.add_argument("lang", choices=WRITERS.keys())
     parser.add_argument("output")
-    args = parser.parse_args(argv)
+    args = parser.parse_args()
 
     options = parse_options(pathlib.Path(args.input), args.lang)
     writer = WRITERS[args.lang]
@@ -418,4 +416,4 @@ def main(argv: List[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main())
