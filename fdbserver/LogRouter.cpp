@@ -880,8 +880,7 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                           TLogInterface myInterface,
                           bool isReplacement,
                           double localRecruitmentTime) {
-	while (isReplacement && now() - localRecruitmentTime < SERVER_KNOBS->LOG_ROUTER_REPLACEMENT_GRACE_PERIOD &&
-	       db->get().recoveryCount == recoveryCount) {
+	while (isReplacement && now() - localRecruitmentTime < SERVER_KNOBS->LOG_ROUTER_REPLACEMENT_GRACE_PERIOD) {
 		// If this is a replacement log router, give grace period for ServerDBInfo to update.
 		// If there is a new recovery, break immediately.
 		co_await delay(1.0); // Check again in 1 second
