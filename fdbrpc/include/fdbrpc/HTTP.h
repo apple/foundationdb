@@ -87,6 +87,7 @@ bool verifyMD5(HTTPData<std::string>* data,
 template <class T>
 struct RequestBase : ReferenceCounted<RequestBase<T>> {
 	RequestBase() {}
+	virtual ~RequestBase() = default;
 	std::string verb;
 	std::string resource;
 	HTTPData<T> data;
