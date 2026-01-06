@@ -589,7 +589,7 @@ FDBFuture* validate_and_update_parameters(int& limit,
 
 	/* _ITERATOR mode maps to one of the known streaming modes
 	   depending on iteration */
-	const int mode_bytes_array[] = { GetRangeLimits::BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 80000 };
+	const int mode_bytes_array[] = { GetRangeLimits::BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 120000 };
 
 	/* The progression used for FDB_STREAMING_MODE_ITERATOR.
 	   Goes 1.5 * previous. */
