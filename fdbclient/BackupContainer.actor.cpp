@@ -197,6 +197,7 @@ std::string BackupDescription::toJSON() const {
 	doc.setKey("URL", url.c_str());
 	doc.setKey("Restorable", maxRestorableVersion.present());
 	doc.setKey("Partitioned", partitioned);
+	doc.setKey("FileLevelEncryption", fileLevelEncryption);
 
 	auto formatVersion = [&](Version v) {
 		JsonBuilderObject doc;
