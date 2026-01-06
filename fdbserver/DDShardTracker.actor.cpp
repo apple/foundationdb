@@ -1331,6 +1331,96 @@ void triggerStorageQueueRebalance(DataDistributionTracker* self, RebalanceStorag
 	return;
 }
 
+// Akanksha TODO: Exprerimental actor
+ACTOR Future<Void> calculateUserKeyPartitions(DataDistributionTracker* self) {
+	state const int NUM_PARTITIONS = 100; // Hardcoded for now.
+
+	state std::vector<std::pair<KeyRange, int64_t>> userShards;
+	state int64_t totalBytes = 0;
+
+	printf("User Key Space Shards (normalKeys)\n");
+
+	// NOTES:
+	// self->shards contains all shards:
+	// 		KeyRange -> ShardTrackedData
+	//			ShardTrackedData contains Data which includes Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+	// Also it iterates in sorted key order because it's a RangeMap and RangeMap is ordered by key.
+	// So the iteration below goes through all shards in normalKeys range in sorted order.
+
+	loop {
+		state bool needWait = false;
+		state Future<Void> onChange;
+		userShards.clear();
+		totalBytes = 0;
+
+		for (auto it : self->shards->intersectingRanges(normalKeys)) {
+
+			// Get the key range for this shard.
+			KeyRange shardRange = it.range();
+
+			// NOTES:
+			// Wait for metrics to be available
+			// It reads from the cache rather than querying storage servers directly.
+			// trackShardMetrics actor continually updates the cache.
+			if (!it->value().stats->get().present()) {
+				// Wait until stats are available in background by trackShardMetrics actor.
+				// Doesn't trigger a new RPC call. It's already being in Process/has to be done in the background by
+				// trackShardMetrics actor anyway.
+				onChange = it->value().stats->onChange();
+				needWait = true;
+				break; // EXIT iteration before waiting
+			}
+
+			// Stored in memory.
+			StorageMetrics metrics = it->value().stats->get().get().metrics;
+
+			int64_t shardBytes = metrics.bytes;
+			totalBytes += shardBytes;
+
+			// Store in map: (KeyRange, size in bytes)
+			userShards.push_back(std::make_pair(shardRange, shardBytes));
+		}
+
+		if (!needWait) {
+			break; // EXIT loop
+		}
+
+		wait(onChange);
+	}
+
+	// Step 2: Partition the shards
+	int64_t targetBytesPerPartition = totalBytes / NUM_PARTITIONS;
+	printf("Target bytes per partition: %" PRId64 "\n", targetBytesPerPartition);
+
+	state std::vector<KeyRange> partitions;
+	state int64_t currentPartitionBytes = 0;
+	state Key partitionStart = normalKeys.begin;
+
+	for (int i = 0; i < userShards.size(); i++) {
+		KeyRange shardRange = userShards[i].first;
+		int64_t shardBytes = userShards[i].second;
+
+		currentPartitionBytes += shardBytes;
+
+		bool shouldCreatePartition = (currentPartitionBytes >= targetBytesPerPartition) || (i == userShards.size() - 1);
+
+		if (shouldCreatePartition) {
+			partitions.push_back(KeyRangeRef(partitionStart, shardRange.end));
+			partitionStart = shardRange.end;
+			currentPartitionBytes = 0;
+		}
+	}
+
+	// TODO Save in a more permanent place rather than printing.
+	for (int i = 0; i < partitions.size(); i++) {
+		printf("Partition %d: Begin=%s, End=%s\n",
+		       i,
+		       partitions[i].begin.printable().c_str(),
+		       partitions[i].end.printable().c_str());
+	}
+	return Void();
+}
+
 DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitParams const& params)
   : IDDShardTracker(), db(params.db), distributorId(params.distributorId), shards(params.shards), actors(false),
     systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
