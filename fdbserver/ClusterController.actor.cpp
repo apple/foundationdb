@@ -568,7 +568,15 @@ ACTOR Future<Void> recruitFailedBackupWorkers(ClusterControllerData* cluster,
 	}
 
 	// Wait for all recruitments to complete
-	wait(waitForAll(recruitments));
+	state Future<Void> timeout = delay(SERVER_KNOBS->CC_RERECRUIT_BACKUP_WORKER_TIMEOUT);
+	wait(waitForAll(recruitments) || timeout);
+
+	if (timeout.isReady()) {
+		TraceEvent(SevWarnAlways, "BackupWorkersRecruitmentTimeout", cluster->id)
+		    .detail("TagCount", tagIds.size())
+		    .detail("RecoveryCount", recoveryCount);
+		throw recruitment_failed();
+	}
 
 	// Update all successfully recruited backup workers
 	state std::vector<InitializeBackupReply> newRecruits;
@@ -639,29 +647,45 @@ ACTOR Future<Void> monitorAndRecruitBackupWorkers(ClusterControllerData* self) {
 		TraceEvent("BackupWorkerMonitoringStart", self->id).detail("RecoveryCount", recoveryCount);
 
 		state Future<Void> newRecovery = self->db.serverInfo->onChange();
+		state double failedRecuitDelay = 1.0;
+		state Future<Void> recruitment = Never();
 		loop {
-			choose {
-				when(wait(newRecovery)) {
-					// Recovery state changed, loop back to check if we should exit
-					TraceEvent("BackupWorkerMonitoringEnded", self->id)
-					    .detail("Reason", "RecoveryChanged")
-					    .detail("OldRecoveryCount", recoveryCount)
-					    .detail("NewRecoveryCount",
-					            self->db.recoveryData.isValid() ? self->db.recoveryData->cstate.myDBState.recoveryCount
-					                                            : -1);
-					break;
-				}
-				when(std::vector<int> failedBackupWorkers = wait(monitorBackupWorkers(self, logSystem))) {
-					try {
-						wait(recruitFailedBackupWorkers(
-						    self, &self->db, failedBackupWorkers, recoveryCount, logSystem, cx));
-					} catch (Error& e) {
-						TraceEvent(SevWarnAlways, "BackupWorkerMonitoringRecruitmentFailed", self->id)
-						    .error(e)
-						    .detail("RecoveryCount", recoveryCount);
+			try {
+				choose {
+					when(wait(newRecovery)) {
+						// Recovery state changed, loop back to check if we should exit
+						TraceEvent("BackupWorkerMonitoringEnded", self->id)
+							.detail("Reason", "RecoveryChanged")
+							.detail("OldRecoveryCount", recoveryCount)
+							.detail("NewRecoveryCount",
+									self->db.recoveryData.isValid() ? self->db.recoveryData->cstate.myDBState.recoveryCount
+																	: -1);
+						break; // exits inner loop
+					}
+					when(std::vector<int> failedBackupWorkers = wait(monitorBackupWorkers(self, logSystem))) {
+						// recruitFailedBackupWorkers() can throw errors if timed out
+						recruitment = recruitFailedBackupWorkers(
+								self, &self->db, failedBackupWorkers, recoveryCount, logSystem, cx);
+						TraceEvent("BackupWorkerFailureDetected", self->id)
+							.detail("FailedCount", failedBackupWorkers.size())
+							.detail("RecoveryCount", recoveryCount);
+					}
+					when(wait(recruitment)) {
+						failedRecuitDelay = 1.0; // Reset backoff on success
+						TraceEvent("BackupWorkerReRecruitmentSuccess", self->id).detail("RecoveryCount", recoveryCount);
+						recruitment = Never();
 					}
 				}
+			} catch (Error& e) {
+				CODE_PROBE(true, "Backup worker re-recruitment failed");
+				failedRecuitDelay = std::min(failedRecuitDelay * 2, 60.0); // Exponential backoff up to 1 minute
+				TraceEvent(SevWarnAlways, "BackupWorkerMonitoringRecruitmentFailed", self->id)
+						    .error(e)
+						    .detail("RecoveryCount", recoveryCount);
 			}
+
+			// wait before restarting monitoring
+			wait(delay(failedRecuitDelay));
 		} // End of inner loop (monitoring this recovery)
 	} // End of outer loop (restart for each recovery)
 }
