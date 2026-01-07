@@ -82,6 +82,7 @@ Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 				throw e;
 			}
 
+			TraceEvent(SevWarn, "GetExcludedServersError").error(e);
 			err = e;
 		}
 
@@ -110,6 +111,7 @@ Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) 
 				throw e;
 			}
 
+			TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(e);
 			err = e;
 		}
 		co_await safeThreadFutureToFuture(tr->onError(err));
@@ -150,7 +152,7 @@ Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
 				throw e;
 			}
 
-			TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(e);
+			TraceEvent(SevWarn, "GetFailedLocalitiesError").error(e);
 			err = e;
 		}
 
@@ -195,7 +197,7 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-
+			TraceEvent(SevWarn, "ExcludeServersAndLocalitiesError").error(e);
 			err = e;
 		}
 
@@ -204,8 +206,10 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 			// last character is \n
 			auto pos = errorMsgStr.find_last_of("\n", errorMsgStr.size() - 2);
 			auto last_line = errorMsgStr.substr(pos + 1);
+			TraceEvent(SevWarn, "ExcludeServerAndLocalitiesError").error(err).detail("Message", last_line);
 			co_return false;
 		}
+
 		TraceEvent(SevWarn, "ExcludeServersAndLocalitiesError").error(err);
 		co_await safeThreadFutureToFuture(tr->onError(err));
 	}

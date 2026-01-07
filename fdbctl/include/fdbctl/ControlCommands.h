@@ -59,6 +59,7 @@ Future<grpc::Status> kill(Reference<IDatabase> db, const KillRequest* req, KillR
 namespace utils {
 Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
 
+// Returns addresses of excluded/failed/in-progress processes.
 Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db);
 Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db);
 Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db);
