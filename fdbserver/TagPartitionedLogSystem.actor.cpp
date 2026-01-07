@@ -547,6 +547,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 			}
 		} else {
 			if (SERVER_KNOBS->CC_RERECRUIT_BACKUP_WORKER_ENABLED) {
+				TraceEvent("SkipMonitoringBackupWorkers", self->dbgid).log();
 				// Skip monitoring backup workers after full recovery.
 				backupFailed.clear();
 			}

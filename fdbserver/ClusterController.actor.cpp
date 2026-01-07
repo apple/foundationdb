@@ -222,12 +222,12 @@ bool ClusterControllerData::remoteTransactionSystemContainsDegradedServers() {
 }
 
 // Recruit failed log routers in parallel
-ACTOR Future<Void> recruitLogRouters(ClusterControllerData* cluster,
-                                     ClusterControllerData::DBInfo* db,
-                                     std::vector<int> tagIds,
-                                     int logSetIndex,
-                                     Reference<ILogSystem> logSystem,
-                                     LogSystemConfig config) {
+ACTOR Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
+                                           ClusterControllerData::DBInfo* db,
+                                           std::vector<int> tagIds,
+                                           int logSetIndex,
+                                           Reference<ILogSystem> logSystem,
+                                           LogSystemConfig config) {
 	state Optional<Key> targetDcId =
 	    db->recoveryData->remoteDcIds.size() ? db->recoveryData->remoteDcIds[0] : Optional<Key>();
 
@@ -468,7 +468,7 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 		// self, logSystem, and logSetIndex are member of compiled class, captured by this.
 		auto monitor = [this]() { return monitorLogRouters(self, logSystem, logSetIndex); };
 		auto recruit = [this](std::vector<int> failedWorkers) {
-			return recruitLogRouters(
+			return recruitFailedLogRouters(
 			    self, &self->db, failedWorkers, logSetIndex, logSystem, logSystem->getLogSystemConfig());
 		};
 

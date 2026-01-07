@@ -197,9 +197,13 @@ ACTOR Future<Version> _takeover(Database cx, UID newWorkerID, LogEpoch backupEpo
 			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
 			// Scan all progress entries to find the one matching our epoch and tag
+			state Version maxTagVersion = invalidVersion;
 			for (auto& it : results) {
-				WorkerBackupStatus status = decodeBackupProgressValue(it.value);
-				if (status.epoch == backupEpoch && status.tag == tag) {
+				state WorkerBackupStatus status = decodeBackupProgressValue(it.value);
+				if (status.tag != tag) {
+					continue;
+				}
+				if (status.epoch == backupEpoch) {
 					UID oldWorkerID = decodeBackupProgressKey(it.key);
 					state Version savedVersion = status.version;
 
@@ -219,16 +223,20 @@ ACTOR Future<Version> _takeover(Database cx, UID newWorkerID, LogEpoch backupEpo
 
 					wait(tr.commit());
 					return savedVersion;
+				} else {
+					maxTagVersion = std::max(maxTagVersion, status.version);
 				}
 			}
 
-			// No matching progress found, use the this transaction's read version
+			// No matching progress found, use the maxTagVersion if exists or
+			// this transaction's read version.
 			TraceEvent("BackupProgressNoTakeover", newWorkerID)
 			    .detail("Epoch", backupEpoch)
 			    .detail("Tag", tag)
 			    .detail("ReadVersion", readVersion)
+			    .detail("MaxTagVersion", maxTagVersion)
 			    .detail("TotalProgressEntries", results.size());
-			return readVersion;
+			return maxTagVersion == invalidVersion ? readVersion : maxTagVersion;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
