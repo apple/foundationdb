@@ -108,8 +108,8 @@ graph TB
     BA -->|Save snapshots| RF
     BW -->|Save partitioned logs| ML
     
-    style BW fill:#90EE90
-    style ML fill:#90EE90
+    style BW fill:#C8E6C9
+    style ML fill:#C8E6C9
 ```
 
 **V2 Key Features:**
@@ -187,9 +187,9 @@ graph TB
     BW -->|Save partitioned logs| ML
     BDTF -->|Save SST snapshots| BD
     
-    style BDTF fill:#FFD700
-    style DD fill:#FFD700
-    style BD fill:#FFD700
+    style BDTF fill:#FFF3CD
+    style DD fill:#FFF3CD
+    style BD fill:#FFF3CD
 ```
 
 **V3 Key Changes:**
@@ -201,15 +201,16 @@ graph TB
 
 ### Terminology and Component Definitions
 
-- **`backup_agent`** = Long-running executable process that executes backup-related TaskBucket tasks only
-- **`Backup Agents`** = Instances of `backup_agent` processes executing backup TaskBucket tasks
+- **`backup_agent`** = Long-running executable process that executes backup and restore TaskBucket tasks
+- **`Backup Agents`** = Instances of `backup_agent` processes executing TaskBucket tasks (both backup and restore)
 - **`fdbbackup`** = Command-line tool that submits backup jobs to TaskBucket (does not execute the backup itself)
-- **`fdbrestore`** = Command-line tool that both submits and executes restore jobs (different from backup_agent)
+- **`fdbrestore`** = Command-line tool that submits restore jobs to TaskBucket (does not execute the restore itself)
 
 **Flow:**
 1. User runs `fdbbackup start` → Submits backup job to TaskBucket
 2. Running `backup_agent` processes pick up and execute the backup tasks
-3. User runs `fdbrestore start` → Submits and executes restore job (not via backup_agent)
+3. User runs `fdbrestore start` → Submits restore job to TaskBucket
+4. Running `backup_agent` processes pick up and execute the restore tasks
 
 ## Detailed Design
 
@@ -359,13 +360,15 @@ graph TB
         BD3["bulkdump_data/<br/>V3 SST files"]
     end
     
-    RC["fdbrestore process<br/><br/>1. Orchestrate phases<br/>2. Track progress<br/>3. Coordinate timing"]
+    RC["fdbrestore<br/><br/>Submits restore job<br/>to TaskBucket"]
+    
+    TB["TaskBucket<br/><br/>Orchestrates task<br/>dependencies"]
     
     BLTF["BulkLoadTaskFunc NEW<br/><br/>1. Verify manifest<br/>2. Start BulkLoad"]
     
     BLS["BulkLoad System<br/>Black box<br/><br/>Direct SST ingestion"]
     
-    RA3["Restore Agents<br/>TaskBucket V2<br/><br/>Skip range data<br/>Only apply mutations"]
+    RA3["Backup Agents<br/>TaskBucket execution<br/><br/>Apply mutation logs"]
     
     subgraph Target_Cluster_V3["Target FDB Cluster"]
         DD3[Data Distributor]
@@ -373,33 +376,33 @@ graph TB
         CP3[Commit Proxy]
     end
     
+    RC -->|Submit job| TB
+    TB -->|1. Execute| BLTF
     BD3 -->|Read SSTs| BLTF
     BLTF -->|Delegate| BLS
     BLS -->|Direct injection<br/>Bypass transactions| DD3
     DD3 -->|Ingest SSTs| SS3
     
-    RC -->|1. Start BulkLoad phase| BLTF
-    BLS -.->|Complete notification| RC
-    RC -->|2. Start mutation replay<br/>after BulkLoad done| RA3
+    TB -->|2. After BulkLoad done| RA3
     
     ML3 -->|Read partitioned logs| RA3
     RA3 -->|Transactions| CP3
     CP3 --> SS3
     
-    style BLTF fill:#FFD700
-    style BLS fill:#FFD700
-    style BD3 fill:#FFD700
-    style RC fill:#FF6B6B
+    style BLTF fill:#FFF3CD
+    style BLS fill:#FFF3CD
+    style BD3 fill:#FFF3CD
+    style TB fill:#F8D7DA
 ```
 
 **V3 Restore Flow:**
-1. **fdbrestore process** orchestrates the restore phases (always the coordinator)
-2. **Phase 1 - Range Data:** fdbrestore determines method based on `--mode` flag:
-   - If `--mode bulkload`: triggers BulkLoadTaskFunc to verify manifest and start BulkLoad
+1. **fdbrestore** submits restore job to TaskBucket (then exits or waits for completion)
+2. **TaskBucket** orchestrates task execution via Backup Agents based on `--mode` flag:
+   - If `--mode bulkload`: executes BulkLoadTaskFunc to verify manifest and run BulkLoad
    - If default: uses traditional range file restore from kvranges/
 3. **BulkLoad system** (when used) directly injects SST files into Storage Servers via DD
-4. **Phase 2 - Mutation Replay:** After range data loading completes, fdbrestore triggers Restore Agents to apply partitioned mutation logs using V2 method (transaction-based)
-5. fdbrestore ensures proper sequencing: range data first (via chosen method), then mutation logs via traditional method
+4. **Phase 2 - Mutation Replay:** After range data loading completes, TaskBucket triggers mutation log replay using V2 method (transaction-based)
+5. TaskBucket task dependencies ensure proper sequencing: range data first (via chosen method), then mutation logs
 
 #### 4. BulkDump Resilience and Continuous Operation
 
@@ -443,7 +446,7 @@ For BulkDump Operations:
 
 **Configuration Steps:**
 1. **Configure knobs** on all FDB processes (fdbserver command line or config file)
-2. **Restart cluster** (rolling restart recommended in Kubernetes environments)
+2. **Restart cluster** (in Kubernetes environments, the operator restarts processes via kill command)
 3. **Trigger database wiggle** to rewrite all shard metadata with enhanced location encoding
 4. **Validate configuration** - BulkLoad operations automatically verify prerequisites
 
@@ -481,6 +484,8 @@ if (!SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE) {
     );
 }
 ```
+
+**Important:** The knob validation above only checks that knobs are enabled. It does not verify that the database wiggle has completed and all shard metadata is in the new format. If BulkLoad encounters shards with old-format metadata, it will fail at runtime. Operators must ensure the database wiggle has fully completed before using BulkLoad. Monitor wiggle progress via `fdbcli --exec "status details"` and verify no shards are pending migration.
 
 ## Alternatives Considered
 
@@ -531,7 +536,7 @@ if (!SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE) {
 
 ### Development Phases and Testing Strategy
 
-The implementation is divided into six phases with specific testing criteria:
+The implementation is divided into four phases with specific testing criteria:
 
 #### Phase 1: Simulation Testing for BulkDump/BulkLoad-enabled Backup/Restore
 **Implementation**:
