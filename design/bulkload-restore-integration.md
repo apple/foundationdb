@@ -554,7 +554,7 @@ The implementation is divided into six phases with specific testing criteria:
 
 **Completion Criteria**: Confidence that Backup/Restore with the new snapshot system works at large scale in cluster environments.
 
-#### Phase 4: PlayStation Cluster (TBD)
+#### Phase 4: Production-like Cluster validation (TBD)
 **Implementation**: Production environment validation (timeline to be determined).
 
 ### Representative Test Cases
