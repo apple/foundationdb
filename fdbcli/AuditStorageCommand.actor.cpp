@@ -18,6 +18,46 @@
  * limitations under the License.
  */
 
+/*
+ * ============================================================================
+ * AUDIT STORAGE COMMANDS
+ * ============================================================================
+ *
+ * This file implements CLI commands for various storage audit operations:
+ *   - audit_storage ha                 : Validate high availability
+ *   - audit_storage replica            : Validate replica consistency
+ *   - audit_storage locationmetadata   : Validate location metadata
+ *   - audit_storage ssshard            : Validate storage server shards
+ *   - audit_storage validate_restore   : Validate restored backup data
+ *
+ * ============================================================================
+ * RESTORE VALIDATION (validate_restore) - Quick Reference
+ * ============================================================================
+ *
+ * USAGE: audit_storage validate_restore <begin_key> <end_key>
+ *
+ * Validates that restored backup data matches original source data.
+ *
+ * EXAMPLE WORKFLOW:
+ *   1. Backup:     fdbbackup start -d file:///backup -z
+ *   2. Stop:       fdbbackup discontinue -C <cluster_file>
+ *   3. Lock:       fdb> lock                               (save the returned UID)
+ *   4. Restore:    fdbrestore start -r file:///backup --add-prefix "\xff\x02/rlog/"
+ *   5. Validate:   fdb> audit_storage validate_restore "" "\xff"
+ *   6. Check:      fdb> get_audit_status validate_restore id <AuditID>
+ *   7. Unlock:     fdb> unlock <UID>
+ *   8. Cleanup:    fdb> clearrange "\xff\x02/rlog/" "\xff\x02/rlog0"
+ *
+ * NOTE: Steps 2-3 (stop backup and lock) prevent writes during validation, avoiding
+ * false positive audit errors. The --add-prefix parameter in step 4 allows the restore
+ * to run on a non-empty database, enabling validation by comparing restored data
+ * against the source. Both restore and audit use LOCK_AWARE transactions, so they
+ * work on a locked database.
+ *
+ * See fdbserver/storageserver.actor.cpp for detailed implementation docs.
+ * ============================================================================
+ */
+
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/IClientApi.h"
@@ -54,6 +94,8 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			type = AuditType::ValidateLocationMetadata;
 		} else if (tokencmp(tokens[2], "ssshard")) {
 			type = AuditType::ValidateStorageServerShard;
+		} else if (tokencmp(tokens[2], "validate_restore")) {
+			type = AuditType::ValidateRestore;
 		} else {
 			printUsage(tokens[0]);
 			return UID();
@@ -72,6 +114,8 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			type = AuditType::ValidateLocationMetadata;
 		} else if (tokencmp(tokens[1], "ssshard")) {
 			type = AuditType::ValidateStorageServerShard;
+		} else if (tokencmp(tokens[1], "validate_restore")) {
+			type = AuditType::ValidateRestore;
 		} else {
 			printUsage(tokens[0]);
 			return UID();
@@ -119,7 +163,7 @@ CommandFactory auditStorageFactory(
     CommandHelp("audit_storage <Type> [BeginKey EndKey] <EngineType>",
                 "Start an audit storage",
                 "Specify audit `Type' (only `ha' and `replica' and `locationmetadata' and "
-                "`ssshard' `Type' are supported currently), and\n"
+                "`ssshard' and `validate_restore' `Type' are supported currently), and\n"
                 "optionally a sub-range with `BeginKey' and `EndKey'.\n"
                 "Specify audit `EngineType' when auditType is `ha' or `replica'\n"
                 "(only `ssd-rocksdb-v1' and `ssd-sharded-rocksdb' and `ssd-2' are supported).\n"
