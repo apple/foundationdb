@@ -29,6 +29,9 @@ set(PASS_COMPILATION_UNIT
 )
 
 function(generate_coverage_xml)
+  if(NOT COVERAGETOOL_AVAILABLE)
+    return()
+  endif()
   if(NOT (${ARGC} EQUAL "1"))
     message(FATAL_ERROR "generate_coverage_xml expects one argument")
   endif()
@@ -85,7 +88,7 @@ function(generate_coverage_xml)
   else()
     add_custom_command(
       OUTPUT ${target_file}
-      COMMAND ${coveragetool_exe} ${target_file} ${in_files}
+      COMMAND ${coveragetool_command} ${target_file} ${in_files}
       DEPENDS ${in_files}
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       COMMENT "Generate coverage xml")
@@ -268,9 +271,11 @@ function(add_flow_target)
           set(cs_out_file "${out_file}.cs_gen")
           add_custom_command(OUTPUT "${out_file}"
             COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}"
-                    ${ACTORCOMPILER_COMMAND} "${in_file}" "${py_out_file}" ${actor_compiler_flags}
+                    ${ACTORCOMPILER_PY_COMMAND} "${in_file}" "${py_out_file}" ${actor_compiler_flags}
             COMMAND ${ACTORCOMPILER_CSHARP_COMMAND} "${in_file}" "${cs_out_file}" ${actor_compiler_flags}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/flow/actorcompiler_py/compare_actor_output.py "${cs_out_file}" "${py_out_file}"
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_SOURCE_DIR}/flow/actorcompiler_py/compare_actor_output.py
+                    "${cs_out_file}" "${py_out_file}"
             COMMAND ${CMAKE_COMMAND} -E copy "${py_out_file}" "${out_file}"
             DEPENDS "${in_file}" actorcompiler
             COMMENT "Compile and compare actor: ${src}")
@@ -327,6 +332,17 @@ function(add_flow_target)
     set_property(TARGET ${AFT_NAME} PROPERTY COVERAGE_FILTERS ${AFT_SRCS})
 
     add_custom_target(${AFT_NAME}_actors DEPENDS ${generated_files})
+    if(TARGET fdboptions AND NOT "${AFT_NAME}" STREQUAL "fdboptions")
+      if(DEFINED FDB_OPTIONS_H)
+        set_source_files_properties(${sources} ${AFT_ADDL_SRCS}
+          APPEND PROPERTY OBJECT_DEPENDS ${FDB_OPTIONS_H})
+      endif()
+      add_dependencies(${AFT_NAME}_actors fdboptions)
+      add_dependencies(${AFT_NAME} fdboptions)
+      if(TARGET fdboptions_vex)
+        add_dependencies(${AFT_NAME}_actors fdboptions_vex)
+      endif()
+    endif()
     add_dependencies(${AFT_NAME} ${AFT_NAME}_actors)
     generate_coverage_xml(${AFT_NAME})
     if(strip_target)
