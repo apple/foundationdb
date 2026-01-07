@@ -1499,7 +1499,7 @@ BackupType getBackupType(std::string backupType) {
 	return enBackupType;
 }
 
-SnapshotMode getSnapshotMode(std::string mode) {
+Optional<SnapshotMode> getSnapshotMode(std::string mode) {
 	std::transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
 
 	if (mode == "rangefile")
@@ -1508,17 +1508,17 @@ SnapshotMode getSnapshotMode(std::string mode) {
 		return SnapshotMode::BULKDUMP;
 	if (mode == "both")
 		return SnapshotMode::BOTH;
-	return SnapshotMode::RANGEFILE;
+	return Optional<SnapshotMode>();
 }
 
-RestoreMode getRestoreMode(std::string mode) {
+Optional<RestoreMode> getRestoreMode(std::string mode) {
 	std::transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
 
 	if (mode == "rangefile")
 		return RestoreMode::RANGEFILE;
 	if (mode == "bulkload")
 		return RestoreMode::BULKLOAD;
-	return RestoreMode::RANGEFILE;
+	return Optional<RestoreMode>();
 }
 
 RestoreType getRestoreType(std::string name) {
@@ -4212,10 +4212,24 @@ int main(int argc, char* argv[]) {
 				// Handle mode parameter for both backup and restore
 				if (programExe == ProgramExe::BACKUP) {
 					// Validate and store mode parameter for snapshot generation
-					snapshotMode = getSnapshotMode(args->OptionArg());
+					auto parsedMode = getSnapshotMode(args->OptionArg());
+					if (!parsedMode.present()) {
+						fprintf(stderr,
+						        "ERROR: Unknown snapshot mode '%s'. Valid modes are: rangefile, bulkdump, both\n",
+						        args->OptionArg());
+						return FDB_EXIT_ERROR;
+					}
+					snapshotMode = parsedMode.get();
 				} else if (programExe == ProgramExe::RESTORE || programExe == ProgramExe::FASTRESTORE_TOOL) {
 					// Validate and store mode parameter for restore mechanism
-					restoreMode = getRestoreMode(args->OptionArg());
+					auto parsedMode = getRestoreMode(args->OptionArg());
+					if (!parsedMode.present()) {
+						fprintf(stderr,
+						        "ERROR: Unknown restore mode '%s'. Valid modes are: rangefile, bulkload\n",
+						        args->OptionArg());
+						return FDB_EXIT_ERROR;
+					}
+					restoreMode = parsedMode.get();
 				}
 				break;
 			}
