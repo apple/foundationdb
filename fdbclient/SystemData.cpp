@@ -1296,6 +1296,10 @@ const KeyRef clusterIdKey = "\xff/clusterIdKey"_sr;
 const KeyRef backupEnabledKey = "\xff/backupEnabled"_sr;
 const KeyRangeRef backupLogKeys("\xff\x02/blog/"_sr, "\xff\x02/blog0"_sr);
 const KeyRangeRef applyLogKeys("\xff\x02/alog/"_sr, "\xff\x02/alog0"_sr);
+// Validate restore prefix (system key space)
+// Usage: fdbbackup restore --add-prefix '\xff\x02/rlog/'
+// TOML: addPrefix = '\xff\x02/rlog/' (unprintable() converts escape sequences to bytes)
+const KeyRangeRef validateRestoreLogKeys("\xff\x02/rlog/"_sr, "\xff\x02/rlog0"_sr);
 bool isBackupLogMutation(const MutationRef& m) {
 	return isSingleKeyMutation((MutationRef::Type)m.type) &&
 	       (backupLogKeys.contains(m.param1) || applyLogKeys.contains(m.param1));
