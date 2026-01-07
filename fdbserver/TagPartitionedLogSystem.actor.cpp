@@ -566,6 +566,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		}
 
 		changes.push_back(self->recoveryCompleteWrittenToCoreState.onChange());
+		changes.push_back(self->backupWorkerChanged.onTrigger());
 
 		ASSERT(failed.size() >= 1);
 		Future<Void> backupWorkerFailed =
