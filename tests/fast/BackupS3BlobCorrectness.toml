@@ -26,20 +26,22 @@ connectionFailuresDisableDuration = 90
     testName = 'Cycle'
     nodeCount = 10000
     transactionsPerSecond = 1000.0
-    # Cycle fills data, then stops BEFORE backup/restore.
-    # Flow: fill (0-15s) → backup (20s+) → clear → restore → verify (Cycle.check())
-    testDuration = 15.0
+    # Cycle runs continuously. During clear+restore, the database is locked,
+    # so Cycle gets database_locked errors (retriable) instead of missing keys.
+    # After restore unlocks, Cycle continues normally on restored data.
+    testDuration = 30.0
     expectedRate = 0
 
     [[test.workload]]
     testName = 'BackupS3BlobCorrectness'
-    # Start backup after Cycle has finished populating data
-    backupAfter = 20.0
+    backupAfter = 10.0
     restoreAfter = 80.0
     abortAndRestartAfter = 0.0
     stopDifferentialAfter = 0.0
     performRestore = true
     backupRangesCount = -1
+    # Database locking prevents Cycle from seeing cleared keys during restore.
+    # The workload locks the database before clearing, and restore unlocks when done.
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
 

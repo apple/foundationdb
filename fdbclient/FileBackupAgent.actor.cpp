@@ -7802,28 +7802,31 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         Optional<UID> lockUID) {
 	Standalone<VectorRef<Version>> beginVersions;
 	for (auto i = 0; i < ranges.size(); ++i) {
 		beginVersions.push_back(beginVersions.arena(), beginVersion);
 	}
-	return restore(cx,
-	               cxOrig,
-	               tagName,
-	               url,
-	               proxy,
-	               ranges,
-	               beginVersions,
-	               waitForComplete,
-	               targetVersion,
-	               verbose,
-	               addPrefix,
-	               removePrefix,
-	               lockDB,
-	               unlockDB,
-	               onlyApplyMutationLogs,
-	               inconsistentSnapshotOnly,
-	               encryptionKeyFileName);
+	return FileBackupAgentImpl::restore(this,
+	                                    cx,
+	                                    cxOrig,
+	                                    tagName,
+	                                    url,
+	                                    proxy,
+	                                    ranges,
+	                                    beginVersions,
+	                                    waitForComplete,
+	                                    targetVersion,
+	                                    verbose,
+	                                    addPrefix,
+	                                    removePrefix,
+	                                    lockDB,
+	                                    unlockDB,
+	                                    onlyApplyMutationLogs,
+	                                    inconsistentSnapshotOnly,
+	                                    encryptionKeyFileName,
+	                                    lockUID.present() ? lockUID.get() : deterministicRandom()->randomUniqueID());
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,

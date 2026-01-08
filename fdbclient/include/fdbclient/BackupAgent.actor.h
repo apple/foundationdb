@@ -241,7 +241,8 @@ public:
 	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {},
+	                        Optional<UID> lockUID = Optional<UID>());
 
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
