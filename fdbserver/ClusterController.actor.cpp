@@ -337,9 +337,7 @@ ACTOR Future<Void> recruitFailedLogRouters(ClusterControllerData* cluster,
 	return Void();
 }
 
-ACTOR Future<std::vector<int>> monitorLogRouters(ClusterControllerData* self,
-                                                 Reference<ILogSystem> logSystem,
-                                                 int logSetIndex) {
+ACTOR Future<std::vector<int>> monitorLogRouters(Reference<ILogSystem> logSystem, int logSetIndex) {
 	state std::vector<Future<Void>> failures;
 	state LogSystemConfig config = logSystem->getLogSystemConfig();
 	state std::vector<int> failedTagIds;
@@ -473,7 +471,7 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 		    .detail("Locality", config.tLogs[logSetIndex].locality);
 
 		// self, logSystem, and logSetIndex are member of compiled class, captured by this.
-		auto monitor = [this]() { return monitorLogRouters(self, logSystem, logSetIndex); };
+		auto monitor = [this]() { return monitorLogRouters(logSystem, logSetIndex); };
 		auto recruit = [this](std::vector<int> failedWorkers) {
 			return recruitFailedLogRouters(
 			    self, &self->db, failedWorkers, logSetIndex, logSystem, logSystem->getLogSystemConfig());
