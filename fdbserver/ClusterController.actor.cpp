@@ -392,6 +392,11 @@ ACTOR Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
 		try {
 			choose {
 				when(wait(newRecovery)) {
+					if (self->db.recoveryData.isValid() &&
+					    self->db.recoveryData->cstate.myDBState.recoveryCount == recoveryCount) {
+						newRecovery = self->db.serverInfo->onChange();
+						continue; // no recovery change, keep monitoring
+					}
 					TraceEvent((std::string(workerName) + "MonitoringEnded").c_str(), self->id)
 					    .detail("Reason", "RecoveryChanged")
 					    .detail("RecoveryCount", recoveryCount);
@@ -411,6 +416,8 @@ ACTOR Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
 			}
 		} catch (Error& e) {
 			if (strcmp(workerName, "LogRouter") == 0) {
+				// the probe macro prefers constant strings, so we can't combine
+				// log router and backup worker into one macro.
 				CODE_PROBE(true, "LogRouter re-recruitment failed");
 			} else {
 				ASSERT(strcmp(workerName, "BackupWorker") == 0);
@@ -651,7 +658,6 @@ ACTOR Future<Void> monitorAndRecruitBackupWorkers(ClusterControllerData* self) {
 		ASSERT(self->db.recoveryData.isValid());
 		state uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
 		state Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
-		state Database cx = openDBOnServer(self->db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 
 		if (!self->db.recoveryData->configuration.backupWorkerEnabled) {
 			TraceEvent("NoBackupWorkersToMonitor", self->id).detail("RecoveryCount", recoveryCount);
@@ -665,6 +671,8 @@ ACTOR Future<Void> monitorAndRecruitBackupWorkers(ClusterControllerData* self) {
 			}
 			continue;
 		}
+
+		state Database cx = openDBOnServer(self->db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 
 		// The captured are members of compiled class, state variables or actor parameters.
 		auto monitor = [this]() { return monitorBackupWorkers(self, logSystem); };
