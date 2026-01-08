@@ -142,11 +142,12 @@ function start_fdb_cluster {
     set -o errexit  # a.k.a. set -e
     set -o noclobber
     # Set the global FDB_PIDS with retry logic for robustness
+    # Use grep -a to treat binary files as text (output may contain binary data from fdbserver)
     FDB_PIDS=()
     local retries=5
     for ((i=0; i<retries; i++)); do
       if [[ -f "${output}" ]]; then
-        FDB_PIDS=($(grep -e "PIDS=" "${output}" | sed -e 's/PIDS=//' | xargs)) || true
+        FDB_PIDS=($(grep -a -e "PIDS=" "${output}" | sed -e 's/PIDS=//' | xargs)) || true
         if [[ ${#FDB_PIDS[@]} -gt 0 ]]; then
           break
         fi
@@ -171,7 +172,8 @@ function start_fdb_cluster {
       break;
     fi
     # Otherwise, look for 'Local address in use' and if found retry with different ports.
-    if grep 'Local address in use' "${output}"; then
+    # Use grep -a to treat binary files as text
+    if grep -a 'Local address in use' "${output}"; then
       log "Ports in use; retry cluster start but with different ports"
       continue
     fi
