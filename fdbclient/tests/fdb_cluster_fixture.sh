@@ -13,7 +13,6 @@ FDB_PIDS=()
 function shutdown_fdb_cluster {
   echo "$(date -Iseconds) shutdown_fdb_cluster: starting (${#FDB_PIDS[@]} tracked PIDs)"
   
-  # Add a timeout to prevent hanging in this function
   local shutdown_start_time=$(date +%s)
   local max_shutdown_time=15  # Maximum time to spend in shutdown
   
