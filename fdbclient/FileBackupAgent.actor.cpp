@@ -7769,7 +7769,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          UnlockDB unlockDB,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         Optional<UID> lockUID) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -7788,7 +7789,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    onlyApplyMutationLogs,
 	                                    inconsistentSnapshotOnly,
 	                                    encryptionKeyFileName,
-	                                    deterministicRandom()->randomUniqueID());
+	                                    lockUID.present() ? lockUID.get() : deterministicRandom()->randomUniqueID());
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
@@ -7807,7 +7808,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         Optional<UID> lockUID) {
 	Standalone<VectorRef<Version>> beginVersions;
 	for (auto i = 0; i < ranges.size(); ++i) {
 		beginVersions.push_back(beginVersions.arena(), beginVersion);
@@ -7828,7 +7830,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               unlockDB,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
-	               encryptionKeyFileName);
+	               encryptionKeyFileName,
+	               lockUID);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
