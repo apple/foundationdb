@@ -25,6 +25,7 @@ I * Licensed under the Apache License, Version 2.0 (the "License");
 #include "fdbclient/Schemas.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/genericactors.actor.h"
+#include "fdbctl/ControlCommands.h"
 #include "fmt/format.h"
 #include <boost/algorithm/string.hpp>
 
@@ -38,7 +39,7 @@ Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 		Error err;
 		try {
 			ThreadFuture<RangeResult> resultFuture =
-				tr->getRange(special_keys::excludedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			    tr->getRange(special_keys::excludedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
 			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -67,7 +68,7 @@ Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 		Error err;
 		try {
 			ThreadFuture<RangeResult> resultFuture =
-				tr->getRange(special_keys::failedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			    tr->getRange(special_keys::failedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
 			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -97,7 +98,7 @@ Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) 
 		Error err;
 		try {
 			ThreadFuture<RangeResult> resultFuture =
-				tr->getRange(special_keys::excludedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			    tr->getRange(special_keys::excludedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
 			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -121,13 +122,13 @@ Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) 
 
 Future<std::set<NetworkAddress>> getInProgressExclusion(Reference<ITransaction> tr) {
 	ThreadFuture<RangeResult> resultFuture =
-		tr->getRange(fdbctl::special_keys::exclusionInProgressSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+	    tr->getRange(fdbctl::special_keys::exclusionInProgressSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
 	RangeResult result = co_await safeThreadFutureToFuture(resultFuture);
 	ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
 	std::set<NetworkAddress> inProgressExclusion;
 	for (const auto& addr : result) {
 		inProgressExclusion.insert(NetworkAddress::parse(
-			addr.key.removePrefix(fdbctl::special_keys::exclusionInProgressSpecialKeyRange.begin).toString()));
+		    addr.key.removePrefix(fdbctl::special_keys::exclusionInProgressSpecialKeyRange.begin).toString()));
 	}
 	co_return inProgressExclusion;
 }
@@ -138,7 +139,7 @@ Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
 		Error err;
 		try {
 			ThreadFuture<RangeResult> resultFuture =
-				tr->getRange(special_keys::failedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			    tr->getRange(special_keys::failedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
 			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -164,10 +165,10 @@ Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
 } // namespace utils
 
 Future<Void> excludeServersAndLocalities(Reference<IDatabase> db,
-										 std::vector<AddressExclusion> servers,
-										 std::unordered_set<std::string> localities,
-										 bool failed,
-										 bool force) {
+                                         std::vector<AddressExclusion> servers,
+                                         std::unordered_set<std::string> localities,
+                                         bool failed,
+                                         bool force) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		Error err;
@@ -176,20 +177,20 @@ Future<Void> excludeServersAndLocalities(Reference<IDatabase> db,
 		try {
 			if (force && servers.size())
 				tr->set(failed ? special_keys::failedForceOptionSpecialKey
-							   : special_keys::excludedForceOptionSpecialKey,
-						ValueRef());
+				               : special_keys::excludedForceOptionSpecialKey,
+				        ValueRef());
 			for (const auto& s : servers) {
 				Key addr = failed ? special_keys::failedServersSpecialKeyRange.begin.withSuffix(s.toString())
-								  : special_keys::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
+				                  : special_keys::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
 				tr->set(addr, ValueRef());
 			}
 			if (force && localities.size())
 				tr->set(failed ? special_keys::failedLocalityForceOptionSpecialKey
-							   : special_keys::excludedLocalityForceOptionSpecialKey,
-						ValueRef());
+				               : special_keys::excludedLocalityForceOptionSpecialKey,
+				        ValueRef());
 			for (const auto& l : localities) {
 				Key addr = failed ? special_keys::failedLocalitySpecialKeyRange.begin.withSuffix(l)
-								  : special_keys::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
+				                  : special_keys::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
 				tr->set(addr, ValueRef());
 			}
 			co_await safeThreadFutureToFuture(tr->commit());
@@ -217,8 +218,8 @@ Future<Void> excludeServersAndLocalities(Reference<IDatabase> db,
 }
 
 Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> db,
-														  std::set<AddressExclusion> exclusions,
-														  bool waitForAllExcluded) {
+                                                          std::set<AddressExclusion> exclusions,
+                                                          bool waitForAllExcluded) {
 	std::set<NetworkAddress> inProgressExclusion;
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
@@ -292,7 +293,7 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		std::vector<std::string> noMatchLocalities;
 		for (auto& loc : req->localities()) {
 			ASSERT(loc.starts_with(LocalityData::ExcludeLocalityPrefix.toString()) &&
-				   loc.find(':') != std::string::npos);
+			       loc.find(':') != std::string::npos);
 			exclusionLocalities.insert(loc);
 			auto localityAddresses = getAddressesByLocality(workers, loc);
 			auto localityServerAddresses = getServerAddressesByLocality(server_interfaces, loc);
@@ -323,7 +324,7 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		// here the provided locality and/or address will not be excluded.
 		if (exclusionAddresses.empty() && exclusionLocalities.empty()) {
 			co_return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
-								   "At least one valid network endpoint address or a locality must be provided.");
+			                       "At least one valid network endpoint address or a locality must be provided.");
 		}
 
 		try {
@@ -333,7 +334,7 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		}
 
 		std::set<NetworkAddress> notExcludedServers =
-			co_await checkForExcludingServers(db, exclusionSet, waitForAllExcluded);
+		    co_await checkForExcludingServers(db, exclusionSet, waitForAllExcluded);
 
 		// Determine if data movement is complete
 		rep->set_data_movement_complete(notExcludedServers.empty());
@@ -366,14 +367,14 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		// Report warnings for localities with no matches
 		if (!noMatchLocalities.empty()) {
 			TraceEvent(SevWarn, "ExcludeLocalitiesNoMatch")
-				.detail("Count", noMatchLocalities.size())
-				.detail("Localities", boost::algorithm::join(noMatchLocalities, ", "));
+			    .detail("Count", noMatchLocalities.size())
+			    .detail("Localities", boost::algorithm::join(noMatchLocalities, ", "));
 		}
 
 		co_return grpc::Status::OK;
 	} catch (const Error& e) {
 		co_return grpc::Status(grpc::StatusCode::INTERNAL,
-							   fmt::format("Error getting worker information: {}", e.what()));
+		                       fmt::format("Error getting worker information: {}", e.what()));
 	}
 }
 
@@ -409,7 +410,7 @@ Future<grpc::Status> excludeStatus(Reference<IDatabase> db, const ExcludeStatusR
 		co_return grpc::Status::OK;
 	} catch (const Error& e) {
 		co_return grpc::Status(grpc::StatusCode::INTERNAL,
-							   fmt::format("Error getting worker information: {}", e.what()));
+		                       fmt::format("Error getting worker information: {}", e.what()));
 	}
 }
 
