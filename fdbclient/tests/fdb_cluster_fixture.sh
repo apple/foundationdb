@@ -13,36 +13,68 @@ FDB_PIDS=()
 function shutdown_fdb_cluster {
   echo "$(date -Iseconds) shutdown_fdb_cluster: starting (${#FDB_PIDS[@]} tracked PIDs)"
   
+  local shutdown_start_time=$(date +%s)
+  local max_shutdown_time=15  # Maximum time to spend in shutdown
+  
   # Kill all running fdb processes from tracked PIDs
   if [[ ${#FDB_PIDS[@]} -gt 0 ]]; then
     # First pass: Try graceful shutdown (SIGTERM)
     echo "$(date -Iseconds) shutdown_fdb_cluster: sending SIGTERM to all processes"
     for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
+      # Check if we're taking too long
+      local current_time=$(date +%s)
+      if [[ $((current_time - shutdown_start_time)) -gt $max_shutdown_time ]]; then
+        echo "$(date -Iseconds) shutdown_fdb_cluster: TIMEOUT - aborting graceful shutdown"
+        break
+      fi
+      
       if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
         echo "$(date -Iseconds) shutdown_fdb_cluster: SIGTERM -> PID ${FDB_PIDS[i]}"
         kill -15 "${FDB_PIDS[i]}" 2>/dev/null || true
       fi
     done
     
-    sleep 0.2
+    # Brief wait for graceful shutdown
+    local current_time=$(date +%s)
+    if [[ $((current_time - shutdown_start_time)) -lt $max_shutdown_time ]]; then
+      sleep 0.2
+    fi
     
     # Second pass: Force kill any survivors with SIGKILL immediately
     echo "$(date -Iseconds) shutdown_fdb_cluster: sending SIGKILL to survivors"
     local still_running=0
     for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
+      # Check timeout again
+      local current_time=$(date +%s)
+      if [[ $((current_time - shutdown_start_time)) -gt $max_shutdown_time ]]; then
+        echo "$(date -Iseconds) shutdown_fdb_cluster: TIMEOUT - skipping remaining processes"
+        break
+      fi
+      
       if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
         echo "$(date -Iseconds) shutdown_fdb_cluster: SIGKILL -> PID ${FDB_PIDS[i]} (didn't respond to SIGTERM)"
         kill -9 "${FDB_PIDS[i]}" 2>/dev/null || true
       fi
     done
     
-    sleep 0.1
+    # Brief check period
+    local current_time=$(date +%s)
+    if [[ $((current_time - shutdown_start_time)) -lt $max_shutdown_time ]]; then
+      sleep 0.1
+    fi
     
-    # Third pass: Check for unkillable processes (no wait, just report)
+    # Third pass: Check for unkillable processes (no wait, just report) - but with timeout
     for (( i=0; i < "${#FDB_PIDS[@]}"; ++i)); do
+      # Check timeout
+      local current_time=$(date +%s)
+      if [[ $((current_time - shutdown_start_time)) -gt $max_shutdown_time ]]; then
+        echo "$(date -Iseconds) shutdown_fdb_cluster: TIMEOUT - skipping process check"
+        break
+      fi
+      
       if kill -0 "${FDB_PIDS[i]}" 2>/dev/null; then
-        # Get process info for debugging
-        local proc_info=$(ps -p "${FDB_PIDS[i]}" -o pid,ppid,stat,comm 2>/dev/null || echo "PID not in process table")
+        # Get process info for debugging - but don't let ps hang
+        local proc_info=$(timeout 2 ps -p "${FDB_PIDS[i]}" -o pid,ppid,stat,comm 2>/dev/null || echo "PID not accessible or timeout")
         echo "$(date -Iseconds) ERROR: Process ${FDB_PIDS[i]} is unkillable (zombie or kernel issue)" >&2
         echo "       Process info: ${proc_info}" >&2
         still_running=$((still_running + 1))
@@ -52,9 +84,12 @@ function shutdown_fdb_cluster {
     if [[ ${still_running} -gt 0 ]]; then
       echo "$(date -Iseconds) ERROR: ${still_running} FDB processes remain unkillable" >&2
     fi
+  else
+    echo "$(date -Iseconds) shutdown_fdb_cluster: no tracked PIDs to shutdown"
   fi
   
-  echo "$(date -Iseconds) shutdown_fdb_cluster: complete"
+  local total_shutdown_time=$(($(date +%s) - shutdown_start_time))
+  echo "$(date -Iseconds) shutdown_fdb_cluster: complete (took ${total_shutdown_time}s)"
 }
 
 # Start an fdb cluster. If port clashes, try again with new ports.
@@ -107,11 +142,12 @@ function start_fdb_cluster {
     set -o errexit  # a.k.a. set -e
     set -o noclobber
     # Set the global FDB_PIDS with retry logic for robustness
+    # Use grep -a to treat binary files as text (output may contain binary data from fdbserver)
     FDB_PIDS=()
     local retries=5
     for ((i=0; i<retries; i++)); do
       if [[ -f "${output}" ]]; then
-        FDB_PIDS=($(grep -e "PIDS=" "${output}" | sed -e 's/PIDS=//' | xargs)) || true
+        FDB_PIDS=($(grep -a -e "PIDS=" "${output}" | sed -e 's/PIDS=//' | xargs)) || true
         if [[ ${#FDB_PIDS[@]} -gt 0 ]]; then
           break
         fi
@@ -136,7 +172,8 @@ function start_fdb_cluster {
       break;
     fi
     # Otherwise, look for 'Local address in use' and if found retry with different ports.
-    if grep 'Local address in use' "${output}"; then
+    # Use grep -a to treat binary files as text
+    if grep -a 'Local address in use' "${output}"; then
       log "Ports in use; retry cluster start but with different ports"
       continue
     fi
