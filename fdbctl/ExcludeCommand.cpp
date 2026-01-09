@@ -17,6 +17,8 @@ I * Licensed under the Apache License, Version 2.0 (the "License");
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifdef FLOW_GRPC_ENABLED
+
 #include "fdbctl/ControlCommands.h"
 
 #include "fdbclient/IClientApi.h"
@@ -33,6 +35,7 @@ I * Licensed under the Apache License, Version 2.0 (the "License");
 
 namespace fdbctl {
 namespace utils {
+
 Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
@@ -415,3 +418,5 @@ Future<grpc::Status> excludeStatus(Reference<IDatabase> db, const ExcludeStatusR
 }
 
 } // namespace fdbctl
+
+#endif
