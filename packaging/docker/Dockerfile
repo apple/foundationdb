@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM rockylinux/rockylinux:9.6-minimal AS base
+FROM rockylinux/rockylinux:10.0-minimal AS base
 
 # Disable the faulty mirror list for RockyLinux for now. Since all the other images use the base image
 # as base we don't have to repeat this step.
