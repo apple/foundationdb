@@ -8679,6 +8679,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
 	               encryptionKeyFileName,
+	               {},
 	               useRangeFileRestore);
 }
 
