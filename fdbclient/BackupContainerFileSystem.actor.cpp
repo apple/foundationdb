@@ -1307,9 +1307,7 @@ public:
 			    0400));
 			keyFile = _keyFile;
 		} catch (Error& e) {
-			TraceEvent(SevError, "FailedToOpenEncryptionKeyFile")
-			    .error(e)
-			    .detail("FileName", encryptionKeyFileName);
+			TraceEvent(SevError, "FailedToOpenEncryptionKeyFile").error(e).detail("FileName", encryptionKeyFileName);
 			throw e;
 		}
 		int bytesRead = wait(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
