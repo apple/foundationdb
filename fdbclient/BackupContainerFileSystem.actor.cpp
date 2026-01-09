@@ -1304,14 +1304,12 @@ public:
 			    0400));
 			keyFile = _keyFile;
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
-			    .error(e)
-			    .detail("FileName", encryptionKeyFileName);
+			TraceEvent(SevError, "FailedToOpenEncryptionKeyFile").error(e).detail("FileName", encryptionKeyFileName);
 			throw e;
 		}
 		int bytesRead = wait(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
 		if (bytesRead != cipherKey->size()) {
-			TraceEvent(SevWarnAlways, "InvalidEncryptionKeyFileSize")
+			TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
 			    .detail("ExpectedSize", cipherKey->size())
 			    .detail("ActualSize", bytesRead);
 			throw invalid_encryption_key_file();
