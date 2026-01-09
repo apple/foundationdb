@@ -111,6 +111,9 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
                                                                  Version atLeastVersion,
                                                                  UID logId) {
 	state Transaction tr(cx);
+	state int retryCount = 0;
+	state int metadataRetryCount = 0;
+	state double startTime = now();
 	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	loop {
@@ -118,6 +121,15 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
 			state Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 			ASSERT(tr.getReadVersion().isReady());
 			if (tr.getReadVersion().get() < atLeastVersion) {
+				retryCount++;
+				if (retryCount % 100 == 0) {
+					TraceEvent(SevWarn, "SSBulkLoadTaskWaitingForVersion", logId)
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("ReadVersion", tr.getReadVersion().get())
+					    .detail("AtLeastVersion", atLeastVersion)
+					    .detail("RetryCount", retryCount)
+					    .detail("ElapsedSec", now() - startTime);
+				}
 				wait(delay(0.1));
 				tr.reset();
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -127,8 +139,24 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
 			if (val.present()) {
 				state DataMoveMetaData dataMoveMetaData = decodeDataMoveValue(val.get());
 				if (dataMoveMetaData.bulkLoadTaskState.present()) {
+					if (metadataRetryCount > 0 || retryCount > 0) {
+						TraceEvent(SevInfo, "SSBulkLoadTaskGotMetadata", logId)
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("MetadataRetryCount", metadataRetryCount)
+						    .detail("VersionRetryCount", retryCount)
+						    .detail("ElapsedSec", now() - startTime);
+					}
 					return dataMoveMetaData.bulkLoadTaskState.get();
 				} else {
+					metadataRetryCount++;
+					if (metadataRetryCount % 100 == 0) {
+						TraceEvent(SevWarn, "SSBulkLoadTaskWaitingForMetadata", logId)
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("DataMovePhase", static_cast<int>(dataMoveMetaData.getPhase()))
+						    .detail("MetadataRetryCount", metadataRetryCount)
+						    .detail("ElapsedSec", now() - startTime)
+						    .detail("Message", "DataMove exists but BulkLoadTaskState not yet written");
+					}
 					wait(delay(0.1));
 					tr.reset();
 					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -145,7 +173,8 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTaskStateFromDataMove(Database cx,
 			    .detail("Message", "This fetchKey is blocked and will be cancelled later")
 			    .detail("DataMoveID", dataMoveId)
 			    .detail("ReadVersion", tr.getReadVersion().get())
-			    .detail("AtLeastVersion", atLeastVersion);
+			    .detail("AtLeastVersion", atLeastVersion)
+			    .detail("ElapsedSec", now() - startTime);
 			wait(Never());
 			throw internal_error(); // does not happen
 		} catch (Error& e) {
