@@ -432,20 +432,20 @@ ACTOR Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
 	}
 }
 
-ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
-	loop {
+Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
+	while (true) {
 		// Wait until fully recovered
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
-			wait(self->db.serverInfo->onChange());
+			co_await self->db.serverInfo->onChange();
 		}
 
 		ASSERT(self->db.recoveryData.isValid());
-		state uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
-		state Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
-		state LogSystemConfig config = logSystem->getLogSystemConfig();
+		uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
+		Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
+		LogSystemConfig config = logSystem->getLogSystemConfig();
 
 		// Find the log set with log routers (should be remote/satellite)
-		state int logSetIndex = -1;
+		int logSetIndex = -1;
 		for (int i = 0; i < config.tLogs.size(); i++) {
 			if (config.tLogs[i].logRouters.size() > 0) {
 				ASSERT_WE_THINK(logSetIndex == -1); // only one log set should have log routers
@@ -459,7 +459,7 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 			while (self->db.serverInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			       self->db.recoveryData.isValid() &&
 			       self->db.recoveryData->cstate.myDBState.recoveryCount == recoveryCount) {
-				wait(self->db.serverInfo->onChange());
+				co_await self->db.serverInfo->onChange();
 			}
 			continue;
 		}
@@ -470,14 +470,13 @@ ACTOR Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 		    .detail("IsLocal", config.tLogs[logSetIndex].isLocal)
 		    .detail("Locality", config.tLogs[logSetIndex].locality);
 
-		// self, logSystem, and logSetIndex are member of compiled class, captured by this.
-		auto monitor = [this]() { return monitorLogRouters(logSystem, logSetIndex); };
-		auto recruit = [this](std::vector<int> failedWorkers) {
+		auto monitor = [logSystem, logSetIndex]() { return monitorLogRouters(logSystem, logSetIndex); };
+		auto recruit = [self, logSetIndex, logSystem](std::vector<int> failedWorkers) {
 			return recruitFailedLogRouters(
 			    self, &self->db, failedWorkers, logSetIndex, logSystem, logSystem->getLogSystemConfig());
 		};
 
-		wait(monitorAndRecruitWorkerSet(self, recoveryCount, "LogRouter", monitor, recruit));
+		co_await monitorAndRecruitWorkerSet(self, recoveryCount, "LogRouter", monitor, recruit);
 	}
 }
 
@@ -646,16 +645,16 @@ ACTOR Future<Void> recruitFailedBackupWorkers(ClusterControllerData* cluster,
 	return Void();
 }
 
-ACTOR Future<Void> monitorAndRecruitBackupWorkers(ClusterControllerData* self) {
-	loop {
+Future<Void> monitorAndRecruitBackupWorkers(ClusterControllerData* self) {
+	while (true) {
 		// Wait until fully recovered
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
-			wait(self->db.serverInfo->onChange());
+			co_await self->db.serverInfo->onChange();
 		}
 
 		ASSERT(self->db.recoveryData.isValid());
-		state uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
-		state Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
+		uint64_t recoveryCount = self->db.recoveryData->cstate.myDBState.recoveryCount;
+		Reference<ILogSystem> logSystem = self->db.recoveryData->logSystem;
 
 		if (!self->db.recoveryData->configuration.backupWorkerEnabled) {
 			TraceEvent("NoBackupWorkersToMonitor", self->id).detail("RecoveryCount", recoveryCount);
@@ -665,20 +664,19 @@ ACTOR Future<Void> monitorAndRecruitBackupWorkers(ClusterControllerData* self) {
 			while (self->db.serverInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			       self->db.recoveryData.isValid() &&
 			       self->db.recoveryData->cstate.myDBState.recoveryCount == recoveryCount) {
-				wait(self->db.serverInfo->onChange());
+				co_await self->db.serverInfo->onChange();
 			}
 			continue;
 		}
 
-		state Database cx = openDBOnServer(self->db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+		Database cx = openDBOnServer(self->db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 
-		// The captured are members of compiled class, state variables or actor parameters.
-		auto monitor = [this]() { return monitorBackupWorkers(self, logSystem); };
-		auto recruit = [this](std::vector<int> failedWorkers) {
+		auto monitor = [self, logSystem]() { return monitorBackupWorkers(self, logSystem); };
+		auto recruit = [self, recoveryCount, logSystem, cx](std::vector<int> failedWorkers) {
 			return recruitFailedBackupWorkers(self, &self->db, failedWorkers, recoveryCount, logSystem, cx);
 		};
 
-		wait(monitorAndRecruitWorkerSet(self, recoveryCount, "BackupWorker", monitor, recruit));
+		co_await monitorAndRecruitWorkerSet(self, recoveryCount, "BackupWorker", monitor, recruit);
 	}
 }
 

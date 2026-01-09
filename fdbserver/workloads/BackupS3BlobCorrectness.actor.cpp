@@ -627,7 +627,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					    .detail("SkipDirtyRestore", self->skipDirtyRestore);
 
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_restore");
-					Version _ = wait(backupAgent.restore(cx,
+					Version v = wait(backupAgent.restore(cx,
 					                                     cx,
 					                                     restoreTag,
 					                                     KeyRef(lastBackupContainer->getURL()),
@@ -645,7 +645,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					                                     ::invalidVersion,
 					                                     lastBackupContainer->getEncryptionKeyFileName()));
 
-					TraceEvent("BS3BCW_RestoreComplete").detail("BackupTag", printable(self->backupTag));
+					TraceEvent("BS3BCW_RestoreComplete").detail("BackupTag", printable(self->backupTag)).detail("RestoreVersion", v);
 				}
 			}
 
