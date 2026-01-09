@@ -29,7 +29,7 @@ static_assert(FDB_API_VERSION == 510, "Don't change this! This test intentionall
 #include <foundationdb/fdb_c.h>
 
 #define DOCTEST_CONFIG_IMPLEMENT
-#include "doctest.h"
+#include "doctest/doctest.h"
 
 #include "flow/config.h"
 
