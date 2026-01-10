@@ -19,22 +19,63 @@ CLEANUP_WATCHDOG_PID=""
 function start_cleanup_watchdog {
   local timeout_seconds="${1:-30}"
   local my_pid=$$
+  local my_pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ' || echo "")
+  
+  # Create a more robust watchdog that tries multiple kill strategies
   (
-    set -x  # Debug output to show what the watchdog is doing
     sleep "$timeout_seconds"
     echo "$(date -Iseconds) CLEANUP TIMEOUT after ${timeout_seconds}s - forcing exit"
-    # Try to kill the process group first (minus sign = process group),
-    # fall back to just the main PID if we're not the process group leader
-    kill -9 -$my_pid 2>/dev/null || kill -9 $my_pid 2>/dev/null
+    
+    # Strategy 1: Kill process group (most effective for shell scripts)
+    if [[ -n "$my_pgid" ]] && kill -0 -$my_pgid 2>/dev/null; then
+      echo "$(date -Iseconds) WATCHDOG: Killing process group $my_pgid"
+      kill -9 -$my_pgid 2>/dev/null && {
+        echo "$(date -Iseconds) WATCHDOG: Successfully killed process group"
+        exit 0
+      }
+    fi
+    
+    # Strategy 2: Kill the main process directly
+    if kill -0 $my_pid 2>/dev/null; then
+      echo "$(date -Iseconds) WATCHDOG: Killing main process $my_pid"
+      kill -9 $my_pid 2>/dev/null && {
+        echo "$(date -Iseconds) WATCHDOG: Successfully killed main process"
+        exit 0
+      }
+    fi
+    
+    # Strategy 3: Nuclear option - kill all processes with same script name
+    local script_name=$(basename "${BASH_SOURCE[1]:-$0}" 2>/dev/null || echo "")
+    if [[ -n "$script_name" ]] && command -v pkill >/dev/null 2>&1; then
+      echo "$(date -Iseconds) WATCHDOG: Nuclear option - killing all $script_name processes"
+      pkill -9 -f "$script_name" 2>/dev/null || true
+    fi
+    
+    echo "$(date -Iseconds) WATCHDOG: Cleanup timeout handling complete"
   ) &
   CLEANUP_WATCHDOG_PID=$!
-  disown $CLEANUP_WATCHDOG_PID 2>/dev/null || true
+  
+  # Don't disown - we want to be able to cancel this if cleanup finishes normally
+  echo "$(date -Iseconds) Started cleanup watchdog (PID: $CLEANUP_WATCHDOG_PID, timeout: ${timeout_seconds}s)"
 }
 
 # Cancel the cleanup watchdog (call this when cleanup finishes successfully)
 function cancel_cleanup_watchdog {
   if [[ -n "${CLEANUP_WATCHDOG_PID:-}" ]]; then
-    kill $CLEANUP_WATCHDOG_PID 2>/dev/null || true
+    if kill -0 $CLEANUP_WATCHDOG_PID 2>/dev/null; then
+      echo "$(date -Iseconds) Canceling cleanup watchdog (PID: $CLEANUP_WATCHDOG_PID)"
+      kill $CLEANUP_WATCHDOG_PID 2>/dev/null || true
+      # Wait briefly for it to exit
+      local i=0
+      while kill -0 $CLEANUP_WATCHDOG_PID 2>/dev/null && [[ $i -lt 10 ]]; do
+        sleep 0.1
+        i=$((i + 1))
+      done
+      # Force kill if it didn't exit gracefully
+      if kill -0 $CLEANUP_WATCHDOG_PID 2>/dev/null; then
+        kill -9 $CLEANUP_WATCHDOG_PID 2>/dev/null || true
+      fi
+    fi
     CLEANUP_WATCHDOG_PID=""
   fi
 }

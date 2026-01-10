@@ -4,21 +4,42 @@ list(APPEND FDBCLIENT_SRCS sha1/SHA1.cpp)
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
 
-set(options_srcs ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
+if(NOT VEXILLOGRAPHER_COMMAND)
+  message(FATAL_ERROR "VEXILLOGRAPHER_COMMAND is undefined; ensure CompileVexillographer.cmake is included")
+endif()
 
-make_directory(${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/)
-vexillographer_compile(TARGET fdboptions_vex LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/)
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/FDBOptions.g.h
-  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h
-  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/FDBOptions.g.h)
+set(FDBOPTIONS_GEN_BASE ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/FDBOptions.g)
+set(FDBOPTIONS_GEN_H    ${FDBOPTIONS_GEN_BASE}.h)
+set(FDBOPTIONS_GEN_CPP  ${FDBOPTIONS_GEN_BASE}.cpp)
 
-vexillographer_compile(TARGET fdboptions_c LANG c OUT ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/fdb_c_options.g.h
+# Generate the C++ option bindings directly into the final include directory so
+# the header and source exist before any staging or actor compilation.
+add_custom_command(
+  OUTPUT ${FDBOPTIONS_GEN_H} ${FDBOPTIONS_GEN_CPP}
+  COMMAND ${VEXILLOGRAPHER_COMMAND}
+          ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
+          cpp
+          ${FDBOPTIONS_GEN_BASE}
+  DEPENDS ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
+          ${VEXILLOGRAPHER_DEPENDS}
+  COMMENT "Generate FDBOptions (C++)"
+  VERBATIM)
+
+vexillographer_compile(
+  TARGET fdboptions_c
+  LANG c
+  OUT ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/fdb_c_options.g.h
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/fdb_c_options.g.h)
 
-add_custom_target(fdboptions DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/FDBOptions.g.h)
-add_dependencies(fdboptions fdboptions_c)
+set(FDB_OPTIONS_H ${FDBOPTIONS_GEN_H} CACHE INTERNAL "FDB options header")
+set(options_srcs ${FDBOPTIONS_GEN_CPP})
+
+add_custom_target(fdboptions ALL
+  DEPENDS ${FDBOPTIONS_GEN_H}
+          ${FDBOPTIONS_GEN_CPP}
+          fdboptions_c)
 
 ################################################################################
 # Build information

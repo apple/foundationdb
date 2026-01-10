@@ -150,6 +150,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/RestoreValidation.toml)
 
   add_fdb_test(TEST_FILES fast/BulkDumping.toml)
   add_fdb_test(TEST_FILES slow/BulkDumpingS3.toml)

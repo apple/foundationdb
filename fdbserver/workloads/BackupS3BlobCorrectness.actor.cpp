@@ -610,10 +610,23 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				if (lastBackupContainer) {
 					wait(waitForRestorable(lastBackupContainer, 150));
 
+					// Generate a lock UID for the entire clear+restore operation
+					state UID lockUID = deterministicRandom()->randomUniqueID();
+
+					// Lock the database to prevent other workloads from seeing inconsistent state
+					// during clear+restore. This makes workloads like Cycle get database_locked
+					// errors (retriable) instead of encountering missing keys.
+					wait(lockDatabase(cx, lockUID));
+
+					TraceEvent("BS3BCW_DatabaseLocked")
+					    .detail("LockUID", lockUID)
+					    .detail("BackupTag", printable(self->backupTag));
+
 					// Clear the backup ranges before restoring (unless skipDirtyRestore is true)
 					if (!self->skipDirtyRestore) {
 						wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 							for (auto& kvrange : self->backupRanges)
 								tr->clear(kvrange);
 							return Void();
@@ -624,9 +637,13 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					TraceEvent("BS3BCW_Restore")
 					    .detail("LastBackupContainer", lastBackupContainer->getURL())
 					    .detail("BackupTag", printable(self->backupTag))
+					    .detail("LockUID", lockUID)
 					    .detail("SkipDirtyRestore", self->skipDirtyRestore);
 
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_restore");
+
+					// Pass lockDB=False since we already locked, unlockDB=True to release when done,
+					// and our lockUID so restore uses the same lock for checkDatabaseLock calls
 					Version v = wait(backupAgent.restore(cx,
 					                                     cx,
 					                                     restoreTag,
@@ -638,12 +655,13 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					                                     Verbose::True,
 					                                     Key(),
 					                                     Key(),
-					                                     self->locked,
+					                                     LockDB::False,
 					                                     UnlockDB::True,
 					                                     OnlyApplyMutationLogs::False,
 					                                     InconsistentSnapshotOnly::False,
 					                                     ::invalidVersion,
-					                                     lastBackupContainer->getEncryptionKeyFileName()));
+					                                     lastBackupContainer->getEncryptionKeyFileName(),
+					                                     lockUID));
 
 					TraceEvent("BS3BCW_RestoreComplete")
 					    .detail("BackupTag", printable(self->backupTag))

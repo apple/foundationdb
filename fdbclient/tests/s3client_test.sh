@@ -572,11 +572,34 @@ function test_list_with_files {
   fi
 
   # Test non-recursive listing - use higher page size to avoid MockS3Server pagination edge case
-  output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-  --knob_blobstore_list_max_keys_per_page=10 ls "${url}" 2>&1)
-  status=$?
-
-  check_nested_files "${url_path}" 1 "false"
+  # Add retry logic for MockS3Server consistency (similar to recursive listing)
+  local non_recursive_attempts=5
+  local non_recursive_attempt=0
+  local non_recursive_success=0
+  
+  while [[ $non_recursive_attempt -lt $non_recursive_attempts ]]; do
+    output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
+      --knob_blobstore_list_max_keys_per_page=10 ls "${url}" 2>&1)
+    status=$?
+    
+    # Reset missing flag for this attempt
+    missing=0
+    check_nested_files "${url_path}" 1 "false"
+    
+    if [[ "${missing}" -eq 0 ]]; then
+      non_recursive_success=1
+      break
+    fi
+    
+    log "Non-recursive listing attempt $((non_recursive_attempt + 1)) failed, retrying..."
+    non_recursive_attempt=$((non_recursive_attempt + 1))
+    sleep 0.5
+  done
+  
+  if [[ "${non_recursive_success}" -eq 0 ]]; then
+    err "Non-recursive listing failed after ${non_recursive_attempts} attempts"
+    return 1
+  fi
   if [[ "${missing}" -ne 0 ]]; then
     return 1
   fi

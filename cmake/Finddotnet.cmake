@@ -71,6 +71,8 @@ function(dotnet_build project_file_path)
   cmake_path(APPEND project_root_directory "bin" OUTPUT_VARIABLE
              project_binary_directory)
   cmake_path(APPEND project_binary_directory "${project}" OUTPUT_VARIABLE
+             project_binary_directory)
+  cmake_path(APPEND project_binary_directory "${project}.dll" OUTPUT_VARIABLE
              project_binary_path)
   message(
     STATUS "Building project ${project} using dotnet, in ${configuration} mode")
@@ -80,6 +82,7 @@ function(dotnet_build project_file_path)
     COMMAND
       ${dotnet_EXECUTABLE} ARGS build ${project_file_path} --configuration
       "${configuration}" --output "${project_binary_directory}" --self-contained
+      "false" -p:UseAppHost=false -p:PublishSingleFile=false
     DEPENDS ${ARG_SOURCE}
     WORKING_DIRECTORY "${project_root_directory}"
     COMMENT "Build ${project} using .NET framework")
