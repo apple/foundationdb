@@ -98,7 +98,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 			state Transaction tr(cx);
 			try {
 				StorageMetrics sm = wait(cx->getStorageMetrics(self->wholeRange, 100));
-				(void) sm; // suppress unused variable warning
+				(void)sm; // suppress unused variable warning
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangeSize", sm.bytes)
 				//     .detail("KeyRangeReadBandwidth", sm.bytesReadPerKSecond);

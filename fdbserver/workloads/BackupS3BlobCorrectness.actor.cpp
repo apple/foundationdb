@@ -645,7 +645,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					                                     ::invalidVersion,
 					                                     lastBackupContainer->getEncryptionKeyFileName()));
 
-					TraceEvent("BS3BCW_RestoreComplete").detail("BackupTag", printable(self->backupTag)).detail("RestoreVersion", v);
+					TraceEvent("BS3BCW_RestoreComplete")
+					    .detail("BackupTag", printable(self->backupTag))
+					    .detail("RestoreVersion", v);
 				}
 			}
 
