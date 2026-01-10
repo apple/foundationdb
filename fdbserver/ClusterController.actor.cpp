@@ -470,11 +470,14 @@ Future<Void> monitorAndRecruitLogRouters(ClusterControllerData* self) {
 		    .detail("IsLocal", config.tLogs[logSetIndex].isLocal)
 		    .detail("Locality", config.tLogs[logSetIndex].locality);
 
-		auto monitor = [logSystem, logSetIndex]() { return monitorLogRouters(logSystem, logSetIndex); };
-		auto recruit = [self, logSetIndex, logSystem](std::vector<int> failedWorkers) {
-			return recruitFailedLogRouters(
-			    self, &self->db, failedWorkers, logSetIndex, logSystem, logSystem->getLogSystemConfig());
+		std::function<Future<std::vector<int>>()> monitor = [logSystem, logSetIndex]() {
+			return monitorLogRouters(logSystem, logSetIndex);
 		};
+		std::function<Future<Void>(std::vector<int>)> recruit =
+		    [self, logSetIndex, logSystem](std::vector<int> failedWorkers) {
+			    return recruitFailedLogRouters(
+			        self, &self->db, failedWorkers, logSetIndex, logSystem, logSystem->getLogSystemConfig());
+		    };
 
 		co_await monitorAndRecruitWorkerSet(self, recoveryCount, "LogRouter", monitor, recruit);
 	}
@@ -671,10 +674,13 @@ Future<Void> monitorAndRecruitBackupWorkers(ClusterControllerData* self) {
 
 		Database cx = openDBOnServer(self->db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 
-		auto monitor = [self, logSystem]() { return monitorBackupWorkers(self, logSystem); };
-		auto recruit = [self, recoveryCount, logSystem, cx](std::vector<int> failedWorkers) {
-			return recruitFailedBackupWorkers(self, &self->db, failedWorkers, recoveryCount, logSystem, cx);
+		std::function<Future<std::vector<int>>()> monitor = [self, logSystem]() {
+			return monitorBackupWorkers(self, logSystem);
 		};
+		std::function<Future<Void>(std::vector<int>)> recruit =
+		    [self, recoveryCount, logSystem, cx](std::vector<int> failedWorkers) {
+			    return recruitFailedBackupWorkers(self, &self->db, failedWorkers, recoveryCount, logSystem, cx);
+		    };
 
 		co_await monitorAndRecruitWorkerSet(self, recoveryCount, "BackupWorker", monitor, recruit);
 	}
