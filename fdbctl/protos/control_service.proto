@@ -357,11 +357,14 @@ message ExcludeRequest {
 
 // Response to an exclude operation.
 message ExcludeReply {
-    // Number of workers excluded
-    optional int32 num_excluded = 1;
+    // List of excluded worker addresses (format: "ip:port")
+    repeated string excluded_addresses = 1;
 
     // True if data movement is complete.
     optional bool data_movement_complete = 2;
+
+    // List of excluded addresses that don't have a corresponding worker.
+    repeated string absent_addresses = 3;
 }
 
 // Request to get the status of exclusions.
