@@ -1079,8 +1079,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			    .detail("BackupEpoch", self->backupEpoch)
 			    .detail("Popped", r->popped())
 			    .detail("NoopPoppedVersion", maxNoopVersion)
-			    .detail("ExpectedPeekVersion", tagAt);
-			ASSERT(self->backupEpoch < self->recruitedEpoch && maxNoopVersion >= r->popped());
+			    .detail("ExpectedPeekVersion", tagAt)
+			    .detail("RecruitedEpoch", self->recruitedEpoch);
+			ASSERT(self->backupEpoch < self->recruitedEpoch && (maxNoopVersion == invalidVersion || maxNoopVersion >= r->popped()));
 			// This can only happen when the backup was in NOOP mode in the previous epoch,
 			// where NOOP mode popped version is larger than the expected peek version.
 			// CC recruits this worker from epoch's begin version, which is lower than the
