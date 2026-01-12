@@ -1,0 +1,14 @@
+[configuration]
+
+[[test]]
+testTitle = 'SimpleReadWriteWithNetworkFailures'
+
+    [[test.workload]]
+    testName = 'SimpleReadWrite'
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 60.0
+    scale = 0.5
+    clogginess = 1.5
+
