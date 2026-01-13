@@ -326,6 +326,7 @@ class Summary:
         error_out: str = None,
         will_restart: bool = False,
         long_running: bool = False,
+        is_old_binary: bool = False,
     ):
         self.binary = binary
         self.runtime: float = runtime
@@ -354,6 +355,7 @@ class Summary:
         self.negative_test_success = False
         self.max_trace_time = -1
         self.max_trace_time_type = "None"
+        self.is_old_binary: bool = is_old_binary
 
         if uid is not None:
             self.out.attributes["TestUID"] = str(uid)
@@ -387,7 +389,8 @@ class Summary:
             self.out.append(child)
             return
         self.summarize_files(trace_files[0])
-        if config.joshua_dir is not None:
+        # Skip write_coverage for old binaries in restarting tests
+        if config.joshua_dir is not None and not self.is_old_binary:
             import test_harness.fdb
 
             test_harness.fdb.write_coverage(
