@@ -541,7 +541,7 @@ class TestRun:
         try:
             out_bytes, err_bytes = process.communicate(timeout=timeout)
             # Check if we're running with an old binary (restarting test with non-current binary)
-            self.is_old_binary = self.binary != config.binary
+            self.is_old_binary = (self.binary != config.binary)
             # Try normal UTF-8 decode first
             try:
                 out = out_bytes.decode('utf-8') if out_bytes else ""
