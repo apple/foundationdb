@@ -17,6 +17,7 @@ cmake-build-*/
 *.g.S
 *.g.asm
 *.pom
+fdbserver/include/fdbserver/FDBRocksDBVersion.h
 bindings/java/pom*.xml
 bindings/java/src*/main/overview.html
 bindings/java/src*/main/com/apple/foundationdb/NetworkOptions.java
