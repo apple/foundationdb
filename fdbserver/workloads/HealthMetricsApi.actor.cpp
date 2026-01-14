@@ -23,7 +23,15 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// workload description
+// NOTE: it might be simpler to test health metrics via something
+// other than simulation. Testing equivalent to what this workload does can
+// seemingly be obtained by a straight line test case that does
+// the following:
+// a) start a cluster
+// b) do a few transactions
+// c) call getHealthMetrics()
+// d) ensure the returned metrics are non-zero.
+
 // This workload can be attached to other workload to collect health information about the FDB cluster.
 struct HealthMetricsApiWorkload : TestWorkload {
 	// Performance Metrics
@@ -43,10 +51,10 @@ struct HealthMetricsApiWorkload : TestWorkload {
 	double healthMetricsCheckInterval;
 	double maxAllowedStaleness;
 	bool sendDetailedHealthMetrics;
-	bool everGotMetrics = false;
 
 	// internal states
 	bool healthMetricsStoppedUpdating = false;
+	bool gotMetrics = false;
 	static constexpr auto NAME = "HealthMetricsApi";
 
 	HealthMetricsApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -57,10 +65,9 @@ struct HealthMetricsApiWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _setup(Database cx, HealthMetricsApiWorkload* self) {
-		self->everGotMetrics = false;
-
 		if (!self->sendDetailedHealthMetrics) {
-			// Clear detailed health metrics that are already populated
+			// Internally cached health metrics time out after this knob.  Wait
+			// an extra second to avoid any off-by-1 ">" vs ">=" type issues.
 			wait(delay(1 + CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS));
 			cx->healthMetrics.storageStats.clear();
 			cx->healthMetrics.tLogQueue.clear();
@@ -75,8 +82,11 @@ struct HealthMetricsApiWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	Future<bool> check(Database const& cx) override {
-		if (!everGotMetrics) {
+		if (!gotMetrics) {
 			// It's not valid to fail a sanity check of metrics which have never been received.
+			// Yes, this encodes a blatant "got" vs "have" usage error.  The intent is to show
+			// up on any case insensitive search for "gotmetrics".
+			TraceEvent("HealthMetricsCheckPassedBecauseWeDontGotMetrics");
 			return true;
 		}
 		if (healthMetricsStoppedUpdating) {
@@ -187,9 +197,9 @@ struct HealthMetricsApiWorkload : TestWorkload {
 				self->detailedWorstTLogQueue = std::max(self->detailedWorstTLogQueue, ss.second);
 				traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);
 			}
-			if (!self->everGotMetrics && gotStorageStats && gotTLogQueue) {
+			if (!self->gotMetrics && gotStorageStats && gotTLogQueue) {
 				TraceEvent("HealthMetricsGotFullResult");
-				self->everGotMetrics = true;
+				self->gotMetrics = true;
 			}
 		};
 	}
