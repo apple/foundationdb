@@ -16,8 +16,8 @@
 # OPTION 1: Official Release (DEFAULT - currently active)
 # Use this for stable, released versions of RocksDB.
 ###############################################################################
-set(ROCKSDB_VERSION "9.7.3")
-set(ROCKSDB_VERSION_SHA256 "acfabb989cbfb5b5c4d23214819b059638193ec33dad2d88373c46448d16d38b")
+# set(ROCKSDB_VERSION "9.7.3")
+# set(ROCKSDB_VERSION_SHA256 "acfabb989cbfb5b5c4d23214819b059638193ec33dad2d88373c46448d16d38b")
 
 ###############################################################################
 # OPTION 2: Git Commit
@@ -27,5 +27,5 @@ set(ROCKSDB_VERSION_SHA256 "acfabb989cbfb5b5c4d23214819b059638193ec33dad2d88373c
 # Note: CMake will auto-fetch the version from GitHub at configure time.
 # This requires network access during cmake configure.
 ###############################################################################
-# set(ROCKSDB_GIT_HASH "")
-# set(ROCKSDB_GIT_HASH_SHA256 "")
+set(ROCKSDB_GIT_HASH "2732f118497ab75cd2e44bc327746be180b42dcf")
+set(ROCKSDB_GIT_HASH_SHA256 "5f0dd06680c0bf302abb9bc70b4698fdcd0d5623c7264c8b3af7a1fe4f8b3078")
