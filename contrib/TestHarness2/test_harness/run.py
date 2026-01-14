@@ -394,6 +394,7 @@ class TestRun:
             expected_unseed=self.expected_unseed,
             will_restart=will_restart,
             long_running=config.long_running,
+            is_old_binary=False,  # will be set after the run
         )
         self.run_time: int = 0
         self.success = self.run()
@@ -539,6 +540,8 @@ class TestRun:
         err_out: str = ""
         try:
             out_bytes, err_bytes = process.communicate(timeout=timeout)
+            # Check if we're running with an old binary (restarting test with non-current binary)
+            self.is_old_binary = (self.binary != config.binary)
             # Try normal UTF-8 decode first
             try:
                 out = out_bytes.decode('utf-8') if out_bytes else ""
@@ -548,9 +551,7 @@ class TestRun:
                 decode_error_occurred = True
                 out = out_bytes.decode('utf-8', errors='replace') if out_bytes else ""
                 err_out = err_bytes.decode('utf-8', errors='replace') if err_bytes else ""
-                # Check if we're running with an old binary (restarting test with non-current binary)
-                is_old_binary = self.binary != config.binary
-                if is_old_binary:
+                if self.is_old_binary:
                     print(f"WARNING: UnicodeDecodeError at position {decode_ex.start} - invalid byte {hex(out_bytes[decode_ex.start])}. Output decoded with replacement. (Old binary - not failing test)", file=sys.stderr)
                     # Don't fail tests for old binaries - we can't fix them
                 else:
@@ -575,16 +576,16 @@ class TestRun:
         self.summary.was_killed = did_kill
         self.summary.valgrind_out_file = valgrind_file
         self.summary.error_out = err_out
-        
+        self.summary.is_old_binary = self.is_old_binary
+
         # Add diagnostic info if decode error occurred (BEFORE summarize calculates Ok attribute)
         if decode_error_occurred:
-            is_old_binary = self.binary != config.binary
             decode_error_node = SummaryTree("UnicodeDecodeError")
             # Use Severity 30 (warning) for old binaries, 40 (error) for current binary
-            decode_error_node.attributes["Severity"] = "30" if is_old_binary else "40"
+            decode_error_node.attributes["Severity"] = "30" if self.is_old_binary else "40"
             decode_error_node.attributes["Message"] = "fdbserver output contained invalid UTF-8 bytes. Output decoded with replacement characters."
             decode_error_node.attributes["Position"] = "Check fdbserver.stdout for � characters"
-            if is_old_binary:
+            if self.is_old_binary:
                 decode_error_node.attributes["Note"] = "Old binary - binary output tolerated"
             self.summary.out.append(decode_error_node)
         
