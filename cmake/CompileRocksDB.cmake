@@ -48,6 +48,7 @@ if(ROCKSDB_GIT_HASH)
   endif()
 
   message(STATUS "Detected RocksDB version: ${FDB_ROCKSDB_MAJOR}.${FDB_ROCKSDB_MINOR}.${FDB_ROCKSDB_PATCH}")
+  set(FDB_ROCKSDB_GIT_HASH ${ROCKSDB_GIT_HASH})
 else()
   set(ROCKSDB_VERSION_FOR_HEADER ${ROCKSDB_VERSION})
   # Parse version string into MAJOR.MINOR.PATCH
@@ -60,6 +61,7 @@ else()
   list(GET ROCKSDB_VERSION_LIST 0 FDB_ROCKSDB_MAJOR)
   list(GET ROCKSDB_VERSION_LIST 1 FDB_ROCKSDB_MINOR)
   list(GET ROCKSDB_VERSION_LIST 2 FDB_ROCKSDB_PATCH)
+  set(FDB_ROCKSDB_GIT_HASH "")
 endif()
 
 # Generate FDBRocksDBVersion.h from template into build directory
