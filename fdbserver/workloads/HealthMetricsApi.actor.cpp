@@ -43,6 +43,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 	double healthMetricsCheckInterval;
 	double maxAllowedStaleness;
 	bool sendDetailedHealthMetrics;
+	bool everGotMetrics = false;
 
 	// internal states
 	bool healthMetricsStoppedUpdating = false;
@@ -56,9 +57,11 @@ struct HealthMetricsApiWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _setup(Database cx, HealthMetricsApiWorkload* self) {
+		self->everGotMetrics = false;
+
 		if (!self->sendDetailedHealthMetrics) {
 			// Clear detailed health metrics that are already populated
-			wait(delay(2 * CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS));
+			wait(delay(1 + CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS));
 			cx->healthMetrics.storageStats.clear();
 			cx->healthMetrics.tLogQueue.clear();
 		}
@@ -72,23 +75,33 @@ struct HealthMetricsApiWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	Future<bool> check(Database const& cx) override {
+		if (!everGotMetrics) {
+			// It's not valid to fail a sanity check of metrics which have never been received.
+			return true;
+		}
 		if (healthMetricsStoppedUpdating) {
 			TraceEvent(SevError, "HealthMetricsStoppedUpdating").log();
 			return false;
 		}
-		bool correctHealthMetricsState = true;
-		if (worstStorageQueue == 0 || worstStorageDurabilityLag == 0 || worstTLogQueue == 0)
-			correctHealthMetricsState = false;
+		bool valid = true;
+		if (worstStorageQueue == 0 || worstStorageDurabilityLag == 0 || worstTLogQueue == 0) {
+			valid = false;
+			TraceEvent("HealthMetrics:valid_false_case1");
+		}
 		if (sendDetailedHealthMetrics) {
 			if (detailedWorstStorageQueue == 0 || detailedWorstStorageDurabilityLag == 0 ||
-			    detailedWorstTLogQueue == 0 || detailedWorstCpuUsage == 0.0 || detailedWorstDiskUsage == 0.0)
-				correctHealthMetricsState = false;
+			    detailedWorstTLogQueue == 0 || detailedWorstCpuUsage == 0.0 || detailedWorstDiskUsage == 0.0) {
+				valid = false;
+				TraceEvent("HealthMetrics:valid_false_case2");
+			}
 		} else {
 			if (detailedWorstStorageQueue != 0 || detailedWorstStorageDurabilityLag != 0 ||
-			    detailedWorstTLogQueue != 0 || detailedWorstCpuUsage != 0.0 || detailedWorstDiskUsage != 0.0)
-				correctHealthMetricsState = false;
+			    detailedWorstTLogQueue != 0 || detailedWorstCpuUsage != 0.0 || detailedWorstDiskUsage != 0.0) {
+				valid = false;
+				TraceEvent("HealthMetrics:valid_false_case3");
+			}
 		}
-		if (!correctHealthMetricsState) {
+		if (!valid) {
 			TraceEvent(SevError, "IncorrectHealthMetricsState")
 			    .detail("WorstStorageQueue", worstStorageQueue)
 			    .detail("WorstLimitingStorageQueue", worstLimitingStorageQueue)
@@ -102,7 +115,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			    .detail("DetailedWorstDiskUsage", detailedWorstDiskUsage)
 			    .detail("SendingDetailedHealthMetrics", sendDetailedHealthMetrics);
 		}
-		return correctHealthMetricsState;
+		return valid;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -151,8 +164,9 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			TraceEvent traceCpuUsage("CpuUsage");
 			TraceEvent traceDiskUsage("DiskUsage");
 
-			// update metrics
+			bool gotStorageStats = false;
 			for (const auto& ss : healthMetrics.storageStats) {
+				gotStorageStats = true;
 				auto storageStats = ss.second;
 				self->detailedWorstStorageQueue = std::max(self->detailedWorstStorageQueue, storageStats.storageQueue);
 				traceStorageQueue.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.storageQueue);
@@ -167,9 +181,15 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			}
 			TraceEvent traceTLogQueue("TLogQueue");
 			traceTLogQueue.setMaxEventLength(10000);
+			bool gotTLogQueue = false;
 			for (const auto& ss : healthMetrics.tLogQueue) {
+				gotTLogQueue = true;
 				self->detailedWorstTLogQueue = std::max(self->detailedWorstTLogQueue, ss.second);
 				traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);
+			}
+			if (!self->everGotMetrics && gotStorageStats && gotTLogQueue) {
+				TraceEvent("HealthMetricsGotFullResult");
+				self->everGotMetrics = true;
 			}
 		};
 	}
