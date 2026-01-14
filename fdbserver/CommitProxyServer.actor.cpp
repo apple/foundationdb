@@ -1422,7 +1422,6 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			ASSERT_EQ(encryptedMutations->size(), pMutations->size());
 		}
 
-		state int64_t encryptDomain = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext);
 
 		for (; mutationNum < pMutations->size(); mutationNum++) {

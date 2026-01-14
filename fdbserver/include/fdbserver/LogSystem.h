@@ -726,6 +726,8 @@ struct ILogSystem {
 	virtual Version popPseudoLocalityTag(Tag tag, Version upTo) = 0;
 
 	virtual void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) = 0;
+	virtual void updateBackupWorkers(const std::vector<int>& tagIds,
+	                                 const std::vector<InitializeBackupReply>& rplies) = 0;
 
 	// Removes a finished backup worker from log system and returns true. Returns false
 	// if the worker is not found.
