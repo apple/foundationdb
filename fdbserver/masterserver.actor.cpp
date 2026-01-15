@@ -596,21 +596,6 @@ ACTOR Future<Void> masterServerCxx(MasterInterface mi,
 			addActor.getFuture().pop();
 		}
 
-		CODE_PROBE(
-		    err.code() == error_code_tlog_failed, "Master: terminated due to tLog failure", probe::decoration::rare);
-		CODE_PROBE(err.code() == error_code_commit_proxy_failed,
-		           "Master: terminated due to commit proxy failure",
-		           probe::decoration::rare);
-		CODE_PROBE(err.code() == error_code_grv_proxy_failed,
-		           "Master: terminated due to GRV proxy failure",
-		           probe::decoration::rare);
-		CODE_PROBE(err.code() == error_code_resolver_failed,
-		           "Master: terminated due to resolver failure",
-		           probe::decoration::rare);
-		CODE_PROBE(err.code() == error_code_backup_worker_failed,
-		           "Master: terminated due to backup worker failure",
-		           probe::decoration::rare);
-
 		if (normalMasterErrors().contains(err.code())) {
 			TraceEvent("MasterTerminated", mi.id()).error(err);
 			return Void();
