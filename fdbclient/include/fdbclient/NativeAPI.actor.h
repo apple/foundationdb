@@ -65,6 +65,7 @@ void enableClientInfoLogging();
 
 struct NetworkOptions {
 	std::string localAddress;
+	Optional<IPAddress> traceIP;
 	std::string clusterFile;
 	Optional<std::string> traceDirectory;
 	uint64_t traceRollSize;
