@@ -71,7 +71,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
   add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
   add_fdb_test(TEST_FILES BGServerCommonUnit.toml)
-  add_fdb_test(TEST_FILES BlobGranuleFileUnit.toml)
   add_fdb_test(TEST_FILES BlobManagerUnit.toml)
   add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
   add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
@@ -146,7 +145,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/AtomicOps.toml)
   add_fdb_test(TEST_FILES fast/AtomicOpsApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AuthzSecurity.toml)
-  add_fdb_test(TEST_FILES fast/AuthzSecurityWithBlobGranules.toml)
   add_fdb_test(TEST_FILES fast/AutomaticIdempotency.toml)
   add_fdb_test(TEST_FILES fast/BackupAzureBlobCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES fast/BackupS3BlobCorrectness.toml IGNORE)
@@ -157,20 +155,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyAtomicOps.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyCycle.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifySmall.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifySmallClean.toml)
-
-  # TODO: test occasionally times out due to too many change feed shard parts
-  # Disable for now until the underlying issue is fixed.
-  add_fdb_test(TEST_FILES rare/BlobGranuleMoveVerifyCycle.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobRestoreBasic.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobRestoreLarge.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobRestoreToVersion.toml IGNORE)
-  # IGNORE below because we do not use tenant mode and it is likely to be
-  # deprecated/removed. rdar://157717454, rdar://134522214.
-  add_fdb_test(TEST_FILES rare/BlobRestoreTenantMode.toml IGNORE)
 
   add_fdb_test(TEST_FILES fast/BulkDumping.toml)
   add_fdb_test(TEST_FILES fast/BulkLoading.toml)
@@ -297,19 +281,6 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml)
   endif()
 
-  # TODO: Disable BlobGranule tests temporarily until the feature is more stable and these tests are fixed.
-  add_fdb_test(TEST_FILES rare/BlobGranuleApiCorrectness.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleCorrectnessClean.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleCorrectness.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleMergeBoundaries.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleRangesChangeLog.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyBalance.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyBalanceClean.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyLarge.toml IGNORE)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyLargeClean.toml IGNORE)
-
-
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogTlog.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
@@ -407,15 +378,6 @@ if(WITH_PYTHON)
       TEST_FILES restarting/from_7.3.0/VersionVectorEnableRestart-1.toml
       restarting/from_7.3.0/VersionVectorEnableRestart-2.toml IGNORE)
     add_fdb_test(
-      TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCycle-1.toml
-      restarting/from_7.3.0/BlobGranuleRestartCycle-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.3.0/BlobGranuleRestartLarge-1.toml
-      restarting/from_7.3.0/BlobGranuleRestartLarge-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCorrectness-1.toml
-      restarting/from_7.3.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
-    add_fdb_test(
       TEST_FILES restarting/from_7.3.0_until_7.4.0/SnapCycleRestart-1.toml
       restarting/from_7.3.0_until_7.4.0/SnapCycleRestart-2.toml)
     add_fdb_test(
@@ -470,26 +432,17 @@ if(WITH_PYTHON)
       TEST_FILES restarting/to_7.2.0_until_7.3.0/CycleTestRestart-1.toml
       restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml IGNORE)
     add_fdb_test(
-      TEST_FILES restarting/to_7.3.0_until_7.3.51/BlobGranuleRestartCorrectness-1.toml
-      restarting/to_7.3.0_until_7.3.51/BlobGranuleRestartCorrectness-2.toml IGNORE)
-    add_fdb_test(
       TEST_FILES restarting/to_7.3.0_until_7.3.51/ConfigureStorageMigrationTestRestart-1.toml
       restarting/to_7.3.0_until_7.3.51/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
       TEST_FILES restarting/to_7.3.0_until_7.3.51/CycleTestRestart-1.toml
       restarting/to_7.3.0_until_7.3.51/CycleTestRestart-2.toml)
     add_fdb_test(
-      TEST_FILES restarting/to_7.3.51_until_7.4.0/BlobGranuleRestartCorrectness-1.toml
-      restarting/to_7.3.51_until_7.4.0/BlobGranuleRestartCorrectness-2.toml IGNORE)
-    add_fdb_test(
       TEST_FILES restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
       restarting/to_7.3.51_until_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
       TEST_FILES restarting/to_7.3.51_until_7.4.0/CycleTestRestart-1.toml
       restarting/to_7.3.51_until_7.4.0/CycleTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/to_7.4.0/BlobGranuleRestartCorrectness-1.toml
-      restarting/to_7.4.0/BlobGranuleRestartCorrectness-2.toml)
     add_fdb_test(
       TEST_FILES restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-1.toml
       restarting/to_7.4.0/ConfigureStorageMigrationTestRestart-2.toml)
