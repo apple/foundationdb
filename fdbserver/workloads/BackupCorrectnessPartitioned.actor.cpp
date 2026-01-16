@@ -47,6 +47,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 	static int backupAgentRequests;
 	LockDB locked{ false };
 	bool allowPauses;
+	bool allowBackupWorkerToggle;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
 	bool defaultBackup;
@@ -81,6 +82,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		                                 : 0.0);
 		agentRequest = getOption(options, "simBackupAgents"_sr, true);
 		allowPauses = getOption(options, "allowPauses"_sr, true);
+		allowBackupWorkerToggle = getOption(options, "allowBackupWorkerToggle"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 		defaultBackup = getOption(options, "defaultBackup"_sr, false);
 
@@ -242,6 +244,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		    .detail("DifferentialBackup", differentialBackup)
 		    .detail("StopDifferentialAfter", stopDifferentialAfter)
 		    .detail("AgentRequest", agentRequest)
+		    .detail("AllowBackupWorkerToggle", allowBackupWorkerToggle)
 		    .detail("Encrypted", encryptionKeyFileName.present());
 
 		return _start(cx, this);
@@ -301,6 +304,61 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> testBackupWorkerToggle(BackupAndRestorePartitionedCorrectnessWorkload* self,
+	                                                 Database cx,
+	                                                 Key tag,
+	                                                 UID randomID,
+	                                                 bool allowBackupWorkerToggle) {
+		if (allowBackupWorkerToggle && deterministicRandom()->random01() < 0.3) {
+			state int toggleCount = deterministicRandom()->randomInt(1, 4); // Random 1 to 3 toggles
+			TraceEvent("BARW_BackupWorkerToggleTest", randomID)
+			    .detail("Tag", printable(tag))
+			    .detail("TestingBackupWorkerToggle", true)
+			    .detail("ToggleCount", toggleCount);
+
+			// Waiting for the backup to start.
+			wait(delay(50));
+
+			try {
+				state int i;
+				for (i = 0; i < toggleCount; i++) {
+					// Disable backup workers
+					wait(disableBackupWorker(cx));
+					TraceEvent("BARW_BackupWorkerDisabled", randomID)
+					    .detail("Tag", printable(tag))
+					    .detail("ToggleIteration", i + 1)
+					    .detail("TotalToggles", toggleCount);
+
+					// Wait for a random period (5-15 seconds) with backup workers disabled
+					state double disabledDuration = deterministicRandom()->random01() * 10.0 + 5.0;
+					wait(delay(disabledDuration));
+
+					// Re-enable backup workers
+					wait(enableBackupWorker(cx));
+					TraceEvent("BARW_BackupWorkerReenabled", randomID)
+					    .detail("Tag", printable(tag))
+					    .detail("DisabledDuration", disabledDuration)
+					    .detail("ToggleIteration", i + 1)
+					    .detail("TotalToggles", toggleCount);
+
+					// Wait a bit before next toggle (if not the last one)
+					if (i < toggleCount - 1) {
+						state double betweenToggleDelay = deterministicRandom()->random01() * 5.0 + 2.0; // 2-7 seconds
+						wait(delay(betweenToggleDelay));
+					}
+				}
+
+			} catch (Error& e) {
+				TraceEvent(SevError, "BARW_BackupWorkerToggleException", randomID)
+				    .error(e)
+				    .detail("Tag", printable(tag))
+				    .detail("ToggleCount", toggleCount);
+				// Continue with the test even if toggle fails
+			}
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> doBackup(BackupAndRestorePartitionedCorrectnessWorkload* self,
 	                                   double startDelay,
 	                                   FileBackupAgent* backupAgent,
@@ -352,6 +410,10 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
 		}
+
+		state Future<Void> backupWorkerToggleTest =
+		    testBackupWorkerToggle(self, cx, tag, randomID, self->allowBackupWorkerToggle);
+		wait(backupWorkerToggleTest);
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
