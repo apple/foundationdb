@@ -382,7 +382,7 @@ ACTOR Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
                                               std::function<Future<Void>(std::vector<int>)> recruit) {
 	TraceEvent((std::string(workerName) + "MonitoringStart").c_str(), self->id).detail("RecoveryCount", recoveryCount);
 
-	state double failedRecuitDelay = 1.0;
+	state double failedRecruitDelay = 1.0;
 	state Future<Void> recruitment = Never();
 	state Future<Void> newRecovery = self->db.serverInfo->onChange();
 	loop {
@@ -405,7 +405,7 @@ ACTOR Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
 					    .detail("FailedCount", failedWorkers.size());
 				}
 				when(wait(recruitment)) {
-					failedRecuitDelay = 1.0; // Reset backoff on success
+					failedRecruitDelay = 1.0; // Reset backoff on success
 					TraceEvent((std::string(workerName) + "ReRecruitmentSuccess").c_str(), self->id)
 					    .detail("RecoveryCount", recoveryCount);
 					recruitment = Never();
@@ -423,11 +423,11 @@ ACTOR Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
 			TraceEvent(SevWarnAlways, (std::string(workerName) + "MonitoringRecruitmentFailed").c_str(), self->id)
 			    .error(e)
 			    .detail("RecoveryCount", recoveryCount);
-			failedRecuitDelay = std::min(failedRecuitDelay * 2, 60.0);
+			failedRecruitDelay = std::min(failedRecruitDelay * 2, 60.0);
 			recruitment = Never();
 		}
 
-		wait(delay(failedRecuitDelay));
+		wait(delay(failedRecruitDelay));
 	}
 }
 
