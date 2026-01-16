@@ -890,9 +890,9 @@ public:
 	bool RECORD_RECOVER_AT_IN_CSTATE;
 	bool TRACK_TLOG_RECOVERY;
 	double CC_RERECRUIT_LOG_ROUTER_TIMEOUT;
-	// If enabled, Cluster Controller will rerecruit log router if it detects the log router has failed to avoid recoveries.
-	// Note this feature only covers the period when the cluster is in fully_recovered state.
-	// Before that state, log router failes will trigger a new recovery.
+	// If enabled, Cluster Controller will rerecruit log router if it detects the log router has failed to avoid
+	// recoveries. Note this feature only covers the period when the cluster is in fully_recovered state. Before that
+	// state, log router failures will trigger a new recovery.
 	bool CC_RERECRUIT_LOG_ROUTER_ENABLED;
 
 	// Move Keys
