@@ -716,6 +716,13 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
+			// CHECK: Don't save progress if backup workers are disabled
+			Optional<Value> backupWorkerEnabled = wait(tr.get(backupWorkerEnabledKey));
+			if (!backupWorkerEnabled.present() || backupWorkerEnabled.get() == "0"_sr) {
+				TraceEvent("BackupWorkerProgressSkipped", self->myId).detail("Reason", "BackupWorkersDisabled");
+				return Void();
+			}
+
 			WorkerBackupStatus status(self->backupEpoch, backupVersion, self->tag, self->totalTags);
 			tr.set(key, backupProgressValue(status));
 			tr.addReadConflictRange(singleKeyRange(key));
@@ -1071,7 +1078,8 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			    .detail("BackupEpoch", self->backupEpoch)
 			    .detail("Popped", r->popped())
 			    .detail("NoopPoppedVersion", maxNoopVersion)
-			    .detail("ExpectedPeekVersion", tagAt);
+			    .detail("ExpectedPeekVersion", tagAt)
+			    .detail("RecruitedEpoch", self->recruitedEpoch);
 			ASSERT(self->backupEpoch < self->recruitedEpoch && maxNoopVersion >= r->popped());
 			// This can only happen when the backup was in NOOP mode in the previous epoch,
 			// where NOOP mode popped version is larger than the expected peek version.

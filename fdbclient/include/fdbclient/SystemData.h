@@ -324,6 +324,7 @@ UID decodeProcessClassKeyOld(KeyRef const& key);
 extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
+extern const KeyRef backupWorkerEnabledKey;
 extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
 extern const KeyRef perpetualStorageWiggleIDPrefix;
