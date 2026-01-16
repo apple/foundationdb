@@ -322,7 +322,7 @@ readonly ENCRYPTION_KEY_FILE
 readonly USE_PARTITIONED_LOG
 
 # Set host, bucket, and blob_credentials_file whether MockS3Server or s3.
-readonly path_prefix="ctests"
+readonly path_prefix="ctests/$$"
 host=
 query_str=
 blob_credentials_file=
