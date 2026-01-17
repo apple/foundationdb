@@ -134,6 +134,8 @@
 # Set defaults for key environment variables
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
 
+PYTHON_STARTED_EXECUTION=0
+PYTHON_EXIT_CODE=0
 
 # Cleanup function - preserve logs on failure if archival is enabled
 cleanup() {
@@ -167,6 +169,21 @@ cleanup() {
     else
         echo "Cleaning up test artifacts: ${TOP_LEVEL_OUTPUT_DIR}" >&2
         rm -rf "${TOP_LEVEL_OUTPUT_DIR}"
+    fi
+
+    if [ "${PYTHON_STARTED_EXECUTION}" -eq 0 ];
+    then
+        echo "The script terminated before running TestHarness2"
+    else
+        # Here we forward the exit code. So the caller knows if
+        # the test failed or not.
+        if [ "${PYTHON_EXIT_CODE}" -ne 0 ]; then
+            exit "${PYTHON_EXIT_CODE}"
+        elif [ "${TEST_FAILED}" = "true" ]; then
+            exit 1
+        else
+            exit 0
+        fi
     fi
 }
 
@@ -252,6 +269,7 @@ PYTHON_APP_STDERR_FILE="${APP_RUN_TEMP_DIR}/python_app_stderr.log"
 echo "Executing TestHarness2 with seed ${JOSHUA_SEED}..." >&2
 
 # Run TestHarness - output goes to stdout via tee AND gets saved to file
+PYTHON_STARTED_EXECUTION=1
 python3 -m test_harness.app "${PYTHON_CMD_ARGS[@]}" 2> "${PYTHON_APP_STDERR_FILE}" | tee "${PYTHON_APP_STDOUT_FILE}"
 PYTHON_EXIT_CODE=$?
 
@@ -276,7 +294,7 @@ fi
 
 # Note: stdout was already output via tee above (or fallback echo if empty)
     
-    # Check if test actually failed
+# Check if test actually failed
 if [ -f "${PYTHON_APP_STDOUT_FILE}" ] && grep -q 'Ok="0"' "${PYTHON_APP_STDOUT_FILE}"; then
         echo "Test result: FAILED" >&2
         TEST_FAILED=true
@@ -285,7 +303,9 @@ if [ -f "${PYTHON_APP_STDOUT_FILE}" ] && grep -q 'Ok="0"' "${PYTHON_APP_STDOUT_F
         TEST_FAILED=false
 fi
 
-# Exit with appropriate code
+# Exit with appropriate code -- NOTE: The trap will override these exit codes,
+# so the code below cannot be used to exit. This is kept in case the trap code
+# is removed, so the behavior of the code is consistent to changes.
 if [ "${PYTHON_EXIT_CODE}" -ne 0 ]; then
     exit ${PYTHON_EXIT_CODE}
 elif [ "${TEST_FAILED}" = "true" ]; then
