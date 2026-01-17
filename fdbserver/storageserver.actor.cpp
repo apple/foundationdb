@@ -7214,18 +7214,28 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    .detail("Phase", "File download")
 				    .detail("FKID", fetchKeysID);
 				// Do SST ingestion if (1) the knob is enabled, (2) the storage engine supports SST ingestion, and
-				// (3) the task range is aligned with manifests' range.
+				// (3) the task range is aligned with manifests' range, and (4) all file ranges fit within shard.
+				// Check (4) is needed because shard boundaries may differ between backup and restore time.
+				bool allFilesContained = true;
+				for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
+					if (!keys.contains(range)) {
+						allFilesContained = false;
+						TraceEvent(SevInfo, "SSBulkLoadFileRangeMismatch", data->thisServerID)
+						    .detail("ShardRange", keys)
+						    .detail("FileRange", range)
+						    .detail("DataMoveId", dataMoveId.toString())
+						    .detail("FKID", fetchKeysID);
+						break;
+					}
+				}
 				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
-				    data->storage.getKeyValueStore()->supportsSstIngestion() && bulkloadCanIngestSSTFile) {
+				    data->storage.getKeyValueStore()->supportsSstIngestion() && bulkloadCanIngestSSTFile &&
+				    allFilesContained) {
 					TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 					    .detail("DataMoveId", dataMoveId.toString())
 					    .detail("Range", keys)
 					    .detail("Phase", "SST ingestion")
 					    .detail("FKID", fetchKeysID);
-					// Verify ranges...
-					for (const auto& [range, fileSet] : *localBulkLoadFileSets) {
-						ASSERT(keys.contains(range));
-					}
 					// Clear the key range before ingestion. This mirrors the replaceRange done in the case were
 					// we do not ingest SST files.
 					data->storage.getKeyValueStore()->clear(keys);
@@ -7255,11 +7265,15 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				} else {
 					if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
 					    data->storage.getKeyValueStore()->supportsSstIngestion()) {
-						ASSERT(!bulkloadCanIngestSSTFile);
+						// Falling back to KV-based writes because either:
+						// - Task range is not aligned with manifests (bulkloadCanIngestSSTFile=false)
+						// - File ranges don't fit within shard (allFilesContained=false)
 						TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 						    .detail("DataMoveId", dataMoveId.toString())
 						    .detail("Range", keys)
-						    .detail("Phase", "SST ingestion give up due to task range not aligned with manifests")
+						    .detail("Phase", "SST ingestion fallback to KV writes")
+						    .detail("TaskRangeAligned", bulkloadCanIngestSSTFile)
+						    .detail("AllFilesContained", allFilesContained)
 						    .detail("FKID", fetchKeysID);
 					}
 					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
