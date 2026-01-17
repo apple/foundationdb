@@ -460,6 +460,22 @@ rocksdb::CompactionPri getCompactionPriority() {
 	}
 }
 
+rocksdb::BlockBasedTableOptions::IndexType getIndexType() {
+	switch (SERVER_KNOBS->SHARDED_ROCKSDB_INDEX_TYPE) {
+	case 0:
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearch;
+	case 1:
+		return rocksdb::BlockBasedTableOptions::IndexType::kHashSearch;
+	case 2:
+		return rocksdb::BlockBasedTableOptions::IndexType::kTwoLevelIndexSearch;
+	case 3:
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearchWithFirstKey;
+	default:
+		TraceEvent(SevWarn, "InvalidIndexType").detail("KnobValue", SERVER_KNOBS->SHARDED_ROCKSDB_INDEX_TYPE);
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearch;
+	}
+}
+
 rocksdb::WALRecoveryMode getWalRecoveryMode() {
 	switch (SERVER_KNOBS->ROCKSDB_WAL_RECOVERY_MODE) {
 	case 0:
@@ -583,6 +599,8 @@ struct ShardedRocksDBState {
 		bbOpts.cache_index_and_filter_blocks_with_high_priority =
 		    SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 		bbOpts.block_cache = blockCache;
+		bbOpts.index_block_restart_interval = SERVER_KNOBS->SHARDED_ROCKSDB_INDEX_BLOCK_RESTART_INTERVAL;
+		bbOpts.index_type = getIndexType();
 
 		options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 

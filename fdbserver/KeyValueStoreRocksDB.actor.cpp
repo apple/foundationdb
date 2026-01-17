@@ -115,6 +115,22 @@ rocksdb::CompactionPri getCompactionPriority() {
 	}
 }
 
+rocksdb::BlockBasedTableOptions::IndexType getIndexType() {
+	switch (SERVER_KNOBS->ROCKSDB_INDEX_TYPE) {
+	case 0:
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearch;
+	case 1:
+		return rocksdb::BlockBasedTableOptions::IndexType::kHashSearch;
+	case 2:
+		return rocksdb::BlockBasedTableOptions::IndexType::kTwoLevelIndexSearch;
+	case 3:
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearchWithFirstKey;
+	default:
+		TraceEvent(SevWarn, "InvalidIndexType").detail("KnobValue", SERVER_KNOBS->ROCKSDB_INDEX_TYPE);
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearch;
+	}
+}
+
 class SharedRocksDBState {
 public:
 	SharedRocksDBState(UID id);
@@ -264,6 +280,9 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	if (SERVER_KNOBS->ROCKSDB_MAX_AUTO_READAHEAD_SIZE > 0) {
 		bbOpts.max_auto_readahead_size = SERVER_KNOBS->ROCKSDB_MAX_AUTO_READAHEAD_SIZE;
 	}
+
+	bbOpts.index_block_restart_interval = SERVER_KNOBS->ROCKSDB_INDEX_BLOCK_RESTART_INTERVAL;
+	bbOpts.index_type = getIndexType();
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
