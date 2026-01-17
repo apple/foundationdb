@@ -1310,7 +1310,7 @@ public:
 			TraceEvent(SevError, "FailedToOpenEncryptionKeyFile").error(e).detail("FileName", encryptionKeyFileName);
 			throw e;
 		}
-		int bytesRead = wait(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+		int bytesRead = wait(uncancellable(keyFile->read(cipherKey->data(), cipherKey->size(), 0)));
 		if (bytesRead != cipherKey->size()) {
 			TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
 			    .detail("ExpectedSize", cipherKey->size())

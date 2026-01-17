@@ -90,7 +90,7 @@ struct PartConfig {
 ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size) {
 	state int64_t pos = 0;
 	state XXH64_state_t* hashState = XXH64_createState();
-	state std::vector<uint8_t> buffer(65536);
+	state std::shared_ptr<std::vector<uint8_t>> buffer = std::make_shared<std::vector<uint8_t>>(65536);
 	state int readSize;
 
 	XXH64_reset(hashState, 0);
@@ -102,8 +102,8 @@ ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int6
 		}
 
 		while (pos < size) {
-			readSize = std::min<int64_t>(buffer.size(), size - pos);
-			int bytesRead = wait(file->read(buffer.data(), readSize, pos));
+			readSize = std::min<int64_t>(buffer->size(), size - pos);
+			int bytesRead = wait(uncancellable(holdWhile(buffer, file->read(buffer->data(), readSize, pos))));
 			if (bytesRead != readSize) {
 				XXH64_freeState(hashState);
 				TraceEvent(SevError, "S3ClientCalculateChecksumReadError")
@@ -112,7 +112,7 @@ ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int6
 				    .detail("Position", pos);
 				throw io_error();
 			}
-			XXH64_update(hashState, buffer.data(), bytesRead);
+			XXH64_update(hashState, buffer->data(), bytesRead);
 			pos += bytesRead;
 		}
 
@@ -310,10 +310,10 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 	loop {
 		try {
 			// Read part data from file (automatic memory management)
-			state std::string partData;
-			partData.resize(resultPart.size);
+			state std::shared_ptr<std::string> partData = std::make_shared<std::string>(resultPart.size, '\0');
 
-			int bytesRead = wait(file->read(&partData[0], resultPart.size, resultPart.offset));
+			int bytesRead = wait(
+			    uncancellable(holdWhile(partData, file->read(&(*partData)[0], resultPart.size, resultPart.offset))));
 			if (bytesRead != resultPart.size) {
 				TraceEvent(SevError, "S3ClientUploadPartReadError")
 				    .detail("Expected", resultPart.size)
@@ -325,7 +325,7 @@ ACTOR static Future<PartState> uploadPart(Reference<S3BlobStoreEndpoint> endpoin
 			// Store part data for sequential XXH64 checksum calculation after concurrent uploads complete
 			// to avoid race condition where multiple concurrent uploadPart actors all call
 			// XXH64_update(hashState, ...) on the same hash state simultaneously, corrupting it.
-			resultPart.partData = std::move(partData);
+			resultPart.partData = std::move(*partData);
 
 			// Calculate hash for this part - use SHA256 if integrity check enabled, otherwise MD5
 			std::string checksum;
