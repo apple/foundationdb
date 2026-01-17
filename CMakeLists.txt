@@ -293,8 +293,6 @@ if(NOT WIN32)
                                        # x-compiling.
     add_subdirectory(fdbmonitor)
   endif()
-else()
-  add_subdirectory(fdbservice)
 endif()
 add_subdirectory(fdbbackup)
 add_subdirectory(tests)
