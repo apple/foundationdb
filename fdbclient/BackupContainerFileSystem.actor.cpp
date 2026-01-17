@@ -167,25 +167,36 @@ public:
 	                                                    std::vector<std::string> fileNames,
 	                                                    std::vector<std::pair<Key, Key>> beginEndKeys,
 	                                                    int64_t totalBytes,
-	                                                    IncludeKeyRangeMap includeKeyRangeMap) {
-		ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
-
+	                                                    IncludeKeyRangeMap includeKeyRangeMap,
+	                                                    Optional<SnapshotMetadata> metadata) {
 		state Version minVer = std::numeric_limits<Version>::max();
 		state Version maxVer = 0;
 		state RangeFile rf;
 		state json_spirit::mArray fileArray;
+		state bool isBulkDump = metadata.present() && metadata.get().isBulkDump();
 
-		// Validate each filename, update version range
-		for (const auto& f : fileNames) {
-			if (pathToRangeFile(rf, f, 0)) {
-				fileArray.push_back(f);
-				if (rf.version < minVer)
-					minVer = rf.version;
-				if (rf.version > maxVer)
-					maxVer = rf.version;
-			} else
-				throw restore_unknown_file_type();
-			wait(yield());
+		if (isBulkDump) {
+			// For BulkDump snapshots, version comes from metadata
+			ASSERT(metadata.get().snapshotVersion != invalidVersion);
+			minVer = metadata.get().snapshotVersion;
+			maxVer = metadata.get().snapshotVersion;
+			// fileNames is empty for BulkDump (files are referenced by job ID)
+		} else {
+			// Traditional range file snapshots
+			ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
+
+			// Validate each filename, update version range
+			for (const auto& f : fileNames) {
+				if (pathToRangeFile(rf, f, 0)) {
+					fileArray.push_back(f);
+					if (rf.version < minVer)
+						minVer = rf.version;
+					if (rf.version > maxVer)
+						maxVer = rf.version;
+				} else
+					throw restore_unknown_file_type();
+				wait(yield());
+			}
 		}
 
 		state json_spirit::mValue json;
@@ -196,7 +207,22 @@ public:
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
 
-		if (includeKeyRangeMap) {
+		if (isBulkDump) {
+			// Add BulkDump-specific fields
+			doc.create("snapshotType") = metadata.get().snapshotType;
+			doc.create("bulkDumpJobId") = metadata.get().bulkDumpJobId;
+			doc.create("totalKeys") = metadata.get().totalKeys;
+
+			// Include the backup ranges
+			json_spirit::mArray rangesArray;
+			for (const auto& range : beginEndKeys) {
+				json_spirit::mObject rangeObj;
+				rangeObj["begin"] = range.first.toString();
+				rangeObj["end"] = range.second.toString();
+				rangesArray.push_back(rangeObj);
+			}
+			doc.create("ranges") = rangesArray;
+		} else if (includeKeyRangeMap) {
 			auto ranges = doc.subDoc("keyRanges");
 			for (int i = 0; i < beginEndKeys.size(); i++) {
 				auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
@@ -1387,9 +1413,14 @@ BackupContainerFileSystem::readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
 Future<Void> BackupContainerFileSystem::writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
                                                                   const std::vector<std::pair<Key, Key>>& beginEndKeys,
                                                                   int64_t totalBytes,
-                                                                  IncludeKeyRangeMap includeKeyRangeMap) {
-	return BackupContainerFileSystemImpl::writeKeyspaceSnapshotFile(
-	    Reference<BackupContainerFileSystem>::addRef(this), fileNames, beginEndKeys, totalBytes, includeKeyRangeMap);
+                                                                  IncludeKeyRangeMap includeKeyRangeMap,
+                                                                  Optional<SnapshotMetadata> metadata) {
+	return BackupContainerFileSystemImpl::writeKeyspaceSnapshotFile(Reference<BackupContainerFileSystem>::addRef(this),
+	                                                                fileNames,
+	                                                                beginEndKeys,
+	                                                                totalBytes,
+	                                                                includeKeyRangeMap,
+	                                                                metadata);
 };
 
 Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beginVersion,
